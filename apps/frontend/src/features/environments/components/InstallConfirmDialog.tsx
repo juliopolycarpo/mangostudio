@@ -6,6 +6,7 @@
 
 import type { InstallPreparation } from '@mangostudio/shared/environments';
 import { Download, FolderPen, Globe, TerminalSquare, X } from 'lucide-react';
+import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatBytes, formatMessage } from '../format';
@@ -26,6 +27,16 @@ export function InstallConfirmDialog({
   const { t } = useI18n();
   const s = t.environments.install;
   const { recipe } = preparation;
+
+  // Escape backs out of the dialog, as it does everywhere else in the app. A
+  // modal that gates running a command must not trap a keyboard user in it.
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onCancel();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onCancel]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm sm:p-6">
