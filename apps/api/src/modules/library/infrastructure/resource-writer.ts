@@ -205,6 +205,35 @@ async function backupExistingResource(
   return backupPath;
 }
 
+interface BackupSet {
+  readonly id: string;
+  readonly path: string;
+  readonly modifiedAtMs: number;
+}
+
+/**
+ * Recognizes a directory as a prunable backup set only when it has the
+ * `<backupId>/<locationId>/<slug>` shape this writer creates. A misconfigured
+ * `library.backupDir` pointing at a shared directory must never make retention
+ * delete unrelated data, and a set that vanished mid-prune is simply skipped.
+ */
+async function describeBackupSet(
+  id: string,
+  path: string,
+  fs: ResourceWriterFs
+): Promise<BackupSet | null> {
+  try {
+    const entries = await fs.readdir(path);
+    const holdsLocation = entries.some(
+      (entry) => entry.isDirectory() && getLibraryLocation(entry.name as LibraryLocationId)
+    );
+    if (!holdsLocation) return null;
+    return { id, path, modifiedAtMs: (await fs.stat(path)).mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
 async function pruneBackupSets(
   backupRoot: string,
   currentBackupId: string,
@@ -218,15 +247,12 @@ async function pruneBackupSets(
     throw error;
   }
 
-  const backupSets = await Promise.all(
+  const candidates = await Promise.all(
     entries
       .filter((entry) => entry.isDirectory())
-      .map(async (entry) => ({
-        id: entry.name,
-        path: join(backupRoot, entry.name),
-        modifiedAtMs: (await deps.fs.stat(join(backupRoot, entry.name))).mtimeMs,
-      }))
+      .map((entry) => describeBackupSet(entry.name, join(backupRoot, entry.name), deps.fs))
   );
+  const backupSets = candidates.filter((backup): backup is BackupSet => backup !== null);
   backupSets.sort(
     (left, right) => right.modifiedAtMs - left.modifiedAtMs || right.id.localeCompare(left.id)
   );

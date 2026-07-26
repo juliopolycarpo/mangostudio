@@ -209,12 +209,15 @@ describe('directory resource writes', () => {
     const destination = destinationPath();
     mkdirSync(destination, { recursive: true });
     writeFileSync(join(destination, 'SKILL.md'), 'old content');
+    const unrelated = join(backupDir, 'holiday-photos');
+    mkdirSync(unrelated, { recursive: true });
+    utimesSync(unrelated, 0, 0);
     for (const [id, seconds] of [
       ['apply-oldest', 1],
       ['apply-newer', 2],
     ] as const) {
       const path = join(backupDir, id);
-      mkdirSync(path, { recursive: true });
+      mkdirSync(join(path, 'agents-skills', 'gh'), { recursive: true });
       utimesSync(path, seconds, seconds);
     }
 
@@ -232,5 +235,6 @@ describe('directory resource writes', () => {
     expect(lstatSync(join(backupDir, 'apply-current')).isDirectory()).toBe(true);
     expect(lstatSync(join(backupDir, 'apply-newer')).isDirectory()).toBe(true);
     expect(() => lstatSync(join(backupDir, 'apply-oldest'))).toThrow();
+    expect(lstatSync(unrelated).isDirectory()).toBe(true);
   });
 });
