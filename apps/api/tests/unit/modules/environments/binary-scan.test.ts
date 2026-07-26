@@ -163,6 +163,28 @@ describe('scanRuntime', () => {
     });
   });
 
+  it('identifies nvm installations under a custom NVM_DIR', async () => {
+    const nodePath = '/opt/custom-nvm/versions/node/v24.18.0/bin/node';
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        env: {
+          PATH: '/opt/custom-nvm/versions/node/v24.18.0/bin',
+          NVM_DIR: '/opt/custom-nvm',
+        },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v24.18.0' : null),
+      })
+    );
+
+    expect(result.installations[0]).toMatchObject({
+      rawPath: nodePath,
+      origin: 'version-manager',
+      managedBy: 'nvm',
+    });
+  });
+
   it('treats an authoritative configured binary as the only candidate', async () => {
     const result = await scanRuntime(
       NODE_RUNTIME_DEFINITION,

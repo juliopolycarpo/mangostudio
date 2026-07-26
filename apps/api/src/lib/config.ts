@@ -78,6 +78,10 @@ export interface MangoConfig {
      */
     trustProxy: boolean;
   };
+  environments: {
+    /** Opt in to refreshing Node release metadata from nodejs.org. */
+    ltsRefresh: boolean;
+  };
   /** Computed CORS origins derived from frontend host/port. */
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
@@ -117,6 +121,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   checkpoints: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
+  environments: { ltsRefresh: false },
   cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
@@ -173,6 +178,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   TRUST_PROXY: (cfg, v) => {
     cfg.security.trustProxy = parseBooleanFlag(v);
+  },
+  MANGO_ENV_LTS_REFRESH: (cfg, v) => {
+    cfg.environments.ltsRefresh = parseBooleanFlag(v);
   },
   CURSOR_WORKSPACE_DIR: (cfg, v) => {
     cfg.cursor.workspaceDir = v;
@@ -330,6 +338,7 @@ function cloneDefaults(): MangoConfig {
     checkpoints: { ...DEFAULT_CONFIG.checkpoints },
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
+    environments: { ...DEFAULT_CONFIG.environments },
     cursor: { ...DEFAULT_CONFIG.cursor },
     chatgpt: { ...DEFAULT_CONFIG.chatgpt },
     secretStore: { ...DEFAULT_CONFIG.secretStore },
@@ -403,6 +412,11 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const security = parsed.security as Record<string, unknown> | undefined;
   if (security) {
     if (typeof security.trustProxy === 'boolean') cfg.security.trustProxy = security.trustProxy;
+  }
+
+  const environments = parsed.environments as Record<string, unknown> | undefined;
+  if (environments && typeof environments.lts_refresh === 'boolean') {
+    cfg.environments.ltsRefresh = environments.lts_refresh;
   }
 
   const cursor = parsed.cursor as Record<string, unknown> | undefined;
@@ -693,6 +707,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.checkpoints) Object.assign(cfg.checkpoints, partial.checkpoints);
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
+  if (partial.environments) Object.assign(cfg.environments, partial.environments);
   if (partial.cursor) Object.assign(cfg.cursor, partial.cursor);
   if (partial.chatgpt) Object.assign(cfg.chatgpt, partial.chatgpt);
   if (partial.secretStore) Object.assign(cfg.secretStore, partial.secretStore);

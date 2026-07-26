@@ -226,7 +226,7 @@ function detectVersionManager(
 ): VersionManagerId | undefined {
   const paths = [rawPath, realpath].map(normalizedPath);
   const configuredRoots = [
-    ['nvm', deps.env.NVM_HOME, deps.env.NVM_SYMLINK],
+    ['nvm', deps.env.NVM_DIR, deps.env.NVM_HOME, deps.env.NVM_SYMLINK],
     ['fnm', deps.env.FNM_DIR],
     ['volta', deps.env.VOLTA_HOME],
   ] as const;

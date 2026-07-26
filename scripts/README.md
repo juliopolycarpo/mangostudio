@@ -12,6 +12,8 @@ scripts/
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── check.ts          Biome + dprint + madge + tsc + workflow static analysis, in parallel (bun run check)
 ├── check-versions.ts Assert root + workspace + cargo-shim versions agree (bun run check:versions)
+├── update-node-release-schedule.ts
+│                     Refresh bundled Node lifecycle and latest-patch data
 ├── fix.ts            Apply Biome + dprint fixes (bun run fix)
 ├── test.ts           Run unit/integration/e2e/coverage lanes (bun run test)
 ├── verify.ts         check → test → build gate (bun run verify)

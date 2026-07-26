@@ -19,6 +19,15 @@ export const VersionManagerIdSchema = Type.Union([
   Type.Literal('volta'),
 ]);
 
+export const LtsStatusSchema = Type.Union([
+  Type.Literal('current-lts'),
+  Type.Literal('lts-outdated-patch'),
+  Type.Literal('lts-superseded'),
+  Type.Literal('end-of-life'),
+  Type.Literal('current-release'),
+  Type.Literal('unknown'),
+]);
+
 export const RuntimeHealthSchema = Type.Union([
   Type.Literal('ok'),
   Type.Literal('warn'),
@@ -65,12 +74,39 @@ export const RuntimeStatusSchema = Type.Object({
 
 export const RuntimeStatusListSchema = Type.Array(RuntimeStatusSchema);
 
+export const ManagedVersionSchema = Type.Object({
+  version: Type.String({ minLength: 1 }),
+  path: Type.String({ minLength: 1 }),
+  isDefault: Type.Boolean(),
+  isCurrent: Type.Boolean(),
+  ltsStatus: LtsStatusSchema,
+  ltsCodename: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export const VersionManagerStatusSchema = Type.Object({
+  id: VersionManagerIdSchema,
+  installed: Type.Boolean(),
+  root: Type.Optional(Type.String({ minLength: 1 })),
+  managerVersion: Type.Optional(Type.String({ minLength: 1 })),
+  versions: Type.Array(ManagedVersionSchema),
+  defaultAlias: Type.Optional(Type.String({ minLength: 1 })),
+  defaultVersion: Type.Optional(Type.String({ minLength: 1 })),
+  currentVersion: Type.Optional(Type.String({ minLength: 1 })),
+  findings: Type.Array(RuntimeFindingSchema),
+});
+
+export const VersionManagerStatusListSchema = Type.Array(VersionManagerStatusSchema);
+
 export type RuntimeId = Static<typeof RuntimeIdSchema>;
 export type RuntimeOrigin = Static<typeof RuntimeOriginSchema>;
 export type VersionManagerId = Static<typeof VersionManagerIdSchema>;
+export type LtsStatus = Static<typeof LtsStatusSchema>;
 export type RuntimeHealth = Static<typeof RuntimeHealthSchema>;
 export type RuntimeFindingCode = Static<typeof RuntimeFindingCodeSchema>;
 export type RuntimeInstallation = Static<typeof RuntimeInstallationSchema>;
 export type RuntimeFinding = Static<typeof RuntimeFindingSchema>;
 export type RuntimeStatus = Static<typeof RuntimeStatusSchema>;
 export type RuntimeStatusList = Static<typeof RuntimeStatusListSchema>;
+export type ManagedVersion = Static<typeof ManagedVersionSchema>;
+export type VersionManagerStatus = Static<typeof VersionManagerStatusSchema>;
+export type VersionManagerStatusList = Static<typeof VersionManagerStatusListSchema>;

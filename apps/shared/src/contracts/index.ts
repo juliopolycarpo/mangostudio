@@ -62,6 +62,8 @@ export type {
 } from '../connectors';
 // Environments
 export type {
+  LtsStatus,
+  ManagedVersion,
   RuntimeFinding,
   RuntimeFindingCode,
   RuntimeHealth,
@@ -71,6 +73,8 @@ export type {
   RuntimeStatus,
   RuntimeStatusList,
   VersionManagerId,
+  VersionManagerStatus,
+  VersionManagerStatusList,
 } from '../environments';
 // Errors
 export type { ApiErrorResponse, SSEErrorEvent } from '../errors';
