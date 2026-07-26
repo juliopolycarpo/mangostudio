@@ -27,7 +27,7 @@ concurrency:
 
 jobs:
   browser-smoke:
-    name: Chromium auth flow
+    name: Chromium smoke suite
     # ubuntu-24.04: Playwright 1.60 cannot install Chromium system deps on 26.04 yet.
     runs-on: ubuntu-24.04
     timeout-minutes: 10
