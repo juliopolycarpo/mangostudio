@@ -444,7 +444,7 @@ bun ./scripts/release/push-dist-repo.ts \
   --file tap/Formula/mangostudio.rb:Formula/mangostudio.rb
 ```
 
-The renderer is shared too: `scripts/release/dist-manifest.ts` fills `{{VERSION}}`
+The renderer is shared too: `scripts/release/template-renderer.ts` fills `{{VERSION}}`
 and the per-platform `{{SHA_*}}` placeholders from `SHA256SUMS`, and the two thin
 entrypoints (`update-homebrew.ts`, `update-scoop.ts`) bind it to their template and
 placeholder map.

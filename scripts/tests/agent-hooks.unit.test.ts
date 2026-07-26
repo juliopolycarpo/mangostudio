@@ -6,16 +6,16 @@ import {
   createPathExportLine,
   resolveRepoBin,
   updateClaudeEnvPath,
-} from '../.claude/hooks/session-path.mjs';
+} from '../../.claude/hooks/session-path.mjs';
 import {
   chooseFormatter,
   extractTouchedFilePath,
   isInsideRepo,
   runAutoFixHook,
   shouldSkipFile,
-} from '../.codex/hooks/auto-fix.mjs';
+} from '../../.codex/hooks/auto-fix.mjs';
 
-const tempDirs = [];
+const tempDirs: string[] = [];
 
 async function makeTempDir() {
   const path = await mkdtemp(join(tmpdir(), 'mango-agent-hooks-'));

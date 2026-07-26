@@ -13,8 +13,7 @@
         "scripts/qa-gate/publish/*.mjs",
         "scripts/release/{archive-assets,bundle-distribution,distribution-manifest,extract-distribution,fill-dry-run-checksums,pack-npm,prepare-release,publish-npm,push-dist-repo,stage-docker-ctx,update-homebrew,update-scoop,verify-checksum}.ts",
         "scripts/release/*.sh",
-        "scripts/tests/**/*.test.ts",
-        "scripts/agent-hooks.test.mjs"
+        "scripts/tests/**/*.test.ts"
       ],
       "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"]
     },

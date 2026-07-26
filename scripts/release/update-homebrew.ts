@@ -7,7 +7,11 @@ import { dirname, join } from 'node:path';
 
 import { normalizeVersion, resolveReleaseVersion } from '../lib/release-version';
 import { assertNoUnexpectedArguments, error, parseArgs, success } from '../lib/runner';
-import { renderDistManifest, resolveManifestPath, type ShaPlaceholderMap } from './dist-manifest';
+import {
+  renderDistManifest,
+  resolveManifestPath,
+  type ShaPlaceholderMap,
+} from './template-renderer';
 
 export const HOMEBREW_FORMULA_TEMPLATE_PATH = join(
   import.meta.dir,
