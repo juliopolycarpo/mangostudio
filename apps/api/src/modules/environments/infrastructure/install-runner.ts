@@ -131,9 +131,9 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
         };
       }
 
-      let process: InstallSubprocess;
+      let child: InstallSubprocess;
       try {
-        process = deps.spawn(command.argv, buildInstallEnvironment(processEnv(), command.env));
+        child = deps.spawn(command.argv, buildInstallEnvironment(process.env, command.env));
       } catch (error) {
         const detail = error instanceof Error ? error.message : 'Unable to start installer.';
         emitLine(options, 'system', detail);
@@ -155,10 +155,10 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
       let logWrites = Promise.resolve();
 
       const kill = (reason: 'cancelled' | 'timed-out') => {
-        if (termination || process.exitCode !== null) return;
+        if (termination || child.exitCode !== null) return;
         termination = reason;
         try {
-          process.kill('SIGKILL');
+          child.kill('SIGKILL');
         } catch {
           // The child may exit between the state check and signal delivery.
         }
@@ -223,15 +223,15 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
       let exitCode: number | null = null;
       try {
         const results = await Promise.all([
-          readStream(process.stdout, 'stdout'),
-          readStream(process.stderr, 'stderr'),
-          process.exited,
+          readStream(child.stdout, 'stdout'),
+          readStream(child.stderr, 'stderr'),
+          child.exited,
         ]);
         exitCode = results[2];
       } catch (error) {
         kill('cancelled');
         streamFailed = true;
-        await process.exited.catch(() => undefined);
+        await child.exited.catch(() => undefined);
         const detail = error instanceof Error ? error.message : 'Installer output stream failed.';
         emitLine(options, 'system', detail);
       } finally {
@@ -262,10 +262,6 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
       };
     },
   };
-}
-
-function processEnv(): NodeJS.ProcessEnv {
-  return process.env;
 }
 
 export const installRunner = createInstallRunner();
