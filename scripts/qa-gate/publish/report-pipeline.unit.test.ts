@@ -80,6 +80,8 @@ class FakeGithub {
   };
 }
 
+const FORK_REPOSITORY = { owner: { login: 'forker' } };
+
 const context = {
   repo: { owner: 'mango', repo: 'studio' },
   payload: {
@@ -88,7 +90,7 @@ const context = {
       event: 'pull_request',
       head_sha: HEAD_SHA,
       head_branch: 'feat/thing',
-      head_repository: { owner: { login: 'forker' } },
+      head_repository: FORK_REPOSITORY,
       html_url: 'https://example.test/runs/42',
     },
   },
@@ -223,7 +225,7 @@ describe('resolveReportInputs', () => {
         workflow_id: CI_WORKFLOW_FILE,
         branch: 'feat/thing',
         event: 'pull_request',
-        status: 'completed',
+        status: 'success',
         per_page: 100,
       },
     ]);
@@ -293,6 +295,42 @@ describe('resolveReportInputs', () => {
       error: 'Actions jobs API failed: temporary jobs API outage',
       jobs: [],
     });
+  });
+
+  it('matches the previous fork run, whose pull_requests array is always empty', async () => {
+    const github = new FakeGithub({
+      pullRequests: [openPr],
+      previousRuns: [
+        { id: 41, pull_requests: [], head_branch: 'feat/thing', head_repository: FORK_REPOSITORY },
+      ],
+      artifactsByRun: { 42: [artifact(1)] },
+      jobsByRun: { 41: [job('Test / Run tests')] },
+    });
+
+    const result = await resolveReportInputs({ github, context });
+
+    expect(result.ciDurations.previous.runId).toBe(41);
+    expect(result.ciDurations.previous.error).toBeNull();
+  });
+
+  it('ignores same-branch runs from a different fork', async () => {
+    const github = new FakeGithub({
+      pullRequests: [openPr],
+      previousRuns: [
+        {
+          id: 41,
+          pull_requests: [],
+          head_branch: 'feat/thing',
+          head_repository: { owner: { login: 'someone-else' } },
+        },
+      ],
+      artifactsByRun: { 42: [artifact(1)] },
+    });
+
+    const result = await resolveReportInputs({ github, context });
+
+    expect(result.ciDurations.previous.runId).toBeNull();
+    expect(result.ciDurations.previous.error).toContain('no previous successful CI run');
   });
 });
 

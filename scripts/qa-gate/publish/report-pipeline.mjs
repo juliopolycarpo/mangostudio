@@ -110,24 +110,33 @@ export async function collectCiDurations(github, context, runId) {
 }
 
 async function findPreviousPullRequestRun(github, context, run, pullRequest) {
+  const headOwner = run.head_repository?.owner?.login;
   try {
     const { data } = await github.rest.actions.listWorkflowRuns({
       ...context.repo,
       workflow_id: CI_WORKFLOW_FILE,
       branch: run.head_branch,
       event: 'pull_request',
-      status: 'completed',
+      // `completed` would also match runs this workflow's own concurrency group
+      // cancelled mid-flight, whose wall clock is a truncated fragment.
+      status: 'success',
       per_page: 100,
     });
     const previous = data.workflow_runs?.find(
       (candidate) =>
         candidate.id !== run.id &&
         candidate.id < run.id &&
-        candidate.pull_requests?.some((pull) => pull.number === pullRequest.number)
+        (candidate.pull_requests?.some((pull) => pull.number === pullRequest.number) ||
+          // Runs triggered by a fork pull request carry an empty `pull_requests`
+          // array, so fall back to the head identity the branch filter alone
+          // cannot disambiguate.
+          (Boolean(headOwner) &&
+            candidate.head_repository?.owner?.login === headOwner &&
+            candidate.head_branch === run.head_branch))
     );
     return previous
       ? { run: previous, error: null }
-      : { run: null, error: 'no previous completed CI run found for this pull request' };
+      : { run: null, error: 'no previous successful CI run found for this pull request' };
   } catch (error) {
     return { run: null, error: errorMessage(error, 'previous CI run lookup failed: ') };
   }
