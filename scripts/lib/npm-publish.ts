@@ -201,13 +201,18 @@ export async function publishPackages(
   packages: readonly NpmPublishPackage[],
   options: NpmPublishOptions
 ): Promise<NpmPublishSummary> {
+  // A dry run only reads the registry (`npm view`), so it must not demand
+  // publish credentials: release-dry-run.yml and the documented local command
+  // run it without `id-token: write` and without a token.
   const publishAuthMode =
     options.authMode ??
-    resolveNpmPublishAuth({
-      allowLegacy: options.allowLegacyToken ?? false,
-      oidcAvailable: isNpmPublishOidcAvailable(),
-      tokenPresent: isNpmPublishTokenPresent(),
-    });
+    (options.dryRun
+      ? undefined
+      : resolveNpmPublishAuth({
+          allowLegacy: options.allowLegacyToken ?? false,
+          oidcAvailable: isNpmPublishOidcAvailable(),
+          tokenPresent: isNpmPublishTokenPresent(),
+        }));
   const context = createContext(options);
   const summary = { published: 0, skipped: 0, dryRun: 0 };
 
@@ -422,8 +427,9 @@ function summarizeAuth(
     readonly skipped: number;
     readonly dryRun: number;
   },
-  publishAuthMode: 'legacy-explicit' | 'oidc'
+  publishAuthMode: 'legacy-explicit' | 'oidc' | undefined
 ): NpmPublishAuthMode {
+  if (publishAuthMode === undefined) return 'not-published';
   if (summary.published === 0 && summary.dryRun === 0 && summary.skipped > 0) {
     return 'not-published';
   }

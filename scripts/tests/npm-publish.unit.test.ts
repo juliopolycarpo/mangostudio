@@ -283,6 +283,38 @@ describe('publishPackages auth reporting', () => {
       else process.env.NODE_AUTH_TOKEN = priorNpm;
     }
   });
+
+  // release-dry-run.yml runs `publish-npm.ts --dry-run` with only
+  // `contents: read` and no NPM_TOKEN, and the same command is documented for
+  // local use, so a dry run must never demand publish credentials.
+  test('a dry run needs no credentials and reports auth=not-published', async () => {
+    const runner = new FakeNpmRunner([missing()]);
+    const priorUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    const priorToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    const priorNpm = process.env.NODE_AUTH_TOKEN;
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+    delete process.env.NODE_AUTH_TOKEN;
+    try {
+      await expect(
+        publishPackages([PLATFORM_PACKAGE], {
+          allowLegacyToken: false,
+          dryRun: true,
+          logger: new CapturingLogger(),
+          retryDelaysMs: [10],
+          runner,
+          sleep: () => Promise.resolve(),
+        })
+      ).resolves.toMatchObject({ auth: 'not-published', dryRun: 1, published: 0 });
+    } finally {
+      if (priorUrl === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = priorUrl;
+      if (priorToken === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
+      else process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = priorToken;
+      if (priorNpm === undefined) delete process.env.NODE_AUTH_TOKEN;
+      else process.env.NODE_AUTH_TOKEN = priorNpm;
+    }
+  });
 });
 
 describe('publishPackages', () => {
