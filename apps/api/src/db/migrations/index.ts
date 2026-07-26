@@ -26,6 +26,7 @@ import { chatTodos } from './025_chat_todos';
 import { chatWorkdir } from './026_chat_workdir';
 import { chatRestrictToolsToWorkdir } from './027_chat_restrict_tools_to_workdir';
 import { fileCheckpoints } from './028_file_checkpoints';
+import { environmentInstallRuns } from './029_environment_install_runs';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -56,4 +57,5 @@ export const allMigrations = {
   '026_chat_workdir': chatWorkdir,
   '027_chat_restrict_tools_to_workdir': chatRestrictToolsToWorkdir,
   '028_file_checkpoints': fileCheckpoints,
+  '029_environment_install_runs': environmentInstallRuns,
 };

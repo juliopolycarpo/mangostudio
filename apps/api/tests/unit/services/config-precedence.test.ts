@@ -41,6 +41,7 @@ const WATCHED_ENV_KEYS = [
   'MANGO_LIBRARY_BACKUP_DIR',
   'MANGO_LIBRARY_BACKUP_RETENTION_COUNT',
   'MANGO_ENV_LTS_REFRESH',
+  'MANGO_ENV_INSTALLS_ENABLED',
 ];
 
 function saveEnv(): Record<string, string | undefined> {
@@ -245,6 +246,19 @@ describe('config precedence', () => {
     const cfg = loadConfig(TMP_TOML);
 
     expect(cfg.environments.ltsRefresh).toBe(false);
+  });
+
+  test('keeps environment installs disabled by default and lets env override TOML', () => {
+    const defaults = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
+    expect(defaults.environments.installsEnabled).toBe(false);
+
+    resetConfig();
+    writeFileSync(TMP_TOML, '[environments]\ninstalls_enabled = false\n');
+    process.env.MANGO_ENV_INSTALLS_ENABLED = 'true';
+
+    const cfg = loadConfig(TMP_TOML);
+
+    expect(cfg.environments.installsEnabled).toBe(true);
   });
 
   test('loads cursor sidecar script override from config.toml', () => {

@@ -230,6 +230,19 @@ interface FileCheckpointsTable {
   revertedAt: number | null;
 }
 
+interface EnvironmentInstallRunsTable {
+  id: string;
+  userId: string;
+  recipeId: string;
+  /** JSON-serialized string[]. */
+  argvJson: string;
+  startedAt: number;
+  finishedAt: number | null;
+  exitCode: number | null;
+  status: string;
+  truncated: number;
+}
+
 interface ChatTodosTable {
   /** One row per chat; the list is always replaced wholesale. */
   chatId: string;
@@ -264,6 +277,7 @@ export interface Database {
   mcp_servers: McpServersTable;
   chat_todos: ChatTodosTable;
   file_checkpoints: FileCheckpointsTable;
+  environment_install_runs: EnvironmentInstallRunsTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
 }
@@ -290,3 +304,6 @@ export type ChatTodoInsert = Insertable<ChatTodosTable>;
 
 export type FileCheckpointSelect = Selectable<FileCheckpointsTable>;
 export type FileCheckpointInsert = Insertable<FileCheckpointsTable>;
+
+export type EnvironmentInstallRunSelect = Selectable<EnvironmentInstallRunsTable>;
+export type EnvironmentInstallRunInsert = Insertable<EnvironmentInstallRunsTable>;

@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { getHomeMangoDir } from '../../../src/lib/config';
 import {
   ensureRuntimeDirs,
+  getInstallLogPath,
+  getInstallLogsDir,
   getLogsDir,
   getPidFilePath,
   getRunDir,
@@ -17,6 +19,8 @@ describe('mango-paths', () => {
     expect(getLogsDir()).toBe(join(home, 'logs'));
     expect(getRunDir()).toBe(join(home, 'run'));
     expect(getPidFilePath()).toBe(join(home, 'run', 'server.json'));
+    expect(getInstallLogsDir()).toBe(join(home, 'logs', 'installs'));
+    expect(getInstallLogPath('run-1')).toBe(join(home, 'logs', 'installs', 'run-1.log'));
   });
 
   it('builds a timestamped log filename under the logs dir', () => {

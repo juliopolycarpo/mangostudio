@@ -81,6 +81,8 @@ export interface MangoConfig {
   environments: {
     /** Opt in to refreshing Node release metadata from nodejs.org. */
     ltsRefresh: boolean;
+    /** Permit guarded local runtime and agent CLI installation. */
+    installsEnabled: boolean;
   };
   /** Computed CORS origins derived from frontend host/port. */
   corsOrigins: string[];
@@ -121,7 +123,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   checkpoints: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
-  environments: { ltsRefresh: false },
+  environments: { ltsRefresh: false, installsEnabled: false },
   cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
@@ -181,6 +183,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   MANGO_ENV_LTS_REFRESH: (cfg, v) => {
     cfg.environments.ltsRefresh = parseBooleanFlag(v);
+  },
+  MANGO_ENV_INSTALLS_ENABLED: (cfg, v) => {
+    cfg.environments.installsEnabled = parseBooleanFlag(v);
   },
   CURSOR_WORKSPACE_DIR: (cfg, v) => {
     cfg.cursor.workspaceDir = v;
@@ -415,8 +420,13 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   }
 
   const environments = parsed.environments as Record<string, unknown> | undefined;
-  if (environments && typeof environments.lts_refresh === 'boolean') {
-    cfg.environments.ltsRefresh = environments.lts_refresh;
+  if (environments) {
+    if (typeof environments.lts_refresh === 'boolean') {
+      cfg.environments.ltsRefresh = environments.lts_refresh;
+    }
+    if (typeof environments.installs_enabled === 'boolean') {
+      cfg.environments.installsEnabled = environments.installs_enabled;
+    }
   }
 
   const cursor = parsed.cursor as Record<string, unknown> | undefined;

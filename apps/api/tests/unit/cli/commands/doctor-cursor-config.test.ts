@@ -19,7 +19,7 @@ function makeConfig(configFilePath: string): MangoConfig {
     checkpoints: { dir: '/data/checkpoints' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false },
-    environments: { ltsRefresh: false },
+    environments: { ltsRefresh: false, installsEnabled: false },
     cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
     chatgpt: { authBaseUrl: 'https://auth.openai.com', apiBaseUrl: 'https://api.openai.com' },
     secretStore: { unsafeFileFallbackDir: '' },
