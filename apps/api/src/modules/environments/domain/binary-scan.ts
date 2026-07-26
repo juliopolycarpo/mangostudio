@@ -46,6 +46,14 @@ export interface BinaryScanDeps extends PathEnv {
   readonly totalTimeoutMs?: number;
   readonly configuredPath?: string;
   readonly configuredOnly?: boolean;
+  /**
+   * Stops the scan once a probed version satisfies the caller. Candidates are
+   * handed out in PATH order, so every candidate ahead of the match has already
+   * started and is still awaited — only strictly later ones are skipped. Gate
+   * consumers (the sidecar detector) set this to keep their first-match cost;
+   * duplicate analysis leaves it unset because it needs the full list.
+   */
+  readonly stopWhen?: (version: string) => boolean;
 }
 
 interface BinaryCandidate {
@@ -160,16 +168,21 @@ async function resolveRealpath(path: string, deps: BinaryScanDeps): Promise<stri
 async function mapWithConcurrency<T, Result>(
   items: readonly T[],
   concurrency: number,
-  mapper: (item: T) => Promise<Result>
+  mapper: (item: T) => Promise<Result>,
+  /** Marks a result as terminal; items after that index are left unmapped. */
+  isTerminal?: (result: Result) => boolean
 ): Promise<Result[]> {
   const results = new Array<Result>(items.length);
   let nextIndex = 0;
+  let terminalIndex = Number.POSITIVE_INFINITY;
 
   const worker = async () => {
-    while (nextIndex < items.length) {
+    while (nextIndex < items.length && nextIndex <= terminalIndex) {
       const index = nextIndex;
       nextIndex += 1;
-      results[index] = await mapper(items[index] as T);
+      const result = await mapper(items[index] as T);
+      results[index] = result;
+      if (isTerminal?.(result) && index < terminalIndex) terminalIndex = index;
     }
   };
 
@@ -254,6 +267,7 @@ export async function scanRuntime(
   const installations: RuntimeInstallation[] = [];
   const failures: RuntimeScanFailure[] = [];
   const firstPathByRealpath = new Map<string, string>();
+  const { stopWhen } = deps;
   const candidates = [...iterateBinaryCandidates(definition, deps)].filter(
     (candidate) => !candidate.requiresExistenceCheck || deps.pathExists(candidate.path)
   );
@@ -294,7 +308,8 @@ export async function scanRuntime(
 
       const path = await resolveRealpath(candidate.path, deps);
       return { kind: 'installation', candidate, path, version };
-    }
+    },
+    stopWhen ? (result) => result?.kind === 'installation' && stopWhen(result.version) : undefined
   );
 
   for (const probeResult of probeResults) {

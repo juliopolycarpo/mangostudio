@@ -235,6 +235,61 @@ describe('scanRuntime', () => {
 
     expect(result.installations[0]?.rawPath).toBe('C:\\tools\\node.cmd');
   });
+
+  it('stops probing once stopWhen accepts a candidate', async () => {
+    const versions: Record<string, string> = {
+      '/a/bin/node': 'v20.11.0',
+      '/b/bin/node': 'v22.13.0',
+      '/c/bin/node': 'v24.0.0',
+    };
+    const probed: string[] = [];
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        env: { PATH: '/a/bin:/b/bin:/c/bin' },
+        maxConcurrency: 1,
+        pathExists: (path) => path in versions,
+        probeVersion: (binary) => {
+          probed.push(binary);
+          return Promise.resolve(versions[binary] ?? null);
+        },
+        stopWhen: (version) => version === 'v22.13.0',
+      })
+    );
+
+    expect(probed).toEqual(['/a/bin/node', '/b/bin/node']);
+    expect(result.installations.map((installation) => installation.rawPath)).toEqual([
+      '/a/bin/node',
+      '/b/bin/node',
+    ]);
+    expect(result.installations[0]?.effective).toBe(true);
+  });
+
+  it('keeps scanning every candidate when stopWhen is absent', async () => {
+    const versions: Record<string, string> = {
+      '/a/bin/node': 'v20.11.0',
+      '/b/bin/node': 'v22.13.0',
+      '/c/bin/node': 'v24.0.0',
+    };
+    const probed: string[] = [];
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        env: { PATH: '/a/bin:/b/bin:/c/bin' },
+        maxConcurrency: 1,
+        pathExists: (path) => path in versions,
+        probeVersion: (binary) => {
+          probed.push(binary);
+          return Promise.resolve(versions[binary] ?? null);
+        },
+      })
+    );
+
+    expect(probed).toHaveLength(3);
+    expect(result.installations).toHaveLength(3);
+  });
 });
 
 describe('runtime version parsing', () => {

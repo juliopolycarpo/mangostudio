@@ -124,7 +124,10 @@ function defaultProbeDeps(options: NodeRuntimeDetectorOptions<string>): NodeRunt
   };
 }
 
-function toBinaryScanDeps(deps: NodeRuntimeProbeDeps): BinaryScanDeps {
+function toBinaryScanDeps(
+  deps: NodeRuntimeProbeDeps,
+  minimumVersion: MinimumNodeVersion
+): BinaryScanDeps {
   const configuredPath = deps.configuredNodePath.trim();
   return {
     platform: deps.platform,
@@ -133,6 +136,12 @@ function toBinaryScanDeps(deps: NodeRuntimeProbeDeps): BinaryScanDeps {
     pathExists: deps.pathExists,
     probeVersion: (binary) => deps.probeVersion(binary),
     realpath,
+    // This is a gate, not an inventory: stop at the first Node that clears the
+    // bar so the sidecar check keeps costing one probe on a healthy machine.
+    stopWhen: (version) => {
+      const parsed = parseNodeVersion(version);
+      return parsed !== null && meetsMinimumVersion(parsed, minimumVersion);
+    },
     ...(configuredPath && { configuredPath, configuredOnly: true }),
   };
 }
@@ -166,7 +175,10 @@ async function probeRuntime<ReasonCode extends string>(
   overrides: Partial<NodeRuntimeProbeDeps> = {}
 ): Promise<NodeRuntimeStatus<ReasonCode>> {
   const deps: NodeRuntimeProbeDeps = { ...defaultProbeDeps(options), ...overrides };
-  const result = await scanRuntime(NODE_SIDECAR_RUNTIME_DEFINITION, toBinaryScanDeps(deps));
+  const result = await scanRuntime(
+    NODE_SIDECAR_RUNTIME_DEFINITION,
+    toBinaryScanDeps(deps, options.minimumVersion)
+  );
   const configuredPath = deps.configuredNodePath.trim();
 
   if (configuredPath && result.installations.length === 0) {
