@@ -125,4 +125,14 @@ describe('workflow hygiene', () => {
       expect(readText(file), file).not.toMatch(CHECKOUT_USES);
     }
   });
+
+  test('pull-request workflows key concurrency on the PR number, not the SHA', () => {
+    for (const file of workflowFiles()) {
+      const workflow = readText(file);
+      if (!/\non:\n(?:.|\n)*?\n {2}pull_request:/.test(workflow)) continue;
+      if (!workflow.includes('\nconcurrency:')) continue;
+      expect(workflow, file).toContain('github.event.pull_request.number');
+      expect(workflow, file).not.toContain('github.sha');
+    }
+  });
 });
