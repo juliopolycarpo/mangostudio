@@ -1,25 +1,34 @@
 /**
  * Provider-agnostic Node.js runtime detection for SDK sidecars.
  *
- * Resolution order:
- * 1. Explicitly configured binary supplied by the provider. A broken
- *    configured path reports the provider's `nodeInvalid` reason and does not
- *    fall back to PATH.
- * 2. PATH entries (PATHEXT-aware on Windows, so `node.cmd` shims resolve).
- * 3. A bounded list of well-known install locations (nvm/fnm/volta/Homebrew).
- * 4. Bare binary names resolved by the OS as a last resort.
- * Every candidate must pass a `--version` probe, so a PATH entry that exists
- * but is not executable never wins over a working install later in the list.
+ * The generic environments scanner discovers every working Node candidate.
+ * This adapter preserves the provider gate's configured-path authority,
+ * minimum-version policy, reason codes, and cached public API.
  */
 
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { promisify } from 'node:util';
+import {
+  type BinaryScanDeps,
+  binaryCandidateNames,
+  scanRuntime,
+} from '../../../../modules/environments/domain/binary-scan';
+import {
+  NODE_RUNTIME_DEFINITION,
+  parseNodeVersion,
+  wellKnownNodeDirectories as runtimeWellKnownNodeDirectories,
+} from '../../../../modules/environments/domain/runtime-definitions';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CACHE_TTL_MS = 30_000;
+const NODE_SIDECAR_RUNTIME_DEFINITION = {
+  ...NODE_RUNTIME_DEFINITION,
+  includeBareBinaryNames: true,
+} as const;
 
 interface NodeRuntimeReasonParams {
   foundVersion?: string;
@@ -68,7 +77,13 @@ export interface NodeRuntimeProbeDeps {
 
 interface NodeRuntimeCache<ReasonCode extends string> {
   checkedAt: number;
+  key: string;
   status: NodeRuntimeStatus<ReasonCode>;
+}
+
+interface InflightNodeRuntime<ReasonCode extends string> {
+  key: string;
+  promise: Promise<NodeRuntimeStatus<ReasonCode>>;
 }
 
 export interface NodeRuntimeDetector<ReasonCode extends string> {
@@ -77,16 +92,6 @@ export interface NodeRuntimeDetector<ReasonCode extends string> {
     overrides?: Partial<NodeRuntimeProbeDeps>
   ): Promise<NodeRuntimeStatus<ReasonCode>>;
   resetNodeRuntimeCache(): void;
-}
-
-function parseNodeVersion(raw: string): { major: number; minor: number; patch: number } | null {
-  const match = raw.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return null;
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-  };
 }
 
 function meetsMinimumVersion(
@@ -119,163 +124,122 @@ function defaultProbeDeps(options: NodeRuntimeDetectorOptions<string>): NodeRunt
   };
 }
 
-const WINDOWS_EXECUTABLE_EXTENSIONS = new Set(['.exe', '.cmd', '.bat', '.com']);
-const WINDOWS_PATHEXT_FALLBACK = '.EXE;.CMD;.BAT;.COM';
+function toBinaryScanDeps(
+  deps: NodeRuntimeProbeDeps,
+  minimumVersion: MinimumNodeVersion
+): BinaryScanDeps {
+  const configuredPath = deps.configuredNodePath.trim();
+  return {
+    platform: deps.platform,
+    env: deps.env,
+    homeDir: deps.homeDir,
+    pathExists: deps.pathExists,
+    probeVersion: (binary) => deps.probeVersion(binary),
+    realpath,
+    // This is a gate, not an inventory: stop at the first Node that clears the
+    // bar so the sidecar check keeps costing one probe on a healthy machine.
+    stopWhen: (version) => {
+      const parsed = parseNodeVersion(version);
+      return parsed !== null && meetsMinimumVersion(parsed, minimumVersion);
+    },
+    ...(configuredPath && { configuredPath, configuredOnly: true }),
+  };
+}
 
 /**
  * Binary names to try inside each candidate directory. On Windows the PATHEXT
- * order is honored so `node.cmd` shims (nvm-windows, corporate wrappers) are
- * found, not just `node.exe`.
+ * order is honored so `node.cmd` shims are found, not just `node.exe`.
  */
 export function nodeBinaryCandidateNames(
   deps: Pick<NodeRuntimeProbeDeps, 'platform' | 'env'>
 ): string[] {
-  if (deps.platform !== 'win32') return ['node'];
-
-  const pathext = deps.env.PATHEXT?.trim() || WINDOWS_PATHEXT_FALLBACK;
-  const names: string[] = [];
-  for (const rawExt of pathext.split(';')) {
-    const ext = rawExt.trim().toLowerCase();
-    if (!WINDOWS_EXECUTABLE_EXTENSIONS.has(ext)) continue;
-    const name = `node${ext}`;
-    if (!names.includes(name)) names.push(name);
-  }
-  names.push('node');
-  return names;
+  return binaryCandidateNames(NODE_RUNTIME_DEFINITION, {
+    platform: deps.platform,
+    env: deps.env,
+  });
 }
 
-/**
- * Bounded, ordered list of well-known Node install directories probed when
- * PATH lookup fails (for example, app launched from a GUI without shell
- * profile). Deliberately no filesystem crawling: fixed locations only.
- */
+/** Bounded, ordered Node install directories used after PATH entries. */
 export function wellKnownNodeDirectories(
   deps: Pick<NodeRuntimeProbeDeps, 'platform' | 'env' | 'homeDir'>
 ): string[] {
-  if (deps.platform === 'win32') {
-    const { ProgramFiles, LOCALAPPDATA, NVM_SYMLINK, VOLTA_HOME } = deps.env;
-    return [
-      NVM_SYMLINK,
-      ProgramFiles ? join(ProgramFiles, 'nodejs') : undefined,
-      deps.env['ProgramFiles(x86)']
-        ? join(deps.env['ProgramFiles(x86)'] as string, 'nodejs')
-        : undefined,
-      LOCALAPPDATA ? join(LOCALAPPDATA, 'Programs', 'nodejs') : undefined,
-      VOLTA_HOME ? join(VOLTA_HOME, 'bin') : undefined,
-    ].filter((dir): dir is string => Boolean(dir?.trim()));
-  }
-
-  return [
-    '/usr/local/bin',
-    '/opt/homebrew/bin',
-    join(deps.homeDir, '.volta', 'bin'),
-    join(deps.homeDir, '.local', 'share', 'fnm', 'aliases', 'default', 'bin'),
-  ];
-}
-
-function pathSeparator(platform: string): string {
-  return platform === 'win32' ? ';' : ':';
-}
-
-interface NodeBinaryCandidate {
-  path: string;
-  /** Bare names are resolved by the OS (execFile PATH lookup): skip pathExists. */
-  requiresExistenceCheck: boolean;
-}
-
-function* iterateNodeBinaryCandidates(deps: NodeRuntimeProbeDeps): Generator<NodeBinaryCandidate> {
-  const names = nodeBinaryCandidateNames(deps);
-  const pathEntries = (deps.env.PATH ?? '')
-    .split(pathSeparator(deps.platform))
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  const seen = new Set<string>();
-  for (const dir of [...pathEntries, ...wellKnownNodeDirectories(deps)]) {
-    for (const name of names) {
-      const fullPath = join(dir, name);
-      if (seen.has(fullPath)) continue;
-      seen.add(fullPath);
-      yield { path: fullPath, requiresExistenceCheck: true };
-    }
-  }
-
-  for (const name of names) {
-    yield { path: name, requiresExistenceCheck: false };
-  }
-}
-
-function evaluateNodeVersion<ReasonCode extends string>(
-  nodePath: string,
-  versionText: string,
-  options: NodeRuntimeDetectorOptions<ReasonCode>
-): NodeRuntimeStatus<ReasonCode> | null {
-  const parsed = parseNodeVersion(versionText);
-  if (!parsed) return null;
-  if (!meetsMinimumVersion(parsed, options.minimumVersion)) {
-    return {
-      available: false,
-      nodePath,
-      version: versionText,
-      reasonCode: options.reasonCodes.versionInsufficient,
-      reasonParams: { foundVersion: versionText },
-    };
-  }
-  return { available: true, nodePath, version: versionText };
+  return runtimeWellKnownNodeDirectories(deps);
 }
 
 /**
- * Resolves Node availability with injectable deps (exported through the
- * detector for unit tests). A configured path is authoritative: it never falls
- * back to auto-detection, so typos surface as the provider's node-invalid
- * reason instead of silently running a different Node.
+ * Resolves Node availability through the generic scanner. A configured path is
+ * authoritative: it never falls back to auto-detection.
  */
 async function probeRuntime<ReasonCode extends string>(
   options: NodeRuntimeDetectorOptions<ReasonCode>,
   overrides: Partial<NodeRuntimeProbeDeps> = {}
 ): Promise<NodeRuntimeStatus<ReasonCode>> {
   const deps: NodeRuntimeProbeDeps = { ...defaultProbeDeps(options), ...overrides };
+  const result = await scanRuntime(
+    NODE_SIDECAR_RUNTIME_DEFINITION,
+    toBinaryScanDeps(deps, options.minimumVersion)
+  );
+  const configuredPath = deps.configuredNodePath.trim();
 
-  const configured = deps.configuredNodePath.trim();
-  if (configured) {
-    const versionText = await deps.probeVersion(configured);
-    const status = versionText ? evaluateNodeVersion(configured, versionText, options) : null;
-    if (status) return status;
+  if (configuredPath && result.installations.length === 0) {
     return {
       available: false,
-      nodePath: configured,
+      nodePath: configuredPath,
       reasonCode: options.reasonCodes.nodeInvalid,
-      reasonParams: { nodePath: configured },
+      reasonParams: { nodePath: configuredPath },
     };
   }
 
-  let insufficient: NodeRuntimeStatus<ReasonCode> | null = null;
-  for (const candidate of iterateNodeBinaryCandidates(deps)) {
-    if (candidate.requiresExistenceCheck && !deps.pathExists(candidate.path)) continue;
-
-    const versionText = await deps.probeVersion(candidate.path);
-    if (!versionText) continue;
-
-    const status = evaluateNodeVersion(candidate.path, versionText, options);
-    if (!status) continue;
-    if (status.available) return status;
-    // Too old: remember the first hit but keep scanning for a newer install.
-    insufficient ??= status;
+  const supported = result.installations.find((installation) => {
+    const version = parseNodeVersion(installation.version);
+    return version && meetsMinimumVersion(version, options.minimumVersion);
+  });
+  if (supported) {
+    return {
+      available: true,
+      nodePath: supported.rawPath,
+      version: supported.version,
+    };
   }
 
-  return insufficient ?? { available: false, reasonCode: options.reasonCodes.nodeNotFound };
+  const firstInstallation = result.installations[0];
+  if (firstInstallation) {
+    return {
+      available: false,
+      nodePath: firstInstallation.rawPath,
+      version: firstInstallation.version,
+      reasonCode: options.reasonCodes.versionInsufficient,
+      reasonParams: { foundVersion: firstInstallation.version },
+    };
+  }
+
+  return { available: false, reasonCode: options.reasonCodes.nodeNotFound };
+}
+
+function detectorEnvironmentKey(configuredNodePath: string): string {
+  return createHash('sha256')
+    .update(process.platform)
+    .update('\0')
+    .update(configuredNodePath)
+    .update('\0')
+    .update(process.env.PATH ?? '')
+    .update('\0')
+    .update(process.env.PATHEXT ?? '')
+    .digest('hex');
 }
 
 /**
  * Creates a cached runtime detector for one provider-side sidecar. Each
- * provider gets its own cache so different minimum Node versions or configured
- * binary paths cannot bleed into each other.
+ * provider gets its own cache so minimum versions and configured paths cannot
+ * bleed into each other. PATH changes also invalidate cached detection.
  */
 export function createNodeRuntimeDetector<ReasonCode extends string>(
   options: NodeRuntimeDetectorOptions<ReasonCode>
 ): NodeRuntimeDetector<ReasonCode> {
   let cached: NodeRuntimeCache<ReasonCode> | null = null;
-  let inflight: Promise<NodeRuntimeStatus<ReasonCode>> | null = null;
+  let inflight: InflightNodeRuntime<ReasonCode> | null = null;
+  /** Only the most recently started probe may publish a cache entry. */
+  let probeGeneration = 0;
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
 
   return {
@@ -285,28 +249,39 @@ export function createNodeRuntimeDetector<ReasonCode extends string>(
 
     detectNodeRuntime(detectOptions?: { force?: boolean }) {
       const now = Date.now();
-      if (!detectOptions?.force && cached && now - cached.checkedAt < cacheTtlMs) {
+      const configuredNodePath = options.getConfiguredNodePath?.().trim() ?? '';
+      const key = detectorEnvironmentKey(configuredNodePath);
+      if (
+        !detectOptions?.force &&
+        cached &&
+        cached.key === key &&
+        now - cached.checkedAt < cacheTtlMs
+      ) {
         return Promise.resolve(cached.status);
       }
 
-      if (!detectOptions?.force && inflight) return inflight;
+      if (!detectOptions?.force && inflight?.key === key) return inflight.promise;
 
-      const probe = probeRuntime(options)
+      probeGeneration += 1;
+      const generation = probeGeneration;
+      const promise = probeRuntime(options)
         .then((status) => {
-          cached = { checkedAt: Date.now(), status };
+          if (generation === probeGeneration) cached = { checkedAt: Date.now(), key, status };
           return status;
         })
         .finally(() => {
-          if (inflight === probe) inflight = null;
+          if (inflight?.promise === promise) inflight = null;
         });
 
-      inflight = probe;
-      return probe;
+      inflight = { key, promise };
+      return promise;
     },
 
     resetNodeRuntimeCache() {
       cached = null;
       inflight = null;
+      // Retires in-flight probes so a pre-reset scan cannot repopulate the cache.
+      probeGeneration += 1;
     },
   };
 }

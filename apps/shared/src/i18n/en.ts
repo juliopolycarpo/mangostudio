@@ -1377,6 +1377,32 @@ export const messages: Messages = {
     },
   },
 
+  environments: {
+    runtimes: {
+      bun: 'Bun',
+      node: 'Node.js',
+      nvm: 'nvm',
+    },
+    health: {
+      ok: 'Available',
+      warn: 'Needs attention',
+      missing: 'Not found',
+      error: 'Probe failed',
+    },
+    findings: {
+      notFound: '{runtime} was not found.',
+      shadowedByEarlierPath:
+        '{shadowedPath} is shadowed by {effectivePath}, which appears earlier in PATH.',
+      multipleVersions: 'Multiple {runtime} versions are installed: {versions}.',
+      versionBelowMinimum:
+        '{path} reports {version}; the minimum compatible version is {minimumVersion}.',
+      notExecutable: '{path} exists but did not report an executable version.',
+      outdatedLts: '{path} uses an outdated LTS release.',
+      managedButNotOnPath: '{path} is managed by {manager} but is not on PATH.',
+      probeTimeout: 'Probing {path} timed out.',
+    },
+  },
+
   providers: {
     gemini: 'Google Gemini',
     anthropic: 'Anthropic',

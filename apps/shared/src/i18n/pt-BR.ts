@@ -1395,6 +1395,32 @@ export const messages = {
     },
   },
 
+  environments: {
+    runtimes: {
+      bun: 'Bun',
+      node: 'Node.js',
+      nvm: 'nvm',
+    },
+    health: {
+      ok: 'Disponível',
+      warn: 'Requer atenção',
+      missing: 'Não encontrado',
+      error: 'Falha na verificação',
+    },
+    findings: {
+      notFound: '{runtime} não foi encontrado.',
+      shadowedByEarlierPath:
+        '{shadowedPath} é sombreado por {effectivePath}, que aparece antes no PATH.',
+      multipleVersions: 'Várias versões de {runtime} estão instaladas: {versions}.',
+      versionBelowMinimum:
+        '{path} usa a versão {version}; a versão mínima compatível é {minimumVersion}.',
+      notExecutable: '{path} existe, mas não informou uma versão executável.',
+      outdatedLts: '{path} usa uma versão LTS desatualizada.',
+      managedButNotOnPath: '{path} é gerenciado por {manager}, mas não está no PATH.',
+      probeTimeout: 'A verificação de {path} excedeu o tempo limite.',
+    },
+  },
+
   providers: {
     gemini: 'Google Gemini',
     anthropic: 'Anthropic',

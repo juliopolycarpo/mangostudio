@@ -7,15 +7,11 @@ import type {
   ResourceFormat,
   ResourceKind,
 } from '@mangostudio/shared/library';
+import type { PathEnv } from '../../../lib/path-env';
 
 export type LibraryLocationLayout = 'directory-of-dirs' | 'directory-of-files' | 'single-file';
 
-/** Injectable platform inputs; registry resolution never reads ambient state. */
-export interface PathEnv {
-  readonly platform: string;
-  readonly homeDir: string;
-  readonly env: Readonly<Record<string, string | undefined>>;
-}
+export type { PathEnv } from '../../../lib/path-env';
 
 export interface LocationDefinition {
   readonly id: LibraryLocationId;
