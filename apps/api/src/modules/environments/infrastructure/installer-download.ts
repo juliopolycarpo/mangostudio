@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  type ValidateBaseUrlOptions,
+  validateBaseUrl,
+} from '../../../services/providers/core/base-url-policy';
 
 const MAX_INSTALLER_REDIRECTS = 5;
 const INSTALLER_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -39,6 +43,11 @@ interface InstallerDownloadDeps {
   readonly createTempDir: () => Promise<string>;
   readonly writeFile: (path: string, data: Uint8Array) => Promise<void>;
   readonly removeDir: (path: string) => Promise<void>;
+  /**
+   * Hostname resolver for the address policy. Injectable so tests exercise the
+   * real policy without depending on DNS.
+   */
+  readonly resolveHostname?: ValidateBaseUrlOptions['resolveHostname'];
 }
 
 const defaultDeps: InstallerDownloadDeps = {
@@ -47,6 +56,25 @@ const defaultDeps: InstallerDownloadDeps = {
   writeFile: (path, data) => writeFile(path, data),
   removeDir: (path) => rm(path, { recursive: true, force: true }),
 };
+
+/**
+ * The server fetches this URL on a user's behalf, so an attacker-controlled
+ * redirect is an SSRF primitive: a hijacked installer host could point the fetch
+ * at a link-local metadata endpoint or an internal service, and the resolved URL
+ * would then be presented to the user as the artifact's trusted origin. Every
+ * hop is checked against the same address policy that guards provider base URLs.
+ */
+async function assertReachableUrl(deps: InstallerDownloadDeps, url: URL): Promise<void> {
+  try {
+    await validateBaseUrl(
+      url.href,
+      deps.resolveHostname ? { resolveHostname: deps.resolveHostname } : {}
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : 'Unknown address policy failure.';
+    throw new InstallerDownloadError(`Installer host was refused: ${detail}`);
+  }
+}
 
 async function fetchInstaller(
   deps: InstallerDownloadDeps,
@@ -57,6 +85,7 @@ async function fetchInstaller(
   let redirectCount = 0;
 
   while (true) {
+    await assertReachableUrl(deps, currentUrl);
     const response = await deps.fetch(currentUrl, {
       redirect: 'manual',
       ...(signal && { signal }),

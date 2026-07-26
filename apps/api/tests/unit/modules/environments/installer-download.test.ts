@@ -9,11 +9,24 @@ set -eu
 echo installing
 `;
 
+/**
+ * Exercises the real address policy without touching DNS: every host resolves to
+ * a public address except `internal.test`, which lands inside RFC1918.
+ */
+function resolveHostname(hostname: string) {
+  return Promise.resolve(
+    hostname === 'internal.test'
+      ? [{ address: '10.0.0.5', family: 4 as const }]
+      : [{ address: '93.184.216.34', family: 4 as const }]
+  );
+}
+
 function createDownloaderWithFetch(fetchImpl: typeof fetch) {
   let written: Uint8Array | null = null;
   let removed = false;
   const downloader = createInstallerDownloader({
     fetch: fetchImpl,
+    resolveHostname,
     createTempDir: () => Promise.resolve('/tmp/mangostudio-installer-test'),
     writeFile: (_path, data) => {
       written = data;
@@ -157,5 +170,35 @@ describe('installer download', () => {
       })
     ).rejects.toThrow('non-HTTPS');
     expect(downgradedCalls).toEqual(['https://example.test/install.sh']);
+  });
+
+  it('refuses a redirect into a link-local or private address', async () => {
+    const cases = [
+      // The classic cloud metadata endpoint, reached as a bare IP literal.
+      { location: 'https://169.254.169.254/latest/meta-data/', label: 'metadata' },
+      // A public-looking hostname that resolves inside RFC1918.
+      { location: 'https://internal.test/install.sh', label: 'internal host' },
+    ];
+
+    for (const testCase of cases) {
+      const calls: string[] = [];
+      const fixture = createDownloaderWithFetch(((input: Parameters<typeof fetch>[0]) => {
+        calls.push(String(input));
+        return Promise.resolve(
+          new Response(null, { status: 302, headers: { location: testCase.location } })
+        );
+      }) as unknown as typeof fetch);
+
+      await expect(
+        fixture.downloader.download({
+          url: 'https://example.test/install.sh',
+          minBytes: 16,
+          maxBytes: 1024,
+        })
+      ).rejects.toThrow('refused');
+      // The redirect target is never fetched, so nothing internal is contacted.
+      expect(calls).toEqual(['https://example.test/install.sh']);
+      expect(fixture.getWritten()).toBeNull();
+    }
   });
 });
