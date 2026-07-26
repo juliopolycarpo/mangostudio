@@ -25,16 +25,24 @@ export function CopyCommandBlock({ recipe, message }: CopyCommandBlockProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
-  const reasons = recipe.guard.reasons.map((reason) => guardReasonLabel(t, reason));
-  if (reasons.length === 0 && !recipe.supported) reasons.push(s.unsupported);
+  // Each blocker keeps a key naming where it came from, so two guards that
+  // happen to render the same sentence stay two lines.
+  const reasons: { key: string; text: string }[] = recipe.guard.reasons.map((reason) => ({
+    key: `guard:${reason}`,
+    text: guardReasonLabel(t, reason),
+  }));
+  // Every blocker is stated: a guard refusal does not make an unsupported
+  // platform stop being the other reason this cannot run here.
+  if (!recipe.supported) reasons.push({ key: 'unsupported', text: s.unsupported });
   if (recipe.missingRequirements.length > 0) {
-    reasons.push(
-      formatMessage(s.missingRequirements, {
+    reasons.push({
+      key: 'missing-requirements',
+      text: formatMessage(s.missingRequirements, {
         requirements: recipe.missingRequirements.map((id) => displayName(t, id)).join(', '),
-      })
-    );
+      }),
+    });
   }
-  if (reasons.length === 0 && message) reasons.push(message);
+  if (reasons.length === 0 && message) reasons.push({ key: 'message', text: message });
 
   const copy = async () => {
     try {
@@ -56,8 +64,8 @@ export function CopyCommandBlock({ recipe, message }: CopyCommandBlockProps) {
           {s.guardBlockedTitle}
         </p>
         {reasons.map((reason) => (
-          <p key={reason} className="text-sm text-on-surface-variant">
-            {reason}
+          <p key={reason.key} className="text-sm text-on-surface-variant">
+            {reason.text}
           </p>
         ))}
       </div>
