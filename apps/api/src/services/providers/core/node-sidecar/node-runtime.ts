@@ -226,6 +226,8 @@ export function createNodeRuntimeDetector<ReasonCode extends string>(
 ): NodeRuntimeDetector<ReasonCode> {
   let cached: NodeRuntimeCache<ReasonCode> | null = null;
   let inflight: InflightNodeRuntime<ReasonCode> | null = null;
+  /** Only the most recently started probe may publish a cache entry. */
+  let probeGeneration = 0;
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
 
   return {
@@ -248,9 +250,11 @@ export function createNodeRuntimeDetector<ReasonCode extends string>(
 
       if (!detectOptions?.force && inflight?.key === key) return inflight.promise;
 
+      probeGeneration += 1;
+      const generation = probeGeneration;
       const promise = probeRuntime(options)
         .then((status) => {
-          cached = { checkedAt: Date.now(), key, status };
+          if (generation === probeGeneration) cached = { checkedAt: Date.now(), key, status };
           return status;
         })
         .finally(() => {
@@ -264,6 +268,8 @@ export function createNodeRuntimeDetector<ReasonCode extends string>(
     resetNodeRuntimeCache() {
       cached = null;
       inflight = null;
+      // Retires in-flight probes so a pre-reset scan cannot repopulate the cache.
+      probeGeneration += 1;
     },
   };
 }
