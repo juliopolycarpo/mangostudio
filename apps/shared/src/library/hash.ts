@@ -2,6 +2,15 @@ import type { LibraryInvalidReason } from './schemas';
 
 const textEncoder = new TextEncoder();
 
+/**
+ * Domain separators keep the two hash shapes in disjoint namespaces. Without them a file whose
+ * bytes happen to spell a one-entry manifest (`<name>\0<64 hex>\n`) would hash identically to
+ * the directory that manifest describes, and a file-backed and a directory-backed instance of
+ * the same resource would be grouped as identical content.
+ */
+const FILE_HASH_DOMAIN = 'mangostudio/library/file\0';
+const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir\0';
+
 export interface LibraryHashReader {
   /**
    * Returns every leaf file under `rootPath` as a POSIX-style relative path.
@@ -28,7 +37,7 @@ export async function hashLibraryFile(
 ): Promise<LibraryContentHash> {
   const bytes = await reader.readFile(path);
   return {
-    contentHash: await sha256(bytes),
+    contentHash: await sha256(FILE_HASH_DOMAIN, bytes),
     sizeBytes: bytes.byteLength,
   };
 }
@@ -51,20 +60,23 @@ export async function hashLibraryDirectory(
     if (!isPathWithin(canonicalRoot, canonicalFile)) return pathEscape();
 
     const bytes = await reader.readFile(canonicalFile);
-    manifestLines.push(`${relativePath}\0${await sha256(bytes)}\n`);
+    manifestLines.push(`${relativePath}\0${await sha256(FILE_HASH_DOMAIN, bytes)}\n`);
     sizeBytes += bytes.byteLength;
   }
 
   return {
-    contentHash: await sha256(textEncoder.encode(manifestLines.join(''))),
+    contentHash: await sha256(DIRECTORY_HASH_DOMAIN, textEncoder.encode(manifestLines.join(''))),
     sizeBytes,
     valid: true,
   };
 }
 
-async function sha256(bytes: Uint8Array): Promise<string> {
-  const digestInput = new Uint8Array(bytes.byteLength);
-  digestInput.set(bytes);
+async function sha256(domain: string, bytes: Uint8Array): Promise<string> {
+  const prefix = textEncoder.encode(domain);
+  // The copy also narrows `Uint8Array<ArrayBufferLike>` to a `BufferSource` digest accepts.
+  const digestInput = new Uint8Array(prefix.byteLength + bytes.byteLength);
+  digestInput.set(prefix);
+  digestInput.set(bytes, prefix.byteLength);
   const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', digestInput));
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }

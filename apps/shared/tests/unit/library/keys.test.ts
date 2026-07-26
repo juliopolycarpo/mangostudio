@@ -2,6 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
   isValidResourceSlug,
+  LIBRARY_RESOURCE_SLUG_MAX_LENGTH,
+  LibraryResourceRefSchema,
   LibraryResourceSchema,
   parseResourceKey,
   type ResourceKind,
@@ -31,10 +33,27 @@ describe('library resource keys', () => {
     'path\\child',
     'path..child',
     '.hidden',
+    '..',
+    'trailing.',
+    'stream:name',
+    'has space',
+    'line\nbreak',
+    'a'.repeat(LIBRARY_RESOURCE_SLUG_MAX_LENGTH + 1),
   ])('rejects unsafe slug %s', (slug) => {
     expect(isValidResourceSlug(slug)).toBe(false);
     expect(() => resourceKey('skill', slug)).toThrow(TypeError);
     expect(parseResourceKey(`skill:${slug}`)).toBeNull();
+    expect(Value.Check(LibraryResourceRefSchema, { kind: 'skill', slug })).toBe(false);
+  });
+
+  it.each([
+    'gh',
+    'settings.local',
+    'AGENTS',
+    'multi-word_slug',
+  ])('accepts path-safe slug %s', (slug) => {
+    expect(isValidResourceSlug(slug)).toBe(true);
+    expect(Value.Check(LibraryResourceRefSchema, { kind: 'skill', slug })).toBe(true);
   });
 
   it('rejects unknown kinds and malformed keys', () => {

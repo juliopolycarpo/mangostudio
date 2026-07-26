@@ -64,7 +64,7 @@ describe('library hashing', () => {
 
     expect(first).toEqual(second);
     expect(first).toEqual({
-      contentHash: '075c49768bc9da2b65afb62a63e1d06db00d3b34410601726174f45e9a926ae3',
+      contentHash: '8043d74bf3554c1ce55088c39a1ee8e7506f644a5dcc08939baf9d2a160293e8',
       sizeBytes: 16,
       valid: true,
     });
@@ -130,6 +130,27 @@ describe('library hashing', () => {
       invalidReason: 'path-escape',
     });
     expect(targetRead).toBe(false);
+  });
+
+  it('separates file and directory hash namespaces', async () => {
+    const directory = await hashLibraryDirectory(
+      '/library',
+      fakeReader({ 'SKILL.md': { bytes: '# Skill\n' } })
+    );
+    const entryHash = await hashLibraryFile(
+      '/library/SKILL.md',
+      fakeReader({ 'SKILL.md': { bytes: '# Skill\n' } })
+    );
+    // A file whose bytes are exactly the one-entry manifest of the directory above.
+    const manifestShapedFile = await hashLibraryFile(
+      '/library/manifest.txt',
+      fakeReader({ 'manifest.txt': { bytes: `SKILL.md\0${entryHash.contentHash}\n` } })
+    );
+
+    expect(directory.valid).toBe(true);
+    expect(manifestShapedFile.contentHash).not.toBe(
+      directory.valid ? directory.contentHash : undefined
+    );
   });
 
   it('resolves an in-root symlink and hashes the target bytes', async () => {

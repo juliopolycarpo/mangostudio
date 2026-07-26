@@ -1,17 +1,16 @@
 import { Value } from '@sinclair/typebox/value';
-import { type LibraryResourceRef, type ResourceKind, ResourceKindSchema } from './schemas';
+import {
+  LIBRARY_RESOURCE_SLUG_MAX_LENGTH,
+  LIBRARY_RESOURCE_SLUG_PATTERN,
+  type LibraryResourceRef,
+  type ResourceKind,
+  ResourceKindSchema,
+} from './schemas';
 
-export const LIBRARY_RESOURCE_SLUG_MAX_LENGTH = 128;
+const SLUG_PATTERN = new RegExp(LIBRARY_RESOURCE_SLUG_PATTERN);
 
 export function isValidResourceSlug(slug: string): boolean {
-  return (
-    slug.length > 0 &&
-    slug.length <= LIBRARY_RESOURCE_SLUG_MAX_LENGTH &&
-    !slug.startsWith('.') &&
-    !slug.includes('..') &&
-    !slug.includes('/') &&
-    !slug.includes('\\')
-  );
+  return slug.length <= LIBRARY_RESOURCE_SLUG_MAX_LENGTH && SLUG_PATTERN.test(slug);
 }
 
 export function resourceKey(kind: ResourceKind, slug: string): string {

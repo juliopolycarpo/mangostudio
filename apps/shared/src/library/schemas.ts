@@ -36,25 +36,59 @@ export const ResourceFormatSchema = Type.Union([
 
 export const LibraryInvalidReasonSchema = Type.Literal('path-escape');
 
+export const LIBRARY_RESOURCE_SLUG_MAX_LENGTH = 128;
+
+/**
+ * Path-safe shape a library resource slug must satisfy: dot-separated groups of
+ * `[A-Za-z0-9_-]`. Rejects separators, `..`, leading/trailing dots, drive/stream
+ * colons, whitespace and control characters, so a slug is always safe to use as
+ * a single directory name or file stem.
+ */
+export const LIBRARY_RESOURCE_SLUG_PATTERN = '^[A-Za-z0-9_-]+(?:\\.[A-Za-z0-9_-]+)*$';
+
 export const LibraryResourceRefSchema = Type.Object({
   kind: ResourceKindSchema,
   /** Logical name: skill directory name or file stem for file-backed resources. */
-  slug: Type.String({ minLength: 1, maxLength: 128 }),
+  slug: Type.String({
+    minLength: 1,
+    maxLength: LIBRARY_RESOURCE_SLUG_MAX_LENGTH,
+    pattern: LIBRARY_RESOURCE_SLUG_PATTERN,
+  }),
 });
 
-export const LibraryInstanceSchema = Type.Object({
+const libraryInstanceBase = {
   locationId: LibraryLocationIdSchema,
   /** Absolute path of the file or directory backing this instance. */
   path: Type.String({ minLength: 1 }),
-  contentHash: Type.String({ minLength: 1 }),
-  sizeBytes: Type.Integer({ minimum: 0 }),
   modifiedAtMs: Type.Integer({ minimum: 0 }),
   format: ResourceFormatSchema,
-  valid: Type.Boolean(),
-  invalidReason: Type.Optional(LibraryInvalidReasonSchema),
   title: Type.Optional(Type.String()),
   description: Type.Optional(Type.String()),
+};
+
+/** An instance whose content was read end to end, so it can be hashed and compared. */
+export const ValidLibraryInstanceSchema = Type.Object({
+  ...libraryInstanceBase,
+  valid: Type.Literal(true),
+  contentHash: Type.String({ minLength: 1 }),
+  sizeBytes: Type.Integer({ minimum: 0 }),
 });
+
+/**
+ * An instance that exists on disk but could not be hashed. It carries no `contentHash`,
+ * so it never joins a `LibraryContentGroup` and never counts toward divergence.
+ */
+export const InvalidLibraryInstanceSchema = Type.Object({
+  ...libraryInstanceBase,
+  valid: Type.Literal(false),
+  /** Why `valid` is false — a stable code, never free text. */
+  invalidReason: LibraryInvalidReasonSchema,
+});
+
+export const LibraryInstanceSchema = Type.Union([
+  ValidLibraryInstanceSchema,
+  InvalidLibraryInstanceSchema,
+]);
 
 export const LibraryCoverageSchema = Type.Object({
   targetId: LibraryTargetIdSchema,
@@ -93,6 +127,8 @@ export type LocationAccess = Static<typeof LocationAccessSchema>;
 export type ResourceFormat = Static<typeof ResourceFormatSchema>;
 export type LibraryInvalidReason = Static<typeof LibraryInvalidReasonSchema>;
 export type LibraryResourceRef = Static<typeof LibraryResourceRefSchema>;
+export type ValidLibraryInstance = Static<typeof ValidLibraryInstanceSchema>;
+export type InvalidLibraryInstance = Static<typeof InvalidLibraryInstanceSchema>;
 export type LibraryInstance = Static<typeof LibraryInstanceSchema>;
 export type LibraryCoverage = Static<typeof LibraryCoverageSchema>;
 export type LibraryDivergence = Static<typeof LibraryDivergenceSchema>;
