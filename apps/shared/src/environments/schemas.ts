@@ -58,6 +58,7 @@ export const RuntimeFindingCodeSchema = Type.Union([
 
 export const AgentAuthSignalSchema = Type.Union([
   Type.Literal('file-present'),
+  Type.Literal('file-absent'),
   Type.Literal('config-key-present'),
   Type.Literal('session'),
   Type.Literal('unknown'),
