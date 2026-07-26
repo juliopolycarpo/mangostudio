@@ -1,0 +1,84 @@
+name: Publish npm distribution
+description: Validate and publish the staged npm distribution with provenance.
+
+inputs:
+  dist-tag:
+    description: npm dist-tag to publish under. An empty value publishes as latest.
+    required: false
+    default: ""
+  node-auth-token:
+    description: >
+      npm automation token for the publish. Declared as an input rather than
+      inherited from the caller's step `env:` so the token requirement is part
+      of this action's signature and the release env-contract test can see it.
+      The value is never printed.
+    required: true
+  node-version:
+    description: Minimum Node.js version required for npm provenance.
+    required: false
+    default: "22.14.0"
+
+outputs:
+  auth:
+    description: Authentication method reported by the npm publish script.
+    value: ${{ steps.publish.outputs.auth }}
+  provenance:
+    description: Provenance status reported by the npm publish script.
+    value: ${{ steps.publish.outputs.provenance }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore executable bit on platform binaries
+      # actions/upload-artifact zips files and drops Unix mode bits, so the
+      # downloaded binaries arrive non-executable. npm only force-sets +x on
+      # bin entries (the wrapper's mangostudio.js), not on these plain files,
+      # so without this the published binary fails to spawn (EACCES) on
+      # macOS/Linux. The .exe platforms need no +x.
+      shell: bash
+      run: find dist-npm -type f -name mangostudio -exec chmod +x {} +
+
+    - name: Validate npm distribution
+      shell: bash
+      run: bun ./scripts/release/pack-npm.ts --validate dist-npm
+
+    - name: Verify Node for provenance
+      shell: bash
+      env:
+        MINIMUM_NODE_VERSION: ${{ inputs.node-version }}
+      run: |
+        set -euo pipefail
+        node_version="$(node -p "process.versions.node")"
+        if ! node -e '
+          const [current, minimum] = process.argv
+            .slice(1)
+            .map((version) => version.split(".").map(Number));
+          for (let index = 0; index < 3; index += 1) {
+            if (current[index] > minimum[index]) process.exit(0);
+            if (current[index] < minimum[index]) process.exit(1);
+          }
+        ' "$node_version" "$MINIMUM_NODE_VERSION"; then
+          echo "Node v${node_version} is below the ${MINIMUM_NODE_VERSION} floor required for npm provenance."
+          exit 1
+        fi
+        echo "Node v${node_version}; publish uses npx npm@11.5.1"
+
+    - id: publish
+      name: Publish to npm
+      shell: bash
+      env:
+        DIST_TAG: ${{ inputs.dist-tag }}
+        NODE_AUTH_TOKEN: ${{ inputs.node-auth-token }}
+        NPM_CONFIG_USERCONFIG: ${{ runner.temp }}/mangostudio-publish-npmrc
+      run: |
+        set -euo pipefail
+        trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT
+        umask 077
+        printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > "$NPM_CONFIG_USERCONFIG"
+
+        args=(dist-npm)
+        if [ -n "$DIST_TAG" ]; then
+          args+=(--tag "$DIST_TAG")
+        fi
+        args+=(--provenance-policy required)
+        bun ./scripts/release/publish-npm.ts "${args[@]}"

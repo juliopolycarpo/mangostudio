@@ -1,0 +1,25 @@
+name: Require secret
+description: Fail early when a required workflow secret is empty.
+
+inputs:
+  name:
+    description: Name of the required secret, used only in the failure message.
+    required: true
+  value:
+    description: Secret value to validate. The value is never printed.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate required secret
+      shell: bash
+      env:
+        SECRET_NAME: ${{ inputs.name }}
+        SECRET_VALUE: ${{ inputs.value }}
+      run: |
+        set -euo pipefail
+        if [ -z "$SECRET_VALUE" ]; then
+          echo "Missing required secret: $SECRET_NAME" >&2
+          exit 1
+        fi

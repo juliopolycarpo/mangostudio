@@ -10,8 +10,18 @@ import {
   requiredEnvForReleaseScriptInvocation,
 } from '../release/env-contract';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractJobBlocks, extractStepBlocks } from './support/workflow-blocks';
-import { uploadArtifactSteps, uploadPaths, workflowFiles } from './support/workflow-files';
+import {
+  extractJobBlock,
+  extractJobBlocks,
+  extractStepBlocks,
+  extractStepBlocksAtIndent,
+} from './support/workflow-blocks';
+import {
+  compositeActionFiles,
+  uploadArtifactSteps,
+  uploadPaths,
+  workflowFiles,
+} from './support/workflow-files';
 
 const COMPRESSED_PAYLOAD = /\.(?:tar\.gz|tgz|zip|tar\.xz|tar\.zst)\b/;
 
@@ -53,7 +63,7 @@ function extractWorkflowRunSteps(workflowPath: string): WorkflowRunStep[] {
       steps.push({
         workflowPath,
         job,
-        name: extractStepName(stepBlock),
+        name: extractStepName(stepBlock, 6),
         block: stepBlock,
         env: new Set([...workflowEnv, ...jobEnv, ...collectEnvKeys(stepBlock, 8)]),
       });
@@ -63,10 +73,29 @@ function extractWorkflowRunSteps(workflowPath: string): WorkflowRunStep[] {
   return steps;
 }
 
-function extractStepName(stepBlock: string): string {
+/**
+ * The same walk for a composite action manifest, whose steps sit one level
+ * shallower than a job's. Release scripts moved into `.github/actions/*` would
+ * otherwise leave the env-contract assertion below matching nothing and passing
+ * vacuously.
+ */
+function extractCompositeRunSteps(actionPath: string): WorkflowRunStep[] {
+  return extractStepBlocksAtIndent(readText(actionPath), 4)
+    .filter((stepBlock) => /^ {6}run:/m.test(stepBlock))
+    .map((stepBlock) => ({
+      workflowPath: actionPath,
+      job: 'composite',
+      name: extractStepName(stepBlock, 4),
+      block: stepBlock,
+      env: new Set(collectEnvKeys(stepBlock, 6)),
+    }));
+}
+
+function extractStepName(stepBlock: string, indent: number): string {
+  const marker = ' '.repeat(indent);
   return (
-    /^ {6}- name: (.+)$/m.exec(stepBlock)?.[1] ??
-    /^ {6}- id: (.+)$/m.exec(stepBlock)?.[1] ??
+    new RegExp(`^${marker}- name: (.+)$`, 'm').exec(stepBlock)?.[1] ??
+    new RegExp(`^${marker}- id: (.+)$`, 'm').exec(stepBlock)?.[1] ??
     'unnamed step'
   );
 }
@@ -115,29 +144,86 @@ describe('release workflow binary gate', () => {
   });
 
   test('release script invocations provide their required env explicitly', () => {
-    for (const step of [
+    const invocations = [
       ...extractWorkflowRunSteps('.github/workflows/release.yml'),
       ...extractWorkflowRunSteps('.github/workflows/canary.yml'),
-    ]) {
-      for (const scriptPath of releaseScriptsInStep(step.block)) {
-        const missing = requiredEnvForReleaseScriptInvocation(scriptPath, step.block).filter(
-          (envName) => !step.env.has(envName)
-        );
-        expect(
-          missing,
-          `${step.workflowPath} job "${step.job}" step "${step.name}" invokes ${scriptPath} without env: ${missing.join(', ')}`
-        ).toEqual([]);
-      }
+      ...compositeActionFiles().flatMap(extractCompositeRunSteps),
+    ].flatMap((step) =>
+      releaseScriptsInStep(step.block).map((scriptPath) => ({ step, scriptPath }))
+    );
+
+    // Guard the guard: the publish is the one invocation with a token contract,
+    // and it now lives in a composite action. A walk that stops reaching it
+    // would satisfy every assertion below while enforcing nothing.
+    expect(
+      invocations.map(({ scriptPath }) => scriptPath),
+      'the env-contract walk no longer reaches the npm publish'
+    ).toContain('scripts/release/publish-npm.ts');
+
+    for (const { step, scriptPath } of invocations) {
+      const missing = requiredEnvForReleaseScriptInvocation(scriptPath, step.block).filter(
+        (envName) => !step.env.has(envName)
+      );
+      expect(
+        missing,
+        `${step.workflowPath} job "${step.job}" step "${step.name}" invokes ${scriptPath} without env: ${missing.join(', ')}`
+      ).toEqual([]);
     }
   });
 
-  test('release channel jobs preflight their own secrets instead of prepare', () => {
-    const workflow = readText('.github/workflows/release.yml');
-    const prepareBlock = extractJobBlock(workflow, 'prepare');
-    const npmBlock = extractJobBlock(workflow, 'npm-publish');
-    const homebrewBlock = extractJobBlock(workflow, 'homebrew');
-    const scoopBlock = extractJobBlock(workflow, 'scoop');
-    const cargoBlock = extractJobBlock(workflow, 'cargo-publish');
+  test('release and canary publish through one composite, differing only by dist-tag', () => {
+    const release = extractJobBlock(readText('.github/workflows/release.yml'), 'npm-publish');
+    const canary = extractJobBlock(readText('.github/workflows/canary.yml'), 'npm-canary');
+    const action = readText('.github/actions/publish-npm-distribution/action.yml');
+    const secretPrefix = '$' + '{{ secrets.';
+    const inputPrefix = '$' + '{{ inputs.';
+
+    for (const block of [release, canary]) {
+      expect(block).toContain('uses: ./.github/actions/publish-npm-distribution');
+      expect(block).toContain('node-version: "22.14.0"');
+      expect(block).toContain(`node-auth-token: ${secretPrefix}NPM_TOKEN }}`);
+      expect(block).not.toContain('scripts/release/publish-npm.ts');
+    }
+    expect(release).not.toMatch(/^ {10}dist-tag:/m);
+    expect(canary).toContain('dist-tag: canary');
+
+    const publishStep = extractStepBlocksAtIndent(action, 4).find((step) =>
+      step.includes('scripts/release/publish-npm.ts')
+    );
+    expect(publishStep).toBeDefined();
+    expect(publishStep).toContain(`NODE_AUTH_TOKEN: ${inputPrefix}node-auth-token }}`);
+    expect(publishStep).toContain('--provenance-policy required');
+    expect(publishStep).toContain(`trap 'rm -f "$NPM_CONFIG_USERCONFIG"' EXIT`);
+    // The dist-tag wiring is the highest-consequence branch in the action: a
+    // canary that loses its `--tag` republishes `latest` to every installer.
+    expect(publishStep).toContain(`DIST_TAG: ${inputPrefix}dist-tag }}`);
+    expect(publishStep).toContain('if [ -n "$DIST_TAG" ]; then');
+    expect(publishStep).toContain('args+=(--tag "$DIST_TAG")');
+  });
+
+  test('the publish composite re-exports auth and provenance to both summaries', () => {
+    const action = readText('.github/actions/publish-npm-distribution/action.yml');
+    const publishOutputPrefix = '$' + '{{ steps.publish.outputs.';
+    expect(action).toContain('auth:');
+    expect(action).toContain(`value: ${publishOutputPrefix}auth }}`);
+    expect(action).toContain('provenance:');
+    expect(action).toContain(`value: ${publishOutputPrefix}provenance }}`);
+
+    for (const [file, job] of [
+      ['release.yml', 'npm-publish'],
+      ['canary.yml', 'npm-canary'],
+    ] as const) {
+      const block = extractJobBlock(readText(`.github/workflows/${file}`), job);
+      expect(block).toContain(`auth: ${publishOutputPrefix}auth }}`);
+      expect(block).toContain(`provenance: ${publishOutputPrefix}provenance }}`);
+    }
+  });
+
+  test('every channel secret preflight uses the shared composite', () => {
+    const release = readText('.github/workflows/release.yml');
+    const canary = readText('.github/workflows/canary.yml');
+    const prepareBlock = extractJobBlock(release, 'prepare');
+    const cargoBlock = extractJobBlock(release, 'cargo-publish');
     const secretPrefix = '$' + '{{ secrets.';
 
     expect(prepareBlock).not.toContain('name: Preflight release secrets');
@@ -145,20 +231,36 @@ describe('release workflow binary gate', () => {
       `CARGO_REGISTRY_TOKEN: ${secretPrefix}CARGO_REGISTRY_TOKEN }}`
     );
 
-    expect(npmBlock).toContain('name: Preflight npm publish secret');
-    expect(npmBlock).toContain(`NPM_TOKEN: ${secretPrefix}NPM_TOKEN }}`);
-    expect(npmBlock).toContain('Missing required release secret: NPM_TOKEN');
-    expect(npmBlock).toContain('id-token: write');
-    expect(npmBlock).toContain('actions/setup-node@');
-    expect(npmBlock).toContain('--provenance-policy required');
-
-    expect(homebrewBlock).toContain('name: Preflight Homebrew dist-repos secret');
-    expect(homebrewBlock).toContain(`DIST_REPOS_TOKEN: ${secretPrefix}DIST_REPOS_TOKEN }}`);
-    expect(scoopBlock).toContain('name: Preflight Scoop dist-repos secret');
-    expect(scoopBlock).toContain(`DIST_REPOS_TOKEN: ${secretPrefix}DIST_REPOS_TOKEN }}`);
+    for (const [workflow, job, secret] of [
+      [release, 'npm-publish', 'NPM_TOKEN'],
+      [release, 'homebrew', 'DIST_REPOS_TOKEN'],
+      [release, 'scoop', 'DIST_REPOS_TOKEN'],
+      [canary, 'npm-canary', 'NPM_TOKEN'],
+    ] as const) {
+      const block = extractJobBlock(workflow, job);
+      expect(block, job).toContain('uses: ./.github/actions/require-secret');
+      expect(block, job).toContain(`name: ${secret}`);
+      expect(block, job).toContain(`value: "${secretPrefix}${secret} }}"`);
+      expect(block.indexOf('uses: actions/checkout@'), job).toBeLessThan(
+        block.indexOf('uses: ./.github/actions/require-secret')
+      );
+    }
+    expect(
+      `${release}\n${canary}`.match(/uses: \.\/\.github\/actions\/require-secret/g)
+    ).toHaveLength(4);
+    expect(`${release}\n${canary}`).not.toMatch(
+      /if \[ -z "\$(?:NPM_TOKEN|DIST_REPOS_TOKEN)" \]; then/
+    );
 
     expect(cargoBlock).not.toContain('Missing required release secret: CARGO_REGISTRY_TOKEN');
     expect(cargoBlock).toContain('allow_legacy_cargo_token');
+
+    const action = readText('.github/actions/require-secret/action.yml');
+    const inputPrefix = '$' + '{{ inputs.';
+    expect(action).toContain(`SECRET_NAME: ${inputPrefix}name }}`);
+    expect(action).toContain(`SECRET_VALUE: ${inputPrefix}value }}`);
+    expect(action).toContain('Missing required secret: $SECRET_NAME');
+    expect(action).not.toMatch(/echo[^\n]*SECRET_VALUE/);
   });
 
   test('every publishing job runs in the tag-restricted release environment', () => {
@@ -632,12 +734,10 @@ describe('release workflow binary gate', () => {
     // npm: canary dist-tag so `latest` never moves; provenance is required.
     const npmBlock = extractJobBlock(workflow, 'npm-canary');
     expect(npmBlock).toContain('scope: npm');
-    expect(npmBlock).toContain('name: Preflight npm canary secret');
     expect(npmBlock).toContain('id-token: write');
     expect(npmBlock).toContain('actions/setup-node@');
-    expect(npmBlock).toContain(
-      'bun ./scripts/release/publish-npm.ts dist-npm --tag canary --provenance-policy required'
-    );
+    expect(npmBlock).toContain('uses: ./.github/actions/publish-npm-distribution');
+    expect(npmBlock).toContain('dist-tag: canary');
 
     // GitHub Releases: fixed <root>-canary asset names, with the full per-SHA
     // canary version retained in notes for traceability.
