@@ -152,9 +152,9 @@ describe('release workflow binary gate', () => {
       releaseScriptsInStep(step.block).map((scriptPath) => ({ step, scriptPath }))
     );
 
-    // Guard the guard: the publish is the one invocation with a token contract,
-    // and it now lives in a composite action. A walk that stops reaching it
-    // would satisfy every assertion below while enforcing nothing.
+    // Guard the guard: the publish is the deepest invocation the walk has to
+    // reach (it lives in a composite action, not a workflow). A walk that stops
+    // reaching it would satisfy every assertion below while enforcing nothing.
     expect(
       invocations.map(({ scriptPath }) => scriptPath),
       'the env-contract walk no longer reaches the npm publish'
@@ -187,6 +187,9 @@ describe('release workflow binary gate', () => {
     expect(release).toContain('allow-legacy-token:');
     expect(release).toContain('allow_legacy_npm_token');
     expect(release).not.toMatch(/^ {10}node-auth-token: \$\{\{ secrets\.NPM_TOKEN \}\}/m);
+    // A stable release must publish as `latest`: any dist-tag wired into the
+    // release job would divert it away from the tag every installer reads.
+    expect(release).not.toMatch(/^ {10}dist-tag:/m);
     expect(canary).toContain('dist-tag: canary');
     expect(canary).toContain('allow-legacy-token: "true"');
     expect(canary).toContain(`node-auth-token: ${secretPrefix}NPM_TOKEN }}`);
