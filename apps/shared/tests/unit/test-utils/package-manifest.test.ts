@@ -21,6 +21,12 @@ describe('shared package manifest', () => {
     expect(manifest.exports?.['./runtime-env']).toBe('./src/runtime-env/index.ts');
   });
 
+  it('keeps library as an explicit public export', async () => {
+    const manifest = await readSharedManifest();
+
+    expect(manifest.exports?.['./library']).toBe('./src/library/index.ts');
+  });
+
   it('declares faker as a runtime dependency for the exported test-utils entrypoint', async () => {
     const manifest = await readSharedManifest();
 

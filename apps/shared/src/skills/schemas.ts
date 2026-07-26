@@ -8,6 +8,9 @@ export const SKILL_SLUG_MAX_LENGTH = 64;
  * Where a skill was discovered. `mango` (~/.mango/skills) is always scanned;
  * `agents` (~/.agents/skills) and `claude` (~/.claude/skills) are opt-in
  * third-party sources toggled through app settings.
+ *
+ * @deprecated Use `LibraryLocationId` for new library integrations. Existing
+ * skill consumers remain on this closed union until their settings migrate.
  */
 export const SkillSourceSchema = Type.Union([
   Type.Literal('mango'),
@@ -53,6 +56,10 @@ export const UpdateSkillSettingsBodySchema = Type.Object({
   enabled: Type.Boolean(),
 });
 
+/**
+ * @deprecated Use `LibraryLocationId` for new library integrations. Convert
+ * legacy values with `SKILL_SOURCE_TO_LOCATION_ID`.
+ */
 export type SkillSource = Static<typeof SkillSourceSchema>;
 export type SkillDescriptor = Static<typeof SkillDescriptorSchema>;
 export type SkillSourceState = Static<typeof SkillSourceStateSchema>;
