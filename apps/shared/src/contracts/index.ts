@@ -62,6 +62,9 @@ export type {
 } from '../connectors';
 // Environments
 export type {
+  AgentAuthSignal,
+  AgentCliStatus,
+  AgentCliStatusList,
   LtsStatus,
   ManagedVersion,
   RuntimeFinding,

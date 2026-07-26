@@ -7,6 +7,7 @@ import { AgentProfileSchema } from '../../src/agents';
 import type { AppSettings as ModuleAppSettings } from '../../src/app-settings';
 import type { ModelOption as ModuleModelOption } from '../../src/catalog';
 import type {
+  AgentCliStatus as BarrelAgentCliStatus,
   AppSettings as BarrelAppSettings,
   LibraryLocationStatus as BarrelLibraryLocationStatus,
   LibraryResource as BarrelLibraryResource,
@@ -17,6 +18,7 @@ import type {
   VersionManagerStatus as BarrelVersionManagerStatus,
 } from '../../src/contracts';
 import type {
+  AgentCliStatus as ModuleAgentCliStatus,
   RuntimeStatus as ModuleRuntimeStatus,
   VersionManagerStatus as ModuleVersionManagerStatus,
 } from '../../src/environments';
@@ -64,6 +66,7 @@ assertType<Equals<BarrelObsMetrics, ModuleObsMetrics>>();
 assertType<Equals<BarrelLibraryResource, ModuleLibraryResource>>();
 assertType<Equals<BarrelLibraryLocationStatus, ModuleLibraryLocationStatus>>();
 assertType<Equals<BarrelLibraryTargetDescriptor, ModuleLibraryTargetDescriptor>>();
+assertType<Equals<BarrelAgentCliStatus, ModuleAgentCliStatus>>();
 assertType<Equals<BarrelRuntimeStatus, ModuleRuntimeStatus>>();
 assertType<Equals<BarrelVersionManagerStatus, ModuleVersionManagerStatus>>();
 

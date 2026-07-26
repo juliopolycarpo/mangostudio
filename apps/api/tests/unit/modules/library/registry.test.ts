@@ -13,10 +13,12 @@ import {
   LIBRARY_LOCATION_DEFINITIONS,
   LIBRARY_TARGET_DEFINITIONS,
   listLibraryTargetDescriptors,
+  listLibraryTargetLocationIds,
   type PathEnv,
 } from '../../../../src/modules/library/domain/registry';
 import {
   describeLocation,
+  describeTargetLocations,
   type LocationFsProbe,
 } from '../../../../src/modules/library/infrastructure/location-probe';
 
@@ -115,11 +117,26 @@ describe('library target registry', () => {
         env: { CODEX_HOME: '/Volumes/config/codex' },
       })
     ).toBe('/Volumes/config/codex/AGENTS.md');
+    expect(
+      getLibraryTarget('claude')?.resolveConfigHome({
+        platform: 'win32',
+        homeDir: String.raw`C:\Users\Ada`,
+        env: { CLAUDE_CONFIG_DIR: String.raw`D:\dotfiles\claude` },
+      })
+    ).toBe(String.raw`D:\dotfiles\claude`);
+    expect(
+      getLibraryTarget('codex')?.resolveConfigHome({
+        platform: 'darwin',
+        homeDir: '/Users/ada',
+        env: { CODEX_HOME: '/Volumes/config/codex' },
+      })
+    ).toBe('/Volumes/config/codex');
   });
 
   it('honors Cursor XDG config without moving unrelated Cursor locations', () => {
     const env = { ...LINUX_ENV, env: { XDG_CONFIG_HOME: '/xdg/config' } };
 
+    expect(getLibraryTarget('cursor')?.resolveConfigHome(env)).toBe('/xdg/config/cursor');
     expect(getLibraryLocation('cursor-settings')?.resolvePath(env)).toBe(
       '/xdg/config/cursor/cli-config.json'
     );
@@ -152,6 +169,22 @@ describe('library target registry', () => {
         env: {},
       })
     ).toBeNull();
+  });
+
+  it('lists every target location once and describes its current health', () => {
+    const ids = listLibraryTargetLocationIds('claude');
+    const fs = new FakeLocationFs(new Set(), new Set(), new Set(['/home/ada']));
+
+    expect(ids).toEqual([
+      'claude-skills',
+      'claude-agents',
+      'claude-instructions',
+      'claude-settings',
+      'claude-hooks',
+    ]);
+    expect(describeTargetLocations('claude', LINUX_ENV, fs).map((status) => status.id)).toEqual(
+      ids
+    );
   });
 });
 

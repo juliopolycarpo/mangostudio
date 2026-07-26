@@ -1,9 +1,18 @@
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import type { LibraryLocationId, LibraryLocationStatus } from '@mangostudio/shared/library';
+import type {
+  LibraryLocationId,
+  LibraryLocationStatus,
+  LibraryTargetId,
+} from '@mangostudio/shared/library';
 import { getConfig } from '../../../lib/config';
 import { type FsProbe, nearestExistingWritable } from '../../../lib/fs-probe';
-import { getLibraryLocation, type LibraryLocationLayout, type PathEnv } from '../domain/registry';
+import {
+  getLibraryLocation,
+  type LibraryLocationLayout,
+  listLibraryTargetLocationIds,
+  type PathEnv,
+} from '../domain/registry';
 
 export interface LocationFsProbe extends FsProbe {
   isReadable(path: string): boolean;
@@ -43,7 +52,7 @@ const nodeLocationFsProbe: LocationFsProbe = {
  * Builds the runtime path inputs once per operation. The configured Mango skills
  * directory is injected through the same env-shaped seam used by all resolvers.
  */
-function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv {
+export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv {
   const env = {
     ...process.env,
     SKILLS_DIR: getConfig().skills.dir,
@@ -54,6 +63,14 @@ function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv {
     homeDir: overrides.homeDir ?? homedir(),
     env,
   };
+}
+
+export function describeTargetLocations(
+  targetId: LibraryTargetId,
+  env: PathEnv = createLibraryPathEnv(),
+  fs: LocationFsProbe = nodeLocationFsProbe
+): LibraryLocationStatus[] {
+  return listLibraryTargetLocationIds(targetId).map((id) => describeLocation(id, env, fs));
 }
 
 export function describeLocation(

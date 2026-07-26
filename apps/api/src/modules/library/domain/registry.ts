@@ -28,6 +28,8 @@ export interface LocationDefinition {
 export interface TargetDefinition {
   readonly id: LibraryTargetId;
   readonly displayNameKey: `library.targets.${LibraryTargetId}`;
+  /** Canonical home for target-level config and authentication signals. */
+  readonly resolveConfigHome: (env: PathEnv) => string;
   /** Per kind, highest-precedence location first. */
   readonly reads: Readonly<Record<ResourceKind, readonly LibraryLocationId[]>>;
 }
@@ -61,17 +63,29 @@ function mangoSkillsPath(env: PathEnv): string | null {
   return configuredDir(env, 'SKILLS_DIR', ['.mango', 'skills']);
 }
 
+function mangoConfigHome(env: PathEnv): string {
+  return pathApi(env).join(env.homeDir, '.mango');
+}
+
+function claudeConfigHome(env: PathEnv): string {
+  return configuredDir(env, 'CLAUDE_CONFIG_DIR', ['.claude']);
+}
+
 function claudePath(...parts: string[]): (env: PathEnv) => string | null {
   return (env) => {
     if (!supportsHomeLocations(env)) return null;
-    return pathApi(env).join(configuredDir(env, 'CLAUDE_CONFIG_DIR', ['.claude']), ...parts);
+    return pathApi(env).join(claudeConfigHome(env), ...parts);
   };
+}
+
+function codexConfigHome(env: PathEnv): string {
+  return configuredDir(env, 'CODEX_HOME', ['.codex']);
 }
 
 function codexPath(...parts: string[]): (env: PathEnv) => string | null {
   return (env) => {
     if (!supportsHomeLocations(env)) return null;
-    return pathApi(env).join(configuredDir(env, 'CODEX_HOME', ['.codex']), ...parts);
+    return pathApi(env).join(codexConfigHome(env), ...parts);
   };
 }
 
@@ -80,20 +94,23 @@ function codexLinuxOnlyPath(...parts: string[]): (env: PathEnv) => string | null
   return (env) => (env.platform === 'linux' ? resolveCodexPath(env) : null);
 }
 
-function cursorSettingsPath(env: PathEnv): string | null {
-  if (!supportsHomeLocations(env)) return null;
-
+function cursorConfigHome(env: PathEnv): string {
   const configured = env.env.CURSOR_CONFIG_DIR?.trim();
   if (configured) {
-    return pathApi(env).join(resolveEnvPath(env, configured), 'cli-config.json');
+    return resolveEnvPath(env, configured);
   }
 
   const xdgConfigHome = env.platform === 'linux' ? env.env.XDG_CONFIG_HOME?.trim() : undefined;
   if (xdgConfigHome) {
-    return posix.join(resolveEnvPath(env, xdgConfigHome), 'cursor', 'cli-config.json');
+    return posix.join(resolveEnvPath(env, xdgConfigHome), 'cursor');
   }
 
-  return pathApi(env).join(env.homeDir, '.cursor', 'cli-config.json');
+  return pathApi(env).join(env.homeDir, '.cursor');
+}
+
+function cursorSettingsPath(env: PathEnv): string | null {
+  if (!supportsHomeLocations(env)) return null;
+  return pathApi(env).join(cursorConfigHome(env), 'cli-config.json');
 }
 
 function cursorLinuxOnlyPath(...parts: string[]): (env: PathEnv) => string | null {
@@ -296,6 +313,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
   {
     id: 'mangostudio',
     displayNameKey: 'library.targets.mangostudio',
+    resolveConfigHome: mangoConfigHome,
     reads: {
       skill: ['mango-skills', 'agents-skills', 'claude-skills'],
       subagent: [],
@@ -307,6 +325,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
   {
     id: 'claude',
     displayNameKey: 'library.targets.claude',
+    resolveConfigHome: claudeConfigHome,
     reads: {
       skill: ['claude-skills'],
       subagent: ['claude-agents'],
@@ -318,6 +337,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
   {
     id: 'codex',
     displayNameKey: 'library.targets.codex',
+    resolveConfigHome: codexConfigHome,
     reads: {
       skill: ['codex-skills', 'agents-skills'],
       subagent: ['codex-agents'],
@@ -329,6 +349,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
   {
     id: 'cursor',
     displayNameKey: 'library.targets.cursor',
+    resolveConfigHome: cursorConfigHome,
     reads: {
       skill: ['cursor-skills', 'cursor-skills-builtin'],
       subagent: ['cursor-agents'],
@@ -352,6 +373,12 @@ export function getLibraryLocation(id: LibraryLocationId): LocationDefinition | 
 
 export function getLibraryTarget(id: LibraryTargetId): TargetDefinition | undefined {
   return targetById.get(id);
+}
+
+export function listLibraryTargetLocationIds(id: LibraryTargetId): LibraryLocationId[] {
+  const target = getLibraryTarget(id);
+  if (!target) return [];
+  return [...new Set(Object.values(target.reads).flat())];
 }
 
 export function listLibraryTargetDescriptors(): LibraryTargetDescriptor[] {
