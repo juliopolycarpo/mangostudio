@@ -5,6 +5,7 @@
  */
 
 import type { InstallPreparation } from '@mangostudio/shared/environments';
+import { renderShellCommand } from '@mangostudio/shared/environments';
 import { Download, FolderPen, Globe, TerminalSquare, X } from 'lucide-react';
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -70,7 +71,9 @@ export function InstallConfirmDialog({
               className="block break-all rounded-xl bg-surface-container-highest px-3 py-2 font-mono text-xs text-on-surface"
               data-testid="install-argv"
             >
-              {recipe.argv.join(' ')}
+              {/* Quoted the way the API quotes its copyable command: an
+                  argument containing whitespace must not read as two. */}
+              {renderShellCommand(recipe.argv)}
             </code>
           </section>
 

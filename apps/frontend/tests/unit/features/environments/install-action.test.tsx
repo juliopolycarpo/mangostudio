@@ -92,6 +92,20 @@ describe('InstallAction', () => {
     expect(screen.queryByRole('button', { name: 'Install Bun' })).not.toBeInTheDocument();
   });
 
+  it('quotes an argument containing whitespace in the confirmation', async () => {
+    const recipe = installRecipe({ argv: ['bash', '/tmp/mango installer.sh'] });
+    fetchMock.mockResolvedValue(json({ preparationId: 'prep-1', expiresAt: null, recipe }));
+
+    render(<InstallAction recipe={recipe} input={{ kind: 'none' }} label="Install Bun" />);
+    await userEvent.click(screen.getByRole('button', { name: 'Install Bun' }));
+
+    // The dialog exists to show what will run; a path with a space in it must
+    // not be displayed as two arguments.
+    expect((await screen.findByTestId('install-argv')).textContent).toBe(
+      "bash '/tmp/mango installer.sh'"
+    );
+  });
+
   it('keeps the console and its output after the run exits', async () => {
     const recipe = installRecipe();
     fetchMock.mockImplementation((input: string | URL | Request) => {
