@@ -9,10 +9,19 @@ import {
   type LibraryDivergenceAckRequest,
   LibraryDivergenceAckRequestSchema,
   LibraryDivergenceAckSchema,
+  type PropagationApply,
+  type PropagationApplyRequest,
+  PropagationApplyRequestSchema,
+  PropagationApplySchema,
+  type PropagationBackupUsage,
+  PropagationBackupUsageSchema,
   type PropagationPreview,
   type PropagationPreviewRequest,
   PropagationPreviewRequestSchema,
   PropagationPreviewSchema,
+  type PropagationUndo,
+  PropagationUndoRequestSchema,
+  PropagationUndoSchema,
   parseResourceKey,
 } from '@mangostudio/shared/library';
 import { Elysia, t } from 'elysia';
@@ -22,11 +31,19 @@ import {
   forgetDivergenceAck,
   listDivergenceAcks,
 } from '../application/conflict-resolution';
+import {
+  applyLibraryPropagation,
+  describeBackupUsage,
+  undoLibraryPropagation,
+} from '../application/propagation-apply';
 import { previewLibraryPropagation } from '../application/propagation-preview';
 import { PropagationRequestError } from '../domain/propagation-error';
 
 export interface PropagationRouteService {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
+  apply(userId: string, request: PropagationApplyRequest): Promise<PropagationApply>;
+  undo(userId: string, backupId: string): Promise<PropagationUndo>;
+  backupUsage(): Promise<PropagationBackupUsage>;
   listAcks(userId: string): Promise<LibraryDivergenceAck[]>;
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<LibraryDivergenceAck>;
   forgetAck(userId: string, resourceKey: string): Promise<void>;
@@ -34,6 +51,9 @@ export interface PropagationRouteService {
 
 const defaultPropagationRouteService: PropagationRouteService = {
   preview: (userId, request) => previewLibraryPropagation(userId, request),
+  apply: (userId, request) => applyLibraryPropagation(userId, request),
+  undo: (_userId, backupId) => undoLibraryPropagation(backupId),
+  backupUsage: () => describeBackupUsage(),
   listAcks: (userId) => listDivergenceAcks(userId),
   acknowledge: (userId, request) => acknowledgeDivergence(userId, request),
   forgetAck: (userId, resourceKey) => forgetDivergenceAck(userId, resourceKey),
@@ -80,6 +100,63 @@ export function createPropagationRoutes(
           200: PropagationPreviewSchema,
           404: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/library/propagate/apply',
+      async ({ body, set, user }): Promise<PropagationApply | ApiErrorResponse> => {
+        try {
+          return await service.apply(user?.id ?? '', body);
+        } catch (error) {
+          return mapPropagationError(error, set);
+        }
+      },
+      {
+        body: PropagationApplyRequestSchema,
+        response: {
+          200: PropagationApplySchema,
+          404: ApiErrorResponseSchema,
+          // The preview no longer describes what is on disk. Re-preview rather
+          // than writing over a change the user made in the meantime.
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/library/propagate/undo',
+      async ({ body, set, user }): Promise<PropagationUndo | ApiErrorResponse> => {
+        try {
+          return await service.undo(user?.id ?? '', body.backupId);
+        } catch (error) {
+          return mapPropagationError(error, set);
+        }
+      },
+      {
+        body: PropagationUndoRequestSchema,
+        response: {
+          200: PropagationUndoSchema,
+          404: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .get(
+      '/library/propagate/backups',
+      async ({ set }): Promise<PropagationBackupUsage | ApiErrorResponse> => {
+        try {
+          return await service.backupUsage();
+        } catch (error) {
+          return mapPropagationError(error, set);
+        }
+      },
+      {
+        response: {
+          200: PropagationBackupUsageSchema,
           500: ApiErrorResponseSchema,
         },
       }

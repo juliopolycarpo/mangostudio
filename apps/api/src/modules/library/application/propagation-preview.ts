@@ -177,6 +177,9 @@ function buildSourceGroups(instances: readonly LibraryInstance[]): PropagationSo
   return [...byHash]
     .map(([contentHash, members]) => {
       const locationIds = members.map((instance) => instance.locationId).sort(compareText);
+      const contentLocationId = locationIds[0];
+      const contentSource =
+        members.find((instance) => instance.locationId === contentLocationId) ?? members[0];
       return {
         contentHash,
         locationIds,
@@ -185,7 +188,8 @@ function buildSourceGroups(instances: readonly LibraryInstance[]): PropagationSo
         newestModifiedAtMs: Math.max(...members.map((instance) => instance.modifiedAtMs)),
         // Every member holds the same bytes, so any member's size describes them all.
         sizeBytes: members[0].sizeBytes,
-        contentLocationId: locationIds[0],
+        contentLocationId,
+        contentPath: contentSource.path,
       };
     })
     .sort(

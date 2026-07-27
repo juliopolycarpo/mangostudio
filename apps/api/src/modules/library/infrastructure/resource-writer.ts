@@ -1,31 +1,53 @@
-import { randomBytes } from 'node:crypto';
 import type { Dirent, Stats } from 'node:fs';
 import { cp, lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { LibraryLocationId } from '@mangostudio/shared/library';
-import { getConfig } from '../../../lib/config';
+import { resolvePathThroughExistingAncestor } from '../../../lib/path-containment';
+import { writeFileAtomic } from '../../../lib/safe-file';
 import {
   assertExpectedResourceEntry,
   LibraryWriteError,
   resolveContainedResourcePath,
 } from '../domain/path-safety';
-import { getLibraryLocation, type PathEnv } from '../domain/registry';
+import {
+  getLibraryLocation,
+  type LocationDefinition,
+  type PathEnv,
+  resourceEntryName,
+} from '../domain/registry';
+import {
+  assertBackupId,
+  type BackupStoreDeps,
+  backupExistingResource,
+  createBackupId,
+  defaultBackupStoreDeps,
+  pruneBackupSets,
+} from './backup-store';
 
-export interface DirectoryResourceWriteInput {
+interface ResourceWriteInputBase {
   readonly locationId: LibraryLocationId;
   readonly slug: string;
-  readonly sourceDir: string;
   readonly env: PathEnv;
   /** Shared by all resources in one apply; generated when omitted. */
   readonly backupId?: string;
 }
 
-export interface DirectoryResourceWriteResult {
+export interface DirectoryResourceWriteInput extends ResourceWriteInputBase {
+  readonly sourceDir: string;
+}
+
+export interface FileResourceWriteInput extends ResourceWriteInputBase {
+  readonly contents: string;
+}
+
+export interface ResourceWriteResult {
   readonly locationId: LibraryLocationId;
   readonly destinationPath: string;
   readonly resolvedDestinationPath: string;
   readonly backupId: string;
   readonly backupPath?: string;
+  /** False when the apply created the path, which undo reverses by removing it. */
+  readonly existedBefore: boolean;
 }
 
 export interface ResourceWriterFs {
@@ -36,12 +58,18 @@ export interface ResourceWriterFs {
   rename(source: string, destination: string): Promise<void>;
   remove(path: string): Promise<void>;
   stat(path: string): Promise<Stats>;
+  /**
+   * Symlink-resolving atomic file write. Seamed so a test can fail one write in
+   * the middle of a multi-destination apply and assert the rollback.
+   */
+  writeFile(path: string, contents: string): void;
 }
 
 export interface ResourceWriterDeps {
   readonly fs: ResourceWriterFs;
   readonly backupDir: () => string;
   readonly backupRetentionCount: () => number;
+  readonly backupRetentionBytes: () => number;
   readonly now: () => Date;
   readonly randomSuffix: () => string;
 }
@@ -74,15 +102,38 @@ const nodeResourceWriterFs: ResourceWriterFs = {
     await rm(path, { recursive: true, force: true });
   },
   stat,
+  writeFile: (path, contents) => writeFileAtomic(path, contents),
 };
 
 const defaultResourceWriterDeps: ResourceWriterDeps = {
   fs: nodeResourceWriterFs,
-  backupDir: () => getConfig().library.backupDir,
-  backupRetentionCount: () => getConfig().library.backupRetentionCount,
-  now: () => new Date(),
-  randomSuffix: () => randomBytes(8).toString('hex'),
+  backupDir: defaultBackupStoreDeps.backupDir,
+  backupRetentionCount: defaultBackupStoreDeps.retentionCount,
+  backupRetentionBytes: defaultBackupStoreDeps.retentionBytes,
+  now: defaultBackupStoreDeps.now,
+  randomSuffix: defaultBackupStoreDeps.randomSuffix,
 };
+
+/** Adapts the writer's dependency shape to the backup store's. */
+function backupDeps(deps: ResourceWriterDeps): BackupStoreDeps {
+  return {
+    fs: {
+      ...defaultBackupStoreDeps.fs,
+      copyTree: (source, destination) => deps.fs.copyTree(source, destination, 'backup'),
+      lstat: deps.fs.lstat,
+      mkdir: deps.fs.mkdir,
+      readdir: deps.fs.readdir,
+      rename: deps.fs.rename,
+      remove: deps.fs.remove,
+      stat: deps.fs.stat,
+    },
+    backupDir: deps.backupDir,
+    retentionCount: deps.backupRetentionCount,
+    retentionBytes: deps.backupRetentionBytes,
+    now: deps.now,
+    randomSuffix: deps.randomSuffix,
+  };
+}
 
 /**
  * Copies a complete directory resource into a staging sibling, then swaps it
@@ -91,68 +142,25 @@ const defaultResourceWriterDeps: ResourceWriterDeps = {
 export async function writeDirectoryResource(
   input: DirectoryResourceWriteInput,
   overrides: Partial<ResourceWriterDeps> = {}
-): Promise<DirectoryResourceWriteResult> {
+): Promise<ResourceWriteResult> {
   const deps = { ...defaultResourceWriterDeps, ...overrides };
-  const location = getLibraryLocation(input.locationId);
-  if (!location) {
-    throw new LibraryWriteError(
-      'unsupported-location',
-      `Unknown library location: "${input.locationId}".`
-    );
-  }
-  if (location.access !== 'read-write') {
-    throw new LibraryWriteError(
-      'read-only-location',
-      `Library location "${input.locationId}" is read-only.`
-    );
-  }
-  if (location.layout !== 'directory-of-dirs') {
-    throw new LibraryWriteError(
-      'wrong-layout',
-      `Library location "${input.locationId}" does not contain directory resources.`
-    );
-  }
-
-  const root = location.resolvePath(input.env);
-  if (root === null) {
-    throw new LibraryWriteError(
-      'unsupported-location',
-      `Library location "${input.locationId}" is unsupported on ${input.env.platform}.`
-    );
-  }
-
-  const destination = resolveContainedResourcePath(root, input.slug);
+  const location = requireWritableLocation(input.locationId, 'directory-of-dirs');
+  const destination = resolveDestination(location, input.slug, input.env);
   assertExpectedResourceEntry(destination.resolvedPath, 'directory');
   await assertSourceDirectory(input.sourceDir, deps.fs);
 
-  const backupId = input.backupId ?? createBackupId(deps);
+  const backupId = input.backupId ?? createBackupId(backupDeps(deps));
   assertBackupId(backupId);
-  const retentionCount = deps.backupRetentionCount();
-  if (!Number.isSafeInteger(retentionCount) || retentionCount < 1) {
-    throw new TypeError('Library backup retention count must be a positive integer.');
-  }
 
-  await deps.fs.mkdir(destination.resolvedRoot);
+  await deps.fs.mkdir(dirname(destination.resolvedPath));
   const existing = await deps.fs.lstat(destination.resolvedPath);
   const backupPath = existing
-    ? await backupExistingResource(
-        destination.resolvedPath,
-        input.locationId,
-        input.slug,
-        backupId,
-        deps
-      )
+    ? await backupResource(destination.resolvedPath, input, backupId, deps)
     : undefined;
 
   const suffix = deps.randomSuffix();
-  const stagePath = join(
-    dirname(destination.resolvedPath),
-    `.${basename(destination.resolvedPath)}.${suffix}.staging`
-  );
-  const previousPath = join(
-    dirname(destination.resolvedPath),
-    `.${basename(destination.resolvedPath)}.${suffix}.previous`
-  );
+  const stagePath = siblingPath(destination.resolvedPath, suffix, 'staging');
+  const previousPath = siblingPath(destination.resolvedPath, suffix, 'previous');
 
   try {
     await deps.fs.copyTree(input.sourceDir, stagePath, 'stage');
@@ -168,8 +176,142 @@ export async function writeDirectoryResource(
     destinationPath: destination.logicalPath,
     resolvedDestinationPath: destination.resolvedPath,
     backupId,
+    existedBefore: existing !== null,
     ...(backupPath && { backupPath }),
   };
+}
+
+/**
+ * Writes a file-backed resource, backing up any existing content first. The
+ * commit goes through the symlink-resolving atomic writer, so a destination
+ * linked into a dotfiles repo is updated rather than detached.
+ */
+export async function writeFileResource(
+  input: FileResourceWriteInput,
+  overrides: Partial<ResourceWriterDeps> = {}
+): Promise<ResourceWriteResult> {
+  const deps = { ...defaultResourceWriterDeps, ...overrides };
+  const location = requireWritableLocation(input.locationId, 'file');
+  const destination = resolveDestination(location, input.slug, input.env);
+  assertExpectedResourceEntry(destination.resolvedPath, 'file');
+
+  const backupId = input.backupId ?? createBackupId(backupDeps(deps));
+  assertBackupId(backupId);
+
+  await deps.fs.mkdir(dirname(destination.resolvedPath));
+  const existing = await deps.fs.lstat(destination.resolvedPath);
+  const backupPath = existing
+    ? await backupResource(destination.resolvedPath, input, backupId, deps)
+    : undefined;
+
+  // The logical path is handed to the writer, not the resolved one, so the
+  // writer performs its own resolution and validation on the real target.
+  deps.fs.writeFile(destination.logicalPath, input.contents);
+
+  return {
+    locationId: input.locationId,
+    destinationPath: destination.logicalPath,
+    resolvedDestinationPath: destination.resolvedPath,
+    backupId,
+    existedBefore: existing !== null,
+    ...(backupPath && { backupPath }),
+  };
+}
+
+function requireWritableLocation(
+  locationId: LibraryLocationId,
+  expected: 'directory-of-dirs' | 'file'
+): LocationDefinition {
+  const location = getLibraryLocation(locationId);
+  if (!location) {
+    throw new LibraryWriteError(
+      'unsupported-location',
+      `Unknown library location: "${locationId}".`
+    );
+  }
+  if (location.access !== 'read-write') {
+    throw new LibraryWriteError(
+      'read-only-location',
+      `Library location "${locationId}" is read-only.`
+    );
+  }
+
+  const isFileLayout =
+    location.layout === 'directory-of-files' || location.layout === 'single-file';
+  const matches = expected === 'directory-of-dirs' ? location.layout === expected : isFileLayout;
+  if (!matches) {
+    throw new LibraryWriteError(
+      'wrong-layout',
+      `Library location "${locationId}" does not contain ${
+        expected === 'directory-of-dirs' ? 'directory' : 'file'
+      } resources.`
+    );
+  }
+  return location;
+}
+
+interface ResolvedDestination {
+  readonly logicalPath: string;
+  readonly resolvedPath: string;
+}
+
+/**
+ * Where the resource lives inside the location. A `single-file` location names
+ * exactly one resource, so its own path is the destination and the slug has to
+ * be the one it declares; anything else would write an unrelated resource over
+ * the user's `CLAUDE.md`.
+ */
+function resolveDestination(
+  location: LocationDefinition,
+  slug: string,
+  env: PathEnv
+): ResolvedDestination {
+  const root = location.resolvePath(env);
+  if (root === null) {
+    throw new LibraryWriteError(
+      'unsupported-location',
+      `Library location "${location.id}" is unsupported on ${env.platform}.`
+    );
+  }
+
+  if (location.layout === 'single-file') {
+    if (location.resourceSlug !== slug) {
+      throw new LibraryWriteError(
+        'invalid-slug',
+        `Library location "${location.id}" stores "${location.resourceSlug}", not "${slug}".`
+      );
+    }
+    return { logicalPath: root, resolvedPath: resolvePathThroughExistingAncestor(root) };
+  }
+
+  const entryName =
+    location.layout === 'directory-of-files' ? resourceEntryName(location, slug) : slug;
+  if (entryName === null) {
+    throw new LibraryWriteError(
+      'wrong-layout',
+      `Library location "${location.id}" has no file form for format "${location.format}".`
+    );
+  }
+  return resolveContainedResourcePath(root, entryName);
+}
+
+async function backupResource(
+  resolvedPath: string,
+  input: ResourceWriteInputBase,
+  backupId: string,
+  deps: ResourceWriterDeps
+): Promise<string> {
+  const store = backupDeps(deps);
+  const backupPath = await backupExistingResource(
+    { resolvedPath, locationId: input.locationId, slug: input.slug, backupId },
+    store
+  );
+  await pruneBackupSets(backupId, store);
+  return backupPath;
+}
+
+function siblingPath(path: string, suffix: string, kind: 'staging' | 'previous'): string {
+  return join(dirname(path), `.${basename(path)}.${suffix}.${kind}`);
 }
 
 async function assertSourceDirectory(sourceDir: string, fs: ResourceWriterFs): Promise<void> {
@@ -188,88 +330,6 @@ async function assertSourceDirectory(sourceDir: string, fs: ResourceWriterFs): P
       `Library resource source "${sourceDir}" is not a directory.`
     );
   }
-}
-
-async function backupExistingResource(
-  destinationPath: string,
-  locationId: LibraryLocationId,
-  slug: string,
-  backupId: string,
-  deps: ResourceWriterDeps
-): Promise<string> {
-  const backupRoot = deps.backupDir();
-  const backupPath = join(backupRoot, backupId, locationId, slug);
-  await deps.fs.mkdir(dirname(backupPath));
-  await deps.fs.copyTree(destinationPath, backupPath, 'backup');
-  await pruneBackupSets(backupRoot, backupId, deps);
-  return backupPath;
-}
-
-interface BackupSet {
-  readonly id: string;
-  readonly path: string;
-  readonly modifiedAtMs: number;
-}
-
-/**
- * Recognizes a directory as a prunable backup set only when it has the
- * `<backupId>/<locationId>/<slug>` shape this writer creates. A misconfigured
- * `library.backupDir` pointing at a shared directory must never make retention
- * delete unrelated data, and a set that vanished mid-prune is simply skipped.
- */
-async function describeBackupSet(
-  id: string,
-  path: string,
-  fs: ResourceWriterFs
-): Promise<BackupSet | null> {
-  try {
-    const entries = await fs.readdir(path);
-    const holdsLocation = entries.some(
-      (entry) => entry.isDirectory() && getLibraryLocation(entry.name as LibraryLocationId)
-    );
-    if (!holdsLocation) return null;
-    return { id, path, modifiedAtMs: (await fs.stat(path)).mtimeMs };
-  } catch {
-    return null;
-  }
-}
-
-async function pruneBackupSets(
-  backupRoot: string,
-  currentBackupId: string,
-  deps: ResourceWriterDeps
-): Promise<void> {
-  let entries: Dirent[];
-  try {
-    entries = await deps.fs.readdir(backupRoot);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-    throw error;
-  }
-
-  const candidates = await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => describeBackupSet(entry.name, join(backupRoot, entry.name), deps.fs))
-  );
-  const backupSets = candidates.filter((backup): backup is BackupSet => backup !== null);
-  backupSets.sort(
-    (left, right) => right.modifiedAtMs - left.modifiedAtMs || right.id.localeCompare(left.id)
-  );
-
-  const retentionCount = deps.backupRetentionCount();
-  const retained = new Set([
-    currentBackupId,
-    ...backupSets
-      .filter((backup) => backup.id !== currentBackupId)
-      .slice(0, Math.max(0, retentionCount - 1))
-      .map((backup) => backup.id),
-  ]);
-  await Promise.all(
-    backupSets
-      .filter((backup) => !retained.has(backup.id))
-      .map((backup) => deps.fs.remove(backup.path))
-  );
 }
 
 async function swapStagedDirectory(
@@ -301,22 +361,6 @@ async function swapStagedDirectory(
 
   // A failed cleanup leaves a recoverable stale sibling, never partial content.
   await fs.remove(previousPath).catch(() => undefined);
-}
-
-function createBackupId(deps: ResourceWriterDeps): string {
-  return `${deps.now().toISOString().replaceAll(':', '-')}-${deps.randomSuffix()}`;
-}
-
-/**
- * One path segment that cannot be `.` or `..`, so a caller-supplied id can
- * never move a backup outside the configured backup root.
- */
-const BACKUP_ID_PATTERN = /^[A-Za-z0-9_-][A-Za-z0-9._-]*$/;
-
-function assertBackupId(backupId: string): void {
-  if (!BACKUP_ID_PATTERN.test(backupId)) {
-    throw new TypeError(`Invalid library backup id: "${backupId}".`);
-  }
 }
 
 function errorMessage(error: unknown): string {

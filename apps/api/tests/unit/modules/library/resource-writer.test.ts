@@ -13,6 +13,7 @@ import {
 import { cp, lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { writeFileAtomic } from '../../../../src/lib/safe-file';
 import type { PathEnv } from '../../../../src/modules/library/domain/registry';
 import {
   type ResourceWriterFs,
@@ -66,15 +67,17 @@ function makeWriterFs(overrides: Partial<ResourceWriterFs> = {}): ResourceWriter
       await rm(path, { recursive: true, force: true });
     },
     stat,
+    writeFile: (path, contents) => writeFileAtomic(path, contents),
   };
   return { ...base, ...overrides };
 }
 
-function writerDeps(fs = makeWriterFs(), retentionCount = 10) {
+function writerDeps(fs = makeWriterFs(), retentionCount = 10, retentionBytes = 1024 ** 3) {
   return {
     fs,
     backupDir: () => backupDir,
     backupRetentionCount: () => retentionCount,
+    backupRetentionBytes: () => retentionBytes,
     now: () => new Date('2026-07-26T12:00:00.000Z'),
     randomSuffix: () => 'fixed',
   };

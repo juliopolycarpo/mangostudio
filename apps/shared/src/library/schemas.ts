@@ -255,6 +255,8 @@ export const PropagationSourceGroupSchema = Type.Object({
   sizeBytes: Type.Integer({ minimum: 0 }),
   /** Location to read this group's bytes from, for the diff viewer. */
   contentLocationId: LibraryLocationIdSchema,
+  /** Absolute path of that copy — the source an apply reads from. */
+  contentPath: Type.String({ minLength: 1 }),
 });
 
 /**
@@ -318,6 +320,134 @@ export const PropagationPreviewSchema = Type.Object({
 });
 
 /**
+ * How the user settled a resource before it is written anywhere.
+ *
+ * `keep-per-location` is not a lesser option: sometimes copies *should* differ,
+ * and saying so explicitly is a real outcome rather than a deferral.
+ */
+export const PropagationResolutionSchema = Type.Union([
+  Type.Literal('adopt-group'),
+  Type.Literal('keep-per-location'),
+  Type.Literal('edit-then-adopt'),
+]);
+
+export const PropagationDestinationDecisionSchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  action: Type.Union([Type.Literal('apply'), Type.Literal('skip')]),
+  strategy: Type.Optional(AdapterStrategySchema),
+});
+
+export const PROPAGATION_MAX_EDITED_CONTENT_BYTES = 512 * 1024;
+
+export const PropagationDecisionSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  resolution: PropagationResolutionSchema,
+  /** Required by `adopt-group`; must name one of the entry's source groups. */
+  winnerContentHash: Type.Optional(Type.String({ minLength: 1 })),
+  /** Required by `edit-then-adopt`; becomes the winner, a hash held nowhere yet. */
+  editedContent: Type.Optional(Type.String({ maxLength: PROPAGATION_MAX_EDITED_CONTENT_BYTES })),
+  /** Every destination the preview offered, each explicitly applied or skipped. */
+  destinations: Type.Array(PropagationDestinationDecisionSchema),
+});
+
+export const PropagationApplyRequestSchema = Type.Object({
+  previewToken: Type.String({ minLength: 1 }),
+  stateHash: Type.String({ minLength: 1 }),
+  /** The preview request this apply answers, so the token can be re-derived. */
+  request: PropagationPreviewRequestSchema,
+  decisions: Type.Array(PropagationDecisionSchema, {
+    minItems: 1,
+    maxItems: PROPAGATION_PREVIEW_MAX_RESOURCES,
+  }),
+});
+
+export const PropagationSkipReasonSchema = Type.Union([
+  Type.Literal('user-skipped'),
+  Type.Literal('already-in-sync'),
+  Type.Literal('divergence-acknowledged'),
+]);
+
+export const PropagationFailureReasonSchema = Type.Union([
+  Type.Literal('guard-rejected'),
+  Type.Literal('write-failed'),
+  /** The bytes on disk after the write did not hash to what was intended. */
+  Type.Literal('verification-failed'),
+]);
+
+export const PropagationAppliedSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  locationId: LibraryLocationIdSchema,
+  operation: PropagationOperationSchema,
+  destinationPath: Type.String({ minLength: 1 }),
+  /** Re-hashed from disk after the write, never assumed from the source. */
+  contentHash: Type.String({ minLength: 1 }),
+});
+
+export const PropagationSkippedSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  locationId: Type.Optional(LibraryLocationIdSchema),
+  reason: PropagationSkipReasonSchema,
+});
+
+export const PropagationFailureSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  locationId: LibraryLocationIdSchema,
+  reason: PropagationFailureReasonSchema,
+  message: Type.String(),
+});
+
+export const PropagationApplySchema = Type.Object({
+  /** Present when anything was written; the handle `undo` takes. */
+  backupId: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * False when the filesystem matches its pre-apply state — either everything
+   * landed, or a failure was fully rolled back. True is the alarming case: a
+   * failure whose compensation also failed, leaving some writes in place.
+   */
+  partial: Type.Boolean(),
+  applied: Type.Array(PropagationAppliedSchema),
+  skipped: Type.Array(PropagationSkippedSchema),
+  failed: Type.Array(PropagationFailureSchema),
+});
+
+export const PropagationUndoRequestSchema = Type.Object({
+  backupId: Type.String({ minLength: 1, maxLength: 128 }),
+});
+
+export const PropagationUndoEntrySchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  destinationPath: Type.String({ minLength: 1 }),
+});
+
+export const PropagationUndoSkippedSchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  destinationPath: Type.String({ minLength: 1 }),
+  reason: Type.Union([
+    /** Someone changed the destination after the apply; undo leaves it alone. */
+    Type.Literal('changed-since-apply'),
+    Type.Literal('backup-missing'),
+  ]),
+});
+
+export const PropagationUndoSchema = Type.Object({
+  backupId: Type.String({ minLength: 1 }),
+  restored: Type.Array(PropagationUndoEntrySchema),
+  removed: Type.Array(PropagationUndoEntrySchema),
+  skipped: Type.Array(PropagationUndoSkippedSchema),
+});
+
+/**
+ * What retained backups currently cost. Surfaced so a directory holding copies
+ * of skill trees is never a mystery disk consumer the user has to discover.
+ */
+export const PropagationBackupUsageSchema = Type.Object({
+  setCount: Type.Integer({ minimum: 0 }),
+  sizeBytes: Type.Integer({ minimum: 0 }),
+  retentionCount: Type.Integer({ minimum: 1 }),
+  retentionBytes: Type.Integer({ minimum: 1 }),
+});
+
+/**
  * A recorded "this divergence is intentional" — Cursor's copy of a skill is
  * sometimes meant to differ. Keyed by the exact hashes it covers, so editing any
  * copy makes the resource diverge again instead of muting it permanently.
@@ -365,6 +495,19 @@ export type PropagationDestination = Static<typeof PropagationDestinationSchema>
 export type PropagationPreviewEntry = Static<typeof PropagationPreviewEntrySchema>;
 export type PropagationPreviewRequest = Static<typeof PropagationPreviewRequestSchema>;
 export type PropagationPreview = Static<typeof PropagationPreviewSchema>;
+export type PropagationResolution = Static<typeof PropagationResolutionSchema>;
+export type PropagationDestinationDecision = Static<typeof PropagationDestinationDecisionSchema>;
+export type PropagationDecision = Static<typeof PropagationDecisionSchema>;
+export type PropagationApplyRequest = Static<typeof PropagationApplyRequestSchema>;
+export type PropagationSkipReason = Static<typeof PropagationSkipReasonSchema>;
+export type PropagationFailureReason = Static<typeof PropagationFailureReasonSchema>;
+export type PropagationApplied = Static<typeof PropagationAppliedSchema>;
+export type PropagationSkipped = Static<typeof PropagationSkippedSchema>;
+export type PropagationFailure = Static<typeof PropagationFailureSchema>;
+export type PropagationApply = Static<typeof PropagationApplySchema>;
+export type PropagationUndoRequest = Static<typeof PropagationUndoRequestSchema>;
+export type PropagationUndo = Static<typeof PropagationUndoSchema>;
+export type PropagationBackupUsage = Static<typeof PropagationBackupUsageSchema>;
 export type LibraryDivergenceAck = Static<typeof LibraryDivergenceAckSchema>;
 export type LibraryDivergenceAckRequest = Static<typeof LibraryDivergenceAckRequestSchema>;
 

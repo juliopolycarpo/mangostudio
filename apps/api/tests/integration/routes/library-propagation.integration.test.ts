@@ -224,6 +224,9 @@ describe('library propagation preview over real locations', () => {
 
 const unsupportedService: PropagationRouteService = {
   preview: () => Promise.reject(new Error('preview not stubbed')),
+  apply: () => Promise.reject(new Error('apply not stubbed')),
+  undo: () => Promise.reject(new Error('undo not stubbed')),
+  backupUsage: () => Promise.reject(new Error('backupUsage not stubbed')),
   listAcks: () => Promise.reject(new Error('listAcks not stubbed')),
   acknowledge: () => Promise.reject(new Error('acknowledge not stubbed')),
   forgetAck: () => Promise.reject(new Error('forgetAck not stubbed')),
@@ -431,5 +434,128 @@ describe('divergence acknowledgement routes', () => {
     expect(removed.status).toBe(204);
     expect(invalid.status).toBe(422);
     expect(forgotten).toEqual(['skill:gh']);
+  });
+});
+
+describe('propagation apply, undo, and backup routes', () => {
+  const applyResult = {
+    backupId: '2026-07-27T10-00-00.000Z-abc',
+    partial: false,
+    applied: [
+      {
+        resourceKey: 'skill:gh',
+        locationId: 'claude-skills' as LibraryLocationId,
+        operation: 'create' as const,
+        destinationPath: '/home/test/.claude/skills/gh',
+        contentHash: 'hash-a',
+      },
+    ],
+    skipped: [],
+    failed: [],
+  };
+
+  const applyBody = {
+    previewToken: 'token',
+    stateHash: 'state',
+    request: { resourceKeys: ['skill:gh'], targetLocationIds: ['claude-skills'] },
+    decisions: [
+      {
+        resourceKey: 'skill:gh',
+        resolution: 'adopt-group',
+        winnerContentHash: 'hash-a',
+        destinations: [{ locationId: 'claude-skills', action: 'apply' }],
+      },
+    ],
+  };
+
+  it('returns the apply result', async () => {
+    const app = harness({ apply: () => Promise.resolve(applyResult) });
+
+    const response = await app.handle(jsonRequest('/library/propagate/apply', 'POST', applyBody));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(applyResult);
+  });
+
+  it('maps a stale preview to 409 so the client re-previews', async () => {
+    const app = harness({
+      apply: () => Promise.reject(new PropagationRequestError(409, 'The library changed.')),
+    });
+
+    const response = await app.handle(jsonRequest('/library/propagate/apply', 'POST', applyBody));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('maps an unreviewable decision to 422', async () => {
+    const app = harness({
+      apply: () => Promise.reject(new PropagationRequestError(422, 'Name the winner.')),
+    });
+
+    const response = await app.handle(jsonRequest('/library/propagate/apply', 'POST', applyBody));
+
+    expect(response.status).toBe(422);
+  });
+
+  it('rejects an apply with no decisions before reaching the engine', async () => {
+    let reached = false;
+    const app = harness({
+      apply: () => {
+        reached = true;
+        return Promise.resolve(applyResult);
+      },
+    });
+
+    const response = await app.handle(
+      jsonRequest('/library/propagate/apply', 'POST', { ...applyBody, decisions: [] })
+    );
+
+    expect(response.status).toBe(422);
+    expect(reached).toBe(false);
+  });
+
+  it('undoes an apply by backup id', async () => {
+    const undone = {
+      backupId: '2026-07-27T10-00-00.000Z-abc',
+      restored: [{ locationId: 'claude-skills' as LibraryLocationId, destinationPath: '/a/gh' }],
+      removed: [],
+      skipped: [],
+    };
+    const app = harness({ undo: () => Promise.resolve(undone) });
+
+    const response = await app.handle(
+      jsonRequest('/library/propagate/undo', 'POST', { backupId: undone.backupId })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(undone);
+  });
+
+  it('reports a backup that retention already discarded as 404', async () => {
+    const app = harness({
+      undo: () => Promise.reject(new PropagationRequestError(404, 'No such backup.')),
+    });
+
+    const response = await app.handle(
+      jsonRequest('/library/propagate/undo', 'POST', { backupId: 'gone' })
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it('reports what retained backups cost, with the bounds they are trimmed to', async () => {
+    const usage = {
+      setCount: 3,
+      sizeBytes: 4096,
+      retentionCount: 10,
+      retentionBytes: 512 * 1024 * 1024,
+    };
+    const app = harness({ backupUsage: () => Promise.resolve(usage) });
+
+    const response = await app.handle(jsonRequest('/library/propagate/backups', 'GET'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(usage);
   });
 });

@@ -39,7 +39,11 @@ function makeConfig(overrides: Partial<MangoConfig> = {}): MangoConfig {
     images: { dir: '/data/images' },
     agents: { dir: '/data/agents' },
     skills: { dir: '/data/skills' },
-    library: { backupDir: '/data/library-backups', backupRetentionCount: 10 },
+    library: {
+      backupDir: '/data/library-backups',
+      backupRetentionCount: 10,
+      backupRetentionBytes: 1024,
+    },
     checkpoints: { dir: '/data/checkpoints' },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false },
