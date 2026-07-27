@@ -95,6 +95,7 @@ function preview(
       acknowledgedKeys: () => Promise.resolve(new Set(harness.acknowledged ?? [])),
       enabledLocationIds: () =>
         Promise.resolve(new Set(harness.enabledLocationIds ?? targetLocationIds)),
+      agentAvailable: () => Promise.resolve(false),
       ...(harness.adapters && { adapters: harness.adapters }),
     }
   );
@@ -314,7 +315,7 @@ describe('previewLibraryPropagation — blocked destinations', () => {
 
 describe('previewLibraryPropagation — format adaptation', () => {
   const mdcAdapters: AdapterCatalog = {
-    strategiesFor: (from, to): AdapterStrategy[] => {
+    strategiesFor: ({ from, to }): AdapterStrategy[] => {
       if (from === to) return ['verbatim'];
       return from === 'markdown-plain' && to === 'mdc' ? ['agent', 'mechanical'] : [];
     },
@@ -370,6 +371,7 @@ describe('previewLibraryPropagation — format adaptation', () => {
     const entry = firstEntry(
       await preview(['instruction:global'], ['cursor-rules'], {
         resources: [globalInstruction()],
+        adapters: { strategiesFor: () => [] },
       })
     );
 

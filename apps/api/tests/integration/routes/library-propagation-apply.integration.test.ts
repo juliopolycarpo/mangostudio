@@ -50,6 +50,7 @@ const INSTRUCTION_LOCATIONS: readonly LibraryLocationId[] = [
   'claude-instructions',
   'codex-instructions',
 ];
+const SUBAGENT_LOCATIONS: readonly LibraryLocationId[] = ['claude-agents', 'codex-agents'];
 
 const LOCATION_DIRECTORIES: Record<string, readonly string[]> = {
   'mango-skills': ['.mango', 'skills'],
@@ -61,6 +62,11 @@ const INSTRUCTION_FILES: Record<string, readonly string[]> = {
   'mango-instructions': ['.mango', 'AGENTS.md'],
   'claude-instructions': ['.claude', 'CLAUDE.md'],
   'codex-instructions': ['.codex', 'AGENTS.md'],
+  'cursor-rules': ['.cursor', 'rules', 'global.mdc'],
+};
+const SUBAGENT_FILES: Record<string, readonly string[]> = {
+  'claude-agents': ['.claude', 'agents', 'reviewer.md'],
+  'codex-agents': ['.codex', 'agents', 'reviewer.toml'],
 };
 
 let home: string;
@@ -103,6 +109,16 @@ function writeInstruction(locationId: LibraryLocationId, body: string): void {
   writeFileSync(path, body);
 }
 
+function subagentPath(locationId: LibraryLocationId): string {
+  return join(home, ...(SUBAGENT_FILES[locationId] ?? []));
+}
+
+function writeSubagent(locationId: LibraryLocationId, body: string): void {
+  const path = subagentPath(locationId);
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, body);
+}
+
 function makeDirectories(...locationIds: LibraryLocationId[]): void {
   for (const locationId of locationIds) {
     mkdirSync(join(home, ...(LOCATION_DIRECTORIES[locationId] ?? [])), { recursive: true });
@@ -128,7 +144,12 @@ function settings(locationIds: readonly LibraryLocationId[]): typeof DEFAULT_APP
 function preview(request: PropagationPreviewRequest): Promise<PropagationPreview> {
   const env = pathEnv();
   const cache = new LibraryCache();
-  const enabled = settings([...SKILL_LOCATIONS, ...INSTRUCTION_LOCATIONS, 'cursor-rules']);
+  const enabled = settings([
+    ...SKILL_LOCATIONS,
+    ...INSTRUCTION_LOCATIONS,
+    ...SUBAGENT_LOCATIONS,
+    'cursor-rules',
+  ]);
   return previewLibraryPropagation(userId(), request, {
     discover: (scanUserId, kinds) =>
       discoverLibraryResources(getDb(), scanUserId, {
@@ -187,7 +208,8 @@ function toRequest(
 function adoptAll(
   entry: PropagationPreviewEntry,
   winnerContentHash: string,
-  skip: readonly LibraryLocationId[] = []
+  skip: readonly LibraryLocationId[] = [],
+  strategy?: 'mechanical' | 'verbatim' | 'agent'
 ): PropagationDecision {
   return {
     resourceKey: entry.resourceKey,
@@ -196,6 +218,7 @@ function adoptAll(
     destinations: entry.destinations.map((destination) => ({
       locationId: destination.locationId,
       action: skip.includes(destination.locationId) ? ('skip' as const) : ('apply' as const),
+      ...(strategy && { strategy }),
     })),
   };
 }
@@ -435,6 +458,123 @@ describe('propagation apply — file-backed resources', () => {
     expect(result.failed).toEqual([]);
     expect(readFileSync(instructionPath('mango-instructions'), 'utf8')).toBe('# House rules\n');
     expect(readFileSync(instructionPath('codex-instructions'), 'utf8')).toBe('# House rules\n');
+  });
+
+  it('mechanically adapts plain instructions to MDC before the atomic write', async () => {
+    writeInstruction('claude-instructions', '\uFEFF# House rules\r\n\r\nKeep changes focused.\r\n');
+    mkdirSync(join(home, '.cursor', 'rules'), { recursive: true });
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['instruction:global'],
+      targetLocationIds: ['cursor-rules'],
+    };
+    const taken = await preview(request);
+    const entry = onlyEntry(taken);
+
+    const result = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        adoptAll(entry, winnerFrom(entry, 'claude-instructions'), [], 'mechanical'),
+      ]),
+      applyDeps()
+    );
+
+    expect(result.failed).toEqual([]);
+    expect(readFileSync(instructionPath('cursor-rules'), 'utf8')).toBe(
+      '---\ndescription: "House rules"\nalwaysApply: true\n---\n\n\uFEFF# House rules\r\n\r\nKeep changes focused.\r\n'
+    );
+    expect(result.applied[0]?.adaptation).toMatchObject({
+      strategy: 'mechanical',
+      lossy: false,
+      requiresReview: false,
+      notes: [
+        { code: 'metadata-added', field: 'description' },
+        { code: 'metadata-added', field: 'alwaysApply' },
+      ],
+    });
+  });
+
+  it('requires an explicit strategy before adapting a destination', async () => {
+    writeInstruction('claude-instructions', '# House rules\n');
+    mkdirSync(join(home, '.cursor', 'rules'), { recursive: true });
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['instruction:global'],
+      targetLocationIds: ['cursor-rules'],
+    };
+    const taken = await preview(request);
+    const entry = onlyEntry(taken);
+
+    const failure = applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'claude-instructions'))]),
+      applyDeps()
+    );
+
+    await expect(failure).rejects.toMatchObject({ status: 422 });
+    expect(existsSync(instructionPath('cursor-rules'))).toBe(false);
+  });
+
+  it('normalizes a Claude subagent into Codex TOML through propagation', async () => {
+    writeSubagent(
+      'claude-agents',
+      '---\nname: "reviewer"\ndescription: "Reviews changes"\ntools:\n  - "Read"\n---\n\nReview carefully.\n'
+    );
+    mkdirSync(join(home, '.codex', 'agents'), { recursive: true });
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['subagent:reviewer'],
+      targetLocationIds: ['codex-agents'],
+    };
+    const taken = await preview(request);
+    const entry = onlyEntry(taken);
+
+    const result = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        adoptAll(entry, winnerFrom(entry, 'claude-agents'), [], 'mechanical'),
+      ]),
+      applyDeps()
+    );
+
+    expect(result.failed).toEqual([]);
+    expect(readFileSync(subagentPath('codex-agents'), 'utf8')).toBe(
+      'name = "reviewer"\ndescription = "Reviews changes"\ndeveloper_instructions = "Review carefully.\\n"\n'
+    );
+    expect(result.applied[0]?.adaptation).toMatchObject({
+      strategy: 'mechanical',
+      lossy: true,
+      notes: [{ code: 'field-dropped', field: 'tools' }],
+    });
+  });
+
+  it('does not write adapter failures or return partial output', async () => {
+    writeInstruction('claude-instructions', '# House rules\n');
+    mkdirSync(join(home, '.cursor', 'rules'), { recursive: true });
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['instruction:global'],
+      targetLocationIds: ['cursor-rules'],
+    };
+    const taken = await preview(request);
+    const entry = onlyEntry(taken);
+
+    const result = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        adoptAll(entry, winnerFrom(entry, 'claude-instructions'), [], 'mechanical'),
+      ]),
+      applyDeps({
+        adapt: () =>
+          Promise.resolve({
+            ok: false,
+            error: { code: 'provider-failed', message: 'connector unavailable' },
+          }),
+      })
+    );
+
+    expect(result).toMatchObject({
+      partial: false,
+      applied: [],
+      failed: [{ locationId: 'cursor-rules', reason: 'adaptation-failed' }],
+    });
+    expect(existsSync(instructionPath('cursor-rules'))).toBe(false);
   });
 
   it('adopts edited bytes that exist in no location yet', async () => {

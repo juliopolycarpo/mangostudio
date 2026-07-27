@@ -27,11 +27,23 @@ function getAgentsDir(): string {
 export function listMarkdownAgentProfiles(): AgentProfile[] {
   return readAgentsDirEntries()
     .filter((entry) => entry.isFile() && extname(entry.name) === MARKDOWN_EXTENSION)
-    .map((entry) =>
-      readMarkdownAgent(userAgentIdFromSlug(basename(entry.name, MARKDOWN_EXTENSION)))
-    )
-    .map((record) => record.profile)
+    .flatMap((entry) => readListedAgent(basename(entry.name, MARKDOWN_EXTENSION)))
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+/**
+ * One unusable file must not take the whole list down. The agents directory is
+ * also a library propagation destination, and library slugs are wider than
+ * agent slugs (`Code_Reviewer` is a valid library slug and an invalid agent
+ * one), so a single propagated file could otherwise fail every agent lookup.
+ */
+function readListedAgent(slug: string): AgentProfile[] {
+  try {
+    return [readMarkdownAgent(userAgentIdFromSlug(slug)).profile];
+  } catch (error) {
+    if (error instanceof AgentSettingsError) return [];
+    throw error;
+  }
 }
 
 function readAgentsDirEntries(): Dirent[] {

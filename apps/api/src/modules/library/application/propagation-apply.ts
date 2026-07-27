@@ -27,6 +27,8 @@ import {
   type PropagationSkipped,
   type PropagationSourceGroup,
   type PropagationUndo,
+  type ResourceFormat,
+  type ResourceKind,
 } from '@mangostudio/shared/library';
 import { PropagationRequestError } from '../domain/propagation-error';
 import { getLibraryLocation, type LocationDefinition, type PathEnv } from '../domain/registry';
@@ -49,6 +51,8 @@ import {
   writeDirectoryResource,
   writeFileResource,
 } from '../infrastructure/resource-writer';
+import { defaultAdapterRegistry } from './adapters/registry';
+import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
 import { acknowledgeDivergence } from './conflict-resolution';
 import { previewLibraryPropagation } from './propagation-preview';
 
@@ -59,6 +63,7 @@ export interface PropagationApplyDeps {
   writeDirectory(input: DirectoryWrite): Promise<ResourceWriteResult>;
   writeFile(input: FileWrite): Promise<ResourceWriteResult>;
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
+  adapt(input: AdaptInput, strategy: AdapterStrategy): Promise<AdaptResult>;
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<unknown>;
   backup: BackupStoreDeps;
 }
@@ -91,6 +96,7 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
       overrides.writeFile ??
       ((input) => writeFileResource({ ...input, locationId: input.locationId })),
     hashAt: overrides.hashAt ?? hashResourceAt,
+    adapt: overrides.adapt ?? ((input, strategy) => defaultAdapterRegistry.adapt(input, strategy)),
     acknowledge: overrides.acknowledge ?? acknowledgeDivergence,
     backup: overrides.backup ?? defaultBackupStoreDeps,
   };
@@ -148,7 +154,7 @@ async function runApply(
 
   for (const operation of plan.operations) {
     try {
-      const result = await executeOperation(operation, env, backupId, deps);
+      const result = await executeOperation(operation, userId, env, backupId, deps);
       written.push(result.entry);
       applied.push(result.applied);
     } catch (error) {
@@ -209,6 +215,13 @@ interface PlannedOperation {
   readonly editedContent?: string;
   readonly expectedContentHash: string;
   readonly destinationPath: string;
+  readonly adaptation?: {
+    readonly strategy: AdapterStrategy;
+    readonly kind: ResourceKind;
+    readonly from: ResourceFormat;
+    readonly to: ResourceFormat;
+    readonly sourceLocationId: string;
+  };
 }
 
 interface ApplyPlan {
@@ -378,6 +391,7 @@ function planAcknowledgement(
 interface ResolvedWinner {
   readonly contentHash: string;
   readonly sourcePath: string;
+  readonly sourceLocationId: string;
   readonly editedContent?: string;
 }
 
@@ -405,7 +419,12 @@ function resolveWinner(
         `"${entry.resourceKey}" is a directory resource and cannot be adopted from edited text.`
       );
     }
-    return { contentHash: '', sourcePath: '', editedContent: decision.editedContent };
+    return {
+      contentHash: '',
+      sourcePath: '',
+      sourceLocationId: '',
+      editedContent: decision.editedContent,
+    };
   }
 
   if (decision.editedContent !== undefined) {
@@ -437,7 +456,11 @@ function resolveWinner(
 }
 
 function toWinner(group: PropagationSourceGroup): ResolvedWinner {
-  return { contentHash: group.contentHash, sourcePath: group.contentPath };
+  return {
+    contentHash: group.contentHash,
+    sourcePath: group.contentPath,
+    sourceLocationId: group.contentLocationId,
+  };
 }
 
 /** Returns null when the destination already holds the winner and needs no write. */
@@ -501,6 +524,12 @@ function planDestination(
     );
   }
   if (outcome.operation === 'noop') return null;
+  const selectedStrategy = strategy;
+  if (outcome.adaptation && selectedStrategy === undefined) {
+    throw validationError(
+      `Writing "${entry.resourceKey}" to "${destination.locationId}" requires an explicit adapter strategy.`
+    );
+  }
 
   return {
     resourceKey: entry.resourceKey,
@@ -511,6 +540,16 @@ function planDestination(
     sourcePath: winner.sourcePath,
     expectedContentHash: winner.contentHash,
     destinationPath: destination.path ?? '',
+    ...(outcome.adaptation &&
+      selectedStrategy && {
+        adaptation: {
+          strategy: selectedStrategy,
+          kind: entry.ref.kind,
+          from: outcome.adaptation.fromFormat,
+          to: outcome.adaptation.toFormat,
+          sourceLocationId: winner.sourceLocationId,
+        },
+      }),
   };
 }
 
@@ -520,11 +559,18 @@ function writeKindFor(location: LocationDefinition): 'file' | 'directory' {
 
 async function executeOperation(
   operation: PlannedOperation,
+  userId: string,
   env: PathEnv,
   backupId: string,
   deps: PropagationApplyDeps
 ): Promise<{ entry: BackupEntry; applied: PropagationApplied }> {
-  const { result, expectedContentHash } = await performWrite(operation, env, backupId, deps);
+  const { result, expectedContentHash, adaptation } = await performWrite(
+    operation,
+    userId,
+    env,
+    backupId,
+    deps
+  );
 
   // Re-hash what is actually on disk. A truncated write or a bad adapter output
   // has to be caught here, not by the user noticing something broken later.
@@ -551,17 +597,43 @@ async function executeOperation(
       operation: operation.operation,
       destinationPath: result.destinationPath,
       contentHash: writtenContentHash,
+      ...(adaptation && {
+        adaptation: {
+          strategy: adaptation.strategy,
+          lossy: adaptation.result.lossy,
+          requiresReview: adaptation.result.requiresReview,
+          notes: [...adaptation.result.notes],
+          ...(adaptation.result.provenance && { provenance: adaptation.result.provenance }),
+        },
+      }),
     },
   };
 }
 
+interface CompletedAdaptation {
+  readonly strategy: AdapterStrategy;
+  readonly result: AdaptSuccess;
+}
+
 async function performWrite(
   operation: PlannedOperation,
+  userId: string,
   env: PathEnv,
   backupId: string,
   deps: PropagationApplyDeps
-): Promise<{ result: ResourceWriteResult; expectedContentHash: string }> {
+): Promise<{
+  result: ResourceWriteResult;
+  expectedContentHash: string;
+  adaptation?: CompletedAdaptation;
+}> {
   if (operation.kind === 'directory') {
+    // No adapter converts a directory tree, so a planned adaptation here would
+    // otherwise be dropped and the source copied across unconverted.
+    if (operation.adaptation) {
+      throw new AdaptationError(
+        `"${operation.resourceKey}" is a directory resource and cannot be adapted.`
+      );
+    }
     const result = await deps.writeDirectory({
       locationId: operation.locationId,
       slug: operation.slug,
@@ -572,14 +644,39 @@ async function performWrite(
     return { result, expectedContentHash: operation.expectedContentHash };
   }
 
-  const bytes =
+  let bytes =
     operation.editedContent === undefined
       ? await deps.readSourceFile(operation.sourcePath)
       : new TextEncoder().encode(operation.editedContent);
+  let adaptation: CompletedAdaptation | undefined;
+  if (operation.adaptation) {
+    let content: string;
+    try {
+      content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
+    } catch {
+      throw new AdaptationError('Source is not valid UTF-8 and cannot be adapted safely.');
+    }
+    const result = await deps.adapt(
+      {
+        content,
+        kind: operation.adaptation.kind,
+        from: operation.adaptation.from,
+        to: operation.adaptation.to,
+        resourceKey: operation.resourceKey,
+        sourceLocationId: operation.adaptation.sourceLocationId,
+        targetLocationId: operation.locationId,
+        userId,
+      },
+      operation.adaptation.strategy
+    );
+    if (!result.ok) throw new AdaptationError(clientFacingAdaptationMessage(result.error));
+    adaptation = { strategy: operation.adaptation.strategy, result };
+    bytes = new TextEncoder().encode(result.content);
+  }
   // Edited bytes exist in no location yet, so their expected hash is computed
   // here rather than taken from a preview group.
   const expectedContentHash =
-    operation.editedContent === undefined
+    operation.editedContent === undefined && adaptation === undefined
       ? operation.expectedContentHash
       : (await hashLibraryFile(operation.destinationPath, { readFile: () => bytes })).contentHash;
 
@@ -593,7 +690,7 @@ async function performWrite(
     env,
     backupId,
   });
-  return { result, expectedContentHash };
+  return { result, expectedContentHash, ...(adaptation && { adaptation }) };
 }
 
 /**
@@ -692,14 +789,38 @@ async function runUndo(backupId: string, deps: PropagationUndoDeps): Promise<Pro
 }
 
 class VerificationError extends Error {}
+class AdaptationError extends Error {}
+
+/**
+ * Prefer curated copy for agent/provider failure codes so connector/provider
+ * exception text never reaches PropagationFailure.message. Mechanical adapter
+ * messages are already authored here and pass through unchanged.
+ */
+function clientFacingAdaptationMessage(error: {
+  readonly code: string;
+  readonly message: string;
+}): string {
+  switch (error.code) {
+    case 'provider-failed':
+      return 'The model provider failed during agent adaptation.';
+    case 'adapter-timeout':
+      return 'Agent adaptation timed out.';
+    case 'adapter-cancelled':
+      return 'Agent adaptation was cancelled.';
+    default:
+      return error.message;
+  }
+}
 
 function describeFailure(operation: PlannedOperation, error: unknown): PropagationFailure {
   const reason =
-    error instanceof VerificationError
-      ? 'verification-failed'
-      : error instanceof Error && error.name === 'LibraryWriteError'
-        ? 'guard-rejected'
-        : 'write-failed';
+    error instanceof AdaptationError
+      ? 'adaptation-failed'
+      : error instanceof VerificationError
+        ? 'verification-failed'
+        : error instanceof Error && error.name === 'LibraryWriteError'
+          ? 'guard-rejected'
+          : 'write-failed';
   return {
     resourceKey: operation.resourceKey,
     locationId: operation.locationId,
