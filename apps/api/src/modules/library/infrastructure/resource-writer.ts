@@ -37,7 +37,12 @@ export interface DirectoryResourceWriteInput extends ResourceWriteInputBase {
 }
 
 export interface FileResourceWriteInput extends ResourceWriteInputBase {
-  readonly contents: string;
+  /**
+   * Raw bytes are preferred over a string: a caller that decodes and re-encodes
+   * would silently drop a UTF-8 BOM and replace undecodable bytes, which the
+   * apply's post-write hash check would then report as a verification failure.
+   */
+  readonly contents: string | Uint8Array;
 }
 
 export interface ResourceWriteResult {
@@ -46,8 +51,6 @@ export interface ResourceWriteResult {
   readonly resolvedDestinationPath: string;
   readonly backupId: string;
   readonly backupPath?: string;
-  /** False when the apply created the path, which undo reverses by removing it. */
-  readonly existedBefore: boolean;
 }
 
 export interface ResourceWriterFs {
@@ -62,7 +65,7 @@ export interface ResourceWriterFs {
    * Symlink-resolving atomic file write. Seamed so a test can fail one write in
    * the middle of a multi-destination apply and assert the rollback.
    */
-  writeFile(path: string, contents: string): void;
+  writeFile(path: string, contents: string | Uint8Array): void;
 }
 
 export interface ResourceWriterDeps {
@@ -176,7 +179,6 @@ export async function writeDirectoryResource(
     destinationPath: destination.logicalPath,
     resolvedDestinationPath: destination.resolvedPath,
     backupId,
-    existedBefore: existing !== null,
     ...(backupPath && { backupPath }),
   };
 }
@@ -213,7 +215,6 @@ export async function writeFileResource(
     destinationPath: destination.logicalPath,
     resolvedDestinationPath: destination.resolvedPath,
     backupId,
-    existedBefore: existing !== null,
     ...(backupPath && { backupPath }),
   };
 }

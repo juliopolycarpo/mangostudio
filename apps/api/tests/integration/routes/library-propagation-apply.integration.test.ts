@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
@@ -490,6 +490,43 @@ describe('propagation apply — file-backed resources', () => {
 
     await expect(failure).rejects.toMatchObject({ status: 422 });
   });
+
+  // One hand-merged file is one set of bytes with no adapter behind it, so
+  // fanning it into a differently-formatted location would write text that
+  // location's reader cannot parse — the case `adopt-group` reports blocked.
+  it('refuses to fan one edit into destinations of differing formats', async () => {
+    writeInstruction('claude-instructions', '# Original\n');
+    mkdirSync(join(home, '.cursor', 'rules'), { recursive: true });
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['instruction:global'],
+      targetLocationIds: [...INSTRUCTION_LOCATIONS, 'cursor-rules'],
+    };
+    const taken = await preview(request);
+    const entry = onlyEntry(taken);
+
+    const failure = applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        {
+          resourceKey: entry.resourceKey,
+          resolution: 'edit-then-adopt',
+          editedContent: '# Merged by hand\n',
+          destinations: entry.destinations.map((destination) => ({
+            locationId: destination.locationId,
+            action: 'apply' as const,
+          })),
+        },
+      ]),
+      applyDeps()
+    );
+
+    expect(entry.destinations.map((destination) => destination.locationId)).toContain(
+      'cursor-rules'
+    );
+    await expect(failure).rejects.toThrow(/destinations of differing formats/);
+    expect(existsSync(join(home, '.cursor', 'rules', 'global.mdc'))).toBe(false);
+  });
 });
 
 describe('propagation apply — request validation', () => {
@@ -640,6 +677,54 @@ describe('propagation apply — decisions', () => {
     });
     expect(() => readSkill('cursor-skills')).toThrow();
     expect(readSkill('claude-skills')).toContain('winner\n');
+  });
+
+  it('refuses a decision that leaves an offered destination undecided', async () => {
+    writeSkill('mango-skills', 'winner\n');
+    makeDirectories('claude-skills', 'cursor-skills');
+
+    const { taken, request, entry } = await previewSkill();
+    const decision = adoptAll(entry, winnerFrom(entry, 'mango-skills'));
+    const dropped = decision.destinations.at(-1);
+    expect(dropped).toBeDefined();
+
+    const failure = applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        { ...decision, destinations: decision.destinations.slice(0, -1) },
+      ]),
+      applyDeps()
+    );
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining(`missing "${dropped?.locationId}"`),
+    });
+    expect(() => readSkill('claude-skills')).toThrow();
+  });
+
+  it('refuses two decisions for the same destination', async () => {
+    writeSkill('mango-skills', 'winner\n');
+    makeDirectories('claude-skills');
+
+    const { taken, request, entry } = await previewSkill();
+    const decision = adoptAll(entry, winnerFrom(entry, 'mango-skills'));
+    const failure = applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        {
+          ...decision,
+          destinations: [
+            ...decision.destinations,
+            { locationId: 'claude-skills', action: 'skip' as const },
+          ],
+        },
+      ]),
+      applyDeps()
+    );
+
+    await expect(failure).rejects.toMatchObject({ status: 422 });
+    expect(() => readSkill('claude-skills')).toThrow();
   });
 });
 

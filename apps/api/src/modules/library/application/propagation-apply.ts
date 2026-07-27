@@ -74,7 +74,7 @@ interface DirectoryWrite {
 interface FileWrite {
   readonly locationId: string;
   readonly slug: string;
-  readonly contents: string;
+  readonly contents: string | Uint8Array;
   readonly env: PathEnv;
   readonly backupId: string;
 }
@@ -161,15 +161,21 @@ async function runApply(
     const rolledBack = await rollback(written, deps);
     // The backup set is the only recovery path when a compensation fails, so it
     // is discarded only once the filesystem is provably back where it started.
-    if (rolledBack) await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-    return {
-      partial: !rolledBack,
-      applied: [],
-      skipped: plan.skipped,
-      failed,
-      ...(rolledBack ? {} : { backupId }),
-    };
+    if (rolledBack) {
+      await discardBackupSet(backupId, deps.backup).catch(() => undefined);
+      return { partial: false, applied: [], skipped: plan.skipped, failed };
+    }
+    // Compensation failed, so some writes are still on disk. They are reported
+    // as applied — telling the caller nothing landed would hide exactly the
+    // paths it now has to undo — and the manifest is what `undo` needs to do it.
+    await persistBackupManifest(backupId, written, deps);
+    return { partial: true, applied, skipped: plan.skipped, failed, backupId };
   }
+
+  // The manifest lands before the acknowledgements, not after: it is the only
+  // handle `undo` takes, and a failure between the writes and the manifest would
+  // otherwise leave committed writes with no way back.
+  if (written.length > 0) await persistBackupManifest(backupId, written, deps);
 
   for (const acknowledgement of plan.acknowledgements) {
     await deps.acknowledge(userId, acknowledgement);
@@ -178,13 +184,19 @@ async function runApply(
   if (written.length === 0) {
     return { partial: false, applied, skipped: plan.skipped, failed };
   }
+  return { backupId, partial: false, applied, skipped: plan.skipped, failed };
+}
 
+async function persistBackupManifest(
+  backupId: string,
+  written: readonly BackupEntry[],
+  deps: PropagationApplyDeps
+): Promise<void> {
   await writeBackupManifest(
-    { version: 1, backupId, createdAtMs: deps.backup.now().getTime(), entries: written },
+    { version: 1, backupId, createdAtMs: deps.backup.now().getTime(), entries: [...written] },
     deps.backup
   );
   await pruneBackupSets(backupId, deps.backup);
-  return { backupId, partial: false, applied, skipped: plan.skipped, failed };
 }
 
 interface PlannedOperation {
@@ -245,6 +257,8 @@ function planApply(
     }
 
     const winner = resolveWinner(entry, decision);
+    if (decision.resolution === 'edit-then-adopt') assertOneEditedFormat(entry, decision);
+    assertEveryDestinationDecided(entry, decision);
     for (const target of decision.destinations) {
       const destination = entry.destinations.find(
         (candidate) => candidate.locationId === target.locationId
@@ -281,6 +295,64 @@ function planApply(
       compareText(left.locationId, right.locationId)
   );
   return { operations, skipped, acknowledgements };
+}
+
+/**
+ * The same rule as one-decision-per-entry, a level down: every destination the
+ * preview offered comes back explicitly applied or skipped. A dropped
+ * destination would otherwise land in neither `applied` nor `skipped`, so the
+ * response would not say what happened to a location the user was shown — and
+ * an off-by-one in a client's destination list would read as a clean apply.
+ */
+function assertEveryDestinationDecided(
+  entry: PropagationPreviewEntry,
+  decision: PropagationDecision
+): void {
+  const decided = new Set<string>();
+  for (const target of decision.destinations) {
+    if (decided.has(target.locationId)) {
+      throw validationError(
+        `Duplicate decision for destination "${target.locationId}" of "${entry.resourceKey}".`
+      );
+    }
+    decided.add(target.locationId);
+  }
+
+  const missing = entry.destinations
+    .filter((destination) => !decided.has(destination.locationId))
+    .map((destination) => `"${destination.locationId}"`);
+  if (missing.length > 0) {
+    throw validationError(
+      `Apply must decide every destination the preview offered for "${entry.resourceKey}"; missing ${missing.join(', ')}.`
+    );
+  }
+}
+
+/**
+ * One edit is one set of bytes, and there is no adapter to convert it, so every
+ * destination it is applied to has to store the same format. Fanning a hand-
+ * merged markdown file out to a `.mdc` or `.toml` location would write text no
+ * reader there can parse — the very case `adopt-group` reports as
+ * `blocked / no-adapter-strategy`.
+ */
+function assertOneEditedFormat(
+  entry: PropagationPreviewEntry,
+  decision: PropagationDecision
+): void {
+  const formats = new Set(
+    decision.destinations.flatMap((target) => {
+      if (target.action !== 'apply') return [];
+      const destination = entry.destinations.find(
+        (candidate) => candidate.locationId === target.locationId
+      );
+      return destination ? [destination.toFormat] : [];
+    })
+  );
+  if (formats.size > 1) {
+    throw validationError(
+      `"${entry.resourceKey}" cannot adopt one edit into destinations of differing formats (${[...formats].sort(compareText).join(', ')}).`
+    );
+  }
 }
 
 function planAcknowledgement(
@@ -388,6 +460,15 @@ function planDestination(
   }
 
   if (decision.resolution === 'edit-then-adopt') {
+    // Edited text is written verbatim, so it can only land where the format it
+    // was written in is the format stored. Without this the branch would bypass
+    // the outcome checks below and drop markdown into a `.mdc` or `.toml`
+    // destination that `adopt-group` reports `blocked / no-adapter-strategy`.
+    if (writeKindFor(location) !== 'file') {
+      throw validationError(
+        `"${entry.resourceKey}" cannot be adopted from edited text at directory location "${destination.locationId}".`
+      );
+    }
     return {
       resourceKey: entry.resourceKey,
       locationId: destination.locationId,
@@ -502,10 +583,13 @@ async function performWrite(
       ? operation.expectedContentHash
       : (await hashLibraryFile(operation.destinationPath, { readFile: () => bytes })).contentHash;
 
+  // The raw bytes go to the writer, never a decoded string: decoding strips a
+  // UTF-8 BOM and turns undecodable bytes into U+FFFD, so a re-encoded copy of a
+  // BOM-prefixed CLAUDE.md would hash differently and fail verification below.
   const result = await deps.writeFile({
     locationId: operation.locationId,
     slug: operation.slug,
-    contents: new TextDecoder().decode(bytes),
+    contents: bytes,
     env,
     backupId,
   });
