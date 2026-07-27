@@ -16,47 +16,18 @@ interface ParsedSubagent {
   readonly sourceFields: ReadonlySet<string>;
 }
 
-const DIALECT_FIELDS: Readonly<Record<SubagentDialect, ReadonlySet<string>>> = {
-  claude: new Set([
-    'name',
-    'description',
-    'tools',
-    'model',
-    'disallowedTools',
-    'permissionMode',
-    'mcpServers',
-    'hooks',
-    'maxTurns',
-    'skills',
-    'initialPrompt',
-    'memory',
-    'effort',
-    'background',
-    'isolation',
-    'color',
-  ]),
-  codex: new Set([
-    'name',
-    'description',
-    'developer_instructions',
-    'model',
-    'model_reasoning_effort',
-    'sandbox_mode',
-    'mcp_servers',
-    'skills',
-  ]),
-  cursor: new Set(['name', 'description', 'model', 'readonly', 'is_background']),
-  mangostudio: new Set([
-    'name',
-    'description',
-    'role',
-    'model',
-    'tools',
-    'subagents',
-    'thinkingEnabled',
-    'reasoningEffort',
-    'maxToolIterations',
-  ]),
+/**
+ * What `renderDescriptor` actually writes for each dialect, not what the dialect
+ * is capable of storing. Loss notes are derived from this set: a field the
+ * destination understands but the renderer never emits — Claude's `skills` on
+ * the way to Codex, say — is still lost, and reporting it as carried over would
+ * make the adapter claim a fidelity it does not have.
+ */
+const RENDERED_FIELDS: Readonly<Record<SubagentDialect, ReadonlySet<string>>> = {
+  claude: new Set(['name', 'description', 'model', 'tools']),
+  codex: new Set(['name', 'description', 'model', 'developer_instructions']),
+  cursor: new Set(['name', 'description', 'model']),
+  mangostudio: new Set(['name', 'description', 'model', 'tools', 'role']),
 };
 
 export function createSubagentAdapter(from: ResourceFormat, to: ResourceFormat): FormatAdapter {
@@ -74,13 +45,15 @@ function adaptSubagent(input: AdaptInput): AdaptResult {
   try {
     const targetDialect = dialectFor(input.to, input.targetLocationId);
     const parsed = parseDescriptor(input.content, input.from);
-    const notes = droppedFieldNotes(parsed, targetDialect);
+    const notes = adaptationNotes(parsed, targetDialect);
     return {
       ok: true,
       content: renderDescriptor(parsed.descriptor, targetDialect),
       notes,
       requiresReview: false,
-      lossy: notes.length > 0,
+      // Only a dropped field loses information; supplying a required
+      // destination default does not.
+      lossy: notes.some((note) => note.code === 'field-dropped'),
     };
   } catch (error) {
     return {
@@ -143,6 +116,9 @@ function renderDescriptor(descriptor: SubagentDescriptor, dialect: SubagentDiale
     `name: ${JSON.stringify(descriptor.name)}`,
     `description: ${JSON.stringify(descriptor.description)}`,
   ];
+  // MangoStudio reads its own agent markdown with `role` defaulting to
+  // `primary`, so a subagent written without it would load as a primary agent.
+  if (dialect === 'mangostudio') lines.push('role: subagent');
   if (descriptor.model) lines.push(`model: ${JSON.stringify(descriptor.model)}`);
   if ((dialect === 'claude' || dialect === 'mangostudio') && descriptor.tools?.length) {
     lines.push('tools:', ...descriptor.tools.map((tool) => `  - ${JSON.stringify(tool)}`));
@@ -151,20 +127,28 @@ function renderDescriptor(descriptor: SubagentDescriptor, dialect: SubagentDiale
   return lines.join('\n');
 }
 
-function droppedFieldNotes(parsed: ParsedSubagent, targetDialect: SubagentDialect): AdaptNote[] {
-  const targetFields = DIALECT_FIELDS[targetDialect];
+function adaptationNotes(parsed: ParsedSubagent, targetDialect: SubagentDialect): AdaptNote[] {
+  const renderedFields = RENDERED_FIELDS[targetDialect];
   const dropped = new Set(
     [...parsed.sourceFields].filter(
-      (field) => field !== 'developer_instructions' && !targetFields.has(field)
+      (field) => field !== 'developer_instructions' && !renderedFields.has(field)
     )
   );
-  if (parsed.descriptor.tools?.length && !targetFields.has('tools')) dropped.add('tools');
+  if (parsed.descriptor.tools?.length && !renderedFields.has('tools')) dropped.add('tools');
 
-  return [...dropped].sort(compareText).map((field) => ({
+  const notes: AdaptNote[] = [...dropped].sort(compareText).map((field) => ({
     code: 'field-dropped',
     field,
-    message: `${field} is not supported by ${displayDialect(targetDialect)} and was dropped`,
+    message: `${field} is not carried into ${displayDialect(targetDialect)} and was dropped`,
   }));
+  if (targetDialect === 'mangostudio' && !parsed.sourceFields.has('role')) {
+    notes.push({
+      code: 'metadata-added',
+      field: 'role',
+      message: 'role was set to subagent, which MangoStudio requires to load this as a subagent',
+    });
+  }
+  return notes;
 }
 
 function dialectFor(format: ResourceFormat, locationId?: LibraryLocationId): SubagentDialect {

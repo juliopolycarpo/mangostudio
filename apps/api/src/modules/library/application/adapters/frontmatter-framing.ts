@@ -1,4 +1,8 @@
-const FRONTMATTER_OPENING = /^[\t ]*---[\t ]*(?:\r\n|\n)/;
+// A leading BOM is tolerated because `parseMarkdownFrontmatter` trims it away
+// (`String.trim` strips U+FEFF), so discovery accepts a BOM-prefixed file and
+// the preview offers a mechanical strategy for it. Rejecting it here would fail
+// the apply on a source the preview promised was convertible.
+const FRONTMATTER_OPENING = /^\uFEFF?[\t ]*---[\t ]*(?:\r\n|\n)/;
 const FRONTMATTER_CLOSING = /^[\t ]*---[\t ]*(?:\r\n|\n|$)/gm;
 
 /**

@@ -74,6 +74,15 @@ describe('agent file service', () => {
     expect(() => readMarkdownAgent('user:../escape')).toThrow(AgentSettingsError);
   });
 
+  it('skips unusable files instead of failing the whole listing', () => {
+    // Library propagation writes into this directory, and library slugs are
+    // wider than agent slugs, so `Code_Reviewer.md` can legitimately land here.
+    writeFileSync(join(agentsDir, 'Code_Reviewer.md'), '---\nname: "x"\n---\n\nPrompt\n', 'utf8');
+    writeFileSync(join(agentsDir, 'reviewer.md'), '---\nname: "Reviewer"\n---\n\nPrompt\n', 'utf8');
+
+    expect(listMarkdownAgentProfiles().map((agent) => agent.id)).toEqual(['user:reviewer']);
+  });
+
   it('overwrites an existing agent on write and reports not found for missing reads', () => {
     const base = {
       id: 'user:editor' as const,

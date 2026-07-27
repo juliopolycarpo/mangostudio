@@ -627,6 +627,13 @@ async function performWrite(
   adaptation?: CompletedAdaptation;
 }> {
   if (operation.kind === 'directory') {
+    // No adapter converts a directory tree, so a planned adaptation here would
+    // otherwise be dropped and the source copied across unconverted.
+    if (operation.adaptation) {
+      throw new AdaptationError(
+        `"${operation.resourceKey}" is a directory resource and cannot be adapted.`
+      );
+    }
     const result = await deps.writeDirectory({
       locationId: operation.locationId,
       slug: operation.slug,
