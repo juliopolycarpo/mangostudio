@@ -26,6 +26,25 @@ interface ScanEntry {
 export const LIBRARY_SCAN_CACHE_TTL_MS = 2_000;
 
 /**
+ * Neither level expires by itself: a hash entry for a deleted path and a scan
+ * for a location set nobody asks for again would otherwise live as long as the
+ * process. Both are keyed by insertion order, so evicting the oldest entry
+ * costs a rehash at worst.
+ */
+const MAX_INSTANCE_HASH_ENTRIES = 4_096;
+const MAX_SCAN_ENTRIES = 32;
+
+function setBounded<K, V>(entries: Map<K, V>, key: K, value: V, maxEntries: number): void {
+  entries.delete(key);
+  entries.set(key, value);
+  while (entries.size > maxEntries) {
+    const oldest = entries.keys().next();
+    if (oldest.done) break;
+    entries.delete(oldest.value);
+  }
+}
+
+/**
  * Keeps byte hashes stable across scans and coalesces concurrent matrix loads.
  * A forced rescan replaces both entries instead of serving either cache level.
  */
@@ -43,7 +62,7 @@ export class LibraryCache {
     if (!force && cached?.fingerprint === fingerprint) return cached.value;
 
     const value = compute();
-    this.instanceHashes.set(path, { fingerprint, value });
+    setBounded(this.instanceHashes, path, { fingerprint, value }, MAX_INSTANCE_HASH_ENTRIES);
     void value.catch(() => {
       if (this.instanceHashes.get(path)?.value === value) this.instanceHashes.delete(path);
     });
@@ -68,7 +87,7 @@ export class LibraryCache {
     if (force) this.scans.clear();
 
     const value = compute();
-    this.scans.set(signature, { scannedAtMs: nowMs, value });
+    setBounded(this.scans, signature, { scannedAtMs: nowMs, value }, MAX_SCAN_ENTRIES);
     void value.catch(() => {
       if (this.scans.get(signature)?.value === value) this.scans.delete(signature);
     });

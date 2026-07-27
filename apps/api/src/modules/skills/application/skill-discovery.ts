@@ -5,7 +5,7 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { LibraryLocationId } from '@mangostudio/shared/library';
+import type { LibraryInstance, LibraryLocationId } from '@mangostudio/shared/library';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import type { SkillDescriptor, SkillSource } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
@@ -100,10 +100,9 @@ export async function listSkills(
         }
 
         const key = skillKey(source, resource.ref.slug);
-        const descriptor = describeSkill(source, resource.ref.slug, instance.path);
         return [
           {
-            ...descriptor,
+            ...adaptInstance(source, resource.ref.slug, instance),
             enabled: savedSettings.get(key) ?? true,
             shadowed: mangoCoverage?.effectiveLocationId !== instance.locationId,
           },
@@ -140,6 +139,25 @@ export function resolveWinnersBySlug(skills: ReadonlyArray<ScannedSkill>): Map<s
     }
   }
   return winners;
+}
+
+/**
+ * A healthy instance already carries everything a descriptor needs: discovery
+ * enforces the same frontmatter rules for `kind: 'skill'` that `describeSkill`
+ * does, and its result is memoized per turn. Only the failure path re-reads, to
+ * turn a stable `invalidReason` back into the message this contract promises.
+ */
+function adaptInstance(source: SkillSource, slug: string, instance: LibraryInstance): ScannedSkill {
+  if (!instance.valid) return describeSkill(source, slug, instance.path);
+  return {
+    key: skillKey(source, slug),
+    slug,
+    source,
+    path: instance.path,
+    name: instance.title ?? slug,
+    description: instance.description ?? '',
+    valid: true,
+  };
 }
 
 export function describeSkill(source: SkillSource, slug: string, path: string): ScannedSkill {
