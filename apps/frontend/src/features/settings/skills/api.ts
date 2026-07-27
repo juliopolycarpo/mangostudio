@@ -14,3 +14,10 @@ export async function updateSkillSetting(
   if (error) throw new ApiError(error.value);
   return data as SkillDescriptor;
 }
+
+export async function rescanLibrary(): Promise<void> {
+  const { error } = await client.api.library.rescan.post(undefined, {
+    query: { force: 'true' },
+  });
+  if (error) throw new ApiError(error.value);
+}

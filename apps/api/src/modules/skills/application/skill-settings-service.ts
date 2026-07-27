@@ -32,12 +32,12 @@ export async function listSkillSettings(
     skills,
     sources: {
       agents: {
-        enabled: appSettings.skillSources.agents,
+        enabled: appSettings.libraryLocations['agents-skills'] ?? false,
         path: thirdPartyDirs.agents,
         exists: existsSync(thirdPartyDirs.agents),
       },
       claude: {
-        enabled: appSettings.skillSources.claude,
+        enabled: appSettings.libraryLocations['claude-skills'] ?? false,
         path: thirdPartyDirs.claude,
         exists: existsSync(thirdPartyDirs.claude),
       },

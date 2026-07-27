@@ -20,6 +20,7 @@ import {
   normalizeChatTitleSettings,
   normalizeContextSettings,
   normalizeGitSettings,
+  normalizeLibraryLocationSettings,
   normalizeMultiAgentSettings,
   normalizePromptSettings,
   normalizeWorkspaceSettings,
@@ -504,6 +505,19 @@ describe('normalizeAppSettings', () => {
 
   it('normalizes missing chat display settings to the shared defaults', () => {
     expect(normalizeAppSettings({}).chatDisplaySettings).toEqual(DEFAULT_CHAT_DISPLAY_SETTINGS);
+  });
+
+  it('merges dynamic library defaults while keeping mango-skills always enabled', () => {
+    expect(
+      normalizeLibraryLocationSettings(
+        { 'mango-skills': false, 'agents-skills': false },
+        { 'mango-skills': true, 'agents-skills': true, 'codex-skills': true }
+      )
+    ).toEqual({
+      'mango-skills': true,
+      'agents-skills': false,
+      'codex-skills': true,
+    });
   });
 
   it('falls back individual top-level fields when types are invalid', () => {

@@ -307,7 +307,10 @@ describe('inspectChatCapabilities', () => {
     const settings = await getAppSettings(getDb(), user.id);
     await updateAppSettings(getDb(), user.id, {
       ...settings,
-      skillSources: { ...settings.skillSources, agents: true },
+      libraryLocations: {
+        ...settings.libraryLocations,
+        'agents-skills': true,
+      },
     });
     resetSkillsCache();
     await updateSkillSetting(getDb(), user.id, 'mango:draft', { enabled: false });

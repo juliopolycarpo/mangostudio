@@ -269,7 +269,11 @@ describe('skills lazy-load end-to-end turn', () => {
     const current = await getAppSettings(getDb(), user.id);
     await updateAppSettings(getDb(), user.id, {
       ...current,
-      skillSources: { agents: true, claude: false },
+      libraryLocations: {
+        ...current.libraryLocations,
+        'agents-skills': true,
+        'claude-skills': false,
+      },
     });
     resetSkillsCache();
 

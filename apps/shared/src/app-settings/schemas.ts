@@ -13,6 +13,7 @@ import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
 } from '../git/commit-message';
+import { LibraryLocationIdSchema } from '../library';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
 import { WorkspaceSettingsSchema } from '../workspaces';
@@ -50,15 +51,8 @@ export const MultiAgentSettingsSchema = Type.Object({
   }),
 });
 
-/**
- * Opt-in third-party skill sources. `~/.mango/skills` is always scanned and
- * has no toggle; these directories were written for other agents, so both
- * default to off.
- */
-export const SkillSourceSettingsSchema = Type.Object({
-  agents: Type.Boolean(),
-  claude: Type.Boolean(),
-});
+/** Enablement map for the code-defined locations the library scanner may read. */
+export const LibraryLocationSettingsSchema = Type.Record(LibraryLocationIdSchema, Type.Boolean());
 
 export const DiffPreviewModeSchema = Type.Union([
   Type.Literal('expanded'),
@@ -98,7 +92,7 @@ export const AppSettingsSchema = Type.Object({
   multiAgentSettings: MultiAgentSettingsSchema,
   contextSettings: ContextSettingsSchema,
   chatTitleSettings: ChatTitleSettingsSchema,
-  skillSources: SkillSourceSettingsSchema,
+  libraryLocations: LibraryLocationSettingsSchema,
   workspaceSettings: WorkspaceSettingsSchema,
   gitSettings: GitSettingsSchema,
   chatDisplaySettings: ChatDisplaySettingsSchema,
@@ -110,7 +104,7 @@ export type ChatDisplaySettings = Static<typeof ChatDisplaySettingsSchema>;
 export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;
-export type SkillSourceSettings = Static<typeof SkillSourceSettingsSchema>;
+export type LibraryLocationSettings = Static<typeof LibraryLocationSettingsSchema>;
 export type CommitMessageSettings = Static<typeof CommitMessageSettingsSchema>;
 export type GitSettings = Static<typeof GitSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;

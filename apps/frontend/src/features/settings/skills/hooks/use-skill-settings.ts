@@ -7,15 +7,21 @@ import {
   DEFAULT_APP_SETTINGS,
   normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
+import type { LibraryLocationId } from '@mangostudio/shared/library';
 import type { SkillDescriptor, SkillListResponse } from '@mangostudio/shared/skills';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-invalidation';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
-import { updateSkillSetting } from '../api';
+import { rescanLibrary, updateSkillSetting } from '../api';
 import { skillSettingsKeys, skillSettingsListQueryOptions } from '../queries';
 
 export type SkillSourceKey = keyof SkillListResponse['sources'];
+
+const LOCATION_BY_SOURCE: Record<SkillSourceKey, LibraryLocationId> = {
+  agents: 'agents-skills',
+  claude: 'claude-skills',
+};
 
 function syncSkillListCache(
   queryClient: ReturnType<typeof useQueryClient>,
@@ -77,12 +83,27 @@ export function useToggleSkillSource() {
 
       return updateAppSettings({
         ...current,
-        skillSources: { ...current.skillSources, [source]: enabled },
+        libraryLocations: {
+          ...current.libraryLocations,
+          [LOCATION_BY_SOURCE[source]]: enabled,
+        },
       });
     },
     onSuccess: async (savedSettings) => {
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
       await queryClient.invalidateQueries({ queryKey: skillSettingsKeys.all });
+    },
+  });
+}
+
+export function useRescanLibrary() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: rescanLibrary,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: skillSettingsKeys.all });
+      await invalidateChatCapabilities(queryClient);
     },
   });
 }

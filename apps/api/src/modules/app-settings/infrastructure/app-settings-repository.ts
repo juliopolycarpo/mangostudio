@@ -1,4 +1,4 @@
-import type { AppSettings } from '@mangostudio/shared/app-settings';
+import type { AppSettings, LibraryLocationSettings } from '@mangostudio/shared/app-settings';
 import { normalizeAppSettings } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database, UserAppSettingsSelect } from '../../../db/types';
@@ -7,7 +7,8 @@ import { generateId } from '../../../utils/id';
 
 export async function getSavedAppSettings(
   db: Kysely<Database>,
-  userId: string
+  userId: string,
+  libraryLocationDefaults?: LibraryLocationSettings
 ): Promise<AppSettings> {
   const row = await db
     .selectFrom('user_app_settings')
@@ -15,7 +16,7 @@ export async function getSavedAppSettings(
     .where('userId', '=', userId)
     .executeTakeFirst();
 
-  return parseAppSettingsRow(row);
+  return parseAppSettingsRow(row, libraryLocationDefaults);
 }
 
 export async function upsertAppSettings(
@@ -25,7 +26,23 @@ export async function upsertAppSettings(
 ): Promise<AppSettings> {
   const now = Date.now();
   const normalized = normalizeAppSettings(settings);
-  const settingsJson = JSON.stringify(normalized);
+  const existing = await db
+    .selectFrom('user_app_settings')
+    .select('settingsJson')
+    .where('userId', '=', userId)
+    .executeTakeFirst();
+  const persisted = safeJsonParse(existing?.settingsJson);
+  const preserved = isRecord(persisted) ? persisted : {};
+  const settingsJson = JSON.stringify({
+    ...preserved,
+    ...normalized,
+    // Keep the pre-library shape in storage so an application downgrade
+    // retains the two source choices even though it is no longer public API.
+    skillSources: {
+      agents: normalized.libraryLocations['agents-skills'] ?? false,
+      claude: normalized.libraryLocations['claude-skills'] ?? false,
+    },
+  });
 
   await db
     .insertInto('user_app_settings')
@@ -43,8 +60,13 @@ export async function upsertAppSettings(
 }
 
 function parseAppSettingsRow(
-  row: Pick<UserAppSettingsSelect, 'settingsJson'> | undefined
+  row: Pick<UserAppSettingsSelect, 'settingsJson'> | undefined,
+  libraryLocationDefaults?: LibraryLocationSettings
 ): AppSettings {
   const parsed = safeJsonParse(row?.settingsJson);
-  return normalizeAppSettings(parsed ?? undefined);
+  return normalizeAppSettings(parsed ?? undefined, libraryLocationDefaults);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

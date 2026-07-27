@@ -1,17 +1,11 @@
 /**
- * Skill discovery: scans configured skill source directories for
- * `<slug>/SKILL.md` entries and produces descriptors. Malformed skills are
- * flagged invalid instead of thrown so one broken directory never hides the
- * rest, and a short-lived memo keeps the per-turn prompt listing and tool
- * executions within the same turn from re-reading disk. User settings (source
- * toggles and per-skill flags) are read fresh on every call — they are cheap
- * DB hits and correctness-critical — and applied on top of the memoized scan.
+ * Compatibility adapter from the five-kind library matrix to the established
+ * SkillDescriptor contract consumed by prompts, tools, and capability checks.
  */
 
-import { type Dirent, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import type { SkillSourceSettings } from '@mangostudio/shared/app-settings';
+import type { LibraryLocationId } from '@mangostudio/shared/library';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import type { SkillDescriptor, SkillSource } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
@@ -19,26 +13,29 @@ import type { Database } from '../../../db/types';
 import { getConfig } from '../../../lib/config';
 import { RegularFileReadError, readRegularFileUtf8 } from '../../../lib/safe-file';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import {
+  discoverLibraryResources,
+  resetLibraryDiscoveryCache,
+} from '../../library/application/library-discovery';
 import { isValidSkillSlug, skillKey } from '../domain/skill';
 import { listSavedSkillSettings } from '../infrastructure/skill-settings-repository';
 
 export const MAX_SKILL_FILE_BYTES = 256 * 1024;
 export const SKILL_FILE_NAME = 'SKILL.md';
 
-const CACHE_TTL_MS = 2_000;
-
-/** Highest precedence first: on slug collisions the earlier source wins. */
+/** Highest precedence first for legacy MangoStudio skill consumers. */
 const SKILL_SOURCE_PRECEDENCE: ReadonlyArray<SkillSource> = ['mango', 'agents', 'claude'];
+
+const SOURCE_BY_LOCATION_ID: Readonly<Partial<Record<LibraryLocationId, SkillSource>>> = {
+  'mango-skills': 'mango',
+  'agents-skills': 'agents',
+  'claude-skills': 'claude',
+};
 
 export type ThirdPartySkillSource = Exclude<SkillSource, 'mango'>;
 
 let thirdPartyDirOverrides: Partial<Record<ThirdPartySkillSource, string>> | null = null;
 
-/**
- * Fixed third-party skill directories (mirrors the rule-file resolver's fixed
- * paths). Arbitrary extra directories are intentionally out of scope.
- * // Usage: const { agents, claude } = getThirdPartySkillDirs();
- */
 export function getThirdPartySkillDirs(): Record<ThirdPartySkillSource, string> {
   return {
     agents: thirdPartyDirOverrides?.agents ?? join(homedir(), '.agents', 'skills'),
@@ -46,71 +43,60 @@ export function getThirdPartySkillDirs(): Record<ThirdPartySkillSource, string> 
   };
 }
 
-/** Redirects the fixed third-party dirs — for tests. // Usage: setThirdPartySkillDirsForTest({ agents: dir }) */
 export function setThirdPartySkillDirsForTest(
   overrides: Partial<Record<ThirdPartySkillSource, string>> | null
 ): void {
   thirdPartyDirOverrides = overrides;
 }
 
-interface SkillSourceDir {
-  readonly source: SkillSource;
-  readonly dir: string;
-}
-
-/** Enabled source dirs in precedence order; `mango` is always on. */
-function getSkillSourceDirs(sources: SkillSourceSettings): SkillSourceDir[] {
-  const thirdPartyDirs = getThirdPartySkillDirs();
-  const dirs: SkillSourceDir[] = [{ source: 'mango', dir: getConfig().skills.dir }];
-  if (sources.agents) dirs.push({ source: 'agents', dir: thirdPartyDirs.agents });
-  if (sources.claude) dirs.push({ source: 'claude', dir: thirdPartyDirs.claude });
-  return dirs;
-}
-
-/** Descriptor fields produced by the pure filesystem scan, before settings. */
 export type ScannedSkill = Omit<SkillDescriptor, 'enabled' | 'shadowed'>;
 
-interface SkillsCache {
-  readonly scannedAt: number;
-  readonly skills: ScannedSkill[];
-}
-
-/**
- * Memoized scans keyed by the source-dir signature, so users on different
- * source toggles don't evict each other's entry (the set of distinct keys is
- * bounded by the source combinations, at most a handful).
- */
-const cacheByDirs = new Map<string, SkillsCache>();
-
-/**
- * Lists every skill discovered in the user's enabled sources (valid and
- * invalid), alphabetical by key, with per-skill `enabled` and slug-collision
- * `shadowed` flags resolved. The filesystem scan is memoized for a short TTL
- * and keyed on the source dirs so a config swap (tests) or source toggle is
- * picked up immediately. // Usage: const skills = await listSkills(db, userId);
- */
 export async function listSkills(
   db: Kysely<Database>,
   userId: string,
   now: () => number = Date.now
 ): Promise<SkillDescriptor[]> {
   const appSettings = await getAppSettings(db, userId);
-  const scanned = scanSkillSources(getSkillSourceDirs(appSettings.skillSources), now);
-  const savedSettings = await listSavedSkillSettings(db, userId);
-  const winnerBySlug = resolveWinnersBySlug(scanned);
+  const thirdPartyDirs = getThirdPartySkillDirs();
+  const [resources, savedSettings] = await Promise.all([
+    discoverLibraryResources(db, userId, {
+      settings: appSettings,
+      now,
+      locationPathOverrides: {
+        'mango-skills': getConfig().skills.dir,
+        'agents-skills': thirdPartyDirs.agents,
+        'claude-skills': thirdPartyDirs.claude,
+      },
+    }),
+    listSavedSkillSettings(db, userId),
+  ]);
 
-  return scanned.map((skill) => ({
-    ...skill,
-    enabled: savedSettings.get(skill.key) ?? true,
-    shadowed: winnerBySlug.get(skill.slug) !== skill.key,
-  }));
+  return resources
+    .filter((resource) => resource.ref.kind === 'skill')
+    .flatMap((resource) => {
+      const mangoCoverage = resource.coverage.find(
+        (coverage) => coverage.targetId === 'mangostudio'
+      );
+      return resource.instances.flatMap((instance) => {
+        const source = SOURCE_BY_LOCATION_ID[instance.locationId];
+        if (!source || (!instance.valid && instance.invalidReason === 'unexpected-entry-type')) {
+          return [];
+        }
+
+        const key = skillKey(source, resource.ref.slug);
+        const descriptor = describeSkill(source, resource.ref.slug, instance.path);
+        return [
+          {
+            ...descriptor,
+            enabled: savedSettings.get(key) ?? true,
+            shadowed: mangoCoverage?.effectiveLocationId !== instance.locationId,
+          },
+        ];
+      });
+    })
+    .sort((left, right) => left.key.localeCompare(right.key));
 }
 
-/**
- * Lists only skills that are usable this turn: valid, enabled, and not
- * shadowed by a higher-precedence source.
- * // Usage: await listUsableSkills(db, userId)
- */
 export async function listUsableSkills(
   db: Kysely<Database>,
   userId: string,
@@ -120,16 +106,13 @@ export async function listUsableSkills(
   return skills.filter((skill) => skill.valid && skill.enabled && !skill.shadowed);
 }
 
-/** Drops the discovery memo — for tests. // Usage: resetSkillsCache() */
 export function resetSkillsCache(): void {
-  cacheByDirs.clear();
+  resetLibraryDiscoveryCache();
 }
 
 /**
- * Maps each slug to the key of its winning source (mango > agents > claude).
- * Deliberately ignores `valid` and per-skill `enabled`: a disabled or broken
- * winner still shadows lower-precedence copies, so precedence stays
- * predictable instead of flipping with toggles.
+ * Retained as a pure compatibility helper for callers that already have
+ * descriptors. Library discovery itself resolves precedence per target.
  */
 export function resolveWinnersBySlug(skills: ReadonlyArray<ScannedSkill>): Map<string, string> {
   const winners = new Map<string, string>();
@@ -141,38 +124,6 @@ export function resolveWinnersBySlug(skills: ReadonlyArray<ScannedSkill>): Map<s
     }
   }
   return winners;
-}
-
-function scanSkillSources(sourceDirs: SkillSourceDir[], now: () => number): ScannedSkill[] {
-  const dirsKey = sourceDirs.map((entry) => `${entry.source}:${entry.dir}`).join('\n');
-  const timestamp = now();
-
-  const cached = cacheByDirs.get(dirsKey);
-  if (cached && timestamp - cached.scannedAt < CACHE_TTL_MS) {
-    return cached.skills;
-  }
-
-  const skills = sourceDirs
-    .flatMap((sourceDir) => scanSourceDir(sourceDir))
-    .sort((left, right) => left.key.localeCompare(right.key));
-  cacheByDirs.set(dirsKey, { scannedAt: timestamp, skills });
-  return skills;
-}
-
-function scanSourceDir({ source, dir }: SkillSourceDir): ScannedSkill[] {
-  return readSkillsDirEntries(dir)
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => describeSkill(source, entry.name, join(dir, entry.name)));
-}
-
-function readSkillsDirEntries(dir: string): Dirent[] {
-  try {
-    return readdirSync(dir, { withFileTypes: true });
-  } catch (error) {
-    // A missing skills directory just means no skills installed yet.
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw error;
-  }
 }
 
 export function describeSkill(source: SkillSource, slug: string, path: string): ScannedSkill {
@@ -192,9 +143,6 @@ export function describeSkill(source: SkillSource, slug: string, path: string): 
   }
 
   const { frontmatter } = parseMarkdownFrontmatter(markdown);
-  // The frontmatter parser coerces unquoted scalars, so a numeric-only slug like
-  // `2048` arrives here as a number; accept scalar values so valid slugs are not
-  // rejected for failing the `typeof === 'string'` check.
   const name = frontmatterScalarString(frontmatter.name)?.trim();
   const description = frontmatterScalarString(frontmatter.description)?.trim();
 
@@ -208,7 +156,6 @@ export function describeSkill(source: SkillSource, slug: string, path: string): 
   return { ...base, name, description, valid: true };
 }
 
-/** Renders a scalar frontmatter value as a string; arrays/undefined yield undefined. */
 function frontmatterScalarString(value: unknown): string | undefined {
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
