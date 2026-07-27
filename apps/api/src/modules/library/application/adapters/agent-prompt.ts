@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ResourceFormat } from '@mangostudio/shared/library';
 
 export const LIBRARY_AGENT_ADAPTER_PROMPT_VERSION = 'library-format-adapter-v1';
@@ -10,17 +11,20 @@ and make every required destination field explicit.`;
 
 export function buildLibraryAgentAdapterPrompt(
   source: string,
-  targetFormat: ResourceFormat
+  targetFormat: ResourceFormat,
+  options?: { readonly sourceTagNonce?: string }
 ): string {
+  // Nonce-suffix the delimiter so untrusted source cannot forge a close tag.
+  const tag = `source-content-${options?.sourceTagNonce ?? randomUUID()}`;
   return [
     `Prompt version: ${LIBRARY_AGENT_ADAPTER_PROMPT_VERSION}`,
     `Target format: ${targetFormat}`,
     '',
     targetContract(targetFormat),
     '',
-    '<source-content>',
+    `<${tag}>`,
     source,
-    '</source-content>',
+    `</${tag}>`,
   ].join('\n');
 }
 

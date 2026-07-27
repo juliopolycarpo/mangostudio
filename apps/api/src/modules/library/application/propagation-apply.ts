@@ -669,7 +669,7 @@ async function performWrite(
       },
       operation.adaptation.strategy
     );
-    if (!result.ok) throw new AdaptationError(result.error.message);
+    if (!result.ok) throw new AdaptationError(clientFacingAdaptationMessage(result.error));
     adaptation = { strategy: operation.adaptation.strategy, result };
     bytes = new TextEncoder().encode(result.content);
   }
@@ -790,6 +790,27 @@ async function runUndo(backupId: string, deps: PropagationUndoDeps): Promise<Pro
 
 class VerificationError extends Error {}
 class AdaptationError extends Error {}
+
+/**
+ * Prefer curated copy for agent/provider failure codes so connector/provider
+ * exception text never reaches PropagationFailure.message. Mechanical adapter
+ * messages are already authored here and pass through unchanged.
+ */
+function clientFacingAdaptationMessage(error: {
+  readonly code: string;
+  readonly message: string;
+}): string {
+  switch (error.code) {
+    case 'provider-failed':
+      return 'The model provider failed during agent adaptation.';
+    case 'adapter-timeout':
+      return 'Agent adaptation timed out.';
+    case 'adapter-cancelled':
+      return 'Agent adaptation was cancelled.';
+    default:
+      return error.message;
+  }
+}
 
 function describeFailure(operation: PlannedOperation, error: unknown): PropagationFailure {
   const reason =

@@ -114,20 +114,33 @@ export function createAgentStrategyAdapter(
           },
         };
       } catch (error) {
-        return {
-          ok: false,
-          error: {
-            code:
-              error instanceof NoModelAvailableError
-                ? 'model-unavailable'
-                : error instanceof DOMException && error.name === 'TimeoutError'
-                  ? 'adapter-timeout'
-                  : 'provider-failed',
-            message: error instanceof Error ? error.message : String(error),
-          },
-        };
+        return { ok: false, error: classifyAgentAdapterFailure(error) };
       }
     },
+  };
+}
+
+/** Curated client-facing codes/messages — never forward raw provider/connector text. */
+function classifyAgentAdapterFailure(error: unknown): {
+  readonly code: string;
+  readonly message: string;
+} {
+  if (error instanceof NoModelAvailableError) {
+    return {
+      code: 'model-unavailable',
+      message: 'No configured text model is available for agent adaptation.',
+    };
+  }
+  const name = error instanceof DOMException || error instanceof Error ? error.name : undefined;
+  if (name === 'TimeoutError') {
+    return { code: 'adapter-timeout', message: 'Agent adaptation timed out.' };
+  }
+  if (name === 'AbortError') {
+    return { code: 'adapter-cancelled', message: 'Agent adaptation was cancelled.' };
+  }
+  return {
+    code: 'provider-failed',
+    message: 'The model provider failed during agent adaptation.',
   };
 }
 

@@ -7,6 +7,7 @@ import type {
 import { type MarkdownFrontmatter, parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import { parse as parseToml } from 'smol-toml';
 import { extractFrontmatterBody, removeFrontmatterSeparator } from './frontmatter-framing';
+import { dialectForMarkdownSubagentLocation } from './subagent-dialect';
 import type { AdaptInput, AdaptResult, FormatAdapter } from './types';
 
 type SubagentDialect = 'claude' | 'codex' | 'cursor' | 'mangostudio';
@@ -153,7 +154,9 @@ function adaptationNotes(parsed: ParsedSubagent, targetDialect: SubagentDialect)
 
 function dialectFor(format: ResourceFormat, locationId?: LibraryLocationId): SubagentDialect {
   if (format === 'toml-agent') return 'codex';
-  if (format === 'agent-profile-db' || locationId === 'mango-agents') return 'mangostudio';
+  if (format === 'agent-profile-db') return 'mangostudio';
+  const fromLocation = dialectForMarkdownSubagentLocation(locationId);
+  if (fromLocation) return fromLocation;
   if (locationId?.startsWith('cursor-')) return 'cursor';
   return 'claude';
 }

@@ -1,6 +1,7 @@
 import type { AdapterStrategy, ResourceFormat, ResourceKind } from '@mangostudio/shared/library';
 import { createAgentStrategyAdapter } from './agent-strategy';
 import { markdownToMdcAdapter, mdcToMarkdownAdapter } from './markdown-mdc';
+import { dialectForMarkdownSubagentLocation } from './subagent-dialect';
 import { createSubagentAdapter } from './subagent-frontmatter';
 import type { AdapterCatalog, AdapterQuery, AdaptInput, AdaptResult, FormatAdapter } from './types';
 import { createVerbatimAdapter } from './verbatim';
@@ -31,8 +32,8 @@ export class FormatAdapterRegistry implements AdapterCatalog {
 
   strategiesFor(query: AdapterQuery): readonly AdapterStrategy[] {
     let adapters = this.adapters.get(adapterKey(query.kind, query.from, query.to)) ?? [];
-    const sourceDialect = subagentDialect(query.sourceLocationId);
-    const targetDialect = subagentDialect(query.targetLocationId);
+    const sourceDialect = dialectForMarkdownSubagentLocation(query.sourceLocationId);
+    const targetDialect = dialectForMarkdownSubagentLocation(query.targetLocationId);
     if (
       query.kind === 'subagent' &&
       query.from === 'markdown-frontmatter' &&
@@ -144,13 +145,4 @@ export function rankAdapterStrategies(strategies: readonly AdapterStrategy[]): {
 
 function adapterKey(kind: ResourceKind, from: ResourceFormat, to: ResourceFormat): string {
   return `${kind}\0${from}\0${to}`;
-}
-
-function subagentDialect(
-  locationId: string | undefined
-): 'claude' | 'cursor' | 'mangostudio' | undefined {
-  if (locationId === 'claude-agents') return 'claude';
-  if (locationId === 'cursor-agents') return 'cursor';
-  if (locationId === 'mango-agents') return 'mangostudio';
-  return undefined;
 }
