@@ -91,7 +91,12 @@ export async function readLocationInstances(
       fs.realPath(locationPath),
     ]);
   } catch (error) {
-    if (isMissing(error)) return [];
+    // A location that is absent, unreadable, or not a directory contributes no
+    // resources. Only the unexpected cases are worth a log line — a missing
+    // optional vendor directory is the normal state, not a fault.
+    if (!isMissing(error)) {
+      console.warn(`[library] Skipping unreadable location "${location.id}" at ${locationPath}.`);
+    }
     return [];
   }
 

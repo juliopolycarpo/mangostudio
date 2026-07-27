@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import {
   type ApiErrorResponse,
   ApiErrorResponseSchema,
@@ -23,7 +24,11 @@ import {
 } from '@mangostudio/shared/library';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
-import { readRegularFileUtf8 } from '../../../lib/safe-file';
+import {
+  type RegularFileContent,
+  RegularFileReadError,
+  readRegularFileUtf8,
+} from '../../../lib/safe-file';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { discoverLibraryResources } from '../application/library-discovery';
 import { LIBRARY_LOCATION_DEFINITIONS } from '../domain/registry';
@@ -71,11 +76,21 @@ function readResourceContent(
   const instance = resource.instances.find((candidate) => candidate.locationId === locationId);
   if (!instance) return null;
 
-  const contentPath = resource.ref.kind === 'skill' ? `${instance.path}/SKILL.md` : instance.path;
-  const result = readRegularFileUtf8(contentPath, {
-    maxBytes: MAX_LIBRARY_CONTENT_BYTES,
-    truncateOversize: true,
-  });
+  const contentPath =
+    resource.ref.kind === 'skill' ? join(instance.path, 'SKILL.md') : instance.path;
+  // A scan can report an instance whose entrypoint is missing, unreadable, or a
+  // symlink, and the file can also vanish between the scan and this read. Those
+  // are "no content here", not a server fault, so they must not become a 500.
+  let result: RegularFileContent;
+  try {
+    result = readRegularFileUtf8(contentPath, {
+      maxBytes: MAX_LIBRARY_CONTENT_BYTES,
+      truncateOversize: true,
+    });
+  } catch (error) {
+    if (error instanceof RegularFileReadError) return null;
+    throw error;
+  }
   return {
     key: resource.key,
     locationId,
