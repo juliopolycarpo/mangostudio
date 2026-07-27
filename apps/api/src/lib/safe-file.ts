@@ -9,10 +9,13 @@
 
 import { randomBytes } from 'node:crypto';
 import {
+  accessSync,
+  chmodSync,
   closeSync,
   constants as fsConstants,
   fstatSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readSync,
@@ -22,6 +25,7 @@ import {
 } from 'node:fs';
 import { access, link, lstat, mkdir, open, readlink, rename, unlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { resolvePathThroughExistingAncestor } from './path-containment';
 
 // O_NOFOLLOW makes a final-component symlink fail the open (ELOOP) instead of
 // silently resolving to its target — preserving the "reject symlinks" guarantee
@@ -42,9 +46,22 @@ export interface SafeWriteOptions {
 }
 
 /**
- * Atomically write `data` to `filePath`. Creates parent directories, writes a
- * unique temp file in the destination directory, then renames (or hard-links for
+ * Atomically write `data` to `filePath`, **writing through** a symlinked
+ * destination to its target. Creates parent directories, writes a unique temp
+ * file in the resolved target's directory, then renames (or hard-links for
  * `exclusive`) it into place, cleaning up the temp file on any failure.
+ *
+ * The rename commit swaps a directory entry rather than writing through it, so
+ * a naive implementation would replace a symlink with a regular file and leave
+ * its target holding the old bytes (issue #617). This writer's callers are the
+ * config and secret files users deliberately symlink into dotfiles repos, where
+ * detaching the link is never what they wanted — so it resolves first and
+ * commits on the target. Staging in the *target's* directory is what keeps that
+ * working when the dotfiles repo lives on another filesystem, where a rename
+ * across mounts would fail with `EXDEV`.
+ *
+ * This is a deliberate split from {@link writeRegularFileAtomic}, which rejects
+ * symlinks instead. Do not "fix" the inconsistency — see the note there.
  * // Usage: writeFileAtomic(secretPath, contents, { mode: 0o600 });
  */
 export function writeFileAtomic(
@@ -52,24 +69,84 @@ export function writeFileAtomic(
   data: string | Uint8Array,
   options: SafeWriteOptions = {}
 ): void {
-  mkdirSync(dirname(filePath), { recursive: true });
+  const target = resolveWriteTarget(filePath);
+  mkdirSync(dirname(target.path), { recursive: true });
 
-  const tempPath = atomicTempPath(filePath);
-  writeTempFile(tempPath, data, options.mode);
+  const tempPath = atomicTempPath(target.path);
+  writeTempFile(tempPath, data, options.mode ?? target.mode);
 
   try {
-    commitTempFile(tempPath, filePath, options.exclusive ?? false);
+    commitTempFile(tempPath, target.path, options.exclusive ?? false, options.mode ?? target.mode);
   } catch (error) {
     rmSync(tempPath, { force: true });
     throw error;
   }
 }
 
-/** Raised when a destination is not one {@link writeRegularFileAtomic} may replace. */
+/** Raised when a destination is not one the atomic writers may replace. */
 export class RegularFileWriteError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RegularFileWriteError';
+  }
+}
+
+interface ResolvedWriteTarget {
+  /** Where the bytes actually land, after following any symlink. */
+  readonly path: string;
+  /** The target's current permission bits, or undefined when it does not exist. */
+  readonly mode: number | undefined;
+}
+
+/**
+ * Follows `filePath` to the file a write would really modify and re-validates
+ * it. Resolution reuses `resolvePathThroughExistingAncestor`, which already
+ * follows dangling links manually with a hop cap — a dangling link is a fresh
+ * dotfiles checkout, exactly when a user first saves settings, so it creates the
+ * target instead of throwing.
+ */
+function resolveWriteTarget(filePath: string): ResolvedWriteTarget {
+  const resolvedPath = resolvePathThroughExistingAncestor(filePath);
+  const entry = statOrNull(resolvedPath);
+  if (!entry) return { path: resolvedPath, mode: undefined };
+
+  if (!entry.isFile()) {
+    throw new RegularFileWriteError(
+      `Cannot write ${describeTarget(filePath, resolvedPath)}, which is not a regular file.`
+    );
+  }
+  // Checked on the target, not the link: rename would otherwise replace a
+  // read-only file regardless of its own mode, the other half of #617.
+  if (!isWritable(resolvedPath)) {
+    throw new RegularFileWriteError(
+      `Cannot write ${describeTarget(filePath, resolvedPath)}, which is not writable.`
+    );
+  }
+  return { path: resolvedPath, mode: Number(entry.mode) & 0o7777 };
+}
+
+/** Names both the link and its target, since either alone is hard to diagnose. */
+function describeTarget(filePath: string, resolvedPath: string): string {
+  return filePath === resolvedPath
+    ? `"${filePath}"`
+    : `"${filePath}": it resolves to "${resolvedPath}"`;
+}
+
+function statOrNull(path: string): ReturnType<typeof lstatSync> | null {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function isWritable(path: string): boolean {
+  try {
+    accessSync(path, fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -90,6 +167,14 @@ interface AtomicWriteResult {
  * read-only file would be overwritten despite its own mode. Hard-linked files
  * are still accepted — there the swap gives copy-on-write semantics, which is
  * the safer outcome, not a surprising one.
+ *
+ * **This deliberately diverges from {@link writeFileAtomic}, which resolves a
+ * symlink and writes through it (#617).** The two policies fit their callers:
+ * the sync writer serves config and secret files a user chose to link, where
+ * writing through is what they expect; this one serves request-path mutations
+ * where an unexpected symlink is worth surfacing loudly. A table-driven test
+ * pins the difference so a "consistency" refactor fails there rather than
+ * silently changing either policy.
  *
  * The returned mtime comes from the temp descriptor before the commit, so it
  * provably belongs to the bytes written; a post-commit stat could instead
@@ -204,7 +289,15 @@ function writeTempFile(tempPath: string, data: string | Uint8Array, mode?: numbe
   }
 }
 
-function commitTempFile(tempPath: string, filePath: string, exclusive: boolean): void {
+function commitTempFile(
+  tempPath: string,
+  filePath: string,
+  exclusive: boolean,
+  mode: number | undefined
+): void {
+  // open() applied the process umask, so an inherited or requested mode has to
+  // be reapplied or the commit would silently narrow or widen the user's bits.
+  if (mode !== undefined) chmodSync(tempPath, mode);
   if (!exclusive) {
     renameSync(tempPath, filePath);
     return;
