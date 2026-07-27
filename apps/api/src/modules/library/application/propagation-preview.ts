@@ -296,9 +296,7 @@ function classifyOutcome(
   agentAvailable: boolean
 ): PropagationOutcome {
   const toFormat = destination.format;
-  // Bytes already stored in this format copy across untouched. A destination
-  // that sits inside the group necessarily reaches this branch, so `noop` is
-  // only ever reported for a write that would change nothing.
+  // Destination already holds the group's winning bytes — skip format work.
   if (currentContentHash === group.contentHash) {
     return {
       winnerContentHash: group.contentHash,

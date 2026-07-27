@@ -50,6 +50,20 @@ describe('agent strategy adapter', () => {
     expect(AGENT_ADAPTER_TIMEOUT_MS).toBeGreaterThan(0);
   });
 
+  it('requires a user id before invoking a provider', async () => {
+    let calls = 0;
+    const adapter = createAgentStrategyAdapter('instruction', 'markdown-plain', 'rules-dsl', {
+      generate: () => {
+        calls += 1;
+        return Promise.resolve({ text: 'unused', modelId: 'unused' });
+      },
+    });
+
+    const result = await adapter.adapt({ ...input('source'), userId: undefined });
+    expect(result).toMatchObject({ ok: false, error: { code: 'missing-user' } });
+    expect(calls).toBe(0);
+  });
+
   it('rejects oversized input before invoking a provider', async () => {
     let calls = 0;
     const adapter = createAgentStrategyAdapter('instruction', 'markdown-plain', 'rules-dsl', {

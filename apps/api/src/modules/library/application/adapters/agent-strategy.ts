@@ -55,7 +55,7 @@ export function createAgentStrategyAdapter(
       if (!input.userId) {
         return {
           ok: false,
-          error: { code: 'model-unavailable', message: 'Agent adaptation requires a user.' },
+          error: { code: 'missing-user', message: 'Agent adaptation requires a user.' },
         };
       }
       if (Buffer.byteLength(input.content, 'utf8') > AGENT_ADAPTER_MAX_INPUT_BYTES) {

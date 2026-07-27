@@ -8,7 +8,7 @@ import { ReadonlyArraySchema } from '../schema-helpers';
  */
 export const SubagentDescriptorSchema = Type.Object({
   name: Type.String({ minLength: 1 }),
-  description: Type.String(),
+  description: Type.String({ minLength: 1 }),
   tools: Type.Optional(ReadonlyArraySchema(Type.String({ minLength: 1 }))),
   model: Type.Optional(Type.String({ minLength: 1 })),
   body: Type.String(),
