@@ -362,6 +362,13 @@ export function normalizeMultiAgentSettings(value: unknown): MultiAgentSettings 
   };
 }
 
+const LIBRARY_LOCATION_ID_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const LIBRARY_LOCATION_ID_MAX_LENGTH = 64;
+
+function isLibraryLocationIdShape(value: string): boolean {
+  return value.length <= LIBRARY_LOCATION_ID_MAX_LENGTH && LIBRARY_LOCATION_ID_SHAPE.test(value);
+}
+
 export function normalizeLibraryLocationSettings(
   value: unknown,
   defaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS
@@ -369,6 +376,10 @@ export function normalizeLibraryLocationSettings(
   const normalized = { ...defaults };
   if (isRecord(value)) {
     for (const [locationId, enabled] of Object.entries(value)) {
+      // `Type.Record` compiles the key schema down to a bare `^(.*)$` pattern
+      // and drops its length bounds, so the id shape is only enforced here.
+      // Without this the PUT body's keys are persisted verbatim, forever.
+      if (!isLibraryLocationIdShape(locationId)) continue;
       if (typeof enabled === 'boolean') normalized[locationId] = enabled;
     }
   }
