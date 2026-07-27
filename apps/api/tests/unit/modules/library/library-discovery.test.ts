@@ -9,6 +9,7 @@ import {
   enabledLibraryLocations,
   resetLibraryDiscoveryCache,
 } from '../../../../src/modules/library/application/library-discovery';
+import { MAX_LIBRARY_FILE_BYTES } from '../../../../src/modules/library/infrastructure/instance-reader';
 import { LibraryCache } from '../../../../src/modules/library/infrastructure/library-cache';
 
 let root: string;
@@ -95,8 +96,62 @@ describe('discoverLibraryResources', () => {
       },
     });
 
-    expect(new Set(resources.map(({ ref }) => ref.kind))).toEqual(
-      new Set(['skill', 'subagent', 'instruction', 'setting', 'hook'])
+    expect(resources.map(({ key }) => key)).toEqual([
+      'hook:hooks',
+      'instruction:global',
+      'setting:settings',
+      'skill:review',
+      'subagent:review',
+    ]);
+  });
+
+  it('gives differently named instruction files one cross-target identity', async () => {
+    const claudeFile = join(root, 'CLAUDE.md');
+    const codexFile = join(root, 'AGENTS.md');
+    writeFileSync(claudeFile, '# Shared\n');
+    writeFileSync(codexFile, '# Shared\n');
+
+    const [resource, ...rest] = await discoverLibraryResources(getDb(), 'instruction-user', {
+      cache: new LibraryCache(),
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        libraryLocations: { 'claude-instructions': true, 'codex-instructions': true },
+      },
+      locationPathOverrides: {
+        'claude-instructions': claudeFile,
+        'codex-instructions': codexFile,
+      },
+    });
+
+    expect(rest).toEqual([]);
+    expect(resource?.key).toBe('instruction:global');
+    expect(resource?.divergence).toBe('uniform');
+    expect(resource?.coverage).toEqual(
+      expect.arrayContaining(
+        [
+          { targetId: 'claude', state: 'present', shadowedLocationIds: [] },
+          { targetId: 'codex', state: 'present', shadowedLocationIds: [] },
+        ].map((coverage) => expect.objectContaining(coverage))
+      )
     );
+  });
+
+  it('reports a settings file that exceeds the instance byte budget as too large', async () => {
+    const settingsFile = join(root, 'config.toml');
+    writeFileSync(settingsFile, `note = "${'x'.repeat(MAX_LIBRARY_FILE_BYTES)}"\n`);
+
+    const [resource] = await discoverLibraryResources(getDb(), 'oversized-user', {
+      cache: new LibraryCache(),
+      settings: {
+        ...DEFAULT_APP_SETTINGS,
+        libraryLocations: { 'mango-settings': true },
+      },
+      locationPathOverrides: { 'mango-settings': settingsFile },
+    });
+
+    const [instance] = resource?.instances ?? [];
+    expect(instance?.valid).toBe(false);
+    expect(instance?.valid === false && instance.invalidReason).toBe('too-large');
+    expect(instance?.contentHash).toBeUndefined();
   });
 });

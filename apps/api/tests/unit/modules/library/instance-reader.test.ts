@@ -133,6 +133,67 @@ describe('readLocationInstances', () => {
     }
   });
 
+  it('reports a directory whose name breaks the per-kind slug rule', async () => {
+    const badSlugDir = join(root, 'Not_A_Skill');
+    mkdirSync(badSlugDir);
+    writeFileSync(join(badSlugDir, 'SKILL.md'), '---\nname: Not_A_Skill\ndescription: X\n---\n');
+
+    const results = await readLocationInstances(skillLocation(), root, {
+      cache: new LibraryCache(),
+      force: false,
+    });
+
+    expect(results[0]?.ref.slug).toBe('Not_A_Skill');
+    expect(results[0]?.instance).toMatchObject({ valid: false, invalidReason: 'invalid-slug' });
+  });
+
+  it('reports an oversized skill entrypoint without reading it', async () => {
+    const skillDir = join(root, 'oversized-skill');
+    mkdirSync(skillDir);
+    writeFileSync(join(skillDir, 'SKILL.md'), 'x'.repeat(256 * 1024 + 1));
+    let contentReads = 0;
+    const countingFs: LibraryInstanceReaderFs = {
+      readDirectory: (path) => readdir(path, { withFileTypes: true }),
+      readFile(path) {
+        contentReads += 1;
+        return readFile(path);
+      },
+      realPath: (path) => realpath(path),
+      async stat(path) {
+        const value = await stat(path);
+        return {
+          size: value.size,
+          mtimeMs: value.mtimeMs,
+          isFile: value.isFile(),
+          isDirectory: value.isDirectory(),
+        };
+      },
+    };
+
+    const results = await readLocationInstances(skillLocation(), root, {
+      cache: new LibraryCache(),
+      force: false,
+      fs: countingFs,
+    });
+
+    expect(results[0]?.instance).toMatchObject({ valid: false, invalidReason: 'too-large' });
+    expect(contentReads).toBe(0);
+  });
+
+  it('names a single-file resource from the registry, not from the filename', async () => {
+    const location = getLibraryLocation('claude-instructions');
+    if (!location) throw new Error('Missing claude-instructions test fixture.');
+    const instructionFile = join(root, 'CLAUDE.md');
+    writeFileSync(instructionFile, '# Global\n');
+
+    const results = await readLocationInstances(location, instructionFile, {
+      cache: new LibraryCache(),
+      force: false,
+    });
+
+    expect(results[0]?.ref).toEqual({ kind: 'instruction', slug: 'global' });
+  });
+
   it('does not reopen unchanged content when the instance fingerprint is cached', async () => {
     const skillDir = join(root, 'cached-skill');
     mkdirSync(skillDir);

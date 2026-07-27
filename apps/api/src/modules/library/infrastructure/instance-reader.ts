@@ -8,14 +8,27 @@ import {
   type LibraryInstance,
   type LibraryInvalidReason,
   type LibraryResourceRef,
+  normalizeHashPath,
 } from '@mangostudio/shared/library';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import { parse as parseToml } from 'smol-toml';
+import { isValidKindSlug } from '../domain/kind-rules';
 import type { LocationDefinition } from '../domain/registry';
 import type { CachedInstanceDisplay, CachedInstanceHash, LibraryCache } from './library-cache';
 
 const textDecoder = new TextDecoder();
 const SKILL_ENTRYPOINT = 'SKILL.md';
+
+/**
+ * Byte budgets for a single instance. A cold scan reads and hashes every leaf
+ * file of every instance, and the skill adapter runs that scan on the chat-turn
+ * path, so one oversized asset must not be able to stall a turn or balloon peak
+ * memory. Over-budget instances are reported `too-large` and never read.
+ */
+export const MAX_LIBRARY_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_LIBRARY_INSTANCE_BYTES = 16 * 1024 * 1024;
+/** Parity with the legacy skill scanner, which capped SKILL.md at this size. */
+const MAX_SKILL_ENTRYPOINT_BYTES = 256 * 1024;
 
 interface FileMetadata {
   readonly size: number;
@@ -79,7 +92,10 @@ export async function readLocationInstances(
 ): Promise<ReadLibraryInstance[]> {
   const fs = options.fs ?? nodeFs;
   if (location.layout === 'single-file') {
-    const slug = basename(locationPath, extname(locationPath));
+    // The registry names the resource, so the vendor's filename never becomes
+    // identity: CLAUDE.md and AGENTS.md are one `instruction:global` row, and
+    // two unrelated `config.toml` files do not merge into one resource.
+    const slug = location.resourceSlug ?? basename(locationPath, extname(locationPath));
     return readOneEntry(location, slug, locationPath, 'file', options, fs);
   }
 
@@ -132,6 +148,8 @@ async function readOneEntry(
   fs: LibraryInstanceReaderFs,
   containmentRoot?: string
 ): Promise<ReadLibraryInstance[]> {
+  // The library-wide pattern is what makes a slug expressible as a resource ref
+  // at all, so an entry that fails it cannot be reported — only skipped.
   if (!isValidResourceSlug(slug)) return [];
 
   const ref = { kind: location.kind, slug } as const;
@@ -143,17 +161,16 @@ async function readOneEntry(
     return [invalidInstance(ref, location, path, 0, 'unreadable')];
   }
 
+  const modifiedAtMs = Math.max(0, Math.round(metadata.mtimeMs));
   const hasExpectedType = expectedType === 'directory' ? metadata.isDirectory : metadata.isFile;
   if (!hasExpectedType) {
-    return [
-      invalidInstance(
-        ref,
-        location,
-        path,
-        Math.max(0, Math.round(metadata.mtimeMs)),
-        'unexpected-entry-type'
-      ),
-    ];
+    return [invalidInstance(ref, location, path, modifiedAtMs, 'unexpected-entry-type')];
+  }
+  if (!isValidKindSlug(location.kind, slug)) {
+    return [invalidInstance(ref, location, path, modifiedAtMs, 'invalid-slug')];
+  }
+  if (expectedType === 'file' && metadata.size > MAX_LIBRARY_FILE_BYTES) {
+    return [invalidInstance(ref, location, path, modifiedAtMs, 'too-large')];
   }
 
   try {
@@ -169,10 +186,7 @@ async function readOneEntry(
     const instanceBase = {
       locationId: location.id,
       path,
-      modifiedAtMs:
-        expectedType === 'directory'
-          ? directoryModifiedAt(hashed.fingerprint)
-          : Math.max(0, Math.round(metadata.mtimeMs)),
+      modifiedAtMs: hashed.modifiedAtMs,
       format: location.format,
       ...(display.title && { title: display.title }),
       ...(display.description && { description: display.description }),
@@ -185,18 +199,20 @@ async function readOneEntry(
 
     return [{ ref, instance, whitespaceHash: hashed.value.whitespaceHash }];
   } catch (error) {
-    const invalidReason: LibraryInvalidReason =
-      error instanceof PathEscapeError ? 'path-escape' : 'unreadable';
-    return [
-      invalidInstance(
-        ref,
-        location,
-        path,
-        Math.max(0, Math.round(metadata.mtimeMs)),
-        invalidReason
-      ),
-    ];
+    return [invalidInstance(ref, location, path, modifiedAtMs, invalidReasonFor(error))];
   }
+}
+
+function invalidReasonFor(error: unknown): LibraryInvalidReason {
+  if (error instanceof PathEscapeError) return 'path-escape';
+  if (error instanceof InstanceTooLargeError) return 'too-large';
+  return 'unreadable';
+}
+
+interface HashedInstance {
+  readonly fingerprint: string;
+  readonly modifiedAtMs: number;
+  readonly value: CachedInstanceHash;
 }
 
 async function hashFile(
@@ -206,31 +222,23 @@ async function hashFile(
   metadata: FileMetadata,
   options: ReadLibraryInstancesOptions,
   fs: LibraryInstanceReaderFs
-): Promise<{ readonly fingerprint: string; readonly value: CachedInstanceHash }> {
+): Promise<HashedInstance> {
   const fingerprint = `${path}\0${metadata.size}\0${metadata.mtimeMs}`;
   const value = await options.cache.getOrComputeInstanceHash(
     path,
     fingerprint,
     options.force,
     async () => {
-      const bytesByPath = new Map<string, Uint8Array>();
-      const result = await hashLibraryFile(path, {
-        async readFile(filePath) {
-          const bytes = await fs.readFile(filePath);
-          bytesByPath.set(filePath, bytes);
-          return bytes;
-        },
-      });
+      const bytes = await fs.readFile(path);
+      const result = await hashLibraryFile(path, { readFile: () => bytes });
       return {
         ...result,
-        whitespaceHash: hashWhitespaceManifest([
-          [basename(path), bytesByPath.get(path) ?? (await fs.readFile(path))],
-        ]),
-        display: await readDisplayMetadata(location, slug, path, 'file', fs, bytesByPath.get(path)),
+        whitespaceHash: combineWhitespaceDigests([[basename(path), whitespaceDigest(bytes)]]),
+        display: describeInstance(location, slug, textDecoder.decode(bytes)),
       };
     }
   );
-  return { fingerprint, value };
+  return { fingerprint, modifiedAtMs: Math.max(0, Math.round(metadata.mtimeMs)), value };
 }
 
 async function hashDirectory(
@@ -240,50 +248,73 @@ async function hashDirectory(
   rootMetadata: FileMetadata,
   options: ReadLibraryInstancesOptions,
   fs: LibraryInstanceReaderFs
-): Promise<{ readonly fingerprint: string; readonly value: CachedInstanceHash }> {
+): Promise<HashedInstance> {
   const leaves = await collectLeafFiles(path, fs);
+  assertWithinByteBudget(location, leaves);
   const fingerprint = [
     `.\0${rootMetadata.size}\0${rootMetadata.mtimeMs}\n`,
     ...leaves.map((leaf) => `${leaf.relativePath}\0${leaf.size}\0${leaf.mtimeMs}\n`),
   ].join('');
+  const modifiedAtMs = leaves.reduce(
+    (newest, leaf) => Math.max(newest, leaf.mtimeMs),
+    rootMetadata.mtimeMs
+  );
   const value = await options.cache.getOrComputeInstanceHash(
     path,
     fingerprint,
     options.force,
     async () => {
-      const bytesByCanonicalPath = new Map<string, Uint8Array>();
+      // Several leaves can share one canonical path when a leaf is a symlink to
+      // a sibling, and the hash reader only ever sees the canonical one.
+      const relativePathsByCanonicalPath = new Map<string, string[]>();
+      await Promise.all(
+        leaves.map(async (leaf) => {
+          const canonicalPath = normalizeHashPath(await fs.realPath(leaf.absolutePath));
+          const known = relativePathsByCanonicalPath.get(canonicalPath) ?? [];
+          known.push(leaf.relativePath);
+          relativePathsByCanonicalPath.set(canonicalPath, known);
+        })
+      );
+
+      const whitespaceDigests: [string, string][] = [];
+      let entrypointText: string | undefined;
       const result = await hashLibraryDirectory(path, {
         listFiles: () => leaves.map((leaf) => leaf.relativePath),
         realPath: fs.realPath,
         async readFile(filePath) {
           const bytes = await fs.readFile(filePath);
-          bytesByCanonicalPath.set(filePath, bytes);
+          // Digest each file as it is read and keep only the digest. Retaining
+          // every leaf's bytes made peak memory the size of the whole library.
+          for (const relativePath of relativePathsByCanonicalPath.get(filePath) ?? []) {
+            whitespaceDigests.push([relativePath, whitespaceDigest(bytes)]);
+            if (relativePath === SKILL_ENTRYPOINT) entrypointText = textDecoder.decode(bytes);
+          }
           return bytes;
         },
       });
       if (!result.valid) throw new PathEscapeError();
 
-      const whitespaceEntries = await Promise.all(
-        leaves.map(async (leaf) => {
-          const canonicalPath = await fs.realPath(leaf.absolutePath);
-          const bytes =
-            bytesByCanonicalPath.get(canonicalPath) ?? (await fs.readFile(canonicalPath));
-          return [leaf.relativePath, bytes] as const;
-        })
-      );
-      const primaryLeaf = leaves.find((leaf) => leaf.relativePath === SKILL_ENTRYPOINT);
-      const primaryBytes = primaryLeaf
-        ? bytesByCanonicalPath.get(await fs.realPath(primaryLeaf.absolutePath))
-        : undefined;
       return {
         contentHash: result.contentHash,
         sizeBytes: result.sizeBytes,
-        whitespaceHash: hashWhitespaceManifest(whitespaceEntries),
-        display: await readDisplayMetadata(location, slug, path, 'directory', fs, primaryBytes),
+        whitespaceHash: combineWhitespaceDigests(whitespaceDigests),
+        display: describeInstance(location, slug, entrypointText),
       };
     }
   );
-  return { fingerprint, value };
+  return { fingerprint, modifiedAtMs: Math.max(0, Math.round(modifiedAtMs)), value };
+}
+
+function assertWithinByteBudget(location: LocationDefinition, leaves: readonly LeafFile[]): void {
+  let totalBytes = 0;
+  for (const leaf of leaves) {
+    if (leaf.size > MAX_LIBRARY_FILE_BYTES) throw new InstanceTooLargeError();
+    if (location.kind === 'skill' && leaf.relativePath === SKILL_ENTRYPOINT) {
+      if (leaf.size > MAX_SKILL_ENTRYPOINT_BYTES) throw new InstanceTooLargeError();
+    }
+    totalBytes += leaf.size;
+    if (totalBytes > MAX_LIBRARY_INSTANCE_BYTES) throw new InstanceTooLargeError();
+  }
 }
 
 async function collectLeafFiles(
@@ -321,28 +352,17 @@ async function collectLeafFiles(
   return leaves.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 
-async function readDisplayMetadata(
+/**
+ * Derives display metadata from the entrypoint text the hash pass already read.
+ * `text` is undefined only when a directory instance has no entrypoint at all —
+ * an unreadable one fails the hash pass first and never reaches here.
+ */
+function describeInstance(
   location: LocationDefinition,
   slug: string,
-  path: string,
-  layout: 'file' | 'directory',
-  fs: LibraryInstanceReaderFs,
-  primaryBytes?: Uint8Array
-): Promise<CachedInstanceDisplay> {
-  const primaryPath = layout === 'directory' ? join(path, SKILL_ENTRYPOINT) : path;
-  let text: string;
-  if (primaryBytes) {
-    text = textDecoder.decode(primaryBytes);
-  } else {
-    try {
-      text = textDecoder.decode(await fs.readFile(primaryPath));
-    } catch (error) {
-      return {
-        title: slug,
-        invalidReason: isMissing(error) ? 'missing-entrypoint' : 'unreadable',
-      };
-    }
-  }
+  text: string | undefined
+): CachedInstanceDisplay {
+  if (text === undefined) return { title: slug, invalidReason: 'missing-entrypoint' };
 
   try {
     if (location.format === 'markdown-frontmatter' || location.format === 'mdc') {
@@ -413,25 +433,20 @@ function fileSlug(name: string): string {
   return basename(name, extname(name));
 }
 
-function hashWhitespaceManifest(entries: readonly (readonly [string, Uint8Array])[]): string {
-  const hash = createHash('sha256');
-  hash.update('mangostudio/library/whitespace\0');
-  for (const [path, bytes] of entries) {
-    hash.update(path);
-    hash.update('\0');
-    hash.update(textDecoder.decode(bytes).replaceAll(/\s+/g, ''));
-    hash.update('\n');
-  }
-  return hash.digest('hex');
+function whitespaceDigest(bytes: Uint8Array): string {
+  return createHash('sha256')
+    .update(textDecoder.decode(bytes).replaceAll(/\s+/g, ''))
+    .digest('hex');
 }
 
-function directoryModifiedAt(fingerprint: string): number {
-  let modifiedAtMs = 0;
-  for (const line of fingerprint.split('\n')) {
-    const raw = line.split('\0')[2];
-    if (raw) modifiedAtMs = Math.max(modifiedAtMs, Number(raw));
+/** Order-independent so it never depends on which order the hash pass read in. */
+function combineWhitespaceDigests(entries: readonly (readonly [string, string])[]): string {
+  const hash = createHash('sha256');
+  hash.update('mangostudio/library/whitespace\0');
+  for (const [path, digest] of [...entries].sort(([left], [right]) => left.localeCompare(right))) {
+    hash.update(`${path}\0${digest}\n`);
   }
-  return Math.max(0, Math.round(modifiedAtMs));
+  return hash.digest('hex');
 }
 
 function scalarString(value: unknown): string | undefined {
@@ -460,3 +475,4 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
 }
 
 class PathEscapeError extends Error {}
+class InstanceTooLargeError extends Error {}
