@@ -376,6 +376,31 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
   },
 ];
 
+/**
+ * Filename extension each file-backed format uses. `agent-profile-db` has none
+ * because it is not file-backed at all, and a writer that reaches it is asking
+ * to write a database row to disk.
+ */
+const FORMAT_EXTENSIONS: Readonly<Record<ResourceFormat, string | null>> = {
+  'markdown-plain': '.md',
+  'markdown-frontmatter': '.md',
+  mdc: '.mdc',
+  'toml-agent': '.toml',
+  'toml-settings': '.toml',
+  'json-settings': '.json',
+  'rules-dsl': '.rules',
+  'agent-profile-db': null,
+};
+
+/**
+ * The filename `slug` takes inside a `directory-of-files` location, matching the
+ * extension discovery scans for. Returns null for formats with no file form.
+ */
+export function resourceEntryName(location: LocationDefinition, slug: string): string | null {
+  const extension = FORMAT_EXTENSIONS[location.format];
+  return extension === null ? null : `${slug}${extension}`;
+}
+
 const locationById = new Map(
   LIBRARY_LOCATION_DEFINITIONS.map((location) => [location.id, location] as const)
 );

@@ -61,6 +61,11 @@ export interface MangoConfig {
     backupDir: string;
     /** Maximum number of apply backup sets retained on disk. */
     backupRetentionCount: number;
+    /**
+     * Total byte budget for retained backup sets. Skill directories can be
+     * large, so a count alone lets backups become a mystery disk consumer.
+     */
+    backupRetentionBytes: number;
   };
   checkpoints: {
     dir: string;
@@ -125,7 +130,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   images: { dir: '' },
   agents: { dir: '' },
   skills: { dir: '' },
-  library: { backupDir: '', backupRetentionCount: 10 },
+  library: { backupDir: '', backupRetentionCount: 10, backupRetentionBytes: 512 * 1024 * 1024 },
   checkpoints: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
@@ -223,6 +228,12 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
     const count = Number(v);
     if (Number.isSafeInteger(count) && count > 0) {
       cfg.library.backupRetentionCount = count;
+    }
+  },
+  MANGO_LIBRARY_BACKUP_RETENTION_BYTES: (cfg, v) => {
+    const bytes = Number(v);
+    if (Number.isSafeInteger(bytes) && bytes > 0) {
+      cfg.library.backupRetentionBytes = bytes;
     }
   },
 };
@@ -411,6 +422,13 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
       library.backup_retention_count > 0
     ) {
       cfg.library.backupRetentionCount = library.backup_retention_count;
+    }
+    if (
+      typeof library.backup_retention_bytes === 'number' &&
+      Number.isSafeInteger(library.backup_retention_bytes) &&
+      library.backup_retention_bytes > 0
+    ) {
+      cfg.library.backupRetentionBytes = library.backup_retention_bytes;
     }
   }
 

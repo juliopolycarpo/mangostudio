@@ -139,6 +139,41 @@ export async function readLocationInstances(
   return described.flat();
 }
 
+/** Reads a file-backed resource's raw bytes, for copying it to a destination. */
+export function readResourceFile(
+  path: string,
+  fs: LibraryInstanceReaderFs = nodeFs
+): Promise<Uint8Array> {
+  return Promise.resolve(fs.readFile(path));
+}
+
+/**
+ * Hashes what is on disk at `path` the way a scan would, for verifying a write
+ * landed. Propagation re-hashes every destination it writes: "the call returned
+ * without error" is not good enough on the one code path that replaces files a
+ * user cares about, and a truncated write or a bad adapter output has to be
+ * caught here rather than by the user noticing weeks later.
+ */
+export async function hashResourceAt(
+  path: string,
+  expectedType: 'file' | 'directory',
+  fs: LibraryInstanceReaderFs = nodeFs
+): Promise<string> {
+  if (expectedType === 'file') {
+    const { contentHash } = await hashLibraryFile(path, { readFile: () => fs.readFile(path) });
+    return contentHash;
+  }
+
+  const leaves = await collectLeafFiles(path, fs);
+  const result = await hashLibraryDirectory(path, {
+    listFiles: () => leaves.map((leaf) => leaf.relativePath),
+    realPath: fs.realPath,
+    readFile: fs.readFile,
+  });
+  if (!result.valid) throw new PathEscapeError();
+  return result.contentHash;
+}
+
 async function readOneEntry(
   location: LocationDefinition,
   slug: string,

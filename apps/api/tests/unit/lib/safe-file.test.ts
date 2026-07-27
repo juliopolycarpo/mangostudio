@@ -1,15 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
+  chmodSync,
+  linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   RegularFileReadError,
   type RegularFileReadFailure,
@@ -208,3 +213,237 @@ function expectReadFailure(run: () => unknown, reason: RegularFileReadFailure): 
   expect(caught).toBeInstanceOf(RegularFileReadError);
   expect((caught as RegularFileReadError).reason).toBe(reason);
 }
+
+/**
+ * Regression coverage for #617: the sync writer used to replace a symlinked
+ * destination with a regular file, silently detaching a dotfiles-managed path.
+ */
+describe('writeFileAtomic through symlinks', () => {
+  it('writes through a symlink and leaves the link pointing where it did', () => {
+    if (isWindows) return;
+    const target = join(dir, 'dotfiles', 'config.toml');
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, 'old\n');
+    const link = join(dir, 'config.toml');
+    symlinkSync(target, link);
+
+    writeFileAtomic(link, 'new\n');
+
+    expect(readFileSync(target, 'utf8')).toBe('new\n');
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(link)).toBe(target);
+  });
+
+  it('stages beside the target, not beside the link', () => {
+    if (isWindows) return;
+    // A dotfiles repo on a separate mount would fail EXDEV if the temp file were
+    // staged next to the link and renamed across filesystems.
+    const targetDir = join(dir, 'dotfiles');
+    mkdirSync(targetDir);
+    const target = join(targetDir, 'config.toml');
+    writeFileSync(target, 'old\n');
+    const linkDir = join(dir, 'home');
+    mkdirSync(linkDir);
+    const link = join(linkDir, 'config.toml');
+    symlinkSync(target, link);
+
+    writeFileAtomic(link, 'new\n');
+
+    expect(readFileSync(target, 'utf8')).toBe('new\n');
+    // Neither directory keeps a temp file, and the link directory never held one.
+    expect(readdirSync(targetDir)).toEqual(['config.toml']);
+    expect(readdirSync(linkDir)).toEqual(['config.toml']);
+  });
+
+  it('creates the target of a dangling symlink instead of throwing', () => {
+    if (isWindows) return;
+    // A fresh dotfiles checkout, which is exactly when a user first saves.
+    const target = join(dir, 'dotfiles', 'config.toml');
+    mkdirSync(dirname(target), { recursive: true });
+    const link = join(dir, 'config.toml');
+    symlinkSync(target, link);
+
+    writeFileAtomic(link, 'first\n');
+
+    expect(readFileSync(target, 'utf8')).toBe('first\n');
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+  });
+
+  it('follows a chain of symlinks to the real file', () => {
+    if (isWindows) return;
+    const target = join(dir, 'real.toml');
+    writeFileSync(target, 'old\n');
+    const middle = join(dir, 'middle.toml');
+    const outer = join(dir, 'outer.toml');
+    symlinkSync(target, middle);
+    symlinkSync(middle, outer);
+
+    writeFileAtomic(outer, 'new\n');
+
+    expect(readFileSync(target, 'utf8')).toBe('new\n');
+    expect(lstatSync(outer).isSymbolicLink()).toBe(true);
+  });
+
+  it('throws on a symlink cycle rather than hanging', () => {
+    if (isWindows) return;
+    const first = join(dir, 'a');
+    const second = join(dir, 'b');
+    symlinkSync(second, first);
+    symlinkSync(first, second);
+
+    expect(() => writeFileAtomic(first, 'content')).toThrow();
+  });
+
+  it('refuses a symlink whose target is not a regular file, naming both', () => {
+    if (isWindows) return;
+    const target = join(dir, 'a-directory');
+    mkdirSync(target);
+    const link = join(dir, 'config.toml');
+    symlinkSync(target, link);
+
+    let message = '';
+    try {
+      writeFileAtomic(link, 'content');
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    expect(message).toContain(link);
+    expect(message).toContain(target);
+    expect(message).toContain('not a regular file');
+  });
+
+  it('refuses a read-only target instead of replacing it', () => {
+    if (isWindows || process.getuid?.() === 0) return;
+    const target = join(dir, 'dotfiles', 'config.toml');
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, 'protected\n');
+    chmodSync(target, 0o444);
+    const link = join(dir, 'config.toml');
+    symlinkSync(target, link);
+
+    expect(() => writeFileAtomic(link, 'overwrite')).toThrow(RegularFileWriteError);
+    expect(readFileSync(target, 'utf8')).toBe('protected\n');
+  });
+
+  it('refuses a read-only regular destination with no symlink involved', () => {
+    if (isWindows || process.getuid?.() === 0) return;
+    const target = join(dir, 'config.toml');
+    writeFileSync(target, 'protected\n');
+    chmodSync(target, 0o444);
+
+    expect(() => writeFileAtomic(target, 'overwrite')).toThrow(RegularFileWriteError);
+    expect(readFileSync(target, 'utf8')).toBe('protected\n');
+  });
+
+  it('inherits the destination permission bits when no mode is requested', () => {
+    if (isWindows) return;
+    const target = join(dir, 'config.toml');
+    writeFileSync(target, 'old\n', { mode: 0o600 });
+
+    writeFileAtomic(target, 'new\n');
+
+    expect(statSync(target).mode & 0o777).toBe(0o600);
+  });
+
+  it('keeps copy-on-write semantics for a hard-linked destination', () => {
+    if (isWindows) return;
+    const target = join(dir, 'config.toml');
+    writeFileSync(target, 'shared\n');
+    const hardLink = join(dir, 'other.toml');
+    linkSync(target, hardLink);
+
+    writeFileAtomic(target, 'changed\n');
+
+    expect(readFileSync(target, 'utf8')).toBe('changed\n');
+    expect(readFileSync(hardLink, 'utf8')).toBe('shared\n');
+  });
+});
+
+/**
+ * The two writers differ on symlinks **on purpose**, and agree everywhere else.
+ * Encoding that here means a well-meaning refactor that unifies them fails this
+ * test instead of silently changing one of the policies.
+ */
+describe('atomic writer policy divergence', () => {
+  const scenarios = [
+    {
+      name: 'symlink to a regular file',
+      setUp: (): string => {
+        const target = join(dir, 'target.txt');
+        writeFileSync(target, 'old\n');
+        const link = join(dir, 'link.txt');
+        symlinkSync(target, link);
+        return link;
+      },
+      syncSucceeds: true,
+      asyncSucceeds: false,
+    },
+    {
+      name: 'plain regular file',
+      setUp: (): string => {
+        const target = join(dir, 'plain.txt');
+        writeFileSync(target, 'old\n');
+        return target;
+      },
+      syncSucceeds: true,
+      asyncSucceeds: true,
+    },
+    {
+      name: 'path that does not exist yet',
+      setUp: (): string => join(dir, 'fresh.txt'),
+      syncSucceeds: true,
+      asyncSucceeds: true,
+    },
+    {
+      name: 'directory in the way',
+      setUp: (): string => {
+        const target = join(dir, 'a-directory');
+        mkdirSync(target);
+        return target;
+      },
+      syncSucceeds: false,
+      asyncSucceeds: false,
+    },
+  ] as const;
+
+  for (const scenario of scenarios) {
+    it(`agrees or diverges as recorded for a ${scenario.name}`, async () => {
+      if (isWindows) return;
+
+      const syncPath = scenario.setUp();
+      let syncSucceeded = true;
+      try {
+        writeFileAtomic(syncPath, 'written\n');
+      } catch {
+        syncSucceeded = false;
+      }
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+
+      const asyncPath = scenario.setUp();
+      let asyncSucceeded = true;
+      try {
+        await writeRegularFileAtomic(asyncPath, 'written\n');
+      } catch {
+        asyncSucceeded = false;
+      }
+
+      expect(syncSucceeded).toBe(scenario.syncSucceeds);
+      expect(asyncSucceeded).toBe(scenario.asyncSucceeds);
+    });
+  }
+
+  it('keeps the async writer rejecting symlinks with its typed error', async () => {
+    if (isWindows) return;
+    const target = join(dir, 'target.txt');
+    writeFileSync(target, 'old\n');
+    const link = join(dir, 'link.txt');
+    symlinkSync(target, link);
+
+    await expect(writeRegularFileAtomic(link, 'new\n')).rejects.toBeInstanceOf(
+      RegularFileWriteError
+    );
+    expect(readFileSync(target, 'utf8')).toBe('old\n');
+  });
+});

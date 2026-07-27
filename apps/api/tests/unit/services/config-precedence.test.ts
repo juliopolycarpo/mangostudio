@@ -40,6 +40,7 @@ const WATCHED_ENV_KEYS = [
   'MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR',
   'MANGO_LIBRARY_BACKUP_DIR',
   'MANGO_LIBRARY_BACKUP_RETENTION_COUNT',
+  'MANGO_LIBRARY_BACKUP_RETENTION_BYTES',
   'MANGO_ENV_LTS_REFRESH',
   'MANGO_ENV_INSTALLS_ENABLED',
   'MANGO_CONTAINER',
@@ -344,7 +345,7 @@ describe('config precedence', () => {
   test('loads library backup settings from config.toml', () => {
     writeFileSync(
       TMP_TOML,
-      '[library]\nbackup_dir = "/tmp/library-backups"\nbackup_retention_count = 7\n'
+      '[library]\nbackup_dir = "/tmp/library-backups"\nbackup_retention_count = 7\nbackup_retention_bytes = 2048\n'
     );
 
     const cfg = loadConfig(TMP_TOML);
@@ -352,6 +353,7 @@ describe('config precedence', () => {
     expect(cfg.library).toEqual({
       backupDir: '/tmp/library-backups',
       backupRetentionCount: 7,
+      backupRetentionBytes: 2048,
     });
   });
 
@@ -362,22 +364,26 @@ describe('config precedence', () => {
     );
     process.env.MANGO_LIBRARY_BACKUP_DIR = '/tmp/from-env';
     process.env.MANGO_LIBRARY_BACKUP_RETENTION_COUNT = '3';
+    process.env.MANGO_LIBRARY_BACKUP_RETENTION_BYTES = '4096';
 
     const cfg = loadConfig(TMP_TOML);
 
     expect(cfg.library).toEqual({
       backupDir: '/tmp/from-env',
       backupRetentionCount: 3,
+      backupRetentionBytes: 4096,
     });
   });
 
   test('ignores invalid library backup retention overrides', () => {
     writeFileSync(TMP_TOML, '[library]\nbackup_retention_count = 7\n');
     process.env.MANGO_LIBRARY_BACKUP_RETENTION_COUNT = '0';
+    process.env.MANGO_LIBRARY_BACKUP_RETENTION_BYTES = '-1';
 
     const cfg = loadConfig(TMP_TOML);
 
     expect(cfg.library.backupRetentionCount).toBe(7);
+    expect(cfg.library.backupRetentionBytes).toBe(512 * 1024 * 1024);
   });
 
   test('keeps test library backups inside the managed test sandbox', () => {

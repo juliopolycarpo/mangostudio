@@ -21,6 +21,7 @@ import { turnRecoveryRoutes } from './modules/generation/http/turn-recovery-rout
 import { gitRoutes } from './modules/git/http/git-routes';
 import { githubRoutes } from './modules/github/http/github-routes';
 import { libraryRoutes } from './modules/library/http/library-routes';
+import { propagationRoutes } from './modules/library/http/propagation-routes';
 import { mcpServerRoutes } from './modules/mcp-servers/http/mcp-server-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
 import { skillRoutes } from './modules/skills/http/skill-routes';
@@ -73,6 +74,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(gitRoutes)
   .use(githubRoutes)
   .use(libraryRoutes)
+  .use(propagationRoutes)
   .use(settingsRoutes)
   .use(skillRoutes)
   .use(mcpServerRoutes)
