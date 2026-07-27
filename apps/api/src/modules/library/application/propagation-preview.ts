@@ -39,6 +39,7 @@ import {
 import { PropagationRequestError } from '../domain/propagation-error';
 import { getLibraryLocation, type LocationDefinition } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
+import { isAgentStrategyAvailable } from './adapters/agent-strategy';
 import { acknowledgedResourceKeys } from './conflict-resolution';
 import { discoverLibraryResources, enabledLibraryLocations } from './library-discovery';
 
@@ -47,6 +48,8 @@ export interface PropagationPreviewDeps {
   discover(userId: string, kinds: readonly ResourceKind[]): Promise<LibraryResource[]>;
   describeLocation(id: LibraryLocationId): LibraryLocationStatus;
   adapters: AdapterCatalog;
+  /** Model-backed adapters disappear from the catalog when no connector is ready. */
+  agentAvailable(userId: string): Promise<boolean>;
   /** Resources whose current divergence the user has already accepted. */
   acknowledgedKeys(
     userId: string,
@@ -60,6 +63,7 @@ const defaultPropagationPreviewDeps: PropagationPreviewDeps = {
   discover: (userId, kinds) => discoverLibraryResources(getDb(), userId, { force: true, kinds }),
   describeLocation: (id) => describeLocation(id, createLibraryPathEnv()),
   adapters: defaultAdapterCatalog,
+  agentAvailable: isAgentStrategyAvailable,
   acknowledgedKeys: acknowledgedResourceKeys,
   enabledLocationIds: async (userId) =>
     enabledLibraryLocations((await getAppSettings(getDb(), userId)).libraryLocations),
@@ -102,9 +106,19 @@ export async function previewLibraryPropagation(
   const statuses = new Map(
     locations.map((location) => [location.id, deps.describeLocation(location.id)] as const)
   );
-  const acknowledged = await deps.acknowledgedKeys(userId, resources);
+  const [acknowledged, agentAvailable] = await Promise.all([
+    deps.acknowledgedKeys(userId, resources),
+    deps.agentAvailable(userId),
+  ]);
   const entries = resources.map((resource) =>
-    buildPreviewEntry(resource, locations, statuses, deps.adapters, acknowledged.has(resource.key))
+    buildPreviewEntry(
+      resource,
+      locations,
+      statuses,
+      deps.adapters,
+      acknowledged.has(resource.key),
+      agentAvailable
+    )
   );
   const stateHash = hashPropagationState(resources, statuses);
 
@@ -146,7 +160,8 @@ function buildPreviewEntry(
   locations: readonly LocationDefinition[],
   statuses: ReadonlyMap<LibraryLocationId, LibraryLocationStatus>,
   adapters: AdapterCatalog,
-  acknowledgedDivergence: boolean
+  acknowledgedDivergence: boolean,
+  agentAvailable: boolean
 ): PropagationPreviewEntry {
   const sourceGroups = buildSourceGroups(resource.instances);
   const instanceByLocation = new Map(
@@ -173,7 +188,8 @@ function buildPreviewEntry(
           location,
           statuses.get(location.id),
           instanceByLocation.get(location.id),
-          adapters
+          adapters,
+          agentAvailable
         )
       ),
   };
@@ -223,7 +239,8 @@ function buildDestination(
   location: LocationDefinition,
   status: LibraryLocationStatus | undefined,
   current: LibraryInstance | undefined,
-  adapters: AdapterCatalog
+  adapters: AdapterCatalog,
+  agentAvailable: boolean
 ): PropagationDestination {
   const currentContentHash = current?.valid ? current.contentHash : undefined;
   const base = {
@@ -240,7 +257,7 @@ function buildDestination(
   return {
     ...base,
     outcomes: sourceGroups.map((group) =>
-      classifyOutcome(group, location.format, currentContentHash, adapters)
+      classifyOutcome(ref.kind, group, location, currentContentHash, adapters, agentAvailable)
     ),
   };
 }
@@ -271,27 +288,50 @@ function destinationBlockedReason(
 }
 
 function classifyOutcome(
+  kind: ResourceKind,
   group: PropagationSourceGroup,
-  toFormat: ResourceFormat,
+  destination: LocationDefinition,
   currentContentHash: string | undefined,
-  adapters: AdapterCatalog
+  adapters: AdapterCatalog,
+  agentAvailable: boolean
 ): PropagationOutcome {
+  const toFormat = destination.format;
   // Bytes already stored in this format copy across untouched. A destination
   // that sits inside the group necessarily reaches this branch, so `noop` is
   // only ever reported for a write that would change nothing.
-  if (group.formats.includes(toFormat)) {
+  if (currentContentHash === group.contentHash) {
     return {
       winnerContentHash: group.contentHash,
-      operation:
-        currentContentHash === group.contentHash
-          ? 'noop'
-          : currentContentHash === undefined
-            ? 'create'
-            : 'overwrite',
+      operation: 'noop',
+    };
+  }
+  const sameFormat = group.formats.find((format) => format === toFormat);
+  if (
+    sameFormat &&
+    adapters
+      .strategiesFor({
+        kind,
+        from: sameFormat,
+        to: toFormat,
+        sourceLocationId: group.contentLocationId,
+        targetLocationId: destination.id,
+        agentAvailable,
+      })
+      .includes('verbatim')
+  ) {
+    return {
+      winnerContentHash: group.contentHash,
+      operation: currentContentHash === undefined ? 'create' : 'overwrite',
     };
   }
 
-  const { fromFormat, available, recommended } = selectAdaptation(group, toFormat, adapters);
+  const { fromFormat, available, recommended } = selectAdaptation(
+    kind,
+    group,
+    destination,
+    adapters,
+    agentAvailable
+  );
   const adaptation = {
     fromFormat,
     toFormat,
@@ -319,19 +359,28 @@ function classifyOutcome(
  * can actually convert wins over the first alphabetically.
  */
 function selectAdaptation(
+  kind: ResourceKind,
   group: PropagationSourceGroup,
-  toFormat: ResourceFormat,
-  adapters: AdapterCatalog
+  destination: LocationDefinition,
+  adapters: AdapterCatalog,
+  agentAvailable: boolean
 ): { fromFormat: ResourceFormat; available: AdapterStrategy[]; recommended?: AdapterStrategy } {
   for (const fromFormat of group.formats) {
     const { available, recommended } = rankAdapterStrategies(
-      adapters.strategiesFor(fromFormat, toFormat)
+      adapters.strategiesFor({
+        kind,
+        from: fromFormat,
+        to: destination.format,
+        sourceLocationId: group.contentLocationId,
+        targetLocationId: destination.id,
+        agentAvailable,
+      })
     );
     if (available.length > 0) {
       return { fromFormat, available, ...(recommended !== undefined && { recommended }) };
     }
   }
-  return { fromFormat: group.formats[0] ?? toFormat, available: [] };
+  return { fromFormat: group.formats[0] ?? destination.format, available: [] };
 }
 
 /**

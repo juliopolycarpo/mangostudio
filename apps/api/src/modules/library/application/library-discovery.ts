@@ -72,6 +72,7 @@ export function enabledLibraryLocations(
     Object.entries(settings).flatMap(([id, value]) => (value ? [id as LibraryLocationId] : []))
   );
   enabled.add('mango-skills');
+  enabled.add('mango-agents');
   return enabled;
 }
 

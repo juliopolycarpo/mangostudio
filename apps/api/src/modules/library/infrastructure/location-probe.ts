@@ -55,6 +55,7 @@ const nodeLocationFsProbe: LocationFsProbe = {
 export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv {
   const env = {
     ...process.env,
+    AGENTS_DIR: getConfig().agents.dir,
     SKILLS_DIR: getConfig().skills.dir,
     ...overrides.env,
   };

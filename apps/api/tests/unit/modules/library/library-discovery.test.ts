@@ -54,8 +54,11 @@ describe('discoverLibraryResources', () => {
     expect(resources.map(({ key }) => key)).toEqual(['skill:gh', 'subagent:gh']);
   });
 
-  it('always enables mango-skills even when a malformed map disables it', () => {
-    expect(enabledLibraryLocations({ 'mango-skills': false })).toContain('mango-skills');
+  it('always enables MangoStudio native locations even when a malformed map disables them', () => {
+    const enabled = enabledLibraryLocations({ 'mango-skills': false, 'mango-agents': false });
+
+    expect(enabled.has('mango-skills')).toBe(true);
+    expect(enabled.has('mango-agents')).toBe(true);
   });
 
   it('scans directory and single-file layouts across all five resource kinds', async () => {

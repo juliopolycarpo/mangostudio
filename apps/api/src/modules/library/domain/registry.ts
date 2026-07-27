@@ -70,6 +70,11 @@ function mangoSkillsPath(env: PathEnv): string | null {
   return configuredDir(env, 'SKILLS_DIR', ['.mango', 'skills']);
 }
 
+function mangoAgentsPath(env: PathEnv): string | null {
+  if (!supportsHomeLocations(env)) return null;
+  return configuredDir(env, 'AGENTS_DIR', ['.mango', 'agents']);
+}
+
 function mangoConfigHome(env: PathEnv): string {
   return pathApi(env).join(env.homeDir, '.mango');
 }
@@ -185,6 +190,15 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     layout: 'directory-of-dirs',
     format: 'markdown-frontmatter',
     readBy: ['cursor'],
+  },
+  {
+    id: 'mango-agents',
+    kind: 'subagent',
+    resolvePath: mangoAgentsPath,
+    access: 'read-write',
+    layout: 'directory-of-files',
+    format: 'markdown-frontmatter',
+    readBy: ['mangostudio'],
   },
   {
     id: 'claude-agents',
@@ -332,7 +346,7 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     resolveConfigHome: mangoConfigHome,
     reads: {
       skill: ['mango-skills', 'agents-skills', 'claude-skills'],
-      subagent: [],
+      subagent: ['mango-agents'],
       instruction: ['mango-instructions'],
       setting: ['mango-settings'],
       hook: [],

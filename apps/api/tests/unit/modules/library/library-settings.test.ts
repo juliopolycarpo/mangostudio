@@ -12,6 +12,7 @@ describe('library location settings', () => {
     const defaults = defaultsForDetectedAgents([detected('codex')]);
 
     expect(defaults['mango-skills']).toBe(true);
+    expect(defaults['mango-agents']).toBe(true);
     expect(defaults['agents-skills']).toBe(true);
     expect(defaults['codex-skills']).toBe(true);
     expect(defaults['claude-skills']).toBe(false);

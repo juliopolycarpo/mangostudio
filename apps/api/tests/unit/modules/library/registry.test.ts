@@ -106,6 +106,10 @@ describe('library target registry', () => {
     ]);
   });
 
+  it('uses MangoStudio user agents as its native subagent location', () => {
+    expect(getLibraryTarget('mangostudio')?.reads.subagent).toEqual(['mango-agents']);
+  });
+
   it('keeps Codex native skills ahead of the shared agents location', () => {
     expect(getLibraryTarget('codex')?.reads.skill).toEqual(['codex-skills', 'agents-skills']);
   });
@@ -250,6 +254,15 @@ describe('library location health', () => {
 
     expect(
       describeLocation('mango-skills', { ...LINUX_ENV, env: { SKILLS_DIR: path } }, fs).path
+    ).toBe(path);
+  });
+
+  it('resolves Mango agents from the configured agents directory', () => {
+    const path = '/srv/mango-agents';
+    const fs = new FakeLocationFs(new Set([path]), new Set([path]), new Set([path]));
+
+    expect(
+      describeLocation('mango-agents', { ...LINUX_ENV, env: { AGENTS_DIR: path } }, fs).path
     ).toBe(path);
   });
 });

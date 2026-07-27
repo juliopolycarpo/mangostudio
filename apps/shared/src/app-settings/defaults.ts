@@ -112,6 +112,7 @@ export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
 };
 
 export const DEFAULT_LIBRARY_LOCATION_SETTINGS: LibraryLocationSettings = {
+  'mango-agents': true,
   'mango-skills': true,
 };
 
@@ -384,7 +385,8 @@ export function normalizeLibraryLocationSettings(
     }
   }
 
-  // MangoStudio's native skills location is the one non-toggleable source.
+  // MangoStudio's native resource locations are non-toggleable sources.
+  normalized['mango-agents'] = true;
   normalized['mango-skills'] = true;
   return normalized;
 }

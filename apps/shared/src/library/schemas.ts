@@ -202,6 +202,21 @@ export const AdapterStrategySchema = Type.Union([
   Type.Literal('agent'),
 ]);
 
+export const AdaptNoteSchema = Type.Object({
+  code: Type.Union([
+    Type.Literal('metadata-added'),
+    Type.Literal('field-dropped'),
+    Type.Literal('semantic-rewrite'),
+  ]),
+  message: Type.String({ minLength: 1 }),
+  field: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+export const AdaptProvenanceSchema = Type.Object({
+  modelId: Type.String({ minLength: 1 }),
+  promptVersion: Type.String({ minLength: 1 }),
+});
+
 export const PropagationOperationSchema = Type.Union([
   Type.Literal('create'),
   Type.Literal('overwrite'),
@@ -369,6 +384,7 @@ export const PropagationSkipReasonSchema = Type.Union([
 
 export const PropagationFailureReasonSchema = Type.Union([
   Type.Literal('guard-rejected'),
+  Type.Literal('adaptation-failed'),
   Type.Literal('write-failed'),
   /** The bytes on disk after the write did not hash to what was intended. */
   Type.Literal('verification-failed'),
@@ -381,6 +397,15 @@ export const PropagationAppliedSchema = Type.Object({
   destinationPath: Type.String({ minLength: 1 }),
   /** Re-hashed from disk after the write, never assumed from the source. */
   contentHash: Type.String({ minLength: 1 }),
+  adaptation: Type.Optional(
+    Type.Object({
+      strategy: AdapterStrategySchema,
+      lossy: Type.Boolean(),
+      requiresReview: Type.Boolean(),
+      notes: Type.Array(AdaptNoteSchema),
+      provenance: Type.Optional(AdaptProvenanceSchema),
+    })
+  ),
 });
 
 export const PropagationSkippedSchema = Type.Object({
@@ -486,6 +511,8 @@ export type LibraryResourceContent = Static<typeof LibraryResourceContentSchema>
 export type LibraryLocationStatus = Static<typeof LibraryLocationStatusSchema>;
 export type LibraryTargetDescriptor = Static<typeof LibraryTargetDescriptorSchema>;
 export type AdapterStrategy = Static<typeof AdapterStrategySchema>;
+export type AdaptNote = Static<typeof AdaptNoteSchema>;
+export type AdaptProvenance = Static<typeof AdaptProvenanceSchema>;
 export type PropagationOperation = Static<typeof PropagationOperationSchema>;
 export type PropagationBlockedReason = Static<typeof PropagationBlockedReasonSchema>;
 export type PropagationAdaptation = Static<typeof PropagationAdaptationSchema>;

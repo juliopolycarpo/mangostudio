@@ -507,14 +507,20 @@ describe('normalizeAppSettings', () => {
     expect(normalizeAppSettings({}).chatDisplaySettings).toEqual(DEFAULT_CHAT_DISPLAY_SETTINGS);
   });
 
-  it('merges dynamic library defaults while keeping mango-skills always enabled', () => {
+  it('merges dynamic library defaults while keeping MangoStudio native locations enabled', () => {
     expect(
       normalizeLibraryLocationSettings(
-        { 'mango-skills': false, 'agents-skills': false },
-        { 'mango-skills': true, 'agents-skills': true, 'codex-skills': true }
+        { 'mango-skills': false, 'mango-agents': false, 'agents-skills': false },
+        {
+          'mango-skills': true,
+          'mango-agents': true,
+          'agents-skills': true,
+          'codex-skills': true,
+        }
       )
     ).toEqual({
       'mango-skills': true,
+      'mango-agents': true,
       'agents-skills': false,
       'codex-skills': true,
     });
