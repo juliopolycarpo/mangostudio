@@ -243,6 +243,18 @@ interface EnvironmentInstallRunsTable {
   truncated: number;
 }
 
+interface LibraryDivergenceAcksTable {
+  id: string;
+  userId: string;
+  /** `<kind>:<slug>` — one acknowledgement per resource per user. */
+  resourceKey: string;
+  /** Digest of the accepted hash set; a content change retires the row. */
+  divergenceKey: string;
+  /** JSON-serialized string[]. */
+  contentHashesJson: string;
+  acknowledgedAt: number;
+}
+
 interface ChatTodosTable {
   /** One row per chat; the list is always replaced wholesale. */
   chatId: string;
@@ -278,6 +290,7 @@ export interface Database {
   chat_todos: ChatTodosTable;
   file_checkpoints: FileCheckpointsTable;
   environment_install_runs: EnvironmentInstallRunsTable;
+  library_divergence_acks: LibraryDivergenceAcksTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
 }
@@ -307,3 +320,5 @@ export type FileCheckpointInsert = Insertable<FileCheckpointsTable>;
 
 export type EnvironmentInstallRunSelect = Selectable<EnvironmentInstallRunsTable>;
 export type EnvironmentInstallRunInsert = Insertable<EnvironmentInstallRunsTable>;
+
+export type LibraryDivergenceAckSelect = Selectable<LibraryDivergenceAcksTable>;

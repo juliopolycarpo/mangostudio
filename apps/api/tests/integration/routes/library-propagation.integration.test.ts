@@ -9,11 +9,14 @@ import type {
   PropagationPreviewEntry,
 } from '@mangostudio/shared/library';
 import { getDb } from '../../../src/db/database';
-import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import {
-  PropagationRequestError,
-  previewLibraryPropagation,
-} from '../../../src/modules/library/application/propagation-preview';
+  acknowledgeDivergence,
+  type DivergenceAckDeps,
+  listDivergenceAcks,
+} from '../../../src/modules/library/application/conflict-resolution';
+import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
+import { previewLibraryPropagation } from '../../../src/modules/library/application/propagation-preview';
+import { PropagationRequestError } from '../../../src/modules/library/domain/propagation-error';
 import {
   createPropagationRoutes,
   type PropagationRouteService,
@@ -40,7 +43,12 @@ const SKILL_LOCATIONS: readonly LibraryLocationId[] = [
 ];
 
 let home: string;
-let restoreAuth: (() => void) | null = null;
+/**
+ * One test can mount more than one stub service, and each mount patches the
+ * shared auth module. Keeping every restore and undoing them in reverse stops a
+ * later mount's restore from reinstating an earlier mount's patch.
+ */
+const authRestores: (() => void)[] = [];
 
 function skillAt(locationId: LibraryLocationId, body: string): void {
   const directories: Record<string, string> = {
@@ -58,35 +66,58 @@ function emptyLocation(...paths: string[]): void {
   for (const path of paths) mkdirSync(path, { recursive: true });
 }
 
-function previewSkills(
-  targetLocationIds: readonly LibraryLocationId[]
-): Promise<PropagationPreview> {
-  const pathEnv = createLibraryPathEnv({
+function libraryPathEnv() {
+  return createLibraryPathEnv({
     homeDir: home,
     env: { SKILLS_DIR: join(home, '.mango', 'skills') },
   });
+}
+
+function skillLocationSettings(): typeof DEFAULT_APP_SETTINGS {
+  return {
+    ...DEFAULT_APP_SETTINGS,
+    libraryLocations: Object.fromEntries(
+      SKILL_LOCATIONS.map((id) => [id, true])
+    ) as (typeof DEFAULT_APP_SETTINGS)['libraryLocations'],
+  };
+}
+
+function previewSkills(
+  targetLocationIds: readonly LibraryLocationId[],
+  userId: string = TEST_USER.id
+): Promise<PropagationPreview> {
+  const pathEnv = libraryPathEnv();
   const cache = new LibraryCache();
 
   return previewLibraryPropagation(
-    TEST_USER.id,
+    userId,
     { resourceKeys: ['skill:gh'], targetLocationIds: [...targetLocationIds] },
     {
-      discover: (userId, kinds) =>
-        discoverLibraryResources(getDb(), userId, {
+      discover: (scanUserId, kinds) =>
+        discoverLibraryResources(getDb(), scanUserId, {
           force: true,
           kinds,
           cache,
           pathEnv,
-          settings: {
-            ...DEFAULT_APP_SETTINGS,
-            libraryLocations: Object.fromEntries(
-              SKILL_LOCATIONS.map((id) => [id, true])
-            ) as (typeof DEFAULT_APP_SETTINGS)['libraryLocations'],
-          },
+          settings: skillLocationSettings(),
         }),
       describeLocation: (id) => describeLocation(id, pathEnv),
     }
   );
+}
+
+/** Drives the real acknowledgement store against the temp locations. */
+function ackDeps(): Partial<DivergenceAckDeps> {
+  return {
+    discover: (userId, ref) =>
+      discoverLibraryResources(getDb(), userId, {
+        force: true,
+        kinds: [ref.kind],
+        cache: new LibraryCache(),
+        pathEnv: libraryPathEnv(),
+        settings: skillLocationSettings(),
+      }),
+  };
 }
 
 function entryOf(preview: PropagationPreview): PropagationPreviewEntry {
@@ -111,8 +142,8 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true });
-  restoreAuth?.();
-  restoreAuth = null;
+  for (const restore of authRestores.reverse()) restore();
+  authRestores.length = 0;
 });
 
 describe('library propagation preview over real locations', () => {
@@ -191,23 +222,32 @@ describe('library propagation preview over real locations', () => {
   });
 });
 
-describe('POST /library/propagate/preview', () => {
-  function harness(service: PropagationRouteService) {
-    const { app, restore } = createAuthenticatedApiTestApp(
-      TEST_USER,
-      createPropagationRoutes(service)
-    );
-    restoreAuth = restore;
-    return app;
-  }
+const unsupportedService: PropagationRouteService = {
+  preview: () => Promise.reject(new Error('preview not stubbed')),
+  listAcks: () => Promise.reject(new Error('listAcks not stubbed')),
+  acknowledge: () => Promise.reject(new Error('acknowledge not stubbed')),
+  forgetAck: () => Promise.reject(new Error('forgetAck not stubbed')),
+};
 
-  function request(body: unknown): Request {
-    return new Request('http://localhost/library/propagate/preview', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-  }
+function harness(service: Partial<PropagationRouteService>) {
+  const { app, restore } = createAuthenticatedApiTestApp(
+    TEST_USER,
+    createPropagationRoutes({ ...unsupportedService, ...service })
+  );
+  authRestores.push(restore);
+  return app;
+}
+
+function jsonRequest(path: string, method: string, body?: unknown): Request {
+  return new Request(`http://localhost${path}`, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    ...(body !== undefined && { body: JSON.stringify(body) }),
+  });
+}
+
+describe('POST /library/propagate/preview', () => {
+  const request = (body: unknown) => jsonRequest('/library/propagate/preview', 'POST', body);
 
   it('returns the preview for a valid request', async () => {
     skillAt('mango-skills', 'served\n');
@@ -260,5 +300,136 @@ describe('POST /library/propagate/preview', () => {
 
     expect(response.status).toBe(422);
     expect(scanned).toBe(false);
+  });
+});
+
+describe('library divergence acknowledgements', () => {
+  let ackUser = 0;
+  // A fresh user per test keeps one suite's acknowledgements out of the next's.
+  function nextUser(): string {
+    ackUser += 1;
+    return `library-ack-user-${ackUser}`;
+  }
+
+  it('stops flagging a divergence the user accepted, and flags it again after an edit', async () => {
+    const userId = nextUser();
+    skillAt('mango-skills', 'mine\n');
+    skillAt('claude-skills', 'theirs\n');
+
+    const before = entryOf(await previewSkills(SKILL_LOCATIONS, userId));
+    expect(before.acknowledgedDivergence).toBe(false);
+
+    await acknowledgeDivergence(
+      userId,
+      {
+        resourceKey: 'skill:gh',
+        contentHashes: before.sourceGroups.map((group) => group.contentHash),
+      },
+      ackDeps()
+    );
+
+    const acknowledged = entryOf(await previewSkills(SKILL_LOCATIONS, userId));
+    expect(acknowledged.acknowledgedDivergence).toBe(true);
+    expect(acknowledged.requiresWinnerSelection).toBe(true);
+
+    // Acknowledging *this* divergence is not a permanent mute: changing a copy
+    // produces a divergence nobody has looked at yet.
+    skillAt('claude-skills', 'theirs, edited\n');
+    const afterEdit = entryOf(await previewSkills(SKILL_LOCATIONS, userId));
+
+    expect(afterEdit.acknowledgedDivergence).toBe(false);
+    expect(await listDivergenceAcks(userId)).toEqual([]);
+  });
+
+  it('refuses to record hashes that disagree with the rescan', async () => {
+    const userId = nextUser();
+    skillAt('mango-skills', 'mine\n');
+    skillAt('claude-skills', 'theirs\n');
+    const entry = entryOf(await previewSkills(SKILL_LOCATIONS, userId));
+
+    skillAt('claude-skills', 'changed underneath\n');
+    const failure = acknowledgeDivergence(
+      userId,
+      {
+        resourceKey: 'skill:gh',
+        contentHashes: entry.sourceGroups.map((group) => group.contentHash),
+      },
+      ackDeps()
+    );
+
+    await expect(failure).rejects.toMatchObject({ status: 409 });
+    expect(await listDivergenceAcks(userId)).toEqual([]);
+  });
+});
+
+describe('divergence acknowledgement routes', () => {
+  const ack = {
+    resourceKey: 'skill:gh',
+    contentHashes: ['hash-a', 'hash-b'],
+    acknowledgedAtMs: 5,
+  };
+
+  it('lists acknowledgements', async () => {
+    const app = harness({ listAcks: () => Promise.resolve([ack]) });
+
+    const response = await app.handle(jsonRequest('/library/divergence/acks', 'GET'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([ack]);
+  });
+
+  it('records an acknowledgement and reports a stale one as a conflict', async () => {
+    const recorded = harness({ acknowledge: () => Promise.resolve(ack) });
+    const created = await recorded.handle(
+      jsonRequest('/library/divergence/acks', 'POST', {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-b'],
+      })
+    );
+    expect(created.status).toBe(200);
+    expect(await created.json()).toEqual(ack);
+
+    const stale = harness({
+      acknowledge: () => Promise.reject(new PropagationRequestError(409, 'changed')),
+    });
+    const conflict = await stale.handle(
+      jsonRequest('/library/divergence/acks', 'POST', {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-b'],
+      })
+    );
+
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('requires at least two hashes to describe a divergence', async () => {
+    const app = harness({ acknowledge: () => Promise.reject(new Error('unreachable')) });
+
+    const response = await app.handle(
+      jsonRequest('/library/divergence/acks', 'POST', {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a'],
+      })
+    );
+
+    expect(response.status).toBe(422);
+  });
+
+  it('forgets an acknowledgement idempotently and validates the key', async () => {
+    const forgotten: string[] = [];
+    const app = harness({
+      forgetAck: (_userId, resourceKey) => {
+        forgotten.push(resourceKey);
+        return Promise.resolve();
+      },
+    });
+
+    const removed = await app.handle(jsonRequest('/library/divergence/acks/skill:gh', 'DELETE'));
+    const invalid = await app.handle(jsonRequest('/library/divergence/acks/not-a-key', 'DELETE'));
+
+    expect(removed.status).toBe(204);
+    expect(invalid.status).toBe(422);
+    expect(forgotten).toEqual(['skill:gh']);
   });
 });

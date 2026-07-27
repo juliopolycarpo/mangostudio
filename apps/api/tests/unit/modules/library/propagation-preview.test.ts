@@ -10,11 +10,9 @@ import type {
   ResourceFormat,
   ResourceKind,
 } from '@mangostudio/shared/library';
-import {
-  PropagationRequestError,
-  previewLibraryPropagation,
-} from '../../../../src/modules/library/application/propagation-preview';
+import { previewLibraryPropagation } from '../../../../src/modules/library/application/propagation-preview';
 import type { AdapterCatalog } from '../../../../src/modules/library/domain/format-adapters';
+import { PropagationRequestError } from '../../../../src/modules/library/domain/propagation-error';
 import { getLibraryLocation } from '../../../../src/modules/library/domain/registry';
 
 function instance(
@@ -74,6 +72,7 @@ interface PreviewHarness {
   readonly resources?: LibraryResource[];
   readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
   readonly adapters?: AdapterCatalog;
+  readonly acknowledged?: string[];
   readonly onDiscover?: (kinds: readonly ResourceKind[]) => void;
 }
 
@@ -91,6 +90,7 @@ function preview(
         return Promise.resolve(harness.resources ?? []);
       },
       describeLocation: (id) => harness.statuses?.[id] ?? status(id),
+      acknowledgedKeys: () => Promise.resolve(new Set(harness.acknowledged ?? [])),
       ...(harness.adapters && { adapters: harness.adapters }),
     }
   );

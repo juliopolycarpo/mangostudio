@@ -290,6 +290,8 @@ export const PropagationPreviewEntrySchema = Type.Object({
   sourceGroups: Type.Array(PropagationSourceGroupSchema),
   /** True when more than one group could win, so an apply must name one. */
   requiresWinnerSelection: Type.Boolean(),
+  /** True while the user has accepted this exact set of diverging hashes. */
+  acknowledgedDivergence: Type.Boolean(),
   destinations: Type.Array(PropagationDestinationSchema),
 });
 
@@ -313,6 +315,26 @@ export const PropagationPreviewSchema = Type.Object({
    */
   stateHash: Type.String({ minLength: 1 }),
   entries: Type.Array(PropagationPreviewEntrySchema),
+});
+
+/**
+ * A recorded "this divergence is intentional" — Cursor's copy of a skill is
+ * sometimes meant to differ. Keyed by the exact hashes it covers, so editing any
+ * copy makes the resource diverge again instead of muting it permanently.
+ */
+export const LibraryDivergenceAckSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  /** Sorted, so two clients observing the same divergence produce one key. */
+  contentHashes: Type.Array(Type.String({ minLength: 1 }), { minItems: 2 }),
+  acknowledgedAtMs: Type.Integer({ minimum: 0 }),
+});
+
+export const LibraryDivergenceAckListSchema = Type.Array(LibraryDivergenceAckSchema);
+
+export const LibraryDivergenceAckRequestSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  /** What the client saw; a mismatch with disk rejects the acknowledgement. */
+  contentHashes: Type.Array(Type.String({ minLength: 1 }), { minItems: 2, maxItems: 64 }),
 });
 
 export type ResourceKind = Static<typeof ResourceKindSchema>;
@@ -343,6 +365,8 @@ export type PropagationDestination = Static<typeof PropagationDestinationSchema>
 export type PropagationPreviewEntry = Static<typeof PropagationPreviewEntrySchema>;
 export type PropagationPreviewRequest = Static<typeof PropagationPreviewRequestSchema>;
 export type PropagationPreview = Static<typeof PropagationPreviewSchema>;
+export type LibraryDivergenceAck = Static<typeof LibraryDivergenceAckSchema>;
+export type LibraryDivergenceAckRequest = Static<typeof LibraryDivergenceAckRequestSchema>;
 
 export const SKILL_SOURCE_TO_LOCATION_ID: Record<SkillSource, LibraryLocationId> = {
   mango: 'mango-skills',

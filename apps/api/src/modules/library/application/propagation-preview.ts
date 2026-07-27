@@ -35,32 +35,29 @@ import {
   defaultAdapterCatalog,
   rankAdapterStrategies,
 } from '../domain/format-adapters';
+import { PropagationRequestError } from '../domain/propagation-error';
 import { getLibraryLocation, type LocationDefinition } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
+import { acknowledgedResourceKeys } from './conflict-resolution';
 import { discoverLibraryResources } from './library-discovery';
-
-/** Client-fault preview failure, carrying the status the route should return. */
-export class PropagationRequestError extends Error {
-  constructor(
-    readonly status: 404 | 422,
-    message: string
-  ) {
-    super(message);
-    this.name = 'PropagationRequestError';
-  }
-}
 
 export interface PropagationPreviewDeps {
   /** Always a forced rescan: a preview of stale state is worse than no preview. */
   discover(userId: string, kinds: readonly ResourceKind[]): Promise<LibraryResource[]>;
   describeLocation(id: LibraryLocationId): LibraryLocationStatus;
   adapters: AdapterCatalog;
+  /** Resources whose current divergence the user has already accepted. */
+  acknowledgedKeys(
+    userId: string,
+    resources: readonly LibraryResource[]
+  ): Promise<ReadonlySet<string>>;
 }
 
 const defaultPropagationPreviewDeps: PropagationPreviewDeps = {
   discover: (userId, kinds) => discoverLibraryResources(getDb(), userId, { force: true, kinds }),
   describeLocation: (id) => describeLocation(id, createLibraryPathEnv()),
   adapters: defaultAdapterCatalog,
+  acknowledgedKeys: acknowledgedResourceKeys,
 };
 
 export async function previewLibraryPropagation(
@@ -86,8 +83,9 @@ export async function previewLibraryPropagation(
   const statuses = new Map(
     locations.map((location) => [location.id, deps.describeLocation(location.id)] as const)
   );
+  const acknowledged = await deps.acknowledgedKeys(userId, resources);
   const entries = resources.map((resource) =>
-    buildPreviewEntry(resource, locations, statuses, deps.adapters)
+    buildPreviewEntry(resource, locations, statuses, deps.adapters, acknowledged.has(resource.key))
   );
   const stateHash = hashPropagationState(resources, statuses);
 
@@ -128,7 +126,8 @@ function buildPreviewEntry(
   resource: LibraryResource,
   locations: readonly LocationDefinition[],
   statuses: ReadonlyMap<LibraryLocationId, LibraryLocationStatus>,
-  adapters: AdapterCatalog
+  adapters: AdapterCatalog,
+  acknowledgedDivergence: boolean
 ): PropagationPreviewEntry {
   const sourceGroups = buildSourceGroups(resource.instances);
   const instanceByLocation = new Map(
@@ -143,6 +142,7 @@ function buildPreviewEntry(
     // Divergence is a user decision with no system-side tiebreaker (D5): more
     // than one readable version means an apply has to name the winner.
     requiresWinnerSelection: sourceGroups.length > 1,
+    acknowledgedDivergence,
     destinations: locations
       // A location stores exactly one kind, so propagating a skill never even
       // offers the subagent directories as destinations.
