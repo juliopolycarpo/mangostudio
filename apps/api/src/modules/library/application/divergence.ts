@@ -2,7 +2,9 @@ import type {
   LibraryContentGroup,
   LibraryDivergence,
   LibraryInstance,
+  ResourceKind,
 } from '@mangostudio/shared/library';
+import { COMPARABLE_RESOURCE_KINDS } from '../domain/registry';
 
 export interface InstanceComparison {
   readonly instance: LibraryInstance;
@@ -15,7 +17,10 @@ export interface DivergenceResult {
   readonly whitespaceOnlyDivergence: boolean;
 }
 
-export function describeDivergence(instances: readonly InstanceComparison[]): DivergenceResult {
+export function describeDivergence(
+  kind: ResourceKind,
+  instances: readonly InstanceComparison[]
+): DivergenceResult {
   const byHash = new Map<string, string[]>();
   for (const { instance } of instances) {
     if (!instance.contentHash) continue;
@@ -32,6 +37,10 @@ export function describeDivergence(instances: readonly InstanceComparison[]): Di
     (left, right) =>
       right.instanceCount - left.instanceCount || left.contentHash.localeCompare(right.contentHash)
   );
+
+  if (!COMPARABLE_RESOURCE_KINDS.has(kind)) {
+    return { divergence: 'not-comparable', contentGroups, whitespaceOnlyDivergence: false };
+  }
 
   const comparableInstanceCount = contentGroups.reduce(
     (count, group) => count + group.instanceCount,

@@ -105,7 +105,7 @@ function groupResources(
       key,
       instances,
       coverage: resolveLibraryCoverage(ref, instances),
-      ...describeDivergence(comparedInstances),
+      ...describeDivergence(ref.kind, comparedInstances),
     };
   }).sort((left, right) => left.key.localeCompare(right.key));
 }

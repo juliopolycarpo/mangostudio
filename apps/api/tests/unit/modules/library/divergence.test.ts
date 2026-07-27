@@ -24,7 +24,7 @@ function compared(
 
 describe('describeDivergence', () => {
   it('groups hashes with the majority first without treating it as canonical', () => {
-    const result = describeDivergence([
+    const result = describeDivergence('skill', [
       compared('mango-skills', 'same'),
       compared('agents-skills', 'same'),
       compared('claude-skills', 'same'),
@@ -42,10 +42,14 @@ describe('describeDivergence', () => {
 
   it('describes uniform and single-instance resources independently', () => {
     expect(
-      describeDivergence([compared('mango-skills', 'same'), compared('agents-skills', 'same')])
-        .divergence
+      describeDivergence('skill', [
+        compared('mango-skills', 'same'),
+        compared('agents-skills', 'same'),
+      ]).divergence
     ).toBe('uniform');
-    expect(describeDivergence([compared('mango-skills', 'only')]).divergence).toBe('single');
+    expect(describeDivergence('skill', [compared('mango-skills', 'only')]).divergence).toBe(
+      'single'
+    );
   });
 
   it('does not describe an unhashable copy as identical content', () => {
@@ -59,12 +63,24 @@ describe('describeDivergence', () => {
     };
 
     expect(
-      describeDivergence([compared('mango-skills', 'known'), { instance: unreadable }]).divergence
+      describeDivergence('skill', [compared('mango-skills', 'known'), { instance: unreadable }])
+        .divergence
     ).toBe('single');
   });
 
+  it('withholds a verdict for kinds no target can write', () => {
+    const result = describeDivergence('hook', [
+      compared('claude-hooks', 'claude-settings-json'),
+      compared('codex-hooks', 'codex-hooks-json'),
+    ]);
+
+    expect(result.divergence).toBe('not-comparable');
+    expect(result.whitespaceOnlyDivergence).toBe(false);
+    expect(result.contentGroups).toHaveLength(2);
+  });
+
   it('flags byte divergence that disappears after whitespace removal', () => {
-    const result = describeDivergence([
+    const result = describeDivergence('skill', [
       compared('mango-skills', 'lf', 'normalized'),
       compared('agents-skills', 'spaces', 'normalized'),
     ]);

@@ -41,6 +41,7 @@ export const LibraryInvalidReasonSchema = Type.Union([
   Type.Literal('missing-entrypoint'),
   Type.Literal('unexpected-entry-type'),
   Type.Literal('unreadable'),
+  Type.Literal('too-large'),
   Type.Literal('invalid-metadata'),
 ]);
 
@@ -121,6 +122,12 @@ export const LibraryDivergenceSchema = Type.Union([
   Type.Literal('uniform'),
   Type.Literal('divergent'),
   Type.Literal('single'),
+  /**
+   * Copies exist but comparing them says nothing actionable: the kind is
+   * read-only everywhere, and its files are different formats per vendor. The
+   * content groups are still reported; only the verdict is withheld.
+   */
+  Type.Literal('not-comparable'),
 ]);
 
 export const LibraryContentGroupSchema = Type.Object({

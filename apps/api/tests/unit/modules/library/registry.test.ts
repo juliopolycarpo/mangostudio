@@ -8,6 +8,7 @@ import {
 import { Value } from '@sinclair/typebox/value';
 import {
   assertLibraryRegistryConsistency,
+  COMPARABLE_RESOURCE_KINDS,
   getLibraryLocation,
   getLibraryTarget,
   LIBRARY_LOCATION_DEFINITIONS,
@@ -75,6 +76,26 @@ describe('library target registry', () => {
         expect(target?.reads[location.kind]).toContain(location.id);
       }
     }
+  });
+
+  it('gives every single-file location a slug that ignores the vendor filename', () => {
+    const slugsById = new Map(
+      LIBRARY_LOCATION_DEFINITIONS.filter((location) => location.layout === 'single-file').map(
+        (location) => [location.id, location.resourceSlug]
+      )
+    );
+
+    expect(slugsById.get('claude-instructions')).toBe('global');
+    expect(slugsById.get('codex-instructions')).toBe('global');
+    expect(slugsById.get('mango-instructions')).toBe('global');
+    expect(slugsById.get('mango-settings')).toBe('settings');
+    expect(slugsById.get('codex-settings')).toBe('settings');
+    expect(slugsById.get('claude-hooks')).toBe('hooks');
+    expect([...slugsById.values()].every(Boolean)).toBe(true);
+  });
+
+  it('treats only kinds with a writable location as comparable', () => {
+    expect([...COMPARABLE_RESOURCE_KINDS].sort()).toEqual(['instruction', 'skill', 'subagent']);
   });
 
   it('reproduces MangoStudio skill precedence exactly', () => {
