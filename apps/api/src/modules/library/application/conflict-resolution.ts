@@ -104,7 +104,8 @@ export async function acknowledgeDivergence(
   }
   // Accepting a divergence the client never saw would mute a version the user
   // has not looked at, so a rescan that disagrees rejects rather than records.
-  if (divergenceKeyFor(request.contentHashes) !== divergenceKeyFor(contentHashes)) {
+  const divergenceKey = divergenceKeyFor(contentHashes);
+  if (divergenceKeyFor(request.contentHashes) !== divergenceKey) {
     throw new PropagationRequestError(
       409,
       `Library resource "${request.resourceKey}" changed since it was reviewed. Rescan and try again.`
@@ -112,7 +113,6 @@ export async function acknowledgeDivergence(
   }
 
   const acknowledgedAtMs = deps.now();
-  const divergenceKey = divergenceKeyFor(contentHashes);
   await deps.repository.upsert(userId, {
     resourceKey: request.resourceKey,
     divergenceKey,
