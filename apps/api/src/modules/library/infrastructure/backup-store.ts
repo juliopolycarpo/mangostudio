@@ -168,7 +168,7 @@ export async function readBackupManifest(
  * Puts a backed-up copy back where it came from, atomically.
  *
  * The copy is staged beside the destination and renamed into place, so a failure
- * partway through leaves the original rather than half of it. `resolvedPath`
+ * while staging leaves the original rather than half of it. `resolvedPath`
  * already points past any symlink — it was recorded after resolution during the
  * apply — so restoring writes through the link exactly as the write did.
  */
@@ -188,12 +188,15 @@ export async function restoreBackupEntry(
   await deps.fs.mkdir(dirname(entry.resolvedPath));
   try {
     await deps.fs.copyTree(entry.backupPath, stagePath);
-    await deps.fs.remove(entry.resolvedPath);
-    await deps.fs.rename(stagePath, entry.resolvedPath);
   } catch (error) {
     await deps.fs.remove(stagePath).catch(() => undefined);
     throw error;
   }
+  // Past this point the destination is already gone, so the staged copy is the
+  // closest thing to it that exists locally. Discarding it on a failed rename
+  // would turn "the restore did not finish" into "the destination vanished".
+  await deps.fs.remove(entry.resolvedPath);
+  await deps.fs.rename(stagePath, entry.resolvedPath);
 }
 
 export async function discardBackupSet(
