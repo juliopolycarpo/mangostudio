@@ -5,7 +5,7 @@
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { accessSync, constants, existsSync, readFileSync } from 'node:fs';
-import { normalizeSkillSourceSettings } from '@mangostudio/shared/app-settings';
+import { normalizeLibraryLocationSettings } from '@mangostudio/shared/app-settings';
 import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 import { parse as parseToml } from 'smol-toml';
@@ -375,11 +375,26 @@ function readSkillSourceToggles(config: MangoConfig): { agents: boolean; claude:
   );
   const toggles = { agents: false, claude: false };
   for (const row of rows) {
-    const sources = normalizeSkillSourceSettings(parseSettingsJson(row.settingsJson).skillSources);
-    if (sources.agents) toggles.agents = true;
-    if (sources.claude) toggles.claude = true;
+    const settings = parseSettingsJson(row.settingsJson);
+    const legacy = parseBooleanRecord(settings.skillSources);
+    const locations = normalizeLibraryLocationSettings(settings.libraryLocations, {
+      'mango-skills': true,
+      'agents-skills': legacy.agents ?? false,
+      'claude-skills': legacy.claude ?? false,
+    });
+    if (locations['agents-skills']) toggles.agents = true;
+    if (locations['claude-skills']) toggles.claude = true;
   }
   return toggles;
+}
+
+function parseBooleanRecord(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value).flatMap(([key, entry]) =>
+      typeof entry === 'boolean' ? [[key, entry]] : []
+    )
+  );
 }
 
 function parseSettingsJson(raw: string): Record<string, unknown> {

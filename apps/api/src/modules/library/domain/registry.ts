@@ -21,6 +21,13 @@ export interface LocationDefinition {
   readonly access: LocationAccess;
   readonly layout: LibraryLocationLayout;
   readonly format: ResourceFormat;
+  /**
+   * Logical slug for `single-file` layouts, where the filename is the vendor's
+   * choice and carries no cross-target meaning: `CLAUDE.md` and `AGENTS.md` are
+   * the same resource, while `config.toml` under `.mango` and `.codex` are not.
+   * Directory layouts derive a slug per entry and must omit this.
+   */
+  readonly resourceSlug?: string;
   /** Every target that reads this location. */
   readonly readBy: readonly LibraryTargetId[];
 }
@@ -212,6 +219,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: homePath('.mango', 'AGENTS.md'),
     access: 'read-write',
     layout: 'single-file',
+    resourceSlug: 'global',
     format: 'markdown-plain',
     readBy: ['mangostudio'],
   },
@@ -221,6 +229,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: claudePath('CLAUDE.md'),
     access: 'read-write',
     layout: 'single-file',
+    resourceSlug: 'global',
     format: 'markdown-plain',
     readBy: ['claude'],
   },
@@ -230,6 +239,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: codexPath('AGENTS.md'),
     access: 'read-write',
     layout: 'single-file',
+    resourceSlug: 'global',
     format: 'markdown-plain',
     readBy: ['codex'],
   },
@@ -250,6 +260,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: claudePath('settings.json'),
     access: 'read-only',
     layout: 'single-file',
+    resourceSlug: 'settings',
     format: 'json-settings',
     readBy: ['claude'],
   },
@@ -259,6 +270,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: codexPath('config.toml'),
     access: 'read-only',
     layout: 'single-file',
+    resourceSlug: 'settings',
     format: 'toml-settings',
     readBy: ['codex'],
   },
@@ -268,6 +280,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: cursorSettingsPath,
     access: 'read-only',
     layout: 'single-file',
+    resourceSlug: 'settings',
     format: 'json-settings',
     readBy: ['cursor'],
   },
@@ -277,6 +290,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: homePath('.mango', 'config.toml'),
     access: 'read-only',
     layout: 'single-file',
+    resourceSlug: 'settings',
     format: 'toml-settings',
     readBy: ['mangostudio'],
   },
@@ -286,6 +300,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: codexPath('hooks.json'),
     access: 'read-only',
     layout: 'single-file',
+    resourceSlug: 'hooks',
     format: 'json-settings',
     readBy: ['codex'],
   },
@@ -295,6 +310,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     resolvePath: claudePath('settings.json'),
     access: 'read-only',
     layout: 'single-file',
+    resourceSlug: 'hooks',
     format: 'json-settings',
     readBy: ['claude'],
   },
@@ -395,6 +411,19 @@ export function listLibraryTargetDescriptors(): LibraryTargetDescriptor[] {
   }));
 }
 
+/**
+ * Kinds MangoStudio can write somewhere. Every `setting` and `hook` location is
+ * read-only in v1 (decision D3), and their files are not even the same shape
+ * across vendors — `~/.claude/settings.json` against `~/.codex/config.toml` —
+ * so comparing their bytes would report permanent divergence on a row nobody
+ * can act on. Discovery reports those kinds as `not-comparable` instead.
+ */
+export const COMPARABLE_RESOURCE_KINDS: ReadonlySet<ResourceKind> = new Set(
+  LIBRARY_LOCATION_DEFINITIONS.filter((location) => location.access === 'read-write').map(
+    (location) => location.kind
+  )
+);
+
 /** Fails fast if a code-defined id, kind, or reverse target edge drifts. */
 export function assertLibraryRegistryConsistency(): void {
   if (locationById.size !== LIBRARY_LOCATION_DEFINITIONS.length) {
@@ -427,6 +456,15 @@ export function assertLibraryRegistryConsistency(): void {
   }
 
   for (const location of LIBRARY_LOCATION_DEFINITIONS) {
+    if (location.layout === 'single-file' && !location.resourceSlug) {
+      throw new Error(`Single-file location "${location.id}" must declare a resourceSlug.`);
+    }
+    if (location.layout !== 'single-file' && location.resourceSlug) {
+      throw new Error(
+        `Location "${location.id}" derives slugs per entry and must not declare one.`
+      );
+    }
+
     for (const targetId of location.readBy) {
       const target = targetById.get(targetId);
       if (!target) {

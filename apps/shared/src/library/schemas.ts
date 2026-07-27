@@ -35,7 +35,15 @@ export const ResourceFormatSchema = Type.Union([
   Type.Literal('rules-dsl'),
 ]);
 
-export const LibraryInvalidReasonSchema = Type.Literal('path-escape');
+export const LibraryInvalidReasonSchema = Type.Union([
+  Type.Literal('path-escape'),
+  Type.Literal('invalid-slug'),
+  Type.Literal('missing-entrypoint'),
+  Type.Literal('unexpected-entry-type'),
+  Type.Literal('unreadable'),
+  Type.Literal('too-large'),
+  Type.Literal('invalid-metadata'),
+]);
 
 export const LIBRARY_RESOURCE_SLUG_MAX_LENGTH = 128;
 
@@ -82,6 +90,12 @@ export const ValidLibraryInstanceSchema = Type.Object({
 export const InvalidLibraryInstanceSchema = Type.Object({
   ...libraryInstanceBase,
   valid: Type.Literal(false),
+  /**
+   * Metadata-invalid resources can still be hashed. I/O and containment
+   * failures omit these fields because no trustworthy digest exists.
+   */
+  contentHash: Type.Optional(Type.String({ minLength: 1 })),
+  sizeBytes: Type.Optional(Type.Integer({ minimum: 0 })),
   /** Why `valid` is false — a stable code, never free text. */
   invalidReason: LibraryInvalidReasonSchema,
 });
@@ -91,9 +105,15 @@ export const LibraryInstanceSchema = Type.Union([
   InvalidLibraryInstanceSchema,
 ]);
 
+export const LibraryCoverageStateSchema = Type.Union([
+  Type.Literal('present'),
+  Type.Literal('absent'),
+  Type.Literal('shadowed'),
+]);
+
 export const LibraryCoverageSchema = Type.Object({
   targetId: LibraryTargetIdSchema,
-  state: Type.Union([Type.Literal('present'), Type.Literal('absent'), Type.Literal('shadowed')]),
+  state: LibraryCoverageStateSchema,
   effectiveLocationId: Type.Optional(LibraryLocationIdSchema),
   shadowedLocationIds: Type.Array(LibraryLocationIdSchema),
 });
@@ -102,6 +122,12 @@ export const LibraryDivergenceSchema = Type.Union([
   Type.Literal('uniform'),
   Type.Literal('divergent'),
   Type.Literal('single'),
+  /**
+   * Copies exist but comparing them says nothing actionable: the kind is
+   * read-only everywhere, and its files are different formats per vendor. The
+   * content groups are still reported; only the verdict is withheld.
+   */
+  Type.Literal('not-comparable'),
 ]);
 
 export const LibraryContentGroupSchema = Type.Object({
@@ -117,8 +143,20 @@ export const LibraryResourceSchema = Type.Object({
   instances: Type.Array(LibraryInstanceSchema),
   coverage: Type.Array(LibraryCoverageSchema),
   divergence: LibraryDivergenceSchema,
+  /** True when divergent text instances become identical after whitespace removal. */
+  whitespaceOnlyDivergence: Type.Boolean(),
   /** Distinct content hashes, most-replicated first. */
   contentGroups: Type.Array(LibraryContentGroupSchema),
+});
+
+export const LibraryResourceListSchema = Type.Array(LibraryResourceSchema);
+
+export const LibraryResourceContentSchema = Type.Object({
+  key: Type.String({ minLength: 1 }),
+  locationId: LibraryLocationIdSchema,
+  content: Type.String(),
+  truncated: Type.Boolean(),
+  sizeBytes: Type.Integer({ minimum: 0 }),
 });
 
 export const LibraryLocationStatusSchema = Type.Object({
@@ -133,6 +171,8 @@ export const LibraryLocationStatusSchema = Type.Object({
   targetIds: Type.Array(LibraryTargetIdSchema),
   entryCount: Type.Optional(Type.Integer({ minimum: 0 })),
 });
+
+export const LibraryLocationStatusListSchema = Type.Array(LibraryLocationStatusSchema);
 
 const LibraryTargetReadsSchema = Type.Object({
   skill: Type.Array(LibraryLocationIdSchema),
@@ -160,10 +200,12 @@ export type LibraryResourceRef = Static<typeof LibraryResourceRefSchema>;
 export type ValidLibraryInstance = Static<typeof ValidLibraryInstanceSchema>;
 export type InvalidLibraryInstance = Static<typeof InvalidLibraryInstanceSchema>;
 export type LibraryInstance = Static<typeof LibraryInstanceSchema>;
+export type LibraryCoverageState = Static<typeof LibraryCoverageStateSchema>;
 export type LibraryCoverage = Static<typeof LibraryCoverageSchema>;
 export type LibraryDivergence = Static<typeof LibraryDivergenceSchema>;
 export type LibraryContentGroup = Static<typeof LibraryContentGroupSchema>;
 export type LibraryResource = Static<typeof LibraryResourceSchema>;
+export type LibraryResourceContent = Static<typeof LibraryResourceContentSchema>;
 export type LibraryLocationStatus = Static<typeof LibraryLocationStatusSchema>;
 export type LibraryTargetDescriptor = Static<typeof LibraryTargetDescriptorSchema>;
 

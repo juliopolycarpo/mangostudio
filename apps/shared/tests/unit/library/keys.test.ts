@@ -90,6 +90,7 @@ describe('library resource contracts', () => {
           },
         ],
         divergence: 'single',
+        whitespaceOnlyDivergence: false,
         contentGroups: [
           {
             contentHash: 'a'.repeat(64),

@@ -144,7 +144,14 @@ describe('SkillsSettingsPage', () => {
     fetchScenario.respondWithJson('GET', '/api/skills', { body: SKILLS_RESPONSE });
     fetchScenario.respondWithJson('GET', '/api/settings/app', { body: DEFAULT_APP_SETTINGS });
     fetchScenario.respondWithJson('PUT', '/api/settings/app', {
-      body: { ...DEFAULT_APP_SETTINGS, skillSources: { agents: true, claude: true } },
+      body: {
+        ...DEFAULT_APP_SETTINGS,
+        libraryLocations: {
+          ...DEFAULT_APP_SETTINGS.libraryLocations,
+          'agents-skills': true,
+          'claude-skills': true,
+        },
+      },
     });
 
     render(<SkillsSettingsPage />);
@@ -164,6 +171,30 @@ describe('SkillsSettingsPage', () => {
         );
       });
       expect(putCalls.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it('forces a library rescan from the visible refresh control', async () => {
+    const user = userEvent.setup();
+    fetchScenario.respondWithJson('GET', '/api/skills', { body: SKILLS_RESPONSE });
+    fetchScenario.respondWithJson('POST', '/api/library/rescan', { body: [] });
+
+    render(<SkillsSettingsPage />);
+
+    await screen.findAllByText('pdf-tools');
+    await user.click(screen.getByRole('button', { name: 'Refresh library' }));
+
+    await vi.waitFor(() => {
+      const postCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
+        const input = call[0];
+        const init = call[1] as RequestInit | undefined;
+        const method = input instanceof Request ? input.method : init?.method;
+        const url = input instanceof Request ? input.url : String(input);
+        return (
+          method === 'POST' && new URL(url, 'http://localhost').pathname === '/api/library/rescan'
+        );
+      });
+      expect(postCalls.length).toBeGreaterThanOrEqual(1);
     });
   });
 });

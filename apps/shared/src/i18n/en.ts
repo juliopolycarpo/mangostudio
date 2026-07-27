@@ -971,16 +971,19 @@ export const messages: Messages = {
     },
     skills: {
       title: 'Skills',
-      description: 'Enable or disable installed Agent Skills and opt in to third-party sources.',
+      description: 'Enable installed Agent Skills and choose which library locations to scan.',
       sourcesTitle: 'Skill sources',
       sourcesDescription:
-        'Skills in ~/.mango/skills are always available. Directories written for other agents are opt-in.',
+        'Skills in ~/.mango/skills are always available. Toggle other detected locations or force a fresh disk scan.',
       sourceLabels: {
         mango: 'MangoStudio',
         agents: 'Agents',
         claude: 'Claude',
       },
       sourceNotFound: 'Directory not found',
+      refreshLibrary: 'Refresh library',
+      refreshingLibrary: 'Refreshing...',
+      refreshLibraryFailed: 'The library could not be refreshed. Existing results remain visible.',
       enabled: 'Enabled',
       disabled: 'Disabled',
       invalidBadge: 'Invalid',

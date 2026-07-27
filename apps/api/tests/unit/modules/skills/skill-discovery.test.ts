@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_APP_SETTINGS, type SkillSourceSettings } from '@mangostudio/shared/app-settings';
+import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import { updateAppSettings } from '../../../../src/modules/app-settings/application/app-settings-service';
@@ -25,10 +25,17 @@ function nextUserId(): string {
   return `user-skill-discovery-${userCounter}`;
 }
 
-async function enableSources(userId: string, sources: Partial<SkillSourceSettings>): Promise<void> {
+async function enableSources(
+  userId: string,
+  sources: { readonly agents?: boolean; readonly claude?: boolean }
+): Promise<void> {
   await updateAppSettings(getDb(), userId, {
     ...DEFAULT_APP_SETTINGS,
-    skillSources: { ...DEFAULT_APP_SETTINGS.skillSources, ...sources },
+    libraryLocations: {
+      ...DEFAULT_APP_SETTINGS.libraryLocations,
+      'agents-skills': sources.agents ?? false,
+      'claude-skills': sources.claude ?? false,
+    },
   });
 }
 

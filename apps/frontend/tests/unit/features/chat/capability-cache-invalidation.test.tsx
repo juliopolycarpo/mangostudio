@@ -166,7 +166,10 @@ describe('capability cache invalidation', () => {
     fetchScenario.respondWithJson('PUT', '/api/settings/app', {
       body: {
         ...DEFAULT_APP_SETTINGS,
-        skillSources: { ...DEFAULT_APP_SETTINGS.skillSources, agents: true },
+        libraryLocations: {
+          ...DEFAULT_APP_SETTINGS.libraryLocations,
+          'agents-skills': true,
+        },
       },
     });
 

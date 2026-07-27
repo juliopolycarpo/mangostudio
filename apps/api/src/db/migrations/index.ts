@@ -27,6 +27,7 @@ import { chatWorkdir } from './026_chat_workdir';
 import { chatRestrictToolsToWorkdir } from './027_chat_restrict_tools_to_workdir';
 import { fileCheckpoints } from './028_file_checkpoints';
 import { environmentInstallRuns } from './029_environment_install_runs';
+import { libraryLocationSettings } from './030_library_location_settings';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -58,4 +59,5 @@ export const allMigrations = {
   '027_chat_restrict_tools_to_workdir': chatRestrictToolsToWorkdir,
   '028_file_checkpoints': fileCheckpoints,
   '029_environment_install_runs': environmentInstallRuns,
+  '030_library_location_settings': libraryLocationSettings,
 };

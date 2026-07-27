@@ -43,8 +43,8 @@ import type {
   DiffPreviewMode,
   GitSettings,
   ImageQuality,
+  LibraryLocationSettings,
   MultiAgentSettings,
-  SkillSourceSettings,
 } from './schemas';
 
 const CURRENT_MODEL_SETTING = 'current_model';
@@ -111,9 +111,8 @@ export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
   defaultMaxTurns: SUBAGENT_MAX_TURNS_DEFAULT,
 };
 
-export const DEFAULT_SKILL_SOURCE_SETTINGS: SkillSourceSettings = {
-  agents: false,
-  claude: false,
+export const DEFAULT_LIBRARY_LOCATION_SETTINGS: LibraryLocationSettings = {
+  'mango-skills': true,
 };
 
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
@@ -152,7 +151,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   multiAgentSettings: DEFAULT_MULTI_AGENT_SETTINGS,
   contextSettings: DEFAULT_CONTEXT_SETTINGS,
   chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
-  skillSources: DEFAULT_SKILL_SOURCE_SETTINGS,
+  libraryLocations: DEFAULT_LIBRARY_LOCATION_SETTINGS,
   workspaceSettings: DEFAULT_WORKSPACE_SETTINGS,
   gitSettings: DEFAULT_GIT_SETTINGS,
   chatDisplaySettings: DEFAULT_CHAT_DISPLAY_SETTINGS,
@@ -363,13 +362,31 @@ export function normalizeMultiAgentSettings(value: unknown): MultiAgentSettings 
   };
 }
 
-export function normalizeSkillSourceSettings(value: unknown): SkillSourceSettings {
-  if (!isRecord(value)) return DEFAULT_SKILL_SOURCE_SETTINGS;
+const LIBRARY_LOCATION_ID_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const LIBRARY_LOCATION_ID_MAX_LENGTH = 64;
 
-  return {
-    agents: typeof value.agents === 'boolean' ? value.agents : DEFAULT_SKILL_SOURCE_SETTINGS.agents,
-    claude: typeof value.claude === 'boolean' ? value.claude : DEFAULT_SKILL_SOURCE_SETTINGS.claude,
-  };
+function isLibraryLocationIdShape(value: string): boolean {
+  return value.length <= LIBRARY_LOCATION_ID_MAX_LENGTH && LIBRARY_LOCATION_ID_SHAPE.test(value);
+}
+
+export function normalizeLibraryLocationSettings(
+  value: unknown,
+  defaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS
+): LibraryLocationSettings {
+  const normalized = { ...defaults };
+  if (isRecord(value)) {
+    for (const [locationId, enabled] of Object.entries(value)) {
+      // `Type.Record` compiles the key schema down to a bare `^(.*)$` pattern
+      // and drops its length bounds, so the id shape is only enforced here.
+      // Without this the PUT body's keys are persisted verbatim, forever.
+      if (!isLibraryLocationIdShape(locationId)) continue;
+      if (typeof enabled === 'boolean') normalized[locationId] = enabled;
+    }
+  }
+
+  // MangoStudio's native skills location is the one non-toggleable source.
+  normalized['mango-skills'] = true;
+  return normalized;
 }
 
 export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
@@ -487,8 +504,16 @@ export function normalizeGitSettings(value: unknown): GitSettings {
   };
 }
 
-export function normalizeAppSettings(value: unknown): AppSettings {
-  if (!isRecord(value)) return DEFAULT_APP_SETTINGS;
+export function normalizeAppSettings(
+  value: unknown,
+  libraryLocationDefaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS
+): AppSettings {
+  if (!isRecord(value)) {
+    return {
+      ...DEFAULT_APP_SETTINGS,
+      libraryLocations: normalizeLibraryLocationSettings(undefined, libraryLocationDefaults),
+    };
+  }
 
   return {
     promptSettings: normalizePromptSettings(value.promptSettings),
@@ -510,7 +535,10 @@ export function normalizeAppSettings(value: unknown): AppSettings {
     multiAgentSettings: normalizeMultiAgentSettings(value.multiAgentSettings),
     contextSettings: normalizeContextSettings(value.contextSettings),
     chatTitleSettings: normalizeChatTitleSettings(value.chatTitleSettings),
-    skillSources: normalizeSkillSourceSettings(value.skillSources),
+    libraryLocations: normalizeLibraryLocationSettings(
+      value.libraryLocations,
+      libraryLocationDefaults
+    ),
     workspaceSettings: normalizeWorkspaceSettings(value.workspaceSettings),
     gitSettings: normalizeGitSettings(value.gitSettings),
     chatDisplaySettings: normalizeChatDisplaySettings(value.chatDisplaySettings),

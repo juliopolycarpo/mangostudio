@@ -46,7 +46,7 @@ export async function hashLibraryDirectory(
   rootPath: string,
   reader: LibraryHashReader
 ): Promise<LibraryDirectoryHash> {
-  const canonicalRoot = normalizePath(await reader.realPath(rootPath));
+  const canonicalRoot = normalizeHashPath(await reader.realPath(rootPath));
   const relativePaths = [...(await reader.listFiles(rootPath))].sort(comparePaths);
   const manifestLines: string[] = [];
   let sizeBytes = 0;
@@ -54,7 +54,7 @@ export async function hashLibraryDirectory(
   for (const relativePath of relativePaths) {
     if (!isSafeRelativePath(relativePath)) return pathEscape();
 
-    const canonicalFile = normalizePath(
+    const canonicalFile = normalizeHashPath(
       await reader.realPath(joinPath(canonicalRoot, relativePath))
     );
     if (!isPathWithin(canonicalRoot, canonicalFile)) return pathEscape();
@@ -81,7 +81,11 @@ async function sha256(domain: string, bytes: Uint8Array): Promise<string> {
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function normalizePath(path: string): string {
+/**
+ * Canonical spelling of an already-resolved path, so a caller that wants to
+ * recognize the paths this module hands to `readFile` keys them the same way.
+ */
+export function normalizeHashPath(path: string): string {
   const normalized = path.replaceAll('\\', '/');
   if (normalized === '/') return normalized;
   return normalized.replace(/\/+$/, '');

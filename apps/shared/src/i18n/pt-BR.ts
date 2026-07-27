@@ -985,16 +985,21 @@ export const messages = {
     },
     skills: {
       title: 'Skills',
-      description: 'Ative ou desative Agent Skills instaladas e habilite fontes de terceiros.',
+      description:
+        'Ative Agent Skills instaladas e escolha quais locais da biblioteca devem ser lidos.',
       sourcesTitle: 'Fontes de skills',
       sourcesDescription:
-        'Skills em ~/.mango/skills estão sempre disponíveis. Diretórios escritos para outros agentes são opcionais.',
+        'Skills em ~/.mango/skills estão sempre disponíveis. Alterne outros locais detectados ou force uma nova leitura do disco.',
       sourceLabels: {
         mango: 'MangoStudio',
         agents: 'Agents',
         claude: 'Claude',
       },
       sourceNotFound: 'Diretório não encontrado',
+      refreshLibrary: 'Atualizar biblioteca',
+      refreshingLibrary: 'Atualizando...',
+      refreshLibraryFailed:
+        'Não foi possível atualizar a biblioteca. Os resultados existentes continuam visíveis.',
       enabled: 'Ativada',
       disabled: 'Desativada',
       invalidBadge: 'Inválida',
