@@ -46,7 +46,7 @@
     "@dprint/toml": "^0.7.0",
     "@mangostudio/shared": "workspace:*",
     "@playwright/test": "^1.61.1",
-    "@sinclair/typebox": "^0.34.49",
+    "@sinclair/typebox": "^0.34.52",
     "@typescript/typescript6": "6.0.2",
     "dprint": "^0.54.0",
     "git-cliff": "^2.13.1",
