@@ -30,6 +30,7 @@ import {
   type ValidLibraryInstance,
 } from '@mangostudio/shared/library';
 import { getDb } from '../../../db/database';
+import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import {
   type AdapterCatalog,
   defaultAdapterCatalog,
@@ -39,7 +40,7 @@ import { PropagationRequestError } from '../domain/propagation-error';
 import { getLibraryLocation, type LocationDefinition } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 import { acknowledgedResourceKeys } from './conflict-resolution';
-import { discoverLibraryResources } from './library-discovery';
+import { discoverLibraryResources, enabledLibraryLocations } from './library-discovery';
 
 export interface PropagationPreviewDeps {
   /** Always a forced rescan: a preview of stale state is worse than no preview. */
@@ -51,6 +52,8 @@ export interface PropagationPreviewDeps {
     userId: string,
     resources: readonly LibraryResource[]
   ): Promise<ReadonlySet<string>>;
+  /** The same set the scanner honours, so a destination is never written blind. */
+  enabledLocationIds(userId: string): Promise<ReadonlySet<LibraryLocationId>>;
 }
 
 const defaultPropagationPreviewDeps: PropagationPreviewDeps = {
@@ -58,6 +61,8 @@ const defaultPropagationPreviewDeps: PropagationPreviewDeps = {
   describeLocation: (id) => describeLocation(id, createLibraryPathEnv()),
   adapters: defaultAdapterCatalog,
   acknowledgedKeys: acknowledgedResourceKeys,
+  enabledLocationIds: async (userId) =>
+    enabledLibraryLocations((await getAppSettings(getDb(), userId)).libraryLocations),
 };
 
 export async function previewLibraryPropagation(
@@ -68,6 +73,20 @@ export async function previewLibraryPropagation(
   const deps = { ...defaultPropagationPreviewDeps, ...overrides };
   const refs = parseRequestedResources(request.resourceKeys);
   const locations = parseRequestedLocations(request.targetLocationIds);
+
+  // A location the scanner skips has no instances in `discovered`, so every
+  // destination there would classify as `create` and the apply would overwrite
+  // whatever is really on disk — and the state hash would not cover it either.
+  // Refusing the request is the only honest answer.
+  const enabled = await deps.enabledLocationIds(userId);
+  for (const location of locations) {
+    if (!enabled.has(location.id)) {
+      throw new PropagationRequestError(
+        422,
+        `Library location "${location.id}" is not enabled, so its contents cannot be previewed or written.`
+      );
+    }
+  }
 
   const kinds = [...new Set([...refs.values()].map((ref) => ref.kind))];
   const discovered = await deps.discover(userId, kinds);

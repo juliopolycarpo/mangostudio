@@ -14,7 +14,10 @@ import type {
 } from '@mangostudio/shared/library';
 import { getDb } from '../../../src/db/database';
 import { listDivergenceAcks } from '../../../src/modules/library/application/conflict-resolution';
-import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
+import {
+  discoverLibraryResources,
+  enabledLibraryLocations,
+} from '../../../src/modules/library/application/library-discovery';
 import {
   applyLibraryPropagation,
   type PropagationApplyDeps,
@@ -125,6 +128,7 @@ function settings(locationIds: readonly LibraryLocationId[]): typeof DEFAULT_APP
 function preview(request: PropagationPreviewRequest): Promise<PropagationPreview> {
   const env = pathEnv();
   const cache = new LibraryCache();
+  const enabled = settings([...SKILL_LOCATIONS, ...INSTRUCTION_LOCATIONS, 'cursor-rules']);
   return previewLibraryPropagation(userId(), request, {
     discover: (scanUserId, kinds) =>
       discoverLibraryResources(getDb(), scanUserId, {
@@ -132,9 +136,10 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
         kinds,
         cache,
         pathEnv: env,
-        settings: settings([...SKILL_LOCATIONS, ...INSTRUCTION_LOCATIONS]),
+        settings: enabled,
       }),
     describeLocation: (id) => describeLocation(id, env),
+    enabledLocationIds: async () => enabledLibraryLocations(enabled.libraryLocations),
   });
 }
 
@@ -481,6 +486,35 @@ describe('propagation apply — file-backed resources', () => {
         },
       ]),
       applyDeps()
+    );
+
+    await expect(failure).rejects.toMatchObject({ status: 422 });
+  });
+});
+
+describe('propagation apply — request validation', () => {
+  // A location the scanner skips reports every destination as `create`, so an
+  // apply would overwrite real content while the preview claimed there was none.
+  it('refuses to preview a location the user has not enabled', async () => {
+    writeInstruction('claude-instructions', '# House rules\n');
+
+    const env = pathEnv();
+    const failure = previewLibraryPropagation(
+      userId(),
+      { resourceKeys: ['instruction:global'], targetLocationIds: [...INSTRUCTION_LOCATIONS] },
+      {
+        discover: (scanUserId, kinds) =>
+          discoverLibraryResources(getDb(), scanUserId, {
+            force: true,
+            kinds,
+            cache: new LibraryCache(),
+            pathEnv: env,
+            settings: settings([...INSTRUCTION_LOCATIONS]),
+          }),
+        describeLocation: (id) => describeLocation(id, env),
+        enabledLocationIds: async () =>
+          enabledLibraryLocations(settings(['claude-instructions']).libraryLocations),
+      }
     );
 
     await expect(failure).rejects.toMatchObject({ status: 422 });

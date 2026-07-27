@@ -74,6 +74,8 @@ interface PreviewHarness {
   readonly adapters?: AdapterCatalog;
   readonly acknowledged?: string[];
   readonly onDiscover?: (kinds: readonly ResourceKind[]) => void;
+  /** Defaults to "every requested location is enabled" so cases opt in explicitly. */
+  readonly enabledLocationIds?: readonly LibraryLocationId[];
 }
 
 function preview(
@@ -91,6 +93,8 @@ function preview(
       },
       describeLocation: (id) => harness.statuses?.[id] ?? status(id),
       acknowledgedKeys: () => Promise.resolve(new Set(harness.acknowledged ?? [])),
+      enabledLocationIds: () =>
+        Promise.resolve(new Set(harness.enabledLocationIds ?? targetLocationIds)),
       ...(harness.adapters && { adapters: harness.adapters }),
     }
   );

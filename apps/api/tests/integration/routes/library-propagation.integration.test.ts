@@ -14,7 +14,10 @@ import {
   type DivergenceAckDeps,
   listDivergenceAcks,
 } from '../../../src/modules/library/application/conflict-resolution';
-import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
+import {
+  discoverLibraryResources,
+  enabledLibraryLocations,
+} from '../../../src/modules/library/application/library-discovery';
 import { previewLibraryPropagation } from '../../../src/modules/library/application/propagation-preview';
 import { PropagationRequestError } from '../../../src/modules/library/domain/propagation-error';
 import {
@@ -102,6 +105,8 @@ function previewSkills(
           settings: skillLocationSettings(),
         }),
       describeLocation: (id) => describeLocation(id, pathEnv),
+      enabledLocationIds: async () =>
+        enabledLibraryLocations(skillLocationSettings().libraryLocations),
     }
   );
 }
