@@ -61,6 +61,12 @@ export class LibraryCache {
       return cached.value;
     }
 
+    // Signatures partition by enabled locations, resolved paths, and requested
+    // kinds, so the rescan route's signature is rarely the one a given consumer
+    // (the skill adapter, the matrix UI) reads. Dropping every memo keeps
+    // "force" globally authoritative instead of refreshing one arbitrary slice.
+    if (force) this.scans.clear();
+
     const value = compute();
     this.scans.set(signature, { scannedAtMs: nowMs, value });
     void value.catch(() => {

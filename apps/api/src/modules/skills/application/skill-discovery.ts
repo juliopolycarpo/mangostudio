@@ -17,6 +17,8 @@ import {
   discoverLibraryResources,
   resetLibraryDiscoveryCache,
 } from '../../library/application/library-discovery';
+import { getLibraryLocation } from '../../library/domain/registry';
+import { createLibraryPathEnv } from '../../library/infrastructure/location-probe';
 import { isValidSkillSlug, skillKey } from '../domain/skill';
 import { listSavedSkillSettings } from '../infrastructure/skill-settings-repository';
 
@@ -36,10 +38,23 @@ export type ThirdPartySkillSource = Exclude<SkillSource, 'mango'>;
 
 let thirdPartyDirOverrides: Partial<Record<ThirdPartySkillSource, string>> | null = null;
 
+/**
+ * Resolves through the library registry so this adapter and the library matrix
+ * never disagree about where a source lives: the registry honours
+ * `CLAUDE_CONFIG_DIR`, which a hardcoded `~/.claude/skills` would ignore.
+ */
+function registrySkillDir(source: ThirdPartySkillSource, ...fallbackParts: string[]): string {
+  const locationId = source === 'agents' ? 'agents-skills' : 'claude-skills';
+  return (
+    getLibraryLocation(locationId)?.resolvePath(createLibraryPathEnv()) ??
+    join(homedir(), ...fallbackParts)
+  );
+}
+
 export function getThirdPartySkillDirs(): Record<ThirdPartySkillSource, string> {
   return {
-    agents: thirdPartyDirOverrides?.agents ?? join(homedir(), '.agents', 'skills'),
-    claude: thirdPartyDirOverrides?.claude ?? join(homedir(), '.claude', 'skills'),
+    agents: thirdPartyDirOverrides?.agents ?? registrySkillDir('agents', '.agents', 'skills'),
+    claude: thirdPartyDirOverrides?.claude ?? registrySkillDir('claude', '.claude', 'skills'),
   };
 }
 
@@ -62,6 +77,7 @@ export async function listSkills(
     discoverLibraryResources(db, userId, {
       settings: appSettings,
       now,
+      kinds: ['skill'],
       locationPathOverrides: {
         'mango-skills': getConfig().skills.dir,
         'agents-skills': thirdPartyDirs.agents,

@@ -2,6 +2,7 @@ import type { AppSettings, LibraryLocationSettings } from '@mangostudio/shared/a
 import {
   type LibraryLocationId,
   type LibraryResource,
+  type ResourceKind,
   resourceKey,
 } from '@mangostudio/shared/library';
 import type { Kysely } from 'kysely';
@@ -22,6 +23,12 @@ export interface LibraryDiscoveryOptions {
   readonly cache?: LibraryCache;
   readonly settings?: AppSettings;
   readonly locationPathOverrides?: Partial<Record<LibraryLocationId, string>>;
+  /**
+   * Restricts the scan to these kinds. Scanning hashes every byte under every
+   * enabled location, so a caller that only consumes one kind (the skill
+   * adapter, on the turn hot path) must not pay for the other four.
+   */
+  readonly kinds?: readonly ResourceKind[];
 }
 
 export async function discoverLibraryResources(
@@ -32,8 +39,10 @@ export async function discoverLibraryResources(
   const settings = options.settings ?? (await getAppSettings(db, userId));
   const pathEnv = options.pathEnv ?? createLibraryPathEnv();
   const enabledLocations = enabledLibraryLocations(settings.libraryLocations);
+  const kinds = options.kinds ? new Set(options.kinds) : null;
   const locations = LIBRARY_LOCATION_DEFINITIONS.flatMap((location) => {
     if (!enabledLocations.has(location.id)) return [];
+    if (kinds && !kinds.has(location.kind)) return [];
     const path = options.locationPathOverrides?.[location.id] ?? location.resolvePath(pathEnv);
     return path ? [{ location, path }] : [];
   });
