@@ -79,6 +79,34 @@ describe('settings parsers', () => {
     });
   });
 
+  it('extracts a rule whose decision precedes its pattern', () => {
+    expect(
+      parsePermissionRules(
+        [
+          {
+            name: 'default.rules',
+            content: 'prefix_rule(decision = "deny", pattern = ["rm", "-rf"])',
+          },
+        ],
+        { homeDir: '/home/ada' }
+      )
+    ).toEqual({
+      parsed: true,
+      fields: [
+        {
+          path: 'default.rules[1].pattern',
+          presentation: 'value',
+          value: '["rm", "-rf"]',
+        },
+        {
+          path: 'default.rules[1].decision',
+          presentation: 'value',
+          value: 'deny',
+        },
+      ],
+    });
+  });
+
   it('reports an empty hooks object as a parsed source with zero fields', () => {
     expect(
       parseJsonSettings('{"hooks":{}}', {

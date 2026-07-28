@@ -10,7 +10,13 @@ export interface PermissionRulesSource {
 }
 
 const DECISION_PATTERN = /\bdecision\s*=\s*["']([^"']+)["']/;
-const RULE_PATTERN = /\bpattern\s*=\s*(.+?)\s*,\s*decision\s*=/;
+/**
+ * `decision` is matched independently of position, so `pattern` must be too:
+ * requiring `decision` to follow it dropped `decision = …, pattern = …` rules
+ * entirely and reported the target as having no rules at all. The value runs to
+ * the next `key =`, or to a trailing call paren, or to the end of the line.
+ */
+const RULE_PATTERN = /\bpattern\s*=\s*(.+?)\s*(?:,\s*[A-Za-z_]\w*\s*=|\)\s*$|$)/;
 
 export function parsePermissionRules(
   sources: readonly PermissionRulesSource[],
