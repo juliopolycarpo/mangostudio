@@ -5,9 +5,12 @@
 import {
   type AppSettings,
   DEFAULT_APP_SETTINGS,
+  libraryLocationsFor,
   normalizeAppSettings,
+  withLibraryLocations,
 } from '@mangostudio/shared/app-settings';
 import type { LibraryLocationId } from '@mangostudio/shared/library';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { SkillDescriptor, SkillListResponse } from '@mangostudio/shared/skills';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-invalidation';
@@ -80,14 +83,14 @@ export function useToggleSkillSource() {
         (await queryClient.fetchQuery(appSettingsQueryOptions())) ??
         DEFAULT_APP_SETTINGS;
       const current = normalizeAppSettings(cached);
+      const locations = libraryLocationsFor(current);
 
-      return updateAppSettings({
-        ...current,
-        libraryLocations: {
-          ...current.libraryLocations,
+      return updateAppSettings(
+        withLibraryLocations(current, DEFAULT_PROFILE_ID, {
+          ...locations,
           [LOCATION_BY_SOURCE[source]]: enabled,
-        },
-      });
+        })
+      );
     },
     onSuccess: async (savedSettings) => {
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));

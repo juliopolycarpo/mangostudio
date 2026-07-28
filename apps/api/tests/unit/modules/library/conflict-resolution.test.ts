@@ -51,18 +51,18 @@ function memoryRepository(seed: DivergenceAckRecord[] = []): MemoryRepository {
   return {
     rows,
     list: () => Promise.resolve([...rows.values()]),
-    listFor: (_userId, resourceKeys) =>
+    listFor: (_userId, _profileId, resourceKeys) =>
       Promise.resolve(
         resourceKeys.flatMap((key) => {
           const record = rows.get(key);
           return record ? [record] : [];
         })
       ),
-    upsert: (_userId, record) => {
+    upsert: (_userId, _profileId, record) => {
       rows.set(record.resourceKey, record);
       return Promise.resolve();
     },
-    remove: (_userId, resourceKeys) => {
+    remove: (_userId, _profileId, resourceKeys) => {
       for (const key of resourceKeys) rows.delete(key);
       return Promise.resolve();
     },
@@ -126,6 +126,31 @@ describe('acknowledgeDivergence', () => {
     expect(repository.rows.get('skill:gh')?.divergenceKey).toBe(
       divergenceKeyFor(['hash-a', 'hash-b'])
     );
+  });
+
+  it('accepts the active profile id and rejects a mismatched one', async () => {
+    const repository = memoryRepository();
+    const matching = await acknowledgeDivergence(
+      'user-1',
+      {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-b'],
+        profileId: 'default',
+      },
+      deps(repository, [divergent])
+    );
+    expect(matching.resourceKey).toBe('skill:gh');
+
+    const mismatched = acknowledgeDivergence(
+      'user-1',
+      {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-b'],
+        profileId: 'work-laptop',
+      },
+      deps(repository, [divergent])
+    );
+    await expect(mismatched).rejects.toMatchObject({ status: 400 });
   });
 
   it('refuses to accept a divergence the client did not see', async () => {

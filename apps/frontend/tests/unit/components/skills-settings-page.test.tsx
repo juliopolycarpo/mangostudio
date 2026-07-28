@@ -2,7 +2,12 @@
  * Unit tests for SkillsSettingsPage component.
  */
 
-import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import {
+  DEFAULT_APP_SETTINGS,
+  DEFAULT_LIBRARY_LOCATION_SETTINGS,
+  withLibraryLocations,
+} from '@mangostudio/shared/app-settings';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SkillsSettingsPage } from '../../../src/features/settings/skills/components/SkillsSettingsPage';
@@ -144,14 +149,11 @@ describe('SkillsSettingsPage', () => {
     fetchScenario.respondWithJson('GET', '/api/skills', { body: SKILLS_RESPONSE });
     fetchScenario.respondWithJson('GET', '/api/settings/app', { body: DEFAULT_APP_SETTINGS });
     fetchScenario.respondWithJson('PUT', '/api/settings/app', {
-      body: {
-        ...DEFAULT_APP_SETTINGS,
-        libraryLocations: {
-          ...DEFAULT_APP_SETTINGS.libraryLocations,
-          'agents-skills': true,
-          'claude-skills': true,
-        },
-      },
+      body: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+        ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+        'agents-skills': true,
+        'claude-skills': true,
+      }),
     });
 
     render(<SkillsSettingsPage />);

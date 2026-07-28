@@ -22,6 +22,7 @@ import type {
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
+import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { generateId } from '../../../utils/id';
 import { evaluateInstallGuard } from '../domain/install-guards';
@@ -106,6 +107,7 @@ interface EventBuffer {
 interface ActiveInstall {
   readonly runId: string;
   readonly userId: string;
+  readonly profileId: string;
   readonly recipeId: InstallRecipeId;
   readonly abortController: AbortController;
   readonly stream: EventBuffer;
@@ -493,7 +495,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     result: CompleteInstallRun
   ): Promise<void> => {
     try {
-      await deps.repository.complete(active.runId, active.userId, result);
+      await deps.repository.complete(active.runId, active.userId, active.profileId, result);
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Unknown persistence failure.';
       active.stream.publish({
@@ -581,11 +583,15 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
    * forever. The outcome is genuinely unknown, which is what `interrupted`
    * reports — the installer may well have finished.
    */
-  const settleOrphanedRun = async (run: InstallRun, userId: string): Promise<InstallRun> => {
+  const settleOrphanedRun = async (
+    run: InstallRun,
+    userId: string,
+    profileId: string
+  ): Promise<InstallRun> => {
     if (run.status !== 'running' || activeByRun.has(run.id)) return run;
     const finishedAt = run.finishedAt ?? deps.now();
     try {
-      await deps.repository.complete(run.id, userId, {
+      await deps.repository.complete(run.id, userId, profileId, {
         finishedAt,
         exitCode: run.exitCode,
         status: 'interrupted',
@@ -632,6 +638,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     },
 
     async prepare(body, context) {
+      assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
       const preview = await buildPreview(recipe, body.input, context);
@@ -684,6 +691,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     },
 
     async start(body, context) {
+      assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
       const preview = await buildPreview(recipe, body.input, context);
@@ -752,9 +760,11 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
 
           const runId = deps.generateId();
           const startedAt = deps.now();
+          const profileId = resolveActiveProfileId(context);
           const active: ActiveInstall = {
             runId,
             userId: context.userId,
+            profileId,
             recipeId: recipe.id,
             abortController: new AbortController(),
             stream: createEventBuffer(),
@@ -769,6 +779,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
             await deps.repository.create({
               id: runId,
               userId: context.userId,
+              profileId,
               recipeId: recipe.id,
               argv,
               startedAt,
@@ -798,14 +809,15 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     },
 
     async cancel(runId, userId) {
-      const run = await deps.repository.find(runId, userId);
+      const profileId = resolveActiveProfileId({ userId });
+      const run = await deps.repository.find(runId, userId, profileId);
       if (!run) return null;
       const active = activeByRun.get(runId);
       if (!active || active.userId !== userId) {
         // There is no child to signal. If the row still claims to be running it
         // belongs to a process that no longer exists, so settle it here rather
         // than report a cancellation that can never be honoured.
-        await settleOrphanedRun(run, userId);
+        await settleOrphanedRun(run, userId, profileId);
         return { runId, cancellationRequested: false };
       }
       active.abortController.abort('user_cancelled');
@@ -813,16 +825,18 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     },
 
     async listRuns(userId) {
-      const runs = await deps.repository.list(userId);
-      return Promise.all(runs.map((run) => settleOrphanedRun(run, userId)));
+      const profileId = resolveActiveProfileId({ userId });
+      const runs = await deps.repository.list(userId, profileId);
+      return Promise.all(runs.map((run) => settleOrphanedRun(run, userId, profileId)));
     },
 
     async getRunStream(runId, userId) {
-      const run = await deps.repository.find(runId, userId);
+      const profileId = resolveActiveProfileId({ userId });
+      const run = await deps.repository.find(runId, userId, profileId);
       if (!run) return null;
       const recent = recentStreams.get(runId);
       if (recent?.userId === userId) return recent.stream.subscribe();
-      return historicalStream(await settleOrphanedRun(run, userId));
+      return historicalStream(await settleOrphanedRun(run, userId, profileId));
     },
   };
 }

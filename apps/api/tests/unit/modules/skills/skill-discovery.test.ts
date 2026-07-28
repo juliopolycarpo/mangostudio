@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import {
+  DEFAULT_APP_SETTINGS,
+  DEFAULT_LIBRARY_LOCATION_SETTINGS,
+  withLibraryLocations,
+} from '@mangostudio/shared/app-settings';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import { updateAppSettings } from '../../../../src/modules/app-settings/application/app-settings-service';
@@ -29,14 +34,15 @@ async function enableSources(
   userId: string,
   sources: { readonly agents?: boolean; readonly claude?: boolean }
 ): Promise<void> {
-  await updateAppSettings(getDb(), userId, {
-    ...DEFAULT_APP_SETTINGS,
-    libraryLocations: {
-      ...DEFAULT_APP_SETTINGS.libraryLocations,
+  await updateAppSettings(
+    getDb(),
+    userId,
+    withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
       'agents-skills': sources.agents ?? false,
       'claude-skills': sources.claude ?? false,
-    },
-  });
+    })
+  );
 }
 
 function writeSkillIn(dir: string, slug: string, frontmatter: string, body = 'Do it.'): string {

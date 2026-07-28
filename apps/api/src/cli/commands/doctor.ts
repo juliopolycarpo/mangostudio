@@ -377,11 +377,24 @@ function readSkillSourceToggles(config: MangoConfig): { agents: boolean; claude:
   for (const row of rows) {
     const settings = parseSettingsJson(row.settingsJson);
     const legacy = parseBooleanRecord(settings.skillSources);
-    const locations = normalizeLibraryLocationSettings(settings.libraryLocations, {
-      'mango-skills': true,
-      'agents-skills': legacy.agents ?? false,
-      'claude-skills': legacy.claude ?? false,
-    });
+    const nestedDefault =
+      settings.profileSettings &&
+      typeof settings.profileSettings === 'object' &&
+      !Array.isArray(settings.profileSettings)
+        ? (settings.profileSettings as Record<string, unknown>).default
+        : undefined;
+    const nestedLocations =
+      nestedDefault && typeof nestedDefault === 'object' && !Array.isArray(nestedDefault)
+        ? (nestedDefault as Record<string, unknown>).libraryLocations
+        : undefined;
+    const locations = normalizeLibraryLocationSettings(
+      nestedLocations ?? settings.libraryLocations,
+      {
+        'mango-skills': true,
+        'agents-skills': legacy.agents ?? false,
+        'claude-skills': legacy.claude ?? false,
+      }
+    );
     if (locations['agents-skills']) toggles.agents = true;
     if (locations['claude-skills']) toggles.claude = true;
   }

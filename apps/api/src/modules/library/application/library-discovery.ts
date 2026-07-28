@@ -1,4 +1,5 @@
 import type { AppSettings } from '@mangostudio/shared/app-settings';
+import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   enabledLibraryLocations,
   type LibraryLocationId,
@@ -39,7 +40,7 @@ export async function discoverLibraryResources(
 ): Promise<LibraryResource[]> {
   const settings = options.settings ?? (await getAppSettings(db, userId));
   const pathEnv = options.pathEnv ?? createLibraryPathEnv();
-  const enabledLocations = enabledLibraryLocations(settings.libraryLocations);
+  const enabledLocations = enabledLibraryLocations(libraryLocationsFor(settings));
   const kinds = options.kinds ? new Set(options.kinds) : null;
   const locations = LIBRARY_LOCATION_DEFINITIONS.flatMap((location) => {
     if (!enabledLocations.has(location.id)) return [];

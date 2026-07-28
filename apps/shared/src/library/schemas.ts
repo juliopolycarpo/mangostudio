@@ -1,4 +1,5 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { ProfileIdSchema } from '../profiles';
 import type { SkillSource } from '../skills';
 
 export const ResourceKindSchema = Type.Union([
@@ -396,6 +397,8 @@ export const PropagationPreviewRequestSchema = Type.Object({
     maxItems: PROPAGATION_PREVIEW_MAX_RESOURCES,
   }),
   targetLocationIds: Type.Array(LibraryLocationIdSchema, { minItems: 1, maxItems: 64 }),
+  /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
+  profileId: Type.Optional(ProfileIdSchema),
 });
 
 export const PropagationPreviewSchema = Type.Object({
@@ -450,6 +453,8 @@ export const PropagationApplyRequestSchema = Type.Object({
     minItems: 1,
     maxItems: PROPAGATION_PREVIEW_MAX_RESOURCES,
   }),
+  /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
+  profileId: Type.Optional(ProfileIdSchema),
 });
 
 export const PropagationSkipReasonSchema = Type.Union([
@@ -566,6 +571,8 @@ export const LibraryDivergenceAckRequestSchema = Type.Object({
   resourceKey: Type.String({ minLength: 1 }),
   /** What the client saw; a mismatch with disk rejects the acknowledgement. */
   contentHashes: Type.Array(Type.String({ minLength: 1 }), { minItems: 2, maxItems: 64 }),
+  /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
+  profileId: Type.Optional(ProfileIdSchema),
 });
 
 export type ResourceKind = Static<typeof ResourceKindSchema>;

@@ -3,7 +3,7 @@
  * should return. Lives in `domain` so the preview and the conflict-resolution
  * service can both raise it without importing each other.
  */
-export type PropagationErrorStatus = 404 | 409 | 422;
+export type PropagationErrorStatus = 400 | 404 | 409 | 422;
 
 export class PropagationRequestError extends Error {
   constructor(

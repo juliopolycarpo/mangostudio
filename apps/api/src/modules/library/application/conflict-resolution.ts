@@ -16,6 +16,11 @@ import {
   parseResourceKey,
 } from '@mangostudio/shared/library';
 import { getDb } from '../../../db/database';
+import {
+  assertRequestedProfileId,
+  ProfileMismatchError,
+  resolveActiveProfileId,
+} from '../../../lib/profile-context';
 import { PropagationRequestError } from '../domain/propagation-error';
 import {
   createDivergenceAckRepository,
@@ -42,6 +47,17 @@ function resolveDeps(overrides: Partial<DivergenceAckDeps>): DivergenceAckDeps {
   };
 }
 
+function activeProfileId(userId: string, requested?: string) {
+  try {
+    return assertRequestedProfileId(requested, { userId });
+  } catch (error) {
+    if (error instanceof ProfileMismatchError) {
+      throw new PropagationRequestError(400, error.message);
+    }
+    throw error;
+  }
+}
+
 /** Stable digest of an accepted divergence, independent of hash order. */
 export function divergenceKeyFor(contentHashes: readonly string[]): string {
   return createHash('sha256')
@@ -64,7 +80,8 @@ export async function listDivergenceAcks(
   overrides: Partial<DivergenceAckDeps> = {}
 ): Promise<LibraryDivergenceAck[]> {
   const deps = resolveDeps(overrides);
-  const records = await deps.repository.list(userId);
+  const profileId = resolveActiveProfileId({ userId });
+  const records = await deps.repository.list(userId, profileId);
   return records.map((record) => ({
     resourceKey: record.resourceKey,
     contentHashes: record.contentHashes,
@@ -78,6 +95,7 @@ export async function acknowledgeDivergence(
   overrides: Partial<DivergenceAckDeps> = {}
 ): Promise<LibraryDivergenceAck> {
   const deps = resolveDeps(overrides);
+  const profileId = activeProfileId(userId, request.profileId);
   const ref = parseResourceKey(request.resourceKey);
   if (!ref) {
     throw new PropagationRequestError(
@@ -113,7 +131,7 @@ export async function acknowledgeDivergence(
   }
 
   const acknowledgedAtMs = deps.now();
-  await deps.repository.upsert(userId, {
+  await deps.repository.upsert(userId, profileId, {
     resourceKey: request.resourceKey,
     divergenceKey,
     contentHashes,
@@ -128,7 +146,8 @@ export async function forgetDivergenceAck(
   overrides: Partial<DivergenceAckDeps> = {}
 ): Promise<void> {
   const deps = resolveDeps(overrides);
-  await deps.repository.remove(userId, [resourceKey]);
+  const profileId = resolveActiveProfileId({ userId });
+  await deps.repository.remove(userId, profileId, [resourceKey]);
 }
 
 /**
@@ -143,8 +162,9 @@ export async function acknowledgedResourceKeys(
   overrides: Partial<DivergenceAckDeps> = {}
 ): Promise<ReadonlySet<string>> {
   const deps = resolveDeps(overrides);
+  const profileId = resolveActiveProfileId({ userId });
   const byKey = new Map(resources.map((resource) => [resource.key, resource] as const));
-  const records = await deps.repository.listFor(userId, [...byKey.keys()]);
+  const records = await deps.repository.listFor(userId, profileId, [...byKey.keys()]);
 
   const current = new Set<string>();
   const expired: string[] = [];
@@ -156,7 +176,7 @@ export async function acknowledgedResourceKeys(
       expired.push(record.resourceKey);
     }
   }
-  await deps.repository.remove(userId, expired);
+  await deps.repository.remove(userId, profileId, expired);
   return current;
 }
 

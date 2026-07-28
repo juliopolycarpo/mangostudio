@@ -2,13 +2,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import {
+  DEFAULT_APP_SETTINGS,
+  libraryLocationsFor,
+  withLibraryLocations,
+} from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
   PropagationPreview,
   PropagationPreviewEntry,
 } from '@mangostudio/shared/library';
 import { enabledLibraryLocations } from '@mangostudio/shared/library';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../src/db/database';
 import {
   acknowledgeDivergence,
@@ -75,12 +80,11 @@ function libraryPathEnv() {
 }
 
 function skillLocationSettings(): typeof DEFAULT_APP_SETTINGS {
-  return {
-    ...DEFAULT_APP_SETTINGS,
-    libraryLocations: Object.fromEntries(
-      SKILL_LOCATIONS.map((id) => [id, true])
-    ) as (typeof DEFAULT_APP_SETTINGS)['libraryLocations'],
-  };
+  return withLibraryLocations(
+    DEFAULT_APP_SETTINGS,
+    DEFAULT_PROFILE_ID,
+    Object.fromEntries(SKILL_LOCATIONS.map((id) => [id, true]))
+  );
 }
 
 function previewSkills(
@@ -104,7 +108,7 @@ function previewSkills(
         }),
       describeLocation: (id) => describeLocation(id, pathEnv),
       enabledLocationIds: async () =>
-        enabledLibraryLocations(skillLocationSettings().libraryLocations),
+        enabledLibraryLocations(libraryLocationsFor(skillLocationSettings())),
     }
   );
 }
@@ -395,6 +399,15 @@ describe('divergence acknowledgement routes', () => {
     expect(created.status).toBe(200);
     expect(await created.json()).toEqual(ack);
 
+    const withProfile = await recorded.handle(
+      jsonRequest('/library/divergence/acks', 'POST', {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-b'],
+        profileId: 'default',
+      })
+    );
+    expect(withProfile.status).toBe(200);
+
     const stale = harness({
       acknowledge: () => Promise.reject(new PropagationRequestError(409, 'changed')),
     });
@@ -407,6 +420,29 @@ describe('divergence acknowledgement routes', () => {
 
     expect(conflict.status).toBe(409);
     expect(await conflict.json()).toMatchObject({ code: 'CONFLICT' });
+  });
+
+  it('rejects a mismatched profileId on acknowledgement', async () => {
+    const app = harness({
+      acknowledge: () =>
+        Promise.reject(
+          new PropagationRequestError(
+            400,
+            'Requested profile "work-laptop" does not match the active profile "default".'
+          )
+        ),
+    });
+
+    const response = await app.handle(
+      jsonRequest('/library/divergence/acks', 'POST', {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-b'],
+        profileId: 'work-laptop',
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'VALIDATION' });
   });
 
   it('requires at least two hashes to describe a divergence', async () => {

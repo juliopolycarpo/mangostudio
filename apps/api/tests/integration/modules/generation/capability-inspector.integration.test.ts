@@ -12,7 +12,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ChatCapabilitiesResponseSchema } from '@mangostudio/shared/capabilities';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
@@ -305,13 +307,14 @@ describe('inspectChatCapabilities', () => {
     writeSkill(skillsDir, 'draft');
     writeSkill(agentsDir, 'notes');
     const settings = await getAppSettings(getDb(), user.id);
-    await updateAppSettings(getDb(), user.id, {
-      ...settings,
-      libraryLocations: {
-        ...settings.libraryLocations,
+    await updateAppSettings(
+      getDb(),
+      user.id,
+      withLibraryLocations(settings, DEFAULT_PROFILE_ID, {
+        ...libraryLocationsFor(settings),
         'agents-skills': true,
-      },
-    });
+      })
+    );
     resetSkillsCache();
     await updateSkillSetting(getDb(), user.id, 'mango:draft', { enabled: false });
 

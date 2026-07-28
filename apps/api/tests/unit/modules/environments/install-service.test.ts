@@ -86,16 +86,16 @@ function createMemoryRepository() {
       runs.set(run.id, run);
       return Promise.resolve(run);
     },
-    complete(id, userId, result) {
+    complete(id, userId, _profileId, result) {
       if (userId !== REQUEST_CONTEXT.userId) return Promise.resolve();
       const run = runs.get(id);
       if (run) runs.set(id, { ...run, ...result });
       return Promise.resolve();
     },
-    find(id, userId) {
+    find(id, userId, _profileId) {
       return Promise.resolve(userId === REQUEST_CONTEXT.userId ? (runs.get(id) ?? null) : null);
     },
-    list(userId) {
+    list(userId, _profileId) {
       return Promise.resolve(userId === REQUEST_CONTEXT.userId ? [...runs.values()] : []);
     },
   };

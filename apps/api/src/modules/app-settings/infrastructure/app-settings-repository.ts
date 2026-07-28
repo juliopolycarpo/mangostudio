@@ -1,5 +1,5 @@
 import type { AppSettings, LibraryLocationSettings } from '@mangostudio/shared/app-settings';
-import { normalizeAppSettings } from '@mangostudio/shared/app-settings';
+import { libraryLocationsFor, normalizeAppSettings } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 import type { Database, UserAppSettingsSelect } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
@@ -26,6 +26,7 @@ export async function upsertAppSettings(
 ): Promise<AppSettings> {
   const now = Date.now();
   const normalized = normalizeAppSettings(settings);
+  const locations = libraryLocationsFor(normalized);
   const existing = await db
     .selectFrom('user_app_settings')
     .select('settingsJson')
@@ -36,11 +37,13 @@ export async function upsertAppSettings(
   const settingsJson = JSON.stringify({
     ...preserved,
     ...normalized,
-    // Keep the pre-library shape in storage so an application downgrade
-    // retains the two source choices even though it is no longer public API.
+    // Keep the pre-nesting and pre-library shapes in storage so an application
+    // downgrade retains the two source choices even though they are no longer
+    // public API.
+    libraryLocations: locations,
     skillSources: {
-      agents: normalized.libraryLocations['agents-skills'] ?? false,
-      claude: normalized.libraryLocations['claude-skills'] ?? false,
+      agents: locations['agents-skills'] ?? false,
+      claude: locations['claude-skills'] ?? false,
     },
   });
 

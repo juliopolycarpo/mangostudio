@@ -48,7 +48,8 @@
     "./github": "./src/github/index.ts",
     "./file-checkpoints": "./src/file-checkpoints/index.ts",
     "./library": "./src/library/index.ts",
-    "./environments": "./src/environments/index.ts"
+    "./environments": "./src/environments/index.ts",
+    "./profiles": "./src/profiles/index.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

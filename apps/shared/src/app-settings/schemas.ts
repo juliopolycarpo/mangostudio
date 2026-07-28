@@ -14,6 +14,7 @@ import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
 } from '../git/commit-message';
 import { LibraryLocationIdSchema } from '../library';
+import { ProfileIdSchema } from '../profiles';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
 import { WorkspaceSettingsSchema } from '../workspaces';
@@ -54,6 +55,17 @@ export const MultiAgentSettingsSchema = Type.Object({
 /** Enablement map for the code-defined locations the library scanner may read. */
 export const LibraryLocationSettingsSchema = Type.Record(LibraryLocationIdSchema, Type.Boolean());
 
+/**
+ * Per-profile settings overlay. Named `profileSettings` rather than `profiles`
+ * because it holds settings scoped *by* profile, not profile definitions —
+ * there is no profile entity yet.
+ */
+export const ProfileScopedSettingsSchema = Type.Object({
+  libraryLocations: LibraryLocationSettingsSchema,
+});
+
+export const ProfileSettingsMapSchema = Type.Record(ProfileIdSchema, ProfileScopedSettingsSchema);
+
 export const DiffPreviewModeSchema = Type.Union([
   Type.Literal('expanded'),
   Type.Literal('collapsed'),
@@ -92,7 +104,7 @@ export const AppSettingsSchema = Type.Object({
   multiAgentSettings: MultiAgentSettingsSchema,
   contextSettings: ContextSettingsSchema,
   chatTitleSettings: ChatTitleSettingsSchema,
-  libraryLocations: LibraryLocationSettingsSchema,
+  profileSettings: ProfileSettingsMapSchema,
   workspaceSettings: WorkspaceSettingsSchema,
   gitSettings: GitSettingsSchema,
   chatDisplaySettings: ChatDisplaySettingsSchema,
@@ -105,6 +117,8 @@ export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;
 export type LibraryLocationSettings = Static<typeof LibraryLocationSettingsSchema>;
+export type ProfileScopedSettings = Static<typeof ProfileScopedSettingsSchema>;
+export type ProfileSettingsMap = Static<typeof ProfileSettingsMapSchema>;
 export type CommitMessageSettings = Static<typeof CommitMessageSettingsSchema>;
 export type GitSettings = Static<typeof GitSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;

@@ -7,6 +7,7 @@ import type {
   InstallStreamEvent,
   RuntimeStatus,
 } from '@mangostudio/shared/environments';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../src/db/database';
 import type { AgentCliDetectionService } from '../../../src/modules/environments/application/agent-cli-detection';
 import { createInstallService } from '../../../src/modules/environments/application/install-service';
@@ -113,7 +114,7 @@ async function execute(argv: readonly string[]) {
   for await (const event of source) events.push(event);
   return {
     events,
-    run: await repository.find(started.runId, user.id),
+    run: await repository.find(started.runId, user.id, DEFAULT_PROFILE_ID),
   };
 }
 

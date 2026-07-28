@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../../src/db/database';
 import { createInstallRunRepository } from '../../../../src/modules/environments/infrastructure/install-run-repository';
 import { insertTestUser } from '../../../support/factories';
@@ -20,6 +21,7 @@ describe('install run repository', () => {
     const created = await repository.create({
       id: 'install-run-1',
       userId: user.id,
+      profileId: DEFAULT_PROFILE_ID,
       recipeId: 'bun.update',
       argv: ['bun', 'upgrade'],
       startedAt: 1_700_000_000_000,
@@ -35,22 +37,22 @@ describe('install run repository', () => {
       status: 'running',
       truncated: false,
     });
-    expect(await repository.find(created.id, otherUser.id)).toBeNull();
+    expect(await repository.find(created.id, otherUser.id, DEFAULT_PROFILE_ID)).toBeNull();
 
-    await repository.complete(created.id, user.id, {
+    await repository.complete(created.id, user.id, DEFAULT_PROFILE_ID, {
       finishedAt: 1_700_000_001_000,
       exitCode: 0,
       status: 'succeeded',
       truncated: true,
     });
 
-    expect(await repository.find(created.id, user.id)).toEqual({
+    expect(await repository.find(created.id, user.id, DEFAULT_PROFILE_ID)).toEqual({
       ...created,
       finishedAt: 1_700_000_001_000,
       exitCode: 0,
       status: 'succeeded',
       truncated: true,
     });
-    expect(await repository.list(user.id)).toHaveLength(1);
+    expect(await repository.list(user.id, DEFAULT_PROFILE_ID)).toHaveLength(1);
   });
 });

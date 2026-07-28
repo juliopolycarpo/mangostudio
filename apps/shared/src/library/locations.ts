@@ -21,7 +21,7 @@ export const ALWAYS_ENABLED_LIBRARY_LOCATIONS: readonly LibraryLocationId[] = [
  * importing `LibraryLocationSettings`, which would make the app-settings module
  * and this one import each other.
  *
- * // Usage: const enabled = enabledLibraryLocations(settings.libraryLocations);
+ * // Usage: const enabled = enabledLibraryLocations(libraryLocationsFor(settings));
  */
 export function enabledLibraryLocations(
   settings: Readonly<Record<string, boolean>>

@@ -1,6 +1,7 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
 import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
+import { ProfileIdSchema } from '../profiles';
 
 export const RuntimeIdSchema = Type.Union([
   Type.Literal('bun'),
@@ -219,6 +220,8 @@ export const InstallPrepareBodySchema = Type.Object(
   {
     recipeId: InstallRecipeIdSchema,
     input: RecipeInputSchema,
+    /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
+    profileId: Type.Optional(ProfileIdSchema),
   },
   { additionalProperties: false }
 );
@@ -234,6 +237,8 @@ export const InstallStartBodySchema = Type.Object(
     recipeId: InstallRecipeIdSchema,
     input: RecipeInputSchema,
     preparationId: Type.Optional(Type.String({ minLength: 1 })),
+    /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
+    profileId: Type.Optional(ProfileIdSchema),
   },
   { additionalProperties: false }
 );

@@ -4,7 +4,12 @@
  * projections stale immediately.
  */
 
-import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import {
+  DEFAULT_APP_SETTINGS,
+  DEFAULT_LIBRARY_LOCATION_SETTINGS,
+  withLibraryLocations,
+} from '@mangostudio/shared/app-settings';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chatCapabilitiesQueryOptions } from '../../../../src/features/chat/hooks/use-chat-capabilities';
@@ -164,13 +169,10 @@ describe('capability cache invalidation', () => {
   it('invalidates cached projections after a skill source update', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/app', { body: DEFAULT_APP_SETTINGS });
     fetchScenario.respondWithJson('PUT', '/api/settings/app', {
-      body: {
-        ...DEFAULT_APP_SETTINGS,
-        libraryLocations: {
-          ...DEFAULT_APP_SETTINGS.libraryLocations,
-          'agents-skills': true,
-        },
-      },
+      body: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+        ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+        'agents-skills': true,
+      }),
     });
 
     const { result } = renderHook(() => ({

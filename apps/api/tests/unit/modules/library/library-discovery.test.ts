@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { enabledLibraryLocations } from '@mangostudio/shared/library';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../../src/db/database';
 import {
   discoverLibraryResources,
@@ -38,13 +39,10 @@ describe('discoverLibraryResources', () => {
 
     const resources = await discoverLibraryResources(getDb(), 'library-user', {
       cache: new LibraryCache(),
-      settings: {
-        ...DEFAULT_APP_SETTINGS,
-        libraryLocations: {
-          'mango-skills': true,
-          'claude-agents': true,
-        },
-      },
+      settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+        'mango-skills': true,
+        'claude-agents': true,
+      }),
       locationPathOverrides: {
         'mango-skills': skillsDir,
         'claude-agents': agentsDir,
@@ -80,16 +78,13 @@ describe('discoverLibraryResources', () => {
 
     const resources = await discoverLibraryResources(getDb(), 'five-kind-user', {
       cache: new LibraryCache(),
-      settings: {
-        ...DEFAULT_APP_SETTINGS,
-        libraryLocations: {
-          'mango-skills': true,
-          'claude-agents': true,
-          'mango-instructions': true,
-          'mango-settings': true,
-          'codex-hooks': true,
-        },
-      },
+      settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+        'mango-skills': true,
+        'claude-agents': true,
+        'mango-instructions': true,
+        'mango-settings': true,
+        'codex-hooks': true,
+      }),
       locationPathOverrides: {
         'mango-skills': skillsDir,
         'claude-agents': agentsDir,
@@ -116,10 +111,10 @@ describe('discoverLibraryResources', () => {
 
     const [resource, ...rest] = await discoverLibraryResources(getDb(), 'instruction-user', {
       cache: new LibraryCache(),
-      settings: {
-        ...DEFAULT_APP_SETTINGS,
-        libraryLocations: { 'claude-instructions': true, 'codex-instructions': true },
-      },
+      settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+        'claude-instructions': true,
+        'codex-instructions': true,
+      }),
       locationPathOverrides: {
         'claude-instructions': claudeFile,
         'codex-instructions': codexFile,
@@ -145,10 +140,9 @@ describe('discoverLibraryResources', () => {
 
     const [resource] = await discoverLibraryResources(getDb(), 'oversized-user', {
       cache: new LibraryCache(),
-      settings: {
-        ...DEFAULT_APP_SETTINGS,
-        libraryLocations: { 'mango-settings': true },
-      },
+      settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+        'mango-settings': true,
+      }),
       locationPathOverrides: { 'mango-settings': settingsFile },
     });
 
