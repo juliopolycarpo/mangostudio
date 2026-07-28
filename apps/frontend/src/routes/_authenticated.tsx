@@ -64,6 +64,7 @@ function AuthenticatedLayout() {
   if (currentPath.includes('/settings')) activePage = 'settings';
   if (currentPath.includes('/studio')) activePage = 'studio';
   if (currentPath.includes('/environments')) activePage = 'environments';
+  if (currentPath.includes('/library')) activePage = 'library';
 
   return (
     <AppContext value={app}>
