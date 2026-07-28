@@ -16,6 +16,8 @@ import {
   LibraryResourceContentSchema,
   LibraryResourceListSchema,
   LibraryResourceSchema,
+  type LibraryTargetDescriptor,
+  LibraryTargetDescriptorListSchema,
   type LibraryTargetId,
   LibraryTargetIdSchema,
   parseResourceKey,
@@ -31,7 +33,7 @@ import {
 } from '../../../lib/safe-file';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { discoverLibraryResources } from '../application/library-discovery';
-import { LIBRARY_LOCATION_DEFINITIONS } from '../domain/registry';
+import { LIBRARY_LOCATION_DEFINITIONS, listLibraryTargetDescriptors } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 
 export const MAX_LIBRARY_CONTENT_BYTES = 512 * 1024;
@@ -136,6 +138,7 @@ const resourceParams = t.Object({ key: t.String() });
 export interface LibraryRouteService {
   discover(userId: string, force: boolean): Promise<LibraryResource[]>;
   listLocations(): LibraryLocationStatus[];
+  listTargets(): LibraryTargetDescriptor[];
   readContent(
     resource: LibraryResource,
     locationId: LibraryLocationId
@@ -148,99 +151,112 @@ const defaultLibraryRouteService: LibraryRouteService = {
     const env = createLibraryPathEnv();
     return LIBRARY_LOCATION_DEFINITIONS.map((location) => describeLocation(location.id, env));
   },
+  listTargets: listLibraryTargetDescriptors,
   readContent: readResourceContent,
 };
 
 export function createLibraryRoutes(service: LibraryRouteService = defaultLibraryRouteService) {
-  return new Elysia()
-    .use(requireAuth)
-    .get(
-      '/library/resources',
-      async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
-        try {
-          const resources = await service.discover(user?.id ?? '', false);
-          return filterLibraryResources(resources, query);
-        } catch (error) {
-          return handleLibraryError(error, set);
-        }
-      },
-      {
-        query: resourceQuery,
-        response: {
-          200: LibraryResourceListSchema,
-          500: ApiErrorResponseSchema,
+  return (
+    new Elysia()
+      .use(requireAuth)
+      .get(
+        '/library/resources',
+        async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
+          try {
+            const resources = await service.discover(user?.id ?? '', false);
+            return filterLibraryResources(resources, query);
+          } catch (error) {
+            return handleLibraryError(error, set);
+          }
         },
-      }
-    )
-    .get(
-      '/library/resources/:key/content',
-      async ({ params, query, set, user }): Promise<LibraryResourceContent | ApiErrorResponse> => {
-        if (!parseResourceKey(params.key)) return invalidResourceKey(set);
-        try {
-          const resources = await service.discover(user?.id ?? '', false);
-          const resource = resources.find((candidate) => candidate.key === params.key);
-          if (!resource) return resourceNotFound(set);
-          return service.readContent(resource, query.location) ?? resourceNotFound(set);
-        } catch (error) {
-          return handleLibraryError(error, set);
+        {
+          query: resourceQuery,
+          response: {
+            200: LibraryResourceListSchema,
+            500: ApiErrorResponseSchema,
+          },
         }
-      },
-      {
-        params: resourceParams,
-        query: t.Object({ location: LibraryLocationIdSchema }),
-        response: {
-          200: LibraryResourceContentSchema,
-          400: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-          500: ApiErrorResponseSchema,
+      )
+      .get(
+        '/library/resources/:key/content',
+        async ({
+          params,
+          query,
+          set,
+          user,
+        }): Promise<LibraryResourceContent | ApiErrorResponse> => {
+          if (!parseResourceKey(params.key)) return invalidResourceKey(set);
+          try {
+            const resources = await service.discover(user?.id ?? '', false);
+            const resource = resources.find((candidate) => candidate.key === params.key);
+            if (!resource) return resourceNotFound(set);
+            return service.readContent(resource, query.location) ?? resourceNotFound(set);
+          } catch (error) {
+            return handleLibraryError(error, set);
+          }
         },
-      }
-    )
-    .get(
-      '/library/resources/:key',
-      async ({ params, set, user }): Promise<LibraryResource | ApiErrorResponse> => {
-        if (!parseResourceKey(params.key)) return invalidResourceKey(set);
-        try {
-          const resources = await service.discover(user?.id ?? '', false);
-          return (
-            resources.find((candidate) => candidate.key === params.key) ?? resourceNotFound(set)
-          );
-        } catch (error) {
-          return handleLibraryError(error, set);
+        {
+          params: resourceParams,
+          query: t.Object({ location: LibraryLocationIdSchema }),
+          response: {
+            200: LibraryResourceContentSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            500: ApiErrorResponseSchema,
+          },
         }
-      },
-      {
-        params: resourceParams,
-        response: {
-          200: LibraryResourceSchema,
-          400: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-          500: ApiErrorResponseSchema,
+      )
+      .get(
+        '/library/resources/:key',
+        async ({ params, set, user }): Promise<LibraryResource | ApiErrorResponse> => {
+          if (!parseResourceKey(params.key)) return invalidResourceKey(set);
+          try {
+            const resources = await service.discover(user?.id ?? '', false);
+            return (
+              resources.find((candidate) => candidate.key === params.key) ?? resourceNotFound(set)
+            );
+          } catch (error) {
+            return handleLibraryError(error, set);
+          }
         },
-      }
-    )
-    .get('/library/locations', () => service.listLocations(), {
-      response: { 200: LibraryLocationStatusListSchema },
-    })
-    .post(
-      '/library/rescan',
-      async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
-        try {
-          return await service.discover(user?.id ?? '', query.force === 'true');
-        } catch (error) {
-          return handleLibraryError(error, set);
+        {
+          params: resourceParams,
+          response: {
+            200: LibraryResourceSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            500: ApiErrorResponseSchema,
+          },
         }
-      },
-      {
-        query: t.Object({
-          force: t.Optional(t.Union([t.Literal('true'), t.Literal('false')])),
-        }),
-        response: {
-          200: LibraryResourceListSchema,
-          500: ApiErrorResponseSchema,
+      )
+      .get('/library/locations', () => service.listLocations(), {
+        response: { 200: LibraryLocationStatusListSchema },
+      })
+      // The coverage matrix has one column per target, and that column set has to
+      // be stable even when a filter leaves no rows to infer it from.
+      .get('/library/targets', () => service.listTargets(), {
+        response: { 200: LibraryTargetDescriptorListSchema },
+      })
+      .post(
+        '/library/rescan',
+        async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
+          try {
+            return await service.discover(user?.id ?? '', query.force === 'true');
+          } catch (error) {
+            return handleLibraryError(error, set);
+          }
         },
-      }
-    );
+        {
+          query: t.Object({
+            force: t.Optional(t.Union([t.Literal('true'), t.Literal('false')])),
+          }),
+          response: {
+            200: LibraryResourceListSchema,
+            500: ApiErrorResponseSchema,
+          },
+        }
+      )
+  );
 }
 
 export const libraryRoutes = createLibraryRoutes();
