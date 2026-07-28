@@ -1,6 +1,7 @@
 import { type Dirent, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type {
+  LibraryLocationId,
   LibraryTargetId,
   SettingsSnapshot,
   SettingsSourceSnapshot,
@@ -18,7 +19,10 @@ import {
   type PathEnv,
 } from '../domain/registry';
 import { createLibraryPathEnv } from '../infrastructure/location-probe';
-import { parseJsonSettings } from '../infrastructure/settings-parsers/json';
+import {
+  type JsonSettingsParserOptions,
+  parseJsonSettings,
+} from '../infrastructure/settings-parsers/json';
 import {
   type PermissionRulesSource,
   parsePermissionRules,
@@ -27,6 +31,18 @@ import { parseTomlSettings } from '../infrastructure/settings-parsers/toml';
 import type { SettingsParserResult } from '../infrastructure/settings-parsers/types';
 
 const MAX_SETTINGS_SOURCE_BYTES = 512 * 1024;
+
+/**
+ * Claude's settings and hook sources are the same file, so the section has to be
+ * claimed by exactly one of them or every hook field is reported twice under
+ * identical paths.
+ */
+const JSON_SECTIONS: Readonly<
+  Partial<Record<LibraryLocationId, Pick<JsonSettingsParserOptions, 'section' | 'excludeSections'>>>
+> = {
+  'claude-hooks': { section: 'hooks' },
+  'claude-settings': { excludeSections: ['hooks'] },
+};
 
 interface RulesDirectoryContent {
   readonly sources: readonly PermissionRulesSource[];
@@ -127,10 +143,7 @@ function inspectSource(
   const options = { homeDir: context.env.homeDir };
   let result: SettingsParserResult;
   if (location.format === 'json-settings') {
-    result = parseJsonSettings(read.content, {
-      ...options,
-      ...(location.id === 'claude-hooks' && { section: 'hooks' }),
-    });
+    result = parseJsonSettings(read.content, { ...options, ...JSON_SECTIONS[location.id] });
   } else if (location.format === 'toml-settings') {
     result = parseTomlSettings(read.content, options);
   } else {
@@ -232,14 +245,24 @@ function readRulesDirectory(path: string): RulesDirectoryContent {
   let sizeBytes = 0;
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     if (entry.name.startsWith('.') || !entry.isFile() || !entry.name.endsWith('.rules')) continue;
-    const file = readRegularFileUtf8(join(path, entry.name), {
-      maxBytes: MAX_SETTINGS_SOURCE_BYTES,
-    });
+    const file = readRuleFile(join(path, entry.name));
+    // A file unlinked between readdir and open must not turn a directory that
+    // demonstrably exists into an absent source.
+    if (file === null) continue;
     sizeBytes += file.sizeBytes;
     if (sizeBytes > MAX_SETTINGS_SOURCE_BYTES) throw new RegularFileReadError('too-large');
     sources.push({ name: entry.name, content: file.content });
   }
   return { sources, sizeBytes };
+}
+
+function readRuleFile(filePath: string): RegularFileContent | null {
+  try {
+    return readRegularFileUtf8(filePath, { maxBytes: MAX_SETTINGS_SOURCE_BYTES });
+  } catch (error) {
+    if (error instanceof RegularFileReadError && error.reason === 'not-found') return null;
+    throw error;
+  }
 }
 
 function classifyDirectoryReadError(error: unknown): RegularFileReadError['reason'] {

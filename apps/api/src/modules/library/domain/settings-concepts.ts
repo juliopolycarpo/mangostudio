@@ -6,6 +6,7 @@ import type {
   SettingsField,
   SettingsSnapshot,
 } from '@mangostudio/shared/library';
+import { LIBRARY_TARGET_DEFINITIONS } from './registry';
 
 type ComparedTargetId = Exclude<LibraryTargetId, 'mangostudio'>;
 
@@ -19,7 +20,10 @@ interface ConceptDefinition {
   readonly selectors: Readonly<Partial<Record<ComparedTargetId, FieldSelector>>>;
 }
 
-const COMPARISON_TARGETS: readonly ComparedTargetId[] = ['claude', 'codex', 'cursor'];
+/** Derived so a target added to the registry cannot silently miss the comparison. */
+const COMPARISON_TARGETS: readonly ComparedTargetId[] = LIBRARY_TARGET_DEFINITIONS.map(
+  (target) => target.id
+).filter((id): id is ComparedTargetId => id !== 'mangostudio');
 
 /**
  * Presentational navigation only. These paths point at settings with roughly
@@ -71,12 +75,19 @@ const CONCEPT_DEFINITIONS: readonly ConceptDefinition[] = [
 export function compareSettingsSnapshots(
   snapshots: readonly SettingsSnapshot[]
 ): ConceptComparison[] {
-  const byTarget = new Map(snapshots.map((snapshot) => [snapshot.targetId, snapshot]));
+  // Flattened once per target rather than once per target per concept: a large
+  // settings file makes that difference thousands of copied entries.
+  const fieldsByTarget = new Map(
+    snapshots.map((snapshot) => [
+      snapshot.targetId,
+      snapshot.sources.flatMap((source) => source.fields),
+    ])
+  );
   return CONCEPT_DEFINITIONS.map((definition) => ({
     concept: definition.concept,
     comparability: 'rough',
     entries: COMPARISON_TARGETS.map((targetId) =>
-      compareTarget(targetId, definition.selectors[targetId], byTarget.get(targetId))
+      compareTarget(targetId, definition.selectors[targetId], fieldsByTarget.get(targetId) ?? [])
     ),
   }));
 }
@@ -84,10 +95,10 @@ export function compareSettingsSnapshots(
 function compareTarget(
   targetId: ComparedTargetId,
   selector: FieldSelector | undefined,
-  snapshot: SettingsSnapshot | undefined
+  targetFields: readonly SettingsField[]
 ): ConceptComparisonEntry {
   if (!selector) return { targetId, state: 'not-applicable', fields: [] };
-  const fields = snapshot ? selectFields(snapshot, selector) : [];
+  const fields = selectFields(targetFields, selector);
   return {
     targetId,
     state: fields.length > 0 ? 'detected' : 'not-detected',
@@ -95,8 +106,7 @@ function compareTarget(
   };
 }
 
-function selectFields(snapshot: SettingsSnapshot, selector: FieldSelector): SettingsField[] {
-  const fields = snapshot.sources.flatMap((source) => source.fields);
+function selectFields(fields: readonly SettingsField[], selector: FieldSelector): SettingsField[] {
   if (selector.kind === 'exact') {
     const paths = new Set(selector.paths);
     return fields.filter((field) => paths.has(field.path));

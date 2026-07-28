@@ -91,6 +91,25 @@ describe('settings parsers', () => {
     });
   });
 
+  it('leaves an excluded section to the source that owns it', () => {
+    expect(
+      parseJsonSettings('{"model":"sonnet","hooks":{"PreToolUse":[{"matcher":"Bash"}]}}', {
+        homeDir: '/home/ada',
+        excludeSections: ['hooks'],
+      })
+    ).toEqual({
+      parsed: true,
+      fields: [{ path: 'model', presentation: 'value', value: 'sonnet' }],
+    });
+  });
+
+  it('projects nothing when a sectioned document is not an object', () => {
+    expect(parseJsonSettings('[1,2]', { homeDir: '/home/ada', section: 'hooks' })).toEqual({
+      parsed: true,
+      fields: [],
+    });
+  });
+
   it('returns a typed failure instead of throwing for malformed TOML', () => {
     expect(parseTomlSettings('[projects.', { homeDir: '/home/ada' })).toEqual({
       parsed: false,

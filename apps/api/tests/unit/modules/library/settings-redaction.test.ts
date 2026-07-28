@@ -42,6 +42,22 @@ describe('settings redaction', () => {
     );
   });
 
+  it('redacts every leaf below a credential-shaped key, not just scalar leaves', () => {
+    expect(
+      redactSettingsDocument(
+        {
+          token: { github: 'ghp-visible-token' },
+          auth: { secret: 'visible-secret', url: 'https://auth.example.com' },
+        },
+        { homeDir: '/home/ada' }
+      )
+    ).toEqual([
+      { path: 'token.github', presentation: 'redacted' },
+      { path: 'auth.secret', presentation: 'redacted' },
+      { path: 'auth.url', presentation: 'redacted' },
+    ]);
+  });
+
   it('redacts a credential-shaped value under an innocuous key', () => {
     expect(
       redactSettingsDocument(
