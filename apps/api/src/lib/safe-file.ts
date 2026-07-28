@@ -73,9 +73,8 @@ export function writeFileAtomic(
   mkdirSync(dirname(target.path), { recursive: true });
 
   const tempPath = atomicTempPath(target.path);
-  writeTempFile(tempPath, data, options.mode ?? target.mode);
-
   try {
+    writeTempFile(tempPath, data, options.mode ?? target.mode);
     commitTempFile(tempPath, target.path, options.exclusive ?? false, options.mode ?? target.mode);
   } catch (error) {
     rmSync(tempPath, { force: true });
@@ -117,12 +116,13 @@ function resolveWriteTarget(filePath: string): ResolvedWriteTarget {
   }
   // Checked on the target, not the link: rename would otherwise replace a
   // read-only file regardless of its own mode, the other half of #617.
-  if (!isWritable(resolvedPath)) {
+  const mode = Number(entry.mode);
+  if (!isWritable(resolvedPath, mode)) {
     throw new RegularFileWriteError(
       `Cannot write ${describeTarget(filePath, resolvedPath)}, which is not writable.`
     );
   }
-  return { path: resolvedPath, mode: Number(entry.mode) & 0o7777 };
+  return { path: resolvedPath, mode: mode & 0o7777 };
 }
 
 /** Names both the link and its target, since either alone is hard to diagnose. */
@@ -141,7 +141,12 @@ function statOrNull(path: string): ReturnType<typeof lstatSync> | null {
   }
 }
 
-function isWritable(path: string): boolean {
+function modeAllowsWriting(mode: number): boolean {
+  return process.platform === 'win32' || (mode & 0o222) !== 0;
+}
+
+function isWritable(path: string, mode: number): boolean {
+  if (!modeAllowsWriting(mode)) return false;
   try {
     accessSync(path, fsConstants.W_OK);
     return true;
@@ -225,10 +230,12 @@ async function inspectWriteDestination(filePath: string): Promise<number | undef
     );
   }
 
-  const writable = await access(filePath, fsConstants.W_OK).then(
-    () => true,
-    () => false
-  );
+  const writable =
+    modeAllowsWriting(Number(entry.mode)) &&
+    (await access(filePath, fsConstants.W_OK).then(
+      () => true,
+      () => false
+    ));
   if (!writable) {
     throw new RegularFileWriteError(`Cannot write "${filePath}": the file is not writable.`);
   }

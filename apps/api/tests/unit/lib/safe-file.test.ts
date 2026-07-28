@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   linkSync,
@@ -38,6 +39,7 @@ afterEach(() => {
 });
 
 const isWindows = process.platform === 'win32';
+const MAX_SYMLINK_HOPS = 32;
 
 describe('writeFileAtomic', () => {
   it('creates the file and any missing parent directories', () => {
@@ -236,8 +238,6 @@ describe('writeFileAtomic through symlinks', () => {
 
   it('stages beside the target, not beside the link', () => {
     if (isWindows) return;
-    // A dotfiles repo on a separate mount would fail EXDEV if the temp file were
-    // staged next to the link and renamed across filesystems.
     const targetDir = join(dir, 'dotfiles');
     mkdirSync(targetDir);
     const target = join(targetDir, 'config.toml');
@@ -247,7 +247,19 @@ describe('writeFileAtomic through symlinks', () => {
     const link = join(linkDir, 'config.toml');
     symlinkSync(target, link);
 
-    writeFileAtomic(link, 'new\n');
+    // A writer that stages next to the link cannot create its temp file here.
+    // Staging beside the target also avoids EXDEV when the directories are on
+    // different filesystems.
+    // Privileged processes ignore directory write bits, so this assertion would
+    // not catch a regression that stages beside the link when running as root.
+    if (process.getuid?.() === 0) return;
+    const originalMode = statSync(linkDir).mode & 0o7777;
+    chmodSync(linkDir, 0o555);
+    try {
+      writeFileAtomic(link, 'new\n');
+    } finally {
+      chmodSync(linkDir, originalMode);
+    }
 
     expect(readFileSync(target, 'utf8')).toBe('new\n');
     // Neither directory keeps a temp file, and the link directory never held one.
@@ -284,6 +296,34 @@ describe('writeFileAtomic through symlinks', () => {
     expect(lstatSync(outer).isSymbolicLink()).toBe(true);
   });
 
+  it('follows an existing symlink chain at the depth cap', () => {
+    if (isWindows) return;
+    const target = join(dir, 'real.toml');
+    writeFileSync(target, 'old\n');
+    const outer = createSymlinkChain(target, MAX_SYMLINK_HOPS);
+
+    writeFileAtomic(outer, 'new\n');
+
+    expect(readFileSync(target, 'utf8')).toBe('new\n');
+  });
+
+  it('rejects an existing symlink chain beyond the depth cap', () => {
+    if (isWindows) return;
+    const target = join(dir, 'real.toml');
+    writeFileSync(target, 'old\n');
+    const outer = createSymlinkChain(target, MAX_SYMLINK_HOPS + 1);
+
+    let code: string | undefined;
+    try {
+      writeFileAtomic(outer, 'new\n');
+    } catch (error) {
+      code = (error as NodeJS.ErrnoException).code;
+    }
+
+    expect(code).toBe('ELOOP');
+    expect(readFileSync(target, 'utf8')).toBe('old\n');
+  });
+
   it('throws on a symlink cycle rather than hanging', () => {
     if (isWindows) return;
     const first = join(dir, 'a');
@@ -313,8 +353,28 @@ describe('writeFileAtomic through symlinks', () => {
     expect(message).toContain('not a regular file');
   });
 
+  it('refuses a symlink whose target is a FIFO, naming both', () => {
+    if (isWindows) return;
+    const target = join(dir, 'config.pipe');
+    const result = spawnSync('mkfifo', [target]);
+    expect(result.status).toBe(0);
+    const link = join(dir, 'config.toml');
+    symlinkSync(target, link);
+
+    let message = '';
+    try {
+      writeFileAtomic(link, 'content');
+    } catch (error) {
+      message = (error as Error).message;
+    }
+
+    expect(message).toContain(link);
+    expect(message).toContain(target);
+    expect(message).toContain('not a regular file');
+  });
+
   it('refuses a read-only target instead of replacing it', () => {
-    if (isWindows || process.getuid?.() === 0) return;
+    if (isWindows) return;
     const target = join(dir, 'dotfiles', 'config.toml');
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, 'protected\n');
@@ -327,7 +387,7 @@ describe('writeFileAtomic through symlinks', () => {
   });
 
   it('refuses a read-only regular destination with no symlink involved', () => {
-    if (isWindows || process.getuid?.() === 0) return;
+    if (isWindows) return;
     const target = join(dir, 'config.toml');
     writeFileSync(target, 'protected\n');
     chmodSync(target, 0o444);
@@ -405,6 +465,17 @@ describe('atomic writer policy divergence', () => {
       syncSucceeds: false,
       asyncSucceeds: false,
     },
+    {
+      name: 'read-only regular file',
+      setUp: (): string => {
+        const target = join(dir, 'read-only.txt');
+        writeFileSync(target, 'old\n');
+        chmodSync(target, 0o444);
+        return target;
+      },
+      syncSucceeds: false,
+      asyncSucceeds: false,
+    },
   ] as const;
 
   for (const scenario of scenarios) {
@@ -447,3 +518,13 @@ describe('atomic writer policy divergence', () => {
     expect(readFileSync(target, 'utf8')).toBe('old\n');
   });
 });
+
+function createSymlinkChain(target: string, hops: number): string {
+  let next = target;
+  for (let index = hops - 1; index >= 0; index -= 1) {
+    const link = join(dir, `link-${index}.toml`);
+    symlinkSync(next, link);
+    next = link;
+  }
+  return next;
+}
