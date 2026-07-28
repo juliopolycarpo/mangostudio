@@ -10,7 +10,8 @@ import { CircleCheck, CircleX, LoaderCircle, TriangleAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
-import { formatDuration, formatMessage } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
+import { formatDuration } from '../format';
 import type { InstallStreamState } from '../hooks/use-install-stream';
 
 interface InstallConsoleProps {

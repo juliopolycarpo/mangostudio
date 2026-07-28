@@ -11,7 +11,8 @@ import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/e
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
-import { displayName, formatMessage } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
+import { displayName } from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';

@@ -11,7 +11,8 @@ import { Check, Copy } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
-import { displayName, formatMessage, guardReasonLabel } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
+import { displayName, guardReasonLabel } from '../format';
 
 interface CopyCommandBlockProps {
   recipe: InstallRecipePreview;

@@ -6,7 +6,8 @@
 
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
-import { describeFinding, displayName, formatMessage } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
+import { describeFinding, displayName } from '../format';
 import { useEnvironmentHealth } from '../hooks/use-runtime-status';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { FindingIcon } from './FindingList';

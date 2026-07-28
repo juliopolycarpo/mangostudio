@@ -14,17 +14,13 @@ import type {
   RuntimeInstallation,
 } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
+import { formatMessage } from '@/lib/i18n-format';
 
 /** Params that name a runtime, agent, or version manager rather than a value. */
 const IDENTIFIER_PARAMS = new Set(['runtime', 'targetId', 'manager']);
 
 /** Params carrying a zero-based PATH index the UI shows one-based. */
 const PATH_INDEX_PARAMS = new Set(['effectivePathIndex', 'shadowedPathIndex']);
-
-/** Substitutes `{key}` placeholders; unknown placeholders are left untouched. */
-export function formatMessage(template: string, params: Record<string, string> = {}): string {
-  return template.replace(/\{(\w+)\}/g, (match, key: string) => params[key] ?? match);
-}
 
 /**
  * Resolves a runtime, agent target, or version manager id to its product name.
