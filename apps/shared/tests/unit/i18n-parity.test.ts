@@ -86,22 +86,28 @@ function formatTokens(tokens: Set<string>) {
   return `{${[...tokens].sort().join(',')}}`;
 }
 
-function hasUnbalancedBraces(value: string) {
-  let depth = 0;
+function hasInvalidPlaceholderSyntax(value: string) {
+  let index = 0;
 
-  for (const character of value) {
-    if (character === '{') {
-      depth += 1;
-    } else if (character === '}') {
-      depth -= 1;
-    }
-
-    if (depth < 0) {
+  while (index < value.length) {
+    if (value[index] === '}') {
       return true;
     }
+
+    if (value[index] !== '{') {
+      index += 1;
+      continue;
+    }
+
+    const end = value.indexOf('}', index + 1);
+    if (end === -1 || !/^\w+$/.test(value.slice(index + 1, end))) {
+      return true;
+    }
+
+    index = end + 1;
   }
 
-  return depth !== 0;
+  return false;
 }
 
 function literalValues(schema: LiteralUnionSchema) {
@@ -161,11 +167,11 @@ describe('i18n structural parity', () => {
     expect(mismatches).toEqual([]);
   });
 
-  it('rejects unbalanced placeholder braces', () => {
+  it('rejects invalid placeholder syntax', () => {
     const errors = flattenedLocales.flatMap(({ name, messages }) =>
       [...messages]
-        .filter(([, value]) => hasUnbalancedBraces(value))
-        .map(([key]) => `${key}: ${name} has unbalanced braces`)
+        .filter(([, value]) => hasInvalidPlaceholderSyntax(value))
+        .map(([key]) => `${key}: ${name} has invalid placeholder syntax`)
     );
 
     expect(errors).toEqual([]);
@@ -174,7 +180,7 @@ describe('i18n structural parity', () => {
   it('rejects empty translation values', () => {
     const errors = flattenedLocales.flatMap(({ name, messages }) =>
       [...messages]
-        .filter(([, value]) => value.length === 0)
+        .filter(([, value]) => value.trim().length === 0)
         .map(([key]) => `${key}: ${name} is empty`)
     );
 
