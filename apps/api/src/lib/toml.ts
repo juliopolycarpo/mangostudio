@@ -53,6 +53,11 @@ export function readTomlStringSections(filePath: string): TomlStringSections {
 export function readTomlDocument(filePath: string): Record<string, unknown> {
   const content = readUtf8FileOrNull(filePath);
   if (content === null) return {};
+  return parseTomlDocument(content);
+}
+
+/** Parse a complete TOML document without reading from disk. */
+export function parseTomlDocument(content: string): Record<string, unknown> {
   const parsed = parseToml(content);
   return isRecord(parsed) ? parsed : {};
 }

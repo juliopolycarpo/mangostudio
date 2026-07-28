@@ -9,6 +9,7 @@ import type { ModelOption as ModuleModelOption } from '../../src/catalog';
 import type {
   AgentCliStatus as BarrelAgentCliStatus,
   AppSettings as BarrelAppSettings,
+  ConceptComparison as BarrelConceptComparison,
   InstallProfileSetup as BarrelInstallProfileSetup,
   InstallRun as BarrelInstallRun,
   LibraryLocationStatus as BarrelLibraryLocationStatus,
@@ -17,6 +18,7 @@ import type {
   ModelOption as BarrelModelOption,
   ProviderObservabilityMetrics as BarrelObsMetrics,
   RuntimeStatus as BarrelRuntimeStatus,
+  SettingsSnapshot as BarrelSettingsSnapshot,
   VersionManagerStatus as BarrelVersionManagerStatus,
 } from '../../src/contracts';
 import type {
@@ -28,9 +30,11 @@ import type {
 } from '../../src/environments';
 import type { SSEErrorEvent as ErrorsSSEErrorEvent } from '../../src/errors';
 import type {
+  ConceptComparison as ModuleConceptComparison,
   LibraryLocationStatus as ModuleLibraryLocationStatus,
   LibraryResource as ModuleLibraryResource,
   LibraryTargetDescriptor as ModuleLibraryTargetDescriptor,
+  SettingsSnapshot as ModuleSettingsSnapshot,
 } from '../../src/library';
 import {
   type ProviderObservabilityMetrics as ModuleObsMetrics,
@@ -70,6 +74,8 @@ assertType<Equals<BarrelObsMetrics, ModuleObsMetrics>>();
 assertType<Equals<BarrelLibraryResource, ModuleLibraryResource>>();
 assertType<Equals<BarrelLibraryLocationStatus, ModuleLibraryLocationStatus>>();
 assertType<Equals<BarrelLibraryTargetDescriptor, ModuleLibraryTargetDescriptor>>();
+assertType<Equals<BarrelSettingsSnapshot, ModuleSettingsSnapshot>>();
+assertType<Equals<BarrelConceptComparison, ModuleConceptComparison>>();
 assertType<Equals<BarrelAgentCliStatus, ModuleAgentCliStatus>>();
 assertType<Equals<BarrelRuntimeStatus, ModuleRuntimeStatus>>();
 assertType<Equals<BarrelVersionManagerStatus, ModuleVersionManagerStatus>>();

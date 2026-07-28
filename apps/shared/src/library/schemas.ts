@@ -174,6 +174,80 @@ export const LibraryLocationStatusSchema = Type.Object({
 
 export const LibraryLocationStatusListSchema = Type.Array(LibraryLocationStatusSchema);
 
+export const SettingsFieldPresentationSchema = Type.Union([
+  Type.Literal('value'),
+  Type.Literal('redacted'),
+  Type.Literal('omitted'),
+]);
+
+export const SettingsFieldSchema = Type.Union([
+  Type.Object({
+    path: Type.String({ minLength: 1 }),
+    presentation: Type.Literal('value'),
+    value: Type.String(),
+  }),
+  Type.Object({
+    path: Type.String({ minLength: 1 }),
+    presentation: Type.Literal('redacted'),
+  }),
+  Type.Object({
+    path: Type.String({ minLength: 1 }),
+    presentation: Type.Literal('omitted'),
+  }),
+]);
+
+export const SettingsParseFailureReasonSchema = Type.Union([
+  Type.Literal('invalid-json'),
+  Type.Literal('invalid-toml'),
+  Type.Literal('unreadable'),
+  Type.Literal('not-regular-file'),
+  Type.Literal('too-large'),
+]);
+
+export const SettingsSourceSnapshotSchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  kind: Type.Union([Type.Literal('setting'), Type.Literal('hook')]),
+  present: Type.Boolean(),
+  parsed: Type.Boolean(),
+  sizeBytes: Type.Optional(Type.Integer({ minimum: 0 })),
+  failureReason: Type.Optional(SettingsParseFailureReasonSchema),
+  fields: Type.Array(SettingsFieldSchema),
+});
+
+export const SettingsSnapshotSchema = Type.Object({
+  targetId: LibraryTargetIdSchema,
+  sources: Type.Array(SettingsSourceSnapshotSchema),
+});
+
+export const SettingsSnapshotListSchema = Type.Array(SettingsSnapshotSchema);
+
+export const SettingsConceptSchema = Type.Union([
+  Type.Literal('default-permission-mode'),
+  Type.Literal('allow-list'),
+  Type.Literal('deny-list'),
+  Type.Literal('selected-model'),
+  Type.Literal('reasoning-effort'),
+]);
+
+export const ConceptComparisonEntrySchema = Type.Object({
+  targetId: LibraryTargetIdSchema,
+  state: Type.Union([
+    Type.Literal('detected'),
+    Type.Literal('not-detected'),
+    Type.Literal('not-applicable'),
+  ]),
+  fields: Type.Array(SettingsFieldSchema),
+});
+
+export const ConceptComparisonSchema = Type.Object({
+  concept: SettingsConceptSchema,
+  /** Navigation aid only: vendor settings with similar intent are not equivalent. */
+  comparability: Type.Literal('rough'),
+  entries: Type.Array(ConceptComparisonEntrySchema),
+});
+
+export const ConceptComparisonListSchema = Type.Array(ConceptComparisonSchema);
+
 const LibraryTargetReadsSchema = Type.Object({
   skill: Type.Array(LibraryLocationIdSchema),
   subagent: Type.Array(LibraryLocationIdSchema),
@@ -509,6 +583,14 @@ export type LibraryContentGroup = Static<typeof LibraryContentGroupSchema>;
 export type LibraryResource = Static<typeof LibraryResourceSchema>;
 export type LibraryResourceContent = Static<typeof LibraryResourceContentSchema>;
 export type LibraryLocationStatus = Static<typeof LibraryLocationStatusSchema>;
+export type SettingsFieldPresentation = Static<typeof SettingsFieldPresentationSchema>;
+export type SettingsField = Static<typeof SettingsFieldSchema>;
+export type SettingsParseFailureReason = Static<typeof SettingsParseFailureReasonSchema>;
+export type SettingsSourceSnapshot = Static<typeof SettingsSourceSnapshotSchema>;
+export type SettingsSnapshot = Static<typeof SettingsSnapshotSchema>;
+export type SettingsConcept = Static<typeof SettingsConceptSchema>;
+export type ConceptComparisonEntry = Static<typeof ConceptComparisonEntrySchema>;
+export type ConceptComparison = Static<typeof ConceptComparisonSchema>;
 export type LibraryTargetDescriptor = Static<typeof LibraryTargetDescriptorSchema>;
 export type AdapterStrategy = Static<typeof AdapterStrategySchema>;
 export type AdaptNote = Static<typeof AdaptNoteSchema>;
