@@ -1557,6 +1557,11 @@ export const messages = {
       stepResult: 'Resultado',
       previewing: 'Analisando o disco...',
       previewError: 'Não foi possível montar a pré-visualização.',
+      // Diferente de `previewError`: nada falhou, não havia o que perguntar.
+      // Tentar de novo só reproduziria a mesma resposta vazia.
+      noDestinations: 'Nenhum local habilitado pode receber este recurso.',
+      noDestinationsHint:
+        'Todos os locais deste tipo estão desativados nas configurações ou indisponíveis nesta plataforma.',
       // 009 rejeita um apply preso a uma leitura antiga; refazer é o caminho.
       stale: 'A biblioteca mudou desde esta leitura. Refaça a pré-visualização antes de aplicar.',
       restale: 'Refazer pré-visualização',

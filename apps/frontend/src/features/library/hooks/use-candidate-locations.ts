@@ -2,14 +2,13 @@
  * The destinations a propagation preview may name, for one resource kind.
  *
  * Both propagation openers — the matrix bulk action and the resource detail —
- * need the same answer, and both need it to be *known* before they offer the
- * action: the enabled-location set lives in app settings, and treating "not
- * loaded yet" as "nothing is enabled" would silently drop every destination
- * outside MangoStudio's own directories, which `enabledLibraryLocations` always
- * keeps on. An empty list therefore means "no enabled destination", never "the
- * answer has not arrived".
+ * need the same answer, and both need to tell "there is nothing to offer" apart
+ * from "the answer has not arrived": the enabled-location set lives in app
+ * settings, and treating "not loaded yet" as "nothing is enabled" would
+ * silently drop every destination outside MangoStudio's own directories, which
+ * `enabledLibraryLocations` always keeps on.
  *
- * // Usage: const locationIds = useCandidateLocationIds(locations, 'skill');
+ * // Usage: const candidates = useCandidateLocations(locations, 'skill');
  */
 
 import {
@@ -23,18 +22,31 @@ import { useMemo } from 'react';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { propagationCandidateLocationIds } from '../format';
 
-export function useCandidateLocationIds(
+export interface CandidateLocations {
+  /** Empty only once `isResolved`, and then it means there is no destination. */
+  readonly locationIds: LibraryLocationId[];
+  /** False while the settings record the answer depends on is still missing. */
+  readonly isResolved: boolean;
+}
+
+const UNRESOLVED: CandidateLocations = { locationIds: [], isResolved: false };
+
+export function useCandidateLocations(
   locations: readonly LibraryLocationStatus[],
   kind: ResourceKind | undefined
-): LibraryLocationId[] {
+): CandidateLocations {
   const libraryLocations = useQuery(appSettingsQueryOptions()).data?.libraryLocations;
 
   return useMemo(() => {
-    if (kind === undefined || libraryLocations === undefined) return [];
-    return propagationCandidateLocationIds(
-      locations,
-      kind,
-      enabledLibraryLocations(libraryLocations)
-    );
+    if (kind === undefined || libraryLocations === undefined) return UNRESOLVED;
+
+    return {
+      locationIds: propagationCandidateLocationIds(
+        locations,
+        kind,
+        enabledLibraryLocations(libraryLocations)
+      ),
+      isResolved: true,
+    };
   }, [locations, kind, libraryLocations]);
 }

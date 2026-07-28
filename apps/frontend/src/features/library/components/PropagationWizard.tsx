@@ -64,12 +64,17 @@ export function PropagationWizard({ resourceKeys, locationIds, onClose }: Propag
       ? formatMessage(l.wizard.titleOne, { resource: resourceKeys[0] })
       : formatMessage(l.wizard.title, { count: String(resourceKeys.length) });
 
+  // No candidate means no preview was ever requested, so every downstream step
+  // would be reasoning about an absent answer.
+  const hasDestinations = locationIds.length > 0;
+
   const canContinue =
-    wizard.step === 'conflict'
+    hasDestinations &&
+    (wizard.step === 'conflict'
       ? unresolved.length === 0
       : wizard.step === 'destinations'
         ? wizard.draft.destinations.size > 0
-        : false;
+        : false);
 
   const nothingToDo = preview ? isNoopApply(preview, wizard.draft) : true;
   const canApply = pendingAcks.length === 0 && !nothingToDo && !wizard.isApplying;
@@ -123,7 +128,14 @@ export function PropagationWizard({ resourceKeys, locationIds, onClose }: Propag
             </div>
           )}
 
-          {wizard.isPreviewing && !preview ? (
+          {!hasDestinations ? (
+            // Not a failure: nothing was asked, so there is nothing to retry.
+            <LibraryPageState
+              variant="empty"
+              title={l.wizard.noDestinations}
+              hint={l.wizard.noDestinationsHint}
+            />
+          ) : wizard.isPreviewing && !preview ? (
             <LibraryPageState variant="loading" />
           ) : wizard.previewError || !preview ? (
             <LibraryPageState

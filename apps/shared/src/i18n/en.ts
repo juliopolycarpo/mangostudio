@@ -1536,6 +1536,11 @@ export const messages: Messages = {
       stepResult: 'Result',
       previewing: 'Reading the disk...',
       previewError: 'The preview could not be built.',
+      // Distinct from `previewError`: nothing failed, there was nothing to ask
+      // about. Retrying would only reproduce the same empty answer.
+      noDestinations: 'No enabled location can hold this resource.',
+      noDestinationsHint:
+        'Every location for this kind is either disabled in settings or unavailable on this platform.',
       // 009 rejects an apply bound to a stale read; re-previewing is the way out.
       stale: 'The library changed since this read. Preview again before applying.',
       restale: 'Preview again',

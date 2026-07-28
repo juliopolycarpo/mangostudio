@@ -11,7 +11,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { useCandidateLocationIds } from '../hooks/use-candidate-locations';
+import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import { useLibraryMatrix } from '../hooks/use-library-matrix';
 import { CoverageMatrix, MatrixLegend } from './CoverageMatrix';
 import { LibraryPageState } from './LibraryPageState';
@@ -30,7 +30,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
    * location is blocked by, and a location absent from the preview cannot be
    * explained at all. Disabled locations are excluded — the API refuses them.
    */
-  const candidateLocationIds = useCandidateLocationIds(matrix.locations, kind);
+  const candidates = useCandidateLocations(matrix.locations, kind);
 
   if (matrix.isPending && matrix.resources.length === 0) {
     return <LibraryPageState variant="loading" />;
@@ -64,10 +64,12 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
               <Button variant="ghost" size="sm" onClick={matrix.clearSelection}>
                 {l.matrix.clearSelection}
               </Button>
+              {/* Offered even with nothing to propagate to: the wizard is where
+                  that answer is explained, and a dead button explains nothing. */}
               <Button
                 size="sm"
                 onClick={() => setWizardKeys([...matrix.selected])}
-                disabled={candidateLocationIds.length === 0}
+                disabled={!candidates.isResolved}
               >
                 {l.matrix.propagate}
               </Button>
@@ -103,7 +105,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
       {wizardKeys && wizardKeys.length > 0 && (
         <PropagationWizard
           resourceKeys={wizardKeys}
-          locationIds={candidateLocationIds}
+          locationIds={candidates.locationIds}
           onClose={() => {
             setWizardKeys(null);
             matrix.clearSelection();

@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { formatBytes, formatRelativeTime, hashPrefix, validInstances } from '../format';
-import { useCandidateLocationIds } from '../hooks/use-candidate-locations';
+import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import {
   libraryLocationsQueryOptions,
   libraryResourceQueryOptions,
@@ -50,7 +50,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
   );
 
   const groups = useMemo(() => (resource ? contentGroupsOf(resource) : []), [resource]);
-  const candidateLocationIds = useCandidateLocationIds(locations, resource?.ref.kind);
+  const candidates = useCandidateLocations(locations, resource?.ref.kind);
 
   if (resourceQuery.isPending) return <LibraryPageState variant="loading" />;
   if (resourceQuery.error || !resource) {
@@ -81,11 +81,11 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
             {`${l.kinds[resource.ref.kind]} · ${l.divergence[resource.divergence]}`}
           </p>
         </div>
-        {candidateLocationIds.length > 0 && (
-          <Button size="sm" onClick={() => setPropagating(true)}>
-            {l.detail.propagate}
-          </Button>
-        )}
+        {/* Offered even with nothing to propagate to: the wizard is where that
+            answer is explained, and hiding the button explains nothing. */}
+        <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
+          {l.detail.propagate}
+        </Button>
       </header>
 
       {resource.divergence === 'not-comparable' && (
@@ -206,7 +206,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
       {propagating && (
         <PropagationWizard
           resourceKeys={[resource.key]}
-          locationIds={candidateLocationIds}
+          locationIds={candidates.locationIds}
           onClose={() => setPropagating(false)}
         />
       )}
