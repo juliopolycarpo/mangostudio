@@ -54,9 +54,13 @@ function extractQueryChains(
     const executeMatch = /\.execute(?:TakeFirst)?\s*\(/.exec(source.slice(start));
     if (!executeMatch) continue;
     const end = start + (executeMatch.index ?? 0) + executeMatch[0].length;
-    // Include a short lead-in so typed `.values(row)` inserts still show the
-    // `profileId:` assignment that builds the row being written.
-    const leadInStart = Math.max(0, start - 400);
+    const body = source.slice(start, end);
+    // Only a typed `.values(row)` insert builds its row above the chain, so a
+    // lead-in is read for that shape alone. Widening it for every query would
+    // let an unrelated `profileId` in the surrounding lines satisfy the check
+    // for a chain that never filters on it.
+    const needsLeadIn = body.startsWith('.insertInto') && /\.values\(\s*[A-Za-z_$]/.test(body);
+    const leadInStart = needsLeadIn ? Math.max(0, start - 400) : start;
     const line = lineStarts.findIndex((offset, index) => {
       const next = lineStarts[index + 1] ?? source.length;
       return offset <= start && start < next;
