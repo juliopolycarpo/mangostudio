@@ -233,6 +233,8 @@ interface FileCheckpointsTable {
 interface EnvironmentInstallRunsTable {
   id: string;
   userId: string;
+  /** Reserved profile scope; always `default` until profiles ship. */
+  profileId: string;
   recipeId: string;
   /** JSON-serialized string[]. */
   argvJson: string;
@@ -246,7 +248,9 @@ interface EnvironmentInstallRunsTable {
 interface LibraryDivergenceAcksTable {
   id: string;
   userId: string;
-  /** `<kind>:<slug>` — one acknowledgement per resource per user. */
+  /** Reserved profile scope; always `default` until profiles ship. */
+  profileId: string;
+  /** `<kind>:<slug>` — one acknowledgement per resource per user+profile. */
   resourceKey: string;
   /** Digest of the accepted hash set; a content change retires the row. */
   divergenceKey: string;
@@ -322,3 +326,4 @@ export type EnvironmentInstallRunSelect = Selectable<EnvironmentInstallRunsTable
 export type EnvironmentInstallRunInsert = Insertable<EnvironmentInstallRunsTable>;
 
 export type LibraryDivergenceAckSelect = Selectable<LibraryDivergenceAcksTable>;
+export type LibraryDivergenceAckInsert = Insertable<LibraryDivergenceAcksTable>;

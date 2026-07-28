@@ -16,6 +16,7 @@ const DEFAULT_RUN_LIMIT = 100;
 interface CreateInstallRun {
   readonly id: string;
   readonly userId: string;
+  readonly profileId: string;
   readonly recipeId: InstallRecipeId;
   readonly argv: readonly string[];
   readonly startedAt: number;
@@ -30,9 +31,14 @@ export interface CompleteInstallRun {
 
 export interface InstallRunRepository {
   create(input: CreateInstallRun): Promise<InstallRun>;
-  complete(id: string, userId: string, result: CompleteInstallRun): Promise<void>;
-  find(id: string, userId: string): Promise<InstallRun | null>;
-  list(userId: string, limit?: number): Promise<InstallRun[]>;
+  complete(
+    id: string,
+    userId: string,
+    profileId: string,
+    result: CompleteInstallRun
+  ): Promise<void>;
+  find(id: string, userId: string, profileId: string): Promise<InstallRun | null>;
+  list(userId: string, profileId: string, limit?: number): Promise<InstallRun[]>;
 }
 
 function parseArgv(value: string): string[] {
@@ -62,6 +68,7 @@ export function createInstallRunRepository(db: Kysely<Database> = getDb()): Inst
       const row: EnvironmentInstallRunInsert = {
         id: input.id,
         userId: input.userId,
+        profileId: input.profileId,
         recipeId: input.recipeId,
         argvJson: JSON.stringify(input.argv),
         startedAt: input.startedAt,
@@ -83,7 +90,7 @@ export function createInstallRunRepository(db: Kysely<Database> = getDb()): Inst
       };
     },
 
-    async complete(id, userId, result) {
+    async complete(id, userId, profileId, result) {
       await db
         .updateTable('environment_install_runs')
         .set({
@@ -94,25 +101,28 @@ export function createInstallRunRepository(db: Kysely<Database> = getDb()): Inst
         })
         .where('id', '=', id)
         .where('userId', '=', userId)
+        .where('profileId', '=', profileId)
         .execute();
     },
 
-    async find(id, userId) {
+    async find(id, userId, profileId) {
       const row = await db
         .selectFrom('environment_install_runs')
         .selectAll()
         .where('id', '=', id)
         .where('userId', '=', userId)
+        .where('profileId', '=', profileId)
         .executeTakeFirst();
       return row ? toInstallRun(row) : null;
     },
 
-    async list(userId, limit = DEFAULT_RUN_LIMIT) {
+    async list(userId, profileId, limit = DEFAULT_RUN_LIMIT) {
       const safeLimit = Math.max(1, Math.min(DEFAULT_RUN_LIMIT, Math.trunc(limit)));
       const rows = await db
         .selectFrom('environment_install_runs')
         .selectAll()
         .where('userId', '=', userId)
+        .where('profileId', '=', profileId)
         .orderBy('startedAt', 'desc')
         .limit(safeLimit)
         .execute();
