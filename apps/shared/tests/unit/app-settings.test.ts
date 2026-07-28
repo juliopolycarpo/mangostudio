@@ -6,10 +6,13 @@ import {
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
   DEFAULT_GIT_SETTINGS,
+  DEFAULT_LIBRARY_LOCATION_SETTINGS,
   DEFAULT_MULTI_AGENT_SETTINGS,
+  DEFAULT_PROFILE_SETTINGS,
   DEFAULT_PROMPT_SETTINGS,
   DEFAULT_WORKSPACE_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
+  libraryLocationsFor,
   MAX_SUBAGENT_CALLS_MAX,
   MAX_SUBAGENT_CALLS_MIN,
   MAX_TOOL_ITERATIONS_DEFAULT,
@@ -26,7 +29,9 @@ import {
   normalizeWorkspaceSettings,
   SUBAGENT_MAX_TURNS_MAX,
   SUBAGENT_MAX_TURNS_MIN,
+  withLibraryLocations,
 } from '../../src/app-settings';
+import { DEFAULT_PROFILE_ID } from '../../src/profiles';
 import { CHAT_SIDEBAR_WIDTH_MAX, WORKSPACE_PANEL_WIDTH_MAX } from '../../src/workspaces';
 
 describe('normalizeGitSettings', () => {
@@ -569,5 +574,112 @@ describe('normalizeAppSettings', () => {
     expect(result.promptSettings.customRules).toEqual([]);
     expect(result.contextSettings.compactionBehavior).toBe('off');
     expect(result.chatTitleSettings.strategy).toBe('model');
+  });
+
+  it('falls back to a legacy top-level libraryLocations when profileSettings is absent', () => {
+    const result = normalizeAppSettings({
+      libraryLocations: {
+        'agents-skills': true,
+        'claude-skills': false,
+      },
+    });
+    expect(result.profileSettings).toEqual({
+      [DEFAULT_PROFILE_ID]: {
+        libraryLocations: {
+          ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+          'agents-skills': true,
+          'claude-skills': false,
+        },
+      },
+    });
+    expect(libraryLocationsFor(result)).toMatchObject({
+      'agents-skills': true,
+      'claude-skills': false,
+    });
+  });
+
+  it('drops unknown profile keys and keeps only the default profile', () => {
+    const result = normalizeAppSettings({
+      profileSettings: {
+        default: {
+          libraryLocations: { 'agents-skills': true },
+        },
+        work: {
+          libraryLocations: { 'claude-skills': true },
+        },
+        personal: {
+          libraryLocations: { 'cursor-skills': true },
+        },
+      },
+    });
+    expect(Object.keys(result.profileSettings)).toEqual([DEFAULT_PROFILE_ID]);
+    expect(result.profileSettings).toEqual({
+      [DEFAULT_PROFILE_ID]: {
+        libraryLocations: {
+          ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+          'agents-skills': true,
+        },
+      },
+    });
+  });
+
+  it('normalizes missing profile settings to the shared defaults', () => {
+    expect(normalizeAppSettings({}).profileSettings).toEqual(DEFAULT_PROFILE_SETTINGS);
+  });
+});
+
+describe('libraryLocationsFor', () => {
+  it('reads locations from the default profile', () => {
+    const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+      'agents-skills': true,
+    });
+    expect(libraryLocationsFor(settings)).toEqual({
+      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+      'agents-skills': true,
+    });
+  });
+
+  it('falls back to the default profile when the requested profile is missing', () => {
+    const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+      'claude-skills': true,
+    });
+    expect(libraryLocationsFor(settings, 'work' as typeof DEFAULT_PROFILE_ID)).toEqual({
+      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+      'claude-skills': true,
+    });
+  });
+});
+
+describe('withLibraryLocations', () => {
+  it('writes nested locations under the default profile', () => {
+    const updated = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+      'agents-skills': true,
+      'claude-skills': false,
+    });
+    expect(updated.profileSettings).toEqual({
+      [DEFAULT_PROFILE_ID]: {
+        libraryLocations: {
+          ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
+          'agents-skills': true,
+          'claude-skills': false,
+        },
+      },
+    });
+    expect(libraryLocationsFor(updated)).toMatchObject({
+      'agents-skills': true,
+      'claude-skills': false,
+    });
+  });
+
+  it('redirects unknown profile ids into the default profile', () => {
+    const updated = withLibraryLocations(
+      DEFAULT_APP_SETTINGS,
+      'work' as typeof DEFAULT_PROFILE_ID,
+      { 'cursor-skills': true }
+    );
+    expect(Object.keys(updated.profileSettings)).toEqual([DEFAULT_PROFILE_ID]);
+    expect(libraryLocationsFor(updated)).toMatchObject({ 'cursor-skills': true });
   });
 });

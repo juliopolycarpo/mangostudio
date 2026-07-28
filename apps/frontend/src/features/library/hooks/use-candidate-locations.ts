@@ -11,6 +11,7 @@
  * // Usage: const candidates = useCandidateLocations(locations, 'skill');
  */
 
+import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   enabledLibraryLocations,
   type LibraryLocationId,
@@ -35,7 +36,8 @@ export function useCandidateLocations(
   locations: readonly LibraryLocationStatus[],
   kind: ResourceKind | undefined
 ): CandidateLocations {
-  const libraryLocations = useQuery(appSettingsQueryOptions()).data?.libraryLocations;
+  const appSettings = useQuery(appSettingsQueryOptions()).data;
+  const libraryLocations = appSettings ? libraryLocationsFor(appSettings) : undefined;
 
   return useMemo(() => {
     if (kind === undefined || libraryLocations === undefined) return UNRESOLVED;

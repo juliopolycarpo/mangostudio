@@ -4,6 +4,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   SkillDescriptor,
@@ -27,17 +28,18 @@ export async function listSkillSettings(
     getAppSettings(db, userId),
   ]);
   const thirdPartyDirs = getThirdPartySkillDirs();
+  const libraryLocations = libraryLocationsFor(appSettings);
 
   return {
     skills,
     sources: {
       agents: {
-        enabled: appSettings.libraryLocations['agents-skills'] ?? false,
+        enabled: libraryLocations['agents-skills'] ?? false,
         path: thirdPartyDirs.agents,
         exists: existsSync(thirdPartyDirs.agents),
       },
       claude: {
-        enabled: appSettings.libraryLocations['claude-skills'] ?? false,
+        enabled: libraryLocations['claude-skills'] ?? false,
         path: thirdPartyDirs.claude,
         exists: existsSync(thirdPartyDirs.claude),
       },

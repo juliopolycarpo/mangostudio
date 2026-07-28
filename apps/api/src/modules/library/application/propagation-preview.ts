@@ -10,6 +10,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   type AdapterStrategy,
   enabledLibraryLocations,
@@ -67,7 +68,7 @@ const defaultPropagationPreviewDeps: PropagationPreviewDeps = {
   agentAvailable: isAgentStrategyAvailable,
   acknowledgedKeys: acknowledgedResourceKeys,
   enabledLocationIds: async (userId) =>
-    enabledLibraryLocations((await getAppSettings(getDb(), userId)).libraryLocations),
+    enabledLibraryLocations(libraryLocationsFor(await getAppSettings(getDb(), userId))),
 };
 
 export async function previewLibraryPropagation(

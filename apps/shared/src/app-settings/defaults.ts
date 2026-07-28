@@ -17,6 +17,7 @@ import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
   DEFAULT_COMMIT_MESSAGE_PROMPT,
 } from '../git/commit-message';
+import { DEFAULT_PROFILE_ID, type ProfileId } from '../profiles';
 import type {
   PromptInjectionRole,
   PromptSendFrequency,
@@ -45,6 +46,7 @@ import type {
   ImageQuality,
   LibraryLocationSettings,
   MultiAgentSettings,
+  ProfileSettingsMap,
 } from './schemas';
 
 const CURRENT_MODEL_SETTING = 'current_model';
@@ -116,6 +118,12 @@ export const DEFAULT_LIBRARY_LOCATION_SETTINGS: LibraryLocationSettings = {
   'mango-skills': true,
 };
 
+export const DEFAULT_PROFILE_SETTINGS: ProfileSettingsMap = {
+  [DEFAULT_PROFILE_ID]: {
+    libraryLocations: DEFAULT_LIBRARY_LOCATION_SETTINGS,
+  },
+};
+
 export const DEFAULT_WORKSPACE_SETTINGS: WorkspaceSettings = {
   defaultWorkdir: '',
   recentWorkdirs: [],
@@ -152,7 +160,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   multiAgentSettings: DEFAULT_MULTI_AGENT_SETTINGS,
   contextSettings: DEFAULT_CONTEXT_SETTINGS,
   chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
-  libraryLocations: DEFAULT_LIBRARY_LOCATION_SETTINGS,
+  profileSettings: DEFAULT_PROFILE_SETTINGS,
   workspaceSettings: DEFAULT_WORKSPACE_SETTINGS,
   gitSettings: DEFAULT_GIT_SETTINGS,
   chatDisplaySettings: DEFAULT_CHAT_DISPLAY_SETTINGS,
@@ -391,6 +399,80 @@ export function normalizeLibraryLocationSettings(
   return normalized;
 }
 
+const PROFILE_ID_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const PROFILE_ID_MAX_LENGTH = 64;
+
+function isProfileIdShape(value: string): value is ProfileId {
+  return value.length >= 1 && value.length <= PROFILE_ID_MAX_LENGTH && PROFILE_ID_SHAPE.test(value);
+}
+
+/**
+ * Keep only the default profile today. The schema admits many profile keys so
+ * enabling profiles later is a normalizer change, not a contract reshape.
+ * Falls back to a legacy top-level `libraryLocations` when `profileSettings`
+ * is absent, so a database that has not run the nesting migration still reads.
+ */
+export function normalizeProfileSettings(
+  value: unknown,
+  libraryLocationDefaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS,
+  legacyLibraryLocations?: unknown
+): ProfileSettingsMap {
+  const source = isRecord(value) ? value : undefined;
+  const defaultScoped = isRecord(source?.[DEFAULT_PROFILE_ID])
+    ? source[DEFAULT_PROFILE_ID]
+    : undefined;
+  const libraryLocationsSource = isRecord(defaultScoped)
+    ? defaultScoped.libraryLocations
+    : legacyLibraryLocations;
+
+  return {
+    [DEFAULT_PROFILE_ID]: {
+      libraryLocations: normalizeLibraryLocationSettings(
+        libraryLocationsSource,
+        libraryLocationDefaults
+      ),
+    },
+  };
+}
+
+/** Read library location enablement for a profile; falls back to the default profile. */
+export function libraryLocationsFor(
+  settings: AppSettings,
+  profileId: ProfileId = DEFAULT_PROFILE_ID
+): LibraryLocationSettings {
+  return (
+    settings.profileSettings[profileId]?.libraryLocations ??
+    settings.profileSettings[DEFAULT_PROFILE_ID]?.libraryLocations ??
+    DEFAULT_LIBRARY_LOCATION_SETTINGS
+  );
+}
+
+/** Return a copy of settings with library locations updated for one profile. */
+export function withLibraryLocations(
+  settings: AppSettings,
+  profileId: ProfileId,
+  libraryLocations: LibraryLocationSettings
+): AppSettings {
+  const normalizedLocations = normalizeLibraryLocationSettings(libraryLocations);
+  if (!isProfileIdShape(profileId) || profileId !== DEFAULT_PROFILE_ID) {
+    // Unknown profiles are not selectable yet; write into the default profile
+    // so a future selector cannot accidentally create orphan keys.
+    return {
+      ...settings,
+      profileSettings: {
+        [DEFAULT_PROFILE_ID]: { libraryLocations: normalizedLocations },
+      },
+    };
+  }
+  return {
+    ...settings,
+    profileSettings: {
+      ...settings.profileSettings,
+      [profileId]: { libraryLocations: normalizedLocations },
+    },
+  };
+}
+
 export function normalizeWorkspaceSettings(value: unknown): WorkspaceSettings {
   if (!isRecord(value)) return DEFAULT_WORKSPACE_SETTINGS;
 
@@ -513,7 +595,7 @@ export function normalizeAppSettings(
   if (!isRecord(value)) {
     return {
       ...DEFAULT_APP_SETTINGS,
-      libraryLocations: normalizeLibraryLocationSettings(undefined, libraryLocationDefaults),
+      profileSettings: normalizeProfileSettings(undefined, libraryLocationDefaults),
     };
   }
 
@@ -537,9 +619,10 @@ export function normalizeAppSettings(
     multiAgentSettings: normalizeMultiAgentSettings(value.multiAgentSettings),
     contextSettings: normalizeContextSettings(value.contextSettings),
     chatTitleSettings: normalizeChatTitleSettings(value.chatTitleSettings),
-    libraryLocations: normalizeLibraryLocationSettings(
-      value.libraryLocations,
-      libraryLocationDefaults
+    profileSettings: normalizeProfileSettings(
+      value.profileSettings,
+      libraryLocationDefaults,
+      value.libraryLocations
     ),
     workspaceSettings: normalizeWorkspaceSettings(value.workspaceSettings),
     gitSettings: normalizeGitSettings(value.gitSettings),

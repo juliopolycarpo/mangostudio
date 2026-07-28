@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/app-settings';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import {
@@ -267,14 +269,15 @@ describe('skills lazy-load end-to-end turn', () => {
     expect(provider.requests[0]?.systemPrompt ?? '').not.toContain('agents-skill');
 
     const current = await getAppSettings(getDb(), user.id);
-    await updateAppSettings(getDb(), user.id, {
-      ...current,
-      libraryLocations: {
-        ...current.libraryLocations,
+    await updateAppSettings(
+      getDb(),
+      user.id,
+      withLibraryLocations(current, DEFAULT_PROFILE_ID, {
+        ...libraryLocationsFor(current),
         'agents-skills': true,
         'claude-skills': false,
-      },
-    });
+      })
+    );
     resetSkillsCache();
 
     await collectTurn('Second turn.');

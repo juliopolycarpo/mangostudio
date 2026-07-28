@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import {
+  DEFAULT_APP_SETTINGS,
+  libraryLocationsFor,
+  withLibraryLocations,
+} from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
   PropagationApply,
@@ -13,6 +17,7 @@ import type {
   PropagationPreviewRequest,
 } from '@mangostudio/shared/library';
 import { enabledLibraryLocations } from '@mangostudio/shared/library';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../src/db/database';
 import { listDivergenceAcks } from '../../../src/modules/library/application/conflict-resolution';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
@@ -131,12 +136,11 @@ function pathEnv() {
 }
 
 function settings(locationIds: readonly LibraryLocationId[]): typeof DEFAULT_APP_SETTINGS {
-  return {
-    ...DEFAULT_APP_SETTINGS,
-    libraryLocations: Object.fromEntries(
-      locationIds.map((id) => [id, true])
-    ) as (typeof DEFAULT_APP_SETTINGS)['libraryLocations'],
-  };
+  return withLibraryLocations(
+    DEFAULT_APP_SETTINGS,
+    DEFAULT_PROFILE_ID,
+    Object.fromEntries(locationIds.map((id) => [id, true]))
+  );
 }
 
 function preview(request: PropagationPreviewRequest): Promise<PropagationPreview> {
@@ -158,7 +162,7 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
         settings: enabled,
       }),
     describeLocation: (id) => describeLocation(id, env),
-    enabledLocationIds: async () => enabledLibraryLocations(enabled.libraryLocations),
+    enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled)),
   });
 }
 
@@ -688,7 +692,7 @@ describe('propagation apply — request validation', () => {
           }),
         describeLocation: (id) => describeLocation(id, env),
         enabledLocationIds: async () =>
-          enabledLibraryLocations(settings(['claude-instructions']).libraryLocations),
+          enabledLibraryLocations(libraryLocationsFor(settings(['claude-instructions']))),
       }
     );
 
