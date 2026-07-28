@@ -145,7 +145,7 @@ function contentPreview(
     const parsed = parseResultObject(result);
     const before = parsed?.before;
     if (typeof before === 'string') {
-      const lines = lineDiff(before, args.content);
+      const lines = diffTextLines(before, args.content);
       return {
         files: [
           {
@@ -171,7 +171,7 @@ function editFilePreview(
   if (typeof args.path !== 'string' || args.path.length === 0) return null;
   if (typeof args.oldString !== 'string' || typeof args.newString !== 'string') return null;
 
-  const lines = lineDiff(args.oldString, args.newString);
+  const lines = diffTextLines(args.oldString, args.newString);
   const preview: FileChangePreview = {
     files: [
       {
@@ -209,7 +209,7 @@ function replaceRangePreview(
   if (typeof before === 'string') {
     const beforeLines = splitLines(before);
     const oldSlice = beforeLines.slice(startLine - 1, endLine).join('\n');
-    const lines = lineDiff(oldSlice, args.content);
+    const lines = diffTextLines(oldSlice, args.content);
     return {
       files: [
         {
@@ -316,11 +316,16 @@ function splitLines(text: string): string[] {
 }
 
 /**
- * Standard LCS line diff for the small before/after fragments edit_file
- * carries. Shared prefix/suffix lines are stripped first so the quadratic
- * table only covers the changed middle.
+ * Standard LCS line diff between two texts. Shared prefix/suffix lines are
+ * stripped first so the quadratic table only covers the changed middle.
+ *
+ * Exported because comparing two versions of the same file is not unique to
+ * tool calls — the library's instance comparison renders through the same
+ * pipeline, and a second diff implementation would drift from this one.
+ *
+ * // Usage: const lines = diffTextLines(before, after);
  */
-function lineDiff(oldText: string, newText: string): DiffPreviewLine[] {
+export function diffTextLines(oldText: string, newText: string): DiffPreviewLine[] {
   const oldLines = splitLines(oldText);
   const newLines = splitLines(newText);
 
