@@ -250,11 +250,15 @@ describe('writeFileAtomic through symlinks', () => {
     // A writer that stages next to the link cannot create its temp file here.
     // Staging beside the target also avoids EXDEV when the directories are on
     // different filesystems.
+    // Privileged processes ignore directory write bits, so this assertion would
+    // not catch a regression that stages beside the link when running as root.
+    if (process.getuid?.() === 0) return;
+    const originalMode = statSync(linkDir).mode & 0o7777;
     chmodSync(linkDir, 0o555);
     try {
       writeFileAtomic(link, 'new\n');
     } finally {
-      chmodSync(linkDir, 0o755);
+      chmodSync(linkDir, originalMode);
     }
 
     expect(readFileSync(target, 'utf8')).toBe('new\n');
