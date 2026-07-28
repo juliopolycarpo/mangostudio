@@ -77,6 +77,20 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         </div>
       </div>
 
+      {/*
+        The matrix renders even with nothing in it. The column set is the answer
+        to "which agents am I looking at", and it does not depend on which rows
+        survived a filter — or on whether this machine has any resources at all.
+      */}
+      <CoverageMatrix
+        groups={matrix.groups}
+        targets={matrix.targets}
+        locations={matrix.locations}
+        selected={matrix.selected}
+        onToggleSelected={matrix.toggleSelected}
+        onToggleAll={matrix.toggleAllVisible}
+      />
+
       {matrix.resources.length === 0 ? (
         <LibraryPageState variant="empty" title={l.matrix.empty} hint={l.matrix.emptyHint} />
       ) : matrix.visible.length === 0 ? (
@@ -85,16 +99,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
           title={l.matrix.emptyFiltered}
           onRetry={matrix.clearFilters}
         />
-      ) : (
-        <CoverageMatrix
-          groups={matrix.groups}
-          targets={matrix.targets}
-          locations={matrix.locations}
-          selected={matrix.selected}
-          onToggleSelected={matrix.toggleSelected}
-          onToggleAll={matrix.toggleAllVisible}
-        />
-      )}
+      ) : null}
 
       {wizardKeys && wizardKeys.length > 0 && (
         <PropagationWizard

@@ -176,6 +176,16 @@ describe('CoverageMatrix', () => {
     expect(title).toContain('a3f9c1');
   });
 
+  it('keeps every column when there is nothing to show', async () => {
+    await renderMatrix([]);
+
+    // A machine with no resources yet, or a filter that matched none, still owes
+    // the user the answer to "which agents am I looking at".
+    expect(screen.getByTestId('coverage-matrix')).toBeInTheDocument();
+    expect(screen.getAllByRole('columnheader')).toHaveLength(TARGETS.length + 2);
+    expect(screen.queryAllByTestId('matrix-row')).toEqual([]);
+  });
+
   it('explains every glyph in the legend', async () => {
     const { MatrixLegend } = await import(
       '../../../../src/features/library/components/CoverageMatrix'
