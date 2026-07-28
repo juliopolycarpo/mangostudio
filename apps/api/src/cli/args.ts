@@ -3,6 +3,7 @@
  * the -d/--detach flag.
  */
 
+import type { ResourceKind } from '@mangostudio/shared/library';
 import { CliError } from './errors';
 
 export interface ServeArgs {
@@ -17,6 +18,37 @@ export interface DoctorArgs {
   chatgptRefresh: boolean;
   /** Actively connect to each enabled MCP server (spawns children / hits URLs). */
   probe: boolean;
+  /** When set, run only the Environments section (plus core checks). */
+  envOnly: boolean;
+  /** When set, run only the Library section (plus core checks). */
+  libraryOnly: boolean;
+  /** Emit structured JSON instead of plain text. */
+  json: boolean;
+}
+
+export interface EnvArgs {
+  subcommand: 'runtimes' | 'agents' | null;
+  json: boolean;
+}
+
+/** Default doctor flags for tests and internal callers. */
+export const DEFAULT_DOCTOR_ARGS: DoctorArgs = {
+  all: false,
+  cursorProbe: false,
+  chatgptRefresh: false,
+  probe: false,
+  envOnly: false,
+  libraryOnly: false,
+  json: false,
+};
+
+type LibrarySubcommand = 'locations' | null;
+
+export interface LibraryArgs {
+  subcommand: LibrarySubcommand;
+  kind?: ResourceKind;
+  divergent: boolean;
+  json: boolean;
 }
 
 const PORT_MIN = 1;
@@ -59,6 +91,9 @@ export function parseDoctorArgs(rest: string[]): DoctorArgs {
   let cursorProbe = false;
   let chatgptRefresh = false;
   let probe = false;
+  let envOnly = false;
+  let libraryOnly = false;
+  let json = false;
 
   for (const arg of rest) {
     if (arg === '--all') {
@@ -77,10 +112,109 @@ export function parseDoctorArgs(rest: string[]): DoctorArgs {
       probe = true;
       continue;
     }
+    if (arg === '--env') {
+      envOnly = true;
+      continue;
+    }
+    if (arg === '--library') {
+      libraryOnly = true;
+      continue;
+    }
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
     throw new CliError(`Unknown option for doctor: ${arg}`);
   }
 
-  return { all, cursorProbe, chatgptRefresh, probe };
+  return { all, cursorProbe, chatgptRefresh, probe, envOnly, libraryOnly, json };
+}
+
+/** Parse `env` args: optional subcommand and --json. */
+export function parseEnvArgs(rest: string[]): EnvArgs {
+  let json = false;
+  const positionals: string[] = [];
+
+  for (const arg of rest) {
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      throw new CliError(`Unknown option for env: ${arg}`);
+    }
+    positionals.push(arg);
+  }
+
+  if (positionals.length > 1) {
+    throw new CliError(`Unexpected extra arguments for env: ${positionals.slice(1).join(' ')}`);
+  }
+
+  const subcommand = positionals[0];
+  if (subcommand === undefined) {
+    return { subcommand: null, json };
+  }
+  if (subcommand === 'runtimes' || subcommand === 'agents') {
+    return { subcommand, json };
+  }
+  throw new CliError(`Unknown env subcommand: ${subcommand}`);
+}
+
+const LIBRARY_KINDS = new Set<ResourceKind>([
+  'skill',
+  'subagent',
+  'instruction',
+  'setting',
+  'hook',
+]);
+
+/** Parse `library` args: optional subcommand, filters, and --json. */
+export function parseLibraryArgs(rest: string[]): LibraryArgs {
+  let json = false;
+  let divergent = false;
+  let kind: ResourceKind | undefined;
+  const positionals: string[] = [];
+
+  for (let index = 0; index < rest.length; index += 1) {
+    const arg = rest[index];
+    if (arg === '--json') {
+      json = true;
+      continue;
+    }
+    if (arg === '--divergent') {
+      divergent = true;
+      continue;
+    }
+    if (arg === '--kind') {
+      const value = rest[index + 1];
+      if (!value || value.startsWith('-')) {
+        throw new CliError('Missing value for library --kind');
+      }
+      if (!LIBRARY_KINDS.has(value as ResourceKind)) {
+        throw new CliError(`Unknown library kind: ${value}`);
+      }
+      kind = value as ResourceKind;
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith('-')) {
+      throw new CliError(`Unknown option for library: ${arg}`);
+    }
+    positionals.push(arg);
+  }
+
+  if (positionals.length > 1) {
+    throw new CliError(`Unexpected extra arguments for library: ${positionals.slice(1).join(' ')}`);
+  }
+
+  const subcommand = positionals[0];
+  if (subcommand === undefined) {
+    return { subcommand: null, kind, divergent, json };
+  }
+  if (subcommand === 'locations') {
+    return { subcommand: 'locations', kind, divergent, json };
+  }
+  throw new CliError(`Unknown library subcommand: ${subcommand}`);
 }
 
 interface ServeTarget {

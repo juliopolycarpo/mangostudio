@@ -123,6 +123,9 @@ describe('parseDoctorArgs', () => {
       cursorProbe: false,
       chatgptRefresh: false,
       probe: false,
+      envOnly: false,
+      libraryOnly: false,
+      json: false,
     });
   });
 
@@ -132,30 +135,57 @@ describe('parseDoctorArgs', () => {
       cursorProbe: false,
       chatgptRefresh: false,
       probe: false,
+      envOnly: false,
+      libraryOnly: false,
+      json: false,
     });
     expect(parseDoctorArgs(['--cursor-probe'])).toEqual({
       all: false,
       cursorProbe: true,
       chatgptRefresh: false,
       probe: false,
+      envOnly: false,
+      libraryOnly: false,
+      json: false,
     });
     expect(parseDoctorArgs(['--chatgpt-refresh'])).toEqual({
       all: false,
       cursorProbe: false,
       chatgptRefresh: true,
       probe: false,
+      envOnly: false,
+      libraryOnly: false,
+      json: false,
     });
     expect(parseDoctorArgs(['--probe'])).toEqual({
       all: false,
       cursorProbe: false,
       chatgptRefresh: false,
       probe: true,
+      envOnly: false,
+      libraryOnly: false,
+      json: false,
     });
     expect(parseDoctorArgs(['--all', '--cursor-probe', '--chatgpt-refresh', '--probe'])).toEqual({
       all: true,
       cursorProbe: true,
       chatgptRefresh: true,
       probe: true,
+      envOnly: false,
+      libraryOnly: false,
+      json: false,
+    });
+  });
+
+  it('parses --env, --library, and --json', () => {
+    expect(parseDoctorArgs(['--env', '--json'])).toEqual({
+      all: false,
+      cursorProbe: false,
+      chatgptRefresh: false,
+      probe: false,
+      envOnly: true,
+      libraryOnly: false,
+      json: true,
     });
   });
 

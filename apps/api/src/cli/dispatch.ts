@@ -3,9 +3,11 @@
  * turns CliError into a clean stderr message + non-zero exit.
  */
 
-import { parseDoctorArgs, parseServeArgs } from './args';
+import { parseDoctorArgs, parseEnvArgs, parseLibraryArgs, parseServeArgs } from './args';
 import { runDoctor } from './commands/doctor';
+import { runEnv } from './commands/env';
 import { runKillServer } from './commands/killserver';
+import { runLibrary } from './commands/library';
 import { runServe } from './commands/serve';
 import { runServeInternal } from './commands/serve-internal';
 import { runStatus } from './commands/status';
@@ -55,6 +57,12 @@ async function route(command: string | undefined, rest: string[]): Promise<void>
       return;
     case 'doctor':
       await runDoctor(parseDoctorArgs(rest));
+      return;
+    case 'env':
+      await runEnv(parseEnvArgs(rest));
+      return;
+    case 'library':
+      await runLibrary(parseLibraryArgs(rest));
       return;
     case 'version':
     case '-v':

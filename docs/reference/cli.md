@@ -35,6 +35,12 @@ copy-paste commands, or:
 | `doctor --cursor-probe`            | After chain checks pass, spawn the sidecar `validate_api_key` RPC with a dummy key. |
 | `doctor --chatgpt-refresh`         | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).      |
 | `doctor --probe`                   | Actively connect to each enabled MCP server (spawns children / hits URLs).          |
+| `doctor --env` / `--library`       | Limit extra sections to environments and/or library (core checks always run).       |
+| `doctor --json`                    | Emit structured JSON (checks, warning/failure counts).                              |
+| `env [runtimes\|agents] [--json]`  | Report runtimes, version managers, and agent CLIs (read-only).                      |
+| `library [locations] [--json]`     | Library coverage matrix and location health (read-only).                            |
+| `library --kind <kind>`            | Filter resources by kind (`skill`, `subagent`, etc.).                               |
+| `library --divergent`              | List only resources whose copies disagree across locations.                         |
 | `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                                             |
 
 `-d` / `--detach` and the positional host/port target may be combined in any

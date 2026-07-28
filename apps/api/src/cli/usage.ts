@@ -17,14 +17,20 @@ Commands:
   status              Show whether a server is running and its details.
   stop                Gracefully stop the running server.
   killserver          Force-kill the running server.
-  doctor [--all] [--cursor-probe] [--chatgpt-refresh] [--probe]
+  doctor [--all] [--cursor-probe] [--chatgpt-refresh] [--probe] [--env] [--library] [--json]
                       Run environment and configuration diagnostics.
                       Cursor and ChatGPT connector checks run when the
                       connector is configured, or with --all. --cursor-probe
                       spawns the sidecar validate_api_key RPC with a dummy
                       key. --chatgpt-refresh performs a live token refresh
                       (rotates the stored refresh token). --probe actively
-                      connects to each enabled MCP server.
+                      connects to each enabled MCP server. --env or
+                      --library limit extra sections; --json prints JSON.
+  env [runtimes|agents] [--json]
+                      Report runtimes, version managers, and agent CLIs
+                      (read-only; no install).
+  library [locations] [--kind <kind>] [--divergent] [--json]
+                      Library coverage matrix and location health (read-only).
   version, --version  Print the MangoStudio version.
   help                Show this help.
 
