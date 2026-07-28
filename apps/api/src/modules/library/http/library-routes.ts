@@ -32,6 +32,11 @@ import {
   readRegularFileUtf8,
 } from '../../../lib/safe-file';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import {
+  validateWorkdir,
+  type WorkdirValidationResult,
+} from '../../workspaces/application/workdir-validation';
+import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import { discoverLibraryResources } from '../application/library-discovery';
 import { LIBRARY_LOCATION_DEFINITIONS, listLibraryTargetDescriptors } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
@@ -127,17 +132,66 @@ function handleLibraryError(error: unknown, set: { status?: number | string }): 
   };
 }
 
+/**
+ * Root a `workspace`-scoped location would resolve under.
+ *
+ * Reserved and inert: v1 defines no workspace location, so every response is
+ * byte-identical with and without it. It is validated anyway, and rejected with
+ * 422 when it does not name a readable directory — a parameter that silently
+ * does nothing when malformed is worse than one that does nothing at all, and
+ * the day locations do resolve under it, a typo would quietly return the
+ * home-only matrix instead of an error.
+ *
+ * Named for a path rather than an id because that is what a workspace is here:
+ * `workspaceSettings` and chat workdirs both store roots, and no workspace
+ * entity or id space exists to validate against.
+ */
+const WorkspaceRootSchema = t.Optional(t.String({ minLength: 1, maxLength: 4096 }));
+
 const resourceQuery = t.Object({
   kind: t.Optional(ResourceKindSchema),
   target: t.Optional(LibraryTargetIdSchema),
   location: t.Optional(LibraryLocationIdSchema),
   state: t.Optional(LibraryCoverageStateSchema),
+  workspaceRoot: WorkspaceRootSchema,
 });
 const resourceParams = t.Object({ key: t.String() });
 
+function rejectWorkspaceRoot(
+  set: { status?: number | string },
+  message: string
+): { ok: false; body: ApiErrorResponse } {
+  set.status = 422;
+  return { ok: false, body: { error: message, code: ERROR_CODES.VALIDATION } };
+}
+
+/** Resolves the requested root, or the 422 body explaining why it cannot. */
+async function resolveWorkspaceRoot(
+  workspaceRoot: string | undefined,
+  set: { status?: number | string }
+): Promise<{ ok: true; root: string | undefined } | { ok: false; body: ApiErrorResponse }> {
+  if (workspaceRoot === undefined) return { ok: true, root: undefined };
+
+  let validation: WorkdirValidationResult;
+  try {
+    // Absolute only. A relative root would resolve against the server process's
+    // working directory, which is a tree the caller never named.
+    validation = await validateWorkdir(workspaceRoot, { requireAbsolute: true });
+  } catch (error) {
+    if (error instanceof WorkspacePathError) {
+      return rejectWorkspaceRoot(set, error.message);
+    }
+    throw error;
+  }
+
+  return validation.ok
+    ? { ok: true, root: validation.resolvedPath }
+    : rejectWorkspaceRoot(set, `The workspace root is ${validation.reason}.`);
+}
+
 export interface LibraryRouteService {
-  discover(userId: string, force: boolean): Promise<LibraryResource[]>;
-  listLocations(): LibraryLocationStatus[];
+  discover(userId: string, force: boolean, workspaceRoot?: string): Promise<LibraryResource[]>;
+  listLocations(workspaceRoot?: string): LibraryLocationStatus[];
   listTargets(): LibraryTargetDescriptor[];
   readContent(
     resource: LibraryResource,
@@ -146,9 +200,13 @@ export interface LibraryRouteService {
 }
 
 const defaultLibraryRouteService: LibraryRouteService = {
-  discover: (userId, force) => discoverLibraryResources(getDb(), userId, { force }),
-  listLocations() {
-    const env = createLibraryPathEnv();
+  discover: (userId, force, workspaceRoot) =>
+    discoverLibraryResources(getDb(), userId, {
+      force,
+      pathEnv: createLibraryPathEnv({ workspaceRoot }),
+    }),
+  listLocations(workspaceRoot) {
+    const env = createLibraryPathEnv({ workspaceRoot });
     return LIBRARY_LOCATION_DEFINITIONS.map((location) => describeLocation(location.id, env));
   },
   listTargets: listLibraryTargetDescriptors,
@@ -162,8 +220,10 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
       .get(
         '/library/resources',
         async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
+          if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(user?.id ?? '', false);
+            const resources = await service.discover(user?.id ?? '', false, workspace.root);
             return filterLibraryResources(resources, query);
           } catch (error) {
             return handleLibraryError(error, set);
@@ -173,6 +233,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           query: resourceQuery,
           response: {
             200: LibraryResourceListSchema,
+            422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
           },
         }
@@ -186,8 +247,10 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           user,
         }): Promise<LibraryResourceContent | ApiErrorResponse> => {
           if (!parseResourceKey(params.key)) return invalidResourceKey(set);
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
+          if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(user?.id ?? '', false);
+            const resources = await service.discover(user?.id ?? '', false, workspace.root);
             const resource = resources.find((candidate) => candidate.key === params.key);
             if (!resource) return resourceNotFound(set);
             return service.readContent(resource, query.location) ?? resourceNotFound(set);
@@ -197,21 +260,27 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
         },
         {
           params: resourceParams,
-          query: t.Object({ location: LibraryLocationIdSchema }),
+          query: t.Object({
+            location: LibraryLocationIdSchema,
+            workspaceRoot: WorkspaceRootSchema,
+          }),
           response: {
             200: LibraryResourceContentSchema,
             400: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
+            422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
           },
         }
       )
       .get(
         '/library/resources/:key',
-        async ({ params, set, user }): Promise<LibraryResource | ApiErrorResponse> => {
+        async ({ params, query, set, user }): Promise<LibraryResource | ApiErrorResponse> => {
           if (!parseResourceKey(params.key)) return invalidResourceKey(set);
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
+          if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(user?.id ?? '', false);
+            const resources = await service.discover(user?.id ?? '', false, workspace.root);
             return (
               resources.find((candidate) => candidate.key === params.key) ?? resourceNotFound(set)
             );
@@ -221,17 +290,31 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
         },
         {
           params: resourceParams,
+          query: t.Object({ workspaceRoot: WorkspaceRootSchema }),
           response: {
             200: LibraryResourceSchema,
             400: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
+            422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
           },
         }
       )
-      .get('/library/locations', () => service.listLocations(), {
-        response: { 200: LibraryLocationStatusListSchema },
-      })
+      .get(
+        '/library/locations',
+        async ({ query, set }): Promise<LibraryLocationStatus[] | ApiErrorResponse> => {
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
+          if (!workspace.ok) return workspace.body;
+          return service.listLocations(workspace.root);
+        },
+        {
+          query: t.Object({ workspaceRoot: WorkspaceRootSchema }),
+          response: {
+            200: LibraryLocationStatusListSchema,
+            422: ApiErrorResponseSchema,
+          },
+        }
+      )
       // The coverage matrix has one column per target, and that column set has to
       // be stable even when a filter leaves no rows to infer it from.
       .get('/library/targets', () => service.listTargets(), {
@@ -240,8 +323,10 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
       .post(
         '/library/rescan',
         async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
+          if (!workspace.ok) return workspace.body;
           try {
-            return await service.discover(user?.id ?? '', query.force === 'true');
+            return await service.discover(user?.id ?? '', query.force === 'true', workspace.root);
           } catch (error) {
             return handleLibraryError(error, set);
           }
@@ -249,9 +334,11 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
         {
           query: t.Object({
             force: t.Optional(t.Union([t.Literal('true'), t.Literal('false')])),
+            workspaceRoot: WorkspaceRootSchema,
           }),
           response: {
             200: LibraryResourceListSchema,
+            422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
           },
         }
