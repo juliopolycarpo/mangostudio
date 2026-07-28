@@ -14,7 +14,7 @@ import { loadConfig, type MangoConfig } from '../lib/config';
 import { safeJsonParse } from '../lib/safe-parse';
 
 /**
- * Returns the first persisted `user_app_settings` row as AppSettings.
+ * Returns the most recently updated `user_app_settings` row as AppSettings.
  * Falls back to defaults when the DB is missing, empty, or unreadable.
  */
 export function readCliAppSettings(
@@ -23,7 +23,7 @@ export function readCliAppSettings(
 ): AppSettings {
   const rows = readReadonlyDbRows<{ settingsJson: string }>(
     config,
-    'SELECT settingsJson FROM user_app_settings LIMIT 1'
+    'SELECT settingsJson FROM user_app_settings ORDER BY updatedAt DESC LIMIT 1'
   );
   const parsed = safeJsonParse(rows[0]?.settingsJson);
   if (!parsed) return defaults;

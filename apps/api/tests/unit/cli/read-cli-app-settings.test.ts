@@ -82,4 +82,41 @@ describe('readCliAppSettings', () => {
     expect(locations['agents-skills']).toBe(true);
     expect(locations['claude-skills']).toBe(true);
   });
+
+  it('selects the most recently updated settings row', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cli-app-settings-'));
+    dirs.push(dir);
+    const dbPath = join(dir, 'db.sqlite');
+    const older = withLibraryLocations(DEFAULT_APP_SETTINGS, 'default', {
+      'mango-skills': true,
+      'agents-skills': false,
+    });
+    const newer = withLibraryLocations(DEFAULT_APP_SETTINGS, 'default', {
+      'mango-skills': true,
+      'agents-skills': true,
+    });
+
+    const db = new SQLiteDatabase(dbPath);
+    db.run(
+      `CREATE TABLE user_app_settings (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        settingsJson TEXT NOT NULL,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      )`
+    );
+    db.run(
+      'INSERT INTO user_app_settings (id, userId, settingsJson, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
+      ['old', 'user-old', JSON.stringify(older), 1, 10]
+    );
+    db.run(
+      'INSERT INTO user_app_settings (id, userId, settingsJson, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?)',
+      ['new', 'user-new', JSON.stringify(newer), 2, 20]
+    );
+    db.close();
+
+    const locations = libraryLocationsFor(readCliAppSettings(makeConfig(dbPath)));
+    expect(locations['agents-skills']).toBe(true);
+  });
 });
