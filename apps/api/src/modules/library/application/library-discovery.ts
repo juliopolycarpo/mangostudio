@@ -1,5 +1,6 @@
-import type { AppSettings, LibraryLocationSettings } from '@mangostudio/shared/app-settings';
+import type { AppSettings } from '@mangostudio/shared/app-settings';
 import {
+  enabledLibraryLocations,
   type LibraryLocationId,
   type LibraryResource,
   type ResourceKind,
@@ -63,17 +64,6 @@ export async function discoverLibraryResources(
     ).flat();
     return groupResources(scanned);
   });
-}
-
-export function enabledLibraryLocations(
-  settings: LibraryLocationSettings
-): ReadonlySet<LibraryLocationId> {
-  const enabled = new Set(
-    Object.entries(settings).flatMap(([id, value]) => (value ? [id as LibraryLocationId] : []))
-  );
-  enabled.add('mango-skills');
-  enabled.add('mango-agents');
-  return enabled;
 }
 
 function groupResources(

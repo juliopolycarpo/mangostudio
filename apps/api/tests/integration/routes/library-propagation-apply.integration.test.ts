@@ -12,12 +12,10 @@ import type {
   PropagationPreviewEntry,
   PropagationPreviewRequest,
 } from '@mangostudio/shared/library';
+import { enabledLibraryLocations } from '@mangostudio/shared/library';
 import { getDb } from '../../../src/db/database';
 import { listDivergenceAcks } from '../../../src/modules/library/application/conflict-resolution';
-import {
-  discoverLibraryResources,
-  enabledLibraryLocations,
-} from '../../../src/modules/library/application/library-discovery';
+import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import {
   applyLibraryPropagation,
   type PropagationApplyDeps,
