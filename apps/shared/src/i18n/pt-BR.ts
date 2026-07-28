@@ -906,7 +906,7 @@ export const messages = {
         pathPlaceholder: 'ex. ~/.cursor/mcp.json',
         pathHint: 'Caminho .json absoluto (ou iniciando com ~) na máquina que executa a API.',
         jsonLabel: 'JSON',
-        jsonPlaceholder: '{"mcpServers": { ... }}',
+        jsonPlaceholder: '"mcpServers": …',
         sourceRequired: 'Informe um caminho ou JSON',
         previewButton: 'Pré-visualizar',
         previewingButton: 'Carregando...',

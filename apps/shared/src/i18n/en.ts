@@ -892,7 +892,7 @@ export const messages: Messages = {
         pathPlaceholder: 'e.g. ~/.cursor/mcp.json',
         pathHint: 'Absolute (or ~-prefixed) .json path on the machine running the API.',
         jsonLabel: 'JSON',
-        jsonPlaceholder: '{"mcpServers": { ... }}',
+        jsonPlaceholder: '"mcpServers": …',
         sourceRequired: 'Provide a path or JSON',
         previewButton: 'Preview',
         previewingButton: 'Loading...',
