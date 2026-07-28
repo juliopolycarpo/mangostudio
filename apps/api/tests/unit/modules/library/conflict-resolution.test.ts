@@ -128,6 +128,31 @@ describe('acknowledgeDivergence', () => {
     );
   });
 
+  it('accepts the active profile id and rejects a mismatched one', async () => {
+    const repository = memoryRepository();
+    const matching = await acknowledgeDivergence(
+      'user-1',
+      {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-b'],
+        profileId: 'default',
+      },
+      deps(repository, [divergent])
+    );
+    expect(matching.resourceKey).toBe('skill:gh');
+
+    const mismatched = acknowledgeDivergence(
+      'user-1',
+      {
+        resourceKey: 'skill:gh',
+        contentHashes: ['hash-a', 'hash-b'],
+        profileId: 'work-laptop',
+      },
+      deps(repository, [divergent])
+    );
+    await expect(mismatched).rejects.toMatchObject({ status: 400 });
+  });
+
   it('refuses to accept a divergence the client did not see', async () => {
     const repository = memoryRepository();
     const failure = acknowledgeDivergence(

@@ -16,7 +16,11 @@ import {
   parseResourceKey,
 } from '@mangostudio/shared/library';
 import { getDb } from '../../../db/database';
-import { resolveActiveProfileId } from '../../../lib/profile-context';
+import {
+  assertRequestedProfileId,
+  ProfileMismatchError,
+  resolveActiveProfileId,
+} from '../../../lib/profile-context';
 import { PropagationRequestError } from '../domain/propagation-error';
 import {
   createDivergenceAckRepository,
@@ -41,6 +45,17 @@ function resolveDeps(overrides: Partial<DivergenceAckDeps>): DivergenceAckDeps {
         discoverLibraryResources(getDb(), userId, { force: true, kinds: [ref.kind] })),
     now: overrides.now ?? Date.now,
   };
+}
+
+function activeProfileId(userId: string, requested?: string) {
+  try {
+    return assertRequestedProfileId(requested, { userId });
+  } catch (error) {
+    if (error instanceof ProfileMismatchError) {
+      throw new PropagationRequestError(400, error.message);
+    }
+    throw error;
+  }
 }
 
 /** Stable digest of an accepted divergence, independent of hash order. */
@@ -80,7 +95,7 @@ export async function acknowledgeDivergence(
   overrides: Partial<DivergenceAckDeps> = {}
 ): Promise<LibraryDivergenceAck> {
   const deps = resolveDeps(overrides);
-  const profileId = resolveActiveProfileId({ userId });
+  const profileId = activeProfileId(userId, request.profileId);
   const ref = parseResourceKey(request.resourceKey);
   if (!ref) {
     throw new PropagationRequestError(

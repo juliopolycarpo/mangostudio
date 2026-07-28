@@ -25,6 +25,7 @@ import {
   parseResourceKey,
 } from '@mangostudio/shared/library';
 import { Elysia, t } from 'elysia';
+import { ProfileMismatchError } from '../../../lib/profile-context';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   acknowledgeDivergence,
@@ -60,6 +61,7 @@ const defaultPropagationRouteService: PropagationRouteService = {
 };
 
 const ERROR_CODE_BY_STATUS = {
+  400: ERROR_CODES.VALIDATION,
   404: ERROR_CODES.NOT_FOUND,
   409: ERROR_CODES.CONFLICT,
   422: ERROR_CODES.VALIDATION,
@@ -69,6 +71,10 @@ function mapPropagationError(error: unknown, set: { status?: number | string }):
   if (error instanceof PropagationRequestError) {
     set.status = error.status;
     return { error: error.message, code: ERROR_CODE_BY_STATUS[error.status] };
+  }
+  if (error instanceof ProfileMismatchError) {
+    set.status = 400;
+    return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
   console.error('[library] Unexpected propagation error:', error);
   set.status = 500;
@@ -98,6 +104,7 @@ export function createPropagationRoutes(
         body: PropagationPreviewRequestSchema,
         response: {
           200: PropagationPreviewSchema,
+          400: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
@@ -117,6 +124,7 @@ export function createPropagationRoutes(
         body: PropagationApplyRequestSchema,
         response: {
           200: PropagationApplySchema,
+          400: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           // The preview no longer describes what is on disk. Re-preview rather
           // than writing over a change the user made in the meantime.
@@ -190,6 +198,7 @@ export function createPropagationRoutes(
         body: LibraryDivergenceAckRequestSchema,
         response: {
           200: LibraryDivergenceAckSchema,
+          400: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           // The reviewed hashes no longer match disk, so the acknowledgement
           // would cover a divergence the user has not actually seen.

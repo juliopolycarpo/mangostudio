@@ -15,6 +15,7 @@ import {
 } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
+import { ProfileMismatchError } from '../../../lib/profile-context';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   InstallBlockedError,
@@ -81,6 +82,10 @@ function mapInstallError(
     set.status = 422;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
+  if (error instanceof ProfileMismatchError) {
+    set.status = 400;
+    return { error: error.message, code: ERROR_CODES.VALIDATION };
+  }
   if (error instanceof InstallerDownloadError) {
     set.status = 502;
     return { error: error.message, code: ERROR_CODES.INTERNAL };
@@ -137,6 +142,7 @@ export function createInstallRoutes(service: InstallService = installService) {
         body: InstallPrepareBodySchema,
         response: {
           200: InstallPreparationSchema,
+          400: ApiErrorResponseSchema,
           403: InstallBlockedResponseSchema,
           409: t.Union([InstallBlockedResponseSchema, ApiErrorResponseSchema]),
           422: ApiErrorResponseSchema,
@@ -165,6 +171,7 @@ export function createInstallRoutes(service: InstallService = installService) {
         body: InstallStartBodySchema,
         response: {
           200: InstallStartResponseSchema,
+          400: ApiErrorResponseSchema,
           403: InstallBlockedResponseSchema,
           409: t.Union([InstallBlockedResponseSchema, ApiErrorResponseSchema]),
           422: ApiErrorResponseSchema,

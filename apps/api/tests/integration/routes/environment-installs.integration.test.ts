@@ -10,6 +10,7 @@ import {
   type InstallStreamEvent,
 } from '@mangostudio/shared/environments';
 import { Value } from '@sinclair/typebox/value';
+import { assertRequestedProfileId } from '../../../src/lib/profile-context';
 import {
   InstallBlockedError,
   type InstallRequestContext,
@@ -78,7 +79,8 @@ function createFakeService(
       lastContext = context;
       return Promise.resolve([PREVIEW]);
     },
-    prepare(_body, context) {
+    prepare(body, context) {
+      assertRequestedProfileId(body.profileId, context);
       lastContext = context;
       return Promise.resolve({
         preparationId: null,
@@ -86,7 +88,8 @@ function createFakeService(
         recipe: PREVIEW,
       });
     },
-    start(_body, context) {
+    start(body, context) {
+      assertRequestedProfileId(body.profileId, context);
       startCalls += 1;
       lastContext = context;
       if (options.blocked) {
@@ -252,6 +255,34 @@ describe('environment install routes', () => {
     );
 
     expect(fake.getLastContext()?.clientIp).toBeUndefined();
+  });
+
+  it('accepts a matching profileId and rejects a mismatched one', async () => {
+    const fake = createFakeService();
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createInstallRoutes(fake.service)
+    );
+    restoreAuth = restore;
+
+    const matching = await app.handle(
+      jsonRequest('http://localhost/environments/install', {
+        recipeId: 'bun.update',
+        input: { kind: 'none' },
+        profileId: 'default',
+      })
+    );
+    const mismatched = await app.handle(
+      jsonRequest('http://localhost/environments/install', {
+        recipeId: 'bun.update',
+        input: { kind: 'none' },
+        profileId: 'work-laptop',
+      })
+    );
+
+    expect(matching.status).toBe(200);
+    expect(mismatched.status).toBe(400);
+    expect(await mismatched.json()).toMatchObject({ code: 'VALIDATION' });
   });
 
   it('requires authentication for every install lifecycle route', async () => {

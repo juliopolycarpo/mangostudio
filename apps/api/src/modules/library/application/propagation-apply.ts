@@ -30,6 +30,7 @@ import {
   type ResourceFormat,
   type ResourceKind,
 } from '@mangostudio/shared/library';
+import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { PropagationRequestError } from '../domain/propagation-error';
 import { getLibraryLocation, type LocationDefinition, type PathEnv } from '../domain/registry';
 import {
@@ -131,6 +132,14 @@ async function runApply(
   request: PropagationApplyRequest,
   deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
+  try {
+    assertRequestedProfileId(request.profileId, { userId });
+  } catch (error) {
+    if (error instanceof ProfileMismatchError) {
+      throw new PropagationRequestError(400, error.message);
+    }
+    throw error;
+  }
   const preview = await deps.preview(userId, request.request);
   // Both must match: the token pins which preview this answers, the state hash
   // pins the bytes it described. A file edited in another window between the

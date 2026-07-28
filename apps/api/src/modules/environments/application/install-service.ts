@@ -22,7 +22,7 @@ import type {
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
-import { resolveActiveProfileId } from '../../../lib/profile-context';
+import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { generateId } from '../../../utils/id';
 import { evaluateInstallGuard } from '../domain/install-guards';
@@ -638,6 +638,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     },
 
     async prepare(body, context) {
+      assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
       const preview = await buildPreview(recipe, body.input, context);
@@ -690,6 +691,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     },
 
     async start(body, context) {
+      assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
       const preview = await buildPreview(recipe, body.input, context);

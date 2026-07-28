@@ -4,7 +4,11 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { sql } from 'kysely';
 import { getDb } from '../../../../src/db/database';
-import { resolveActiveProfileId } from '../../../../src/lib/profile-context';
+import {
+  assertRequestedProfileId,
+  ProfileMismatchError,
+  resolveActiveProfileId,
+} from '../../../../src/lib/profile-context';
 
 const API_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
 
@@ -70,6 +74,17 @@ describe('profile seam', () => {
   it('resolveActiveProfileId always returns DEFAULT_PROFILE_ID', () => {
     expect(resolveActiveProfileId({ userId: 'anyone' })).toBe(DEFAULT_PROFILE_ID);
     expect(resolveActiveProfileId({ userId: '' })).toBe(DEFAULT_PROFILE_ID);
+  });
+
+  it('assertRequestedProfileId accepts a matching or omitted profile id', () => {
+    expect(assertRequestedProfileId(undefined, { userId: 'u' })).toBe(DEFAULT_PROFILE_ID);
+    expect(assertRequestedProfileId(DEFAULT_PROFILE_ID, { userId: 'u' })).toBe(DEFAULT_PROFILE_ID);
+  });
+
+  it('assertRequestedProfileId rejects a mismatched profile id', () => {
+    expect(() => assertRequestedProfileId('work-laptop', { userId: 'u' })).toThrow(
+      ProfileMismatchError
+    );
   });
 
   it('migrated schema has profileId with the reserved default on both tables', async () => {

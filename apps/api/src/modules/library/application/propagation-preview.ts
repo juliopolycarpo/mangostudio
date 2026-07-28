@@ -32,6 +32,7 @@ import {
   type ValidLibraryInstance,
 } from '@mangostudio/shared/library';
 import { getDb } from '../../../db/database';
+import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import {
   type AdapterCatalog,
@@ -77,6 +78,15 @@ export async function previewLibraryPropagation(
   overrides: Partial<PropagationPreviewDeps> = {}
 ): Promise<PropagationPreview> {
   const deps = { ...defaultPropagationPreviewDeps, ...overrides };
+  let profileId: string;
+  try {
+    profileId = assertRequestedProfileId(request.profileId, { userId });
+  } catch (error) {
+    if (error instanceof ProfileMismatchError) {
+      throw new PropagationRequestError(400, error.message);
+    }
+    throw error;
+  }
   const refs = parseRequestedResources(request.resourceKeys);
   const locations = parseRequestedLocations(request.targetLocationIds);
 
@@ -126,6 +136,7 @@ export async function previewLibraryPropagation(
 
   return {
     previewToken: hashJson({
+      profileId,
       resourceKeys: [...refs.keys()].sort(compareText),
       targetLocationIds: locations.map((location) => location.id).sort(compareText),
       stateHash,
