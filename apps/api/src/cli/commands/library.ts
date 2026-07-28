@@ -2,7 +2,7 @@
  * `library` command: read-only library coverage and location health.
  */
 
-import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import type { AppSettings } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationStatus,
   LibraryResource,
@@ -22,6 +22,7 @@ import {
 } from '../../modules/library/infrastructure/location-probe';
 import type { LibraryArgs } from '../args';
 import { writeLine } from '../output';
+import { readCliAppSettings } from '../read-cli-app-settings';
 
 export const CliLibraryLocationsSchema = LibraryLocationStatusListSchema;
 
@@ -31,6 +32,7 @@ export const CliLibrarySnapshotSchema = Type.Object({
 });
 
 export interface LibraryDeps {
+  readonly getSettings: () => AppSettings;
   readonly discoverResources: (options: {
     readonly kinds?: readonly ResourceKind[];
     readonly force?: boolean;
@@ -119,13 +121,15 @@ export async function runLibrary(
 }
 
 function resolveDeps(deps: Partial<LibraryDeps>): LibraryDeps {
+  const getSettings = deps.getSettings ?? readCliAppSettings;
   const defaultDiscover = (discoverOptions: { kinds?: readonly ResourceKind[]; force?: boolean }) =>
-    discoverLibraryResourcesFromSettings(DEFAULT_APP_SETTINGS, {
+    discoverLibraryResourcesFromSettings(getSettings(), {
       kinds: discoverOptions.kinds,
       force: discoverOptions.force,
     });
 
   return {
+    getSettings,
     discoverResources: deps.discoverResources ?? defaultDiscover,
     listLocations:
       deps.listLocations ??

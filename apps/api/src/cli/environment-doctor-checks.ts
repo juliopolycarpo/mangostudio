@@ -53,8 +53,7 @@ function runtimeRow(status: RuntimeStatus): CheckResult {
       : ok(label, 'detected');
 }
 
-function versionManagerRow(status: VersionManagerStatus): CheckResult | null {
-  if (status.id !== 'nvm') return null;
+function versionManagerRow(status: VersionManagerStatus): CheckResult {
   const label = displayName(status.id);
   if (!status.installed) {
     const finding = status.findings[0];
@@ -114,8 +113,7 @@ export async function collectEnvironmentDoctorSection(
     rows.push(runtimeRow(runtime));
   }
   for (const manager of versionManagers) {
-    const row = versionManagerRow(manager);
-    if (row) rows.push(row);
+    rows.push(versionManagerRow(manager));
   }
   for (const agent of agents) {
     rows.push(agentRow(agent));

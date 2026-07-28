@@ -37,9 +37,9 @@ export function collectLibraryDoctorSection(deps: Partial<LibraryDoctorDeps> = {
   }
 
   rows.push(
-    warn(
+    ok(
       'divergence',
-      'run `mango library --divergent` to list resources that differ across locations'
+      'run `mangostudio library --divergent` to list resources that differ across locations'
     )
   );
 
