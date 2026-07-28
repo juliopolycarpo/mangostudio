@@ -17,6 +17,7 @@ import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
   DEFAULT_COMMIT_MESSAGE_PROMPT,
 } from '../git/commit-message';
+import { LIBRARY_SCOPES } from '../library';
 import { DEFAULT_PROFILE_ID, type ProfileId } from '../profiles';
 import type {
   PromptInjectionRole,
@@ -45,6 +46,7 @@ import type {
   GitSettings,
   ImageQuality,
   LibraryLocationSettings,
+  LibraryLocationToggles,
   MultiAgentSettings,
   ProfileSettingsMap,
 } from './schemas';
@@ -114,8 +116,11 @@ export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
 };
 
 export const DEFAULT_LIBRARY_LOCATION_SETTINGS: LibraryLocationSettings = {
-  'mango-agents': true,
-  'mango-skills': true,
+  home: {
+    'mango-agents': true,
+    'mango-skills': true,
+  },
+  workspace: {},
 };
 
 export const DEFAULT_PROFILE_SETTINGS: ProfileSettingsMap = {
@@ -378,10 +383,10 @@ function isLibraryLocationIdShape(value: string): boolean {
   return value.length <= LIBRARY_LOCATION_ID_MAX_LENGTH && LIBRARY_LOCATION_ID_SHAPE.test(value);
 }
 
-export function normalizeLibraryLocationSettings(
+function normalizeLibraryLocationToggles(
   value: unknown,
-  defaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS
-): LibraryLocationSettings {
+  defaults: LibraryLocationToggles
+): LibraryLocationToggles {
   const normalized = { ...defaults };
   if (isRecord(value)) {
     for (const [locationId, enabled] of Object.entries(value)) {
@@ -392,11 +397,31 @@ export function normalizeLibraryLocationSettings(
       if (typeof enabled === 'boolean') normalized[locationId] = enabled;
     }
   }
-
-  // MangoStudio's native resource locations are non-toggleable sources.
-  normalized['mango-agents'] = true;
-  normalized['mango-skills'] = true;
   return normalized;
+}
+
+/**
+ * Accepts both the nested shape and the pre-nesting flat map, so a row that
+ * predates the scope migration — or one written by a downgraded build — still
+ * reads. Flat toggles are home toggles: no workspace location has ever existed.
+ */
+export function normalizeLibraryLocationSettings(
+  value: unknown,
+  defaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS
+): LibraryLocationSettings {
+  const source = isRecord(value) ? value : undefined;
+  const nested = source && LIBRARY_SCOPES.some((scope) => isRecord(source[scope]));
+  const homeSource = nested ? source.home : source;
+
+  const home = normalizeLibraryLocationToggles(homeSource, defaults.home);
+  // MangoStudio's native resource locations are non-toggleable sources.
+  home['mango-agents'] = true;
+  home['mango-skills'] = true;
+
+  // Only `home` is materialised today. The schema admits every scope so
+  // defining the first workspace location is a normalizer change rather than a
+  // contract reshape — the same seam shape `normalizeProfileSettings` uses.
+  return { home, workspace: {} };
 }
 
 const PROFILE_ID_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

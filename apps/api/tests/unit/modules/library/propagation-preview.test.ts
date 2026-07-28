@@ -58,6 +58,7 @@ function status(
   return {
     id,
     kind: location.kind,
+    scope: location.scope,
     path: `/home/test/${id}`,
     access: location.access,
     exists: true,

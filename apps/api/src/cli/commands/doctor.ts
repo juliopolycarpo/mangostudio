@@ -432,13 +432,16 @@ function readSkillSourceToggles(config: MangoConfig): { agents: boolean; claude:
     const locations = normalizeLibraryLocationSettings(
       nestedLocations ?? settings.libraryLocations,
       {
-        'mango-skills': true,
-        'agents-skills': legacy.agents ?? false,
-        'claude-skills': legacy.claude ?? false,
+        home: {
+          'mango-skills': true,
+          'agents-skills': legacy.agents ?? false,
+          'claude-skills': legacy.claude ?? false,
+        },
+        workspace: {},
       }
     );
-    if (locations['agents-skills']) toggles.agents = true;
-    if (locations['claude-skills']) toggles.claude = true;
+    if (locations.home['agents-skills']) toggles.agents = true;
+    if (locations.home['claude-skills']) toggles.claude = true;
   }
   return toggles;
 }

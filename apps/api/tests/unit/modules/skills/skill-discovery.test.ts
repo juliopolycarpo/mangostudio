@@ -39,8 +39,11 @@ async function enableSources(
     userId,
     withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
       ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-      'agents-skills': sources.agents ?? false,
-      'claude-skills': sources.claude ?? false,
+      home: {
+        ...DEFAULT_LIBRARY_LOCATION_SETTINGS.home,
+        'agents-skills': sources.agents ?? false,
+        'claude-skills': sources.claude ?? false,
+      },
     })
   );
 }

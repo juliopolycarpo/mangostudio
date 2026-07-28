@@ -46,7 +46,8 @@ export function useCandidateLocations(
       locationIds: propagationCandidateLocationIds(
         locations,
         kind,
-        enabledLibraryLocations(libraryLocations)
+        // No workspace-scoped location exists, so every candidate is home.
+        enabledLibraryLocations(libraryLocations, 'home')
       ),
       isResolved: true,
     };

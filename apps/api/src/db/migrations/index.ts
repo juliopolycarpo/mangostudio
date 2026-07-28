@@ -31,6 +31,7 @@ import { libraryLocationSettings } from './030_library_location_settings';
 import { libraryDivergenceAcks } from './031_library_divergence_acks';
 import { profileScopedRows } from './032_profile_scoped_rows';
 import { profileScopedAppSettings } from './033_profile_scoped_app_settings';
+import { scopedLibraryLocationSettings } from './034_scoped_library_location_settings';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -66,4 +67,5 @@ export const allMigrations = {
   '031_library_divergence_acks': libraryDivergenceAcks,
   '032_profile_scoped_rows': profileScopedRows,
   '033_profile_scoped_app_settings': profileScopedAppSettings,
+  '034_scoped_library_location_settings': scopedLibraryLocationSettings,
 };

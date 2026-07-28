@@ -80,11 +80,10 @@ function libraryPathEnv() {
 }
 
 function skillLocationSettings(): typeof DEFAULT_APP_SETTINGS {
-  return withLibraryLocations(
-    DEFAULT_APP_SETTINGS,
-    DEFAULT_PROFILE_ID,
-    Object.fromEntries(SKILL_LOCATIONS.map((id) => [id, true]))
-  );
+  return withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+    home: Object.fromEntries(SKILL_LOCATIONS.map((id) => [id, true])),
+    workspace: {},
+  });
 }
 
 function previewSkills(
@@ -108,7 +107,7 @@ function previewSkills(
         }),
       describeLocation: (id) => describeLocation(id, pathEnv),
       enabledLocationIds: async () =>
-        enabledLibraryLocations(libraryLocationsFor(skillLocationSettings())),
+        enabledLibraryLocations(libraryLocationsFor(skillLocationSettings()), 'home'),
     }
   );
 }

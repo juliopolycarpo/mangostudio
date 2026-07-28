@@ -136,11 +136,10 @@ function pathEnv() {
 }
 
 function settings(locationIds: readonly LibraryLocationId[]): typeof DEFAULT_APP_SETTINGS {
-  return withLibraryLocations(
-    DEFAULT_APP_SETTINGS,
-    DEFAULT_PROFILE_ID,
-    Object.fromEntries(locationIds.map((id) => [id, true]))
-  );
+  return withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+    home: Object.fromEntries(locationIds.map((id) => [id, true])),
+    workspace: {},
+  });
 }
 
 function preview(request: PropagationPreviewRequest): Promise<PropagationPreview> {
@@ -162,7 +161,7 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
         settings: enabled,
       }),
     describeLocation: (id) => describeLocation(id, env),
-    enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled)),
+    enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
   });
 }
 
@@ -692,7 +691,7 @@ describe('propagation apply — request validation', () => {
           }),
         describeLocation: (id) => describeLocation(id, env),
         enabledLocationIds: async () =>
-          enabledLibraryLocations(libraryLocationsFor(settings(['claude-instructions']))),
+          enabledLibraryLocations(libraryLocationsFor(settings(['claude-instructions'])), 'home'),
       }
     );
 

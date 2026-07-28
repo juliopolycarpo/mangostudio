@@ -40,8 +40,11 @@ describe('discoverLibraryResources', () => {
     const resources = await discoverLibraryResources(getDb(), 'library-user', {
       cache: new LibraryCache(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-        'mango-skills': true,
-        'claude-agents': true,
+        home: {
+          'mango-skills': true,
+          'claude-agents': true,
+        },
+        workspace: {},
       }),
       locationPathOverrides: {
         'mango-skills': skillsDir,
@@ -53,10 +56,24 @@ describe('discoverLibraryResources', () => {
   });
 
   it('always enables MangoStudio native locations even when a malformed map disables them', () => {
-    const enabled = enabledLibraryLocations({ 'mango-skills': false, 'mango-agents': false });
+    const enabled = enabledLibraryLocations(
+      { home: { 'mango-skills': false, 'mango-agents': false }, workspace: {} },
+      'home'
+    );
 
     expect(enabled.has('mango-skills')).toBe(true);
     expect(enabled.has('mango-agents')).toBe(true);
+  });
+
+  it('does not force MangoStudio native locations on under another scope', () => {
+    // Both are directories under the user's home. Forcing them on for a
+    // workspace would enable a location that has no definition there.
+    const enabled = enabledLibraryLocations(
+      { home: { 'mango-skills': true, 'mango-agents': true }, workspace: {} },
+      'workspace'
+    );
+
+    expect(enabled.size).toBe(0);
   });
 
   it('scans directory and single-file layouts across all five resource kinds', async () => {
@@ -79,11 +96,14 @@ describe('discoverLibraryResources', () => {
     const resources = await discoverLibraryResources(getDb(), 'five-kind-user', {
       cache: new LibraryCache(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-        'mango-skills': true,
-        'claude-agents': true,
-        'mango-instructions': true,
-        'mango-settings': true,
-        'codex-hooks': true,
+        home: {
+          'mango-skills': true,
+          'claude-agents': true,
+          'mango-instructions': true,
+          'mango-settings': true,
+          'codex-hooks': true,
+        },
+        workspace: {},
       }),
       locationPathOverrides: {
         'mango-skills': skillsDir,
@@ -112,8 +132,11 @@ describe('discoverLibraryResources', () => {
     const [resource, ...rest] = await discoverLibraryResources(getDb(), 'instruction-user', {
       cache: new LibraryCache(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-        'claude-instructions': true,
-        'codex-instructions': true,
+        home: {
+          'claude-instructions': true,
+          'codex-instructions': true,
+        },
+        workspace: {},
       }),
       locationPathOverrides: {
         'claude-instructions': claudeFile,
@@ -141,7 +164,10 @@ describe('discoverLibraryResources', () => {
     const [resource] = await discoverLibraryResources(getDb(), 'oversized-user', {
       cache: new LibraryCache(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-        'mango-settings': true,
+        home: {
+          'mango-settings': true,
+        },
+        workspace: {},
       }),
       locationPathOverrides: { 'mango-settings': settingsFile },
     });

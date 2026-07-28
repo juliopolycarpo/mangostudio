@@ -28,7 +28,9 @@ export async function listSkillSettings(
     getAppSettings(db, userId),
   ]);
   const thirdPartyDirs = getThirdPartySkillDirs();
-  const libraryLocations = libraryLocationsFor(appSettings);
+  // Both third-party skill sources are directories under the user's home, so
+  // this listing only ever asks about home-scoped toggles.
+  const libraryLocations = libraryLocationsFor(appSettings).home;
 
   return {
     skills,

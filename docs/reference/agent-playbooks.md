@@ -148,6 +148,14 @@ There is no canonical copy of a resource: when versions diverge, only a human
 picks the winner. The API refuses an apply that does not name one, and the UI is
 built so a user cannot reach that error.
 
+Every location carries a `scope`, and every one of them is `home` today. The
+`workspace` scope is reserved: nothing resolves under a repository root yet, and
+`apps/api/tests/unit/modules/library/scope-seam.test.ts` fails if a workspace
+location is added without the settings toggles and cross-scope read precedence
+that have to come with it. Precedence between a workspace copy and a home copy
+is a per-target fact and belongs in `TargetDefinition.reads`, never in a
+resolver.
+
 ## Environments (Runtimes, Version Managers, Agent CLIs)
 
 Open these first:

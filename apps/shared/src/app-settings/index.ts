@@ -51,6 +51,7 @@ export {
   ImageQualitySchema,
   type LibraryLocationSettings,
   LibraryLocationSettingsSchema,
+  type LibraryLocationToggles,
   type MultiAgentSettings,
   MultiAgentSettingsSchema,
   type ProfileScopedSettings,

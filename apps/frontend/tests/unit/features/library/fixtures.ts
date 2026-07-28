@@ -105,6 +105,7 @@ export function location(overrides: Partial<LibraryLocationStatus> = {}): Librar
   return {
     id: 'agents-skills',
     kind: 'skill',
+    scope: 'home',
     path: '/home/dev/.agents/skills',
     access: 'read-write',
     exists: true,

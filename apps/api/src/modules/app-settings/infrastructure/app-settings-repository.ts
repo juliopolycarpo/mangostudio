@@ -39,11 +39,12 @@ export async function upsertAppSettings(
     ...normalized,
     // Keep the pre-nesting and pre-library shapes in storage so an application
     // downgrade retains the two source choices even though they are no longer
-    // public API.
-    libraryLocations: locations,
+    // public API. Both mirrors are flat because both predate scope, and every
+    // location they can name is home-scoped.
+    libraryLocations: locations.home,
     skillSources: {
-      agents: locations['agents-skills'] ?? false,
-      claude: locations['claude-skills'] ?? false,
+      agents: locations.home['agents-skills'] ?? false,
+      claude: locations.home['claude-skills'] ?? false,
     },
   });
 

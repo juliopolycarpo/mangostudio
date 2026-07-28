@@ -240,6 +240,7 @@ describe('agent CLI detection', () => {
     const unwritableLocation: LibraryLocationStatus = {
       id: 'codex-skills',
       kind: 'skill',
+      scope: 'home',
       path: `${configHome}/skills`,
       access: 'read-write',
       exists: true,
@@ -250,6 +251,7 @@ describe('agent CLI detection', () => {
     const uncreatedLocation: LibraryLocationStatus = {
       id: 'codex-agents',
       kind: 'subagent',
+      scope: 'home',
       path: `${configHome}/agents`,
       access: 'read-write',
       exists: false,
@@ -261,6 +263,7 @@ describe('agent CLI detection', () => {
     const readOnlyLocation: LibraryLocationStatus = {
       id: 'codex-settings',
       kind: 'setting',
+      scope: 'home',
       path: `${configHome}/config.toml`,
       access: 'read-only',
       exists: true,
@@ -300,6 +303,7 @@ describe('agent CLI detection', () => {
     const sharedFile = (id: LibraryLocationStatus['id'], kind: LibraryLocationStatus['kind']) => ({
       id,
       kind,
+      scope: 'home' as const,
       path: settingsPath,
       access: 'read-write' as const,
       exists: true,

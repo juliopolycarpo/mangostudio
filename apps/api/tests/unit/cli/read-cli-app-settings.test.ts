@@ -56,9 +56,8 @@ describe('readCliAppSettings', () => {
     dirs.push(dir);
     const dbPath = join(dir, 'db.sqlite');
     const persisted = withLibraryLocations(DEFAULT_APP_SETTINGS, 'default', {
-      'mango-skills': true,
-      'agents-skills': true,
-      'claude-skills': true,
+      home: { 'mango-skills': true, 'agents-skills': true, 'claude-skills': true },
+      workspace: {},
     });
 
     const db = new SQLiteDatabase(dbPath);
@@ -78,7 +77,7 @@ describe('readCliAppSettings', () => {
     db.close();
 
     const settings = readCliAppSettings(makeConfig(dbPath));
-    const locations = libraryLocationsFor(settings);
+    const locations = libraryLocationsFor(settings).home;
     expect(locations['agents-skills']).toBe(true);
     expect(locations['claude-skills']).toBe(true);
   });
@@ -88,12 +87,12 @@ describe('readCliAppSettings', () => {
     dirs.push(dir);
     const dbPath = join(dir, 'db.sqlite');
     const older = withLibraryLocations(DEFAULT_APP_SETTINGS, 'default', {
-      'mango-skills': true,
-      'agents-skills': false,
+      home: { 'mango-skills': true, 'agents-skills': false },
+      workspace: {},
     });
     const newer = withLibraryLocations(DEFAULT_APP_SETTINGS, 'default', {
-      'mango-skills': true,
-      'agents-skills': true,
+      home: { 'mango-skills': true, 'agents-skills': true },
+      workspace: {},
     });
 
     const db = new SQLiteDatabase(dbPath);
@@ -116,7 +115,7 @@ describe('readCliAppSettings', () => {
     );
     db.close();
 
-    const locations = libraryLocationsFor(readCliAppSettings(makeConfig(dbPath)));
+    const locations = libraryLocationsFor(readCliAppSettings(makeConfig(dbPath))).home;
     expect(locations['agents-skills']).toBe(true);
   });
 });

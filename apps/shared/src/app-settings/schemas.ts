@@ -13,7 +13,7 @@ import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
 } from '../git/commit-message';
-import { LibraryLocationIdSchema } from '../library';
+import { LibraryLocationIdSchema, LibraryScopeSchema } from '../library';
 import { ProfileIdSchema } from '../profiles';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
@@ -53,7 +53,19 @@ export const MultiAgentSettingsSchema = Type.Object({
 });
 
 /** Enablement map for the code-defined locations the library scanner may read. */
-export const LibraryLocationSettingsSchema = Type.Record(LibraryLocationIdSchema, Type.Boolean());
+const LibraryLocationTogglesSchema = Type.Record(LibraryLocationIdSchema, Type.Boolean());
+
+/**
+ * Per-scope enablement. Nested rather than flat because a flat map cannot say
+ * "workspace skills on, home skills off" without forking the location id space,
+ * and the id space is the one thing scope must stay orthogonal to.
+ *
+ * `workspace` is present and empty in v1: no location resolves under it yet.
+ */
+export const LibraryLocationSettingsSchema = Type.Record(
+  LibraryScopeSchema,
+  LibraryLocationTogglesSchema
+);
 
 /**
  * Per-profile settings overlay. Named `profileSettings` rather than `profiles`
@@ -116,6 +128,7 @@ export type ChatDisplaySettings = Static<typeof ChatDisplaySettingsSchema>;
 export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;
+export type LibraryLocationToggles = Static<typeof LibraryLocationTogglesSchema>;
 export type LibraryLocationSettings = Static<typeof LibraryLocationSettingsSchema>;
 export type ProfileScopedSettings = Static<typeof ProfileScopedSettingsSchema>;
 export type ProfileSettingsMap = Static<typeof ProfileSettingsMapSchema>;

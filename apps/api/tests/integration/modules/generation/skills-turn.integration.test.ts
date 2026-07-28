@@ -274,8 +274,11 @@ describe('skills lazy-load end-to-end turn', () => {
       user.id,
       withLibraryLocations(current, DEFAULT_PROFILE_ID, {
         ...libraryLocationsFor(current),
-        'agents-skills': true,
-        'claude-skills': false,
+        home: {
+          ...libraryLocationsFor(current).home,
+          'agents-skills': true,
+          'claude-skills': false,
+        },
       })
     );
     resetSkillsCache();

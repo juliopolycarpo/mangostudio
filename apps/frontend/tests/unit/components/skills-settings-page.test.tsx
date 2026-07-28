@@ -151,8 +151,11 @@ describe('SkillsSettingsPage', () => {
     fetchScenario.respondWithJson('PUT', '/api/settings/app', {
       body: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
         ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-        'agents-skills': true,
-        'claude-skills': true,
+        home: {
+          ...DEFAULT_LIBRARY_LOCATION_SETTINGS.home,
+          'agents-skills': true,
+          'claude-skills': true,
+        },
       }),
     });
 
