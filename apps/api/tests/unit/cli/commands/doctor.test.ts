@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_DOCTOR_ARGS } from '../../../../src/cli/args';
 import { runDoctor } from '../../../../src/cli/commands/doctor';
 import type { FsProbe } from '../../../../src/cli/doctor-checks';
 import type { BuildInfo } from '../../../../src/lib/build-info';
@@ -96,6 +97,8 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
     ],
     listMcpServers: () => [],
     collectMcpChecks: () => Promise.resolve([]),
+    collectEnvironmentChecks: () => Promise.resolve([]),
+    collectLibraryChecks: () => [],
     log: () => undefined,
     exit: () => undefined,
     ...overrides,
@@ -108,7 +111,7 @@ describe('runDoctor', () => {
     let exited = -1;
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),
@@ -129,7 +132,7 @@ describe('runDoctor', () => {
     let exited = -1;
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS },
       {
         ...makeDoctorDeps({ fs: NOTHING }),
         exit: (code) => {
@@ -146,7 +149,7 @@ describe('runDoctor', () => {
     let exited = -1;
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS },
       {
         ...makeDoctorDeps({
           isCursorConfigured: () => true,
@@ -173,7 +176,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: true, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS, all: true },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),
@@ -189,7 +192,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),
@@ -204,7 +207,7 @@ describe('runDoctor', () => {
     const receivedRefresh: boolean[] = [];
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: true, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS, chatgptRefresh: true },
       {
         ...makeDoctorDeps({
           listChatGptConnectors: () => [{ id: 'connector-1' }],
@@ -231,7 +234,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: true, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS, all: true },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),
@@ -245,7 +248,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: true, cursorProbe: true, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS, all: true, cursorProbe: true },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),
@@ -261,7 +264,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS },
       {
         ...makeDoctorDeps({
           getCheckoutBuildInfo: () => ({ ...BUILD_INFO, gitSha: 'checkout123' }),
@@ -285,7 +288,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
     try {
       await runDoctor(
-        { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+        { ...DEFAULT_DOCTOR_ARGS },
         {
           ...makeDoctorDeps({
             getEmbeddedFrontend: () => ({
@@ -312,7 +315,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS },
       { ...makeDoctorDeps(), log: (msg) => lines.push(msg) }
     );
 
@@ -323,7 +326,7 @@ describe('runDoctor', () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS },
       {
         ...makeDoctorDeps({
           collectMcpChecks: () =>
@@ -340,7 +343,7 @@ describe('runDoctor', () => {
     let exited = -1;
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+      { ...DEFAULT_DOCTOR_ARGS },
       {
         ...makeDoctorDeps({
           listMcpServers: () => [{ slug: 'github' }] as never,
@@ -368,7 +371,7 @@ describe('runDoctor', () => {
     const received: Array<{ probe: boolean; serverRunning: boolean }> = [];
 
     await runDoctor(
-      { all: false, cursorProbe: false, chatgptRefresh: false, probe: true },
+      { ...DEFAULT_DOCTOR_ARGS, probe: true },
       {
         ...makeDoctorDeps({
           readState: () => Promise.resolve({ pid: 4242, port: 3001, startedAt: 0 } as never),

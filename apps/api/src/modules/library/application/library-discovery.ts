@@ -39,6 +39,14 @@ export async function discoverLibraryResources(
   options: LibraryDiscoveryOptions = {}
 ): Promise<LibraryResource[]> {
   const settings = options.settings ?? (await getAppSettings(db, userId));
+  return discoverLibraryResourcesFromSettings(settings, options);
+}
+
+/** Discover library resources without a database when settings are already known (CLI). */
+export async function discoverLibraryResourcesFromSettings(
+  settings: AppSettings,
+  options: Omit<LibraryDiscoveryOptions, 'settings'> = {}
+): Promise<LibraryResource[]> {
   const pathEnv = options.pathEnv ?? createLibraryPathEnv();
   const enabledLocations = enabledLibraryLocations(libraryLocationsFor(settings));
   const kinds = options.kinds ? new Set(options.kinds) : null;
@@ -55,7 +63,7 @@ export async function discoverLibraryResources(
   const cache = options.cache ?? libraryCache;
   const force = options.force ?? false;
 
-  return cache.getOrComputeScan(signature, (options.now ?? Date.now)(), force, async () => {
+  return await cache.getOrComputeScan(signature, (options.now ?? Date.now)(), force, async () => {
     const scanned = (
       await Promise.all(
         locations.map(({ location, path }) =>

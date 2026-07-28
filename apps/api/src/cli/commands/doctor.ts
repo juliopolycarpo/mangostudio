@@ -46,6 +46,7 @@ import {
   describeCursorRuntimeChain,
 } from '../../services/providers/cursor/runtime-availability';
 import type { DoctorArgs } from '../args';
+import { DEFAULT_DOCTOR_ARGS } from '../args';
 import { collectChatGptDoctorChecks } from '../chatgpt-doctor-checks';
 import { probeCursorDoctorRuntime } from '../cursor-doctor-probe';
 import {
@@ -65,6 +66,8 @@ import {
   type FsProbe,
   ok,
 } from '../doctor-checks';
+import { collectEnvironmentDoctorSection } from '../environment-doctor-checks';
+import { collectLibraryDoctorSection } from '../library-doctor-checks';
 import { collectMcpDoctorChecks } from '../mcp-doctor-checks';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
@@ -95,6 +98,8 @@ export interface DoctorDeps {
     rows: readonly McpServerSelect[],
     options: { probe: boolean; serverRunning: boolean }
   ) => Promise<CheckResult[]>;
+  collectEnvironmentChecks: () => Promise<CheckResult[]>;
+  collectLibraryChecks: () => CheckResult[];
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -106,13 +111,13 @@ interface InstanceProbe {
 
 /** Run diagnostics and print a checklist; exit 1 on any failure. // Usage: await runDoctor() */
 export async function runDoctor(
-  options: DoctorArgs = { all: false, cursorProbe: false, chatgptRefresh: false, probe: false },
+  options: DoctorArgs = DEFAULT_DOCTOR_ARGS,
   deps: Partial<DoctorDeps> = {}
 ): Promise<void> {
   const d = resolveDeps(deps);
   const config = d.loadConfig();
   const results = await collectResults(config, options, d);
-  render(results, d);
+  render(results, options, d);
 }
 
 async function collectResults(
@@ -128,6 +133,11 @@ async function collectResults(
       ? (instance.state?.frontendDir ?? d.frontendDir())
       : d.frontendDir();
   const serverBuild = instance.alive ? (instance.state?.buildInfo ?? null) : d.getBuildInfo();
+
+  const sectionFilter = options.envOnly || options.libraryOnly;
+  const includeEnvSection = !options.libraryOnly || options.envOnly;
+  const includeLibrarySection = !options.envOnly || options.libraryOnly;
+
   const results: CheckResult[] = [
     checkDir('Home directory', getHomeMangoDir(), d.fs),
     checkDir('Logs directory', getLogsDir(), d.fs),
@@ -148,32 +158,42 @@ async function collectResults(
     }),
   ];
 
-  if (d.isCursorConfigured(config) || options.all) {
-    const chain = await d.getCursorDoctorChain();
-    const probe =
-      options.cursorProbe && cursorRuntimeChainReady(chain)
-        ? await d.probeCursorRuntime()
-        : undefined;
-    results.push(...collectCursorDoctorChecks(chain, probe));
+  if (!sectionFilter) {
+    if (d.isCursorConfigured(config) || options.all) {
+      const chain = await d.getCursorDoctorChain();
+      const probe =
+        options.cursorProbe && cursorRuntimeChainReady(chain)
+          ? await d.probeCursorRuntime()
+          : undefined;
+      results.push(...collectCursorDoctorChecks(chain, probe));
+    }
+
+    const chatgptConnectors = d.listChatGptConnectors(config);
+    if (chatgptConnectors.length > 0 || options.all) {
+      results.push(
+        ...(await d.collectChatGptChecks(config, chatgptConnectors, options.chatgptRefresh))
+      );
+    }
+
+    results.push(...d.collectSkillsChecks(config));
+
+    const mcpServers = d.listMcpServers(config);
+    if (mcpServers.length > 0 || options.all) {
+      results.push(
+        ...(await d.collectMcpChecks(mcpServers, {
+          probe: options.probe,
+          serverRunning: instance.alive,
+        }))
+      );
+    }
   }
 
-  const chatgptConnectors = d.listChatGptConnectors(config);
-  if (chatgptConnectors.length > 0 || options.all) {
-    results.push(
-      ...(await d.collectChatGptChecks(config, chatgptConnectors, options.chatgptRefresh))
-    );
+  if (includeEnvSection) {
+    results.push(...(await d.collectEnvironmentChecks()));
   }
 
-  results.push(...d.collectSkillsChecks(config));
-
-  const mcpServers = d.listMcpServers(config);
-  if (mcpServers.length > 0 || options.all) {
-    results.push(
-      ...(await d.collectMcpChecks(mcpServers, {
-        probe: options.probe,
-        serverRunning: instance.alive,
-      }))
-    );
+  if (includeLibrarySection) {
+    results.push(...d.collectLibraryChecks());
   }
 
   return results;
@@ -214,14 +234,33 @@ async function inspectInstance(d: Required<DoctorDeps>): Promise<InstanceProbe> 
   return { state, alive };
 }
 
-function render(results: CheckResult[], d: Required<DoctorDeps>): void {
+function render(results: CheckResult[], options: DoctorArgs, d: Required<DoctorDeps>): void {
+  const failures = results.filter((r) => r.status === 'fail').length;
+  const warnings = results.filter((r) => r.status === 'warn').length;
+
+  if (options.json) {
+    d.log(
+      JSON.stringify(
+        {
+          checks: results,
+          warnings,
+          failures,
+        },
+        null,
+        2
+      )
+    );
+    if (failures > 0) {
+      d.exit(1);
+    }
+    return;
+  }
+
   d.log('MangoStudio doctor\n');
   for (const result of results) {
     d.log(`${badge(result.status)} ${result.label.padEnd(18)} ${result.detail}`);
   }
 
-  const failures = results.filter((r) => r.status === 'fail').length;
-  const warnings = results.filter((r) => r.status === 'warn').length;
   d.log(`\n${warnings} warning(s), ${failures} failure(s).`);
 
   if (failures > 0) {
@@ -273,6 +312,9 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     collectSkillsChecks: deps.collectSkillsChecks ?? collectSkillsDoctorSection,
     listMcpServers: deps.listMcpServers ?? listMcpServerRows,
     collectMcpChecks: deps.collectMcpChecks ?? ((rows, opts) => collectMcpDoctorChecks(rows, opts)),
+    collectEnvironmentChecks:
+      deps.collectEnvironmentChecks ?? (() => collectEnvironmentDoctorSection()),
+    collectLibraryChecks: deps.collectLibraryChecks ?? (() => collectLibraryDoctorSection()),
     log: deps.log ?? writeLine,
     exit: deps.exit ?? ((code) => process.exit(code)),
   };
