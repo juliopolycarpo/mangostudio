@@ -112,6 +112,7 @@ export type {
 } from '../generation';
 // Library
 export type {
+  ConceptComparison,
   LibraryContentGroup,
   LibraryCoverage,
   LibraryCoverageState,
@@ -128,6 +129,12 @@ export type {
   LocationAccess,
   ResourceFormat,
   ResourceKind,
+  SettingsConcept,
+  SettingsField,
+  SettingsFieldPresentation,
+  SettingsParseFailureReason,
+  SettingsSnapshot,
+  SettingsSourceSnapshot,
 } from '../library';
 // MCP
 export type {
