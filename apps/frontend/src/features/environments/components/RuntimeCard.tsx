@@ -9,7 +9,8 @@
 import type { InstallRecipePreview, RuntimeStatus } from '@mangostudio/shared/environments';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
-import { displayName, formatMessage, groupInstallations, pathPosition } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
+import { displayName, groupInstallations, pathPosition } from '../format';
 import { useProbeRuntime } from '../hooks/use-runtime-status';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';

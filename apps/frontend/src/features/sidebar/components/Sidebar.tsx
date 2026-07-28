@@ -7,6 +7,7 @@ import {
 import {
   Image,
   LayoutGrid,
+  LibraryBig,
   MessageSquare,
   MonitorCog,
   Pencil,
@@ -177,7 +178,7 @@ export function Sidebar({
 
         {/* Mobile quick shortcuts */}
         <div className="px-4 mb-4 md:hidden" data-testid="mobile-shortcuts">
-          <div className="grid grid-cols-4 gap-2">
+          <div className="grid grid-cols-5 gap-2">
             <button
               type="button"
               onClick={() => handleMobileNav('studio')}
@@ -201,6 +202,18 @@ export function Sidebar({
             >
               <LayoutGrid size={20} />
               <span>{t.gallery.title}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleMobileNav('library')}
+              className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-all duration-200 text-xs font-medium ${
+                currentPage === 'library'
+                  ? 'text-primary bg-surface-container-high'
+                  : 'text-on-surface/70 hover:bg-surface-container-high hover:text-on-surface'
+              }`}
+            >
+              <LibraryBig size={20} />
+              <span>{t.library.nav}</span>
             </button>
             <button
               type="button"
@@ -321,6 +334,14 @@ export function Sidebar({
           >
             <LayoutGrid size={18} />
             <span className="font-label font-medium text-sm">{t.gallery.title}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleMobileNav('library')}
+            className={navItemClass('library')}
+          >
+            <LibraryBig size={18} />
+            <span className="font-label font-medium text-sm">{t.library.nav}</span>
           </button>
           <button
             type="button"

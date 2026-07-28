@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { LibraryResource, LibraryResourceContent } from '@mangostudio/shared/library';
+import type {
+  LibraryResource,
+  LibraryResourceContent,
+  LibraryTargetDescriptor,
+} from '@mangostudio/shared/library';
+import { listLibraryTargetDescriptors } from '../../../src/modules/library/domain/registry';
 import {
   createLibraryRoutes,
   type LibraryRouteService,
@@ -86,6 +91,7 @@ function createService(resources: LibraryResource[] = [skillResource]) {
       return Promise.resolve(resources);
     },
     listLocations: () => [],
+    listTargets: () => [],
     readContent: () => content,
   };
   return { service, forced };
@@ -175,5 +181,30 @@ describe('library routes', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(service.listLocations());
+  });
+
+  it('serves the target registry so a filtered matrix keeps every column', async () => {
+    const { service } = createService();
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      // The default service is the real registry: the route exists so the
+      // client never has to restate the target list or its read precedence.
+      createLibraryRoutes({ ...service, listTargets: listLibraryTargetDescriptors })
+    );
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/library/targets'));
+
+    expect(response.status).toBe(200);
+    const targets = (await response.json()) as LibraryTargetDescriptor[];
+    expect(targets.map((target) => target.id)).toEqual([
+      'mangostudio',
+      'claude',
+      'codex',
+      'cursor',
+    ]);
+    // A skill in `agents-skills` covers MangoStudio and Codex from one write,
+    // and that fact is only derivable from the per-kind read precedence.
+    expect(targets.find((target) => target.id === 'codex')?.reads.skill).toContain('agents-skills');
   });
 });

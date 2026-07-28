@@ -128,6 +128,26 @@ Open these first:
 - `apps/frontend/src/features/settings/skills/`
 - Reference: `docs/reference/skills.md`
 
+## Library (Coverage, Divergence, Propagation)
+
+Open these first:
+
+- `apps/api/src/modules/library/domain/registry.ts` (locations, targets, per-kind read precedence)
+- `apps/api/src/modules/library/application/library-discovery.ts` (scan, cache, grouping)
+- `apps/api/src/modules/library/application/coverage-resolver.ts` (present / absent / shadowed)
+- `apps/api/src/modules/library/application/propagation-preview.ts` (source groups, outcomes)
+- `apps/api/src/modules/library/application/propagation-apply.ts` (token, backup, verify, undo)
+- `apps/api/src/modules/library/application/adapters/` (format conversion strategies)
+- `apps/api/src/modules/library/http/library-routes.ts`, `propagation-routes.ts`, `settings-routes.ts`
+- `apps/shared/src/library/schemas.ts` (single source of truth for every shape)
+- `apps/frontend/src/features/library/` (`format.ts` holds the cell-state rules,
+  `propagation.ts` mirrors the apply contract's validation)
+- `apps/frontend/src/routes/_authenticated/library/`
+
+There is no canonical copy of a resource: when versions diverge, only a human
+picks the winner. The API refuses an apply that does not name one, and the UI is
+built so a user cannot reach that error.
+
 ## Environments (Runtimes, Version Managers, Agent CLIs)
 
 Open these first:

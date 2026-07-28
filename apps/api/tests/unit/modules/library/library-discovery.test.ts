@@ -3,10 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import { enabledLibraryLocations } from '@mangostudio/shared/library';
 import { getDb } from '../../../../src/db/database';
 import {
   discoverLibraryResources,
-  enabledLibraryLocations,
   resetLibraryDiscoveryCache,
 } from '../../../../src/modules/library/application/library-discovery';
 import { MAX_LIBRARY_FILE_BYTES } from '../../../../src/modules/library/infrastructure/instance-reader';

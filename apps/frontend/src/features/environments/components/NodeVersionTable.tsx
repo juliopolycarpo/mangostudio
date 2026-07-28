@@ -13,7 +13,8 @@ import type {
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import { useI18n } from '@/hooks/use-i18n';
-import { displayName, formatMessage, ltsLabel } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
+import { displayName, ltsLabel } from '../format';
 import { useProbeVersionManager } from '../hooks/use-runtime-status';
 import { FindingList } from './FindingList';
 import { InstallAction } from './InstallAction';

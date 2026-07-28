@@ -12,6 +12,7 @@
 import { createHash } from 'node:crypto';
 import {
   type AdapterStrategy,
+  enabledLibraryLocations,
   type LibraryInstance,
   type LibraryLocationId,
   type LibraryLocationStatus,
@@ -41,7 +42,7 @@ import { getLibraryLocation, type LocationDefinition } from '../domain/registry'
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 import { isAgentStrategyAvailable } from './adapters/agent-strategy';
 import { acknowledgedResourceKeys } from './conflict-resolution';
-import { discoverLibraryResources, enabledLibraryLocations } from './library-discovery';
+import { discoverLibraryResources } from './library-discovery';
 
 export interface PropagationPreviewDeps {
   /** Always a forced rescan: a preview of stale state is worse than no preview. */

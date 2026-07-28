@@ -264,6 +264,8 @@ export const LibraryTargetDescriptorSchema = Type.Object({
   reads: LibraryTargetReadsSchema,
 });
 
+export const LibraryTargetDescriptorListSchema = Type.Array(LibraryTargetDescriptorSchema);
+
 /**
  * How a resource's bytes are rewritten when the destination stores a different
  * format than the source. `verbatim` copies the bytes unchanged, `mechanical` is

@@ -8,16 +8,14 @@ import type {
   PropagationPreview,
   PropagationPreviewEntry,
 } from '@mangostudio/shared/library';
+import { enabledLibraryLocations } from '@mangostudio/shared/library';
 import { getDb } from '../../../src/db/database';
 import {
   acknowledgeDivergence,
   type DivergenceAckDeps,
   listDivergenceAcks,
 } from '../../../src/modules/library/application/conflict-resolution';
-import {
-  discoverLibraryResources,
-  enabledLibraryLocations,
-} from '../../../src/modules/library/application/library-discovery';
+import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import { previewLibraryPropagation } from '../../../src/modules/library/application/propagation-preview';
 import { PropagationRequestError } from '../../../src/modules/library/domain/propagation-error';
 import {

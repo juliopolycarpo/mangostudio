@@ -7,7 +7,8 @@
  */
 
 import { useI18n } from '@/hooks/use-i18n';
-import { displayName, formatMessage, type InstallationGroup, pathPosition } from '../format';
+import { formatMessage } from '@/lib/i18n-format';
+import { displayName, type InstallationGroup, pathPosition } from '../format';
 
 interface InstallationListProps {
   /**
