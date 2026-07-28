@@ -85,12 +85,16 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
     [request.targetLocationIds]
   );
 
+  // Empty targets fail the contract with 422; the openers must not offer that.
+  const canPreview = request.resourceKeys.length > 0 && request.targetLocationIds.length > 0;
+
   const previewQuery = useQuery({
     queryKey: [...libraryKeys.all, 'preview', requestKey, locationKey],
     // A preview is a snapshot of the disk, never something to serve from cache.
     gcTime: 0,
     staleTime: 0,
     retry: false,
+    enabled: canPreview,
     queryFn: () => previewPropagation(request),
   });
 
@@ -105,11 +109,14 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
 
   const effectiveDraft = useMemo<WizardDraft>(() => draft ?? EMPTY_DRAFT, [draft]);
 
+  // `refetch` ignores `enabled`, so the retry path needs the same gate or it
+  // walks straight into the 422 the query option exists to avoid.
   const repreview = useCallback(() => {
+    if (!canPreview) return;
     setIsStale(false);
     setDraft(null);
     void previewQuery.refetch();
-  }, [previewQuery]);
+  }, [canPreview, previewQuery]);
 
   const applyMutation = useMutation({
     mutationFn: () =>

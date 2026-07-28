@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { formatBytes, formatRelativeTime, hashPrefix, validInstances } from '../format';
+import { useCandidateLocationIds } from '../hooks/use-candidate-locations';
 import {
   libraryLocationsQueryOptions,
   libraryResourceQueryOptions,
@@ -49,15 +50,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
   );
 
   const groups = useMemo(() => (resource ? contentGroupsOf(resource) : []), [resource]);
-  const candidateLocationIds = useMemo(
-    () =>
-      resource
-        ? locations
-            .filter((location) => location.kind === resource.ref.kind && location.path !== null)
-            .map((location) => location.id)
-        : [],
-    [locations, resource]
-  );
+  const candidateLocationIds = useCandidateLocationIds(locations, resource?.ref.kind);
 
   if (resourceQuery.isPending) return <LibraryPageState variant="loading" />;
   if (resourceQuery.error || !resource) {

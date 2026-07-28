@@ -6,11 +6,12 @@
  * of work, and the wizard opens once for the whole set.
  */
 
-import type { LibraryLocationId, ResourceKind } from '@mangostudio/shared/library';
-import { useMemo, useState } from 'react';
+import type { ResourceKind } from '@mangostudio/shared/library';
+import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { useCandidateLocationIds } from '../hooks/use-candidate-locations';
 import { useLibraryMatrix } from '../hooks/use-library-matrix';
 import { CoverageMatrix, MatrixLegend } from './CoverageMatrix';
 import { LibraryPageState } from './LibraryPageState';
@@ -27,15 +28,9 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
    * Every enabled location storing this kind is previewed, not only the ones
    * the user might pick: the destination step needs the full list to say what a
    * location is blocked by, and a location absent from the preview cannot be
-   * explained at all.
+   * explained at all. Disabled locations are excluded — the API refuses them.
    */
-  const candidateLocationIds = useMemo<LibraryLocationId[]>(
-    () =>
-      matrix.locations
-        .filter((location) => location.kind === kind && location.path !== null)
-        .map((location) => location.id),
-    [matrix.locations, kind]
-  );
+  const candidateLocationIds = useCandidateLocationIds(matrix.locations, kind);
 
   if (matrix.isPending && matrix.resources.length === 0) {
     return <LibraryPageState variant="loading" />;
@@ -69,7 +64,11 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
               <Button variant="ghost" size="sm" onClick={matrix.clearSelection}>
                 {l.matrix.clearSelection}
               </Button>
-              <Button size="sm" onClick={() => setWizardKeys([...matrix.selected])}>
+              <Button
+                size="sm"
+                onClick={() => setWizardKeys([...matrix.selected])}
+                disabled={candidateLocationIds.length === 0}
+              >
                 {l.matrix.propagate}
               </Button>
             </>

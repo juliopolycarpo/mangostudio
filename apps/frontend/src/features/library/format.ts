@@ -15,8 +15,10 @@ import type {
   LibraryCoverage,
   LibraryInstance,
   LibraryLocationId,
+  LibraryLocationStatus,
   LibraryResource,
   LibraryTargetId,
+  ResourceKind,
   ValidLibraryInstance,
 } from '@mangostudio/shared/library';
 
@@ -141,6 +143,27 @@ function newestModifiedAtMs(resource: LibraryResource): number {
 
 export function validInstances(resource: LibraryResource): ValidLibraryInstance[] {
   return resource.instances.filter((instance): instance is ValidLibraryInstance => instance.valid);
+}
+
+/**
+ * Location ids a propagation preview is allowed to name.
+ *
+ * The API refuses any destination the scanner skips, so the wizard must not ask
+ * about a disabled location even when that directory exists on disk. Path-null
+ * locations resolve to nowhere on this platform, so there is no directory to
+ * write into — the preview would only report them back as `unsupported-location`.
+ */
+export function propagationCandidateLocationIds(
+  locations: readonly LibraryLocationStatus[],
+  kind: ResourceKind,
+  enabledLocationIds: ReadonlySet<LibraryLocationId>
+): LibraryLocationId[] {
+  return locations
+    .filter(
+      (location) =>
+        location.kind === kind && location.path !== null && enabledLocationIds.has(location.id)
+    )
+    .map((location) => location.id);
 }
 
 export type LibraryShowFilter = 'all' | 'divergent' | 'single-location' | 'shadowed';
