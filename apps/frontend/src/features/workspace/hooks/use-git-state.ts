@@ -21,6 +21,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 import { githubContextKeys } from './use-github-context';
@@ -457,6 +458,18 @@ export function useGitPush(chatId: string) {
  * the panel does not spawn a `git log` on every render of every chat.
  */
 export function useGitHeadMessage(chatId: string, enabled: boolean) {
+  const queryClient = useQueryClient();
+
+  // Leaving amend mode discards the entry instead of parking it in the cache.
+  // A commit, an amend, or a checkout moves HEAD without this query running, so
+  // a retained success would prefill the form from a message that no longer
+  // exists, and a retained failure would bounce the user straight back out of
+  // amend mode before the retry it triggers could resolve.
+  useEffect(() => {
+    if (enabled) return;
+    queryClient.removeQueries({ queryKey: gitHeadMessageKeys.detail(chatId) });
+  }, [enabled, chatId, queryClient]);
+
   return useQuery({
     queryKey: gitHeadMessageKeys.detail(chatId),
     enabled,
