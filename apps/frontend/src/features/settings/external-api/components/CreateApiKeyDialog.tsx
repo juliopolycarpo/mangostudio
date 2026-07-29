@@ -1,6 +1,7 @@
 import {
   API_KEY_EXPIRY_MAX_DAYS,
   API_KEY_NAME_MAX_LENGTH,
+  API_KEY_SCOPES,
   type ApiKeyScope,
   type CreateApiKeyResponse,
 } from '@mangostudio/shared/api-keys';
@@ -18,7 +19,8 @@ interface CreateApiKeyDialogProps {
   readonly onClose: () => void;
 }
 
-const SCOPES: readonly ApiKeyScope[] = ['read-only', 'full'];
+const FIELD_CLASS =
+  'w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20';
 
 export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
   const { t } = useI18n();
@@ -34,10 +36,17 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
   const [nameError, setNameError] = useState<string | null>(null);
   const [expiresError, setExpiresError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  // Plaintext lives only here — never written to the query cache.
+  // Plaintext lives only in this dialog's state — never written to the query
+  // cache, and `useCreateApiKey` pins `gcTime: 0` so the mutation result is not
+  // parked in the MutationCache after the dialog unmounts either.
   const [created, setCreated] = useState<CreateApiKeyResponse | null>(null);
 
   const handleSubmit = () => {
+    // Clear the previous attempt's server error first: a validation bounce
+    // otherwise leaves a stale "failed to create" line under a form that was
+    // never resubmitted.
+    setSubmitError(null);
+
     const trimmedName = name.trim();
     if (!trimmedName) {
       setNameError(labels.nameRequired);
@@ -63,7 +72,6 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
       parsedExpires = parsed;
     }
     setExpiresError(null);
-    setSubmitError(null);
 
     createMutation.mutate(
       {
@@ -141,7 +149,7 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
                 placeholder={labels.namePlaceholder}
                 aria-label={labels.nameLabel}
                 aria-invalid={Boolean(nameError)}
-                className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+                className={FIELD_CLASS}
               />
               {nameError && <span className="block text-xs text-error">{nameError}</span>}
             </label>
@@ -154,9 +162,9 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
                 value={scope}
                 onChange={(event) => setScope(event.target.value as ApiKeyScope)}
                 aria-label={labels.scopeLabel}
-                className="w-full cursor-pointer rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+                className={`cursor-pointer ${FIELD_CLASS}`}
               >
-                {SCOPES.map((value) => (
+                {API_KEY_SCOPES.map((value) => (
                   <option key={value} value={value}>
                     {scopeLabel(t, value)}
                   </option>
@@ -183,7 +191,7 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
                 }}
                 aria-label={labels.expiresLabel}
                 aria-invalid={Boolean(expiresError)}
-                className="w-full rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-4 py-2.5 text-sm text-on-surface outline-none transition-colors focus:border-primary/60 focus:ring-1 focus:ring-primary/20"
+                className={FIELD_CLASS}
               />
               {expiresError && <span className="block text-xs text-error">{expiresError}</span>}
             </label>

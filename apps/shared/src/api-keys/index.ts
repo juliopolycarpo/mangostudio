@@ -3,6 +3,7 @@ export {
   API_KEY_HEADER,
   API_KEY_MAX_PER_USER,
   API_KEY_NAME_MAX_LENGTH,
+  API_KEY_SCOPES,
   type ApiKeyScope,
   ApiKeyScopeSchema,
   type ApiKeySummary,
