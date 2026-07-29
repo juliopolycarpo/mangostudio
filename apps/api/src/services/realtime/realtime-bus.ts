@@ -30,6 +30,18 @@ export function createRealtimeBus(): RealtimeBus {
     return set;
   }
 
+  function logListenerFailure(
+    userId: string,
+    event: RealtimeInvalidateEvent,
+    error: unknown
+  ): void {
+    logger.error('listener_failed', {
+      userId,
+      topic: event.topic,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   return {
     publish(userId, event) {
       const listeners = listenersByUser.get(userId);
@@ -38,13 +50,11 @@ export function createRealtimeBus(): RealtimeBus {
       }
       for (const listener of listeners) {
         try {
-          listener(event);
-        } catch (error) {
-          logger.error('listener_failed', {
-            userId,
-            topic: event.topic,
-            error: error instanceof Error ? error.message : String(error),
+          void Promise.resolve(listener(event)).catch((error) => {
+            logListenerFailure(userId, event, error);
           });
+        } catch (error) {
+          logListenerFailure(userId, event, error);
         }
       }
     },

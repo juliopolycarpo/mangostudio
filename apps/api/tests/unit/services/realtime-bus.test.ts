@@ -69,6 +69,25 @@ describe('createRealtimeBus', () => {
     expect(ok).toHaveBeenCalledTimes(1);
     expect(okCalls).toBe(1);
   });
+
+  it('continues fan-out when an async listener rejects', async () => {
+    const bus = createRealtimeBus();
+    let okCalls = 0;
+    const ok = mock(() => {
+      okCalls += 1;
+    });
+    bus.subscribe('user-1', async () => {
+      await Promise.resolve();
+      throw new Error('async boom');
+    });
+    bus.subscribe('user-1', ok);
+
+    bus.publish('user-1', { type: 'invalidate', topic: SETTINGS_TOPIC });
+    await Promise.resolve();
+
+    expect(ok).toHaveBeenCalledTimes(1);
+    expect(okCalls).toBe(1);
+  });
 });
 
 describe('getRealtimeBus', () => {
