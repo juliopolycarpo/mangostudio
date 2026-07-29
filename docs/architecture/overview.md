@@ -120,7 +120,25 @@ Subagent delegation is executed through the `delegate_to_agent` tool. The orches
 
 ### Auth
 
-Better Auth handles sessions via cookie-based authentication. The `auth-middleware.ts` plugin decorates routes with `requireAuth`, which validates the session and injects the user context.
+Better Auth handles sessions via cookie-based authentication. The
+`auth-middleware.ts` plugin decorates routes with `requireAuth`, which validates
+the session and injects the user context. External automation uses scoped API
+keys: callers send `x-api-key`, `apiKeyGuard` enforces the per-user toggle and
+scope, and Better Auth resolves the key into the same session path so
+`requireAuth` stays unchanged. See [`reference/external-api.md`](./../reference/external-api.md).
+
+### Rate Limiting
+
+In-memory rate limiter (`rate-limit.ts`) that counts requests per (bucket,
+client id). A `classify` function (`rate-limit-policy.ts`) sorts each request
+into a named bucket — `health`, `auth`, `general` (cookie traffic), and
+`api-key` (requests with `x-api-key`) use independent counters so automation
+cannot starve browser sessions on the same IP. Client id is the caller IP for
+every bucket today (per-key ids need a verified key id after `apiKeyGuard`; see
+issue #737). Limited requests return a `429` `ApiErrorResponse`
+(`code: RATE_LIMITED`) with a `Retry-After` header. Expired counters are cleaned
+up lazily. Proxy headers affect the client id only when `trustProxy` is
+explicitly enabled behind a trusted reverse proxy.
 
 ### Error Handling
 
@@ -128,10 +146,6 @@ Better Auth handles sessions via cookie-based authentication. The `auth-middlewa
 - Streaming errors use `SSEErrorEvent` from `@mangostudio/shared/streaming`: `{ type: 'error', error, done: true }`.
 - Domain errors extend `Error` with typed codes (e.g., `ChatNotFoundError`, `ToolParameterError`).
 - The centralized `error-handler.ts` plugin maps thrown errors to HTTP responses.
-
-### Rate Limiting
-
-In-memory rate limiter (`rate-limit.ts`) that counts requests per (bucket, client IP). A `classify` function (`rate-limit-policy.ts`) sorts each request path into a named bucket — `health` and `auth` get their own, more generous buckets so they are never gated by the general API limit, while everything else shares the baseline `general` bucket. Limited requests return a `429` `ApiErrorResponse` (`code: RATE_LIMITED`) with a `Retry-After` header. Lazy cleanup of expired counters. Can be trusted-proxy-aware for deployment behind reverse proxies.
 
 ### Validation
 

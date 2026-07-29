@@ -22,6 +22,10 @@ fetch('/api/chats', { credentials: 'include' });
 
 The frontend uses Eden Treaty which handles this automatically.
 
+For automation outside the browser, use scoped API keys (`x-api-key`). See
+[`external-api.md`](./external-api.md) for enablement, scopes, errors, and
+examples.
+
 ### Auth Endpoints
 
 | Method | Path                 | Purpose             |

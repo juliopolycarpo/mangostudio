@@ -8,6 +8,7 @@
         ".claude/hooks/*.mjs",
         ".codex/hooks/*.mjs",
         "scripts/ci/{distribution-identity,evaluate-gate}.ts",
+        "scripts/examples/external-api-smoke.ts",
         "scripts/qa-gate/{collect,collect-test-metrics,render-coverage-summary,render-report}.ts",
         "scripts/qa-gate/**/*.unit.test.ts",
         "scripts/qa-gate/publish/*.mjs",

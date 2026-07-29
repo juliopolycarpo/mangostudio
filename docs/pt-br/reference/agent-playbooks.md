@@ -11,10 +11,18 @@ Abra estes arquivos primeiro:
 - `apps/api/src/auth.ts`
 - `apps/api/src/routes/auth.ts`
 - `apps/api/src/plugins/auth-middleware.ts`
+- `apps/api/src/plugins/api-key-guard.ts`
+- `apps/api/src/plugins/rate-limit-policy.ts`
+- `apps/api/src/modules/api-keys/application/api-key-service.ts`
+- `apps/api/src/modules/api-keys/http/api-key-routes.ts`
+- `apps/shared/src/api-keys/schemas.ts`
+- `apps/frontend/src/features/settings/external-api/` (Configurações → API externa)
+- `apps/frontend/src/routes/_authenticated/settings/external-api.tsx`
 - `apps/frontend/src/lib/auth-client.ts`
 - `apps/frontend/src/routes/login.tsx`
 - `apps/frontend/src/routes/signup.tsx`
 - `apps/frontend/src/routes/_authenticated.tsx` (guard de rota no cliente)
+- `docs/pt-br/reference/external-api.md` (chaves de API para automação HTTP)
 - `tests/browser-smoke/auth-flow.spec.ts`
 
 ## Rotas De API E Contratos

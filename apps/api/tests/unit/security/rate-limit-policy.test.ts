@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'bun:test';
+import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import {
   classifyRateLimit,
   isAuthPath,
   isHealthPath,
   RATE_LIMIT_BUCKETS,
+  resolveRateLimitClientId,
 } from '../../../src/plugins/rate-limit-policy';
+
+function headersWithApiKey(value: string): Headers {
+  return new Headers({ [API_KEY_HEADER]: value });
+}
 
 describe('rate-limit policy classification', () => {
   it('routes prefixed health paths to the health bucket', () => {
@@ -32,6 +38,17 @@ describe('rate-limit policy classification', () => {
     expect(classifyRateLimit('/api/generate')).toBe(RATE_LIMIT_BUCKETS.general);
   });
 
+  it('routes key-authenticated traffic to the api-key bucket', () => {
+    const headers = headersWithApiKey('mango_test_secret_value');
+    expect(classifyRateLimit('/api/chats', headers)).toBe(RATE_LIMIT_BUCKETS.apiKey);
+  });
+
+  it('keeps health and auth precedence over the api-key header', () => {
+    const headers = headersWithApiKey('mango_test_secret_value');
+    expect(classifyRateLimit('/api/health', headers)).toBe(RATE_LIMIT_BUCKETS.health);
+    expect(classifyRateLimit('/api/auth/session', headers)).toBe(RATE_LIMIT_BUCKETS.auth);
+  });
+
   it('does not misclassify look-alike paths as health or auth', () => {
     // `/api/authors` and `/api/healthcheck` must not match the auth/health groups.
     expect(isAuthPath('/api/authors')).toBe(false);
@@ -40,12 +57,36 @@ describe('rate-limit policy classification', () => {
     expect(classifyRateLimit('/api/healthcheck')).toBe(RATE_LIMIT_BUCKETS.general);
   });
 
-  it('keeps health and auth more lenient than the general bucket', () => {
+  it('keeps health, auth, and api-key more lenient than the general bucket', () => {
     // The user requirement: health/auth must not inherit the stronger general
     // limit, but must still be bounded.
     expect(RATE_LIMIT_BUCKETS.auth.max).toBeGreaterThanOrEqual(RATE_LIMIT_BUCKETS.general.max);
     expect(RATE_LIMIT_BUCKETS.health.max).toBeGreaterThanOrEqual(RATE_LIMIT_BUCKETS.general.max);
+    expect(RATE_LIMIT_BUCKETS.apiKey.max).toBeGreaterThanOrEqual(RATE_LIMIT_BUCKETS.general.max);
     expect(Number.isFinite(RATE_LIMIT_BUCKETS.auth.max)).toBe(true);
     expect(Number.isFinite(RATE_LIMIT_BUCKETS.health.max)).toBe(true);
+    expect(Number.isFinite(RATE_LIMIT_BUCKETS.apiKey.max)).toBe(true);
+  });
+});
+
+describe('resolveRateLimitClientId', () => {
+  it('keys the api-key bucket by client IP until verified key ids exist', () => {
+    // Hashing the raw header would let rotating garbage keys escape the limiter
+    // before apiKeyGuard runs. Isolation still comes from the separate bucket.
+    const headers = headersWithApiKey('mango_same_key');
+    expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, headers, '1.2.3.4')).toBe('1.2.3.4');
+    expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, headers, '9.9.9.9')).toBe('9.9.9.9');
+  });
+
+  it('uses client IP for non api-key buckets', () => {
+    expect(
+      resolveRateLimitClientId(RATE_LIMIT_BUCKETS.general, headersWithApiKey('k'), '5.5.5.5')
+    ).toBe('5.5.5.5');
+  });
+
+  it('uses client IP when the api-key bucket has no header', () => {
+    expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, new Headers(), '5.5.5.5')).toBe(
+      '5.5.5.5'
+    );
   });
 });

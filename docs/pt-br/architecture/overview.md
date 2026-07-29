@@ -109,7 +109,12 @@ stream-text-turn.ts (orquestrador)
 
 ### Auth
 
-O Better Auth gerencia sessões via autenticação baseada em cookies. O plugin `auth-middleware.ts` decora rotas com `requireAuth`, que valida a sessão e injeta o contexto do usuário.
+O Better Auth gerencia sessões via autenticação baseada em cookies. O plugin
+`auth-middleware.ts` decora rotas com `requireAuth`, que valida a sessão e injeta
+o contexto do usuário. Automação externa usa chaves de API com escopo: o cliente
+envia `x-api-key`, `apiKeyGuard` aplica o toggle por usuário e o escopo, e o
+Better Auth resolve a chave no mesmo caminho de sessão para `requireAuth`
+continuar igual. Veja [`reference/external-api.md`](./../reference/external-api.md).
 
 ### Tratamento De Erros
 
@@ -120,7 +125,16 @@ O Better Auth gerencia sessões via autenticação baseada em cookies. O plugin 
 
 ### Rate Limiting
 
-Há um rate limiter em memória (`rate-limit.ts`) que conta requests por (bucket, IP do cliente). Uma função `classify` (`rate-limit-policy.ts`) classifica cada path em um bucket nomeado — `health` e `auth` têm buckets próprios e mais generosos, então não ficam sujeitos ao limite geral da API, enquanto os demais endpoints compartilham o bucket `general` de base. Requests bloqueados retornam `429` no formato `ApiErrorResponse` (`code: RATE_LIMITED`) com header `Retry-After`. A limpeza de contadores expirados é lazy. Pode operar de forma proxy-aware quando a aplicação está atrás de reverse proxies.
+Há um rate limiter em memória (`rate-limit.ts`) que conta requests por (bucket,
+id do cliente). A função `classify` (`rate-limit-policy.ts`) classifica cada
+request em um bucket — `health`, `auth`, `general` (sessão no navegador) e
+`api-key` (requests com `x-api-key`) usam contadores independentes para
+automação não afetar sessões no mesmo IP. O id do cliente é o IP em todos os
+buckets hoje (ids por chave exigem o id verificado após `apiKeyGuard`; ver
+issue #737). Requests bloqueados retornam `429` como `ApiErrorResponse`
+(`code: RATE_LIMITED`) com header `Retry-After`. Os contadores expirados são
+limpos sob demanda. Headers de proxy só afetam o id do cliente quando
+`trustProxy` está habilitado explicitamente atrás de um proxy confiável.
 
 ### Validação
 
