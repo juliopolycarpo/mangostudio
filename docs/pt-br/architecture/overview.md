@@ -52,6 +52,7 @@ modules/<domain>/
 | `tool-settings`     | A/H/I   | Enable/disable de tools e overrides de parâmetros                                  |
 | `prompt-rules`      | A/H     | Composição de prompts de sistema e resolução de arquivos de regra                  |
 | `attachments`       | A/I     | Upload de arquivos, validação, storage e entrega ao provedor                       |
+| `realtime`          | H       | Invalidação de cache por cookie e limitada ao usuário                              |
 
 A = Application, D = Domain, H = HTTP, I = Infrastructure
 
@@ -105,6 +106,14 @@ stream-text-turn.ts (orquestrador)
   └─ persiste o turno → produz eventos SSE
 ```
 
+### Invalidação Em Tempo Real
+
+`/api/ws` é uma ponte somente de invalidação entre o bus no processo, limitado
+ao usuário, e as abas autenticadas do navegador. Os dados de entidades
+continuam trafegando por HTTP. Veja [`realtime.md`](./realtime.md) para o
+protocolo, os limites de segurança, as restrições, o modelo de degradação e o
+fluxo de extensão de tópicos.
+
 ## Preocupações Transversais
 
 ### Auth
@@ -118,7 +127,7 @@ continuar igual. Veja [`reference/external-api.md`](./../reference/external-api.
 
 ### Tratamento De Erros
 
-- Erros de API usam `ApiErrorResponse` de `@mangostudio/shared/contracts`: `{ error: string, code?: string, details?: Record<string, string> }`. O HTTP status é carregado pela resposta, não pelo body.
+- Erros de API usam `ApiErrorResponse` de `@mangostudio/shared/errors`: `{ error: string, code?: string, details?: Record<string, string> }`. O HTTP status é carregado pela resposta, não pelo body.
 - Erros de streaming usam `SSEErrorEvent` de `@mangostudio/shared/streaming`: `{ type: 'error', error, done: true }`.
 - Erros de domínio estendem `Error` com códigos tipados, como `ChatNotFoundError` e `ToolParameterError`.
 - O plugin centralizado `error-handler.ts` mapeia exceções lançadas para respostas HTTP.
@@ -206,6 +215,7 @@ O pacote shared é agnóstico a framework e pode ser importado tanto pela API qu
 shared/src/
   contracts/           → barrel export de todos os tipos de contrato
   <module>/            → contratos por módulo + schemas TypeBox
+  realtime/            → mensagens de invalidação WebSocket, tópicos e códigos de fechamento
   streaming/           → tipos e schemas de eventos SSE
   types/               → tipos de domínio (provider, agent-events, gallery)
   i18n/                → dicionários em Português/Inglês + sistema de tipos
