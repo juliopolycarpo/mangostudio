@@ -37,6 +37,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const usageAlerts = useChatGptUsageAlerts(connectors);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [connectorToDelete, setConnectorToDelete] = useState<Connector | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const connectorForm = useConnectorForm({
     errorRequired: s.errorRequired,
@@ -68,6 +69,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       return;
     }
 
+    setIsDeleting(true);
     try {
       await deleteConnector(id);
       await reloadModelCatalog();
@@ -78,6 +80,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     } finally {
       await reloadConnectors();
       setConnectorToDelete(null);
+      setIsDeleting(false);
     }
   };
 
@@ -144,6 +147,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
           entityName={connectorToDelete.name}
           confirmLabel={s.deleteConnector}
           cancelLabel={s.cancelButton}
+          isPending={isDeleting}
           onConfirm={() => void handleDeleteConnector(connectorToDelete.id)}
           onCancel={() => setConnectorToDelete(null)}
         />

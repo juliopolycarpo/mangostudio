@@ -90,7 +90,13 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
               <p className="text-sm text-on-surface-variant/70">{scopeHint(t, scope)}</p>
             )}
           </div>
-          <Button variant="ghost" size="sm" aria-label={labels.cancelButton} onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={labels.cancelButton}
+            disabled={createMutation.isPending}
+            onClick={onClose}
+          >
             <X size={16} />
           </Button>
         </div>
@@ -185,7 +191,12 @@ export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
             {submitError && <p className="text-sm text-error">{submitError}</p>}
 
             <div className="flex gap-3 pt-2">
-              <Button variant="secondary" className="flex-1" onClick={onClose}>
+              <Button
+                variant="secondary"
+                className="flex-1"
+                disabled={createMutation.isPending}
+                onClick={onClose}
+              >
                 {labels.cancelButton}
               </Button>
               <Button className="flex-1" loading={createMutation.isPending} onClick={handleSubmit}>

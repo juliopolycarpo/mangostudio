@@ -41,4 +41,11 @@ describe('ConfirmDialog', () => {
     screen.getByRole('button', { name: 'Delete Connector' }).click();
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
+
+  it('disables cancel and shows confirm as loading while pending', () => {
+    render(<ConfirmDialog {...props} isPending />);
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Delete Connector' })).toBeDisabled();
+  });
 });

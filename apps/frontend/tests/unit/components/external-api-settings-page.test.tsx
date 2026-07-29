@@ -152,6 +152,56 @@ describe('ExternalApiSettingsPage', () => {
     expect(screen.queryByText('mango_plaintext_secret_once')).not.toBeInTheDocument();
   });
 
+  it('keeps cancel disabled while create is pending so plaintext cannot be orphaned', async () => {
+    const user = userEvent.setup();
+    respondWithKeys(fetchScenario, []);
+
+    let resolveCreate!: (response: Response) => void;
+    const pendingCreate = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const defaultFetch = fetchScenario.fetchMock.getMockImplementation();
+    if (!defaultFetch) {
+      throw new Error('expected fetch scenario mock implementation');
+    }
+
+    fetchScenario.fetchMock.mockImplementation((input, init) => {
+      const method = (
+        init?.method ?? (input instanceof Request ? input.method : 'GET')
+      ).toUpperCase();
+      const url =
+        input instanceof Request ? new URL(input.url) : new URL(String(input), 'http://localhost');
+      if (method === 'POST' && url.pathname === '/api/api-keys') {
+        return pendingCreate;
+      }
+      return defaultFetch(input, init);
+    });
+
+    render(
+      <ExternalApiSettingsPage settings={{ enabled: true }} setExternalApiEnabled={vi.fn()} />
+    );
+
+    await user.click(await screen.findByRole('button', { name: /create key/i }));
+    await user.type(screen.getByLabelText('Name'), 'CI pipeline');
+    await user.click(screen.getByRole('button', { name: /^create$/i }));
+
+    expect(await screen.findByRole('button', { name: /creating/i })).toBeDisabled();
+    for (const cancel of screen.getAllByRole('button', { name: /^cancel$/i })) {
+      expect(cancel).toBeDisabled();
+    }
+
+    resolveCreate(
+      new Response(JSON.stringify(CREATED), {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    expect(await screen.findByTestId('api-key-plaintext')).toHaveTextContent(
+      'mango_plaintext_secret_once'
+    );
+  });
+
   it('fires DELETE when revoke is confirmed', async () => {
     const user = userEvent.setup();
     respondWithKeys(fetchScenario, [SAMPLE_KEY]);
