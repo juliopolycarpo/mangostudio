@@ -17,6 +17,11 @@ export function useCreateApiKey() {
   return useMutation({
     mutationFn: (body: CreateApiKeyBody) => createApiKey(body),
     onSuccess: () => invalidate(),
+    // The response carries the only plaintext copy of the key. React Query
+    // parks a finished mutation's result in the MutationCache for `gcTime`
+    // (5 minutes by default) even after the dialog unmounts, so drop it the
+    // moment the dialog is done with it.
+    gcTime: 0,
   });
 }
 
