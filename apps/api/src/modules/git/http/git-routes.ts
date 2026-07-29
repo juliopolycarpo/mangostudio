@@ -30,6 +30,8 @@ import {
   type InitRepoResponse,
   InitRepoResponseSchema,
   StagePathsBodySchema,
+  StashApplyBodySchema,
+  StashDropBodySchema,
   StashListResponseSchema,
   StashPopBodySchema,
   StashSaveBodySchema,
@@ -70,6 +72,8 @@ import {
   pullFastForward,
   pushBranch,
   stagePaths,
+  stashApply,
+  stashDrop,
   stashList,
   stashPop,
   stashSave,
@@ -411,6 +415,54 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         body: StashPopBodySchema,
         response: {
           200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/stash/apply',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+
+        try {
+          return await stashApply(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: StashApplyBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/stash/drop',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+
+        try {
+          return await stashDrop(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: StashDropBodySchema,
+        response: {
+          200: StashListResponseSchema,
           403: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           409: ApiErrorResponseSchema,

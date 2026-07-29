@@ -371,6 +371,35 @@ describe('Git write routes', () => {
     expect(stashesAfterPop.stashes).toEqual([]);
   });
 
+  it.skipIf(!hasGit)('applies a stash without consuming it, then drops the entry', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    await writeFile(join(workdir, 'tracked.txt'), 'stashed\n');
+    const { app, chatId } = await createRouteFixture(workdir);
+    await postJson(app, '/git/stash', { chatId, message: 'reusable work' });
+
+    const applied = await postJson(app, '/git/stash/apply', { chatId, index: 0 });
+    expect(applied.status).toBe(200);
+    expect(await applied.json()).toMatchObject({
+      state: 'repo',
+      status: { unstaged: [{ path: 'tracked.txt', status: 'modified' }] },
+    });
+    const afterApply = (await (await getStashes(app, chatId)).json()) as StashListResponse;
+    expect(afterApply.stashes).toEqual([
+      { index: 0, branch: expect.any(String), message: 'reusable work' },
+    ]);
+
+    const dropped = await postJson(app, '/git/stash/drop', { chatId, index: 0 });
+    const droppedPayload = (await dropped.json()) as StashListResponse;
+    expect(dropped.status).toBe(200);
+    expect(Value.Check(StashListResponseSchema, droppedPayload)).toBe(true);
+    expect(droppedPayload.stashes).toEqual([]);
+    // Dropping removes a stack entry only; the applied worktree edit survives.
+    expect(await Bun.file(join(workdir, 'tracked.txt')).text()).toBe('stashed\n');
+  });
+
   it.skipIf(!hasGit)('reports stash-pop conflicts and leaves conflict state visible', async () => {
     const workdir = await createTempRepo();
     await writeFile(join(workdir, 'conflict.txt'), 'base\n');
@@ -413,6 +442,8 @@ describe('Git write routes', () => {
       postJson(authenticated.app, '/git/commit-message', { chatId: foreignChat.id }),
       postJson(authenticated.app, '/git/stash', { chatId: foreignChat.id }),
       postJson(authenticated.app, '/git/stash/pop', { chatId: foreignChat.id }),
+      postJson(authenticated.app, '/git/stash/apply', { chatId: foreignChat.id }),
+      postJson(authenticated.app, '/git/stash/drop', { chatId: foreignChat.id }),
       getStashes(authenticated.app, foreignChat.id),
     ]);
 
@@ -431,6 +462,8 @@ describe('Git write routes', () => {
       postJson(app, '/git/commit-message', { chatId: 'chat-1' }),
       postJson(app, '/git/stash', { chatId: 'chat-1' }),
       postJson(app, '/git/stash/pop', { chatId: 'chat-1' }),
+      postJson(app, '/git/stash/apply', { chatId: 'chat-1' }),
+      postJson(app, '/git/stash/drop', { chatId: 'chat-1' }),
       getStashes(app, 'chat-1'),
     ]);
 
