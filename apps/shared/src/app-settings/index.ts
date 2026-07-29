@@ -35,6 +35,8 @@ export {
 } from './defaults';
 export {
   type AppSettings,
+  type AppSettingsPutBody,
+  AppSettingsPutBodySchema,
   AppSettingsSchema,
   type ChatDisplaySettings,
   ChatDisplaySettingsSchema,

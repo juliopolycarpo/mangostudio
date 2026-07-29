@@ -156,4 +156,35 @@ describe('settings app settings routes', () => {
     expect(response.status).toBe(200);
     expect(payload).toEqual(DEFAULT_APP_SETTINGS);
   });
+
+  it('accepts a PUT body missing the workspace library scope and normalizes on save', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const homeOnlyLibraryLocations = {
+      home: DEFAULT_APP_SETTINGS.profileSettings.default.libraryLocations.home,
+    };
+
+    const response = await app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...DEFAULT_APP_SETTINGS,
+          profileSettings: {
+            default: {
+              libraryLocations: homeOnlyLibraryLocations,
+            },
+          },
+        }),
+      })
+    );
+    const payload = (await response.json()) as AppSettings;
+
+    expect(response.status).toBe(200);
+    expect(Value.Check(AppSettingsSchema, payload)).toBe(true);
+    expect(payload.profileSettings.default.libraryLocations).toEqual(
+      DEFAULT_APP_SETTINGS.profileSettings.default.libraryLocations
+    );
+  });
 });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { Value } from '@sinclair/typebox/value';
 import {
+  AppSettingsPutBodySchema,
+  AppSettingsSchema,
   clampMaxToolIterations,
   DEFAULT_APP_SETTINGS,
   DEFAULT_CHAT_DISPLAY_SETTINGS,
@@ -714,5 +717,23 @@ describe('withLibraryLocations', () => {
     );
     expect(Object.keys(updated.profileSettings)).toEqual([DEFAULT_PROFILE_ID]);
     expect(libraryLocationsFor(updated).home).toMatchObject({ 'cursor-skills': true });
+  });
+});
+
+describe('AppSettingsPutBodySchema', () => {
+  it('accepts nested library locations without the workspace scope', () => {
+    const body = {
+      ...DEFAULT_APP_SETTINGS,
+      profileSettings: {
+        [DEFAULT_PROFILE_ID]: {
+          libraryLocations: {
+            home: DEFAULT_LIBRARY_LOCATION_SETTINGS.home,
+          },
+        },
+      },
+    };
+
+    expect(Value.Check(AppSettingsPutBodySchema, body)).toBe(true);
+    expect(Value.Check(AppSettingsSchema, body)).toBe(false);
   });
 });

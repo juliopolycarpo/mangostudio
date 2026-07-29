@@ -67,6 +67,16 @@ export const LibraryLocationSettingsSchema = Type.Record(
   LibraryLocationTogglesSchema
 );
 
+/** PUT bodies may predate the workspace scope or use a flat home map; normalize before persisting. */
+const LibraryLocationSettingsPutSchema = Type.Union([
+  LibraryLocationSettingsSchema,
+  Type.Object({
+    home: LibraryLocationTogglesSchema,
+    workspace: Type.Optional(LibraryLocationTogglesSchema),
+  }),
+  LibraryLocationTogglesSchema,
+]);
+
 /**
  * Per-profile settings overlay. Named `profileSettings` rather than `profiles`
  * because it holds settings scoped *by* profile, not profile definitions —
@@ -76,7 +86,13 @@ export const ProfileScopedSettingsSchema = Type.Object({
   libraryLocations: LibraryLocationSettingsSchema,
 });
 
+const ProfileScopedSettingsPutSchema = Type.Object({
+  libraryLocations: LibraryLocationSettingsPutSchema,
+});
+
 export const ProfileSettingsMapSchema = Type.Record(ProfileIdSchema, ProfileScopedSettingsSchema);
+
+const ProfileSettingsMapPutSchema = Type.Record(ProfileIdSchema, ProfileScopedSettingsPutSchema);
 
 export const DiffPreviewModeSchema = Type.Union([
   Type.Literal('expanded'),
@@ -104,7 +120,7 @@ export const GitSettingsSchema = Type.Object({
   commitMessage: CommitMessageSettingsSchema,
 });
 
-export const AppSettingsSchema = Type.Object({
+const AppSettingsFieldsSchema = {
   promptSettings: PromptSettingsSchema,
   globalImageQuality: ImageQualitySchema,
   thinkingEnabled: Type.Boolean(),
@@ -116,10 +132,19 @@ export const AppSettingsSchema = Type.Object({
   multiAgentSettings: MultiAgentSettingsSchema,
   contextSettings: ContextSettingsSchema,
   chatTitleSettings: ChatTitleSettingsSchema,
-  profileSettings: ProfileSettingsMapSchema,
   workspaceSettings: WorkspaceSettingsSchema,
   gitSettings: GitSettingsSchema,
   chatDisplaySettings: ChatDisplaySettingsSchema,
+} as const;
+
+export const AppSettingsSchema = Type.Object({
+  ...AppSettingsFieldsSchema,
+  profileSettings: ProfileSettingsMapSchema,
+});
+
+export const AppSettingsPutBodySchema = Type.Object({
+  ...AppSettingsFieldsSchema,
+  profileSettings: ProfileSettingsMapPutSchema,
 });
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;
@@ -135,3 +160,4 @@ export type ProfileSettingsMap = Static<typeof ProfileSettingsMapSchema>;
 export type CommitMessageSettings = Static<typeof CommitMessageSettingsSchema>;
 export type GitSettings = Static<typeof GitSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;
+export type AppSettingsPutBody = Static<typeof AppSettingsPutBodySchema>;
