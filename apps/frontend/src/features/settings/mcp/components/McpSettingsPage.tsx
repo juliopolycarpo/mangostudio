@@ -7,6 +7,7 @@ import type { McpServer } from '@mangostudio/shared/mcp';
 import { FileDown, FileUp, Plus } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -17,7 +18,6 @@ import {
   useUpdateMcpServer,
 } from '../hooks/use-mcp-servers';
 import { buildAddBody, buildUpdateBody, type McpServerFormState } from '../lib/server-form';
-import { DeleteServerDialog } from './DeleteServerDialog';
 import { ExportServersDialog } from './ExportServersDialog';
 import { ImportServersDialog } from './ImportServersDialog';
 import { McpServerCard } from './McpServerCard';
@@ -158,9 +158,13 @@ export function McpSettingsPage() {
       {exportOpen && <ExportServersDialog servers={servers} onClose={() => setExportOpen(false)} />}
 
       {serverToDelete && (
-        <DeleteServerDialog
-          server={serverToDelete}
-          isDeleting={deleteMutation.isPending}
+        <ConfirmDialog
+          title={s.deleteServer}
+          description={s.deleteConfirm}
+          entityName={serverToDelete.name}
+          confirmLabel={s.deleteServer}
+          cancelLabel={s.cancelButton}
+          isPending={deleteMutation.isPending}
           onConfirm={() => handleDelete(serverToDelete)}
           onCancel={() => setServerToDelete(null)}
         />
