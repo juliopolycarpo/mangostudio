@@ -1,7 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   size?: 'sm' | 'md';
   loading?: boolean;
   children: ReactNode;
@@ -11,6 +11,9 @@ const variantStyles: Record<NonNullable<ButtonProps['variant']>, string> = {
   primary: 'bg-primary text-on-primary shadow-lg shadow-primary/20 hover:opacity-90',
   secondary: 'bg-surface-container-high text-on-surface hover:bg-surface-container-highest',
   ghost: 'text-on-surface/70 hover:text-on-surface hover:bg-surface-container-high',
+  // Confirming something that deletes a user's files should not look like
+  // confirming anything else.
+  danger: 'bg-error text-on-error shadow-lg shadow-error/20 hover:opacity-90',
 };
 
 const sizeStyles: Record<NonNullable<ButtonProps['size']>, string> = {

@@ -9,6 +9,8 @@ import {
   PropagationBlockedReasonSchema,
   type PropagationOperation,
   PropagationOperationSchema,
+  RemovalBlockedReasonSchema,
+  RemovalFailureReasonSchema,
 } from '../../src/library';
 
 type FlatDictionary = Map<string, string>;
@@ -57,9 +59,21 @@ const ENUM_COVERAGE = [
     blocks: [en.library.adaptation.note, ptBR.library.adaptation.note],
   },
   {
+    // One catalog, two enums: propagation and removal block for mostly the same
+    // reasons, and a reader sees the same sentence whichever flow refused.
     path: 'library.blockedReason',
-    values: literalValues(PropagationBlockedReasonSchema),
+    values: [
+      ...new Set([
+        ...literalValues(PropagationBlockedReasonSchema),
+        ...literalValues(RemovalBlockedReasonSchema),
+      ]),
+    ],
     blocks: [en.library.blockedReason, ptBR.library.blockedReason],
+  },
+  {
+    path: 'library.removalFailureReason',
+    values: literalValues(RemovalFailureReasonSchema),
+    blocks: [en.library.removalFailureReason, ptBR.library.removalFailureReason],
   },
 ] as const;
 
