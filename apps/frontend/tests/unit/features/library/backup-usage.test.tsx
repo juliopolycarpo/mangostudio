@@ -31,6 +31,9 @@ const usage: PropagationBackupUsage = {
       entryCount: 1,
       pinned: true,
       lastCopyResourceKeys: ['skill:gh'],
+      operation: 'removal',
+      resourceKeys: ['skill:gh'],
+      evictsNext: false,
     },
   ],
 };

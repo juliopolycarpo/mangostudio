@@ -209,10 +209,15 @@ async function persistManifest(
 ): Promise<void> {
   await writeBackupManifest(
     {
-      version: 1,
+      version: 2,
       backupId,
       createdAtMs: deps.backup.now().getTime(),
       entries: [...entries],
+      // Every entry here carries a backup, so undoing this set only ever puts
+      // content back. Recording that is what lets a listed row say "put the
+      // removed copies back" instead of the neutral verb a propagation set has
+      // to use, where undo can also delete.
+      operation: 'removal',
       // Pinning is decided by what the apply actually did, not by what the
       // preview offered: a set holding someone's only copy of a skill must
       // never be evicted to reclaim disk.
@@ -447,6 +452,9 @@ async function stageOperation(
       destinationPath: destination.logicalPath,
       resolvedPath: destination.resolvedPath,
       backupPath,
+      // The identity the coverage matrix uses, so a retained set can name the
+      // resources it holds rather than counting anonymous entries.
+      resourceKey: operation.resourceKey,
       // What the apply left at the destination is *nothing*, so undo compares
       // against the removed content: a path recreated with different bytes
       // after the removal is a change undo must not silently discard.

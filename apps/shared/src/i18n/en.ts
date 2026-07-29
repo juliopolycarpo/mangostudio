@@ -1735,13 +1735,44 @@ export const messages: Messages = {
       restored: '{count} put back.',
       restoreError: 'This backup could not be restored.',
       purge: 'Purge',
-      // Two clicks, because the set being purged is the only remaining copy of
-      // whatever the removal that created it took.
+      // Two clicks on every row, pinned or not. Ordinary sets are purgeable for
+      // the first time here, and a set holding a recoverable copy must not go
+      // on one click just because nothing pinned it.
       purgeConfirm: 'Delete it permanently',
       purgeCancel: 'Keep it',
       purgeError: 'This backup could not be deleted.',
       usage: '{count} backups using {size}.',
       retention: 'We keep the last {count} or {size}, whichever comes first.',
+      manage: 'Manage backups',
+      title: 'Backups',
+      description:
+        'Every copy the app is holding from a propagation or a removal, with the way back from each.',
+      empty: 'No backups are being held right now.',
+      // Undo means opposite things by origin, so the verb is never generic. A
+      // removal set only ever puts content back; a propagation set can also
+      // delete the paths that apply created.
+      undoRemoval: 'Put the copies back',
+      undoPropagation: 'Undo this apply',
+      undoUnknown: 'Undo',
+      undoUnknownHint:
+        'This backup predates the record of what wrote it, so undoing it may put content back or remove what was written.',
+      origin: {
+        propagation: 'Apply',
+        removal: 'Removal',
+        unknown: 'Unrecorded',
+      },
+      columnCreated: 'Created',
+      columnContents: 'Contents',
+      columnSize: 'Size',
+      columnOrigin: 'Origin',
+      columnStatus: 'Status',
+      contentsUnknown: '{count} entries',
+      pinnedBadge: 'Pinned',
+      // Retention evicts on the next apply, so saying it after the fact is
+      // saying it too late.
+      evictsNext: 'Goes next',
+      evictsNextHint: 'The next apply will delete this backup to stay inside the retention budget.',
+      bulkHint: 'Backups are restored and deleted one set at a time, on purpose.',
     },
     settings: {
       title: 'Settings side by side',

@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type BackupEntry,
+  type BackupManifest,
   type BackupStoreDeps,
   backupExistingResource,
   createBackupId,
@@ -64,32 +65,65 @@ function seedBackupSet(id: string, bytes: number, modifiedAtMs?: number): string
 /** The same shape, plus the manifest a last-copy removal writes. */
 function seedPinnedBackupSet(id: string, bytes: number, modifiedAtMs?: number): string {
   const setPath = seedBackupSet(id, bytes);
-  writeFileSync(
-    join(setPath, 'manifest.json'),
-    JSON.stringify({
-      version: 1,
-      backupId: id,
-      createdAtMs: 1,
-      pinned: true,
-      lastCopyResourceKeys: ['skill:gh'],
-      entries: [
-        {
-          locationId: 'claude-skills',
-          slug: 'gh',
-          kind: 'directory',
-          destinationPath: '/home/test/.claude/skills/gh',
-          resolvedPath: '/home/test/.claude/skills/gh',
-          backupPath: join(setPath, 'claude-skills', 'gh'),
-          writtenContentHash: 'hash',
-        },
-      ],
-    })
-  );
+  seedManifest(setPath, id, {
+    version: 2,
+    operation: 'removal',
+    pinned: true,
+    lastCopyResourceKeys: ['skill:gh'],
+  });
   if (modifiedAtMs !== undefined) {
     const seconds = modifiedAtMs / 1000;
     utimesSync(setPath, seconds, seconds);
   }
   return setPath;
+}
+
+/**
+ * Writes a manifest over a seeded set. `version` and the entry shape are
+ * parameters rather than constants because manifest compatibility — a v1
+ * manifest still reading, still listing, still undoing — is the thing these
+ * tests exist to hold.
+ */
+function seedManifest(
+  setPath: string,
+  id: string,
+  manifest: {
+    version: 1 | 2;
+    operation?: 'propagation' | 'removal';
+    pinned?: boolean;
+    lastCopyResourceKeys?: string[];
+    resourceKeys?: string[];
+  }
+): void {
+  const {
+    version,
+    operation,
+    pinned,
+    lastCopyResourceKeys,
+    resourceKeys = ['skill:gh'],
+  } = manifest;
+  writeFileSync(
+    join(setPath, 'manifest.json'),
+    JSON.stringify({
+      version,
+      backupId: id,
+      createdAtMs: 1,
+      ...(operation && { operation }),
+      ...(pinned && { pinned }),
+      ...(lastCopyResourceKeys && { lastCopyResourceKeys }),
+      entries: resourceKeys.map((resourceKey) => ({
+        locationId: 'claude-skills',
+        slug: resourceKey.split(':')[1],
+        kind: 'directory',
+        destinationPath: `/home/test/.claude/skills/${resourceKey.split(':')[1]}`,
+        resolvedPath: `/home/test/.claude/skills/${resourceKey.split(':')[1]}`,
+        backupPath: join(setPath, 'claude-skills', 'gh'),
+        writtenContentHash: 'hash',
+        // A v1 manifest predates the field entirely.
+        ...(version === 2 && { resourceKey }),
+      })),
+    })
+  );
 }
 
 describe('createBackupId', () => {
@@ -143,16 +177,54 @@ describe('backup manifest', () => {
 
   it('round-trips what undo needs', async () => {
     await writeBackupManifest(
-      { version: 1, backupId: 'set-1', createdAtMs: 5, entries: [entry] },
+      { version: 2, backupId: 'set-1', createdAtMs: 5, entries: [entry], operation: 'removal' },
       deps()
     );
 
     expect(await readBackupManifest('set-1', deps())).toEqual({
-      version: 1,
+      version: 2,
       backupId: 'set-1',
       createdAtMs: 5,
       entries: [entry],
+      operation: 'removal',
     });
+  });
+
+  // Backups are files on disk: there is no migration and nothing to backfill,
+  // so a manifest written before v2 has to keep resolving. Rejecting it would
+  // strand the copies it points at behind a 404 from undo.
+  it('reads a v1 manifest unchanged, so an older backup still undoes', async () => {
+    const setPath = join(backupRoot, 'v1-set');
+    mkdirSync(setPath, { recursive: true });
+    const legacy = {
+      version: 1,
+      backupId: 'v1-set',
+      createdAtMs: 5,
+      entries: [entry],
+    } satisfies BackupManifest;
+    writeFileSync(join(setPath, 'manifest.json'), JSON.stringify(legacy));
+
+    expect(await readBackupManifest('v1-set', deps())).toEqual(legacy);
+  });
+
+  it('rejects a manifest whose recorded origin is not one this app writes', async () => {
+    const setPath = join(backupRoot, 'bogus');
+    mkdirSync(setPath, { recursive: true });
+    writeFileSync(
+      join(setPath, 'manifest.json'),
+      JSON.stringify({
+        version: 2,
+        backupId: 'bogus',
+        createdAtMs: 5,
+        entries: [entry],
+        operation: 'unknown',
+      })
+    );
+
+    // `unknown` is a read-time projection for a manifest that recorded nothing.
+    // Accepting it as a written value would let a listed row claim an origin
+    // the writer never asserted.
+    expect(await readBackupManifest('bogus', deps())).toBeNull();
   });
 
   it('reports a missing or corrupt manifest as absent rather than throwing', async () => {
@@ -334,6 +406,92 @@ describe('listBackupSets', () => {
 
     expect(set.pinned).toBe(true);
     expect(set.lastCopyResourceKeys).toEqual(['skill:gh']);
+  });
+
+  it('names what each set holds, deduped and ordered', async () => {
+    const setPath = seedBackupSet('set-1', 10);
+    seedManifest(setPath, 'set-1', {
+      version: 2,
+      operation: 'propagation',
+      resourceKeys: ['skill:release', 'skill:gh', 'skill:gh'],
+    });
+
+    const [set] = await listBackupSets(deps());
+
+    expect(set.resourceKeys).toEqual(['skill:gh', 'skill:release']);
+    expect(set.operation).toBe('propagation');
+  });
+
+  // Undo means opposite things by origin — a removal set puts content back, a
+  // propagation set can delete what the apply created — so a v1 manifest must
+  // report `unknown` and let the UI stay neutral rather than pick a verb.
+  it('reports a v1 manifest as unknown with no resource names, never a guess', async () => {
+    const setPath = seedBackupSet('legacy', 10);
+    seedManifest(setPath, 'legacy', { version: 1 });
+
+    const [set] = await listBackupSets(deps());
+
+    expect(set.operation).toBe('unknown');
+    expect(set.resourceKeys).toEqual([]);
+    expect(set.entryCount).toBe(1);
+  });
+
+  it('still lists a set whose manifest is unreadable, with its size', async () => {
+    const setPath = seedBackupSet('corrupt', 120);
+    writeFileSync(join(setPath, 'manifest.json'), '{ not json');
+
+    const [set] = await listBackupSets(deps());
+
+    expect(set.backupId).toBe('corrupt');
+    expect(set.sizeBytes).toBeGreaterThanOrEqual(120);
+    expect(set.operation).toBe('unknown');
+    expect(set.pinned).toBe(false);
+  });
+
+  it('marks exactly the sets the next prune would drop', async () => {
+    seedBackupSet('oldest', 10, 1_000);
+    seedBackupSet('older', 10, 2_000);
+    seedBackupSet('newer', 10, 3_000);
+    seedBackupSet('newest', 10, 4_000);
+
+    const sets = await listBackupSets(deps({ retentionCount: () => 3 }));
+
+    expect(sets.filter((set) => set.evictsNext).map((set) => set.backupId)).toEqual(['oldest']);
+  });
+
+  // The flag is only worth showing if it agrees with the code that does the
+  // deleting. Asserted by running the prune and comparing, rather than by
+  // re-deriving the retention rule here — a test that restates the rule cannot
+  // catch the two copies drifting apart.
+  it('agrees with what pruneBackupSets actually removes', async () => {
+    seedBackupSet('oldest', 100, 1_000);
+    seedBackupSet('older', 100, 2_000);
+    seedBackupSet('newer', 100, 3_000);
+    seedBackupSet('newest', 100, 4_000);
+    const store = deps({ retentionCount: () => 10, retentionBytes: () => 350 });
+
+    const flagged = (await listBackupSets(store))
+      .filter((set) => set.evictsNext)
+      .map((set) => set.backupId)
+      .sort();
+
+    await pruneBackupSets('newest', store);
+    const deleted = ['oldest', 'older', 'newer', 'newest']
+      .filter((id) => !existsSync(join(backupRoot, id)))
+      .sort();
+
+    expect(flagged).toEqual(deleted);
+    expect(deleted).not.toEqual([]);
+  });
+
+  it('never marks a pinned set as evicting, at any budget', async () => {
+    seedPinnedBackupSet('pinned', 500, 1_000);
+    seedBackupSet('ordinary', 10, 2_000);
+
+    const sets = await listBackupSets(deps({ retentionCount: () => 1, retentionBytes: () => 1 }));
+
+    expect(sets.find((set) => set.backupId === 'pinned')?.evictsNext).toBe(false);
+    expect(sets.find((set) => set.backupId === 'ordinary')?.evictsNext).toBe(true);
   });
 });
 

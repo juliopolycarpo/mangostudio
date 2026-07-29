@@ -204,6 +204,24 @@ describe('applyLibraryRemoval', () => {
     expect(manifest?.lastCopyResourceKeys).toEqual(['skill:gh']);
   });
 
+  // Every entry a removal writes carries a backup, so undoing this set only
+  // ever puts content back. Recording that is what lets a listed row commit to
+  // "put the removed copies back" instead of a neutral verb.
+  it('records the flow that wrote the set, and what the set holds', async () => {
+    seedSkill(SKILL_LOCATION_ROOTS['claude-skills'], 'one');
+    seedSkill(SKILL_LOCATION_ROOTS['mango-skills'], 'one');
+    const preview = previewOf([await entryFor(['claude-skills', 'mango-skills'])]);
+    const backup = backupDeps();
+
+    const result = await apply(preview, requestFor(preview, { keep: ['mango-skills'] }), {
+      backup,
+    });
+    const manifest = await readBackupManifest(result.backupId ?? '', backup);
+
+    expect(manifest?.operation).toBe('removal');
+    expect(manifest?.entries.map((entry) => entry.resourceKey)).toEqual(['skill:gh']);
+  });
+
   it('does not pin an ordinary removal that leaves copies behind', async () => {
     seedSkill(SKILL_LOCATION_ROOTS['claude-skills'], 'one');
     seedSkill(SKILL_LOCATION_ROOTS['mango-skills'], 'one');

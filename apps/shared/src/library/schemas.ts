@@ -583,6 +583,26 @@ export const PropagationUndoSchema = Type.Object({
 });
 
 /**
+ * Which flow wrote a backup set, and therefore what undoing it does.
+ *
+ * Load-bearing rather than descriptive. Undo restores every entry that carries a
+ * backup and deletes every entry that does not, so it puts content back for a
+ * removal set and takes content away for a propagation set that created paths.
+ * One label across both is a button that silently deletes files on half the
+ * list.
+ *
+ * `unknown` is a set whose manifest predates the field. It is never inferred
+ * from the entries: a propagation apply that only overwrote pre-existing files
+ * produces entries shaped exactly like a removal's, so the heuristic is unsound
+ * in precisely the case where being wrong destroys a file.
+ */
+export const BackupSetOperationSchema = Type.Union([
+  Type.Literal('propagation'),
+  Type.Literal('removal'),
+  Type.Literal('unknown'),
+]);
+
+/**
  * One retained backup set. Listed rather than only counted so a pinned set —
  * which no retention rule will ever evict — can be seen, sized, and purged.
  */
@@ -599,6 +619,19 @@ export const PropagationBackupSetSchema = Type.Object({
   pinned: Type.Boolean(),
   /** Resources whose final instance this set is the only remaining copy of. */
   lastCopyResourceKeys: Type.Array(Type.String({ minLength: 1 })),
+  operation: BackupSetOperationSchema,
+  /**
+   * Every resource the set holds, deduped and sorted, so a row can say what is
+   * in it. Empty for a manifest written before entries carried a resource key —
+   * a slug alone does not identify a resource.
+   */
+  resourceKeys: Type.Array(Type.String({ minLength: 1 })),
+  /**
+   * True when the next prune would evict this set, so retention stops being
+   * something a user discovers after the fact. Never true for a pinned set, at
+   * any budget.
+   */
+  evictsNext: Type.Boolean(),
 });
 
 /**
@@ -895,6 +928,7 @@ export type PropagationFailure = Static<typeof PropagationFailureSchema>;
 export type PropagationApply = Static<typeof PropagationApplySchema>;
 export type PropagationUndoRequest = Static<typeof PropagationUndoRequestSchema>;
 export type PropagationUndo = Static<typeof PropagationUndoSchema>;
+export type BackupSetOperation = Static<typeof BackupSetOperationSchema>;
 export type PropagationBackupSet = Static<typeof PropagationBackupSetSchema>;
 export type PropagationBackupUsage = Static<typeof PropagationBackupUsageSchema>;
 export type RemovalOperation = Static<typeof RemovalOperationSchema>;

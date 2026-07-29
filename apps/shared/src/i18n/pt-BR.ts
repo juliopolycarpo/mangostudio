@@ -1761,6 +1761,32 @@ export const messages = {
       purgeError: 'Não foi possível excluir este backup.',
       usage: '{count} backups ocupando {size}.',
       retention: 'Guardamos os últimos {count} ou {size}, o que vier primeiro.',
+      manage: 'Gerenciar backups',
+      title: 'Backups',
+      description:
+        'Todas as cópias que o app está guardando de uma propagação ou de uma remoção, com a volta de cada uma.',
+      empty: 'Nenhum backup está guardado no momento.',
+      undoRemoval: 'Devolver as cópias',
+      undoPropagation: 'Desfazer esta aplicação',
+      undoUnknown: 'Desfazer',
+      undoUnknownHint:
+        'Este backup é anterior ao registro do que o criou, então desfazê-lo pode devolver conteúdo ou remover o que foi escrito.',
+      origin: {
+        propagation: 'Aplicação',
+        removal: 'Remoção',
+        unknown: 'Não registrado',
+      },
+      columnCreated: 'Criado',
+      columnContents: 'Conteúdo',
+      columnSize: 'Tamanho',
+      columnOrigin: 'Origem',
+      columnStatus: 'Situação',
+      contentsUnknown: '{count} entradas',
+      pinnedBadge: 'Fixado',
+      evictsNext: 'Sai na próxima',
+      evictsNextHint:
+        'A próxima aplicação vai apagar este backup para respeitar o limite de retenção.',
+      bulkHint: 'Backups são restaurados e excluídos um conjunto por vez, de propósito.',
     },
     settings: {
       title: 'Configurações lado a lado',

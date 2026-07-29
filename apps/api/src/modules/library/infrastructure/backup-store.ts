@@ -11,7 +11,11 @@ import { randomBytes } from 'node:crypto';
 import type { Dirent, Stats } from 'node:fs';
 import { cp, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { LibraryLocationId, PropagationBackupSet } from '@mangostudio/shared/library';
+import type {
+  BackupSetOperation,
+  LibraryLocationId,
+  PropagationBackupSet,
+} from '@mangostudio/shared/library';
 import { getConfig } from '../../../lib/config';
 import { getLibraryLocation } from '../domain/registry';
 
@@ -27,10 +31,17 @@ export interface BackupEntry {
   readonly backupPath?: string;
   /** Hash the apply wrote, so undo can tell whether anything moved since. */
   readonly writtenContentHash: string;
+  /**
+   * Manifest v2. The identity the coverage matrix uses, so a listed set can name
+   * what it holds instead of counting anonymous entries. Absent on entries
+   * written before v2 — `slug` is what the writer needed, and a slug alone
+   * cannot be turned back into a resource key.
+   */
+  readonly resourceKey?: string;
 }
 
 export interface BackupManifest {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly backupId: string;
   readonly createdAtMs: number;
   readonly entries: BackupEntry[];
@@ -42,6 +53,17 @@ export interface BackupManifest {
   readonly pinned?: boolean;
   /** Resources this set is the only remaining copy of, for the disclosure UI. */
   readonly lastCopyResourceKeys?: string[];
+  /**
+   * Manifest v2. Which flow wrote this set, because undo means opposite things
+   * either way: a removal set restores content, and a propagation set that
+   * created paths deletes them. Recorded rather than inferred — a propagation
+   * apply that only overwrote pre-existing files produces entries
+   * indistinguishable from a removal's, and that is exactly the case where a
+   * wrong guess deletes a file.
+   *
+   * Absent on a v1 manifest, which lists as `unknown` rather than as a guess.
+   */
+  readonly operation?: Exclude<BackupSetOperation, 'unknown'>;
 }
 
 interface BackupStoreFs {
@@ -251,6 +273,8 @@ interface BackupSet {
   readonly entryCount: number;
   readonly pinned: boolean;
   readonly lastCopyResourceKeys: string[];
+  readonly operation: BackupSetOperation;
+  readonly resourceKeys: string[];
 }
 
 /**
@@ -286,10 +310,28 @@ async function describeBackupSet(
       entryCount: manifest?.entries.length ?? 0,
       pinned: manifest?.pinned === true,
       lastCopyResourceKeys: manifest?.lastCopyResourceKeys ?? [],
+      // A v1 manifest, or none at all, reports `unknown`. The alternative would
+      // be reading the entries and guessing, which is unsound in exactly the
+      // case where being wrong labels a delete as a restore.
+      operation: manifest?.operation ?? 'unknown',
+      resourceKeys: distinctResourceKeys(manifest),
     };
   } catch {
     return null;
   }
+}
+
+/**
+ * Every resource the set holds, deduped and ordered so two reads of one set
+ * render the same list. Empty for a v1 manifest: its entries carry a slug, and
+ * a slug does not identify a resource on its own.
+ */
+function distinctResourceKeys(manifest: BackupManifest | null): string[] {
+  const keys = new Set<string>();
+  for (const entry of manifest?.entries ?? []) {
+    if (entry.resourceKey) keys.add(entry.resourceKey);
+  }
+  return [...keys].sort();
 }
 
 async function directorySize(path: string, fs: BackupStoreFs): Promise<number> {
@@ -355,9 +397,36 @@ export async function pruneBackupSets(
     throw new TypeError('Library backup retention count must be a positive integer.');
   }
 
-  // The set this apply just wrote is always retained: dropping it would leave
-  // the caller holding a backup id that cannot be undone.
-  const retained = new Set([currentBackupId]);
+  const retained = selectRetained(backupSets, currentBackupId, retentionCount, deps);
+  await Promise.all(
+    backupSets
+      .filter((backup) => !retained.has(backup.id))
+      .map((backup) => deps.fs.remove(backup.path))
+  );
+}
+
+/**
+ * The sets retention keeps, given the list newest first.
+ *
+ * Extracted so the rule has exactly one definition: `pruneBackupSets` deletes
+ * what it excludes, and `listBackupSets` marks the same sets as evicting next.
+ * Two copies of a retention rule that disagree is a user being told their backup
+ * is safe on the render before it disappears.
+ *
+ * `currentBackupId` is the set an apply just wrote, retained unconditionally
+ * because dropping it would leave the caller holding a backup id that cannot be
+ * undone. A projection has no such set and passes null — it answers "if
+ * retention ran right now, what goes".
+ */
+function selectRetained(
+  backupSets: readonly BackupSet[],
+  currentBackupId: string | null,
+  retentionCount: number,
+  deps: BackupStoreDeps
+): ReadonlySet<string> {
+  const retained = new Set<string>();
+  if (currentBackupId !== null) retained.add(currentBackupId);
+
   let retainedBytes = 0;
   for (const backup of backupSets) {
     if (!backup.pinned) continue;
@@ -377,23 +446,27 @@ export async function pruneBackupSets(
     retainedBytes += backup.sizeBytes;
     ordinaryCount += 1;
   }
-
-  await Promise.all(
-    backupSets
-      .filter((backup) => !retained.has(backup.id))
-      .map((backup) => deps.fs.remove(backup.path))
-  );
+  return retained;
 }
 
 /**
- * What backups cost, set by set. Listed rather than only totalled so a pinned
- * set — which nothing will ever evict — can be seen and sized, and so "why is
- * this directory large" has an answer that names the culprit.
+ * What backups cost, set by set, and which of them retention is about to take.
+ *
+ * Listed rather than only totalled so a pinned set — which nothing will ever
+ * evict — can be seen and sized, and so "why is this directory large" has an
+ * answer that names the culprit. `evictsNext` is computed here, beside the
+ * budget math it has to agree with, rather than re-derived by a caller.
+ *
+ * A retention count too small to keep anything is not rejected the way a prune
+ * rejects it: this path deletes nothing, and refusing to render the list is a
+ * worse answer than reporting every ordinary set as evicting, which is what a
+ * budget of zero honestly means.
  */
 export async function listBackupSets(
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<PropagationBackupSet[]> {
   const backupSets = await collectBackupSets(deps);
+  const retained = selectRetained(backupSets, null, deps.retentionCount(), deps);
   return backupSets.map((backup) => ({
     backupId: backup.id,
     createdAtMs: backup.createdAtMs,
@@ -401,17 +474,29 @@ export async function listBackupSets(
     entryCount: backup.entryCount,
     pinned: backup.pinned,
     lastCopyResourceKeys: backup.lastCopyResourceKeys,
+    operation: backup.operation,
+    resourceKeys: backup.resourceKeys,
+    evictsNext: !retained.has(backup.id),
   }));
 }
 
+/**
+ * Both versions read. A v1 manifest is one written before `operation` and
+ * per-entry `resourceKey` existed, and its undo has to keep working exactly as
+ * it did — backups are files on disk, so there is no migration and nothing to
+ * backfill. Rejecting it would strand the copies it points at.
+ */
 function isManifest(value: unknown): value is BackupManifest {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<BackupManifest>;
   return (
-    candidate.version === 1 &&
+    (candidate.version === 1 || candidate.version === 2) &&
     typeof candidate.backupId === 'string' &&
     typeof candidate.createdAtMs === 'number' &&
     (candidate.pinned === undefined || typeof candidate.pinned === 'boolean') &&
+    (candidate.operation === undefined ||
+      candidate.operation === 'propagation' ||
+      candidate.operation === 'removal') &&
     (candidate.lastCopyResourceKeys === undefined ||
       (Array.isArray(candidate.lastCopyResourceKeys) &&
         candidate.lastCopyResourceKeys.every((key) => typeof key === 'string'))) &&
@@ -430,6 +515,7 @@ function isBackupEntry(value: unknown): value is BackupEntry {
     typeof candidate.destinationPath === 'string' &&
     typeof candidate.resolvedPath === 'string' &&
     typeof candidate.writtenContentHash === 'string' &&
-    (candidate.backupPath === undefined || typeof candidate.backupPath === 'string')
+    (candidate.backupPath === undefined || typeof candidate.backupPath === 'string') &&
+    (candidate.resourceKey === undefined || typeof candidate.resourceKey === 'string')
   );
 }
