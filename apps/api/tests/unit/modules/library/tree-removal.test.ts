@@ -143,4 +143,42 @@ describe('findStagedRemovalsForLocations', () => {
       rmSync(home, { recursive: true, force: true });
     }
   });
+
+  it('attributes a shared-directory leftover to the location it actually came from', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mango-tree-removal-home-'));
+    try {
+      mkdirSync(join(home, '.claude'), { recursive: true });
+      // Both locations stage into `~/.claude`, and `claude-instructions` claims
+      // the directory first. The staged name is the only thing that says which
+      // of the two this tree was moved out of.
+      mkdirSync(join(home, '.claude', '.settings.json.abc.removing'), { recursive: true });
+
+      const leftovers = await findStagedRemovalsForLocations(
+        [locationOf('claude-instructions'), locationOf('claude-settings')],
+        { homeDir: home, platform: 'linux', env: {} }
+      );
+
+      expect(leftovers).toHaveLength(1);
+      expect(leftovers[0]?.locationId).toBe('claude-settings');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an unrecognized leftover with the location that claimed the directory', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'mango-tree-removal-home-'));
+    try {
+      mkdirSync(join(home, '.claude'), { recursive: true });
+      mkdirSync(join(home, '.claude', '.mystery.abc.removing'), { recursive: true });
+
+      const leftovers = await findStagedRemovalsForLocations(
+        [locationOf('claude-instructions'), locationOf('claude-settings')],
+        { homeDir: home, platform: 'linux', env: {} }
+      );
+
+      expect(leftovers[0]?.locationId).toBe('claude-instructions');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
 });

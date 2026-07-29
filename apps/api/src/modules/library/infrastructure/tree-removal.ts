@@ -50,7 +50,8 @@ export const nodeTreeRemovalFs: TreeRemovalFs = {
  */
 const STAGED_SUFFIX = '.removing';
 
-const STAGED_PATTERN = /^\..+\.[A-Za-z0-9_-]+\.removing$/;
+/** Captures the destination basename, which is how a leftover is traced home. */
+const STAGED_PATTERN = /^\.(.+)\.[A-Za-z0-9_-]+\.removing$/;
 
 function stagedRemovalPath(resolvedPath: string, suffix: string): string {
   return join(dirname(resolvedPath), `.${basename(resolvedPath)}.${suffix}${STAGED_SUFFIX}`);
@@ -180,16 +181,54 @@ export async function findStagedRemovalsForLocations(
   env: PathEnv,
   fs: TreeRemovalFs = nodeTreeRemovalFs
 ): Promise<StagedRemovalLeftover[]> {
-  const scanned = new Map<string, LibraryLocationId>();
+  const scanned = new Map<string, LocationDefinition[]>();
   for (const location of locations) {
     const directory = stagedRemovalDirectory(location, env);
-    if (directory !== null && !scanned.has(directory)) scanned.set(directory, location.id);
+    if (directory === null) continue;
+    const sharing = scanned.get(directory);
+    if (sharing) sharing.push(location);
+    else scanned.set(directory, [location]);
   }
 
   const found = await Promise.all(
-    [...scanned].map(([directory, locationId]) =>
-      findStagedRemovalLeftovers({ locationId, directory }, fs)
-    )
+    [...scanned].map(async ([directory, sharing]) => {
+      const primary = sharing[0];
+      if (primary === undefined) return [];
+      const leftovers = await findStagedRemovalLeftovers({ locationId: primary.id, directory }, fs);
+      // Scanned once per directory, then attributed per entry: the scan cannot
+      // tell which of the locations sharing the directory a staged tree is from.
+      return leftovers.map((leftover) => ({
+        ...leftover,
+        locationId: attributeLeftover(leftover.path, sharing, env, primary.id),
+      }));
+    })
   );
   return found.flat();
+}
+
+/**
+ * Which of the locations sharing a directory a staged tree came from.
+ *
+ * `~/.claude` is the staging directory for both `CLAUDE.md` and `settings.json`,
+ * so reporting `.settings.json.a1b2.removing` under whichever location happened
+ * to claim the directory first sends `mango doctor` — and the user reading it —
+ * to the wrong place. Only a `single-file` location owns a fixed basename, so
+ * that is what the staged name is matched against; a directory layout stages its
+ * slug directories under a root nothing else shares, and anything unmatched
+ * stays with the location that claimed the directory.
+ */
+function attributeLeftover(
+  path: string,
+  sharing: readonly LocationDefinition[],
+  env: PathEnv,
+  fallback: LibraryLocationId
+): LibraryLocationId {
+  const original = STAGED_PATTERN.exec(basename(path))?.[1];
+  if (original === undefined) return fallback;
+  for (const candidate of sharing) {
+    if (candidate.layout !== 'single-file') continue;
+    const root = candidate.resolvePath(env);
+    if (root !== null && basename(root) === original) return candidate.id;
+  }
+  return fallback;
 }
