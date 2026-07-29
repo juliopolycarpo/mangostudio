@@ -10,6 +10,7 @@ import { staticPlugin } from '@elysiajs/static';
 import { Elysia } from 'elysia';
 import { getConfig } from './lib/config';
 import { createDiagnosticLogger } from './lib/logger';
+import { apiKeyRoutes } from './modules/api-keys/http/api-key-routes';
 import { chatRoutes } from './modules/chats/http/chat-routes';
 import { environmentRoutes } from './modules/environments/http/environment-routes';
 import { fileCheckpointRoutes } from './modules/file-checkpoints/http/file-checkpoint-routes';
@@ -68,6 +69,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(apiKeyGuard)
   // Register features
   .use(authRoutes)
+  .use(apiKeyRoutes)
   .use(chatRoutes)
   .use(environmentRoutes)
   .use(capabilityRoutes)

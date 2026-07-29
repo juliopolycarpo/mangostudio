@@ -1,5 +1,9 @@
 import { apiKey } from '@better-auth/api-key';
-import { API_KEY_HEADER, type ApiKeyScope } from '@mangostudio/shared/api-keys';
+import {
+  API_KEY_HEADER,
+  API_KEY_NAME_MAX_LENGTH,
+  type ApiKeyScope,
+} from '@mangostudio/shared/api-keys';
 import { betterAuth } from 'better-auth';
 import { getDb } from './db/database';
 import { assertValidAuthSecret, getConfig } from './lib/config';
@@ -50,6 +54,7 @@ function createAuthInstance() {
       apiKey({
         apiKeyHeaders: API_KEY_HEADER,
         defaultPrefix: 'mango_',
+        maximumNameLength: API_KEY_NAME_MAX_LENGTH,
         // The scope (read-only | full) is carried in key metadata.
         enableMetadata: true,
         // Load-bearing: installs a `before` hook that resolves the key header
@@ -97,19 +102,62 @@ export function resetAuth(): void {
 export interface ApiKeyPluginApi {
   createApiKey(options: {
     body: {
-      userId: string;
+      userId?: string;
+      name?: string;
+      expiresIn?: number | null;
       metadata?: { scope: ApiKeyScope };
     };
-  }): Promise<{ key: string; id: string; referenceId: string }>;
+    headers?: Headers;
+  }): Promise<ApiKeyPluginRecord & { key: string }>;
+  listApiKeys(options: {
+    headers: Headers;
+    query?: {
+      sortBy?: string;
+      sortDirection?: 'asc' | 'desc';
+    };
+  }): Promise<{
+    apiKeys: ApiKeyPluginRecord[];
+    total: number;
+    limit?: number;
+    offset?: number;
+  }>;
+  deleteApiKey(options: {
+    body: { keyId: string };
+    headers: Headers;
+  }): Promise<{ success: boolean }>;
   verifyApiKey(options: { body: { key: string } }): Promise<{
     valid: boolean;
     error: { message?: string; code: string } | null;
-    key: {
-      id: string;
-      referenceId: string;
-      metadata: { scope?: ApiKeyScope } | null;
-    } | null;
+    key: ApiKeyPluginRecord | null;
   }>;
+}
+
+/**
+ * Narrow projection of Better Auth's API key record. The key hash is omitted:
+ * only the create endpoint's intersection above may expose plaintext `key`.
+ */
+export interface ApiKeyPluginRecord {
+  id: string;
+  name: string | null;
+  start: string | null;
+  referenceId: string;
+  createdAt: Date;
+  expiresAt: Date | null;
+  lastRequest: Date | null;
+  metadata: unknown;
+}
+
+/** Read the product scope from plugin metadata, defaulting unknown keys to least privilege. */
+export function resolveApiKeyScope(metadata: unknown): ApiKeyScope {
+  if (
+    typeof metadata === 'object' &&
+    metadata !== null &&
+    'scope' in metadata &&
+    metadata.scope === 'full'
+  ) {
+    return 'full';
+  }
+  return 'read-only';
 }
 
 /** Typed accessor for the api-key plugin's endpoints. See ApiKeyPluginApi. */

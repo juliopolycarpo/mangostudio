@@ -1,3 +1,4 @@
+import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { isAPIError } from 'better-auth/api';
 import { Elysia } from 'elysia';
@@ -41,6 +42,11 @@ const authMiddleware = new Elysia({ name: 'auth-middleware' }).derive(
     return {
       user: session?.user ?? null,
       session: session?.session ?? null,
+      authenticationMethod: session
+        ? request.headers.has(API_KEY_HEADER)
+          ? ('api-key' as const)
+          : ('session' as const)
+        : null,
     };
   }
 );
@@ -55,6 +61,24 @@ export const requireAuth = new Elysia({ name: 'require-auth' })
     if (!user) {
       set.status = 401;
       return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED } satisfies ApiErrorResponse;
+    }
+  })
+  .as('scoped');
+
+/**
+ * Stronger authenticated-route guard for credential-management surfaces.
+ * Valid API keys resolve through Better Auth like sessions, so the derived
+ * authentication method is the reliable distinction after authentication.
+ */
+export const requireCookieAuth = new Elysia({ name: 'require-cookie-auth' })
+  .use(requireAuth)
+  .onBeforeHandle({ as: 'scoped' }, ({ authenticationMethod, set }) => {
+    if (authenticationMethod === 'api-key') {
+      set.status = 403;
+      return {
+        error: 'API keys cannot manage API keys',
+        code: ERROR_CODES.API_KEY_SCOPE_FORBIDDEN,
+      } satisfies ApiErrorResponse;
     }
   })
   .as('scoped');
