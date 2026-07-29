@@ -22,6 +22,7 @@ import {
   GitHeadMessageResponseSchema,
   GitHistoryQuerySchema,
   GitHistoryResponseSchema,
+  GitPushBodySchema,
   GitRemoteBodySchema,
   type GitRepoState,
   GitRepoStateSchema,
@@ -758,13 +759,13 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await pushBranch(resolved.workdir, request.signal);
+          return await pushBranch(resolved.workdir, body, request.signal);
         } catch (error) {
           return gitWriteError(error, set);
         }
       },
       {
-        body: GitRemoteBodySchema,
+        body: GitPushBodySchema,
         response: {
           200: GitRepoStateSchema,
           403: ApiErrorResponseSchema,

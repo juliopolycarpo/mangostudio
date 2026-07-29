@@ -6,6 +6,7 @@ import type {
   DeleteBranchBody,
   DiscardPathsBody,
   GitBranchesResponse,
+  GitPushBody,
   GitRepoState,
   GitStatus,
   RenameBranchBody,
@@ -577,7 +578,11 @@ export function pullFastForward(workdir: string, signal?: AbortSignal): Promise<
   });
 }
 
-export function pushBranch(workdir: string, signal?: AbortSignal): Promise<GitRepoState> {
+export function pushBranch(
+  workdir: string,
+  input: Pick<GitPushBody, 'force'> = {},
+  signal?: AbortSignal
+): Promise<GitRepoState> {
   return runRemoteMutation(workdir, signal, 'Pushing changes', async (root) => {
     const status = await getRepoStatus(root, signal);
     if (!status.branch.name) {
@@ -587,8 +592,18 @@ export function pushBranch(workdir: string, signal?: AbortSignal): Promise<GitRe
         ERROR_CODES.CONFLICT
       );
     }
+    // A lease is a claim that the remote ref still points where this clone last
+    // saw it. Without an upstream there is nothing to lease against, and Git
+    // would fall back to an unconditional overwrite.
+    if (input.force && !status.branch.upstream) {
+      throw new GitWriteError(
+        'Publish the branch before forcing a push.',
+        422,
+        ERROR_CODES.VALIDATION
+      );
+    }
     const args = status.branch.upstream
-      ? ['push']
+      ? ['push', ...(input.force === 'with-lease' ? ['--force-with-lease'] : [])]
       : [
           'push',
           '--set-upstream',

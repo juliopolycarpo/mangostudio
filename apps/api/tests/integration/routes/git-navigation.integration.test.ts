@@ -324,6 +324,69 @@ describe('Git navigation routes', () => {
   );
 
   it.skipIf(!hasGit)(
+    'accepts a leased force push after an amend and rejects it once the peer moves',
+    async () => {
+      const remote = await tempDirectory('mango-git-lease-remote-');
+      await fixtureGit(remote, ['init', '--bare', '-b', 'main']);
+      const workdir = await createTempRepo();
+      await writeFile(join(workdir, 'leased.txt'), 'base\n');
+      await fixtureGit(workdir, ['add', 'leased.txt']);
+      await fixtureGit(workdir, ['commit', '-m', 'base']);
+      await fixtureGit(workdir, ['remote', 'add', 'origin', remote]);
+      const { app, chatId } = await createRouteFixture(workdir);
+      expect((await postJson(app, '/git/push', { chatId })).status).toBe(200);
+
+      await fixtureGit(workdir, ['commit', '--amend', '-m', 'base, reworded']);
+      const rejected = await postJson(app, '/git/push', { chatId });
+      expect(rejected.status).toBe(409);
+      expect(await rejected.json()).toMatchObject({ code: 'HISTORY_DIVERGED' });
+
+      const leased = await postJson(app, '/git/push', { chatId, force: 'with-lease' });
+      expect(leased.status).toBe(200);
+      expect(Value.Check(GitRepoStateSchema, await leased.json())).toBe(true);
+      expect(await fixtureGit(remote, ['log', '-1', '--format=%s', 'main'])).toBe('base, reworded');
+
+      // A peer commit the clone has not fetched invalidates the lease, which is
+      // the whole point of preferring it over a plain --force.
+      const peerParent = await tempDirectory('mango-git-lease-peer-');
+      await fixtureGit(peerParent, ['clone', remote, 'peer']);
+      const peer = join(peerParent, 'peer');
+      await fixtureGit(peer, ['config', 'user.email', 'peer@mangostudio.test']);
+      await fixtureGit(peer, ['config', 'user.name', 'Peer Test']);
+      await fixtureGit(peer, ['config', 'commit.gpgSign', 'false']);
+      await fixtureGit(peer, ['config', 'core.hooksPath', join(peer, '.git', 'hooks')]);
+      await writeFile(join(peer, 'peer.txt'), 'peer\n');
+      await fixtureGit(peer, ['add', 'peer.txt']);
+      await fixtureGit(peer, ['commit', '-m', 'peer ahead']);
+      await fixtureGit(peer, ['push']);
+      await fixtureGit(workdir, ['commit', '--amend', '-m', 'base, reworded twice']);
+
+      const staleLease = await postJson(app, '/git/push', { chatId, force: 'with-lease' });
+      expect(staleLease.status).toBe(409);
+      expect(await staleLease.json()).toMatchObject({ code: 'HISTORY_DIVERGED' });
+      expect(await fixtureGit(remote, ['log', '-1', '--format=%s', 'main'])).toBe('peer ahead');
+    },
+    GIT_NAVIGATION_TIMEOUT_MS
+  );
+
+  it.skipIf(!hasGit)(
+    'refuses a leased force push on a branch that has no upstream',
+    async () => {
+      const workdir = await createTempRepo();
+      await writeFile(join(workdir, 'unpublished.txt'), 'base\n');
+      await fixtureGit(workdir, ['add', 'unpublished.txt']);
+      await fixtureGit(workdir, ['commit', '-m', 'base']);
+      const { app, chatId } = await createRouteFixture(workdir);
+
+      const response = await postJson(app, '/git/push', { chatId, force: 'with-lease' });
+
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ code: 'VALIDATION' });
+    },
+    GIT_NAVIGATION_TIMEOUT_MS
+  );
+
+  it.skipIf(!hasGit)(
     'keeps diff reads inside the repository root',
     async () => {
       const workdir = await createTempRepo();
