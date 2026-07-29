@@ -31,6 +31,14 @@ export function useClipboard(options: UseClipboardOptions = {}): UseClipboardRes
     }
   }, []);
 
+  const scheduleReset = useCallback(() => {
+    resetTimerRef.current = setTimeout(() => {
+      setCopied(false);
+      setFailed(false);
+      resetTimerRef.current = null;
+    }, resetAfterMs);
+  }, [resetAfterMs]);
+
   useEffect(() => clearResetTimer, [clearResetTimer]);
 
   const copy = useCallback(
@@ -40,18 +48,16 @@ export function useClipboard(options: UseClipboardOptions = {}): UseClipboardRes
         await navigator.clipboard.writeText(text);
         setCopied(true);
         setFailed(false);
-        resetTimerRef.current = setTimeout(() => {
-          setCopied(false);
-          resetTimerRef.current = null;
-        }, resetAfterMs);
+        scheduleReset();
         return true;
       } catch {
         setCopied(false);
         setFailed(true);
+        scheduleReset();
         return false;
       }
     },
-    [clearResetTimer, resetAfterMs]
+    [clearResetTimer, scheduleReset]
   );
 
   return { copy, copied, failed };
