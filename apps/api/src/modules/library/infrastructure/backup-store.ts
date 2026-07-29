@@ -154,11 +154,17 @@ export async function writeBackupManifest(
   await deps.fs.writeFile(join(setPath, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-export function readBackupManifest(
+/**
+ * `async` on purpose: `backupSetPath` rejects a malformed id by throwing, and
+ * callers reach for `.catch()` to turn "no such backup" into a 404. Throwing
+ * synchronously would route a caller-supplied bad id past that catch and out as
+ * an unexpected 500 instead.
+ */
+export async function readBackupManifest(
   backupId: string,
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<BackupManifest | null> {
-  return readManifestAt(backupSetPath(backupId, deps), deps.fs);
+  return await readManifestAt(backupSetPath(backupId, deps), deps.fs);
 }
 
 async function readManifestAt(setPath: string, fs: BackupStoreFs): Promise<BackupManifest | null> {

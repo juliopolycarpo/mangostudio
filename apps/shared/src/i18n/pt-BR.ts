@@ -1675,6 +1675,13 @@ export const messages = {
       'remove-failed': 'A remoção falhou.',
       'verification-failed': 'A cópia continuava lá depois de ser removida.',
     },
+    removalKeptReason: {
+      'user-kept': 'Você escolheu manter esta cópia.',
+      absent: 'Não havia nada neste local.',
+      blocked: 'Não é possível escrever neste local.',
+      'not-attempted': 'Uma falha anterior interrompeu a remoção antes de chegar a esta cópia.',
+      'rolled-back': 'Ela voltou para o lugar depois que uma remoção seguinte falhou.',
+    },
     removal: {
       title: 'Remover {count} recursos',
       titleOne: 'Remover {resource}',
@@ -1715,6 +1722,8 @@ export const messages = {
       resultPartial:
         'Uma remoção falhou e não pôde ser desfeita por completo, então algumas cópias já sumiram. Use o backup abaixo.',
       resultRolledBack: 'Uma remoção falhou, então todas as cópias voltaram para o lugar.',
+      resultNone: 'Nada foi removido.',
+      resultKeptHeading: 'Continuam no lugar',
     },
     result: {
       title: 'Resultado',
@@ -1743,6 +1752,9 @@ export const messages = {
       pinnedHint:
         'Backups fixados guardam a última cópia de um recurso, então a retenção nunca os apaga.',
       purge: 'Descartar',
+      purgeConfirm: 'Excluir definitivamente',
+      purgeCancel: 'Manter',
+      purgeError: 'Não foi possível excluir este backup.',
       usage: '{count} backups ocupando {size}.',
       retention: 'Guardamos os últimos {count} ou {size}, o que vier primeiro.',
     },

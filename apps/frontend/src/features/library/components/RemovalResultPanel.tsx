@@ -7,7 +7,7 @@
  */
 
 import type { PropagationUndo, RemovalApply } from '@mangostudio/shared/library';
-import { CircleCheck, CircleX, TriangleAlert, Undo2 } from 'lucide-react';
+import { CircleCheck, CircleSlash, CircleX, TriangleAlert, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -33,6 +33,13 @@ export function RemovalResultPanel({
   if (!result) return null;
 
   const rolledBack = result.failed.length > 0 && !result.partial;
+  // Only the copies the apply itself decided about. A location the user
+  // unchecked, or one that held nothing, is not news — but a copy the run never
+  // reached, or put back on its way out, was shown as scheduled for removal and
+  // would otherwise vanish from the report entirely.
+  const unresolved = result.kept.filter(
+    (kept) => kept.reason === 'not-attempted' || kept.reason === 'rolled-back'
+  );
 
   return (
     <div className="space-y-4" data-testid="removal-result-panel" data-partial={result.partial}>
@@ -106,8 +113,33 @@ export function RemovalResultPanel({
         </section>
       )}
 
+      {unresolved.length > 0 && (
+        <section className="space-y-1.5">
+          <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+            {l.removal.resultKeptHeading}
+          </h3>
+          <ul className="space-y-1">
+            {unresolved.map((kept) => (
+              <li
+                key={`${kept.resourceKey}:${kept.locationId}`}
+                className="flex items-start gap-2 text-xs"
+                data-testid="kept-row"
+              >
+                <CircleSlash size={12} className="mt-0.5 shrink-0 text-on-surface-variant/60" />
+                <span className="min-w-0">
+                  <span className="text-on-surface">{kept.resourceKey}</span>
+                  <span className="block text-[11px] text-on-surface-variant/70">
+                    {l.removalKeptReason[kept.reason]}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {result.removed.length === 0 && result.failed.length === 0 && (
-        <p className="text-on-surface-variant text-xs">{l.result.none}</p>
+        <p className="text-on-surface-variant text-xs">{l.removal.resultNone}</p>
       )}
 
       {result.backupId && (

@@ -164,6 +164,29 @@ describe('eliminatedGroups', () => {
 
     expect(eliminatedGroups(divergent, draft)).toHaveLength(1);
   });
+
+  // The preview answers this for every removable copy at once, before the user
+  // has chosen anything, so two locations holding the same bytes are both
+  // flagged. Repeating that verbatim would warn someone that they are
+  // destroying a version they are in fact keeping.
+  it('stays quiet when another copy of the same version is being kept', () => {
+    const twins = preview([
+      entry({
+        locations: [
+          location('agents-skills', { contentHash: '7c21e8', eliminatesContentGroup: true }),
+          location('claude-skills', { contentHash: '7c21e8', eliminatesContentGroup: true }),
+        ],
+      }),
+    ]);
+
+    expect(eliminatedGroups(twins, removing(removalKey('skill:gh', 'claude-skills')))).toEqual([]);
+    expect(
+      eliminatedGroups(
+        twins,
+        removing(removalKey('skill:gh', 'claude-skills'), removalKey('skill:gh', 'agents-skills'))
+      )
+    ).toHaveLength(2);
+  });
 });
 
 describe('buildRemovalDecisions', () => {

@@ -16,7 +16,12 @@ import type {
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { formatRelativeTime, hashPrefix } from '../format';
-import { isRemovable, type RemovalDraft, removalKey } from '../removal';
+import {
+  eliminatesSelectedContentGroup,
+  isRemovable,
+  type RemovalDraft,
+  removalKey,
+} from '../removal';
 import { BlockedReason } from './BlockedReason';
 
 interface RemovalLocationStepProps {
@@ -65,7 +70,7 @@ export function RemovalLocationStep({ preview, draft, onToggle }: RemovalLocatio
                 key={location.locationId}
                 entry={entry}
                 location={location}
-                checked={draft.removing.has(removalKey(entry.resourceKey, location.locationId))}
+                draft={draft}
                 onToggle={onToggle}
               />
             ))
@@ -79,17 +84,19 @@ export function RemovalLocationStep({ preview, draft, onToggle }: RemovalLocatio
 function RemovalRow({
   entry,
   location,
-  checked,
+  draft,
   onToggle,
 }: {
   readonly entry: RemovalPreviewEntry;
   readonly location: RemovalLocation;
-  readonly checked: boolean;
+  readonly draft: RemovalDraft;
   readonly onToggle: (resourceKey: string, locationId: LibraryLocationId) => void;
 }) {
   const { t, locale } = useI18n();
   const l = t.library;
   const removable = isRemovable(location);
+  const checked = draft.removing.has(removalKey(entry.resourceKey, location.locationId));
+  const eliminatesGroup = eliminatesSelectedContentGroup(entry, location, draft);
 
   return (
     <label
@@ -137,7 +144,7 @@ function RemovalRow({
           Divergent copies are not interchangeable, and the minority version is
           often the newest work. Saying so is the whole point of the row.
         */}
-        {location.eliminatesContentGroup && checked && removable && (
+        {eliminatesGroup && checked && removable && (
           <span className="block text-[11px] text-tertiary" data-testid="eliminates-group">
             {formatMessage(l.removal.eliminatesGroup, {
               hash: `${hashPrefix(location.contentHash ?? '')}…`,

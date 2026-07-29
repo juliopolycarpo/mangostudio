@@ -310,6 +310,116 @@ describe('applyLibraryRemoval atomicity', () => {
     );
   });
 
+  it('reports only the copies whose compensation also failed as removed', async () => {
+    const order = ['agents-skills', 'claude-skills', 'mango-skills'] as const;
+    const paths = Object.fromEntries(
+      order.map((locationId) => [locationId, seedSkill(SKILL_LOCATION_ROOTS[locationId], 'one')])
+    );
+    const preview = previewOf([await entryFor(order)]);
+
+    // Renames 1 and 2 stage agents and claude, 3 fails the apply, 4 puts claude
+    // back, and 5 fails to put agents back. Only agents is really gone.
+    let renames = 0;
+    const treeFs: TreeRemovalFs = {
+      ...nodeTreeRemovalFs,
+      rename(source, destination) {
+        renames += 1;
+        if (renames === 3 || renames === 5) return Promise.reject(new Error('disk went away'));
+        return nodeTreeRemovalFs.rename(source, destination);
+      },
+    };
+
+    const result = await apply(
+      preview,
+      requestFor(preview, { acknowledgeLastCopy: ['skill:gh'] }),
+      { treeFs }
+    );
+
+    expect(result.partial).toBe(true);
+    // Listing claude here would send the caller to restore a tree that is
+    // sitting exactly where they left it.
+    expect(result.removed.map((row) => row.locationId)).toEqual(['agents-skills']);
+    expect(existsSync(paths['claude-skills'])).toBe(true);
+    expect(existsSync(paths['agents-skills'])).toBe(false);
+    expect(result.failed.map((row) => row.locationId)).toEqual(['mango-skills']);
+  });
+
+  it('withholds a backup id the undo route could not resolve', async () => {
+    seedSkill(SKILL_LOCATION_ROOTS['claude-skills'], 'one');
+    const preview = previewOf([await entryFor(['claude-skills'])]);
+
+    // Rename 1 stages the tree, the manifest write then fails, and rename 2 —
+    // putting the tree back — fails too. The copy is gone and nothing on disk
+    // says where it went.
+    let renames = 0;
+    const treeFs: TreeRemovalFs = {
+      ...nodeTreeRemovalFs,
+      rename(source, destination) {
+        renames += 1;
+        if (renames === 2) return Promise.reject(new Error('disk went away'));
+        return nodeTreeRemovalFs.rename(source, destination);
+      },
+    };
+    const backup = backupDeps({
+      fs: {
+        ...defaultBackupStoreDeps.fs,
+        writeFile: () => Promise.reject(new Error('no space left on device')),
+      },
+    });
+
+    const result = await apply(
+      preview,
+      requestFor(preview, { acknowledgeLastCopy: ['skill:gh'] }),
+      { treeFs, backup }
+    );
+
+    expect(result.partial).toBe(true);
+    expect(result.removed).toHaveLength(1);
+    // `undo` resolves a manifest and answers 404 without one, so returning the
+    // id would put a restore button on screen that cannot work.
+    expect(result.backupId).toBeUndefined();
+    // It still has to reach the user, because the backup set is the only copy.
+    expect(result.failed[0]?.message).toContain('2026-07-28T10-00-00.000Z-fixed');
+  });
+
+  it('accounts for every reviewed location when the apply stops at a failure', async () => {
+    const order = ['agents-skills', 'claude-skills', 'mango-skills', 'codex-skills'] as const;
+    for (const locationId of order) seedSkill(SKILL_LOCATION_ROOTS[locationId], 'one');
+    const preview = previewOf([await entryFor(order)]);
+
+    // Rename 1 stages agents, rename 2 fails on claude, and mango and codex are
+    // never reached. Rename 3 puts agents back, so nothing ends up removed.
+    let renames = 0;
+    const treeFs: TreeRemovalFs = {
+      ...nodeTreeRemovalFs,
+      rename(source, destination) {
+        renames += 1;
+        if (renames === 2) return Promise.reject(new Error('disk went away'));
+        return nodeTreeRemovalFs.rename(source, destination);
+      },
+    };
+
+    const result = await apply(
+      preview,
+      requestFor(preview, { acknowledgeLastCopy: ['skill:gh'] }),
+      { treeFs }
+    );
+
+    expect(result.partial).toBe(false);
+    expect(result.removed).toEqual([]);
+    expect(result.failed.map((row) => row.locationId)).toEqual(['claude-skills']);
+    // Without these the response would simply omit three of the four locations
+    // the user reviewed, and the panel would show a failure with no account of
+    // what happened to everything else.
+    expect(
+      result.kept.map((row) => [row.locationId, row.reason]).sort((a, b) => (a[0] < b[0] ? -1 : 1))
+    ).toEqual([
+      ['agents-skills', 'rolled-back'],
+      ['codex-skills', 'not-attempted'],
+      ['mango-skills', 'not-attempted'],
+    ]);
+  });
+
   it('fails and rolls back when a destination survives its own removal', async () => {
     const path = seedSkill(SKILL_LOCATION_ROOTS['claude-skills'], 'one');
     const preview = previewOf([await entryFor(['claude-skills'])]);

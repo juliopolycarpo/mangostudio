@@ -162,6 +162,24 @@ describe('backup manifest', () => {
     writeFileSync(join(backupRoot, 'set-2', 'manifest.json'), '{ not json');
     expect(await readBackupManifest('set-2', deps())).toBeNull();
   });
+
+  // The backup id reaches here straight from an undo request body. Callers
+  // reach for `.catch()` to turn "no such backup" into a 404, and a synchronous
+  // throw would sail past that catch and surface as an unexpected 500.
+  it('rejects rather than throws when the id could escape the backup root', async () => {
+    // Written as a bare try/catch because a synchronous throw and a rejected
+    // promise are what this is telling apart, and the matchers conflate them.
+    let threwSynchronously = false;
+    let settled: unknown;
+    try {
+      settled = await readBackupManifest('../escape', deps()).catch((error: unknown) => error);
+    } catch {
+      threwSynchronously = true;
+    }
+
+    expect(threwSynchronously).toBe(false);
+    expect(settled).toBeInstanceOf(TypeError);
+  });
 });
 
 describe('restoreBackupEntry', () => {

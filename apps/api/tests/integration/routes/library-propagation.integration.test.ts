@@ -583,6 +583,26 @@ describe('propagation apply, undo, and backup routes', () => {
     expect(response.status).toBe(404);
   });
 
+  it('refuses a backup id that would escape the backup root', async () => {
+    let reached = false;
+    const app = harness({
+      undo: () => {
+        reached = true;
+        return Promise.reject(new LibraryRequestError(404, 'No such backup.'));
+      },
+    });
+
+    const response = await app.handle(
+      jsonRequest('/library/propagate/undo', 'POST', { backupId: '../../etc/passwd' })
+    );
+
+    // Every backup id becomes a path segment under the backup root, so the shape
+    // is a request-validation concern and never reaches the store's own guard —
+    // which raises a TypeError the route would have to report as a 500.
+    expect(response.status).toBe(422);
+    expect(reached).toBe(false);
+  });
+
   it('reports what retained backups cost, with the bounds they are trimmed to', async () => {
     const usage = {
       setCount: 3,

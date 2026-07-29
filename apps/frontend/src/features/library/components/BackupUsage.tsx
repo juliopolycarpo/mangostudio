@@ -13,6 +13,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2 } from 'lucide-react';
+import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { purgeBackup } from '../api';
@@ -24,8 +25,14 @@ export function BackupUsage() {
   const l = t.library;
   const queryClient = useQueryClient();
   const query = useQuery(backupUsageQueryOptions());
+  // A pinned set is the last remaining copy of something, and the purge is not
+  // undoable by anything. One stray click must not be the whole interaction —
+  // the removal that created this set demanded an explicit acknowledgement, and
+  // destroying its only backup deserves no less.
+  const [confirming, setConfirming] = useState<string | null>(null);
   const purge = useMutation({
     mutationFn: (backupId: string) => purgeBackup(backupId),
+    onSettled: () => setConfirming(null),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: libraryKeys.backups() }),
   });
   const usage = query.data;
@@ -72,16 +79,49 @@ export function BackupUsage() {
                     {set.lastCopyResourceKeys.join(', ')}
                   </span>
                 )}
-                <button
-                  type="button"
-                  onClick={() => purge.mutate(set.backupId)}
-                  disabled={purge.isPending}
-                  className="inline-flex items-center gap-1 text-error hover:underline disabled:opacity-50"
-                  data-testid="purge-backup"
-                >
-                  <Trash2 size={11} />
-                  {l.backups.purge}
-                </button>
+                {confirming === set.backupId ? (
+                  <span className="inline-flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => purge.mutate(set.backupId)}
+                      disabled={purge.isPending}
+                      className="inline-flex items-center gap-1 font-semibold text-error hover:underline disabled:opacity-50"
+                      data-testid="purge-backup-confirm"
+                    >
+                      <Trash2 size={11} />
+                      {l.backups.purgeConfirm}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(null)}
+                      className="text-on-surface-variant/70 hover:underline"
+                      data-testid="purge-backup-cancel"
+                    >
+                      {l.backups.purgeCancel}
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirming(set.backupId)}
+                    disabled={purge.isPending}
+                    className="inline-flex items-center gap-1 text-error hover:underline disabled:opacity-50"
+                    data-testid="purge-backup"
+                  >
+                    <Trash2 size={11} />
+                    {l.backups.purge}
+                  </button>
+                )}
+                {/*
+                  Keyed to the row that was actually purged. A failed purge that
+                  says nothing is indistinguishable from one that worked, and the
+                  set is still on disk counting against the retention budget.
+                */}
+                {purge.isError && purge.variables === set.backupId && (
+                  <span className="text-error" data-testid="purge-backup-error">
+                    {l.backups.purgeError}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

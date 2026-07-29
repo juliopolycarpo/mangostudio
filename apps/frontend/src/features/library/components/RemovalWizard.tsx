@@ -53,7 +53,16 @@ export function RemovalWizard({ resourceKeys, locationIds, onClose }: RemovalWiz
       : formatMessage(l.removal.title, { count: String(resourceKeys.length) });
 
   const hasLocations = locationIds.length > 0;
-  const canRemove = pendingAcks.length === 0 && !nothingSelected && !wizard.isApplying;
+  // A rejected apply leaves the draft aimed at a preview the server has already
+  // refused. Until a fresh one arrives — which clears both flags — the button
+  // can only reproduce the same rejection, so it stays out of reach and the
+  // banner's "Preview again" is the only way forward.
+  const canRemove =
+    pendingAcks.length === 0 &&
+    !nothingSelected &&
+    !wizard.isApplying &&
+    !wizard.isStale &&
+    !wizard.needsLastCopyReview;
 
   return (
     <div
@@ -115,7 +124,22 @@ export function RemovalWizard({ resourceKeys, locationIds, onClose }: RemovalWiz
             </div>
           )}
 
-          {!hasLocations ? (
+          {/*
+            The result panel is checked before any preview state. Removing the
+            last copy of a resource makes the next preview 404 — the resource is
+            gone — and the apply invalidates the library keys, so gating the
+            panel on a healthy preview would replace the backup id and Undo with
+            an error exactly when they are the only way back.
+          */}
+          {wizard.step === 'result' ? (
+            <RemovalResultPanel
+              result={wizard.result}
+              undoResult={wizard.undoResult}
+              isUndoing={wizard.isUndoing}
+              undoError={wizard.undoError}
+              onUndo={wizard.undo}
+            />
+          ) : !hasLocations ? (
             <LibraryPageState
               variant="empty"
               title={l.removal.noLocations}
@@ -135,19 +159,11 @@ export function RemovalWizard({ resourceKeys, locationIds, onClose }: RemovalWiz
               draft={wizard.draft}
               onToggle={wizard.toggleLocation}
             />
-          ) : wizard.step === 'confirm' ? (
+          ) : (
             <RemovalConfirmStep
               preview={preview}
               draft={wizard.draft}
               onToggleAcknowledgement={wizard.toggleAcknowledgement}
-            />
-          ) : (
-            <RemovalResultPanel
-              result={wizard.result}
-              undoResult={wizard.undoResult}
-              isUndoing={wizard.isUndoing}
-              undoError={wizard.undoError}
-              onUndo={wizard.undo}
             />
           )}
         </div>

@@ -111,36 +111,47 @@ async function runRemoval(
   const plan = planRemoval(preview, request);
   const env = deps.pathEnv();
   const backupId = createBackupId(deps.backup);
-  const staged: StagedRemoval[] = [];
-  const entries: BackupEntry[] = [];
-  const removed: RemovalRemoved[] = [];
+  const results: StagedOperation[] = [];
   const failed: RemovalFailure[] = [];
 
   for (const operation of plan.operations) {
     try {
-      const result = await stageOperation(operation, env, backupId, deps);
-      staged.push(result.staged);
-      entries.push(result.entry);
-      removed.push(result.removed);
+      results.push(await stageOperation(operation, env, backupId, deps));
     } catch (error) {
       failed.push(describeFailure(operation, error));
       break;
     }
   }
 
+  const staged = results.map((result) => result.staged);
+  const entries = results.map((result) => result.entry);
+  const removed = results.map((result) => result.removed);
+
   if (failed.length > 0) {
-    const rolledBack = await rollback(staged);
-    if (rolledBack) {
+    // Captured before the rollback, because it is the staging loop that stopped
+    // short: everything after the failing operation was never tried, and the
+    // user reviewed those locations too.
+    const unattempted = notAttempted(plan.operations, results.length);
+    const unrestored = await rollback(staged);
+    const kept = [...plan.kept, ...rolledBack(results, unrestored), ...unattempted];
+    if (unrestored.size === 0) {
       // Every tree is back where it started, so the copies in the backup set
       // are redundant and keeping them would only confuse the retention budget.
       await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-      return { partial: false, removed: [], kept: plan.kept, failed };
+      return { partial: false, removed: [], kept, failed };
     }
-    // Compensation failed, so some copies are already gone. They are reported
-    // as removed — claiming nothing happened would hide exactly the paths the
-    // caller now has to restore — and the manifest is what `undo` needs.
+    // Compensation failed for some copies. Only those are reported as removed:
+    // a tree the rollback did put back is on disk, and listing it here would
+    // send the caller to restore a path that never went anywhere. The manifest
+    // still carries every entry, so `undo` can reach all of them.
     await persistManifest(backupId, entries, plan, deps);
-    return { partial: true, removed, kept: plan.kept, failed, backupId };
+    return {
+      partial: true,
+      removed: stillRemoved(results, unrestored),
+      kept,
+      failed,
+      backupId,
+    };
   }
 
   if (entries.length === 0) {
@@ -154,17 +165,27 @@ async function runRemoval(
   try {
     await persistManifest(backupId, entries, plan, deps);
   } catch (error) {
-    const rolledBack = await rollback(staged);
-    if (rolledBack) await discardBackupSet(backupId, deps.backup).catch(() => undefined);
+    const unrestored = await rollback(staged);
+    if (unrestored.size === 0) await discardBackupSet(backupId, deps.backup).catch(() => undefined);
     failed.push({
       resourceKey: plan.operations[0]?.resourceKey ?? '',
       locationId: plan.operations[0]?.locationId ?? '',
       reason: 'remove-failed',
-      message: `Could not record the backup manifest: ${errorMessage(error)}`,
+      // The set id belongs in the message rather than in `backupId`: without a
+      // manifest `undo` resolves nothing and answers 404, so returning the field
+      // would render a restore button that cannot work. Naming the set here
+      // still points a human at the copies, which is all that is left.
+      message: `Could not record the backup manifest, so this removal cannot be undone automatically; the copies are under backup set "${backupId}": ${errorMessage(error)}`,
     });
-    return rolledBack
-      ? { partial: false, removed: [], kept: plan.kept, failed }
-      : { partial: true, removed, kept: plan.kept, failed, backupId };
+    const kept = [...plan.kept, ...rolledBack(results, unrestored)];
+    return unrestored.size === 0
+      ? { partial: false, removed: [], kept, failed }
+      : {
+          partial: true,
+          removed: stillRemoved(results, unrestored),
+          kept,
+          failed,
+        };
   }
 
   for (const stage of staged) {
@@ -459,21 +480,68 @@ function assertPreviewedPath(
 }
 
 /**
- * Renames every staged tree back, newest first. Returns false when any
- * compensation failed — the one case where the backups must be kept and the
- * apply reported as partial.
+ * Renames every staged tree back, newest first. Returns the stage paths whose
+ * compensation failed — empty means the disk is exactly as it was, and anything
+ * else is the one case where the backups must be kept and the apply reported as
+ * partial.
  */
-async function rollback(staged: readonly StagedRemoval[]): Promise<boolean> {
-  let complete = true;
+async function rollback(staged: readonly StagedRemoval[]): Promise<ReadonlySet<string>> {
+  const unrestored = new Set<string>();
   for (const stage of [...staged].reverse()) {
     try {
       await stage.rollback();
     } catch (error) {
-      complete = false;
+      unrestored.add(stage.stagePath);
       console.error(`[library] Could not restore "${stage.resolvedPath}":`, error);
     }
   }
-  return complete;
+  return unrestored;
+}
+
+/**
+ * The copies a failed compensation really did leave gone. Anything the rollback
+ * put back is on disk and must not be reported as removed — the response is
+ * what the caller reads to decide which paths still need restoring.
+ */
+function stillRemoved(
+  results: readonly StagedOperation[],
+  unrestored: ReadonlySet<string>
+): RemovalRemoved[] {
+  return results
+    .filter((result) => unrestored.has(result.staged.stagePath))
+    .map((result) => result.removed);
+}
+
+/**
+ * The copies a compensation did put back. They sit on disk exactly as they did
+ * before the apply, so the caller has to see them as kept — reporting them
+ * nowhere at all would leave a location the user reviewed unaccounted for.
+ */
+function rolledBack(
+  results: readonly StagedOperation[],
+  unrestored: ReadonlySet<string>
+): RemovalKept[] {
+  return results
+    .filter((result) => !unrestored.has(result.staged.stagePath))
+    .map((result) => ({
+      resourceKey: result.removed.resourceKey,
+      locationId: result.removed.locationId,
+      reason: 'rolled-back' as const,
+    }));
+}
+
+/**
+ * The copies the apply stopped short of. Staging halts at the first failure, so
+ * every operation after it was planned, shown to the user, and then silently
+ * skipped. `staged` is how many succeeded; the one at that index is the failure
+ * already recorded in `failed`.
+ */
+function notAttempted(operations: readonly PlannedRemoval[], staged: number): RemovalKept[] {
+  return operations.slice(staged + 1).map((operation) => ({
+    resourceKey: operation.resourceKey,
+    locationId: operation.locationId,
+    reason: 'not-attempted' as const,
+  }));
 }
 
 class GuardError extends Error {}

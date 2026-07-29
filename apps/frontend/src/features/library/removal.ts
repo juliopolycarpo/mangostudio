@@ -86,6 +86,35 @@ export function pendingAcknowledgements(
 }
 
 /**
+ * Whether removing this copy, given what else is marked, takes the last copy of
+ * its version with it.
+ *
+ * The preview's own `eliminatesContentGroup` answers the question for *every*
+ * removable copy at once, because it is computed before the user has chosen
+ * anything. Two locations holding the same bytes are therefore both flagged,
+ * and reporting that verbatim would tell someone who checked one of them that
+ * they are destroying a version they are in fact keeping. A false alarm in a
+ * destructive flow is not harmless: it is what teaches people to ignore the
+ * real one.
+ */
+export function eliminatesSelectedContentGroup(
+  entry: RemovalPreviewEntry,
+  location: RemovalLocation,
+  draft: RemovalDraft
+): boolean {
+  // The preview looked at copies this wizard never offers, so a `false` here
+  // means one of those survives and no local reasoning can overturn it.
+  if (!location.eliminatesContentGroup) return false;
+  if (location.contentHash === undefined) return false;
+  return !entry.locations.some(
+    (candidate) =>
+      candidate.locationId !== location.locationId &&
+      candidate.contentHash === location.contentHash &&
+      !draft.removing.has(removalKey(entry.resourceKey, candidate.locationId))
+  );
+}
+
+/**
  * Marked copies that would take the only copy of their version with them.
  *
  * Never a block. Resolving a divergence by deleting the copy you do not want is
@@ -96,7 +125,9 @@ export function eliminatedGroups(
   preview: RemovalPreview,
   draft: RemovalDraft
 ): { entry: RemovalPreviewEntry; location: RemovalLocation }[] {
-  return plannedRemovals(preview, draft).filter(({ location }) => location.eliminatesContentGroup);
+  return plannedRemovals(preview, draft).filter(({ entry, location }) =>
+    eliminatesSelectedContentGroup(entry, location, draft)
+  );
 }
 
 /** True when nothing is marked, so submitting would remove nothing. */

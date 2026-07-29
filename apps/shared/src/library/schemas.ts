@@ -542,8 +542,22 @@ export const PropagationApplySchema = Type.Object({
   failed: Type.Array(PropagationFailureSchema),
 });
 
+/**
+ * A backup set id supplied by a client.
+ *
+ * Every one of these becomes a path segment under the backup root, so the shape
+ * is constrained at the edge rather than only by the store's own guard: a
+ * leading dot, a slash, or a `..` must be a 422 on the way in, not a `TypeError`
+ * raised deep enough that a route reports it as an internal failure.
+ */
+const BackupIdRequestSchema = Type.String({
+  minLength: 1,
+  maxLength: 128,
+  pattern: '^[A-Za-z0-9_-][A-Za-z0-9._-]*$',
+});
+
 export const PropagationUndoRequestSchema = Type.Object({
-  backupId: Type.String({ minLength: 1, maxLength: 128 }),
+  backupId: BackupIdRequestSchema,
 });
 
 export const PropagationUndoEntrySchema = Type.Object({
@@ -602,7 +616,7 @@ export const PropagationBackupUsageSchema = Type.Object({
 });
 
 export const PropagationBackupPurgeRequestSchema = Type.Object({
-  backupId: Type.String({ minLength: 1, maxLength: 128 }),
+  backupId: BackupIdRequestSchema,
 });
 
 /**
@@ -764,10 +778,22 @@ export const RemovalApplyRequestSchema = Type.Object({
   profileId: Type.Optional(ProfileIdSchema),
 });
 
+/**
+ * Why a copy the preview offered is still on disk.
+ *
+ * Every location the user reviewed lands in exactly one of `removed`, `kept`, or
+ * `failed`. The last two reasons exist to keep that total: an apply stops at its
+ * first failure, and the copies it never reached — or already put back — would
+ * otherwise be reported nowhere at all.
+ */
 export const RemovalKeptReasonSchema = Type.Union([
   Type.Literal('user-kept'),
   Type.Literal('absent'),
   Type.Literal('blocked'),
+  /** The apply stopped at an earlier failure and never reached this copy. */
+  Type.Literal('not-attempted'),
+  /** Staged aside, then restored when a later failure compensated the apply. */
+  Type.Literal('rolled-back'),
 ]);
 
 export const RemovalFailureReasonSchema = Type.Union([

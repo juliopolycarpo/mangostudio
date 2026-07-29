@@ -86,11 +86,20 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
 
   // A new preview always starts from an empty selection. Carrying checkboxes
   // across a re-read would let a user confirm a deletion they chose against a
-  // picture of the disk that no longer holds.
+  // picture of the disk that no longer holds. Keyed on the preview token rather
+  // than on the draft being unset, because a refetch — an invalidation
+  // elsewhere, a changed location set — replaces the preview without ever
+  // passing through null, and that is exactly the case worth resetting.
+  // Both rejection banners go with it. Each one says "preview again before
+  // removing", and a preview that just arrived is the thing they were asking
+  // for — leaving them up would tell the user to redo work already done.
+  const previewToken = preview?.previewToken;
   useEffect(() => {
-    if (!preview) return;
-    setDraft((current) => current ?? initialRemovalDraft());
-  }, [preview]);
+    if (previewToken === undefined) return;
+    setDraft(initialRemovalDraft());
+    setIsStale(false);
+    setNeedsLastCopyReview(false);
+  }, [previewToken]);
 
   const effectiveDraft = useMemo<RemovalDraft>(() => draft ?? EMPTY_DRAFT, [draft]);
 

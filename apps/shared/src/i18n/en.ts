@@ -1654,6 +1654,13 @@ export const messages: Messages = {
       'remove-failed': 'The removal failed.',
       'verification-failed': 'The copy was still there after being removed.',
     },
+    removalKeptReason: {
+      'user-kept': 'You chose to keep this copy.',
+      absent: 'There was nothing at this location.',
+      blocked: 'This location cannot be written to.',
+      'not-attempted': 'An earlier failure stopped the removal before it reached this copy.',
+      'rolled-back': 'It was put back after a later removal failed.',
+    },
     removal: {
       title: 'Remove {count} resources',
       titleOne: 'Remove {resource}',
@@ -1694,6 +1701,8 @@ export const messages: Messages = {
       resultPartial:
         'A removal failed and could not be fully undone, so some copies are already gone. Use the backup below.',
       resultRolledBack: 'A removal failed, so every copy was put back.',
+      resultNone: 'Nothing was removed.',
+      resultKeptHeading: 'Still there',
     },
     result: {
       title: 'Result',
@@ -1722,6 +1731,11 @@ export const messages: Messages = {
       pinnedHint:
         'Pinned sets hold the last remaining copy of a resource, so retention never deletes them.',
       purge: 'Purge',
+      // Two clicks, because the set being purged is the only remaining copy of
+      // whatever the removal that created it took.
+      purgeConfirm: 'Delete it permanently',
+      purgeCancel: 'Keep it',
+      purgeError: 'This backup could not be deleted.',
       usage: '{count} backups using {size}.',
       retention: 'We keep the last {count} or {size}, whichever comes first.',
     },
