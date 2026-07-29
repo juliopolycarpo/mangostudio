@@ -45,8 +45,14 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
 
   const copyJson = async () => {
     if (!preview) return;
-    const ok = await copy(preview.content);
-    if (ok) toast(s.portability.copiedJson, 'success');
+    // An insecure context (or a denied permission) rejects the clipboard write.
+    // Say so — a silent no-op reads as "copied" and the JSON is lost.
+    if (await copy(preview.content)) {
+      setError(null);
+      toast(s.portability.copiedJson, 'success');
+      return;
+    }
+    setError(s.portability.copyJsonFailed);
   };
 
   const downloadJson = () => {

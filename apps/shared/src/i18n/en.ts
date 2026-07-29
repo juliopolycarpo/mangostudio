@@ -925,6 +925,7 @@ export const messages: Messages = {
         exportFailed: 'Export failed',
         copyJson: 'Copy JSON',
         copiedJson: 'JSON copied',
+        copyJsonFailed: 'Could not copy to the clipboard. Download the file instead.',
         downloadJson: 'Download JSON',
         importDescription:
           'Review every add, skip, replacement, or copy before applying the configuration as one transaction.',

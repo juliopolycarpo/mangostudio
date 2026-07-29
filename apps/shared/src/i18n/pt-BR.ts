@@ -939,6 +939,8 @@ export const messages = {
         exportFailed: 'Falha na exportação',
         copyJson: 'Copiar JSON',
         copiedJson: 'JSON copiado',
+        copyJsonFailed:
+          'Não foi possível copiar para a área de transferência. Baixe o arquivo em vez disso.',
         downloadJson: 'Baixar JSON',
         importDescription:
           'Revise cada adição, omissão, substituição ou cópia antes de aplicar a configuração em uma única transação.',
