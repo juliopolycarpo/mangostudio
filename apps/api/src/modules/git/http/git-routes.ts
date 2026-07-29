@@ -18,6 +18,7 @@ import {
   GitDiffQuerySchema,
   GitDiffResponseSchema,
   GitFetchBodySchema,
+  GitHeadMessageResponseSchema,
   GitHistoryQuerySchema,
   GitHistoryResponseSchema,
   GitRemoteBodySchema,
@@ -51,7 +52,12 @@ import {
   generateCommitMessageUseCase,
   NoCommitChangesError,
 } from '../application/generate-commit-message';
-import { getCommitDetails, getFileDiff, listHistory } from '../application/git-navigation-service';
+import {
+  getCommitDetails,
+  getFileDiff,
+  getHeadMessage,
+  listHistory,
+} from '../application/git-navigation-service';
 import { getRepoState, initRepo } from '../application/git-status-service';
 import {
   checkoutRemoteBranch,
@@ -324,6 +330,39 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         body: CommitBodySchema,
         response: {
           200: CommitResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .get(
+      '/head-message',
+      async ({ query, request, set, user }) => {
+        const db = getDb();
+        const userId = user?.id ?? '';
+        const resolved = await routeWorkdir(query.chatId, userId, set);
+        if ('error' in resolved) return resolved.error;
+
+        try {
+          // `/commit` re-adds the trailer from the same setting, so the form
+          // must not be prefilled with one it would then duplicate.
+          const settings = await getAppSettings(db, userId);
+          return await getHeadMessage(
+            resolved.workdir,
+            settings.gitSettings.signOff,
+            request.signal
+          );
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        query: GitStateQuerySchema,
+        response: {
+          200: GitHeadMessageResponseSchema,
           403: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           409: ApiErrorResponseSchema,

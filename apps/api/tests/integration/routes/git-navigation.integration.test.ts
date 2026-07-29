@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import {
   GitBranchesResponseSchema,
   type GitCommitDetailsResponse,
   GitCommitDetailsResponseSchema,
   type GitDiffResponse,
   GitDiffResponseSchema,
+  type GitHeadMessageResponse,
+  GitHeadMessageResponseSchema,
   type GitHistoryResponse,
   GitHistoryResponseSchema,
   type GitRepoState,
@@ -15,6 +18,7 @@ import {
 } from '@mangostudio/shared/git';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
+import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import {
@@ -50,6 +54,10 @@ async function createTempRepo(): Promise<string> {
   await fixtureGit(path, ['config', 'user.email', 'git-navigation@mangostudio.test']);
   await fixtureGit(path, ['config', 'user.name', 'Git Navigation Test']);
   await fixtureGit(path, ['config', 'commit.gpgSign', 'false']);
+  // Developer machines may set core.hooksPath globally (e.g. to force
+  // Signed-off-by). Pointing at this repo's own hooks directory keeps fixture
+  // commit messages exactly as written.
+  await fixtureGit(path, ['config', 'core.hooksPath', join(path, '.git', 'hooks')]);
   return path;
 }
 
@@ -258,6 +266,59 @@ describe('Git navigation routes', () => {
           status: 'renamed',
         })
       );
+    },
+    GIT_NAVIGATION_TIMEOUT_MS
+  );
+
+  it.skipIf(!hasGit)(
+    'reads the HEAD message and strips sign-off only when the setting adds it back',
+    async () => {
+      const workdir = await createTempRepo();
+      await writeFile(join(workdir, 'amend.txt'), 'base\n');
+      await fixtureGit(workdir, ['add', 'amend.txt']);
+      await fixtureGit(workdir, [
+        'commit',
+        '-m',
+        'feat(git): land the panel',
+        '-m',
+        'Explain the change.\n\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>',
+      ]);
+      const { app, chatId, user } = await createRouteFixture(workdir);
+
+      const preserved = await getRoute(app, '/git/head-message', { chatId });
+      expect(preserved.status).toBe(200);
+      const preservedPayload = (await preserved.json()) as GitHeadMessageResponse;
+      expect(Value.Check(GitHeadMessageResponseSchema, preservedPayload)).toBe(true);
+      expect(preservedPayload.hash).toBe(await fixtureGit(workdir, ['rev-parse', 'HEAD']));
+      expect(preservedPayload.title).toBe('feat(git): land the panel');
+      expect(preservedPayload.body).toBe(
+        'Explain the change.\n\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>'
+      );
+
+      await updateAppSettings(getDb(), user.id, {
+        ...DEFAULT_APP_SETTINGS,
+        gitSettings: { ...DEFAULT_APP_SETTINGS.gitSettings, signOff: true },
+      });
+
+      const stripped = await getRoute(app, '/git/head-message', { chatId });
+      expect(stripped.status).toBe(200);
+      const strippedPayload = (await stripped.json()) as GitHeadMessageResponse;
+      expect(strippedPayload.title).toBe('feat(git): land the panel');
+      expect(strippedPayload.body).toBe('Explain the change.');
+    },
+    GIT_NAVIGATION_TIMEOUT_MS
+  );
+
+  it.skipIf(!hasGit)(
+    'reports a repository without commits as an amend without HEAD',
+    async () => {
+      const workdir = await createTempRepo();
+      const { app, chatId } = await createRouteFixture(workdir);
+
+      const response = await getRoute(app, '/git/head-message', { chatId });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: 'AMEND_WITHOUT_HEAD' });
     },
     GIT_NAVIGATION_TIMEOUT_MS
   );

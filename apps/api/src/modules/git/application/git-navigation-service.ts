@@ -1,9 +1,11 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import type {
-  GitCommitDetailsResponse,
-  GitCommitFile,
-  GitDiffResponse,
-  GitHistoryResponse,
+import {
+  type GitCommitDetailsResponse,
+  type GitCommitFile,
+  type GitDiffResponse,
+  type GitHeadMessageResponse,
+  type GitHistoryResponse,
+  splitCommitMessage,
 } from '@mangostudio/shared/git';
 import { GIT_LOG_FORMAT, parseCommitFiles, parseHistoryLog } from '../domain/history-parser';
 import {
@@ -44,6 +46,34 @@ export async function listHistory(
   } catch (error) {
     if (isEmptyHistory(error)) return { commits: [] };
     return mapWriteFailure(error, 'Reading history');
+  }
+}
+
+/**
+ * Reads the message of the commit an amend would replace, so the form can show
+ * the author what they are about to rewrite instead of silently discarding it.
+ */
+export async function getHeadMessage(
+  workdir: string,
+  stripSignoff: boolean,
+  signal?: AbortSignal
+): Promise<GitHeadMessageResponse> {
+  try {
+    const root = await requireRepoRoot(workdir, signal);
+    const result = await runGit(['log', '-1', '--format=%H%x00%B'], { cwd: root, signal });
+    const separator = result.stdout.indexOf('\0');
+    if (separator < 0) {
+      throw new GitWriteError('There is no commit to amend.', 409, ERROR_CODES.AMEND_WITHOUT_HEAD);
+    }
+    return {
+      hash: result.stdout.slice(0, separator).trim(),
+      ...splitCommitMessage(result.stdout.slice(separator + 1), { stripSignoff }),
+    };
+  } catch (error) {
+    if (isEmptyHistory(error)) {
+      throw new GitWriteError('There is no commit to amend.', 409, ERROR_CODES.AMEND_WITHOUT_HEAD);
+    }
+    return mapWriteFailure(error, 'Reading the HEAD commit message');
   }
 }
 
