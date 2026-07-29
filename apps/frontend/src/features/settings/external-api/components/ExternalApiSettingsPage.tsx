@@ -6,6 +6,7 @@ import { API_KEY_MAX_PER_USER, type ApiKeySummary } from '@mangostudio/shared/ap
 import type { ExternalApiSettings } from '@mangostudio/shared/app-settings';
 import { Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { SettingToggle } from '@/components/settings/SettingToggle';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { useToast } from '@/components/ui/Toast';
@@ -195,33 +196,5 @@ export function ExternalApiSettingsPage({
         />
       )}
     </div>
-  );
-}
-
-function SettingToggle({
-  label,
-  description,
-  checked,
-  onChange,
-}: {
-  readonly label: string;
-  readonly description: string;
-  readonly checked: boolean;
-  readonly onChange: (value: boolean) => void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-start justify-between gap-4">
-      <span className="space-y-1">
-        <span className="block text-sm font-semibold text-on-surface">{label}</span>
-        <span className="block text-sm text-on-surface-variant/60">{description}</span>
-      </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(event) => onChange(event.target.checked)}
-        aria-label={label}
-        className="mt-1 h-4 w-4 shrink-0 rounded border-outline-variant/30 accent-primary"
-      />
-    </label>
   );
 }
