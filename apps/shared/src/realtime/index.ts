@@ -4,6 +4,7 @@ export {
   GitScopeSchema,
   gitTopic,
   parseGitTopic,
+  REALTIME_CLOSE_CODES,
   type RealtimeClientMessage,
   RealtimeClientMessageSchema,
   type RealtimeErrorMessage,

@@ -30,25 +30,37 @@ export const GIT_SCOPES: readonly GitScope[] = GitScopeSchema.anyOf.map((literal
 export const SETTINGS_TOPIC = 'settings' as const;
 
 const GIT_TOPIC_PREFIX = 'git:' as const;
+const MAX_REALTIME_TOPICS_PER_MESSAGE = 32;
+const MAX_REALTIME_TOPIC_LENGTH = 256;
 
 /** Topic string for git-panel invalidation scoped to one chat. */
 export function gitTopic(chatId: string): string {
   if (chatId.length === 0) {
     throw new TypeError('chatId must not be empty');
   }
-  return `${GIT_TOPIC_PREFIX}${chatId}`;
+  const topic = `${GIT_TOPIC_PREFIX}${chatId}`;
+  if (topic.length > MAX_REALTIME_TOPIC_LENGTH) {
+    throw new TypeError(`git topic must not exceed ${MAX_REALTIME_TOPIC_LENGTH} characters`);
+  }
+  return topic;
 }
 
 /** Chat id encoded in a git invalidation topic (`git:<chatId>`). */
 export function parseGitTopic(topic: string): string | undefined {
-  if (!topic.startsWith(GIT_TOPIC_PREFIX)) {
+  if (!topic.startsWith(GIT_TOPIC_PREFIX) || topic.length > MAX_REALTIME_TOPIC_LENGTH) {
     return undefined;
   }
   const chatId = topic.slice(GIT_TOPIC_PREFIX.length);
   return chatId.length > 0 ? chatId : undefined;
 }
 
-const TopicsArraySchema = Type.Array(Type.String({ minLength: 1 }), { minItems: 1 });
+const TopicsArraySchema = Type.Array(
+  Type.String({ minLength: 1, maxLength: MAX_REALTIME_TOPIC_LENGTH }),
+  {
+    minItems: 1,
+    maxItems: MAX_REALTIME_TOPICS_PER_MESSAGE,
+  }
+);
 
 export const RealtimeSubscribeMessageSchema = Type.Object(
   {
@@ -111,7 +123,7 @@ const RealtimeSettingsInvalidateMessageSchema = Type.Object(
 const RealtimeGitInvalidateMessageSchema = Type.Object(
   {
     type: Type.Literal('invalidate'),
-    topic: Type.String({ pattern: '^git:.+$' }),
+    topic: Type.String({ pattern: '^git:.+$', maxLength: MAX_REALTIME_TOPIC_LENGTH }),
     scopes: Type.Optional(Type.Array(GitScopeSchema, { minItems: 1 })),
   },
   { additionalProperties: false }
@@ -144,3 +156,12 @@ export const RealtimeServerMessageSchema = Type.Union([
   RealtimeErrorMessageSchema,
 ]);
 export type RealtimeServerMessage = Static<typeof RealtimeServerMessageSchema>;
+
+/** Stable close codes used by WebSocket clients to choose reconnect behavior. */
+export const REALTIME_CLOSE_CODES = {
+  INVALID_MESSAGE: 4400,
+  UNAUTHORIZED: 4401,
+  FORBIDDEN: 4403,
+  RATE_LIMITED: 4429,
+  INTERNAL_ERROR: 1011,
+} as const;

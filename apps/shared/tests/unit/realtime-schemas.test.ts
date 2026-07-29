@@ -4,6 +4,7 @@ import {
   GIT_SCOPES,
   gitTopic,
   parseGitTopic,
+  REALTIME_CLOSE_CODES,
   RealtimeClientMessageSchema,
   RealtimeInvalidateMessageSchema,
   RealtimeServerMessageSchema,
@@ -28,6 +29,31 @@ describe('realtime topic helpers', () => {
         type: 'invalidate',
         topic: 'git:',
         scopes: ['state'],
+      })
+    ).toBe(false);
+  });
+
+  it('keeps git helpers and schemas within the topic length bound', () => {
+    const maximumChatId = 'c'.repeat(252);
+    const oversizedChatId = 'c'.repeat(253);
+    const maximumTopic = gitTopic(maximumChatId);
+    const oversizedTopic = `git:${oversizedChatId}`;
+
+    expect(maximumTopic).toHaveLength(256);
+    expect(parseGitTopic(maximumTopic)).toBe(maximumChatId);
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: maximumTopic,
+      })
+    ).toBe(true);
+
+    expect(() => gitTopic(oversizedChatId)).toThrow(TypeError);
+    expect(parseGitTopic(oversizedTopic)).toBeUndefined();
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: oversizedTopic,
       })
     ).toBe(false);
   });
@@ -65,6 +91,33 @@ describe('realtime client messages', () => {
         type: 'subscribe',
         topics: ['x'],
         extra: true,
+      })
+    ).toBe(false);
+  });
+
+  it('bounds subscription batches and individual topic lengths', () => {
+    expect(
+      Value.Check(RealtimeClientMessageSchema, {
+        type: 'subscribe',
+        topics: Array.from({ length: 32 }, (_, index) => `topic-${index}`),
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(RealtimeClientMessageSchema, {
+        type: 'subscribe',
+        topics: Array.from({ length: 33 }, (_, index) => `topic-${index}`),
+      })
+    ).toBe(false);
+    expect(
+      Value.Check(RealtimeClientMessageSchema, {
+        type: 'unsubscribe',
+        topics: ['t'.repeat(256)],
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(RealtimeClientMessageSchema, {
+        type: 'unsubscribe',
+        topics: ['t'.repeat(257)],
       })
     ).toBe(false);
   });
@@ -167,5 +220,17 @@ describe('realtime server messages', () => {
         chatId: 'chat-b',
       })
     ).toBe(false);
+  });
+});
+
+describe('realtime close codes', () => {
+  it('exports the stable browser reconnect contract', () => {
+    expect(REALTIME_CLOSE_CODES).toEqual({
+      INVALID_MESSAGE: 4400,
+      UNAUTHORIZED: 4401,
+      FORBIDDEN: 4403,
+      RATE_LIMITED: 4429,
+      INTERNAL_ERROR: 1011,
+    });
   });
 });
