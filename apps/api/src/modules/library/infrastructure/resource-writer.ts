@@ -148,7 +148,7 @@ export async function writeDirectoryResource(
 ): Promise<ResourceWriteResult> {
   const deps = { ...defaultResourceWriterDeps, ...overrides };
   const location = requireWritableLocation(input.locationId, 'directory-of-dirs');
-  const destination = resolveDestination(location, input.slug, input.env);
+  const destination = resolveResourceDestination(location, input.slug, input.env);
   assertExpectedResourceEntry(destination.resolvedPath, 'directory');
   await assertSourceDirectory(input.sourceDir, deps.fs);
 
@@ -194,7 +194,7 @@ export async function writeFileResource(
 ): Promise<ResourceWriteResult> {
   const deps = { ...defaultResourceWriterDeps, ...overrides };
   const location = requireWritableLocation(input.locationId, 'file');
-  const destination = resolveDestination(location, input.slug, input.env);
+  const destination = resolveResourceDestination(location, input.slug, input.env);
   assertExpectedResourceEntry(destination.resolvedPath, 'file');
 
   const backupId = input.backupId ?? createBackupId(backupDeps(deps));
@@ -219,7 +219,12 @@ export async function writeFileResource(
   };
 }
 
-function requireWritableLocation(
+/**
+ * Shared by every mutation of a library resource, write or removal: an
+ * unknown, read-only, or wrong-layout location is refused before any path is
+ * resolved, so the two flows cannot drift on which locations they will touch.
+ */
+export function requireWritableLocation(
   locationId: LibraryLocationId,
   expected: 'directory-of-dirs' | 'file'
 ): LocationDefinition {
@@ -251,7 +256,7 @@ function requireWritableLocation(
   return location;
 }
 
-interface ResolvedDestination {
+export interface ResolvedDestination {
   readonly logicalPath: string;
   readonly resolvedPath: string;
 }
@@ -262,7 +267,7 @@ interface ResolvedDestination {
  * be the one it declares; anything else would write an unrelated resource over
  * the user's `CLAUDE.md`.
  */
-function resolveDestination(
+export function resolveResourceDestination(
   location: LocationDefinition,
   slug: string,
   env: PathEnv

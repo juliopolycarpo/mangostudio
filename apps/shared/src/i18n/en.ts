@@ -1502,6 +1502,7 @@ export const messages: Messages = {
       via: 'via {location}',
       alsoIn: 'also in {locations}, identical',
       propagate: 'Propagate',
+      remove: 'Remove',
       notFound: 'This resource is no longer in the library.',
       invalidInstance: 'Unreadable copy in {location}',
       // 001 deliberately does not normalize line endings, so a CRLF/LF split is
@@ -1632,6 +1633,9 @@ export const messages: Messages = {
         'The copy already here could not be read, so overwriting it is not safe.',
       'no-source-content': 'No readable copy exists to copy from.',
       'no-adapter-strategy': "No converter knows how to reach the destination's format.",
+      // Removal shares this catalog; only the reason below is unique to it.
+      'invalid-instance':
+        'This copy could not be read end to end, so it cannot be backed up faithfully. Remove it yourself.',
     },
     skipReason: {
       'user-skipped': 'Not selected',
@@ -1643,6 +1647,62 @@ export const messages: Messages = {
       'adaptation-failed': 'The format conversion failed.',
       'write-failed': 'The write to disk failed.',
       'verification-failed': 'The bytes on disk after the write do not match what was intended.',
+    },
+    removalFailureReason: {
+      'guard-rejected': 'A safety check refused the removal.',
+      'backup-failed': 'The copy could not be backed up, so it was left alone.',
+      'remove-failed': 'The removal failed.',
+      'verification-failed': 'The copy was still there after being removed.',
+    },
+    removalKeptReason: {
+      'user-kept': 'You chose to keep this copy.',
+      absent: 'There was nothing at this location.',
+      blocked: 'This location cannot be written to.',
+      'not-attempted': 'An earlier failure stopped the removal before it reached this copy.',
+      'rolled-back': 'It was put back after a later removal failed.',
+    },
+    removal: {
+      title: 'Remove {count} resources',
+      titleOne: 'Remove {resource}',
+      remove: 'Remove',
+      removing: 'Removing...',
+      stepLocations: 'Choose copies',
+      stepConfirm: 'Confirm',
+      locationsDescription:
+        'Pick the copies to remove. Nothing is selected for you: keeping a copy is always the safe answer.',
+      absent: 'No copy here',
+      version: 'version {hash}',
+      noLocations: 'No location for this kind holds a copy that can be removed.',
+      noLocationsHint:
+        'Every location for this kind is either disabled in settings or unavailable on this platform.',
+      previewError: 'The removal preview could not be built.',
+      nothingSelected: 'Nothing is selected, so there is nothing to remove.',
+      // Deleting the version you do not want is a legitimate way to resolve a
+      // divergence — the user only needs to know that is what they are doing.
+      eliminatesGroup: 'This is the only copy of version {hash}.',
+      eliminatesGroupHeading: 'These removals take the last copy of a version with them',
+      eliminatesGroupRow: '{resource} — {location} holds the only copy of version {hash}',
+      confirmDescription: '{count} copies will be removed.',
+      lastCopyWarning:
+        'This would leave no copy of the resource anywhere. The backup below is the only way back, and only while it is retained.',
+      lastCopyAcknowledge: 'I understand this removes the last copy of {resource}.',
+      acknowledgeRequired: 'Acknowledge the last-copy removal to continue.',
+      lastCopyRefused:
+        'The library holds fewer copies than this preview showed, so removing these would leave none. Preview again to see what is really there.',
+      backupNote: 'Every removed copy is backed up first and can be restored from the result.',
+      // The apply is bound to a state hash; between preview and confirm the user
+      // may have edited the very copy they are about to delete.
+      stale: 'The library changed since this read. Preview again before removing.',
+      staleStaged:
+        'An interrupted removal left a temporary copy behind. Nothing was deleted; inspect these paths and remove them yourself.',
+      applyError: 'The removal failed.',
+      resultRemovedHeading: 'Removed',
+      resultLastCopy: 'This was the last copy.',
+      resultPartial:
+        'A removal failed and could not be fully undone, so some copies are already gone. Use the backup below.',
+      resultRolledBack: 'A removal failed, so every copy was put back.',
+      resultNone: 'Nothing was removed.',
+      resultKeptHeading: 'Still there',
     },
     result: {
       title: 'Result',
@@ -1667,6 +1727,19 @@ export const messages: Messages = {
       done: 'Done',
     },
     backups: {
+      pinned: '{count} pinned, holding {size}.',
+      pinnedHint:
+        'Pinned sets hold the last remaining copy of a resource, so retention never deletes them.',
+      restore: 'Restore',
+      restoring: 'Restoring...',
+      restored: '{count} put back.',
+      restoreError: 'This backup could not be restored.',
+      purge: 'Purge',
+      // Two clicks, because the set being purged is the only remaining copy of
+      // whatever the removal that created it took.
+      purgeConfirm: 'Delete it permanently',
+      purgeCancel: 'Keep it',
+      purgeError: 'This backup could not be deleted.',
       usage: '{count} backups using {size}.',
       retention: 'We keep the last {count} or {size}, whichever comes first.',
     },

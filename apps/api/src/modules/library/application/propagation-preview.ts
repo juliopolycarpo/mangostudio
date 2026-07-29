@@ -9,7 +9,6 @@
  * decisions all keep that module's mechanics.
  */
 
-import { createHash } from 'node:crypto';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   type AdapterStrategy,
@@ -39,12 +38,13 @@ import {
   defaultAdapterCatalog,
   rankAdapterStrategies,
 } from '../domain/format-adapters';
-import { PropagationRequestError } from '../domain/propagation-error';
+import { LibraryRequestError } from '../domain/library-request-error';
 import { getLibraryLocation, type LocationDefinition } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 import { isAgentStrategyAvailable } from './adapters/agent-strategy';
 import { acknowledgedResourceKeys } from './conflict-resolution';
 import { discoverLibraryResources } from './library-discovery';
+import { compareText, hashJson, hashLibraryState } from './preview-state';
 
 export interface PropagationPreviewDeps {
   /** Always a forced rescan: a preview of stale state is worse than no preview. */
@@ -86,7 +86,7 @@ export async function previewLibraryPropagation(
     profileId = assertRequestedProfileId(request.profileId, { userId });
   } catch (error) {
     if (error instanceof ProfileMismatchError) {
-      throw new PropagationRequestError(400, error.message);
+      throw new LibraryRequestError(400, error.message);
     }
     throw error;
   }
@@ -100,7 +100,7 @@ export async function previewLibraryPropagation(
   const enabled = await deps.enabledLocationIds(userId);
   for (const location of locations) {
     if (!enabled.has(location.id)) {
-      throw new PropagationRequestError(
+      throw new LibraryRequestError(
         422,
         `Library location "${location.id}" is not enabled, so its contents cannot be previewed or written.`
       );
@@ -113,7 +113,7 @@ export async function previewLibraryPropagation(
   const resources = [...refs.keys()].map((key) => {
     const resource = byKey.get(key);
     if (!resource) {
-      throw new PropagationRequestError(404, `Library resource "${key}" was not found.`);
+      throw new LibraryRequestError(404, `Library resource "${key}" was not found.`);
     }
     return resource;
   });
@@ -135,7 +135,7 @@ export async function previewLibraryPropagation(
       agentAvailable
     )
   );
-  const stateHash = hashPropagationState(resources, statuses);
+  const stateHash = hashLibraryState(resources, statuses);
 
   return {
     previewToken: hashJson({
@@ -155,7 +155,7 @@ function parseRequestedResources(keys: readonly string[]): Map<string, LibraryRe
   const refs = new Map<string, LibraryResourceRef>();
   for (const key of keys) {
     const ref = parseResourceKey(key);
-    if (!ref) throw new PropagationRequestError(422, `Invalid library resource key: "${key}".`);
+    if (!ref) throw new LibraryRequestError(422, `Invalid library resource key: "${key}".`);
     refs.set(key, ref);
   }
   return refs;
@@ -165,7 +165,7 @@ function parseRequestedLocations(ids: readonly LibraryLocationId[]): LocationDef
   const locations = new Map<LibraryLocationId, LocationDefinition>();
   for (const id of ids) {
     const location = getLibraryLocation(id);
-    if (!location) throw new PropagationRequestError(422, `Unknown library location: "${id}".`);
+    if (!location) throw new LibraryRequestError(422, `Unknown library location: "${id}".`);
     locations.set(id, location);
   }
   return [...locations.values()];
@@ -395,52 +395,4 @@ function selectAdaptation(
     }
   }
   return { fromFormat: group.formats[0] ?? destination.format, available: [] };
-}
-
-/**
- * Covers every source instance and every destination's observable state. An
- * apply re-derives this and refuses to run when it differs, so a file the user
- * edited in another window between preview and apply is never silently clobbered.
- */
-function hashPropagationState(
-  resources: readonly LibraryResource[],
-  statuses: ReadonlyMap<LibraryLocationId, LibraryLocationStatus>
-): string {
-  return hashJson({
-    resources: resources
-      .map((resource) => ({
-        key: resource.key,
-        instances: resource.instances
-          .map((instance) => ({
-            locationId: instance.locationId,
-            path: instance.path,
-            valid: instance.valid,
-            contentHash: instance.contentHash ?? null,
-            sizeBytes: instance.sizeBytes ?? null,
-            modifiedAtMs: instance.modifiedAtMs,
-          }))
-          .sort((left, right) => compareText(left.locationId, right.locationId)),
-      }))
-      .sort((left, right) => compareText(left.key, right.key)),
-    locations: [...statuses.values()]
-      .map((status) => ({
-        id: status.id,
-        path: status.path,
-        exists: status.exists,
-        writable: status.writable,
-        access: status.access,
-      }))
-      .sort((left, right) => compareText(left.id, right.id)),
-  });
-}
-
-function hashJson(value: unknown): string {
-  return createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
-}
-
-/** Locale-independent so a token computed here matches one computed anywhere. */
-function compareText(left: string, right: string): number {
-  if (left < right) return -1;
-  if (left > right) return 1;
-  return 0;
 }

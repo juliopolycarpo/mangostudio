@@ -1522,6 +1522,7 @@ export const messages = {
       via: 'via {location}',
       alsoIn: 'também em {locations}, idêntico',
       propagate: 'Propagar',
+      remove: 'Remover',
       notFound: 'Este recurso não existe mais na biblioteca.',
       invalidInstance: 'Cópia ilegível em {location}',
       // 001 não normaliza fim de linha de propósito, então CRLF contra LF é uma
@@ -1653,6 +1654,9 @@ export const messages = {
         'A cópia que está aqui não pôde ser lida, então sobrescrevê-la não é seguro.',
       'no-source-content': 'Nenhuma cópia legível existe para copiar.',
       'no-adapter-strategy': 'Nenhum conversor sabe levar este formato até o do destino.',
+      // A remoção usa este mesmo catálogo; só o motivo abaixo é exclusivo dela.
+      'invalid-instance':
+        'Esta cópia não pôde ser lida por inteiro, então não dá para guardar um backup fiel dela. Remova você mesmo.',
     },
     skipReason: {
       'user-skipped': 'Não selecionado',
@@ -1664,6 +1668,62 @@ export const messages = {
       'adaptation-failed': 'A conversão de formato falhou.',
       'write-failed': 'A escrita no disco falhou.',
       'verification-failed': 'O conteúdo no disco após a escrita não confere com o esperado.',
+    },
+    removalFailureReason: {
+      'guard-rejected': 'A remoção foi recusada por uma checagem de segurança.',
+      'backup-failed': 'Não foi possível guardar um backup da cópia, então ela ficou onde estava.',
+      'remove-failed': 'A remoção falhou.',
+      'verification-failed': 'A cópia continuava lá depois de ser removida.',
+    },
+    removalKeptReason: {
+      'user-kept': 'Você escolheu manter esta cópia.',
+      absent: 'Não havia nada neste local.',
+      blocked: 'Não é possível escrever neste local.',
+      'not-attempted': 'Uma falha anterior interrompeu a remoção antes de chegar a esta cópia.',
+      'rolled-back': 'Ela voltou para o lugar depois que uma remoção seguinte falhou.',
+    },
+    removal: {
+      title: 'Remover {count} recursos',
+      titleOne: 'Remover {resource}',
+      remove: 'Remover',
+      removing: 'Removendo...',
+      stepLocations: 'Escolher cópias',
+      stepConfirm: 'Confirmar',
+      locationsDescription:
+        'Escolha as cópias que devem sair. Nada vem marcado: manter a cópia é sempre a resposta segura.',
+      absent: 'Sem cópia aqui',
+      version: 'versão {hash}',
+      noLocations: 'Nenhum local desse tipo tem uma cópia que possa ser removida.',
+      noLocationsHint:
+        'Todos os locais desse tipo estão desativados nas configurações ou indisponíveis nesta plataforma.',
+      previewError: 'Não foi possível montar a prévia da remoção.',
+      nothingSelected: 'Nada está selecionado, então não há o que remover.',
+      // Apagar a versão que você não quer é uma forma legítima de resolver uma
+      // divergência — só é preciso saber que é isso que está acontecendo.
+      eliminatesGroup: 'Esta é a única cópia da versão {hash}.',
+      eliminatesGroupHeading: 'Estas remoções levam junto a última cópia de uma versão',
+      eliminatesGroupRow: '{resource} — {location} tem a única cópia da versão {hash}',
+      confirmDescription: '{count} cópias serão removidas.',
+      lastCopyWarning:
+        'Isto deixaria o recurso sem nenhuma cópia. O backup abaixo é o único caminho de volta, e só enquanto ele existir.',
+      lastCopyAcknowledge: 'Entendo que isto remove a última cópia de {resource}.',
+      acknowledgeRequired: 'Confirme a remoção da última cópia para continuar.',
+      lastCopyRefused:
+        'A biblioteca tem menos cópias do que esta prévia mostrou, então removê-las não deixaria nenhuma. Leia de novo para ver o que existe agora.',
+      backupNote: 'Toda cópia removida vai para um backup e pode ser restaurada pelo resultado.',
+      // A aplicação está presa a um hash de estado; entre a prévia e a
+      // confirmação a pessoa pode ter editado justamente a cópia que vai sumir.
+      stale: 'A biblioteca mudou desde esta leitura. Leia de novo antes de remover.',
+      staleStaged:
+        'Uma remoção interrompida deixou uma cópia temporária para trás. Nada foi apagado; confira estes caminhos e remova você mesmo.',
+      applyError: 'A remoção falhou.',
+      resultRemovedHeading: 'Removido',
+      resultLastCopy: 'Esta era a última cópia.',
+      resultPartial:
+        'Uma remoção falhou e não pôde ser desfeita por completo, então algumas cópias já sumiram. Use o backup abaixo.',
+      resultRolledBack: 'Uma remoção falhou, então todas as cópias voltaram para o lugar.',
+      resultNone: 'Nada foi removido.',
+      resultKeptHeading: 'Continuam no lugar',
     },
     result: {
       title: 'Resultado',
@@ -1688,6 +1748,17 @@ export const messages = {
       done: 'Concluir',
     },
     backups: {
+      pinned: '{count} fixados, ocupando {size}.',
+      pinnedHint:
+        'Backups fixados guardam a última cópia de um recurso, então a retenção nunca os apaga.',
+      restore: 'Restaurar',
+      restoring: 'Restaurando...',
+      restored: '{count} restaurados.',
+      restoreError: 'Não foi possível restaurar este backup.',
+      purge: 'Descartar',
+      purgeConfirm: 'Excluir definitivamente',
+      purgeCancel: 'Manter',
+      purgeError: 'Não foi possível excluir este backup.',
       usage: '{count} backups ocupando {size}.',
       retention: 'Guardamos os últimos {count} ou {size}, o que vier primeiro.',
     },

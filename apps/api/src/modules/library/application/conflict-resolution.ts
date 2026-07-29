@@ -21,7 +21,7 @@ import {
   ProfileMismatchError,
   resolveActiveProfileId,
 } from '../../../lib/profile-context';
-import { PropagationRequestError } from '../domain/propagation-error';
+import { LibraryRequestError } from '../domain/library-request-error';
 import {
   createDivergenceAckRepository,
   type DivergenceAckRepository,
@@ -52,7 +52,7 @@ function activeProfileId(userId: string, requested?: string) {
     return assertRequestedProfileId(requested, { userId });
   } catch (error) {
     if (error instanceof ProfileMismatchError) {
-      throw new PropagationRequestError(400, error.message);
+      throw new LibraryRequestError(400, error.message);
     }
     throw error;
   }
@@ -98,24 +98,18 @@ export async function acknowledgeDivergence(
   const profileId = activeProfileId(userId, request.profileId);
   const ref = parseResourceKey(request.resourceKey);
   if (!ref) {
-    throw new PropagationRequestError(
-      422,
-      `Invalid library resource key: "${request.resourceKey}".`
-    );
+    throw new LibraryRequestError(422, `Invalid library resource key: "${request.resourceKey}".`);
   }
 
   const resources = await deps.discover(userId, ref);
   const resource = resources.find((candidate) => candidate.key === request.resourceKey);
   if (!resource) {
-    throw new PropagationRequestError(
-      404,
-      `Library resource "${request.resourceKey}" was not found.`
-    );
+    throw new LibraryRequestError(404, `Library resource "${request.resourceKey}" was not found.`);
   }
 
   const contentHashes = readableContentHashes(resource);
   if (contentHashes.length < 2) {
-    throw new PropagationRequestError(
+    throw new LibraryRequestError(
       422,
       `Library resource "${request.resourceKey}" is not divergent.`
     );
@@ -124,7 +118,7 @@ export async function acknowledgeDivergence(
   // has not looked at, so a rescan that disagrees rejects rather than records.
   const divergenceKey = divergenceKeyFor(contentHashes);
   if (divergenceKeyFor(request.contentHashes) !== divergenceKey) {
-    throw new PropagationRequestError(
+    throw new LibraryRequestError(
       409,
       `Library resource "${request.resourceKey}" changed since it was reviewed. Rescan and try again.`
     );

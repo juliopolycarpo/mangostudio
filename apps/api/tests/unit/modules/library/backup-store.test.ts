@@ -17,8 +17,9 @@ import {
   createBackupId,
   defaultBackupStoreDeps,
   discardBackupSet,
-  measureBackupUsage,
+  listBackupSets,
   pruneBackupSets,
+  purgeBackupSet,
   readBackupManifest,
   restoreBackupEntry,
   writeBackupManifest,
@@ -58,6 +59,37 @@ function seedBackupSet(id: string, bytes: number, modifiedAtMs?: number): string
     utimesSync(join(backupRoot, id), seconds, seconds);
   }
   return join(backupRoot, id);
+}
+
+/** The same shape, plus the manifest a last-copy removal writes. */
+function seedPinnedBackupSet(id: string, bytes: number, modifiedAtMs?: number): string {
+  const setPath = seedBackupSet(id, bytes);
+  writeFileSync(
+    join(setPath, 'manifest.json'),
+    JSON.stringify({
+      version: 1,
+      backupId: id,
+      createdAtMs: 1,
+      pinned: true,
+      lastCopyResourceKeys: ['skill:gh'],
+      entries: [
+        {
+          locationId: 'claude-skills',
+          slug: 'gh',
+          kind: 'directory',
+          destinationPath: '/home/test/.claude/skills/gh',
+          resolvedPath: '/home/test/.claude/skills/gh',
+          backupPath: join(setPath, 'claude-skills', 'gh'),
+          writtenContentHash: 'hash',
+        },
+      ],
+    })
+  );
+  if (modifiedAtMs !== undefined) {
+    const seconds = modifiedAtMs / 1000;
+    utimesSync(setPath, seconds, seconds);
+  }
+  return setPath;
 }
 
 describe('createBackupId', () => {
@@ -129,6 +161,24 @@ describe('backup manifest', () => {
     mkdirSync(join(backupRoot, 'set-2'), { recursive: true });
     writeFileSync(join(backupRoot, 'set-2', 'manifest.json'), '{ not json');
     expect(await readBackupManifest('set-2', deps())).toBeNull();
+  });
+
+  // The backup id reaches here straight from an undo request body. Callers
+  // reach for `.catch()` to turn "no such backup" into a 404, and a synchronous
+  // throw would sail past that catch and surface as an unexpected 500.
+  it('rejects rather than throws when the id could escape the backup root', async () => {
+    // Written as a bare try/catch because a synchronous throw and a rejected
+    // promise are what this is telling apart, and the matchers conflate them.
+    let threwSynchronously = false;
+    let settled: unknown;
+    try {
+      settled = await readBackupManifest('../escape', deps()).catch((error: unknown) => error);
+    } catch {
+      threwSynchronously = true;
+    }
+
+    expect(threwSynchronously).toBe(false);
+    expect(settled).toBeInstanceOf(TypeError);
   });
 });
 
@@ -227,6 +277,31 @@ describe('pruneBackupSets', () => {
     await expect(pruneBackupSets('current', deps())).resolves.toBeUndefined();
   });
 
+  it('keeps a pinned set that count-based eviction would otherwise drop', async () => {
+    seedPinnedBackupSet('pinned', 10, 1_000);
+    seedBackupSet('ordinary', 10, 2_000);
+    seedBackupSet('current', 10, 3_000);
+
+    await pruneBackupSets('current', deps({ retentionCount: () => 1 }));
+
+    expect(existsSync(join(backupRoot, 'pinned'))).toBe(true);
+    expect(existsSync(join(backupRoot, 'current'))).toBe(true);
+    // The ordinary set is the one the count evicts; the pinned one is exempt.
+    expect(existsSync(join(backupRoot, 'ordinary'))).toBe(false);
+  });
+
+  it('charges pinned bytes first, so ordinary sets are the ones the budget squeezes out', async () => {
+    seedPinnedBackupSet('pinned', 200, 1_000);
+    seedBackupSet('ordinary', 100, 2_000);
+    seedBackupSet('current', 100, 3_000);
+
+    await pruneBackupSets('current', deps({ retentionCount: () => 10, retentionBytes: () => 350 }));
+
+    expect(existsSync(join(backupRoot, 'pinned'))).toBe(true);
+    expect(existsSync(join(backupRoot, 'current'))).toBe(true);
+    expect(existsSync(join(backupRoot, 'ordinary'))).toBe(false);
+  });
+
   it('rejects a retention count that would retain nothing', async () => {
     seedBackupSet('current', 10);
 
@@ -236,16 +311,42 @@ describe('pruneBackupSets', () => {
   });
 });
 
-describe('measureBackupUsage', () => {
-  it('totals what retained backups cost on disk', async () => {
+describe('listBackupSets', () => {
+  it('reports what each retained backup costs on disk', async () => {
     seedBackupSet('one', 100);
     seedBackupSet('two', 50);
 
-    expect(await measureBackupUsage(deps())).toEqual({ setCount: 2, sizeBytes: 150 });
+    const sets = await listBackupSets(deps());
+
+    expect(sets.map((set) => set.backupId).sort()).toEqual(['one', 'two']);
+    expect(sets.reduce((total, set) => total + set.sizeBytes, 0)).toBe(150);
+    expect(sets.every((set) => !set.pinned)).toBe(true);
   });
 
   it('reports nothing when no backup has ever been taken', async () => {
-    expect(await measureBackupUsage(deps())).toEqual({ setCount: 0, sizeBytes: 0 });
+    expect(await listBackupSets(deps())).toEqual([]);
+  });
+
+  it('reports a set as pinned when its manifest says it holds a last copy', async () => {
+    seedPinnedBackupSet('pinned', 10, 1_000);
+
+    const [set] = await listBackupSets(deps());
+
+    expect(set.pinned).toBe(true);
+    expect(set.lastCopyResourceKeys).toEqual(['skill:gh']);
+  });
+});
+
+describe('purgeBackupSet', () => {
+  it('removes a pinned set on an explicit request and reports it was there', async () => {
+    seedPinnedBackupSet('pinned', 10, 1_000);
+
+    expect(await purgeBackupSet('pinned', deps())).toBe(true);
+    expect(existsSync(join(backupRoot, 'pinned'))).toBe(false);
+  });
+
+  it('treats purging a set that is already gone as the state the caller asked for', async () => {
+    expect(await purgeBackupSet('never-existed', deps())).toBe(false);
   });
 });
 

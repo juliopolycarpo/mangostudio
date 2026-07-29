@@ -23,6 +23,12 @@ export const ERROR_CODES = {
   HISTORY_DIVERGED: 'HISTORY_DIVERGED',
   GIT_LOCKED: 'GIT_LOCKED',
   GIT_COMMAND_FAILED: 'GIT_COMMAND_FAILED',
+  /**
+   * A library removal would leave no copy of a resource anywhere and the
+   * request did not name it in `acknowledgeLastCopy`. Distinct from a plain
+   * validation failure because the fix is the user's, not the client's.
+   */
+  LAST_COPY_UNACKNOWLEDGED: 'LAST_COPY_UNACKNOWLEDGED',
   INTERNAL: 'INTERNAL',
 } as const;
 

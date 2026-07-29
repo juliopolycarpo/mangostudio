@@ -26,12 +26,14 @@ import { ContentGroupList } from './ContentGroupList';
 import { InstanceDiff } from './InstanceDiff';
 import { LibraryPageState } from './LibraryPageState';
 import { PropagationWizard } from './PropagationWizard';
+import { RemovalWizard } from './RemovalWizard';
 
 export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }) {
   const { t, locale } = useI18n();
   const l = t.library;
   const [comparing, setComparing] = useState(false);
   const [propagating, setPropagating] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const [resourceQuery, locationsQuery, targetsQuery] = useQueries({
     queries: [
@@ -81,11 +83,22 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
             {`${l.kinds[resource.ref.kind]} · ${l.divergence[resource.divergence]}`}
           </p>
         </div>
-        {/* Offered even with nothing to propagate to: the wizard is where that
-            answer is explained, and hiding the button explains nothing. */}
-        <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
-          {l.detail.propagate}
-        </Button>
+        {/* Both are offered even with nowhere to act: the wizards are where that
+            answer is explained, and hiding a button explains nothing. */}
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setRemoving(true)}
+            disabled={!candidates.isResolved}
+            data-testid="remove-resource"
+          >
+            {l.detail.remove}
+          </Button>
+          <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
+            {l.detail.propagate}
+          </Button>
+        </div>
       </header>
 
       {resource.divergence === 'not-comparable' && (
@@ -208,6 +221,14 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
           resourceKeys={[resource.key]}
           locationIds={candidates.locationIds}
           onClose={() => setPropagating(false)}
+        />
+      )}
+
+      {removing && (
+        <RemovalWizard
+          resourceKeys={[resource.key]}
+          locationIds={candidates.locationIds}
+          onClose={() => setRemoving(false)}
         />
       )}
     </div>

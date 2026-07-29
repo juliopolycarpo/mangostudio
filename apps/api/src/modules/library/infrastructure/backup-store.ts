@@ -11,7 +11,7 @@ import { randomBytes } from 'node:crypto';
 import type { Dirent, Stats } from 'node:fs';
 import { cp, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { LibraryLocationId } from '@mangostudio/shared/library';
+import type { LibraryLocationId, PropagationBackupSet } from '@mangostudio/shared/library';
 import { getConfig } from '../../../lib/config';
 import { getLibraryLocation } from '../domain/registry';
 
@@ -34,6 +34,14 @@ export interface BackupManifest {
   readonly backupId: string;
   readonly createdAtMs: number;
   readonly entries: BackupEntry[];
+  /**
+   * Set holds the last remaining copy of a resource, so retention never evicts
+   * it. Optional rather than a version bump: a manifest written before pinning
+   * existed is simply an unpinned one, and an undo of it must keep working.
+   */
+  readonly pinned?: boolean;
+  /** Resources this set is the only remaining copy of, for the disclosure UI. */
+  readonly lastCopyResourceKeys?: string[];
 }
 
 interface BackupStoreFs {
@@ -146,13 +154,23 @@ export async function writeBackupManifest(
   await deps.fs.writeFile(join(setPath, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+/**
+ * `async` on purpose: `backupSetPath` rejects a malformed id by throwing, and
+ * callers reach for `.catch()` to turn "no such backup" into a 404. Throwing
+ * synchronously would route a caller-supplied bad id past that catch and out as
+ * an unexpected 500 instead.
+ */
 export async function readBackupManifest(
   backupId: string,
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<BackupManifest | null> {
+  return await readManifestAt(backupSetPath(backupId, deps), deps.fs);
+}
+
+async function readManifestAt(setPath: string, fs: BackupStoreFs): Promise<BackupManifest | null> {
   let raw: string;
   try {
-    raw = await deps.fs.readFile(join(backupSetPath(backupId, deps), MANIFEST_NAME));
+    raw = await fs.readFile(join(setPath, MANIFEST_NAME));
   } catch {
     return null;
   }
@@ -206,11 +224,33 @@ export async function discardBackupSet(
   await deps.fs.remove(backupSetPath(backupId, deps));
 }
 
+/**
+ * Deletes a retained set on the user's say-so, reporting whether it was there.
+ *
+ * The explicit counterpart to pinning: a set holding someone's only copy of a
+ * skill is never evicted automatically, so there has to be a way to say "yes,
+ * really, let it go" — and a purge of something already gone is the state the
+ * caller asked for, not an error, which is why the boolean is informational.
+ */
+export async function purgeBackupSet(
+  backupId: string,
+  deps: BackupStoreDeps = defaultBackupStoreDeps
+): Promise<boolean> {
+  const path = backupSetPath(backupId, deps);
+  const existed = (await deps.fs.lstat(path)) !== null;
+  await deps.fs.remove(path);
+  return existed;
+}
+
 interface BackupSet {
   readonly id: string;
   readonly path: string;
   readonly modifiedAtMs: number;
   readonly sizeBytes: number;
+  readonly createdAtMs: number;
+  readonly entryCount: number;
+  readonly pinned: boolean;
+  readonly lastCopyResourceKeys: string[];
 }
 
 /**
@@ -227,15 +267,25 @@ async function describeBackupSet(
 ): Promise<BackupSet | null> {
   try {
     const entries = await fs.readdir(path);
+    const hasManifest = entries.some((entry) => entry.isFile() && entry.name === MANIFEST_NAME);
     const isBackupSet =
-      entries.some((entry) => entry.isFile() && entry.name === MANIFEST_NAME) ||
-      entries.some((entry) => entry.isDirectory() && getLibraryLocation(entry.name));
+      hasManifest || entries.some((entry) => entry.isDirectory() && getLibraryLocation(entry.name));
     if (!isBackupSet) return null;
+
+    const stats = await fs.stat(path);
+    // A set whose manifest is missing or unreadable is still a real backup
+    // directory, and still costs disk. It is reported unpinned rather than
+    // hidden — pinning is a property the manifest carries, not an assumption.
+    const manifest = hasManifest ? await readManifestAt(path, fs) : null;
     return {
       id,
       path,
-      modifiedAtMs: (await fs.stat(path)).mtimeMs,
+      modifiedAtMs: stats.mtimeMs,
       sizeBytes: await directorySize(path, fs),
+      createdAtMs: manifest?.createdAtMs ?? Math.round(stats.mtimeMs),
+      entryCount: manifest?.entries.length ?? 0,
+      pinned: manifest?.pinned === true,
+      lastCopyResourceKeys: manifest?.lastCopyResourceKeys ?? [],
     };
   } catch {
     return null;
@@ -256,20 +306,17 @@ async function directorySize(path: string, fs: BackupStoreFs): Promise<number> {
 }
 
 /**
- * Trims retained sets to both bounds, newest first. Count alone is not enough:
- * a handful of large skill directories can outgrow anything a user expected a
- * backup folder to cost.
+ * Every retained set, newest first. Returns an empty list rather than throwing
+ * when the backup root does not exist yet, because "nothing retained" is the
+ * normal state before the first apply.
  */
-export async function pruneBackupSets(
-  currentBackupId: string,
-  deps: BackupStoreDeps = defaultBackupStoreDeps
-): Promise<void> {
+async function collectBackupSets(deps: BackupStoreDeps): Promise<BackupSet[]> {
   const backupRoot = deps.backupDir();
   let entries: Dirent[];
   try {
     entries = await deps.fs.readdir(backupRoot);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
 
@@ -278,10 +325,30 @@ export async function pruneBackupSets(
       .filter((entry) => entry.isDirectory())
       .map((entry) => describeBackupSet(entry.name, join(backupRoot, entry.name), deps.fs))
   );
-  const backupSets = candidates.filter((backup): backup is BackupSet => backup !== null);
-  backupSets.sort(
-    (left, right) => right.modifiedAtMs - left.modifiedAtMs || right.id.localeCompare(left.id)
-  );
+  return candidates
+    .filter((backup): backup is BackupSet => backup !== null)
+    .sort(
+      (left, right) => right.modifiedAtMs - left.modifiedAtMs || right.id.localeCompare(left.id)
+    );
+}
+
+/**
+ * Trims retained sets to both bounds, newest first. Count alone is not enough:
+ * a handful of large skill directories can outgrow anything a user expected a
+ * backup folder to cost.
+ *
+ * Pinned sets sit outside both bounds. They are retained unconditionally and
+ * their bytes are charged first, so they squeeze ordinary sets out rather than
+ * being squeezed out themselves. Evicting the only copy of a user's skill to
+ * reclaim disk is not a trade the app gets to make silently — the way to
+ * reclaim it is `purgeBackupSet`, which the user asks for.
+ */
+export async function pruneBackupSets(
+  currentBackupId: string,
+  deps: BackupStoreDeps = defaultBackupStoreDeps
+): Promise<void> {
+  const backupSets = await collectBackupSets(deps);
+  if (backupSets.length === 0) return;
 
   const retentionCount = deps.retentionCount();
   if (!Number.isSafeInteger(retentionCount) || retentionCount < 1) {
@@ -290,15 +357,25 @@ export async function pruneBackupSets(
 
   // The set this apply just wrote is always retained: dropping it would leave
   // the caller holding a backup id that cannot be undone.
-  const current = backupSets.find((backup) => backup.id === currentBackupId);
   const retained = new Set([currentBackupId]);
-  let retainedBytes = current?.sizeBytes ?? 0;
+  let retainedBytes = 0;
   for (const backup of backupSets) {
-    if (backup.id === currentBackupId) continue;
-    if (retained.size >= retentionCount) break;
+    if (!backup.pinned) continue;
+    retained.add(backup.id);
+    retainedBytes += backup.sizeBytes;
+  }
+
+  const current = backupSets.find((backup) => backup.id === currentBackupId);
+  if (current && !current.pinned) retainedBytes += current.sizeBytes;
+  let ordinaryCount = current && !current.pinned ? 1 : 0;
+
+  for (const backup of backupSets) {
+    if (retained.has(backup.id)) continue;
+    if (ordinaryCount >= retentionCount) break;
     if (retainedBytes + backup.sizeBytes > deps.retentionBytes()) break;
     retained.add(backup.id);
     retainedBytes += backup.sizeBytes;
+    ordinaryCount += 1;
   }
 
   await Promise.all(
@@ -308,29 +385,23 @@ export async function pruneBackupSets(
   );
 }
 
-/** Total bytes currently held, so the UI can show what backups cost. */
-export async function measureBackupUsage(
+/**
+ * What backups cost, set by set. Listed rather than only totalled so a pinned
+ * set — which nothing will ever evict — can be seen and sized, and so "why is
+ * this directory large" has an answer that names the culprit.
+ */
+export async function listBackupSets(
   deps: BackupStoreDeps = defaultBackupStoreDeps
-): Promise<{ setCount: number; sizeBytes: number }> {
-  const backupRoot = deps.backupDir();
-  let entries: Dirent[];
-  try {
-    entries = await deps.fs.readdir(backupRoot);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { setCount: 0, sizeBytes: 0 };
-    throw error;
-  }
-
-  const candidates = await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => describeBackupSet(entry.name, join(backupRoot, entry.name), deps.fs))
-  );
-  const backupSets = candidates.filter((backup): backup is BackupSet => backup !== null);
-  return {
-    setCount: backupSets.length,
-    sizeBytes: backupSets.reduce((total, backup) => total + backup.sizeBytes, 0),
-  };
+): Promise<PropagationBackupSet[]> {
+  const backupSets = await collectBackupSets(deps);
+  return backupSets.map((backup) => ({
+    backupId: backup.id,
+    createdAtMs: backup.createdAtMs,
+    sizeBytes: backup.sizeBytes,
+    entryCount: backup.entryCount,
+    pinned: backup.pinned,
+    lastCopyResourceKeys: backup.lastCopyResourceKeys,
+  }));
 }
 
 function isManifest(value: unknown): value is BackupManifest {
@@ -340,6 +411,10 @@ function isManifest(value: unknown): value is BackupManifest {
     candidate.version === 1 &&
     typeof candidate.backupId === 'string' &&
     typeof candidate.createdAtMs === 'number' &&
+    (candidate.pinned === undefined || typeof candidate.pinned === 'boolean') &&
+    (candidate.lastCopyResourceKeys === undefined ||
+      (Array.isArray(candidate.lastCopyResourceKeys) &&
+        candidate.lastCopyResourceKeys.every((key) => typeof key === 'string'))) &&
     Array.isArray(candidate.entries) &&
     candidate.entries.every(isBackupEntry)
   );

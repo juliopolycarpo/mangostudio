@@ -7,7 +7,7 @@
  * than a blank line.
  */
 
-import type { PropagationBlockedReason } from '@mangostudio/shared/library';
+import type { PropagationBlockedReason, RemovalBlockedReason } from '@mangostudio/shared/library';
 import { Ban } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -15,7 +15,8 @@ export function BlockedReason({
   reason,
   action,
 }: {
-  readonly reason: PropagationBlockedReason;
+  /** Both flows block for mostly the same reasons, and read the same catalog. */
+  readonly reason: PropagationBlockedReason | RemovalBlockedReason;
   readonly action?: React.ReactNode;
 }) {
   const { t } = useI18n();
