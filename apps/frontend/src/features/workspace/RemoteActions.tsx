@@ -9,11 +9,14 @@ import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import { readGitPanelPrefs } from './git-panel-prefs';
 import { useGitFetch, useGitPull, useGitPush } from './hooks/use-git-state';
 
-/** Divergence the user can only get past by rewriting the remote branch. */
-const LEASE_RECOVERABLE_CODES: readonly string[] = [
-  ERROR_CODES.HISTORY_DIVERGED,
-  ERROR_CODES.NON_FAST_FORWARD,
-];
+/**
+ * Divergence the user can only get past by rewriting the remote branch, which
+ * is a *rejected push* and nothing else. `NON_FAST_FORWARD` is deliberately
+ * absent: it is what `git pull --ff-only` reports, and that pull already
+ * advanced the remote-tracking ref, so a lease taken right after it would pass
+ * and overwrite the very commits the user asked to integrate.
+ */
+const LEASE_RECOVERABLE_CODES: readonly string[] = [ERROR_CODES.HISTORY_DIVERGED];
 
 export function RemoteActions({
   chatId,
