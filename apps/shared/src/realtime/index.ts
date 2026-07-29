@@ -3,6 +3,7 @@ export {
   type GitScope,
   GitScopeSchema,
   gitTopic,
+  parseGitTopic,
   type RealtimeClientMessage,
   RealtimeClientMessageSchema,
   type RealtimeErrorMessage,

@@ -29,9 +29,20 @@ export const GIT_SCOPES: readonly GitScope[] = GitScopeSchema.anyOf.map((literal
 
 export const SETTINGS_TOPIC = 'settings' as const;
 
+const GIT_TOPIC_PREFIX = 'git:' as const;
+
 /** Topic string for git-panel invalidation scoped to one chat. */
 export function gitTopic(chatId: string): string {
-  return `git:${chatId}`;
+  return `${GIT_TOPIC_PREFIX}${chatId}`;
+}
+
+/** Chat id encoded in a git invalidation topic (`git:<chatId>`). */
+export function parseGitTopic(topic: string): string | undefined {
+  if (!topic.startsWith(GIT_TOPIC_PREFIX)) {
+    return undefined;
+  }
+  const chatId = topic.slice(GIT_TOPIC_PREFIX.length);
+  return chatId.length > 0 ? chatId : undefined;
 }
 
 const TopicsArraySchema = Type.Array(Type.String({ minLength: 1 }), { minItems: 1 });
@@ -99,7 +110,6 @@ const RealtimeGitInvalidateMessageSchema = Type.Object(
     type: Type.Literal('invalidate'),
     topic: Type.String({ pattern: '^git:.+$' }),
     scopes: Type.Optional(Type.Array(GitScopeSchema, { minItems: 1 })),
-    chatId: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false }
 );

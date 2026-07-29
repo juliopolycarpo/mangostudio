@@ -3,6 +3,7 @@ import { Value } from '@sinclair/typebox/value';
 import {
   GIT_SCOPES,
   gitTopic,
+  parseGitTopic,
   RealtimeClientMessageSchema,
   RealtimeInvalidateMessageSchema,
   RealtimeServerMessageSchema,
@@ -14,6 +15,9 @@ describe('realtime topic helpers', () => {
   it('round-trips settings and git topics', () => {
     expect(SETTINGS_TOPIC).toBe('settings');
     expect(gitTopic('chat-abc')).toBe('git:chat-abc');
+    expect(parseGitTopic(gitTopic('chat-abc'))).toBe('chat-abc');
+    expect(parseGitTopic('settings')).toBeUndefined();
+    expect(parseGitTopic('git:')).toBeUndefined();
   });
 
   it('exposes scope lists derived from schemas', () => {
@@ -70,7 +74,6 @@ describe('realtime server messages', () => {
         type: 'invalidate',
         topic: gitTopic('chat-1'),
         scopes: ['state'],
-        chatId: 'chat-1',
       })
     ).toBe(true);
     expect(
@@ -142,6 +145,14 @@ describe('realtime server messages', () => {
         type: 'invalidate',
         topic: gitTopic('chat-1'),
         scopes: ['not-a-git-scope'],
+      })
+    ).toBe(false);
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: gitTopic('chat-a'),
+        scopes: ['state'],
+        chatId: 'chat-b',
       })
     ).toBe(false);
   });
