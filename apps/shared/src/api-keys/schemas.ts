@@ -12,6 +12,15 @@ export const API_KEY_MAX_PER_USER = 20;
 export const ApiKeyScopeSchema = Type.Union([Type.Literal('read-only'), Type.Literal('full')]);
 export type ApiKeyScope = Static<typeof ApiKeyScopeSchema>;
 
+/**
+ * Selectable scopes in schema order. Derived from `ApiKeyScopeSchema` so a new
+ * literal reaches every consumer (pickers, docs, tests) without a second list
+ * to keep in sync.
+ */
+export const API_KEY_SCOPES: readonly ApiKeyScope[] = ApiKeyScopeSchema.anyOf.map(
+  (literal) => literal.const
+);
+
 const ISO_DATE_TIME_PATTERN = '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$';
 const DateTimeSchema = Type.String({ pattern: ISO_DATE_TIME_PATTERN });
 const NullableDateTimeSchema = Type.Union([DateTimeSchema, Type.Null()]);

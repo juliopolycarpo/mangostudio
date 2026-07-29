@@ -318,6 +318,7 @@ export const messages = {
       tools: 'Ferramentas',
       skills: 'Skills',
       mcp: 'MCP',
+      externalApi: 'API externa',
       metrics: 'Métricas',
       logs: 'Logs',
     },
@@ -938,6 +939,8 @@ export const messages = {
         exportFailed: 'Falha na exportação',
         copyJson: 'Copiar JSON',
         copiedJson: 'JSON copiado',
+        copyJsonFailed:
+          'Não foi possível copiar para a área de transferência. Baixe o arquivo em vez disso.',
         downloadJson: 'Baixar JSON',
         importDescription:
           'Revise cada adição, omissão, substituição ou cópia antes de aplicar a configuração em uma única transação.',
@@ -981,6 +984,78 @@ export const messages = {
         summarySkipped: 'Ignorados: {count}',
         summaryInvalid: 'Inválidos: {count}',
         done: 'Concluir',
+      },
+    },
+    externalApi: {
+      title: 'API externa',
+      description:
+        'Permita que scripts e outras ferramentas chamem esta instância com uma chave de API em vez de uma sessão no navegador. As chaves nunca funcionam nas rotas de autenticação.',
+      enableLabel: 'Ativar acesso à API externa',
+      enableDescription:
+        'Quando desativado, todas as chaves desta conta são recusadas mesmo que ainda apareçam na lista abaixo.',
+      disabledNotice:
+        'O acesso à API externa está desativado. As chaves existentes continuam listadas, mas toda requisição que as apresentar é recusada.',
+      keysTitle: 'Chaves de API',
+      createKey: 'Criar chave',
+      createDisabledAtCap:
+        'Limite de {max} chaves ativas atingido. Revogue uma antes de criar outra.',
+      empty:
+        'Nenhuma chave de API ainda. Crie uma para autenticar automações contra esta instância.',
+      loadError: 'Falha ao carregar chaves de API',
+      createSuccess: 'Chave de API criada',
+      revokeSuccess: 'Chave de API revogada',
+      failedToCreate: 'Falha ao criar chave de API',
+      failedToRevoke: 'Falha ao revogar chave de API',
+      columns: {
+        name: 'Nome',
+        scope: 'Escopo',
+        key: 'Chave',
+        created: 'Criada',
+        expires: 'Expira',
+        lastUsed: 'Último uso',
+        actions: 'Ações',
+      },
+      neverExpires: 'Nunca',
+      neverUsed: 'Nunca',
+      inactive: 'Inativa',
+      expired: 'Expirada',
+      unnamed: 'Sem nome',
+      scope: {
+        'read-only': 'Somente leitura',
+        full: 'Completo',
+      },
+      scopeHint: {
+        'read-only': 'Permite apenas GET, HEAD e OPTIONS.',
+        full: 'Permite todos os métodos HTTP em rotas que não sejam de autenticação.',
+      },
+      createDialog: {
+        title: 'Criar chave de API',
+        nameLabel: 'Nome',
+        namePlaceholder: 'ex. pipeline de CI',
+        nameRequired: 'O nome é obrigatório',
+        scopeLabel: 'Escopo',
+        expiresLabel: 'Expira em (dias)',
+        expiresHint: 'Deixe vazio para uma chave que não expira. Máximo de {max} dias.',
+        expiresInvalid: 'Informe um número inteiro entre 1 e {max}, ou deixe vazio.',
+        createButton: 'Criar',
+        creatingButton: 'Criando...',
+        cancelButton: 'Cancelar',
+      },
+      reveal: {
+        title: 'Copie sua chave de API',
+        notice:
+          'Esta é a única vez em que a chave em texto puro é mostrada. Guarde-a em local seguro.',
+        copy: 'Copiar chave',
+        copied: 'Copiada',
+        copyFailed: 'Não foi possível copiar para a área de transferência.',
+        done: 'Concluir',
+      },
+      revoke: {
+        title: 'Revogar chave de API',
+        confirm:
+          'Revogar esta chave? Requisições que a apresentarem deixam de funcionar imediatamente.',
+        confirmButton: 'Revogar',
+        cancelButton: 'Cancelar',
       },
     },
     skills: {

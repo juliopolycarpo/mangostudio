@@ -30,6 +30,7 @@ import { Route as AuthenticatedSettingsMcpRouteImport } from './routes/_authenti
 import { Route as AuthenticatedSettingsLogsRouteImport } from './routes/_authenticated/settings/logs'
 import { Route as AuthenticatedSettingsGitRouteImport } from './routes/_authenticated/settings/git'
 import { Route as AuthenticatedSettingsGeneralRouteImport } from './routes/_authenticated/settings/general'
+import { Route as AuthenticatedSettingsExternalApiRouteImport } from './routes/_authenticated/settings/external-api'
 import { Route as AuthenticatedSettingsContextRouteImport } from './routes/_authenticated/settings/context'
 import { Route as AuthenticatedSettingsConnectorsRouteImport } from './routes/_authenticated/settings/connectors'
 import { Route as AuthenticatedSettingsAppearanceRouteImport } from './routes/_authenticated/settings/appearance'
@@ -163,6 +164,12 @@ const AuthenticatedSettingsGeneralRoute =
     path: '/general',
     getParentRoute: () => AuthenticatedSettingsRoute,
   } as any)
+const AuthenticatedSettingsExternalApiRoute =
+  AuthenticatedSettingsExternalApiRouteImport.update({
+    id: '/external-api',
+    path: '/external-api',
+    getParentRoute: () => AuthenticatedSettingsRoute,
+  } as any)
 const AuthenticatedSettingsContextRoute =
   AuthenticatedSettingsContextRouteImport.update({
     id: '/context',
@@ -276,6 +283,7 @@ export interface FileRoutesByFullPath {
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/context': typeof AuthenticatedSettingsContextRoute
+  '/settings/external-api': typeof AuthenticatedSettingsExternalApiRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings/git': typeof AuthenticatedSettingsGitRoute
   '/settings/logs': typeof AuthenticatedSettingsLogsRoute
@@ -310,6 +318,7 @@ export interface FileRoutesByTo {
   '/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/settings/context': typeof AuthenticatedSettingsContextRoute
+  '/settings/external-api': typeof AuthenticatedSettingsExternalApiRoute
   '/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/settings/git': typeof AuthenticatedSettingsGitRoute
   '/settings/logs': typeof AuthenticatedSettingsLogsRoute
@@ -348,6 +357,7 @@ export interface FileRoutesById {
   '/_authenticated/settings/appearance': typeof AuthenticatedSettingsAppearanceRoute
   '/_authenticated/settings/connectors': typeof AuthenticatedSettingsConnectorsRoute
   '/_authenticated/settings/context': typeof AuthenticatedSettingsContextRoute
+  '/_authenticated/settings/external-api': typeof AuthenticatedSettingsExternalApiRoute
   '/_authenticated/settings/general': typeof AuthenticatedSettingsGeneralRoute
   '/_authenticated/settings/git': typeof AuthenticatedSettingsGitRoute
   '/_authenticated/settings/logs': typeof AuthenticatedSettingsLogsRoute
@@ -387,6 +397,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/connectors'
     | '/settings/context'
+    | '/settings/external-api'
     | '/settings/general'
     | '/settings/git'
     | '/settings/logs'
@@ -421,6 +432,7 @@ export interface FileRouteTypes {
     | '/settings/appearance'
     | '/settings/connectors'
     | '/settings/context'
+    | '/settings/external-api'
     | '/settings/general'
     | '/settings/git'
     | '/settings/logs'
@@ -458,6 +470,7 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/appearance'
     | '/_authenticated/settings/connectors'
     | '/_authenticated/settings/context'
+    | '/_authenticated/settings/external-api'
     | '/_authenticated/settings/general'
     | '/_authenticated/settings/git'
     | '/_authenticated/settings/logs'
@@ -627,6 +640,13 @@ declare module '@tanstack/react-router' {
       path: '/general'
       fullPath: '/settings/general'
       preLoaderRoute: typeof AuthenticatedSettingsGeneralRouteImport
+      parentRoute: typeof AuthenticatedSettingsRoute
+    }
+    '/_authenticated/settings/external-api': {
+      id: '/_authenticated/settings/external-api'
+      path: '/external-api'
+      fullPath: '/settings/external-api'
+      preLoaderRoute: typeof AuthenticatedSettingsExternalApiRouteImport
       parentRoute: typeof AuthenticatedSettingsRoute
     }
     '/_authenticated/settings/context': {
@@ -804,6 +824,7 @@ interface AuthenticatedSettingsRouteChildren {
   AuthenticatedSettingsAppearanceRoute: typeof AuthenticatedSettingsAppearanceRoute
   AuthenticatedSettingsConnectorsRoute: typeof AuthenticatedSettingsConnectorsRoute
   AuthenticatedSettingsContextRoute: typeof AuthenticatedSettingsContextRoute
+  AuthenticatedSettingsExternalApiRoute: typeof AuthenticatedSettingsExternalApiRoute
   AuthenticatedSettingsGeneralRoute: typeof AuthenticatedSettingsGeneralRoute
   AuthenticatedSettingsGitRoute: typeof AuthenticatedSettingsGitRoute
   AuthenticatedSettingsLogsRoute: typeof AuthenticatedSettingsLogsRoute
@@ -821,6 +842,7 @@ const AuthenticatedSettingsRouteChildren: AuthenticatedSettingsRouteChildren = {
   AuthenticatedSettingsAppearanceRoute: AuthenticatedSettingsAppearanceRoute,
   AuthenticatedSettingsConnectorsRoute: AuthenticatedSettingsConnectorsRoute,
   AuthenticatedSettingsContextRoute: AuthenticatedSettingsContextRoute,
+  AuthenticatedSettingsExternalApiRoute: AuthenticatedSettingsExternalApiRoute,
   AuthenticatedSettingsGeneralRoute: AuthenticatedSettingsGeneralRoute,
   AuthenticatedSettingsGitRoute: AuthenticatedSettingsGitRoute,
   AuthenticatedSettingsLogsRoute: AuthenticatedSettingsLogsRoute,

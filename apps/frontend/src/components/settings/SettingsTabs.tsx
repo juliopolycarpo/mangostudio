@@ -1,6 +1,16 @@
 import { Link } from '@tanstack/react-router';
 import { useI18n } from '@/hooks/use-i18n';
 
+// Router Link concatenates `className` with the matching state's className, so
+// the two state classes must stay disjoint from the base and from each other:
+// putting the idle color in the base would leave `text-on-surface-variant/60`
+// on the active tab, fighting `text-primary` on stylesheet order alone.
+const TAB_LINK_BASE =
+  'px-3 sm:px-4 py-2.5 text-sm rounded-t-lg transition-all duration-200 whitespace-nowrap';
+const TAB_LINK_IDLE =
+  'font-medium text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high/60';
+const TAB_LINK_ACTIVE = 'font-semibold text-primary border-b-2 border-primary -mb-px bg-primary/5';
+
 /**
  * Horizontal tab navigation for the Settings page.
  * Each tab is a TanStack Router Link for bookmarkable URLs.
@@ -20,6 +30,7 @@ export function SettingsTabs() {
     { to: '/settings/tools' as const, label: t.settings.tabs.tools },
     { to: '/settings/skills' as const, label: t.settings.tabs.skills },
     { to: '/settings/mcp' as const, label: t.settings.tabs.mcp },
+    { to: '/settings/external-api' as const, label: t.settings.tabs.externalApi },
     { to: '/settings/metrics' as const, label: t.settings.tabs.metrics },
     { to: '/settings/logs' as const, label: t.settings.tabs.logs },
   ];
@@ -33,11 +44,9 @@ export function SettingsTabs() {
         <Link
           key={to}
           to={to}
-          className="px-3 sm:px-4 py-2.5 text-sm font-medium rounded-t-lg transition-all duration-200 text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high/60 whitespace-nowrap"
-          activeProps={{
-            className:
-              'px-3 sm:px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all duration-200 text-primary border-b-2 border-primary -mb-px bg-primary/5 whitespace-nowrap',
-          }}
+          className={TAB_LINK_BASE}
+          activeProps={{ className: TAB_LINK_ACTIVE }}
+          inactiveProps={{ className: TAB_LINK_IDLE }}
         >
           {label}
         </Link>

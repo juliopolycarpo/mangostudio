@@ -2,6 +2,7 @@
 
 import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
 import { useState } from 'react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -9,7 +10,6 @@ import { deleteConnector } from './api';
 import { AddConnectorModal } from './components/AddConnectorModal';
 import { ConnectorList } from './components/ConnectorList';
 import { ConnectorModelsModal } from './components/ConnectorModelsModal';
-import { DeleteConfirmDialog } from './components/DeleteConfirmDialog';
 import { useChatGptUsageAlerts } from './hooks/use-chatgpt-usage-alerts';
 import { useConnectorForm } from './hooks/use-connector-form';
 import { useConnectors } from './hooks/use-connectors';
@@ -37,6 +37,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
   const usageAlerts = useChatGptUsageAlerts(connectors);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [connectorToDelete, setConnectorToDelete] = useState<Connector | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const connectorForm = useConnectorForm({
     errorRequired: s.errorRequired,
@@ -68,6 +69,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       return;
     }
 
+    setIsDeleting(true);
     try {
       await deleteConnector(id);
       await reloadModelCatalog();
@@ -78,6 +80,7 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
     } finally {
       await reloadConnectors();
       setConnectorToDelete(null);
+      setIsDeleting(false);
     }
   };
 
@@ -138,8 +141,13 @@ export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: Connect
       )}
 
       {connectorToDelete && (
-        <DeleteConfirmDialog
-          connector={connectorToDelete}
+        <ConfirmDialog
+          title={s.deleteConnector}
+          description={s.deleteConfirm}
+          entityName={connectorToDelete.name}
+          confirmLabel={s.deleteConnector}
+          cancelLabel={s.cancelButton}
+          isPending={isDeleting}
           onConfirm={() => void handleDeleteConnector(connectorToDelete.id)}
           onCancel={() => setConnectorToDelete(null)}
         />

@@ -3,6 +3,7 @@ import { Check, Copy, Download, X } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
+import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useExportPortableMcpServers } from '../hooks/use-mcp-servers';
@@ -16,6 +17,7 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
   const { t } = useI18n();
   const s = t.settings.mcp;
   const { toast } = useToast();
+  const { copy } = useClipboard();
   const [selected, setSelected] = useState(() => new Set(servers.map((server) => server.id)));
   const [preview, setPreview] = useState<ExportMcpServersResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,8 +45,14 @@ export function ExportServersDialog({ servers, onClose }: ExportServersDialogPro
 
   const copyJson = async () => {
     if (!preview) return;
-    await navigator.clipboard.writeText(preview.content);
-    toast(s.portability.copiedJson, 'success');
+    // An insecure context (or a denied permission) rejects the clipboard write.
+    // Say so — a silent no-op reads as "copied" and the JSON is lost.
+    if (await copy(preview.content)) {
+      setError(null);
+      toast(s.portability.copiedJson, 'success');
+      return;
+    }
+    setError(s.portability.copyJsonFailed);
   };
 
   const downloadJson = () => {

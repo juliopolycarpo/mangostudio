@@ -16,6 +16,8 @@ Open these first:
 - `apps/api/src/modules/api-keys/application/api-key-service.ts`
 - `apps/api/src/modules/api-keys/http/api-key-routes.ts`
 - `apps/shared/src/api-keys/schemas.ts`
+- `apps/frontend/src/features/settings/external-api/` (Settings → External API UI)
+- `apps/frontend/src/routes/_authenticated/settings/external-api.tsx`
 - `apps/frontend/src/lib/auth-client.ts`
 - `apps/frontend/src/routes/login.tsx`
 - `apps/frontend/src/routes/signup.tsx`
@@ -277,6 +279,7 @@ Open these first:
 - `apps/frontend/src/routes/_authenticated/settings/` (settings route tree)
 - `apps/frontend/src/components/settings/` (shared panels + `SettingsTabs.tsx`)
 - `apps/frontend/src/features/settings/app/`
+- `apps/frontend/src/features/settings/external-api/`
 - `apps/frontend/src/features/settings/providers/`
 - `apps/frontend/src/features/settings/tools/`
 

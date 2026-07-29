@@ -1,9 +1,7 @@
 import type { Message } from '@mangostudio/shared';
 import { Check, Copy } from 'lucide-react';
-import { useState } from 'react';
+import { useClipboard } from '@/hooks/use-clipboard';
 import { extractRawMarkdown } from './message-content';
-
-const COPIED_RESET_MS = 2000;
 
 interface CopyMessageButtonProps {
   msg: Message;
@@ -17,18 +15,12 @@ interface CopyMessageButtonProps {
  * Usage: <CopyMessageButton msg={msg} label={t.chat.copyMessage} copiedLabel={t.chat.messageCopied} />
  */
 export function CopyMessageButton({ msg, label, copiedLabel }: CopyMessageButtonProps) {
-  const [copied, setCopied] = useState(false);
+  const { copy, copied } = useClipboard();
 
   const handleCopy = async () => {
     const text = extractRawMarkdown(msg);
     if (!text) return;
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), COPIED_RESET_MS);
-    } catch {
-      // Clipboard API unavailable (e.g. insecure context); copy is best-effort.
-    }
+    await copy(text);
   };
 
   return (

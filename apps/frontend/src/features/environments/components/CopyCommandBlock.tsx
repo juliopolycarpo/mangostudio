@@ -8,8 +8,8 @@
 
 import type { InstallRecipePreview } from '@mangostudio/shared/environments';
 import { Check, Copy } from 'lucide-react';
-import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { displayName, guardReasonLabel } from '../format';
@@ -23,8 +23,7 @@ interface CopyCommandBlockProps {
 export function CopyCommandBlock({ recipe, message }: CopyCommandBlockProps) {
   const { t } = useI18n();
   const s = t.environments.install;
-  const [copied, setCopied] = useState(false);
-  const [copyFailed, setCopyFailed] = useState(false);
+  const { copy, copied, failed: copyFailed } = useClipboard();
 
   // Each blocker keeps a key naming where it came from, so two guards that
   // happen to render the same sentence stay two lines.
@@ -44,16 +43,6 @@ export function CopyCommandBlock({ recipe, message }: CopyCommandBlockProps) {
     });
   }
   if (reasons.length === 0 && message) reasons.push({ key: 'message', text: message });
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(recipe.copyCommand);
-      setCopied(true);
-      setCopyFailed(false);
-    } catch {
-      setCopyFailed(true);
-    }
-  };
 
   return (
     <div
@@ -77,7 +66,7 @@ export function CopyCommandBlock({ recipe, message }: CopyCommandBlockProps) {
         <code className="min-w-0 flex-1 break-all rounded-xl bg-surface-container-highest px-3 py-2 font-mono text-xs text-on-surface">
           {recipe.copyCommand}
         </code>
-        <Button variant="secondary" size="sm" onClick={() => void copy()}>
+        <Button variant="secondary" size="sm" onClick={() => void copy(recipe.copyCommand)}>
           {copied ? <Check size={14} /> : <Copy size={14} />}
           {copied ? t.environments.actions.copied : t.environments.actions.copy}
         </Button>

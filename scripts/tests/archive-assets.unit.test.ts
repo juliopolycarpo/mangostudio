@@ -179,17 +179,19 @@ describe.serial('archiveReleaseAssets', () => {
   });
 
   test('produces identical SHA256SUMS for serial and parallel archiving', async () => {
-    const runArchiving = async (concurrency: string): Promise<string> => {
-      const rootDir = makeTempDir();
-      const arches = ['linux-x64-musl', 'linux-arm64-musl'] as const;
-      stageMuslPlatforms(join(rootDir, 'out'), arches);
-      stageFrontendDist(rootDir);
-      const plan = createMuslReleasePlan({ rootDir, version: '9.9.9', arches });
+    // Stage once and re-archive the same sources. Restaging between runs picks up
+    // fresh file mtimes, and GNU tar embeds those in the archive, so checksums
+    // diverge across a second boundary even when concurrency is irrelevant.
+    const rootDir = makeTempDir();
+    const arches = ['linux-x64-musl', 'linux-arm64-musl'] as const;
+    stageMuslPlatforms(join(rootDir, 'out'), arches);
+    stageFrontendDist(rootDir);
+    const plan = createMuslReleasePlan({ rootDir, version: '9.9.9', arches });
 
+    const runArchiving = async (concurrency: string): Promise<string> => {
       await withArchiveConcurrency(concurrency, async () => {
         await archiveReleaseAssets(plan);
       });
-
       return readFileSync(plan.checksumPath, 'utf8');
     };
 
