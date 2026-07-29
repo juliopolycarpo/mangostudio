@@ -1,6 +1,8 @@
 /**
  * Basic rate limiting plugin for Elysia.
- * Counts requests per (bucket, client IP) with a configurable window and max.
+ * Counts requests per (bucket, client id) with a configurable window and max.
+ * Client id is usually the caller IP; the api-key bucket uses a hash of
+ * `x-api-key` when that header is present.
  * An injected `classify` function sorts each request path into a named bucket,
  * letting route groups (e.g. health, auth, general API) carry independent
  * limits without sharing a counter.
@@ -13,17 +15,11 @@
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
+import { resolveRateLimitClientId } from './rate-limit-policy';
 import { type RateLimitEntry, RateLimitStore } from './rate-limit-store';
+import type { RateLimitBucket } from './rate-limit-types';
 
-/** A named limit bucket: requests are counted per (bucket, client IP). */
-export interface RateLimitBucket {
-  /** Identifier used to namespace the per-IP counter store. */
-  name: string;
-  /** Maximum number of requests allowed per window. */
-  max: number;
-  /** Window length in milliseconds. */
-  windowMs: number;
-}
+export type { RateLimitBucket } from './rate-limit-types';
 
 interface RateLimitConfig {
   /** Max requests for the default bucket when `classify` is not provided. */
@@ -43,7 +39,7 @@ interface RateLimitConfig {
    * path from rate limiting entirely. Defaults to a single 'global' bucket
    * built from `max`/`windowMs`.
    */
-  classify?: (path: string) => RateLimitBucket | null;
+  classify?: (path: string, headers?: Headers) => RateLimitBucket | null;
   /** Trust proxy headers (X-Forwarded-For, etc.) for client IP (default: false) */
   trustProxy?: boolean;
 }
@@ -147,8 +143,8 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   };
 
   /** Resolve the bucket for a path, or `null` when the path is exempt. */
-  function resolveBucket(path: string): RateLimitBucket | null {
-    return mergedConfig.classify ? mergedConfig.classify(path) : defaultBucket;
+  function resolveBucket(path: string, headers: Headers): RateLimitBucket | null {
+    return mergedConfig.classify ? mergedConfig.classify(path, headers) : defaultBucket;
   }
 
   /** Periodic expiry sweep; overflow eviction runs per-request via the store. */
@@ -209,11 +205,13 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
           return;
         }
 
-        const bucket = resolveBucket(resolvePath(ctx.path, ctx.request.url));
+        const headers = ctx.request.headers;
+        const bucket = resolveBucket(resolvePath(ctx.path, ctx.request.url), headers);
         if (!bucket) {
           return; // path is exempt
         }
 
+        const clientId = resolveRateLimitClientId(bucket, headers, clientIp);
         const now = Date.now();
 
         // Lazy expiry sweep: run only when the interval has elapsed.
@@ -221,7 +219,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
           runScheduledCleanup(now);
         }
 
-        const entry = store.touch(`rate-limit:${bucket.name}:${clientIp}`, bucket.windowMs, now);
+        const entry = store.touch(`rate-limit:${bucket.name}:${clientId}`, bucket.windowMs, now);
         // Bound memory immediately (not just on the timer) so a flood of distinct
         // keys — e.g. spoofed forwarded IPs — cannot grow the store unbounded.
         store.evictOverflow();

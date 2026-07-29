@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
 import { errorHandler } from '../../../src/plugins/error-handler';
@@ -6,6 +7,7 @@ import { rateLimit } from '../../../src/plugins/rate-limit';
 import { classifyRateLimit, RATE_LIMIT_BUCKETS } from '../../../src/plugins/rate-limit-policy';
 
 const CALLER = { 'x-forwarded-for': '198.51.100.7' };
+const API_KEY_VALUE = 'mango_integration_test_key_value';
 
 type GetFn = (path: string) => Promise<Response>;
 
@@ -88,6 +90,41 @@ describe('rate-limit buckets under the /api prefix', () => {
     expect(authHit).toBe(RATE_LIMIT_BUCKETS.auth.max + 1);
 
     teardown();
+  });
+
+  it('isolates api-key traffic from the general bucket on the same IP', async () => {
+    const tinyApiKey = { name: 'api-key', max: 3, windowMs: 60_000 };
+    const classify = (path: string, headers?: Headers) => {
+      const bucket = classifyRateLimit(path, headers);
+      if (bucket.name === RATE_LIMIT_BUCKETS.apiKey.name) return tinyApiKey;
+      return bucket;
+    };
+    const limiter = rateLimit({ classify, trustProxy: true });
+    const chatRoutes = new Elysia().get('/chats', () => ({ ok: true }));
+    const api = new Elysia({ prefix: '/api' }).use(errorHandler).use(limiter).use(chatRoutes);
+    const app = new Elysia().use(api);
+    const getWithKey = (path: string) =>
+      app.handle(
+        new Request(`http://localhost${path}`, {
+          headers: { ...CALLER, [API_KEY_HEADER]: API_KEY_VALUE },
+        })
+      );
+    const get = (path: string) =>
+      app.handle(new Request(`http://localhost${path}`, { headers: CALLER }));
+
+    for (let i = 0; i < tinyApiKey.max; i++) {
+      expect((await getWithKey('/api/chats')).status).toBe(200);
+    }
+    const limited = await getWithKey('/api/chats');
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toBeTruthy();
+    const body = (await limited.json()) as { code: string };
+    expect(body.code).toBe(ERROR_CODES.RATE_LIMITED);
+
+    // General bucket on the same forwarded IP is untouched.
+    expect((await get('/api/chats')).status).toBe(200);
+
+    limiter.teardown();
   });
 
   /**

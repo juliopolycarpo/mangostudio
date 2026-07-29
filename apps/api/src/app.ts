@@ -54,8 +54,8 @@ const api = new Elysia({ prefix: '/api' })
   // Centralized error handling
   .use(errorHandler)
   // Rate limiting with per-route-group buckets. `classifyRateLimit` routes
-  // health and auth into their own generous buckets so they are not gated by
-  // the general API limit, while everything else shares the baseline bucket.
+  // health and auth into their own generous buckets, key-authenticated traffic
+  // into `api-key`, and everything else into the baseline `general` bucket.
   // `trustProxy` lets proxied deployments (e.g. Docker behind nginx) resolve
   // the real client IP from forwarded headers; off by default (see config).
   .use(rateLimit({ classify: classifyRateLimit, trustProxy: getConfig().security.trustProxy }))
