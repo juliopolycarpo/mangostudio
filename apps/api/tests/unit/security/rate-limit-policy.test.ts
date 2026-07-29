@@ -70,22 +70,21 @@ describe('rate-limit policy classification', () => {
 });
 
 describe('resolveRateLimitClientId', () => {
-  it('uses a stable hashed id for the api-key bucket', () => {
+  it('keys the api-key bucket by client IP until verified key ids exist', () => {
+    // Hashing the raw header would let rotating garbage keys escape the limiter
+    // before apiKeyGuard runs. Isolation still comes from the separate bucket.
     const headers = headersWithApiKey('mango_same_key');
-    const first = resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, headers, '1.2.3.4');
-    const second = resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, headers, '9.9.9.9');
-    expect(first).toBe(second);
-    expect(first.startsWith('key:')).toBe(true);
-    expect(first).not.toContain('mango');
+    expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, headers, '1.2.3.4')).toBe('1.2.3.4');
+    expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, headers, '9.9.9.9')).toBe('9.9.9.9');
   });
 
-  it('falls back to client IP for non api-key buckets', () => {
+  it('uses client IP for non api-key buckets', () => {
     expect(
       resolveRateLimitClientId(RATE_LIMIT_BUCKETS.general, headersWithApiKey('k'), '5.5.5.5')
     ).toBe('5.5.5.5');
   });
 
-  it('falls back to client IP when the api-key bucket has no header', () => {
+  it('uses client IP when the api-key bucket has no header', () => {
     expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, new Headers(), '5.5.5.5')).toBe(
       '5.5.5.5'
     );

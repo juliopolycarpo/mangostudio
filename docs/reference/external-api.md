@@ -63,8 +63,9 @@ Common codes for external API traffic:
 | `RATE_LIMITED`            | 429            | Bucket limit exceeded; see `Retry-After` |
 
 Rate limiting uses separate buckets for health, auth, browser (`general`), and
-key-authenticated traffic (`api-key`). A burst from one key does not consume
-the general per-IP counter for cookie traffic on the same host.
+key-authenticated traffic (`api-key`). Counters are still per IP within each
+bucket today, so a burst with `x-api-key` does not consume the general counter
+for cookie traffic on the same host (per-key bucketing is tracked in #737).
 
 ## Security notes
 

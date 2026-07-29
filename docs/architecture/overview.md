@@ -133,11 +133,12 @@ In-memory rate limiter (`rate-limit.ts`) that counts requests per (bucket,
 client id). A `classify` function (`rate-limit-policy.ts`) sorts each request
 into a named bucket — `health`, `auth`, `general` (cookie traffic), and
 `api-key` (requests with `x-api-key`) use independent counters so automation
-cannot starve browser sessions on the same IP. Client id is usually the caller
-IP; the `api-key` bucket keys counters by a hash of the header value. Limited
-requests return a `429` `ApiErrorResponse` (`code: RATE_LIMITED`) with a
-`Retry-After` header. Lazy cleanup of expired counters. Can be trusted-proxy-aware
-for deployment behind reverse proxies.
+cannot starve browser sessions on the same IP. Client id is the caller IP for
+every bucket today (per-key ids need a verified key id after `apiKeyGuard`; see
+issue #737). Limited requests return a `429` `ApiErrorResponse`
+(`code: RATE_LIMITED`) with a `Retry-After` header. Expired counters are cleaned
+up lazily. Proxy headers affect the client id only when `trustProxy` is
+explicitly enabled behind a trusted reverse proxy.
 
 ### Error Handling
 

@@ -36,10 +36,12 @@ As chaves nunca são expostas ao frontend. A API resolve os secrets server-side 
 O rate limiter em memória conta requests por (bucket, id do cliente). A função
 `classify` (`rate-limit-policy.ts`) classifica cada path em um bucket — `health`,
 `auth`, `general` e `api-key` (tráfego com `x-api-key`) têm contadores
-independentes; o bucket `api-key` usa hash do header em vez de só IP. Requests
-bloqueados retornam `429` no formato `ApiErrorResponse` (`code: RATE_LIMITED`)
-com header `Retry-After`. Protege contra brute-force e abuso. Pode confiar em
-headers de proxy quando o app roda atrás de reverse proxy.
+independentes no mesmo IP. Requests bloqueados retornam `429` no formato
+`ApiErrorResponse` (`code: RATE_LIMITED`) com header `Retry-After`. Protege
+contra brute-force e abuso. Headers de proxy (`X-Forwarded-For`, etc.) só
+definem o cliente quando `trustProxy` / `TRUST_PROXY` está habilitado
+explicitamente e apenas atrás de um proxy confiável que sobrescreve esses
+headers; caso contrário o limiter usa o IP do socket.
 
 ### Validação De Entrada
 

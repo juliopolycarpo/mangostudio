@@ -64,8 +64,9 @@ Códigos comuns para tráfego de API externa:
 | `RATE_LIMITED`            | 429           | Limite do bucket; veja `Retry-After`        |
 
 Rate limiting usa buckets separados para health, auth, navegador (`general`) e
-tráfego com chave (`api-key`). Um pico de uma chave não consome o contador
-general por IP da sessão no mesmo host.
+tráfego com chave (`api-key`). Os contadores ainda são por IP dentro de cada
+bucket hoje, então um pico com `x-api-key` não consome o contador general da
+sessão no mesmo host (bucketing por chave está em #737).
 
 ## Notas de segurança
 

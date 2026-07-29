@@ -127,6 +127,36 @@ describe('rate-limit buckets under the /api prefix', () => {
     limiter.teardown();
   });
 
+  it('still rate-limits when x-api-key rotates on every request', async () => {
+    // Classification runs before apiKeyGuard, so a hash-of-header client id
+    // would mint a fresh counter per garbage value and bypass both buckets.
+    const tinyApiKey = { name: 'api-key', max: 3, windowMs: 60_000 };
+    const classify = (path: string, headers?: Headers) => {
+      const bucket = classifyRateLimit(path, headers);
+      if (bucket.name === RATE_LIMIT_BUCKETS.apiKey.name) return tinyApiKey;
+      return bucket;
+    };
+    const limiter = rateLimit({ classify, trustProxy: true });
+    const chatRoutes = new Elysia().get('/chats', () => ({ ok: true }));
+    const api = new Elysia({ prefix: '/api' }).use(errorHandler).use(limiter).use(chatRoutes);
+    const app = new Elysia().use(api);
+    const getWithRotatingKey = (path: string, n: number) =>
+      app.handle(
+        new Request(`http://localhost${path}`, {
+          headers: { ...CALLER, [API_KEY_HEADER]: `garbage_rotating_key_${n}` },
+        })
+      );
+
+    for (let i = 0; i < tinyApiKey.max; i++) {
+      expect((await getWithRotatingKey('/api/chats', i)).status).toBe(200);
+    }
+    const limited = await getWithRotatingKey('/api/chats', tinyApiKey.max);
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toBeTruthy();
+
+    limiter.teardown();
+  });
+
   /**
    * Regression: the limiter must not consume the request body. The Better Auth
    * passthrough route reads the raw `request` itself, so if the limiter's hooks

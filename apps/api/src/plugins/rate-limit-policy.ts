@@ -10,14 +10,15 @@
  * starved by — nor able to starve — the general API bucket, while still being
  * capped against floods. Requests carrying `x-api-key` use a separate bucket so
  * automation scripts do not share counters with browser session traffic.
+ *
+ * The api-key bucket is keyed by client IP for now. Hashing the raw header for
+ * a per-key counter would let an unauthenticated caller rotate `x-api-key` and
+ * escape both buckets; verified Better Auth key ids arrive only after
+ * `apiKeyGuard`, which runs after this limiter (see issue #737).
  */
 
-import { createHmac } from 'node:crypto';
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import type { RateLimitBucket } from './rate-limit-types';
-
-/** Domain-separated HMAC context for rate-limit store keys (not credential storage). */
-const API_KEY_RATE_LIMIT_HMAC_CONTEXT = 'mangostudio:rate-limit:api-key:v1';
 
 const ONE_MINUTE_MS = 60_000;
 
@@ -41,7 +42,8 @@ export const RATE_LIMIT_BUCKETS = {
   health: { name: 'health', max: 240, windowMs: ONE_MINUTE_MS },
   /**
    * Key-authenticated automation traffic. Counted separately from `general` so a
-   * noisy script cannot starve a browser session on the same host IP.
+   * noisy script cannot starve a browser session on the same host IP. Client id
+   * is the caller IP until verified key ids can key the bucket (#737).
    */
   apiKey: { name: 'api-key', max: 120, windowMs: ONE_MINUTE_MS },
 } as const satisfies Record<string, RateLimitBucket>;
@@ -69,34 +71,16 @@ function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined):
 }
 
 /**
- * Stable store id for an API key header value. The raw secret is never stored;
- * this is a truncated HMAC-SHA256 fingerprint, not the Better Auth key id (that
- * id is unavailable before `apiKeyGuard` runs).
- */
-function hashApiKeyHeader(value: string): string {
-  // Fingerprint for in-memory rate-limit counters only; Better Auth verifies the secret later.
-  // codeql[js/insufficient-password-hash]
-  const digest = createHmac('sha256', API_KEY_RATE_LIMIT_HMAC_CONTEXT)
-    .update(value)
-    .digest('hex')
-    .slice(0, 32);
-  return `key:${digest}`;
-}
-
-/**
- * Resolve the counter key for a bucket. IP buckets use `clientIp`; the api-key
- * bucket uses a hash of `x-api-key` when present, otherwise falls back to IP.
+ * Resolve the counter key for a bucket. All buckets use `clientIp` today; the
+ * api-key bucket still classifies separately so automation does not share the
+ * general counter. Per-key client ids need a verified key id (#737).
  */
 export function resolveRateLimitClientId(
-  bucket: RateLimitBucket,
-  headers: RateLimitHeaderLookup | null | undefined,
+  _bucket: RateLimitBucket,
+  _headers: RateLimitHeaderLookup | null | undefined,
   clientIp: string
 ): string {
-  if (bucket.name !== RATE_LIMIT_BUCKETS.apiKey.name) {
-    return clientIp;
-  }
-  const apiKey = trimmedApiKeyHeader(headers);
-  return apiKey ? hashApiKeyHeader(apiKey) : clientIp;
+  return clientIp;
 }
 
 /**

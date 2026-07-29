@@ -1,8 +1,8 @@
 /**
  * Basic rate limiting plugin for Elysia.
  * Counts requests per (bucket, client id) with a configurable window and max.
- * Client id is usually the caller IP; the api-key bucket uses a hash of
- * `x-api-key` when that header is present.
+ * Client id is the caller IP for every bucket today; the api-key bucket still
+ * classifies separately so automation does not share the general counter.
  * An injected `classify` function sorts each request path into a named bucket,
  * letting route groups (e.g. health, auth, general API) carry independent
  * limits without sharing a counter.
