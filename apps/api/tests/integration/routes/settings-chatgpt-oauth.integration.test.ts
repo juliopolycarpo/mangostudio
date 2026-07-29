@@ -65,7 +65,7 @@ beforeAll(async () => {
   );
 
   const db = getDb();
-  const now = Date.now();
+  const now = new Date().toISOString();
   await db
     .insertInto('user')
     .values({

@@ -233,8 +233,8 @@ describe('GET /messages/images', () => {
           email: galleryUser.email,
           emailVerified: 0,
           image: null,
-          createdAt: baseTimestamp,
-          updatedAt: baseTimestamp,
+          createdAt: new Date(baseTimestamp).toISOString(),
+          updatedAt: new Date(baseTimestamp).toISOString(),
         },
         {
           id: galleryOtherUser.id,
@@ -242,8 +242,8 @@ describe('GET /messages/images', () => {
           email: galleryOtherUser.email,
           emailVerified: 0,
           image: null,
-          createdAt: baseTimestamp,
-          updatedAt: baseTimestamp,
+          createdAt: new Date(baseTimestamp).toISOString(),
+          updatedAt: new Date(baseTimestamp).toISOString(),
         },
       ])
       .execute();

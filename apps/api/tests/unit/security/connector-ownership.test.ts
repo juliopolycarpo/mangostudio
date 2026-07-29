@@ -15,7 +15,7 @@ let restoreAuth: (() => void) | null = null;
 
 beforeAll(async () => {
   const db = getDb();
-  const now = Date.now();
+  const now = new Date().toISOString();
   for (const u of [USER_A, USER_B]) {
     await db
       .insertInto('user')

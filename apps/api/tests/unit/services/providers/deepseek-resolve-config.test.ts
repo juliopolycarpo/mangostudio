@@ -12,7 +12,7 @@ const ROW_CHAT = 'deepseek-row-chat-only';
 const ROW_REASONER = 'deepseek-row-reasoner-only';
 
 beforeAll(async () => {
-  const now = Date.now();
+  const now = new Date().toISOString();
   await getDb()
     .insertInto('user')
     .values({

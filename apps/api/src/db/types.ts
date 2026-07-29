@@ -90,22 +90,26 @@ interface SecretMetadataTable {
   projectId: string | null;
 }
 
+// Better Auth's kysely adapter reports supportsDates: false for sqlite, so date
+// fields are written as ISO strings (value.toISOString()), not integers, despite
+// the migration declaring these columns integer. SQLite type affinity preserves
+// the text either way. See 006_auth_tables.ts and 035_api_keys.ts.
 interface UserTable {
   id: string;
   name: string;
   email: string;
   emailVerified: number;
   image: string | null;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface SessionTable {
   id: string;
-  expiresAt: number;
+  expiresAt: string;
   token: string;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
   ipAddress: string | null;
   userAgent: string | null;
   userId: string;
@@ -119,21 +123,21 @@ interface AccountTable {
   accessToken: string | null;
   refreshToken: string | null;
   idToken: string | null;
-  accessTokenExpiresAt: number | null;
-  refreshTokenExpiresAt: number | null;
+  accessTokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
   scope: string | null;
   password: string | null;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface VerificationTable {
   id: string;
   identifier: string;
   value: string;
-  expiresAt: number;
-  createdAt: number;
-  updatedAt: number;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface UserProviderSettingsTable {
