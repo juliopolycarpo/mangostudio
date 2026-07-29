@@ -33,6 +33,9 @@ const GIT_TOPIC_PREFIX = 'git:' as const;
 
 /** Topic string for git-panel invalidation scoped to one chat. */
 export function gitTopic(chatId: string): string {
+  if (chatId.length === 0) {
+    throw new TypeError('chatId must not be empty');
+  }
   return `${GIT_TOPIC_PREFIX}${chatId}`;
 }
 

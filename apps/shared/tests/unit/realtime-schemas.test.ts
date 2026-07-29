@@ -20,6 +20,18 @@ describe('realtime topic helpers', () => {
     expect(parseGitTopic('git:')).toBeUndefined();
   });
 
+  it('rejects empty chat ids before constructing a git topic', () => {
+    expect(() => gitTopic('')).toThrow(TypeError);
+    expect(() => gitTopic('')).toThrow('chatId must not be empty');
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: 'git:',
+        scopes: ['state'],
+      })
+    ).toBe(false);
+  });
+
   it('exposes scope lists derived from schemas', () => {
     expect(SETTINGS_SCOPES).toEqual(['app', 'provider', 'tool']);
     expect(GIT_SCOPES).toContain('state');
