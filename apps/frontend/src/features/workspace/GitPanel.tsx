@@ -21,7 +21,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { useToast } from '@/components/ui/Toast';
@@ -313,6 +313,11 @@ function RepositoryStatus({
   const branchName = status.branch.name
     ? status.branch.name
     : labels.detachedAt.replace('{commit}', status.branch.detachedAt?.slice(0, 8) ?? 'HEAD');
+
+  // A rejected remote operation describes the branch it was rejected on. Its
+  // guidance — and the leased force push it can offer — must not survive a
+  // checkout onto a different branch.
+  useEffect(() => setRemoteFailure(null), [status.branch.name]);
 
   const mutatePaths = async (action: 'stage' | 'unstage', paths: string[] | { all: true }) => {
     try {

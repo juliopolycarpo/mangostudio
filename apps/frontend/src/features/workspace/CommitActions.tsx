@@ -108,6 +108,9 @@ export function useCommitActions({
       toast(resolveApiErrorMessage(error, labels.pushFailed), 'error');
       return;
     }
+    // The banner describes a remote operation that failed; a push that just
+    // succeeded retires it, exactly as the branch-row buttons do.
+    onRemoteFailure(null);
     const success = action === 'commit-and-sync' ? labels.synced : labels.pushed;
     toast(success.replace('{hash}', shortHash), 'success');
   };
