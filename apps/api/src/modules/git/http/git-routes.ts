@@ -356,8 +356,8 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          // `/commit` re-adds the trailer from the same setting, so the form
-          // must not be prefilled with one it would then duplicate.
+          // `/commit` re-adds this user's trailer from the same setting, so the
+          // form must not be prefilled with one it would then duplicate.
           const settings = await getAppSettings(db, userId);
           return await getHeadMessage(
             resolved.workdir,

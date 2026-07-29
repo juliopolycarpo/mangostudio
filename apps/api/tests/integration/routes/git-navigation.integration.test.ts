@@ -281,7 +281,7 @@ describe('Git navigation routes', () => {
         '-m',
         'feat(git): land the panel',
         '-m',
-        'Explain the change.\n\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>',
+        'Explain the change.\n\nSigned-off-by: Co Author <co-author@mangostudio.test>\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>',
       ]);
       const { app, chatId, user } = await createRouteFixture(workdir);
 
@@ -292,7 +292,7 @@ describe('Git navigation routes', () => {
       expect(preservedPayload.hash).toBe(await fixtureGit(workdir, ['rev-parse', 'HEAD']));
       expect(preservedPayload.title).toBe('feat(git): land the panel');
       expect(preservedPayload.body).toBe(
-        'Explain the change.\n\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>'
+        'Explain the change.\n\nSigned-off-by: Co Author <co-author@mangostudio.test>\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>'
       );
 
       await updateAppSettings(getDb(), user.id, {
@@ -300,11 +300,26 @@ describe('Git navigation routes', () => {
         gitSettings: { ...DEFAULT_APP_SETTINGS.gitSettings, signOff: true },
       });
 
+      // Only this committer's trailer goes: `--signoff` re-adds that one, and a
+      // co-signer dropped here could never be recovered by the form.
       const stripped = await getRoute(app, '/git/head-message', { chatId });
       expect(stripped.status).toBe(200);
       const strippedPayload = (await stripped.json()) as GitHeadMessageResponse;
       expect(strippedPayload.title).toBe('feat(git): land the panel');
-      expect(strippedPayload.body).toBe('Explain the change.');
+      expect(strippedPayload.body).toBe(
+        'Explain the change.\n\nSigned-off-by: Co Author <co-author@mangostudio.test>'
+      );
+
+      const amended = await postJson(app, '/git/commit', {
+        chatId,
+        title: strippedPayload.title,
+        body: strippedPayload.body,
+        amend: true,
+      });
+      expect(amended.status).toBe(200);
+      expect(await fixtureGit(workdir, ['log', '-1', '--format=%B'])).toBe(
+        'feat(git): land the panel\n\nExplain the change.\n\nSigned-off-by: Co Author <co-author@mangostudio.test>\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>'
+      );
     },
     GIT_NAVIGATION_TIMEOUT_MS
   );

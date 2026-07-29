@@ -7,6 +7,7 @@ import {
   type GitHistoryResponse,
   splitCommitMessage,
 } from '@mangostudio/shared/git';
+import { parseCommitterIdentity } from '../domain/commit-command';
 import { GIT_LOG_FORMAT, parseCommitFiles, parseHistoryLog } from '../domain/history-parser';
 import {
   GitPathValidationError,
@@ -50,24 +51,44 @@ export async function listHistory(
 }
 
 /**
+ * Resolves the identity `git commit --signoff` would append, so the form can
+ * hide that one trailer without touching anybody else's.
+ */
+async function readSignoffIdentity(
+  root: string,
+  signal?: AbortSignal
+): Promise<string | undefined> {
+  try {
+    const result = await runGit(['var', 'GIT_COMMITTER_IDENT'], { cwd: root, signal });
+    return parseCommitterIdentity(result.stdout);
+  } catch {
+    // Without an identity git cannot sign off either, so every trailer stays.
+    return undefined;
+  }
+}
+
+/**
  * Reads the message of the commit an amend would replace, so the form can show
  * the author what they are about to rewrite instead of silently discarding it.
  */
 export async function getHeadMessage(
   workdir: string,
-  stripSignoff: boolean,
+  signOff: boolean,
   signal?: AbortSignal
 ): Promise<GitHeadMessageResponse> {
   try {
     const root = await requireRepoRoot(workdir, signal);
-    const result = await runGit(['log', '-1', '--format=%H%x00%B'], { cwd: root, signal });
+    const [result, signoffIdentity] = await Promise.all([
+      runGit(['log', '-1', '--format=%H%x00%B'], { cwd: root, signal }),
+      signOff ? readSignoffIdentity(root, signal) : undefined,
+    ]);
     const separator = result.stdout.indexOf('\0');
     if (separator < 0) {
       throw new GitWriteError('There is no commit to amend.', 409, ERROR_CODES.AMEND_WITHOUT_HEAD);
     }
     return {
       hash: result.stdout.slice(0, separator).trim(),
-      ...splitCommitMessage(result.stdout.slice(separator + 1), { stripSignoff }),
+      ...splitCommitMessage(result.stdout.slice(separator + 1), { signoffIdentity }),
     };
   } catch (error) {
     if (isEmptyHistory(error)) {
