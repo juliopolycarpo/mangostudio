@@ -20,6 +20,7 @@ scripts/
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── lib/              Shared toolkit (see below)
+├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
 ├── install/          Archive-install smoke fixture for the release dry-run (install.sh, not shipped; canonical installers live at mangostudio.dev)
 ├── qa-gate/          PR metrics collector, comment renderers + comment publisher
 ├── release/          Release-time packaging + publication (see below)
@@ -126,6 +127,18 @@ Run by `.github/workflows/release.yml`; each is also runnable locally:
 | `retry.sh`                    | `retry_command` helper sourced by workflow shell steps                                               |
 | `upload-release-assets.sh`    | `upload_release_assets` helper: delete conflicting assets by id, then upload (retry-safe)            |
 | `create-or-update-release.sh` | `create_or_update_release` helper: stateful create/edit with post-failure `gh release view` recovery |
+
+## examples/ — maintainer samples
+
+Runnable Bun scripts for manual verification (no extra dependencies):
+
+| Script                  | Purpose                                                           |
+| ----------------------- | ----------------------------------------------------------------- |
+| `external-api-smoke.ts` | Probe `/api/health` and an authenticated GET with `MANGO_API_KEY` |
+
+```bash
+MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://localhost:3001
+```
 
 ## Conventions
 
