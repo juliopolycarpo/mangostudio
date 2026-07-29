@@ -21,6 +21,8 @@ import { assertChatOwnership, ChatNotFoundError } from '../../chats/domain/chat-
 
 const MAX_CONNECTIONS_PER_USER = 8;
 const MAX_MESSAGES_PER_SECOND = 20;
+/** Cap in-flight + queued frames so slow handlers cannot retain unbounded work. */
+const MAX_PENDING_MESSAGES = MAX_MESSAGES_PER_SECOND;
 const MAX_ACTIVE_TOPICS = 64;
 const MESSAGE_RATE_WINDOW_MS = 1_000;
 
@@ -40,10 +42,11 @@ interface RealtimeSocketState {
   invalidMessageCount: number;
   rateWindowStartedAt: number;
   rateWindowMessageCount: number;
+  pendingMessageCount: number;
   connectionRegistered: boolean;
   unsubscribeBus: (() => void) | null;
   cleanedUp: boolean;
-  /** Serializes async message handlers so topic/rate state cannot race across frames. */
+  /** Serializes async message handlers so topic state cannot race across frames. */
   messageChain: Promise<void>;
 }
 
@@ -231,6 +234,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
           invalidMessageCount: 0,
           rateWindowStartedAt: now(),
           rateWindowMessageCount: 0,
+          pendingMessageCount: 0,
           connectionRegistered: false,
           unsubscribeBus: null,
           cleanedUp: false,
@@ -295,20 +299,33 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
         const state = socket.data.realtimeSocket;
         if (state.cleanedUp || state.rejection || !state.userId) return;
 
-        const run = async (): Promise<void> => {
-          if (state.cleanedUp || state.rejection || !state.userId) return;
+        // Admit before enqueue so slow subscribe ownership work cannot reset the
+        // rate window between frames or retain an unbounded pending chain.
+        if (!acceptsMessage(state)) {
+          cleanupConnection(state, socket.id);
+          sendAndClose(
+            socket,
+            errorMessage('Realtime message rate exceeded', ERROR_CODES.RATE_LIMITED),
+            REALTIME_CLOSE_CODES.RATE_LIMITED,
+            'Rate limited'
+          );
+          return;
+        }
+        if (state.pendingMessageCount >= MAX_PENDING_MESSAGES) {
+          cleanupConnection(state, socket.id);
+          sendAndClose(
+            socket,
+            errorMessage('Realtime message queue limit exceeded', ERROR_CODES.RATE_LIMITED),
+            REALTIME_CLOSE_CODES.RATE_LIMITED,
+            'Rate limited'
+          );
+          return;
+        }
 
+        state.pendingMessageCount += 1;
+        const run = async (): Promise<void> => {
           try {
-            if (!acceptsMessage(state)) {
-              cleanupConnection(state, socket.id);
-              sendAndClose(
-                socket,
-                errorMessage('Realtime message rate exceeded', ERROR_CODES.RATE_LIMITED),
-                REALTIME_CLOSE_CODES.RATE_LIMITED,
-                'Rate limited'
-              );
-              return;
-            }
+            if (state.cleanedUp || state.rejection || !state.userId) return;
 
             if (!Value.Check(RealtimeClientMessageSchema, incomingMessage)) {
               state.invalidMessageCount += 1;
@@ -348,6 +365,8 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
             await subscribe(socket, message);
           } catch (error) {
             failSocket(socket, error);
+          } finally {
+            state.pendingMessageCount = Math.max(0, state.pendingMessageCount - 1);
           }
         };
 

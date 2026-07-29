@@ -623,4 +623,107 @@ describe('realtime WebSocket limits', () => {
     await replacement.opened;
     expect(await replacement.nextMessage()).toEqual({ type: 'ready' });
   });
+
+  it('rate-limits on admission so slow subscribe work cannot bypass the window', async () => {
+    let clock = 10_000;
+    let ownershipGate: Promise<void> = Promise.resolve();
+    let releaseOwnership: (() => void) | undefined;
+    let gateOwnership = false;
+    let ownershipCalls = 0;
+
+    const { httpUrl, wsUrl } = startServer({
+      now: () => clock,
+      ownsChat: async () => {
+        ownershipCalls += 1;
+        if (gateOwnership) await ownershipGate;
+        // Advance the clock only after a frame finishes authorization. Rate
+        // checks that run after enqueue would see a fresh window per frame.
+        clock += 60;
+        return true;
+      },
+    });
+    const user = await signUp(httpUrl);
+    const client = connect(wsUrl, { Cookie: user.cookie });
+
+    await client.opened;
+    await client.nextMessage();
+
+    ownershipGate = new Promise<void>((resolve) => {
+      releaseOwnership = resolve;
+    });
+    gateOwnership = true;
+    ownershipCalls = 0;
+
+    for (let index = 0; index < 25; index += 1) {
+      send(client.socket, { type: 'subscribe', topics: [gitTopic(`burst-${index}`)] });
+    }
+
+    const deadline = Date.now() + 2_000;
+    while (ownershipCalls < 1 && Date.now() < deadline) {
+      await Bun.sleep(5);
+    }
+    expect(ownershipCalls).toBe(1);
+
+    expect(await client.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Realtime message rate exceeded',
+      code: ERROR_CODES.RATE_LIMITED,
+    });
+    expect((await client.closed).code).toBe(REALTIME_CLOSE_CODES.RATE_LIMITED);
+
+    releaseOwnership?.();
+    await Bun.sleep(50);
+    // Queued frames after cleanup must not start more ownership work.
+    expect(ownershipCalls).toBe(1);
+  });
+
+  it('closes when pending frames already fill the per-socket queue', async () => {
+    let clock = 10_000;
+    let ownershipGate: Promise<void> = Promise.resolve();
+    let releaseOwnership: (() => void) | undefined;
+    let gateOwnership = false;
+    let ownershipCalls = 0;
+
+    const { httpUrl, wsUrl } = startServer({
+      now: () => clock,
+      ownsChat: async () => {
+        ownershipCalls += 1;
+        if (gateOwnership) await ownershipGate;
+        return true;
+      },
+    });
+    const user = await signUp(httpUrl);
+    const client = connect(wsUrl, { Cookie: user.cookie });
+
+    await client.opened;
+    await client.nextMessage();
+
+    ownershipGate = new Promise<void>((resolve) => {
+      releaseOwnership = resolve;
+    });
+    gateOwnership = true;
+    ownershipCalls = 0;
+
+    for (let index = 0; index < 20; index += 1) {
+      send(client.socket, { type: 'subscribe', topics: [gitTopic(`queued-${index}`)] });
+    }
+
+    const deadline = Date.now() + 2_000;
+    while (ownershipCalls < 1 && Date.now() < deadline) {
+      await Bun.sleep(5);
+    }
+    expect(ownershipCalls).toBe(1);
+
+    clock += 1_000;
+    send(client.socket, { type: 'subscribe', topics: [gitTopic('overflow-queue')] });
+
+    expect(await client.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Realtime message queue limit exceeded',
+      code: ERROR_CODES.RATE_LIMITED,
+    });
+    expect((await client.closed).code).toBe(REALTIME_CLOSE_CODES.RATE_LIMITED);
+
+    releaseOwnership?.();
+  });
 });

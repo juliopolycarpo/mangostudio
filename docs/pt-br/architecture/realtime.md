@@ -98,19 +98,23 @@ O servidor Elysia raiz aplica limites de transporte a todas as rotas WebSocket:
 | Ação por backpressure   | Fechar |
 
 A rota realtime também permite no máximo 8 conexões por usuário, 20 mensagens
-de aplicação por segundo em cada socket e 64 tópicos ativos por socket. Uma
-operação de subscribe que ultrapassaria 64 tópicos é rejeitada atomicamente.
+de aplicação por segundo em cada socket, 20 frames pendentes por socket e 64
+tópicos ativos por socket. A contagem de taxa acontece na admissão, antes de o
+frame entrar na fila serializada, para que autorização lenta de subscribe não
+reinicie a janela de taxa nem retenha trabalho ilimitado. Uma operação de
+subscribe que ultrapassaria 64 tópicos é rejeitada atomicamente.
 
-| Código | Significado                              |
-| ------ | ---------------------------------------- |
-| `4400` | Mensagens inválidas repetidas do cliente |
-| `4401` | Autenticação ausente ou não permitida    |
-| `4403` | Origin de navegador não permitida        |
-| `4429` | Limite de conexões ou taxa de mensagens  |
-| `1011` | Falha inesperada no servidor             |
+| Código | Significado                                   |
+| ------ | --------------------------------------------- |
+| `4400` | Mensagens inválidas repetidas do cliente      |
+| `4401` | Autenticação ausente ou não permitida         |
+| `4403` | Origin de navegador não permitida             |
+| `4429` | Limite de conexões, taxa ou fila de mensagens |
+| `1011` | Falha inesperada no servidor                  |
 
 Ultrapassar o limite de tópicos ativos retorna `RATE_LIMITED` sem fechar o
-socket. Limites de conexão e de taxa de mensagens fecham com `4429`.
+socket. Limites de conexão, de taxa de mensagens e de fila pendente fecham com
+`4429`.
 
 ## Degradação E Recuperação
 

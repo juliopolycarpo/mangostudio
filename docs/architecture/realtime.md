@@ -93,19 +93,22 @@ The root Elysia server applies transport limits to every WebSocket route:
 | Backpressure behavior | Close  |
 
 The realtime route additionally allows at most 8 connections per user, 20
-application messages per second per socket, and 64 active topics per socket.
-A subscribe operation that would exceed 64 topics is rejected atomically.
+application messages per second per socket, 20 pending frames per socket, and
+64 active topics per socket. Message-rate accounting happens on admission,
+before a frame is queued for serialized handling, so slow subscribe authorization
+cannot reset the rate window or retain unbounded work. A subscribe operation that
+would exceed 64 topics is rejected atomically.
 
-| Close code | Meaning                              |
-| ---------- | ------------------------------------ |
-| `4400`     | Repeated invalid client message      |
-| `4401`     | Missing or disallowed authentication |
-| `4403`     | Disallowed browser origin            |
-| `4429`     | Connection or message-rate limit     |
-| `1011`     | Unexpected server failure            |
+| Close code | Meaning                                  |
+| ---------- | ---------------------------------------- |
+| `4400`     | Repeated invalid client message          |
+| `4401`     | Missing or disallowed authentication     |
+| `4403`     | Disallowed browser origin                |
+| `4429`     | Connection, message-rate, or queue limit |
+| `1011`     | Unexpected server failure                |
 
 Exceeding the active-topic limit returns `RATE_LIMITED` without closing the
-socket. Connection and message-rate limits close with `4429`.
+socket. Connection, message-rate, and pending-queue limits close with `4429`.
 
 ## Degradation And Recovery
 
