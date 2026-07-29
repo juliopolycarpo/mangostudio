@@ -16,11 +16,18 @@
  * has already run by the time this guard's own checks execute — this guard
  * only adds the toggle/scope checks Better Auth's session resolution doesn't
  * know about.
+ *
+ * A plain function-style plugin — matching rate-limit.ts, not a named
+ * `new Elysia({ name })` instance like errorHandler/requireAuth. It is only
+ * ever `.use()`'d once (on the `api` instance in app.ts), so it needs
+ * neither plugin deduplication nor scope propagation: chaining `.onBeforeHandle`
+ * directly onto the passed-in `app` covers every route registered on it
+ * afterward, the same way rate-limit.ts's hooks do.
  */
 
 import { API_KEY_HEADER, type ApiKeyScope } from '@mangostudio/shared/api-keys';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
-import { Elysia } from 'elysia';
+import type { Elysia } from 'elysia';
 import { getApiKeyApi } from '../auth';
 import { getDb } from '../db/database';
 import { getSavedAppSettings } from '../modules/app-settings/infrastructure/app-settings-repository';
@@ -48,9 +55,8 @@ interface ApiKeyGuardContext {
   set: ApiKeyGuardSet;
 }
 
-export const apiKeyGuard = new Elysia({ name: 'api-key-guard' }).onBeforeHandle(
-  { as: 'global' },
-  async (context) => {
+export function apiKeyGuard(app: Elysia) {
+  return app.onBeforeHandle(async (context) => {
     const ctx = context as ApiKeyGuardContext;
     const key = ctx.request.headers.get(API_KEY_HEADER);
     if (!key) return;
@@ -83,5 +89,5 @@ export const apiKeyGuard = new Elysia({ name: 'api-key-guard' }).onBeforeHandle(
         code: ERROR_CODES.API_KEY_SCOPE_FORBIDDEN,
       } satisfies ApiErrorResponse;
     }
-  }
-);
+  });
+}
