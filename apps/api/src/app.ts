@@ -27,6 +27,10 @@ import { removalRoutes } from './modules/library/http/removal-routes';
 import { librarySettingsRoutes } from './modules/library/http/settings-routes';
 import { mcpServerRoutes } from './modules/mcp-servers/http/mcp-server-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
+import {
+  REALTIME_WEBSOCKET_OPTIONS,
+  realtimeRoutes,
+} from './modules/realtime/http/realtime-routes';
 import { skillRoutes } from './modules/skills/http/skill-routes';
 import { todoRoutes } from './modules/todos/http/todo-routes';
 import { workspaceRoutes } from './modules/workspaces/http/workspace-routes';
@@ -70,6 +74,7 @@ const api = new Elysia({ prefix: '/api' })
   // Register features
   .use(authRoutes)
   .use(apiKeyRoutes)
+  .use(realtimeRoutes)
   .use(chatRoutes)
   .use(environmentRoutes)
   .use(capabilityRoutes)
@@ -95,7 +100,7 @@ const api = new Elysia({ prefix: '/api' })
 /**
  * Main application instance.
  */
-export const app = new Elysia()
+export const app = new Elysia({ websocket: REALTIME_WEBSOCKET_OPTIONS })
   .onRequest(({ request }) => {
     // Only log API and auth requests to avoid spamming frontend assets logs
     const url = new URL(request.url);

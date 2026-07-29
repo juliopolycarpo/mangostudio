@@ -36,6 +36,7 @@ describe('rate-limit policy classification', () => {
     expect(classifyRateLimit('/api/chats')).toBe(RATE_LIMIT_BUCKETS.general);
     expect(classifyRateLimit('/api/messages')).toBe(RATE_LIMIT_BUCKETS.general);
     expect(classifyRateLimit('/api/generate')).toBe(RATE_LIMIT_BUCKETS.general);
+    expect(classifyRateLimit('/api/ws')).toBe(RATE_LIMIT_BUCKETS.general);
   });
 
   it('routes key-authenticated traffic to the api-key bucket', () => {
