@@ -9,7 +9,12 @@ import { apiKeysKeys } from '../queries';
 
 function useInvalidateApiKeys() {
   const queryClient = useQueryClient();
-  return () => queryClient.invalidateQueries({ queryKey: apiKeysKeys.list() });
+  // Fire-and-forget: returning the invalidateQueries promise from onSuccess
+  // keeps the mutation pending until the list refetch settles, which delays
+  // per-call onSuccess (e.g. revealing the one-time plaintext create key).
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: apiKeysKeys.list() });
+  };
 }
 
 export function useCreateApiKey() {
