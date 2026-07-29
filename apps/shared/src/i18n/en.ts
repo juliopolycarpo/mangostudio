@@ -1730,9 +1730,7 @@ export const messages: Messages = {
       pinned: '{count} pinned, holding {size}.',
       pinnedHint:
         'Pinned sets hold the last remaining copy of a resource, so retention never deletes them.',
-      restore: 'Restore',
       restoring: 'Restoring...',
-      restored: '{count} put back.',
       restoreError: 'This backup could not be restored.',
       purge: 'Purge',
       // Two clicks on every row, pinned or not. Ordinary sets are purgeable for
@@ -1765,7 +1763,6 @@ export const messages: Messages = {
       columnContents: 'Contents',
       columnSize: 'Size',
       columnOrigin: 'Origin',
-      columnStatus: 'Status',
       contentsUnknown: '{count} entries',
       pinnedBadge: 'Pinned',
       // Retention evicts on the next apply, so saying it after the fact is
