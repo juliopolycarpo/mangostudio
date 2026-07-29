@@ -25,6 +25,7 @@ export function SettingsTabs() {
     { to: '/settings/tools' as const, label: t.settings.tabs.tools },
     { to: '/settings/skills' as const, label: t.settings.tabs.skills },
     { to: '/settings/mcp' as const, label: t.settings.tabs.mcp },
+    { to: '/settings/external-api' as const, label: t.settings.tabs.externalApi },
     { to: '/settings/metrics' as const, label: t.settings.tabs.metrics },
     { to: '/settings/logs' as const, label: t.settings.tabs.logs },
   ];

@@ -234,6 +234,16 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  const updateExternalApiSettings = useCallback(
+    (updates: Partial<AppSettings['externalApiSettings']>) => {
+      saveSettings((current) => ({
+        ...current,
+        externalApiSettings: { ...current.externalApiSettings, ...updates },
+      }));
+    },
+    [saveSettings]
+  );
+
   const updateCommitMessageSettings = useCallback(
     (updates: Partial<AppSettings['gitSettings']['commitMessage']>) => {
       saveSettings((current) => ({
@@ -345,6 +355,7 @@ export function useGlobalSettings() {
     multiAgentSettings: settings.multiAgentSettings,
     workspaceSettings: settings.workspaceSettings,
     gitSettings: settings.gitSettings,
+    externalApiSettings: settings.externalApiSettings,
     chatTitleSettings: settings.chatTitleSettings,
     chatDisplaySettings: settings.chatDisplaySettings,
     setDiffPreviewsEnabled: (value: boolean) =>
@@ -407,6 +418,7 @@ export function useGlobalSettings() {
     resetCommitMessageSystemPrompt: () =>
       updateCommitMessageSettings({ systemPrompt: DEFAULT_COMMIT_MESSAGE_PROMPT }),
     setCommitMessageMaxDiffKb: (value: number) => updateCommitMessageSettings({ maxDiffKb: value }),
+    setExternalApiEnabled: (value: boolean) => updateExternalApiSettings({ enabled: value }),
     resetSettings,
   };
 }

@@ -10,7 +10,7 @@ import {
   ApiErrorResponseSchema,
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
-import { type Elysia, t } from 'elysia';
+import { Elysia, t } from 'elysia';
 import { requireCookieAuth } from '../../../plugins/auth-middleware';
 import {
   ApiKeyServiceError,
@@ -39,68 +39,66 @@ const errorResponses = {
   500: ApiErrorResponseSchema,
 } as const;
 
-export const apiKeyRoutes = (app: Elysia) =>
-  app.group('/api-keys', (app) =>
-    app
-      .use(requireCookieAuth)
-      .get(
-        '/',
-        async ({ request, set, user }): Promise<ListApiKeysResponse | ApiErrorResponse> => {
-          try {
-            return await listApiKeys({
-              userId: user?.id ?? '',
-              headers: request.headers,
-            });
-          } catch (error) {
-            return handleApiKeyError(error, set);
-          }
-        },
-        {
-          response: {
-            200: ListApiKeysResponseSchema,
-            ...errorResponses,
-          },
+export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys', (app) =>
+  app
+    .get(
+      '/',
+      async ({ request, set, user }): Promise<ListApiKeysResponse | ApiErrorResponse> => {
+        try {
+          return await listApiKeys({
+            userId: user?.id ?? '',
+            headers: request.headers,
+          });
+        } catch (error) {
+          return handleApiKeyError(error, set);
         }
-      )
-      .post(
-        '/',
-        async ({ body, request, set, user }): Promise<CreateApiKeyResponse | ApiErrorResponse> => {
-          try {
-            const response = await createApiKey(
-              { userId: user?.id ?? '', headers: request.headers },
-              body
-            );
-            set.status = 201;
-            return response;
-          } catch (error) {
-            return handleApiKeyError(error, set);
-          }
+      },
+      {
+        response: {
+          200: ListApiKeysResponseSchema,
+          ...errorResponses,
         },
-        {
-          body: CreateApiKeyBodySchema,
-          response: {
-            201: CreateApiKeyResponseSchema,
-            ...errorResponses,
-          },
+      }
+    )
+    .post(
+      '/',
+      async ({ body, request, set, user }): Promise<CreateApiKeyResponse | ApiErrorResponse> => {
+        try {
+          const response = await createApiKey(
+            { userId: user?.id ?? '', headers: request.headers },
+            body
+          );
+          set.status = 201;
+          return response;
+        } catch (error) {
+          return handleApiKeyError(error, set);
         }
-      )
-      .delete(
-        '/:id',
-        async ({ params, request, set, user }): Promise<undefined | ApiErrorResponse> => {
-          try {
-            await revokeApiKey({ userId: user?.id ?? '', headers: request.headers }, params.id);
-            set.status = 204;
-            return undefined;
-          } catch (error) {
-            return handleApiKeyError(error, set);
-          }
+      },
+      {
+        body: CreateApiKeyBodySchema,
+        response: {
+          201: CreateApiKeyResponseSchema,
+          ...errorResponses,
         },
-        {
-          params: t.Object({ id: t.String({ minLength: 1 }) }),
-          response: {
-            204: t.Void(),
-            ...errorResponses,
-          },
+      }
+    )
+    .delete(
+      '/:id',
+      async ({ params, request, set, user }): Promise<undefined | ApiErrorResponse> => {
+        try {
+          await revokeApiKey({ userId: user?.id ?? '', headers: request.headers }, params.id);
+          set.status = 204;
+          return undefined;
+        } catch (error) {
+          return handleApiKeyError(error, set);
         }
-      )
-  );
+      },
+      {
+        params: t.Object({ id: t.String({ minLength: 1 }) }),
+        response: {
+          204: t.Void(),
+          ...errorResponses,
+        },
+      }
+    )
+);
