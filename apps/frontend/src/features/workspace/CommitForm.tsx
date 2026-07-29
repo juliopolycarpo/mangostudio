@@ -130,6 +130,9 @@ export function CommitForm({
   const handleShortcut = (event: KeyboardEvent<HTMLElement>) => {
     if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
     event.preventDefault();
+    // The shortcut mirrors the primary button, which is disabled without
+    // something to commit; firing anyway would only earn a rejected request.
+    if (!hasStagedChanges && !amend) return;
     void actions.run('commit');
   };
 
