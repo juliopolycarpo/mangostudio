@@ -63,3 +63,33 @@ export function parseCommitMessageOutput(raw: string): ParsedCommitMessage {
 
   return { title, body: bodyLines.join('\n').trim() };
 }
+
+const SIGNOFF_TRAILER_PATTERN = /^signed-off-by:/i;
+
+/**
+ * Splits a raw `git log` message into the shape the commit form edits.
+ *
+ * `stripSignoff` mirrors the commit settings: `buildCommitArgs` re-adds the
+ * trailer from `gitSettings.signOff`, so keeping it in the textarea would show
+ * noise and risk a duplicate. With the setting off the trailer is preserved,
+ * because amending must never silently drop a sign-off the author added.
+ */
+export function splitCommitMessage(
+  raw: string,
+  options: { readonly stripSignoff: boolean }
+): ParsedCommitMessage {
+  const lines = raw.split(/\r?\n/);
+  const title = (lines[0] ?? '').trim();
+  const bodyLines = lines.slice(1);
+
+  if (options.stripSignoff) {
+    while (bodyLines.length > 0) {
+      const last = bodyLines[bodyLines.length - 1].trim();
+      if (last.length > 0 && !SIGNOFF_TRAILER_PATTERN.test(last)) break;
+      bodyLines.pop();
+    }
+  }
+  while (bodyLines.length > 0 && bodyLines[0].trim().length === 0) bodyLines.shift();
+
+  return { title, body: bodyLines.join('\n').trimEnd() };
+}

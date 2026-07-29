@@ -125,10 +125,16 @@ export const StashSaveBodySchema = Type.Object({
   includeUntracked: Type.Optional(Type.Boolean()),
 });
 
-export const StashPopBodySchema = Type.Object({
-  chatId: Type.String({ minLength: 1 }),
-  index: Type.Optional(Type.Integer({ minimum: 0 })),
-});
+function stashRefBodySchema() {
+  return Type.Object({
+    chatId: Type.String({ minLength: 1 }),
+    index: Type.Optional(Type.Integer({ minimum: 0 })),
+  });
+}
+
+export const StashPopBodySchema = stashRefBodySchema();
+export const StashApplyBodySchema = stashRefBodySchema();
+export const StashDropBodySchema = stashRefBodySchema();
 
 export const StashEntrySchema = Type.Object({
   index: Type.Integer({ minimum: 0 }),
@@ -175,6 +181,18 @@ export const CheckoutRemoteBranchBodySchema = Type.Object({
 export const CreateBranchBodySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
   name: GitBranchNameSchema,
+});
+
+export const DeleteBranchBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  name: GitBranchNameSchema,
+  force: Type.Optional(Type.Boolean()),
+});
+
+export const RenameBranchBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  name: GitBranchNameSchema,
+  newName: GitBranchNameSchema,
 });
 
 export const GitHistoryQuerySchema = Type.Object({
@@ -240,6 +258,22 @@ export const GitRemoteBodySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
 });
 
+/**
+ * `force` is a literal rather than a boolean so a plain `--force` is not
+ * expressible on the wire: the only forced push this API can build is a leased
+ * one, which still refuses to overwrite refs the client has not seen.
+ */
+export const GitPushBodySchema = Type.Object({
+  chatId: Type.String({ minLength: 1 }),
+  force: Type.Optional(Type.Literal('with-lease')),
+});
+
+export const GitHeadMessageResponseSchema = Type.Object({
+  hash: GitCommitHashSchema,
+  title: Type.String(),
+  body: Type.String(),
+});
+
 export type GitFileStatus = Static<typeof GitFileStatusSchema>;
 export type GitFileChange = Static<typeof GitFileChangeSchema>;
 export type GitBranchInfo = Static<typeof GitBranchInfoSchema>;
@@ -257,6 +291,8 @@ export type GenerateCommitMessageBody = Static<typeof GenerateCommitMessageBodyS
 export type GenerateCommitMessageResponse = Static<typeof GenerateCommitMessageResponseSchema>;
 export type StashSaveBody = Static<typeof StashSaveBodySchema>;
 export type StashPopBody = Static<typeof StashPopBodySchema>;
+export type StashApplyBody = Static<typeof StashApplyBodySchema>;
+export type StashDropBody = Static<typeof StashDropBodySchema>;
 export type StashEntry = Static<typeof StashEntrySchema>;
 export type StashListResponse = Static<typeof StashListResponseSchema>;
 export type GitBranch = Static<typeof GitBranchSchema>;
@@ -265,6 +301,8 @@ export type GitBranchesResponse = Static<typeof GitBranchesResponseSchema>;
 export type SwitchBranchBody = Static<typeof SwitchBranchBodySchema>;
 export type CheckoutRemoteBranchBody = Static<typeof CheckoutRemoteBranchBodySchema>;
 export type CreateBranchBody = Static<typeof CreateBranchBodySchema>;
+export type DeleteBranchBody = Static<typeof DeleteBranchBodySchema>;
+export type RenameBranchBody = Static<typeof RenameBranchBodySchema>;
 export type GitHistoryQuery = Static<typeof GitHistoryQuerySchema>;
 export type GitCommitSummary = Static<typeof GitCommitSummarySchema>;
 export type GitHistoryResponse = Static<typeof GitHistoryResponseSchema>;
@@ -275,3 +313,5 @@ export type GitDiffQuery = Static<typeof GitDiffQuerySchema>;
 export type GitDiffResponse = Static<typeof GitDiffResponseSchema>;
 export type GitFetchBody = Static<typeof GitFetchBodySchema>;
 export type GitRemoteBody = Static<typeof GitRemoteBodySchema>;
+export type GitPushBody = Static<typeof GitPushBodySchema>;
+export type GitHeadMessageResponse = Static<typeof GitHeadMessageResponseSchema>;
