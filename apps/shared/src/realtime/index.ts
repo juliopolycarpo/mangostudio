@@ -20,6 +20,8 @@ export {
   RealtimeReadyMessageSchema,
   type RealtimeServerMessage,
   RealtimeServerMessageSchema,
+  type RealtimeSubscribedMessage,
+  RealtimeSubscribedMessageSchema,
   type RealtimeSubscribeMessage,
   RealtimeSubscribeMessageSchema,
   type RealtimeUnsubscribeMessage,

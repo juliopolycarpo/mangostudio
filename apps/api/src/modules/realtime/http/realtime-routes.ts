@@ -61,7 +61,11 @@ interface RealtimeRouteDependencies {
 interface RealtimeSocket {
   id: string;
   send(
-    message: RealtimeErrorMessage | RealtimeInvalidateEvent | { type: 'ready' | 'pong' }
+    message:
+      | RealtimeErrorMessage
+      | RealtimeInvalidateEvent
+      | { type: 'ready' | 'pong' }
+      | { type: 'subscribed'; topics: string[] }
   ): unknown;
   close(code?: number, reason?: string): unknown;
   cork(callback: () => void): unknown;
@@ -204,6 +208,9 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
       return;
     }
     for (const topic of accepted) state.topics.add(topic);
+    if (accepted.size > 0) {
+      ws.send({ type: 'subscribed', topics: [...accepted] });
+    }
   }
 
   return new Elysia({ name: 'realtime-routes' })

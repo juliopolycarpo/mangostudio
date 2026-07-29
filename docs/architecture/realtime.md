@@ -28,7 +28,9 @@ through `apps/api/src/services/realtime/realtime-bus.ts`.
 4. The server sends `{"type":"ready"}`. Clients must not subscribe before this
    message.
 5. Subscribe messages authorize each requested topic. Only accepted topics are
-   added to the socket's active set.
+   added to the socket's active set. After at least one topic commits, the
+   server sends `{"type":"subscribed","topics":[...]}` with those newly
+   activated topics so clients can refresh behind that barrier.
 6. A bus event is forwarded only when its user id matches the socket's bus
    subscription and its topic is active on that socket.
 7. Close and failure paths idempotently remove the bus listener and connection
@@ -57,18 +59,23 @@ provide a valid cookie session.
 
 Client messages:
 
-| Type          | Shape                                          | Behavior                                            |
-| ------------- | ---------------------------------------------- | --------------------------------------------------- |
-| `subscribe`   | `{"type":"subscribe","topics":["settings"]}`   | Authorizes and activates recognized topics.         |
-| `unsubscribe` | `{"type":"unsubscribe","topics":["settings"]}` | Removes recognized topics; repeated calls are safe. |
-| `ping`        | `{"type":"ping"}`                              | Receives `{"type":"pong"}`.                         |
+| Type          | Shape                                          | Behavior                                                            |
+| ------------- | ---------------------------------------------- | ------------------------------------------------------------------- |
+| `subscribe`   | `{"type":"subscribe","topics":["settings"]}`   | Authorizes and activates recognized topics; acks with `subscribed`. |
+| `unsubscribe` | `{"type":"unsubscribe","topics":["settings"]}` | Removes recognized topics; repeated calls are safe.                 |
+| `ping`        | `{"type":"ping"}`                              | Receives `{"type":"pong"}`.                                         |
 
 A subscribe or unsubscribe message contains 1–32 topics. Each topic is 1–256
 characters. The first malformed message receives a `VALIDATION` error; a
 second malformed message on the same socket closes it with `4400`.
 
-Server messages are `ready`, `pong`, `invalidate`, or the shared
+Server messages are `ready`, `subscribed`, `pong`, `invalidate`, or the shared
 `ApiErrorResponse` shape extended with `type: "error"`.
+
+Git topic authorization can await ownership before activation. Invalidations
+published in that window are not delivered; clients must treat HTTP as the
+source of truth and refresh relevant queries after `subscribed` (and after
+`ready` on connect/reconnect).
 
 ### Topics
 
@@ -114,7 +121,8 @@ socket. Connection, message-rate, and pending-queue limits close with `4429`.
 
 Events published while a socket is disconnected are lost by design. On
 connection or reconnection, the client must treat its cache as potentially
-stale and refresh relevant HTTP queries after receiving `ready`. Reconnects
+stale and refresh relevant HTTP queries after receiving `ready`. After
+subscribing to additional topics, refresh again after `subscribed`. Reconnects
 must use bounded backoff and must stop on `4401`.
 
 The bus only reaches sockets in the current API process. Deployments with

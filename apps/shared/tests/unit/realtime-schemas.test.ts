@@ -124,9 +124,15 @@ describe('realtime client messages', () => {
 });
 
 describe('realtime server messages', () => {
-  it('accepts ready, pong, invalidate, and error', () => {
+  it('accepts ready, pong, subscribed, invalidate, and error', () => {
     expect(Value.Check(RealtimeServerMessageSchema, { type: 'ready' })).toBe(true);
     expect(Value.Check(RealtimeServerMessageSchema, { type: 'pong' })).toBe(true);
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'subscribed',
+        topics: [SETTINGS_TOPIC, gitTopic('chat-1')],
+      })
+    ).toBe(true);
     expect(
       Value.Check(RealtimeServerMessageSchema, {
         type: 'invalidate',

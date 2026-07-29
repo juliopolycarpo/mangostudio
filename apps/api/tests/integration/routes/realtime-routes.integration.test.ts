@@ -15,6 +15,7 @@ import {
   createRealtimeRoutes,
   REALTIME_WEBSOCKET_OPTIONS,
 } from '../../../src/modules/realtime/http/realtime-routes';
+import { apiKeyGuard } from '../../../src/plugins/api-key-guard';
 import { authRoutes } from '../../../src/routes/auth';
 import { createRealtimeBus, type RealtimeBus } from '../../../src/services/realtime/realtime-bus';
 import { createApiTestApp } from '../../support/harness/create-api-test-app';
@@ -32,16 +33,26 @@ interface SocketClose {
 const sockets = new Set<WebSocket>();
 let stopServer: (() => void) | undefined;
 
-function startServer(dependencies: Parameters<typeof createRealtimeRoutes>[0] = {}) {
+function startServer(
+  dependencies: Parameters<typeof createRealtimeRoutes>[0] = {},
+  options: { withApiKeyGuard?: boolean } = {}
+) {
   const bus = dependencies.bus ?? createRealtimeBus();
   const routes = createRealtimeRoutes({ ...dependencies, bus });
   const apiRoutes = (app: Elysia) =>
-    app.group('/api', (group) =>
-      group
+    app.group('/api', (group) => {
+      if (options.withApiKeyGuard) {
+        return group
+          .use(apiKeyGuard)
+          .use(authRoutes)
+          .use(routes)
+          .get('/realtime-scope-probe', () => ({ ok: true }));
+      }
+      return group
         .use(authRoutes)
         .use(routes)
-        .get('/realtime-scope-probe', () => ({ ok: true }))
-    );
+        .get('/realtime-scope-probe', () => ({ ok: true }));
+    });
   const app = createApiTestApp(apiRoutes);
   app.listen(0);
   const port = (app.server as { port?: number } | null)?.port;
@@ -218,6 +229,34 @@ describe('realtime WebSocket authentication', () => {
     expect((await client.closed).code).toBe(REALTIME_CLOSE_CODES.UNAUTHORIZED);
     expect(client.messages.some((message) => message.type === 'ready')).toBe(false);
   });
+
+  it('keeps the 4401 WebSocket rejection when apiKeyGuard is mounted', async () => {
+    const { httpUrl, wsUrl } = startServer({}, { withApiKeyGuard: true });
+    const user = await signUp(httpUrl);
+    const apiKey = await getApiKeyApi().createApiKey({
+      body: {
+        userId: user.id,
+        name: 'Realtime guard ordering',
+        metadata: { scope: 'full' },
+      },
+    });
+    const invalidKeyClient = connect(wsUrl, { [API_KEY_HEADER]: 'mango_not-a-real-key' });
+    const validKeyClient = connect(wsUrl, { [API_KEY_HEADER]: apiKey.key });
+
+    await Promise.all([invalidKeyClient.opened, validKeyClient.opened]);
+    expect(await invalidKeyClient.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Unauthorized',
+      code: ERROR_CODES.UNAUTHORIZED,
+    });
+    expect((await invalidKeyClient.closed).code).toBe(REALTIME_CLOSE_CODES.UNAUTHORIZED);
+    expect(await validKeyClient.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Unauthorized',
+      code: ERROR_CODES.UNAUTHORIZED,
+    });
+    expect((await validKeyClient.closed).code).toBe(REALTIME_CLOSE_CODES.UNAUTHORIZED);
+  });
 });
 
 describe('realtime WebSocket origins and liveness', () => {
@@ -283,7 +322,14 @@ describe('realtime WebSocket subscriptions', () => {
     await Promise.all([firstClient.nextMessage(), secondClient.nextMessage()]);
     send(firstClient.socket, { type: 'subscribe', topics: [SETTINGS_TOPIC] });
     send(secondClient.socket, { type: 'subscribe', topics: [SETTINGS_TOPIC] });
-    await Bun.sleep(10);
+    expect(await firstClient.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [SETTINGS_TOPIC],
+    });
+    expect(await secondClient.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [SETTINGS_TOPIC],
+    });
 
     bus.publish(firstUser.id, {
       type: 'invalidate',
@@ -332,6 +378,10 @@ describe('realtime WebSocket subscriptions', () => {
       error: 'Realtime topic is unavailable',
       code: ERROR_CODES.NOT_FOUND,
     });
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [ownedTopic],
+    });
     bus.publish(user.id, {
       type: 'invalidate',
       topic: ownedTopic,
@@ -351,6 +401,42 @@ describe('realtime WebSocket subscriptions', () => {
     });
     await Bun.sleep(50);
     expect(client.messages).toHaveLength(beforeForeignPublish);
+  });
+
+  it('acknowledges topic activation only after ownership commits', async () => {
+    let releaseOwnership: (() => void) | undefined;
+    const ownershipGate = new Promise<void>((resolve) => {
+      releaseOwnership = resolve;
+    });
+    const { bus, httpUrl, wsUrl } = startServer({
+      ownsChat: async () => {
+        await ownershipGate;
+        return true;
+      },
+    });
+    const user = await signUp(httpUrl);
+    const topic = gitTopic('gated-ack');
+    const client = connect(wsUrl, { Cookie: user.cookie });
+
+    await client.opened;
+    await client.nextMessage();
+    send(client.socket, { type: 'subscribe', topics: [topic] });
+    await Bun.sleep(20);
+
+    bus.publish(user.id, { type: 'invalidate', topic, scopes: ['state'] });
+    await Bun.sleep(20);
+    expect(client.messages.some((message) => message.type === 'invalidate')).toBe(false);
+    expect(client.messages.some((message) => message.type === 'subscribed')).toBe(false);
+
+    releaseOwnership?.();
+    expect(await client.nextMessage()).toEqual({ type: 'subscribed', topics: [topic] });
+
+    bus.publish(user.id, { type: 'invalidate', topic, scopes: ['branches'] });
+    expect(await client.nextMessage()).toEqual({
+      type: 'invalidate',
+      topic,
+      scopes: ['branches'],
+    });
   });
 
   it('makes unsubscribe idempotent and removes the bus listener on close', async () => {
@@ -378,6 +464,10 @@ describe('realtime WebSocket subscriptions', () => {
     await client.nextMessage();
     expect(activeListeners).toBe(1);
     send(client.socket, { type: 'subscribe', topics: [SETTINGS_TOPIC] });
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [SETTINGS_TOPIC],
+    });
     send(client.socket, { type: 'unsubscribe', topics: [SETTINGS_TOPIC] });
     send(client.socket, { type: 'unsubscribe', topics: [SETTINGS_TOPIC] });
     await Bun.sleep(10);
@@ -494,8 +584,15 @@ describe('realtime WebSocket limits', () => {
     await client.opened;
     await client.nextMessage();
     send(client.socket, { type: 'subscribe', topics: topics.slice(0, 32) });
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: topics.slice(0, 32),
+    });
     send(client.socket, { type: 'subscribe', topics: topics.slice(32) });
-    await Bun.sleep(20);
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: topics.slice(32),
+    });
 
     const overflowTopics = [gitTopic('overflow-a'), gitTopic('overflow-b')];
     send(client.socket, { type: 'subscribe', topics: overflowTopics });
@@ -548,7 +645,10 @@ describe('realtime WebSocket limits', () => {
     await client.opened;
     await client.nextMessage();
     send(client.socket, { type: 'subscribe', topics: seeded });
-    await Bun.sleep(50);
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: seeded,
+    });
 
     ownershipGate = new Promise<void>((resolve) => {
       releaseOwnership = resolve;
@@ -569,6 +669,10 @@ describe('realtime WebSocket limits', () => {
     expect(ownershipStarted).toBeLessThanOrEqual(32);
     releaseOwnership?.();
 
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: firstBatch,
+    });
     expect(await client.nextMessage()).toEqual({
       type: 'error',
       error: 'Realtime subscription limit exceeded',

@@ -46,6 +46,15 @@ function isApiKeyManagementPath(path: string): boolean {
   );
 }
 
+/**
+ * Cookie-session WebSocket upgrade. The realtime route rejects `x-api-key` with
+ * its stable WS error + `4401` close; short-circuiting here with HTTP 401/403
+ * would prevent that handshake path from running.
+ */
+function isRealtimeWebSocketPath(path: string): boolean {
+  return path === '/ws' || path === '/api/ws';
+}
+
 /** Mutable response controls Elysia exposes on the context. */
 interface ApiKeyGuardSet {
   status?: number;
@@ -71,7 +80,9 @@ export function apiKeyGuard(app: Elysia) {
     const key = ctx.request.headers.get(API_KEY_HEADER);
     if (!key) return;
 
-    if (isAuthPath(resolvePath(ctx.path, ctx.request.url))) {
+    const path = resolvePath(ctx.path, ctx.request.url);
+
+    if (isAuthPath(path)) {
       ctx.set.status = 401;
       return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED } satisfies ApiErrorResponse;
     }
@@ -80,7 +91,10 @@ export function apiKeyGuard(app: Elysia) {
     // requireCookieAuth distinguish a valid key from an invalid credential so
     // the route consistently returns API_KEY_SCOPE_FORBIDDEN for key auth,
     // even while the account's external API toggle is disabled.
-    if (isApiKeyManagementPath(resolvePath(ctx.path, ctx.request.url))) return;
+    if (isApiKeyManagementPath(path)) return;
+
+    // Realtime WS owns cookie-vs-key policy after the upgrade completes.
+    if (isRealtimeWebSocketPath(path)) return;
 
     const result = await getApiKeyApi().verifyApiKey({ body: { key } });
     if (!result.valid || !result.key) {

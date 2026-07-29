@@ -31,7 +31,10 @@ publicam por `apps/api/src/services/realtime/realtime-bus.ts`.
 4. O servidor envia `{"type":"ready"}`. O cliente não deve assinar tópicos
    antes dessa mensagem.
 5. Mensagens de subscribe autorizam cada tópico solicitado. Apenas tópicos
-   aceitos entram no conjunto ativo do socket.
+   aceitos entram no conjunto ativo do socket. Depois que pelo menos um tópico
+   é confirmado, o servidor envia `{"type":"subscribed","topics":[...]}` com
+   esses tópicos recém-ativados para o cliente atualizar o cache atrás dessa
+   barreira.
 6. Um evento do bus só é encaminhado quando o id de usuário corresponde à
    inscrição do socket e o tópico está ativo nele.
 7. Fluxos de fechamento e falha removem o listener e a vaga de conexão de forma
@@ -62,18 +65,23 @@ fora do navegador, que ainda precisam fornecer uma sessão válida por cookie.
 
 Mensagens do cliente:
 
-| Tipo          | Formato                                        | Comportamento                                                |
-| ------------- | ---------------------------------------------- | ------------------------------------------------------------ |
-| `subscribe`   | `{"type":"subscribe","topics":["settings"]}`   | Autoriza e ativa tópicos reconhecidos.                       |
-| `unsubscribe` | `{"type":"unsubscribe","topics":["settings"]}` | Remove tópicos reconhecidos; chamadas repetidas são seguras. |
-| `ping`        | `{"type":"ping"}`                              | Recebe `{"type":"pong"}`.                                    |
+| Tipo          | Formato                                        | Comportamento                                                     |
+| ------------- | ---------------------------------------------- | ----------------------------------------------------------------- |
+| `subscribe`   | `{"type":"subscribe","topics":["settings"]}`   | Autoriza e ativa tópicos reconhecidos; confirma com `subscribed`. |
+| `unsubscribe` | `{"type":"unsubscribe","topics":["settings"]}` | Remove tópicos reconhecidos; chamadas repetidas são seguras.      |
+| `ping`        | `{"type":"ping"}`                              | Recebe `{"type":"pong"}`.                                         |
 
 Uma mensagem de subscribe ou unsubscribe contém de 1 a 32 tópicos. Cada tópico
 tem de 1 a 256 caracteres. A primeira mensagem malformada recebe um erro
 `VALIDATION`; a segunda mensagem malformada no mesmo socket o fecha com `4400`.
 
-As mensagens do servidor são `ready`, `pong`, `invalidate` ou o formato
-compartilhado de `ApiErrorResponse` estendido com `type: "error"`.
+As mensagens do servidor são `ready`, `subscribed`, `pong`, `invalidate` ou o
+formato compartilhado de `ApiErrorResponse` estendido com `type: "error"`.
+
+A autorização de tópicos Git pode aguardar ownership antes da ativação.
+Invalidations publicadas nessa janela não são entregues; o cliente deve tratar
+HTTP como fonte da verdade e atualizar as queries relevantes depois de
+`subscribed` (e depois de `ready` na conexão/reconexão).
 
 ### Tópicos
 
@@ -121,7 +129,8 @@ socket. Limites de conexão, de taxa de mensagens e de fila pendente fecham com
 Eventos publicados enquanto um socket está desconectado são perdidos por
 design. Ao conectar ou reconectar, o cliente deve considerar o cache
 potencialmente desatualizado e atualizar as queries HTTP relevantes depois de
-receber `ready`. Reconexões devem usar backoff limitado e parar em `4401`.
+receber `ready`. Depois de assinar tópicos adicionais, atualize de novo após
+`subscribed`. Reconexões devem usar backoff limitado e parar em `4401`.
 
 O bus alcança apenas sockets no processo atual da API. Deployments com vários
 workers da API exigem uma camada externa de fan-out antes de prometer entrega

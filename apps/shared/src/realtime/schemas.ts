@@ -103,6 +103,15 @@ export const RealtimeReadyMessageSchema = Type.Object(
 );
 export type RealtimeReadyMessage = Static<typeof RealtimeReadyMessageSchema>;
 
+export const RealtimeSubscribedMessageSchema = Type.Object(
+  {
+    type: Type.Literal('subscribed'),
+    topics: TopicsArraySchema,
+  },
+  { additionalProperties: false }
+);
+export type RealtimeSubscribedMessage = Static<typeof RealtimeSubscribedMessageSchema>;
+
 export const RealtimePongMessageSchema = Type.Object(
   {
     type: Type.Literal('pong'),
@@ -151,6 +160,7 @@ export type RealtimeErrorMessage = Static<typeof RealtimeErrorMessageSchema>;
 
 export const RealtimeServerMessageSchema = Type.Union([
   RealtimeReadyMessageSchema,
+  RealtimeSubscribedMessageSchema,
   RealtimePongMessageSchema,
   RealtimeInvalidateMessageSchema,
   RealtimeErrorMessageSchema,
