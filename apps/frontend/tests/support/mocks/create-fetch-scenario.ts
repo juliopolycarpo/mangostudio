@@ -57,11 +57,17 @@ export function createFetchScenario() {
       return Promise.reject(new Error(`[fetch-scenario] Unhandled request: ${key}`));
     }
 
+    // A bodyless mock must not claim `application/json`: Eden Treaty parses by
+    // Content-Type, so an empty body behind that header makes `JSON.parse('')`
+    // throw and turns a real 204 into a client-side failure. Elysia sends no
+    // Content-Type on 204, so neither does this mock.
+    const hasBody = response.body !== undefined;
+
     return Promise.resolve(
-      new Response(response.body === undefined ? null : JSON.stringify(response.body), {
+      new Response(hasBody ? JSON.stringify(response.body) : null, {
         status: response.status ?? 200,
         headers: {
-          'Content-Type': 'application/json',
+          ...(hasBody && { 'Content-Type': 'application/json' }),
           ...response.headers,
         },
       })

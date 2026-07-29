@@ -202,7 +202,10 @@ describe('ExternalApiSettingsPage', () => {
     );
   });
 
-  it('fires DELETE when revoke is confirmed', async () => {
+  // Asserting the toast, not just the request: the 204 carries no body, and a
+  // client that mis-parses it reports a revoke that actually succeeded as a
+  // failure while still having fired the DELETE.
+  it('fires DELETE and reports success when revoke is confirmed', async () => {
     const user = userEvent.setup();
     respondWithKeys(fetchScenario, [SAMPLE_KEY]);
     fetchScenario.respondWithJson('DELETE', `/api/api-keys/${SAMPLE_KEY.id}`, {
@@ -222,6 +225,7 @@ describe('ExternalApiSettingsPage', () => {
         expect.objectContaining({ method: 'DELETE' })
       );
     });
+    expect(await screen.findByText('API key revoked')).toBeInTheDocument();
   });
 
   it('disables create when the active-key cap is reached', async () => {
