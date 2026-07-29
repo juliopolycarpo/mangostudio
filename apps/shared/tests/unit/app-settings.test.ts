@@ -8,6 +8,7 @@ import {
   DEFAULT_CHAT_DISPLAY_SETTINGS,
   DEFAULT_CHAT_TITLE_SETTINGS,
   DEFAULT_CONTEXT_SETTINGS,
+  DEFAULT_EXTERNAL_API_SETTINGS,
   DEFAULT_GIT_SETTINGS,
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
   DEFAULT_MULTI_AGENT_SETTINGS,
@@ -514,6 +515,19 @@ describe('normalizeAppSettings', () => {
 
   it('normalizes missing chat display settings to the shared defaults', () => {
     expect(normalizeAppSettings({}).chatDisplaySettings).toEqual(DEFAULT_CHAT_DISPLAY_SETTINGS);
+  });
+
+  it('normalizes missing external API settings to disabled by default', () => {
+    expect(normalizeAppSettings({}).externalApiSettings).toEqual(DEFAULT_EXTERNAL_API_SETTINGS);
+  });
+
+  it('falls back to disabled when external API settings are malformed', () => {
+    expect(
+      normalizeAppSettings({ externalApiSettings: { enabled: 'yes' } }).externalApiSettings
+    ).toEqual(DEFAULT_EXTERNAL_API_SETTINGS);
+    expect(normalizeAppSettings({ externalApiSettings: 'nope' }).externalApiSettings).toEqual(
+      DEFAULT_EXTERNAL_API_SETTINGS
+    );
   });
 
   it('merges dynamic library defaults while keeping MangoStudio native locations enabled', () => {

@@ -114,8 +114,8 @@ beforeAll(async () => {
         email: TEST_USER.email,
         emailVerified: 0,
         image: null,
-        createdAt: now,
-        updatedAt: now,
+        createdAt: new Date(now).toISOString(),
+        updatedAt: new Date(now).toISOString(),
       },
       {
         id: OTHER_USER.id,
@@ -123,8 +123,8 @@ beforeAll(async () => {
         email: OTHER_USER.email,
         emailVerified: 0,
         image: null,
-        createdAt: now,
-        updatedAt: now,
+        createdAt: new Date(now).toISOString(),
+        updatedAt: new Date(now).toISOString(),
       },
     ])
     .execute();

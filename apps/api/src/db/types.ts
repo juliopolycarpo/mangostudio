@@ -90,22 +90,26 @@ interface SecretMetadataTable {
   projectId: string | null;
 }
 
+// Better Auth's kysely adapter reports supportsDates: false for sqlite, so date
+// fields are written as ISO strings (value.toISOString()), not integers, despite
+// the migration declaring these columns integer. SQLite type affinity preserves
+// the text either way. See 006_auth_tables.ts and 035_api_keys.ts.
 interface UserTable {
   id: string;
   name: string;
   email: string;
   emailVerified: number;
   image: string | null;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface SessionTable {
   id: string;
-  expiresAt: number;
+  expiresAt: string;
   token: string;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
   ipAddress: string | null;
   userAgent: string | null;
   userId: string;
@@ -119,21 +123,46 @@ interface AccountTable {
   accessToken: string | null;
   refreshToken: string | null;
   idToken: string | null;
-  accessTokenExpiresAt: number | null;
-  refreshTokenExpiresAt: number | null;
+  accessTokenExpiresAt: string | null;
+  refreshTokenExpiresAt: string | null;
   scope: string | null;
   password: string | null;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface VerificationTable {
   id: string;
   identifier: string;
   value: string;
-  expiresAt: number;
-  createdAt: number;
-  updatedAt: number;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface ApiKeyTable {
+  id: string;
+  configId: string;
+  name: string | null;
+  start: string | null;
+  referenceId: string;
+  prefix: string | null;
+  key: string;
+  refillInterval: number | null;
+  refillAmount: number | null;
+  lastRefillAt: string | null;
+  enabled: number;
+  rateLimitEnabled: number;
+  rateLimitTimeWindow: number | null;
+  rateLimitMax: number | null;
+  requestCount: number;
+  remaining: number | null;
+  lastRequest: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  permissions: string | null;
+  metadata: string | null;
 }
 
 interface UserProviderSettingsTable {
@@ -285,6 +314,7 @@ export interface Database {
   session: SessionTable;
   account: AccountTable;
   verification: VerificationTable;
+  apikey: ApiKeyTable;
   user_provider_settings: UserProviderSettingsTable;
   user_tool_settings: UserToolSettingsTable;
   user_skill_settings: UserSkillSettingsTable;

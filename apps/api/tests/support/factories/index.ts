@@ -41,8 +41,8 @@ export async function insertTestUser(overrides: Partial<UserFixture> = {}): Prom
       email: user.email,
       emailVerified: 0,
       image: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     })
     .execute();
 

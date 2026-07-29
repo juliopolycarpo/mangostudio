@@ -22,7 +22,7 @@ let previousOpenAICompatibleProvider: AIProvider | null = null;
 
 beforeAll(async () => {
   try {
-    const now = Date.now();
+    const now = new Date().toISOString();
     await getDb()
       .insertInto('user')
       .values({

@@ -195,7 +195,7 @@ describe('cursor connector routes', () => {
 
   beforeAll(async () => {
     const db = getDb();
-    const now = Date.now();
+    const now = new Date().toISOString();
     await db
       .insertInto('user')
       .values({
@@ -559,7 +559,7 @@ const OPENAI_FAIL_USER = {
 describe('openai connector routes', () => {
   beforeAll(async () => {
     const db = getDb();
-    const now = Date.now();
+    const now = new Date().toISOString();
     for (const u of [
       OPENAI_CONNECTOR_USER,
       OPENAI_LIST_USER,

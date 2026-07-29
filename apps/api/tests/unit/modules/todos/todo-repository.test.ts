@@ -16,8 +16,8 @@ async function seedChat(chatId: string, userId: string) {
       email: `${userId}@mangostudio.test`,
       emailVerified: 0,
       image: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();

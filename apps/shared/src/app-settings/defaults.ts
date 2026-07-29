@@ -43,6 +43,7 @@ import type {
   ChatDisplaySettings,
   ChatTitleSettings,
   DiffPreviewMode,
+  ExternalApiSettings,
   GitSettings,
   ImageQuality,
   LibraryLocationSettings,
@@ -156,6 +157,10 @@ export const DEFAULT_GIT_SETTINGS: GitSettings = {
   },
 };
 
+export const DEFAULT_EXTERNAL_API_SETTINGS: ExternalApiSettings = {
+  enabled: false,
+};
+
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   promptSettings: DEFAULT_PROMPT_SETTINGS,
   globalImageQuality: '1K',
@@ -169,6 +174,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   workspaceSettings: DEFAULT_WORKSPACE_SETTINGS,
   gitSettings: DEFAULT_GIT_SETTINGS,
   chatDisplaySettings: DEFAULT_CHAT_DISPLAY_SETTINGS,
+  externalApiSettings: DEFAULT_EXTERNAL_API_SETTINGS,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -613,6 +619,15 @@ export function normalizeGitSettings(value: unknown): GitSettings {
   };
 }
 
+export function normalizeExternalApiSettings(value: unknown): ExternalApiSettings {
+  if (!isRecord(value)) return DEFAULT_EXTERNAL_API_SETTINGS;
+
+  return {
+    enabled:
+      typeof value.enabled === 'boolean' ? value.enabled : DEFAULT_EXTERNAL_API_SETTINGS.enabled,
+  };
+}
+
 export function normalizeAppSettings(
   value: unknown,
   libraryLocationDefaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS
@@ -652,5 +667,6 @@ export function normalizeAppSettings(
     workspaceSettings: normalizeWorkspaceSettings(value.workspaceSettings),
     gitSettings: normalizeGitSettings(value.gitSettings),
     chatDisplaySettings: normalizeChatDisplaySettings(value.chatDisplaySettings),
+    externalApiSettings: normalizeExternalApiSettings(value.externalApiSettings),
   };
 }

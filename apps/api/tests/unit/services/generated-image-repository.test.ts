@@ -15,8 +15,8 @@ async function seedUser(user: { id: string; name: string; email: string }) {
       email: user.email,
       emailVerified: 0,
       image: null,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     })
     .onConflict((oc) => oc.column('id').doNothing())
     .execute();

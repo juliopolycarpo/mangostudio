@@ -34,7 +34,7 @@ beforeAll(async () => {
   config.uploads.dir = uploadsDir;
 
   try {
-    const now = Date.now();
+    const now = new Date().toISOString();
     await getDb()
       .insertInto('user')
       .values({
