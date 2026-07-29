@@ -20,8 +20,8 @@ describe('createRealtimeBus', () => {
       userB.push(event);
     });
 
-    const event = {
-      type: 'invalidate' as const,
+    const event: RealtimeInvalidateEvent = {
+      type: 'invalidate',
       topic: SETTINGS_TOPIC,
       scopes: ['app'],
     };

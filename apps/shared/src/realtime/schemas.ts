@@ -1,4 +1,5 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { ApiErrorResponseSchema } from '../errors/schemas';
 
 /** Settings invalidation sections (app / provider / tool settings pages). */
 export const SettingsScopeSchema = Type.Union([
@@ -84,26 +85,41 @@ export const RealtimePongMessageSchema = Type.Object(
 );
 export type RealtimePongMessage = Static<typeof RealtimePongMessageSchema>;
 
-export const RealtimeInvalidateMessageSchema = Type.Object(
+const RealtimeSettingsInvalidateMessageSchema = Type.Object(
   {
     type: Type.Literal('invalidate'),
-    topic: Type.String({ minLength: 1 }),
-    scopes: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+    topic: Type.Literal(SETTINGS_TOPIC),
+    scopes: Type.Optional(Type.Array(SettingsScopeSchema, { minItems: 1 })),
+  },
+  { additionalProperties: false }
+);
+
+const RealtimeGitInvalidateMessageSchema = Type.Object(
+  {
+    type: Type.Literal('invalidate'),
+    topic: Type.String({ pattern: '^git:.+$' }),
+    scopes: Type.Optional(Type.Array(GitScopeSchema, { minItems: 1 })),
     chatId: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false }
 );
+
+export const RealtimeInvalidateMessageSchema = Type.Union([
+  RealtimeSettingsInvalidateMessageSchema,
+  RealtimeGitInvalidateMessageSchema,
+]);
 export type RealtimeInvalidateMessage = Static<typeof RealtimeInvalidateMessageSchema>;
 
 /** Payload published on the in-process bus (invalidation signals only). */
 export type RealtimeInvalidateEvent = RealtimeInvalidateMessage;
 
-export const RealtimeErrorMessageSchema = Type.Object(
-  {
-    type: Type.Literal('error'),
-    error: Type.String(),
-    code: Type.Optional(Type.String()),
-  },
+export const RealtimeErrorMessageSchema = Type.Composite(
+  [
+    Type.Object({
+      type: Type.Literal('error'),
+    }),
+    ApiErrorResponseSchema,
+  ],
   { additionalProperties: false }
 );
 export type RealtimeErrorMessage = Static<typeof RealtimeErrorMessageSchema>;

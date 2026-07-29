@@ -80,6 +80,14 @@ describe('realtime server messages', () => {
         code: 'UNAUTHORIZED',
       })
     ).toBe(true);
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'error',
+        error: 'Validation failed',
+        code: 'VALIDATION_ERROR',
+        details: { field: 'topics' },
+      })
+    ).toBe(true);
   });
 
   it('rejects SSE-only error shape (done field)', () => {
@@ -103,6 +111,37 @@ describe('realtime server messages', () => {
       Value.Check(RealtimeInvalidateMessageSchema, {
         type: 'invalidate',
         topic: '',
+      })
+    ).toBe(false);
+  });
+
+  it('rejects invalidate messages with topic/scope mismatches', () => {
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: SETTINGS_TOPIC,
+        scopes: ['state'],
+      })
+    ).toBe(false);
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: gitTopic('chat-1'),
+        scopes: ['app'],
+      })
+    ).toBe(false);
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: 'unknown-topic',
+        scopes: ['app'],
+      })
+    ).toBe(false);
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: gitTopic('chat-1'),
+        scopes: ['not-a-git-scope'],
       })
     ).toBe(false);
   });
