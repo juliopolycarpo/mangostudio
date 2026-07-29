@@ -5,22 +5,47 @@ import {
   GIT_SCOPES,
   gitWriteScopes,
   useCommit,
+  useDeleteBranch,
   useGitFetch,
+  useGitHeadMessage,
   useGitPull,
+  useGitPush,
   useGitStashes,
+  useRenameBranch,
   useStagePaths,
+  useStashApply,
+  useStashDrop,
   useUnstagePaths,
 } from '@/features/workspace/hooks/use-git-state';
 import type * as ApiClient from '@/lib/api-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
-const { mockStage, mockUnstage, mockCommit, mockFetch, mockPull, mockStashes } = vi.hoisted(() => ({
+const {
+  mockStage,
+  mockUnstage,
+  mockCommit,
+  mockFetch,
+  mockPull,
+  mockPush,
+  mockStashes,
+  mockStashApply,
+  mockStashDrop,
+  mockBranchDelete,
+  mockBranchRename,
+  mockHeadMessage,
+} = vi.hoisted(() => ({
   mockStage: vi.fn(),
   mockUnstage: vi.fn(),
   mockCommit: vi.fn(),
   mockFetch: vi.fn(),
   mockPull: vi.fn(),
+  mockPush: vi.fn(),
   mockStashes: vi.fn(),
+  mockStashApply: vi.fn(),
+  mockStashDrop: vi.fn(),
+  mockBranchDelete: vi.fn(),
+  mockBranchRename: vi.fn(),
+  mockHeadMessage: vi.fn(),
 }));
 
 vi.mock('@/lib/api-client', () => ({
@@ -32,7 +57,11 @@ vi.mock('@/lib/api-client', () => ({
         commit: { post: mockCommit },
         fetch: { post: mockFetch },
         pull: { post: mockPull },
+        push: { post: mockPush },
         stashes: { get: mockStashes },
+        stash: { apply: { post: mockStashApply }, drop: { post: mockStashDrop } },
+        branches: { delete: mockBranchDelete, rename: { post: mockBranchRename } },
+        'head-message': { get: mockHeadMessage },
       },
     },
   } as unknown as typeof ApiClient,
@@ -254,6 +283,120 @@ describe('Git write hooks', () => {
     expect(result.current.data?.stashes).toEqual([
       { index: 0, message: 'Saved work', branch: 'main' },
     ]);
+  });
+
+  it('applies a stash through Eden while leaving the entry listed', async () => {
+    mockStashApply.mockResolvedValue({ data: repoState, error: null });
+    const refetchStashes = vi.fn().mockResolvedValue({ stashes: [] });
+    const refetchState = vi.fn().mockResolvedValue(repoState);
+
+    const { result } = renderHook(() => {
+      useSeedTrackedQueries({ state: refetchState, stashes: refetchStashes });
+      return useStashApply('chat-1');
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ index: 2 });
+    });
+
+    expect(mockStashApply).toHaveBeenCalledWith({ chatId: 'chat-1', index: 2 });
+    await waitFor(() => expect(refetchStashes).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchState).toHaveBeenCalledOnce());
+  });
+
+  it('drops a stash without invalidating the worktree state', async () => {
+    mockStashDrop.mockResolvedValue({ data: { stashes: [] }, error: null });
+    const refetchStashes = vi.fn().mockResolvedValue({ stashes: [] });
+    const refetchState = vi.fn().mockResolvedValue(repoState);
+
+    const { result } = renderHook(() => {
+      useSeedTrackedQueries({ state: refetchState, stashes: refetchStashes });
+      return useStashDrop('chat-1');
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ index: 0 });
+    });
+
+    expect(mockStashDrop).toHaveBeenCalledWith({ chatId: 'chat-1', index: 0 });
+    await waitFor(() => expect(refetchStashes).toHaveBeenCalledOnce());
+    // The stack changed, the checkout did not.
+    expect(refetchState).not.toHaveBeenCalled();
+  });
+
+  it('deletes and renames branches through Eden', async () => {
+    mockBranchDelete.mockResolvedValue({ data: { branches: [], remotes: [] }, error: null });
+    mockBranchRename.mockResolvedValue({ data: repoState, error: null });
+    const refetchBranches = vi.fn().mockResolvedValue({ branches: [], remotes: [] });
+    const refetchState = vi.fn().mockResolvedValue(repoState);
+
+    const { result: deleteResult } = renderHook(() => {
+      useSeedTrackedQueries({ state: refetchState, branches: refetchBranches });
+      return useDeleteBranch('chat-1');
+    });
+    await act(async () => {
+      await deleteResult.current.mutateAsync({ name: 'feat/old', force: true });
+    });
+
+    expect(mockBranchDelete).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      name: 'feat/old',
+      force: true,
+    });
+    await waitFor(() => expect(refetchBranches).toHaveBeenCalledOnce());
+    expect(refetchState).not.toHaveBeenCalled();
+
+    const { result: renameResult } = renderHook(() => {
+      useSeedTrackedQueries({ state: refetchState });
+      return useRenameBranch('chat-1');
+    });
+    await act(async () => {
+      await renameResult.current.mutateAsync({ name: 'feat/old', newName: 'feat/new' });
+    });
+
+    expect(mockBranchRename).toHaveBeenCalledWith({
+      chatId: 'chat-1',
+      name: 'feat/old',
+      newName: 'feat/new',
+    });
+    // Renaming the checked-out branch changes status.branch.name.
+    await waitFor(() => expect(refetchState).toHaveBeenCalledOnce());
+  });
+
+  it('sends the lease only when a push asks to force', async () => {
+    mockPush.mockResolvedValue({ data: repoState, error: null });
+
+    const { result } = renderHook(() => {
+      useSeedTrackedQueries({});
+      return useGitPush('chat-1');
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({});
+    });
+    expect(mockPush).toHaveBeenLastCalledWith({ chatId: 'chat-1' });
+
+    await act(async () => {
+      await result.current.mutateAsync({ force: 'with-lease' });
+    });
+    expect(mockPush).toHaveBeenLastCalledWith({ chatId: 'chat-1', force: 'with-lease' });
+  });
+
+  it('reads the HEAD commit message only while amend mode is active', async () => {
+    mockHeadMessage.mockResolvedValue({
+      data: { hash: 'abc1234', title: 'previous title', body: 'previous body' },
+      error: null,
+    });
+
+    const { result: disabled } = renderHook(() => useGitHeadMessage('chat-1', false));
+    expect(mockHeadMessage).not.toHaveBeenCalled();
+    expect(disabled.current.data).toBeUndefined();
+
+    const { result } = renderHook(() => useGitHeadMessage('chat-2', true));
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(mockHeadMessage).toHaveBeenCalledWith({ query: { chatId: 'chat-2' } });
+    expect(result.current.data?.title).toBe('previous title');
   });
 
   it('covers every write mutation with a non-empty known scope set', () => {
