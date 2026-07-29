@@ -322,7 +322,7 @@ describe('GitPanel', () => {
 
     await user.click(screen.getByLabelText('Change branch'));
     await user.click(screen.getByRole('button', { name: 'More actions for feat/history' }));
-    // Deleting the checked-out branch is never offered.
+    // `feat/history` is not checked out, so the safe delete is available.
     expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeEnabled();
     await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
 

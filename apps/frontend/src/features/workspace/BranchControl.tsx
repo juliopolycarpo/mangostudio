@@ -188,7 +188,9 @@ export function BranchControl({
         <div className="absolute left-0 right-0 top-full z-30 mt-1 min-w-64 rounded-xl border border-outline-variant/20 bg-surface-container-high shadow-2xl">
           {/* Scrolling is dropped while a row menu is open so the popover is not clipped by this container. */}
           <div
-            className={`p-1.5 ${rowMenu === null ? 'app-scrollbar max-h-64 overflow-y-auto' : ''}`}
+            className={`p-1.5 max-h-64 ${
+              rowMenu === null ? 'app-scrollbar overflow-y-auto' : 'overflow-visible'
+            }`}
           >
             {branches.isLoading ? (
               <p className="px-2 py-3 text-xs text-on-surface-variant">{t.common.loading}</p>
