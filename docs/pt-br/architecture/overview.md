@@ -62,7 +62,9 @@ Módulos simples pulam camadas que só adicionariam cerimônia sem gerar valor:
 
 - **Sem `domain/`** — quando as regras de negócio são autoevidentes (por exemplo, `app-settings` é um wrapper CRUD simples com normalização).
 - **Sem `http/`** — quando o módulo é puramente infraestrutural (por exemplo, `generated-images/` só possui repositório).
-- **Sem `application/`** — nunca; todos os módulos têm pelo menos um serviço.
+- **Sem `application/`** — apenas para módulos de ponte cujo trabalho de política e dados é
+  delegado a serviços existentes (por exemplo, `realtime` delega o fan-out ao barramento
+  realtime e as verificações de ownership a `chats`).
 
 ## Fluxo De Dados
 

@@ -62,7 +62,9 @@ Simple modules skip layers that would add ceremony without value:
 
 - **No `domain/`** — when business rules are self-evident (e.g., app-settings is a simple CRUD wrapper with normalization).
 - **No `http/`** — when the module is purely infrastructural (e.g., `generated-images/` only has a repository).
-- **No `application/`** — never; all modules have at least one service.
+- **No `application/`** — only for bridge modules whose policy and data work is delegated to
+  existing services (for example, `realtime` delegates fan-out to the realtime bus and
+  ownership checks to `chats`).
 
 ## Data Flow
 
