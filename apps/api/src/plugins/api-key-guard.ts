@@ -25,16 +25,26 @@
  * afterward, the same way rate-limit.ts's hooks do.
  */
 
-import { API_KEY_HEADER, type ApiKeyScope } from '@mangostudio/shared/api-keys';
+import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { Elysia } from 'elysia';
-import { getApiKeyApi } from '../auth';
+import { getApiKeyApi, resolveApiKeyScope } from '../auth';
 import { getDb } from '../db/database';
 import { getSavedAppSettings } from '../modules/app-settings/infrastructure/app-settings-repository';
 import { resolvePath } from './rate-limit';
 import { isAuthPath } from './rate-limit-policy';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** Matches the cookie-session-only key management routes with or without `/api`. */
+function isApiKeyManagementPath(path: string): boolean {
+  return (
+    path === '/api-keys' ||
+    path.startsWith('/api-keys/') ||
+    path === '/api/api-keys' ||
+    path.startsWith('/api/api-keys/')
+  );
+}
 
 /** Mutable response controls Elysia exposes on the context. */
 interface ApiKeyGuardSet {
@@ -66,6 +76,12 @@ export function apiKeyGuard(app: Elysia) {
       return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED } satisfies ApiErrorResponse;
     }
 
+    // Key-management routes own a stricter cookie-session-only response. Let
+    // requireCookieAuth distinguish a valid key from an invalid credential so
+    // the route consistently returns API_KEY_SCOPE_FORBIDDEN for key auth,
+    // even while the account's external API toggle is disabled.
+    if (isApiKeyManagementPath(resolvePath(ctx.path, ctx.request.url))) return;
+
     const result = await getApiKeyApi().verifyApiKey({ body: { key } });
     if (!result.valid || !result.key) {
       ctx.set.status = 401;
@@ -81,7 +97,7 @@ export function apiKeyGuard(app: Elysia) {
       } satisfies ApiErrorResponse;
     }
 
-    const scope: ApiKeyScope = result.key.metadata?.scope === 'full' ? 'full' : 'read-only';
+    const scope = resolveApiKeyScope(result.key.metadata);
     if (scope === 'read-only' && !SAFE_METHODS.has(ctx.request.method)) {
       ctx.set.status = 403;
       return {

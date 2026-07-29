@@ -12,6 +12,10 @@ Open these first:
 - `apps/api/src/auth.ts`
 - `apps/api/src/routes/auth.ts`
 - `apps/api/src/plugins/auth-middleware.ts`
+- `apps/api/src/plugins/api-key-guard.ts`
+- `apps/api/src/modules/api-keys/application/api-key-service.ts`
+- `apps/api/src/modules/api-keys/http/api-key-routes.ts`
+- `apps/shared/src/api-keys/schemas.ts`
 - `apps/frontend/src/lib/auth-client.ts`
 - `apps/frontend/src/routes/login.tsx`
 - `apps/frontend/src/routes/signup.tsx`

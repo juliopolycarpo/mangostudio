@@ -32,8 +32,10 @@ export const ERROR_CODES = {
   LAST_COPY_UNACKNOWLEDGED: 'LAST_COPY_UNACKNOWLEDGED',
   /** The request carried a valid API key, but the owner has not enabled the external API. */
   EXTERNAL_API_DISABLED: 'EXTERNAL_API_DISABLED',
-  /** A `read-only` API key was used for a non-GET/HEAD/OPTIONS request. */
+  /** An API key attempted an operation its scope or credential policy forbids. */
   API_KEY_SCOPE_FORBIDDEN: 'API_KEY_SCOPE_FORBIDDEN',
+  /** The account already owns the maximum number of active API keys. */
+  API_KEY_LIMIT_REACHED: 'API_KEY_LIMIT_REACHED',
   INTERNAL: 'INTERNAL',
 } as const;
 
