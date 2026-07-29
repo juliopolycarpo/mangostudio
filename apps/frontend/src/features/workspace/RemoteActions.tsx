@@ -1,12 +1,19 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { GitBranchInfo } from '@mangostudio/shared/git';
 import { CloudDownload, CloudUpload } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
+import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import { readGitPanelPrefs } from './git-panel-prefs';
 import { useGitFetch, useGitPull, useGitPush } from './hooks/use-git-state';
+
+/** Divergence the user can only get past by rewriting the remote branch. */
+const LEASE_RECOVERABLE_CODES: readonly string[] = [
+  ERROR_CODES.HISTORY_DIVERGED,
+  ERROR_CODES.NON_FAST_FORWARD,
+];
 
 export function RemoteActions({
   chatId,
@@ -22,6 +29,7 @@ export function RemoteActions({
   const { t } = useI18n();
   const { toast } = useToast();
   const labels = t.git.remote;
+  const [confirmForcePush, setConfirmForcePush] = useState(false);
   const fetchMutation = useGitFetch(chatId);
   const pullMutation = useGitPull(chatId);
   const pushMutation = useGitPush(chatId);
@@ -36,6 +44,12 @@ export function RemoteActions({
   };
 
   const guidance = resolveGuidance(failure);
+  // The leased force push is a recovery path, never a default affordance: it
+  // only exists once a real push has been rejected as diverged.
+  const canForcePush =
+    failure instanceof ApiError &&
+    LEASE_RECOVERABLE_CODES.includes(failure.code ?? '') &&
+    Boolean(branch.upstream);
 
   const run = async (operation: 'fetch' | 'pull' | 'push') => {
     try {
@@ -55,6 +69,18 @@ export function RemoteActions({
             : labels.pushed,
         'success'
       );
+    } catch (error) {
+      onFailureChange(error);
+      toast(resolveApiErrorMessage(error, labels.actionError), 'error');
+    }
+  };
+
+  const forcePush = async () => {
+    try {
+      await pushMutation.mutateAsync({ force: 'with-lease' });
+      onFailureChange(null);
+      setConfirmForcePush(false);
+      toast(labels.forcePushed, 'success');
     } catch (error) {
       onFailureChange(error);
       toast(resolveApiErrorMessage(error, labels.actionError), 'error');
@@ -102,9 +128,58 @@ export function RemoteActions({
       </div>
 
       {guidance ? (
-        <p className="mt-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5 text-[11px] leading-4 text-warning">
-          {guidance}
-        </p>
+        <div className="mt-2 space-y-2 rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5">
+          <p className="text-[11px] leading-4 text-warning">{guidance}</p>
+          {canForcePush ? (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => setConfirmForcePush(true)}
+              className="cursor-pointer rounded-full bg-warning/20 px-2 py-1 text-[10px] font-semibold text-warning transition-colors hover:bg-warning/30 disabled:cursor-wait disabled:opacity-50"
+            >
+              {labels.forcePush}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {confirmForcePush ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="git-force-push-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+        >
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+            <div className="space-y-2">
+              <h3 id="git-force-push-title" className="text-lg font-bold text-on-surface">
+                {labels.forcePushConfirmTitle}
+              </h3>
+              <p className="text-sm leading-5 text-on-surface-variant">
+                {labels.forcePushConfirmHint}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setConfirmForcePush(false)}
+              >
+                {labels.forcePushCancel}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                className="flex-1"
+                loading={pushMutation.isPending}
+                onClick={() => void forcePush()}
+              >
+                {labels.forcePushConfirm}
+              </Button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </>
   );

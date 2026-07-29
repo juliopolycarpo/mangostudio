@@ -85,8 +85,13 @@ export const gitWriteScopes = {
   commit: ['state', 'history', 'commits', 'branches', 'diffs', 'github'],
   stashSave: ['state', 'stashes', 'diffs'],
   stashPop: ['state', 'stashes', 'diffs'],
+  stashApply: ['state', 'stashes', 'diffs'],
+  // Dropping only removes a stack entry; the worktree and its diffs are untouched.
+  stashDrop: ['stashes'],
   // createBranch runs `git switch -c` at the current HEAD — log is unchanged.
   createBranch: ['state', 'branches'],
+  deleteBranch: ['branches'],
+  renameBranch: ['state', 'branches', 'github'],
   switchBranch: ['state', 'branches', 'history', 'diffs', 'github'],
   checkoutRemote: ['state', 'branches', 'history', 'diffs', 'github'],
   fetch: ['state', 'branches', 'github'],
@@ -110,6 +115,14 @@ interface StashSaveInput {
 }
 interface StashPopInput {
   index?: number;
+}
+interface RenameBranchInput {
+  name: string;
+  newName: string;
+}
+interface DeleteBranchInput {
+  name: string;
+  force?: boolean;
 }
 export interface GitDiffInput {
   path: string;
@@ -263,6 +276,30 @@ export function useStashPop(chatId: string) {
   });
 }
 
+export function useStashApply(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: StashPopInput): Promise<GitRepoState> => {
+      const { data, error } = await client.api.git.stash.apply.post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitRepoState;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.stashApply),
+  });
+}
+
+export function useStashDrop(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: StashPopInput): Promise<StashListResponse> => {
+      const { data, error } = await client.api.git.stash.drop.post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as StashListResponse;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.stashDrop),
+  });
+}
+
 export function useGitBranches(chatId: string) {
   return useQuery({
     queryKey: gitBranchKeys.detail(chatId),
@@ -295,6 +332,30 @@ export function useCreateBranch(chatId: string) {
       return data as GitRepoState;
     },
     onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.createBranch),
+  });
+}
+
+export function useDeleteBranch(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: DeleteBranchInput): Promise<GitBranchesResponse> => {
+      const { data, error } = await client.api.git.branches.delete({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitBranchesResponse;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.deleteBranch),
+  });
+}
+
+export function useRenameBranch(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: RenameBranchInput): Promise<GitRepoState> => {
+      const { data, error } = await client.api.git.branches.rename.post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitRepoState;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.renameBranch),
   });
 }
 
