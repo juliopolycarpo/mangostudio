@@ -18,12 +18,11 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useState } from 'react';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
+import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { FileChangePreviewBody } from './FileChangePreview';
 import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
 import { getToolHint, ToolIcon } from './ToolCallVisuals';
-
-const COPIED_RESET_MS = 2000;
 
 interface ToolCallBlockProps {
   name: string;
@@ -96,7 +95,7 @@ export function ToolCallBlock({
 
   const [expanded, setExpanded] = useState(isError || autoExpandPreview);
   const [showRaw, setShowRaw] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copy, copied } = useClipboard();
 
   const preview = useMemo(
     () => (previewable && expanded ? buildFileChangePreview(name, args, result) : null),
@@ -146,13 +145,7 @@ export function ToolCallBlock({
 
   const handleCopyResult = async () => {
     if (!displayedResult) return;
-    try {
-      await navigator.clipboard.writeText(displayedResult);
-      setCopied(true);
-      setTimeout(() => setCopied(false), COPIED_RESET_MS);
-    } catch {
-      // Clipboard API unavailable (e.g. insecure context); copy is best-effort.
-    }
+    await copy(displayedResult);
   };
 
   return (
