@@ -3,11 +3,16 @@ import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import type {
   CommitBody,
   CommitResponse,
+  DeleteBranchBody,
   DiscardPathsBody,
   GitBranchesResponse,
+  GitPushBody,
   GitRepoState,
   GitStatus,
+  RenameBranchBody,
   StagePathsBody,
+  StashApplyBody,
+  StashDropBody,
   StashListResponse,
   StashPopBody,
   StashSaveBody,
@@ -329,9 +334,40 @@ export function stashPop(
   input: Pick<StashPopBody, 'index'>,
   signal?: AbortSignal
 ): Promise<GitRepoState> {
+  return restoreStash(workdir, 'pop', input.index ?? 0, signal);
+}
+
+/** Restores a stash into the worktree while leaving the entry on the stack. */
+export function stashApply(
+  workdir: string,
+  input: Pick<StashApplyBody, 'index'>,
+  signal?: AbortSignal
+): Promise<GitRepoState> {
+  return restoreStash(workdir, 'apply', input.index ?? 0, signal);
+}
+
+export function stashDrop(
+  workdir: string,
+  input: Pick<StashDropBody, 'index'>,
+  signal?: AbortSignal
+): Promise<StashListResponse> {
+  // Dropping only removes a stack entry, so the caller needs the new list
+  // rather than the untouched worktree state every other stash write returns.
+  return runRepoMutation(workdir, signal, 'Dropping stash', async (root) => {
+    await runGit(['stash', 'drop', `stash@{${input.index ?? 0}}`], { cwd: root, signal });
+    return await readStashList(root, signal);
+  });
+}
+
+function restoreStash(
+  workdir: string,
+  command: 'pop' | 'apply',
+  index: number,
+  signal?: AbortSignal
+): Promise<GitRepoState> {
   return runRepoMutation(workdir, signal, 'Applying stash', async (root) => {
     try {
-      await runGit(['stash', 'pop', `stash@{${input.index ?? 0}}`], { cwd: root, signal });
+      await runGit(['stash', command, `stash@{${index}}`], { cwd: root, signal });
     } catch (error) {
       // Only a merge-conflict failure means the stash actually landed; other
       // failures (a dirty index, a missing entry) must not be reported as an
@@ -359,14 +395,15 @@ export function stashPop(
 export async function stashList(workdir: string, signal?: AbortSignal): Promise<StashListResponse> {
   try {
     const root = await requireRepoRoot(workdir, signal);
-    const result = await runGit(['stash', 'list', '--format=%gd%x00%gs'], {
-      cwd: root,
-      signal,
-    });
-    return { stashes: parseStashList(result.stdout) };
+    return await readStashList(root, signal);
   } catch (error) {
     return mapWriteFailure(error, 'Listing stashes');
   }
+}
+
+async function readStashList(root: string, signal?: AbortSignal): Promise<StashListResponse> {
+  const result = await runGit(['stash', 'list', '--format=%gd%x00%gs'], { cwd: root, signal });
+  return { stashes: parseStashList(result.stdout) };
 }
 
 export async function listBranches(
@@ -375,29 +412,33 @@ export async function listBranches(
 ): Promise<GitBranchesResponse> {
   try {
     const root = await requireRepoRoot(workdir, signal);
-    const [localResult, remoteResult] = await Promise.all([
-      runGit(
-        [
-          'for-each-ref',
-          '--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%00',
-          'refs/heads',
-        ],
-        { cwd: root, signal }
-      ),
-      runGit(['for-each-ref', '--format=%(refname:short)%00', 'refs/remotes'], {
-        cwd: root,
-        signal,
-      }),
-    ]);
-    const branches = parseBranchList(localResult.stdout);
-    const localNames = new Set(branches.map((branch) => branch.name));
-    const remotes = parseRemoteBranchList(remoteResult.stdout).filter(
-      (remote) => !localNames.has(remote.name)
-    );
-    return { branches, remotes };
+    return await readBranches(root, signal);
   } catch (error) {
     return mapWriteFailure(error, 'Listing branches');
   }
+}
+
+async function readBranches(root: string, signal?: AbortSignal): Promise<GitBranchesResponse> {
+  const [localResult, remoteResult] = await Promise.all([
+    runGit(
+      [
+        'for-each-ref',
+        '--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%00',
+        'refs/heads',
+      ],
+      { cwd: root, signal }
+    ),
+    runGit(['for-each-ref', '--format=%(refname:short)%00', 'refs/remotes'], {
+      cwd: root,
+      signal,
+    }),
+  ]);
+  const branches = parseBranchList(localResult.stdout);
+  const localNames = new Set(branches.map((branch) => branch.name));
+  const remotes = parseRemoteBranchList(remoteResult.stdout).filter(
+    (remote) => !localNames.has(remote.name)
+  );
+  return { branches, remotes };
 }
 
 export function switchBranch(
@@ -480,6 +521,43 @@ export function createBranch(
   });
 }
 
+export function deleteBranch(
+  workdir: string,
+  input: Pick<DeleteBranchBody, 'name' | 'force'>,
+  signal?: AbortSignal
+): Promise<GitBranchesResponse> {
+  return runRepoMutation(workdir, signal, 'Deleting branch', async (root) => {
+    const status = await getRepoStatus(root, signal);
+    if (status.branch.name === input.name) {
+      throw new GitWriteError(
+        'Switch to another branch before deleting this one.',
+        409,
+        ERROR_CODES.CONFLICT
+      );
+    }
+    try {
+      await runGit(['branch', input.force ? '-D' : '-d', '--', input.name], { cwd: root, signal });
+    } catch (error) {
+      mapBranchDeleteFailure(error);
+    }
+    return await readBranches(root, signal);
+  });
+}
+
+export function renameBranch(
+  workdir: string,
+  input: Pick<RenameBranchBody, 'name' | 'newName'>,
+  signal?: AbortSignal
+): Promise<GitRepoState> {
+  // Renaming the checked-out branch changes `status.branch.name`, so the caller
+  // gets the whole repository state back rather than just the branch list.
+  return runRepoMutation(workdir, signal, 'Renaming branch', async (root) => {
+    await runGit(['check-ref-format', '--branch', input.newName], { cwd: root, signal });
+    await runGit(['branch', '-m', '--', input.name, input.newName], { cwd: root, signal });
+    return await currentRepoState(workdir, root, signal);
+  });
+}
+
 export function fetchRemote(
   workdir: string,
   prune: boolean,
@@ -500,7 +578,11 @@ export function pullFastForward(workdir: string, signal?: AbortSignal): Promise<
   });
 }
 
-export function pushBranch(workdir: string, signal?: AbortSignal): Promise<GitRepoState> {
+export function pushBranch(
+  workdir: string,
+  input: Pick<GitPushBody, 'force'> = {},
+  signal?: AbortSignal
+): Promise<GitRepoState> {
   return runRemoteMutation(workdir, signal, 'Pushing changes', async (root) => {
     const status = await getRepoStatus(root, signal);
     if (!status.branch.name) {
@@ -510,8 +592,18 @@ export function pushBranch(workdir: string, signal?: AbortSignal): Promise<GitRe
         ERROR_CODES.CONFLICT
       );
     }
+    // A lease is a claim that the remote ref still points where this clone last
+    // saw it. Without an upstream there is nothing to lease against, and Git
+    // would fall back to an unconditional overwrite.
+    if (input.force && !status.branch.upstream) {
+      throw new GitWriteError(
+        'Publish the branch before forcing a push.',
+        422,
+        ERROR_CODES.VALIDATION
+      );
+    }
     const args = status.branch.upstream
-      ? ['push']
+      ? ['push', ...(input.force === 'with-lease' ? ['--force-with-lease'] : [])]
       : [
           'push',
           '--set-upstream',
@@ -568,6 +660,18 @@ function mapBranchSwitchFailure(error: unknown): never {
     }
   }
   return mapWriteFailure(error, 'Switching branches');
+}
+
+function mapBranchDeleteFailure(error: unknown): never {
+  if (error instanceof GitCliError && /not fully merged/i.test(combinedCommandOutput(error))) {
+    throw new GitWriteError(
+      'The branch has commits that are not merged anywhere else.',
+      409,
+      ERROR_CODES.BRANCH_NOT_MERGED,
+      commandDetail(error)
+    );
+  }
+  return mapWriteFailure(error, 'Deleting branch');
 }
 
 function mapRemoteFailure(error: unknown, operation: string): never {

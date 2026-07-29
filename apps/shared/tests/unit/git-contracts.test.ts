@@ -2,12 +2,18 @@ import { describe, expect, it } from 'bun:test';
 import {
   CommitBodySchema,
   CreateBranchBodySchema,
+  DeleteBranchBodySchema,
   DiscardPathsBodySchema,
   GenerateCommitMessageBodySchema,
   GenerateCommitMessageResponseSchema,
   GitDiffQuerySchema,
+  GitHeadMessageResponseSchema,
   GitHistoryQuerySchema,
+  GitPushBodySchema,
+  RenameBranchBodySchema,
   StagePathsBodySchema,
+  StashApplyBodySchema,
+  StashDropBodySchema,
   StashPopBodySchema,
   SwitchBranchBodySchema,
   UnstagePathsBodySchema,
@@ -102,5 +108,54 @@ describe('Git write contracts', () => {
       })
     ).toBe(true);
     expect(Value.Check(GitDiffQuerySchema, { chatId: 'chat-1', path: '../secret' })).toBe(true);
+  });
+
+  it('shares the stash-pop selector shape with apply and drop', () => {
+    for (const schema of [StashApplyBodySchema, StashDropBodySchema]) {
+      expect(Value.Check(schema, { chatId: 'chat-1' })).toBe(true);
+      expect(Value.Check(schema, { chatId: 'chat-1', index: 3 })).toBe(true);
+      expect(Value.Check(schema, { chatId: 'chat-1', index: -1 })).toBe(false);
+      expect(Value.Check(schema, { index: 0 })).toBe(false);
+    }
+  });
+
+  it('validates branch delete and rename administration bodies', () => {
+    expect(Value.Check(DeleteBranchBodySchema, { chatId: 'chat-1', name: 'feat/old' })).toBe(true);
+    expect(
+      Value.Check(DeleteBranchBodySchema, { chatId: 'chat-1', name: 'feat/old', force: true })
+    ).toBe(true);
+    expect(Value.Check(DeleteBranchBodySchema, { chatId: 'chat-1', name: '' })).toBe(false);
+
+    expect(
+      Value.Check(RenameBranchBodySchema, {
+        chatId: 'chat-1',
+        name: 'feat/old',
+        newName: 'feat/new',
+      })
+    ).toBe(true);
+    expect(Value.Check(RenameBranchBodySchema, { chatId: 'chat-1', name: 'feat/old' })).toBe(false);
+    expect(
+      Value.Check(RenameBranchBodySchema, { chatId: 'chat-1', name: 'feat/old', newName: '' })
+    ).toBe(false);
+  });
+
+  it('allows a leased force push and rejects any other forced form', () => {
+    expect(Value.Check(GitPushBodySchema, { chatId: 'chat-1' })).toBe(true);
+    expect(Value.Check(GitPushBodySchema, { chatId: 'chat-1', force: 'with-lease' })).toBe(true);
+    expect(Value.Check(GitPushBodySchema, { chatId: 'chat-1', force: true })).toBe(false);
+    expect(Value.Check(GitPushBodySchema, { chatId: 'chat-1', force: 'force' })).toBe(false);
+  });
+
+  it('describes the HEAD message used to prefill an amend', () => {
+    expect(
+      Value.Check(GitHeadMessageResponseSchema, {
+        hash: 'abcdef1234567890',
+        title: 'feat(git): amend from the panel',
+        body: 'Explain the change.',
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(GitHeadMessageResponseSchema, { hash: 'nothex', title: 'x', body: '' })
+    ).toBe(false);
   });
 });

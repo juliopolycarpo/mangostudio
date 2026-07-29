@@ -63,3 +63,56 @@ export function parseCommitMessageOutput(raw: string): ParsedCommitMessage {
 
   return { title, body: bodyLines.join('\n').trim() };
 }
+
+const SIGNOFF_TRAILER_PATTERN = /^signed-off-by:(.*)$/i;
+
+interface SplitCommitMessageOptions {
+  /**
+   * The `Name <email>` that `git commit --signoff` would re-add, or `undefined`
+   * when the commit settings leave the trailer off.
+   */
+  readonly signoffIdentity?: string;
+}
+
+/**
+ * Splits a raw `git log` message into the shape the commit form edits.
+ *
+ * `signoffIdentity` mirrors the commit settings: `buildCommitArgs` re-adds that
+ * one identity's trailer from `gitSettings.signOff`, so leaving it in the
+ * textarea would show noise and risk a duplicate. Every other signer stays.
+ * Amending must never silently drop a sign-off the form cannot re-create — git
+ * only skips a duplicate when the identical trailer is already last, so a
+ * co-signer that survives below ours would also come back doubled.
+ */
+export function splitCommitMessage(
+  raw: string,
+  options: SplitCommitMessageOptions
+): ParsedCommitMessage {
+  const lines = raw.split(/\r?\n/);
+  const title = (lines[0] ?? '').trim();
+  const bodyLines = lines.slice(1);
+
+  const identity = options.signoffIdentity?.trim().toLowerCase();
+  if (identity) {
+    const cosigners: string[] = [];
+    while (bodyLines.length > 0) {
+      const last = bodyLines[bodyLines.length - 1].trim();
+      if (last.length === 0) {
+        bodyLines.pop();
+        continue;
+      }
+      const trailer = SIGNOFF_TRAILER_PATTERN.exec(last);
+      if (!trailer) break;
+      bodyLines.pop();
+      if (trailer[1].trim().toLowerCase() !== identity) cosigners.unshift(last);
+    }
+    if (cosigners.length > 0) {
+      // The blank line above the trailer block was consumed with it.
+      if (bodyLines.some((line) => line.trim().length > 0)) bodyLines.push('');
+      bodyLines.push(...cosigners);
+    }
+  }
+  while (bodyLines.length > 0 && bodyLines[0].trim().length === 0) bodyLines.shift();
+
+  return { title, body: bodyLines.join('\n').trimEnd() };
+}

@@ -205,6 +205,52 @@ Open these first:
 - `apps/shared/src/github/`
 - `apps/frontend/src/features/workspace/`
 
+### API layering
+
+Every git route lives in `http/git-routes.ts` behind `routeWorkdir()` (chat ownership
+plus workdir resolution) and `gitWriteError()` (typed failures), and declares the same
+`403/404/409/422/500: ApiErrorResponseSchema` set.
+
+- Reads: `application/git-status-service.ts` and `application/git-navigation-service.ts`
+  (history, commit details, diffs, `getHeadMessage` for the amend prefill).
+- Writes: `application/git-write-service.ts`. Every mutation runs inside
+  `runRepoMutation` — which resolves the repo root, takes `withMutationLock(root)`, and
+  funnels failures through `mapWriteFailure` — so two chats rooted in the same repository
+  never touch one `.git/index` concurrently.
+- Failure mapping is per operation: `mapCommitFailure`, `mapBranchSwitchFailure`,
+  `mapBranchDeleteFailure` (`not fully merged` → `BRANCH_NOT_MERGED`) and
+  `mapRemoteFailure` (auth, non-fast-forward, diverged history).
+- `/push` takes `GitPushBodySchema`, whose `force` is the literal `'with-lease'`. A plain
+  `--force` is not expressible on the wire and is never constructed.
+
+### Frontend panel
+
+`GitPanel.tsx` is organized around the commit box: branch row → tabs → commit box →
+change groups, with the GitHub card collapsed at the bottom.
+
+- `CommitForm.tsx` owns the message state and amend mode; `CommitActions.tsx` owns
+  `useCommitActions`, which chains the mutations behind each menu entry and aborts on the
+  first failure. Add a new commit variant there, not in the form.
+- Unstaged and untracked changes render as one group. `GitDiscardSelection[]` is the unit
+  of a discard because a mixed bulk discard needs one call per mode.
+- Secondary controls live in menus: the panel header overflow (stash sheet, prune
+  preference, refresh), the commit split button, per-group overflow, and per-branch rows.
+  All four use `components/ui/Menu.tsx`; the commit button uses
+  `components/ui/SplitButton.tsx`. There is no popover library — extend these.
+- `git-panel-prefs.ts` persists panel preferences in localStorage, mirroring
+  `rail/rail-state.ts`.
+- `hooks/use-git-state.ts` is the only place that talks to the API. Every write must add
+  an entry to `gitWriteScopes`; the guard test in
+  `apps/frontend/tests/unit/hooks/use-git-state.test.ts` fails otherwise.
+
+### Tests
+
+- `apps/api/tests/integration/routes/git-{state,write,navigation}.integration.test.ts`
+  drive real temp repositories and skip when git is absent. Their fixtures pin
+  `core.hooksPath` so a global `commit-msg` hook cannot rewrite fixture messages.
+- `apps/frontend/tests/unit/components/git-panel.test.tsx` mocks the hook module
+  wholesale, so a new hook must be added to that mock before the panel can render.
+
 ## Prompt Rules
 
 Open these first:

@@ -8,6 +8,7 @@ import {
   CommitBodySchema,
   CommitResponseSchema,
   CreateBranchBodySchema,
+  DeleteBranchBodySchema,
   DiscardPathsBodySchema,
   GenerateCommitMessageBodySchema,
   type GenerateCommitMessageResponse,
@@ -18,8 +19,10 @@ import {
   GitDiffQuerySchema,
   GitDiffResponseSchema,
   GitFetchBodySchema,
+  GitHeadMessageResponseSchema,
   GitHistoryQuerySchema,
   GitHistoryResponseSchema,
+  GitPushBodySchema,
   GitRemoteBodySchema,
   type GitRepoState,
   GitRepoStateSchema,
@@ -28,7 +31,10 @@ import {
   InitRepoBodySchema,
   type InitRepoResponse,
   InitRepoResponseSchema,
+  RenameBranchBodySchema,
   StagePathsBodySchema,
+  StashApplyBodySchema,
+  StashDropBodySchema,
   StashListResponseSchema,
   StashPopBodySchema,
   StashSaveBodySchema,
@@ -51,19 +57,28 @@ import {
   generateCommitMessageUseCase,
   NoCommitChangesError,
 } from '../application/generate-commit-message';
-import { getCommitDetails, getFileDiff, listHistory } from '../application/git-navigation-service';
+import {
+  getCommitDetails,
+  getFileDiff,
+  getHeadMessage,
+  listHistory,
+} from '../application/git-navigation-service';
 import { getRepoState, initRepo } from '../application/git-status-service';
 import {
   checkoutRemoteBranch,
   commitChanges,
   createBranch,
+  deleteBranch,
   discardPaths,
   fetchRemote,
   GitWriteError,
   listBranches,
   pullFastForward,
   pushBranch,
+  renameBranch,
   stagePaths,
+  stashApply,
+  stashDrop,
   stashList,
   stashPop,
   stashSave,
@@ -332,6 +347,39 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         },
       }
     )
+    .get(
+      '/head-message',
+      async ({ query, request, set, user }) => {
+        const db = getDb();
+        const userId = user?.id ?? '';
+        const resolved = await routeWorkdir(query.chatId, userId, set);
+        if ('error' in resolved) return resolved.error;
+
+        try {
+          // `/commit` re-adds this user's trailer from the same setting, so the
+          // form must not be prefilled with one it would then duplicate.
+          const settings = await getAppSettings(db, userId);
+          return await getHeadMessage(
+            resolved.workdir,
+            settings.gitSettings.signOff,
+            request.signal
+          );
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        query: GitStateQuerySchema,
+        response: {
+          200: GitHeadMessageResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
     .post(
       '/stash',
       async ({ body, request, set, user }) => {
@@ -372,6 +420,54 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         body: StashPopBodySchema,
         response: {
           200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/stash/apply',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+
+        try {
+          return await stashApply(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: StashApplyBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/stash/drop',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+
+        try {
+          return await stashDrop(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: StashDropBodySchema,
+        response: {
+          200: StashListResponseSchema,
           403: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           409: ApiErrorResponseSchema,
@@ -486,6 +582,52 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
       },
       {
         body: CreateBranchBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .delete(
+      '/branches',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await deleteBranch(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: DeleteBranchBodySchema,
+        response: {
+          200: GitBranchesResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/branches/rename',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await renameBranch(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: RenameBranchBodySchema,
         response: {
           200: GitRepoStateSchema,
           403: ApiErrorResponseSchema,
@@ -617,13 +759,13 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await pushBranch(resolved.workdir, request.signal);
+          return await pushBranch(resolved.workdir, body, request.signal);
         } catch (error) {
           return gitWriteError(error, set);
         }
       },
       {
-        body: GitRemoteBodySchema,
+        body: GitPushBodySchema,
         response: {
           200: GitRepoStateSchema,
           403: ApiErrorResponseSchema,

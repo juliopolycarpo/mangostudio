@@ -5,7 +5,9 @@ import type {
   GitBranchesResponse,
   GitCommitDetailsResponse,
   GitDiffResponse,
+  GitHeadMessageResponse,
   GitHistoryResponse,
+  GitPushBody,
   GitRepoState,
   GitStatus,
   InitRepoResponse,
@@ -19,6 +21,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useEffect } from 'react';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 import { githubContextKeys } from './use-github-context';
@@ -31,6 +34,11 @@ const gitStateKeys = {
 const gitStashKeys = {
   all: ['git-stashes'] as const,
   detail: (chatId: string) => [...gitStashKeys.all, chatId] as const,
+};
+
+const gitHeadMessageKeys = {
+  all: ['git-head-message'] as const,
+  detail: (chatId: string) => [...gitHeadMessageKeys.all, chatId] as const,
 };
 
 const gitBranchKeys = {
@@ -78,8 +86,13 @@ export const gitWriteScopes = {
   commit: ['state', 'history', 'commits', 'branches', 'diffs', 'github'],
   stashSave: ['state', 'stashes', 'diffs'],
   stashPop: ['state', 'stashes', 'diffs'],
+  stashApply: ['state', 'stashes', 'diffs'],
+  // Dropping only removes a stack entry; the worktree and its diffs are untouched.
+  stashDrop: ['stashes'],
   // createBranch runs `git switch -c` at the current HEAD — log is unchanged.
   createBranch: ['state', 'branches'],
+  deleteBranch: ['branches'],
+  renameBranch: ['state', 'branches', 'github'],
   switchBranch: ['state', 'branches', 'history', 'diffs', 'github'],
   checkoutRemote: ['state', 'branches', 'history', 'diffs', 'github'],
   fetch: ['state', 'branches', 'github'],
@@ -103,6 +116,14 @@ interface StashSaveInput {
 }
 interface StashPopInput {
   index?: number;
+}
+interface RenameBranchInput {
+  name: string;
+  newName: string;
+}
+interface DeleteBranchInput {
+  name: string;
+  force?: boolean;
 }
 export interface GitDiffInput {
   path: string;
@@ -256,6 +277,30 @@ export function useStashPop(chatId: string) {
   });
 }
 
+export function useStashApply(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: StashPopInput): Promise<GitRepoState> => {
+      const { data, error } = await client.api.git.stash.apply.post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitRepoState;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.stashApply),
+  });
+}
+
+export function useStashDrop(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: StashPopInput): Promise<StashListResponse> => {
+      const { data, error } = await client.api.git.stash.drop.post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as StashListResponse;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.stashDrop),
+  });
+}
+
 export function useGitBranches(chatId: string) {
   return useQuery({
     queryKey: gitBranchKeys.detail(chatId),
@@ -288,6 +333,30 @@ export function useCreateBranch(chatId: string) {
       return data as GitRepoState;
     },
     onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.createBranch),
+  });
+}
+
+export function useDeleteBranch(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: DeleteBranchInput): Promise<GitBranchesResponse> => {
+      const { data, error } = await client.api.git.branches.delete({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitBranchesResponse;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.deleteBranch),
+  });
+}
+
+export function useRenameBranch(chatId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: RenameBranchInput): Promise<GitRepoState> => {
+      const { data, error } = await client.api.git.branches.rename.post({ chatId, ...input });
+      if (error) throw new ApiError(error.value);
+      return data as GitRepoState;
+    },
+    onSuccess: () => invalidateGitScopes(queryClient, chatId, gitWriteScopes.renameBranch),
   });
 }
 
@@ -348,12 +417,22 @@ export function useGitDiff(chatId: string, input: GitDiffInput | null) {
   });
 }
 
+interface RemoteMutationInput {
+  prune?: boolean;
+  force?: GitPushBody['force'];
+}
+
 function useRemoteMutation(chatId: string, operation: 'fetch' | 'pull' | 'push') {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { prune?: boolean } = {}): Promise<GitRepoState> => {
+    mutationFn: async (input: RemoteMutationInput = {}): Promise<GitRepoState> => {
       const endpoint = client.api.git[operation];
-      const body = operation === 'fetch' ? { chatId, prune: input.prune } : { chatId };
+      const body =
+        operation === 'fetch'
+          ? { chatId, prune: input.prune }
+          : operation === 'push'
+            ? { chatId, ...(input.force ? { force: input.force } : {}) }
+            : { chatId };
       const { data, error } = await endpoint.post(body);
       if (error) throw new ApiError(error.value);
       return data as GitRepoState;
@@ -372,4 +451,32 @@ export function useGitPull(chatId: string) {
 
 export function useGitPush(chatId: string) {
   return useRemoteMutation(chatId, 'push');
+}
+
+/**
+ * The commit an amend would replace. Enabled only while amend mode is active so
+ * the panel does not spawn a `git log` on every render of every chat.
+ */
+export function useGitHeadMessage(chatId: string, enabled: boolean) {
+  const queryClient = useQueryClient();
+
+  // Leaving amend mode discards the entry instead of parking it in the cache.
+  // A commit, an amend, or a checkout moves HEAD without this query running, so
+  // a retained success would prefill the form from a message that no longer
+  // exists, and a retained failure would bounce the user straight back out of
+  // amend mode before the retry it triggers could resolve.
+  useEffect(() => {
+    if (enabled) return;
+    queryClient.removeQueries({ queryKey: gitHeadMessageKeys.detail(chatId) });
+  }, [enabled, chatId, queryClient]);
+
+  return useQuery({
+    queryKey: gitHeadMessageKeys.detail(chatId),
+    enabled,
+    queryFn: async (): Promise<GitHeadMessageResponse> => {
+      const { data, error } = await client.api.git['head-message'].get({ query: { chatId } });
+      if (error) throw new ApiError(error.value);
+      return data as GitHeadMessageResponse;
+    },
+  });
 }

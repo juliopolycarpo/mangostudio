@@ -1,29 +1,35 @@
-import type { GenerateCommitMessageResponse } from '@mangostudio/shared/git';
-import { History, Info, Sparkles } from 'lucide-react';
-import { type FormEvent, useRef, useState } from 'react';
+import type { GenerateCommitMessageResponse, GitBranchInfo } from '@mangostudio/shared/git';
+import { History, Info, Sparkles, X } from 'lucide-react';
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
-import { useCommit, useGenerateCommitMessage } from './hooks/use-git-state';
+import { CommitActions, useCommitActions } from './CommitActions';
+import { useGenerateCommitMessage, useGitHeadMessage } from './hooks/use-git-state';
 
 const AMEND_CONFIRMED_KEY = 'mangostudio.git.amend-confirmed';
 
 export function CommitForm({
   chatId,
+  branch,
   hasChanges,
   hasStagedChanges,
+  hasUnstagedWork,
+  onRemoteFailure,
 }: {
   readonly chatId: string;
+  readonly branch: GitBranchInfo;
   readonly hasChanges: boolean;
   readonly hasStagedChanges: boolean;
+  readonly hasUnstagedWork: boolean;
+  readonly onRemoteFailure: (error: unknown) => void;
 }) {
   const { t } = useI18n();
   const { toast } = useToast();
   const labels = t.git.commit;
   const amendLabels = t.git.amendConfirm;
   const overwriteLabels = t.git.commitMessageOverwrite;
-  const commitMutation = useCommit(chatId);
   const generateMutation = useGenerateCommitMessage(chatId);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -35,6 +41,10 @@ export function CommitForm({
   const [diffWasTruncated, setDiffWasTruncated] = useState(false);
   const titleRef = useRef('');
   const bodyRef = useRef('');
+  // The prefill runs once per amended commit, so editing the prefilled text is
+  // not undone by a refetch of the same HEAD.
+  const prefilledHash = useRef<string | null>(null);
+  const headMessage = useGitHeadMessage(chatId, amend);
 
   const updateTitle = (value: string) => {
     titleRef.current = value;
@@ -52,39 +62,52 @@ export function CommitForm({
     setDiffWasTruncated(suggestion.truncated);
   };
 
-  const handleAmendChange = (checked: boolean) => {
-    if (!checked) {
-      setAmend(false);
-      return;
-    }
-
-    if (sessionStorage.getItem(AMEND_CONFIRMED_KEY) === 'true') {
-      setAmend(true);
-      return;
-    }
-    setConfirmAmend(true);
-  };
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle || (!hasStagedChanges && !amend)) return;
-
-    try {
-      const response = await commitMutation.mutateAsync({
-        title: trimmedTitle,
-        body: body.trim(),
-        amend,
-      });
-      toast(labels.success.replace('{hash}', response.hash.slice(0, 8)), 'success');
+  const actions = useCommitActions({
+    chatId,
+    title,
+    body,
+    amend,
+    onCommitted: () => {
       updateTitle('');
       updateBody('');
       setAmend(false);
       setDiffWasTruncated(false);
-    } catch (error) {
-      toast(resolveApiErrorMessage(error, labels.error), 'error');
+    },
+    onEnterAmend: () => {
+      if (amend) return;
+      if (sessionStorage.getItem(AMEND_CONFIRMED_KEY) === 'true') {
+        setAmend(true);
+        return;
+      }
+      setConfirmAmend(true);
+    },
+    onRemoteFailure,
+  });
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: applySuggestion only writes state and refs, and re-running on its identity would re-prefill an edited draft.
+  useEffect(() => {
+    if (!amend) {
+      prefilledHash.current = null;
+      return;
     }
-  };
+    const head = headMessage.data;
+    if (!head || prefilledHash.current === head.hash) return;
+    prefilledHash.current = head.hash;
+    const suggestion = { title: head.title, body: head.body, truncated: false };
+    // The overwrite dialog is the same guard the generator uses: never replace
+    // text the author typed without asking.
+    if (titleRef.current.trim() || bodyRef.current.trim()) {
+      setPendingSuggestion(suggestion);
+      return;
+    }
+    applySuggestion(suggestion);
+  }, [amend, headMessage.data]);
+
+  useEffect(() => {
+    if (!amend || !headMessage.error) return;
+    toast(resolveApiErrorMessage(headMessage.error, t.git.headMessage.loadError), 'error');
+    setAmend(false);
+  }, [amend, headMessage.error, toast, t.git.headMessage.loadError]);
 
   const handleGenerate = async () => {
     if (!hasChanges) return;
@@ -102,83 +125,86 @@ export function CommitForm({
     }
   };
 
+  // The app has no shortcut registry, so the default action is bound where it
+  // is used rather than through a new global layer.
+  const handleShortcut = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return;
+    event.preventDefault();
+    // The shortcut mirrors the primary button, which is disabled without
+    // something to commit; firing anyway would only earn a rejected request.
+    if (!hasStagedChanges && !amend) return;
+    void actions.run('commit');
+  };
+
   return (
-    <section className="space-y-3 border-t border-outline-variant/15 pt-4">
-      <h3 className="text-[11px] font-bold uppercase tracking-[0.12em] text-on-surface-variant">
-        {labels.title}
-      </h3>
-      <form className="space-y-3" onSubmit={(event) => void handleSubmit(event)}>
-        <label className="block space-y-1">
-          <span className="sr-only">{labels.titleLabel}</span>
-          <input
-            value={title}
-            onChange={(event) => updateTitle(event.target.value)}
-            maxLength={72}
-            aria-label={labels.titleLabel}
-            placeholder={labels.titlePlaceholder}
-            className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
-          />
-          <span className="block text-right font-mono text-[10px] text-on-surface-variant/60">
-            {labels.titleCount.replace('{count}', String(title.length))}
+    <section className="space-y-2">
+      {amend ? (
+        <div className="flex items-center gap-2 rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-1.5 text-[11px] leading-4 text-warning">
+          <History size={13} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold">{labels.amendLabel}</span>
+            <span className="block opacity-80">
+              {headMessage.isLoading ? t.git.headMessage.loading : labels.amendHint}
+            </span>
           </span>
-        </label>
-        <label className="block">
-          <span className="sr-only">{labels.bodyLabel}</span>
-          <textarea
-            value={body}
-            onChange={(event) => updateBody(event.target.value)}
-            aria-label={labels.bodyLabel}
-            placeholder={labels.bodyPlaceholder}
-            rows={3}
-            className="w-full resize-y rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
-          />
-        </label>
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="w-full"
-          loading={generateMutation.isPending}
-          disabled={!hasChanges || generateMutation.isPending || commitMutation.isPending}
-          onClick={() => void handleGenerate()}
-        >
-          {!generateMutation.isPending ? <Sparkles size={14} /> : null}
-          {generateMutation.isPending ? labels.generating : labels.generate}
-        </Button>
-        {diffWasTruncated ? (
-          <p className="flex items-start gap-1.5 text-[10px] leading-4 text-on-surface-variant/70">
-            <Info size={12} className="mt-0.5 shrink-0" />
-            {labels.truncatedNotice}
-          </p>
-        ) : null}
-        <label className="flex cursor-pointer items-start gap-2 text-xs text-on-surface-variant">
-          <input
-            type="checkbox"
-            checked={amend}
-            onChange={(event) => handleAmendChange(event.target.checked)}
-            aria-label={labels.amendLabel}
-            className="mt-0.5 accent-primary"
-          />
-          <span>
-            <span className="font-semibold text-on-surface">{labels.amendLabel}</span>
-            <span className="block text-[10px] leading-4">{labels.amendHint}</span>
-          </span>
-        </label>
-        <Button
-          type="submit"
-          size="sm"
-          className="w-full"
-          loading={commitMutation.isPending}
-          disabled={
-            commitMutation.isPending ||
-            generateMutation.isPending ||
-            title.trim().length === 0 ||
-            (!hasStagedChanges && !amend)
-          }
-        >
-          {commitMutation.isPending ? labels.submitting : labels.submit}
-        </Button>
-      </form>
+          <button
+            type="button"
+            aria-label={labels.amendExit}
+            title={labels.amendExit}
+            onClick={() => setAmend(false)}
+            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded transition-colors hover:bg-warning/20"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      ) : null}
+
+      <label className="block space-y-1">
+        <span className="sr-only">{labels.titleLabel}</span>
+        <input
+          value={title}
+          onChange={(event) => updateTitle(event.target.value)}
+          onKeyDown={handleShortcut}
+          maxLength={72}
+          aria-label={labels.titleLabel}
+          placeholder={labels.titlePlaceholder}
+          className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
+        />
+        <span className="block text-right font-mono text-[10px] text-on-surface-variant/60">
+          {labels.titleCount.replace('{count}', String(title.length))}
+        </span>
+      </label>
+      <label className="block">
+        <span className="sr-only">{labels.bodyLabel}</span>
+        <textarea
+          value={body}
+          onChange={(event) => updateBody(event.target.value)}
+          onKeyDown={handleShortcut}
+          aria-label={labels.bodyLabel}
+          placeholder={labels.bodyPlaceholder}
+          rows={2}
+          className="w-full resize-y rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface outline-none transition-colors placeholder:text-on-surface-variant/50 focus:border-primary/60"
+        />
+      </label>
+
+      <CommitActions
+        actions={actions}
+        branch={branch}
+        amend={amend}
+        hasTitle={title.trim().length > 0}
+        hasStagedChanges={hasStagedChanges}
+        hasUnstagedWork={hasUnstagedWork}
+        generating={generateMutation.isPending}
+        canGenerate={hasChanges}
+        onGenerate={() => void handleGenerate()}
+      />
+
+      {diffWasTruncated ? (
+        <p className="flex items-start gap-1.5 text-[10px] leading-4 text-on-surface-variant/70">
+          <Info size={12} className="mt-0.5 shrink-0" />
+          {labels.truncatedNotice}
+        </p>
+      ) : null}
 
       {confirmAmend ? (
         <div

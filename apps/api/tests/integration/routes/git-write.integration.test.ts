@@ -69,22 +69,45 @@ async function createRouteFixture(workdir: string) {
   return { app: authenticated.app, chatId: chat.id, user };
 }
 
-function postJson(
+function sendJson(
   app: ReturnType<typeof createAuthenticatedApiTestApp>['app'],
+  method: 'POST' | 'DELETE',
   path: string,
   body: unknown
 ) {
   return app.handle(
     new Request(`http://localhost${path}`, {
-      method: 'POST',
+      method,
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
   );
 }
 
+function postJson(
+  app: ReturnType<typeof createAuthenticatedApiTestApp>['app'],
+  path: string,
+  body: unknown
+) {
+  return sendJson(app, 'POST', path, body);
+}
+
+function deleteJson(
+  app: ReturnType<typeof createAuthenticatedApiTestApp>['app'],
+  path: string,
+  body: unknown
+) {
+  return sendJson(app, 'DELETE', path, body);
+}
+
 function getStashes(app: ReturnType<typeof createAuthenticatedApiTestApp>['app'], chatId: string) {
   const url = new URL('http://localhost/git/stashes');
+  url.searchParams.set('chatId', chatId);
+  return app.handle(new Request(url.toString()));
+}
+
+function getBranches(app: ReturnType<typeof createAuthenticatedApiTestApp>['app'], chatId: string) {
+  const url = new URL('http://localhost/git/branches');
   url.searchParams.set('chatId', chatId);
   return app.handle(new Request(url.toString()));
 }
@@ -371,6 +394,103 @@ describe('Git write routes', () => {
     expect(stashesAfterPop.stashes).toEqual([]);
   });
 
+  it.skipIf(!hasGit)('applies a stash without consuming it, then drops the entry', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    await writeFile(join(workdir, 'tracked.txt'), 'stashed\n');
+    const { app, chatId } = await createRouteFixture(workdir);
+    await postJson(app, '/git/stash', { chatId, message: 'reusable work' });
+
+    const applied = await postJson(app, '/git/stash/apply', { chatId, index: 0 });
+    expect(applied.status).toBe(200);
+    expect(await applied.json()).toMatchObject({
+      state: 'repo',
+      status: { unstaged: [{ path: 'tracked.txt', status: 'modified' }] },
+    });
+    const afterApply = (await (await getStashes(app, chatId)).json()) as StashListResponse;
+    expect(afterApply.stashes).toEqual([
+      { index: 0, branch: expect.any(String), message: 'reusable work' },
+    ]);
+
+    const dropped = await postJson(app, '/git/stash/drop', { chatId, index: 0 });
+    const droppedPayload = (await dropped.json()) as StashListResponse;
+    expect(dropped.status).toBe(200);
+    expect(Value.Check(StashListResponseSchema, droppedPayload)).toBe(true);
+    expect(droppedPayload.stashes).toEqual([]);
+    // Dropping removes a stack entry only; the applied worktree edit survives.
+    expect(await Bun.file(join(workdir, 'tracked.txt')).text()).toBe('stashed\n');
+  });
+
+  it.skipIf(!hasGit)('renames a branch and reports the new checked-out name', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    await runFixtureGit(workdir, ['branch', '-M', 'main']);
+    const { app, chatId } = await createRouteFixture(workdir);
+
+    const renamed = await postJson(app, '/git/branches/rename', {
+      chatId,
+      name: 'main',
+      newName: 'trunk',
+    });
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toMatchObject({
+      state: 'repo',
+      status: { branch: { name: 'trunk' } },
+    });
+    expect(await runFixtureGit(workdir, ['branch', '--show-current'])).toBe('trunk');
+
+    const invalid = await postJson(app, '/git/branches/rename', {
+      chatId,
+      name: 'trunk',
+      newName: 'feat/..bad',
+    });
+    expect(invalid.status).toBe(422);
+    expect(await runFixtureGit(workdir, ['branch', '--show-current'])).toBe('trunk');
+  });
+
+  it.skipIf(!hasGit)('deletes a branch only when it is safe or forced', async () => {
+    const workdir = await createTempRepo();
+    await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+    await runFixtureGit(workdir, ['add', 'tracked.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+    await runFixtureGit(workdir, ['branch', '-M', 'main']);
+    await runFixtureGit(workdir, ['checkout', '-b', 'feat/merged']);
+    await runFixtureGit(workdir, ['checkout', '-b', 'feat/unmerged']);
+    await writeFile(join(workdir, 'unmerged.txt'), 'only here\n');
+    await runFixtureGit(workdir, ['add', 'unmerged.txt']);
+    await runFixtureGit(workdir, ['commit', '-m', 'unmerged work']);
+    await runFixtureGit(workdir, ['checkout', 'main']);
+    const { app, chatId } = await createRouteFixture(workdir);
+
+    const current = await deleteJson(app, '/git/branches', { chatId, name: 'main' });
+    expect(current.status).toBe(409);
+    expect(await current.json()).toMatchObject({ code: 'CONFLICT' });
+
+    const unmerged = await deleteJson(app, '/git/branches', { chatId, name: 'feat/unmerged' });
+    expect(unmerged.status).toBe(409);
+    expect(await unmerged.json()).toMatchObject({ code: 'BRANCH_NOT_MERGED' });
+
+    const merged = await deleteJson(app, '/git/branches', { chatId, name: 'feat/merged' });
+    const mergedPayload = (await merged.json()) as { branches: Array<{ name: string }> };
+    expect(merged.status).toBe(200);
+    expect(mergedPayload.branches.map((branch) => branch.name)).not.toContain('feat/merged');
+
+    const forced = await deleteJson(app, '/git/branches', {
+      chatId,
+      name: 'feat/unmerged',
+      force: true,
+    });
+    expect(forced.status).toBe(200);
+    const remaining = (await (await getBranches(app, chatId)).json()) as {
+      branches: Array<{ name: string }>;
+    };
+    expect(remaining.branches.map((branch) => branch.name)).toEqual(['main']);
+  });
+
   it.skipIf(!hasGit)('reports stash-pop conflicts and leaves conflict state visible', async () => {
     const workdir = await createTempRepo();
     await writeFile(join(workdir, 'conflict.txt'), 'base\n');
@@ -413,6 +533,14 @@ describe('Git write routes', () => {
       postJson(authenticated.app, '/git/commit-message', { chatId: foreignChat.id }),
       postJson(authenticated.app, '/git/stash', { chatId: foreignChat.id }),
       postJson(authenticated.app, '/git/stash/pop', { chatId: foreignChat.id }),
+      postJson(authenticated.app, '/git/stash/apply', { chatId: foreignChat.id }),
+      postJson(authenticated.app, '/git/stash/drop', { chatId: foreignChat.id }),
+      deleteJson(authenticated.app, '/git/branches', { chatId: foreignChat.id, name: 'feat/x' }),
+      postJson(authenticated.app, '/git/branches/rename', {
+        chatId: foreignChat.id,
+        name: 'feat/x',
+        newName: 'feat/y',
+      }),
       getStashes(authenticated.app, foreignChat.id),
     ]);
 
@@ -431,6 +559,14 @@ describe('Git write routes', () => {
       postJson(app, '/git/commit-message', { chatId: 'chat-1' }),
       postJson(app, '/git/stash', { chatId: 'chat-1' }),
       postJson(app, '/git/stash/pop', { chatId: 'chat-1' }),
+      postJson(app, '/git/stash/apply', { chatId: 'chat-1' }),
+      postJson(app, '/git/stash/drop', { chatId: 'chat-1' }),
+      deleteJson(app, '/git/branches', { chatId: 'chat-1', name: 'feat/x' }),
+      postJson(app, '/git/branches/rename', {
+        chatId: 'chat-1',
+        name: 'feat/x',
+        newName: 'feat/y',
+      }),
       getStashes(app, 'chat-1'),
     ]);
 

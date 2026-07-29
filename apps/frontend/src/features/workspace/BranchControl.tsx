@@ -1,15 +1,18 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { GitBranchInfo } from '@mangostudio/shared/git';
-import { Check, ChevronDown, Cloud, GitBranch, Plus } from 'lucide-react';
+import { Check, ChevronDown, Cloud, GitBranch, MoreHorizontal, Plus } from 'lucide-react';
 import { type FormEvent, useRef, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { Menu, MenuItem } from '@/components/ui/Menu';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import {
   useCheckoutRemoteBranch,
   useCreateBranch,
+  useDeleteBranch,
   useGitBranches,
+  useRenameBranch,
   useStashSave,
   useSwitchBranch,
 } from './hooks/use-git-state';
@@ -31,8 +34,17 @@ export function BranchControl({
   const createMutation = useCreateBranch(chatId);
   const checkoutRemoteMutation = useCheckoutRemoteBranch(chatId);
   const stashMutation = useStashSave(chatId);
+  const renameMutation = useRenameBranch(chatId);
+  const deleteMutation = useDeleteBranch(chatId);
   const menuRef = useRef<HTMLDetailsElement>(null);
   const [newBranch, setNewBranch] = useState('');
+  const [rowMenu, setRowMenu] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  // `notMerged` upgrades the confirm dialog after Git refuses a safe delete.
+  const [deleteTarget, setDeleteTarget] = useState<{ name: string; notMerged: boolean } | null>(
+    null
+  );
   // `remoteRef` is set only when the blocked checkout targeted a remote-tracking
   // ref: retrying it must re-create the local tracking branch, not `git switch`
   // a local branch that does not exist yet.
@@ -118,6 +130,40 @@ export function BranchControl({
     }
   };
 
+  const rename = async (event: FormEvent) => {
+    event.preventDefault();
+    const newName = renameValue.trim();
+    if (!renameTarget || !newName) return;
+    try {
+      await renameMutation.mutateAsync({ name: renameTarget, newName });
+      setRenameTarget(null);
+      setRenameValue('');
+      toast(labels.renamed.replace('{branch}', newName), 'success');
+    } catch (error) {
+      toast(resolveApiErrorMessage(error, labels.actionError), 'error');
+    }
+  };
+
+  const remove = async (force: boolean) => {
+    if (!deleteTarget) return;
+    try {
+      await deleteMutation.mutateAsync({
+        name: deleteTarget.name,
+        ...(force ? { force: true } : {}),
+      });
+      toast(labels.deleted.replace('{branch}', deleteTarget.name), 'success');
+      setDeleteTarget(null);
+    } catch (error) {
+      // Git only reports unmerged work when it refuses the safe delete, so the
+      // dialog earns its force option instead of offering it up front.
+      if (error instanceof ApiError && error.code === ERROR_CODES.BRANCH_NOT_MERGED) {
+        setDeleteTarget({ name: deleteTarget.name, notMerged: true });
+        return;
+      }
+      toast(resolveApiErrorMessage(error, labels.actionError), 'error');
+    }
+  };
+
   const remotes = branches.data?.remotes ?? [];
 
   return (
@@ -139,8 +185,13 @@ export function BranchControl({
             className="shrink-0 text-on-surface-variant transition-transform group-open:rotate-180"
           />
         </summary>
-        <div className="absolute left-0 right-0 top-full z-30 mt-1 min-w-64 overflow-hidden rounded-xl border border-outline-variant/20 bg-surface-container-high shadow-2xl">
-          <div className="app-scrollbar max-h-64 overflow-y-auto p-1.5">
+        <div className="absolute left-0 right-0 top-full z-30 mt-1 min-w-64 rounded-xl border border-outline-variant/20 bg-surface-container-high shadow-2xl">
+          {/* Scrolling is dropped while a row menu is open so the popover is not clipped by this container. */}
+          <div
+            className={`p-1.5 max-h-64 ${
+              rowMenu === null ? 'app-scrollbar overflow-y-auto' : 'overflow-visible'
+            }`}
+          >
             {branches.isLoading ? (
               <p className="px-2 py-3 text-xs text-on-surface-variant">{t.common.loading}</p>
             ) : (
@@ -150,20 +201,61 @@ export function BranchControl({
                 </p>
                 {branches.data?.branches.length ? (
                   branches.data.branches.map((item) => (
-                    <button
+                    <div
                       key={item.name}
-                      type="button"
-                      disabled={pending || item.current}
-                      onClick={() => void switchTo(item.name)}
-                      aria-label={labels.switchTo.replace('{branch}', item.name)}
-                      title={item.name}
-                      className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-surface-container-highest disabled:cursor-default"
+                      className="flex items-center gap-1 rounded-lg pr-1 hover:bg-surface-container-highest"
                     >
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
-                        {item.name}
-                      </span>
-                      {item.current ? <Check size={13} className="text-primary" /> : null}
-                    </button>
+                      <button
+                        type="button"
+                        disabled={pending || item.current}
+                        onClick={() => void switchTo(item.name)}
+                        aria-label={labels.switchTo.replace('{branch}', item.name)}
+                        title={item.name}
+                        className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 py-2 text-left disabled:cursor-default"
+                      >
+                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-on-surface">
+                          {item.name}
+                        </span>
+                        {item.current ? <Check size={13} className="text-primary" /> : null}
+                      </button>
+                      <Menu
+                        open={rowMenu === item.name}
+                        onOpenChange={(next) => setRowMenu(next ? item.name : null)}
+                        panelClassName="w-40"
+                        trigger={(triggerProps) => (
+                          <button
+                            type="button"
+                            aria-label={labels.itemMenu.replace('{branch}', item.name)}
+                            title={labels.itemMenu.replace('{branch}', item.name)}
+                            className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+                            {...triggerProps}
+                          >
+                            <MoreHorizontal size={13} />
+                          </button>
+                        )}
+                      >
+                        <MenuItem
+                          disabled={pending}
+                          onSelect={() => {
+                            setRowMenu(null);
+                            setRenameValue(item.name);
+                            setRenameTarget(item.name);
+                          }}
+                        >
+                          {labels.rename}
+                        </MenuItem>
+                        <MenuItem
+                          tone="danger"
+                          disabled={pending || item.current}
+                          onSelect={() => {
+                            setRowMenu(null);
+                            setDeleteTarget({ name: item.name, notMerged: false });
+                          }}
+                        >
+                          {labels.delete}
+                        </MenuItem>
+                      </Menu>
+                    </div>
                   ))
                 ) : (
                   <p className="px-2 py-3 text-xs text-on-surface-variant">{labels.empty}</p>
@@ -221,6 +313,99 @@ export function BranchControl({
           </form>
         </div>
       </details>
+
+      {renameTarget ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="git-branch-rename-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+        >
+          <form
+            onSubmit={(event) => void rename(event)}
+            className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl"
+          >
+            <h3 id="git-branch-rename-title" className="text-lg font-bold text-on-surface">
+              {labels.renameTitle.replace('{branch}', renameTarget)}
+            </h3>
+            <label className="block space-y-1">
+              <span className="sr-only">{labels.renameLabel}</span>
+              <input
+                value={renameValue}
+                onChange={(event) => setRenameValue(event.target.value)}
+                aria-label={labels.renameLabel}
+                placeholder={labels.createPlaceholder}
+                className="w-full rounded-lg border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 font-mono text-xs text-on-surface outline-none focus:border-primary/60"
+              />
+            </label>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => {
+                  setRenameTarget(null);
+                  setRenameValue('');
+                }}
+              >
+                {labels.renameCancel}
+              </Button>
+              <Button
+                type="submit"
+                className="flex-1"
+                loading={renameMutation.isPending}
+                disabled={!renameValue.trim() || renameValue.trim() === renameTarget}
+              >
+                {labels.renameConfirm}
+              </Button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="git-branch-delete-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+        >
+          <div className="w-full max-w-sm space-y-4 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-6 shadow-2xl">
+            <div className="space-y-2">
+              <h3 id="git-branch-delete-title" className="text-lg font-bold text-on-surface">
+                {deleteTarget.notMerged
+                  ? labels.deleteNotMergedTitle
+                  : labels.deleteTitle.replace('{branch}', deleteTarget.name)}
+              </h3>
+              <p className="text-sm leading-5 text-on-surface-variant">
+                {deleteTarget.notMerged ? labels.deleteNotMergedHint : labels.deleteHint}
+              </p>
+              <p className="truncate rounded-xl bg-surface-container-lowest p-2 font-mono text-[11px]">
+                {deleteTarget.name}
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="flex-1"
+                onClick={() => setDeleteTarget(null)}
+              >
+                {labels.deleteCancel}
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                className="flex-1"
+                loading={deleteMutation.isPending}
+                onClick={() => void remove(deleteTarget.notMerged)}
+              >
+                {deleteTarget.notMerged ? labels.deleteNotMergedConfirm : labels.deleteConfirm}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {blockedSwitch ? (
         <div

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { buildCommitArgs } from '../../../../src/modules/git/domain/commit-command';
+import {
+  buildCommitArgs,
+  parseCommitterIdentity,
+} from '../../../../src/modules/git/domain/commit-command';
 
 describe('buildCommitArgs', () => {
   const booleans = [false, true] as const;
@@ -31,4 +34,28 @@ describe('buildCommitArgs', () => {
       }
     }
   }
+
+  it('never opts out, so git config stays authoritative when a setting is off', () => {
+    const args = buildCommitArgs({
+      title: 'subject',
+      amend: true,
+      signOff: false,
+      signCommits: false,
+    });
+
+    expect(args).not.toContain('--no-signoff');
+    expect(args).not.toContain('--no-gpg-sign');
+  });
+});
+
+describe('parseCommitterIdentity', () => {
+  it('drops the timestamp git var appends', () => {
+    expect(parseCommitterIdentity('Maintainer <maintainer@example.test> 1751328000 -0300\n')).toBe(
+      'Maintainer <maintainer@example.test>'
+    );
+  });
+
+  it('returns undefined when git has no identity to offer', () => {
+    expect(parseCommitterIdentity('  \n')).toBeUndefined();
+  });
 });

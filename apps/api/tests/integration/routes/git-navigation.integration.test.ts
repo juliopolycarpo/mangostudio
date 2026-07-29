@@ -2,12 +2,15 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
 import {
   GitBranchesResponseSchema,
   type GitCommitDetailsResponse,
   GitCommitDetailsResponseSchema,
   type GitDiffResponse,
   GitDiffResponseSchema,
+  type GitHeadMessageResponse,
+  GitHeadMessageResponseSchema,
   type GitHistoryResponse,
   GitHistoryResponseSchema,
   type GitRepoState,
@@ -15,6 +18,7 @@ import {
 } from '@mangostudio/shared/git';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
+import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import {
@@ -50,6 +54,10 @@ async function createTempRepo(): Promise<string> {
   await fixtureGit(path, ['config', 'user.email', 'git-navigation@mangostudio.test']);
   await fixtureGit(path, ['config', 'user.name', 'Git Navigation Test']);
   await fixtureGit(path, ['config', 'commit.gpgSign', 'false']);
+  // Developer machines may set core.hooksPath globally (e.g. to force
+  // Signed-off-by). Pointing at this repo's own hooks directory keeps fixture
+  // commit messages exactly as written.
+  await fixtureGit(path, ['config', 'core.hooksPath', join(path, '.git', 'hooks')]);
   return path;
 }
 
@@ -258,6 +266,137 @@ describe('Git navigation routes', () => {
           status: 'renamed',
         })
       );
+    },
+    GIT_NAVIGATION_TIMEOUT_MS
+  );
+
+  it.skipIf(!hasGit)(
+    'reads the HEAD message and strips sign-off only when the setting adds it back',
+    async () => {
+      const workdir = await createTempRepo();
+      await writeFile(join(workdir, 'amend.txt'), 'base\n');
+      await fixtureGit(workdir, ['add', 'amend.txt']);
+      await fixtureGit(workdir, [
+        'commit',
+        '-m',
+        'feat(git): land the panel',
+        '-m',
+        'Explain the change.\n\nSigned-off-by: Co Author <co-author@mangostudio.test>\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>',
+      ]);
+      const { app, chatId, user } = await createRouteFixture(workdir);
+
+      const preserved = await getRoute(app, '/git/head-message', { chatId });
+      expect(preserved.status).toBe(200);
+      const preservedPayload = (await preserved.json()) as GitHeadMessageResponse;
+      expect(Value.Check(GitHeadMessageResponseSchema, preservedPayload)).toBe(true);
+      expect(preservedPayload.hash).toBe(await fixtureGit(workdir, ['rev-parse', 'HEAD']));
+      expect(preservedPayload.title).toBe('feat(git): land the panel');
+      expect(preservedPayload.body).toBe(
+        'Explain the change.\n\nSigned-off-by: Co Author <co-author@mangostudio.test>\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>'
+      );
+
+      await updateAppSettings(getDb(), user.id, {
+        ...DEFAULT_APP_SETTINGS,
+        gitSettings: { ...DEFAULT_APP_SETTINGS.gitSettings, signOff: true },
+      });
+
+      // Only this committer's trailer goes: `--signoff` re-adds that one, and a
+      // co-signer dropped here could never be recovered by the form.
+      const stripped = await getRoute(app, '/git/head-message', { chatId });
+      expect(stripped.status).toBe(200);
+      const strippedPayload = (await stripped.json()) as GitHeadMessageResponse;
+      expect(strippedPayload.title).toBe('feat(git): land the panel');
+      expect(strippedPayload.body).toBe(
+        'Explain the change.\n\nSigned-off-by: Co Author <co-author@mangostudio.test>'
+      );
+
+      const amended = await postJson(app, '/git/commit', {
+        chatId,
+        title: strippedPayload.title,
+        body: strippedPayload.body,
+        amend: true,
+      });
+      expect(amended.status).toBe(200);
+      expect(await fixtureGit(workdir, ['log', '-1', '--format=%B'])).toBe(
+        'feat(git): land the panel\n\nExplain the change.\n\nSigned-off-by: Co Author <co-author@mangostudio.test>\nSigned-off-by: Git Navigation Test <git-navigation@mangostudio.test>'
+      );
+    },
+    GIT_NAVIGATION_TIMEOUT_MS
+  );
+
+  it.skipIf(!hasGit)(
+    'reports a repository without commits as an amend without HEAD',
+    async () => {
+      const workdir = await createTempRepo();
+      const { app, chatId } = await createRouteFixture(workdir);
+
+      const response = await getRoute(app, '/git/head-message', { chatId });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: 'AMEND_WITHOUT_HEAD' });
+    },
+    GIT_NAVIGATION_TIMEOUT_MS
+  );
+
+  it.skipIf(!hasGit)(
+    'accepts a leased force push after an amend and rejects it once the peer moves',
+    async () => {
+      const remote = await tempDirectory('mango-git-lease-remote-');
+      await fixtureGit(remote, ['init', '--bare', '-b', 'main']);
+      const workdir = await createTempRepo();
+      await writeFile(join(workdir, 'leased.txt'), 'base\n');
+      await fixtureGit(workdir, ['add', 'leased.txt']);
+      await fixtureGit(workdir, ['commit', '-m', 'base']);
+      await fixtureGit(workdir, ['remote', 'add', 'origin', remote]);
+      const { app, chatId } = await createRouteFixture(workdir);
+      expect((await postJson(app, '/git/push', { chatId })).status).toBe(200);
+
+      await fixtureGit(workdir, ['commit', '--amend', '-m', 'base, reworded']);
+      const rejected = await postJson(app, '/git/push', { chatId });
+      expect(rejected.status).toBe(409);
+      expect(await rejected.json()).toMatchObject({ code: 'HISTORY_DIVERGED' });
+
+      const leased = await postJson(app, '/git/push', { chatId, force: 'with-lease' });
+      expect(leased.status).toBe(200);
+      expect(Value.Check(GitRepoStateSchema, await leased.json())).toBe(true);
+      expect(await fixtureGit(remote, ['log', '-1', '--format=%s', 'main'])).toBe('base, reworded');
+
+      // A peer commit the clone has not fetched invalidates the lease, which is
+      // the whole point of preferring it over a plain --force.
+      const peerParent = await tempDirectory('mango-git-lease-peer-');
+      await fixtureGit(peerParent, ['clone', remote, 'peer']);
+      const peer = join(peerParent, 'peer');
+      await fixtureGit(peer, ['config', 'user.email', 'peer@mangostudio.test']);
+      await fixtureGit(peer, ['config', 'user.name', 'Peer Test']);
+      await fixtureGit(peer, ['config', 'commit.gpgSign', 'false']);
+      await fixtureGit(peer, ['config', 'core.hooksPath', join(peer, '.git', 'hooks')]);
+      await writeFile(join(peer, 'peer.txt'), 'peer\n');
+      await fixtureGit(peer, ['add', 'peer.txt']);
+      await fixtureGit(peer, ['commit', '-m', 'peer ahead']);
+      await fixtureGit(peer, ['push']);
+      await fixtureGit(workdir, ['commit', '--amend', '-m', 'base, reworded twice']);
+
+      const staleLease = await postJson(app, '/git/push', { chatId, force: 'with-lease' });
+      expect(staleLease.status).toBe(409);
+      expect(await staleLease.json()).toMatchObject({ code: 'HISTORY_DIVERGED' });
+      expect(await fixtureGit(remote, ['log', '-1', '--format=%s', 'main'])).toBe('peer ahead');
+    },
+    GIT_NAVIGATION_TIMEOUT_MS
+  );
+
+  it.skipIf(!hasGit)(
+    'refuses a leased force push on a branch that has no upstream',
+    async () => {
+      const workdir = await createTempRepo();
+      await writeFile(join(workdir, 'unpublished.txt'), 'base\n');
+      await fixtureGit(workdir, ['add', 'unpublished.txt']);
+      await fixtureGit(workdir, ['commit', '-m', 'base']);
+      const { app, chatId } = await createRouteFixture(workdir);
+
+      const response = await postJson(app, '/git/push', { chatId, force: 'with-lease' });
+
+      expect(response.status).toBe(422);
+      expect(await response.json()).toMatchObject({ code: 'VALIDATION' });
     },
     GIT_NAVIGATION_TIMEOUT_MS
   );
