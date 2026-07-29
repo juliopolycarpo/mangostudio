@@ -1,6 +1,19 @@
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import { isAPIError } from 'better-auth/api';
 import { Elysia } from 'elysia';
 import { getAuth } from '../auth';
+
+/**
+ * True when getSession failed because the x-api-key header was present but
+ * invalid/expired/disabled — the api-key plugin's enableSessionForAPIKeys
+ * before-hook throws UNAUTHORIZED or FORBIDDEN for those cases instead of
+ * resolving to null. Duck-typed via isAPIError (name === "APIError" fallback)
+ * so the dual-package @better-auth/core hazard does not break the check.
+ */
+function isExpectedApiKeySessionFailure(error: unknown): boolean {
+  if (!isAPIError(error)) return false;
+  return error.statusCode === 401 || error.statusCode === 403;
+}
 
 /**
  * Plugin Elysia que resolve a sessão do usuário a partir dos cookies.
@@ -15,12 +28,15 @@ const authMiddleware = new Elysia({ name: 'auth-middleware' }).derive(
   async ({ request }) => {
     // With the api-key plugin's enableSessionForAPIKeys on, getSession throws
     // a Better Auth APIError for an invalid/expired x-api-key header instead
-    // of resolving to null. Treat that the same as "no session" — the
+    // of resolving to null. Treat only that case as "no session" — the
     // downstream 401 in requireAuth (or api-key-guard's own check) is the
-    // right response, not an uncaught crash through this derive.
+    // right response. Unexpected failures (DB/config) must still surface.
     const session = await getAuth()
       .api.getSession({ headers: request.headers })
-      .catch(() => null);
+      .catch((error: unknown) => {
+        if (!isExpectedApiKeySessionFailure(error)) throw error;
+        return null;
+      });
 
     return {
       user: session?.user ?? null,

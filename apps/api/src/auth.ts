@@ -1,5 +1,5 @@
 import { apiKey } from '@better-auth/api-key';
-import type { ApiKeyScope } from '@mangostudio/shared/api-keys';
+import { API_KEY_HEADER, type ApiKeyScope } from '@mangostudio/shared/api-keys';
 import { betterAuth } from 'better-auth';
 import { getDb } from './db/database';
 import { assertValidAuthSecret, getConfig } from './lib/config';
@@ -48,7 +48,7 @@ function createAuthInstance() {
       // for the hand-typed accessor that works around it.
       // @ts-expect-error dual package hazard: see comment above.
       apiKey({
-        apiKeyHeaders: 'x-api-key',
+        apiKeyHeaders: API_KEY_HEADER,
         defaultPrefix: 'mango_',
         // The scope (read-only | full) is carried in key metadata.
         enableMetadata: true,
