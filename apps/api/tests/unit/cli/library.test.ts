@@ -71,6 +71,7 @@ describe('runLibrary', () => {
           {
             id: 'mango-skills',
             kind: 'skill',
+            scope: 'home',
             path: '/skills',
             access: 'read-write',
             exists: true,

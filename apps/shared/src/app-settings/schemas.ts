@@ -13,7 +13,7 @@ import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
 } from '../git/commit-message';
-import { LibraryLocationIdSchema } from '../library';
+import { LibraryLocationIdSchema, LibraryScopeSchema } from '../library';
 import { ProfileIdSchema } from '../profiles';
 import { PromptSettingsSchema } from '../prompt-rules';
 import { ReasoningEffortSchema } from '../provider-settings';
@@ -53,7 +53,29 @@ export const MultiAgentSettingsSchema = Type.Object({
 });
 
 /** Enablement map for the code-defined locations the library scanner may read. */
-export const LibraryLocationSettingsSchema = Type.Record(LibraryLocationIdSchema, Type.Boolean());
+const LibraryLocationTogglesSchema = Type.Record(LibraryLocationIdSchema, Type.Boolean());
+
+/**
+ * Per-scope enablement. Nested rather than flat because a flat map cannot say
+ * "workspace skills on, home skills off" without forking the location id space,
+ * and the id space is the one thing scope must stay orthogonal to.
+ *
+ * `workspace` is present and empty in v1: no location resolves under it yet.
+ */
+export const LibraryLocationSettingsSchema = Type.Record(
+  LibraryScopeSchema,
+  LibraryLocationTogglesSchema
+);
+
+/** PUT bodies may predate the workspace scope or use a flat home map; normalize before persisting. */
+const LibraryLocationSettingsPutSchema = Type.Union([
+  LibraryLocationSettingsSchema,
+  Type.Object({
+    home: LibraryLocationTogglesSchema,
+    workspace: Type.Optional(LibraryLocationTogglesSchema),
+  }),
+  LibraryLocationTogglesSchema,
+]);
 
 /**
  * Per-profile settings overlay. Named `profileSettings` rather than `profiles`
@@ -64,7 +86,13 @@ export const ProfileScopedSettingsSchema = Type.Object({
   libraryLocations: LibraryLocationSettingsSchema,
 });
 
+const ProfileScopedSettingsPutSchema = Type.Object({
+  libraryLocations: LibraryLocationSettingsPutSchema,
+});
+
 export const ProfileSettingsMapSchema = Type.Record(ProfileIdSchema, ProfileScopedSettingsSchema);
+
+const ProfileSettingsMapPutSchema = Type.Record(ProfileIdSchema, ProfileScopedSettingsPutSchema);
 
 export const DiffPreviewModeSchema = Type.Union([
   Type.Literal('expanded'),
@@ -92,7 +120,7 @@ export const GitSettingsSchema = Type.Object({
   commitMessage: CommitMessageSettingsSchema,
 });
 
-export const AppSettingsSchema = Type.Object({
+const AppSettingsFieldsSchema = {
   promptSettings: PromptSettingsSchema,
   globalImageQuality: ImageQualitySchema,
   thinkingEnabled: Type.Boolean(),
@@ -104,10 +132,19 @@ export const AppSettingsSchema = Type.Object({
   multiAgentSettings: MultiAgentSettingsSchema,
   contextSettings: ContextSettingsSchema,
   chatTitleSettings: ChatTitleSettingsSchema,
-  profileSettings: ProfileSettingsMapSchema,
   workspaceSettings: WorkspaceSettingsSchema,
   gitSettings: GitSettingsSchema,
   chatDisplaySettings: ChatDisplaySettingsSchema,
+} as const;
+
+export const AppSettingsSchema = Type.Object({
+  ...AppSettingsFieldsSchema,
+  profileSettings: ProfileSettingsMapSchema,
+});
+
+export const AppSettingsPutBodySchema = Type.Object({
+  ...AppSettingsFieldsSchema,
+  profileSettings: ProfileSettingsMapPutSchema,
 });
 
 export type ImageQuality = Static<typeof ImageQualitySchema>;
@@ -116,9 +153,11 @@ export type ChatDisplaySettings = Static<typeof ChatDisplaySettingsSchema>;
 export type ChatTitleSettings = Static<typeof ChatTitleSettingsSchema>;
 export type ChatTitleStrategy = ChatTitleSettings['strategy'];
 export type MultiAgentSettings = Static<typeof MultiAgentSettingsSchema>;
+export type LibraryLocationToggles = Static<typeof LibraryLocationTogglesSchema>;
 export type LibraryLocationSettings = Static<typeof LibraryLocationSettingsSchema>;
 export type ProfileScopedSettings = Static<typeof ProfileScopedSettingsSchema>;
 export type ProfileSettingsMap = Static<typeof ProfileSettingsMapSchema>;
 export type CommitMessageSettings = Static<typeof CommitMessageSettingsSchema>;
 export type GitSettings = Static<typeof GitSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;
+export type AppSettingsPutBody = Static<typeof AppSettingsPutBodySchema>;

@@ -37,11 +37,17 @@ describe('propagationCandidateLocationIds', () => {
   it('honours the always-enabled locations the settings record cannot switch off', () => {
     // Every toggle is off, yet MangoStudio's own directories stay scannable, so
     // they stay offerable too.
-    const enabled = enabledLibraryLocations({
-      'mango-skills': false,
-      'agents-skills': false,
-      'claude-skills': false,
-    });
+    const enabled = enabledLibraryLocations(
+      {
+        home: {
+          'mango-skills': false,
+          'agents-skills': false,
+          'claude-skills': false,
+        },
+        workspace: {},
+      },
+      'home'
+    );
 
     expect(propagationCandidateLocationIds(locations, 'skill', enabled)).toEqual(['mango-skills']);
   });

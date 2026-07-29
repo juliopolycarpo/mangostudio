@@ -312,7 +312,7 @@ describe('inspectChatCapabilities', () => {
       user.id,
       withLibraryLocations(settings, DEFAULT_PROFILE_ID, {
         ...libraryLocationsFor(settings),
-        'agents-skills': true,
+        home: { ...libraryLocationsFor(settings).home, 'agents-skills': true },
       })
     );
     resetSkillsCache();

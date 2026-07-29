@@ -69,7 +69,10 @@ const defaultPropagationPreviewDeps: PropagationPreviewDeps = {
   agentAvailable: isAgentStrategyAvailable,
   acknowledgedKeys: acknowledgedResourceKeys,
   enabledLocationIds: async (userId) =>
-    enabledLibraryLocations(libraryLocationsFor(await getAppSettings(getDb(), userId))),
+    // Every propagation destination is home-scoped: v1 defines no workspace
+    // location, and writing into a repository is a consent question this seam
+    // deliberately does not answer.
+    enabledLibraryLocations(libraryLocationsFor(await getAppSettings(getDb(), userId)), 'home'),
 };
 
 export async function previewLibraryPropagation(

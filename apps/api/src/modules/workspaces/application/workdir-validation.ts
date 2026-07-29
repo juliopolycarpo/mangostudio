@@ -33,8 +33,11 @@ function filesystemReason(error: unknown): WorkdirValidationReason | undefined {
   }
 }
 
-export async function validateWorkdir(path: string): Promise<WorkdirValidationResult> {
-  const resolvedPath = resolveWorkspacePath(path);
+export async function validateWorkdir(
+  path: string,
+  options?: { requireAbsolute?: boolean }
+): Promise<WorkdirValidationResult> {
+  const resolvedPath = resolveWorkspacePath(path, options);
 
   try {
     const metadata = await stat(resolvedPath);

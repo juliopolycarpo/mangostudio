@@ -4,10 +4,14 @@ import {
   normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
+import { LIBRARY_SCOPES } from '@mangostudio/shared/library';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { agentCliDetectionService } from '../../environments/application/agent-cli-detection';
-import { LIBRARY_LOCATION_DEFINITIONS } from '../../library/domain/registry';
+import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  type LocationDefinition,
+} from '../../library/domain/registry';
 import { getSavedAppSettings, upsertAppSettings } from '../infrastructure/app-settings-repository';
 
 /**
@@ -58,12 +62,21 @@ export function defaultsForDetectedAgents(
   );
   detectedTargetIds.add('mangostudio');
 
+  const isDetected = (location: LocationDefinition): boolean => {
+    const externalReaders = location.readBy.filter((targetId) => targetId !== 'mangostudio');
+    const controllingTargets =
+      externalReaders.length > 0 ? externalReaders : (['mangostudio'] as const);
+    return controllingTargets.some((targetId) => detectedTargetIds.has(targetId));
+  };
+
   return Object.fromEntries(
-    LIBRARY_LOCATION_DEFINITIONS.map((location) => {
-      const externalReaders = location.readBy.filter((targetId) => targetId !== 'mangostudio');
-      const controllingTargets =
-        externalReaders.length > 0 ? externalReaders : (['mangostudio'] as const);
-      return [location.id, controllingTargets.some((targetId) => detectedTargetIds.has(targetId))];
-    })
-  );
+    LIBRARY_SCOPES.map((scope) => [
+      scope,
+      Object.fromEntries(
+        LIBRARY_LOCATION_DEFINITIONS.filter((location) => location.scope === scope).map(
+          (location) => [location.id, isDetected(location)]
+        )
+      ),
+    ])
+  ) as LibraryLocationSettings;
 }

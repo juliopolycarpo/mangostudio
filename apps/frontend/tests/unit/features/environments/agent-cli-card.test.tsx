@@ -44,6 +44,7 @@ describe('AgentCliCard', () => {
         {
           id: 'claude-skills',
           kind: 'skill',
+          scope: 'home',
           path: '/home/dev/.claude/skills',
           access: 'read-write',
           exists: true,

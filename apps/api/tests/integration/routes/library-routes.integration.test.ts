@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 import type {
   LibraryResource,
   LibraryResourceContent,
@@ -85,16 +86,21 @@ function createService(resources: LibraryResource[] = [skillResource]) {
     truncated: false,
     sizeBytes: 7,
   };
+  const workspaceRoots: (string | undefined)[] = [];
   const service: LibraryRouteService = {
-    discover(_userId, force) {
+    discover(_userId, force, workspaceRoot) {
       forced.push(force);
+      workspaceRoots.push(workspaceRoot);
       return Promise.resolve(resources);
     },
-    listLocations: () => [],
+    listLocations(workspaceRoot) {
+      workspaceRoots.push(workspaceRoot);
+      return [];
+    },
     listTargets: () => [],
     readContent: () => content,
   };
-  return { service, forced };
+  return { service, forced, workspaceRoots };
 }
 
 describe('library routes', () => {
@@ -165,6 +171,7 @@ describe('library routes', () => {
       {
         id: 'agents-skills',
         kind: 'skill',
+        scope: 'home',
         path: '/home/test/.agents/skills',
         access: 'read-write',
         exists: true,
@@ -181,6 +188,62 @@ describe('library routes', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(service.listLocations());
+  });
+
+  it('accepts a valid workspace root and answers exactly as it does without one', async () => {
+    const { service, workspaceRoots } = createService();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const plain = await app.handle(new Request('http://localhost/library/resources'));
+    const scoped = await app.handle(
+      new Request(
+        `http://localhost/library/resources?workspaceRoot=${encodeURIComponent(process.cwd())}`
+      )
+    );
+
+    expect(plain.status).toBe(200);
+    expect(scoped.status).toBe(200);
+    // The seam is inert in v1: no location resolves under a workspace root, so
+    // the parameter is carried to the scanner and changes nothing.
+    expect(await scoped.json()).toEqual(await plain.json());
+    expect(workspaceRoots).toEqual([undefined, process.cwd()]);
+  });
+
+  it('rejects a workspace root that is not a usable directory', async () => {
+    const { service, workspaceRoots } = createService();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const missing = await app.handle(
+      new Request('http://localhost/library/locations?workspaceRoot=/nonexistent-workspace-root')
+    );
+    const notADirectory = await app.handle(
+      new Request(
+        `http://localhost/library/resources?workspaceRoot=${encodeURIComponent(
+          join(process.cwd(), 'package.json')
+        )}`
+      )
+    );
+
+    expect(missing.status).toBe(422);
+    expect(await missing.json()).toMatchObject({ code: 'VALIDATION' });
+    expect(notADirectory.status).toBe(422);
+    // A rejected root never reaches the scanner.
+    expect(workspaceRoots).toEqual([]);
+  });
+
+  it('rejects a relative workspace root rather than resolving it against the server cwd', async () => {
+    const { service, workspaceRoots } = createService();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/locations?workspaceRoot=.')
+    );
+
+    expect(response.status).toBe(422);
+    expect(workspaceRoots).toEqual([]);
   });
 
   it('serves the target registry so a filtered matrix keeps every column', async () => {

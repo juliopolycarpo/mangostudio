@@ -1,4 +1,8 @@
-import { type AppSettings, AppSettingsSchema } from '@mangostudio/shared/app-settings';
+import {
+  type AppSettings,
+  AppSettingsPutBodySchema,
+  normalizeAppSettings,
+} from '@mangostudio/shared/app-settings';
 import { Elysia } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -16,9 +20,9 @@ export const appSettingsRoutes = new Elysia()
     '/app',
     // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async ({ body, user }): Promise<AppSettings> => {
-      return updateAppSettings(getDb(), user?.id ?? '', body);
+      return updateAppSettings(getDb(), user?.id ?? '', normalizeAppSettings(body));
     },
     {
-      body: AppSettingsSchema,
+      body: AppSettingsPutBodySchema,
     }
   );

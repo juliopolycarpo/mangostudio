@@ -88,7 +88,8 @@ export function useToggleSkillSource() {
       return updateAppSettings(
         withLibraryLocations(current, DEFAULT_PROFILE_ID, {
           ...locations,
-          [LOCATION_BY_SOURCE[source]]: enabled,
+          // Both sources are home directories; the workspace scope is untouched.
+          home: { ...locations.home, [LOCATION_BY_SOURCE[source]]: enabled },
         })
       );
     },

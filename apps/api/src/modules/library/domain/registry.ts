@@ -1,6 +1,7 @@
 import { posix, win32 } from 'node:path';
 import type {
   LibraryLocationId,
+  LibraryScope,
   LibraryTargetDescriptor,
   LibraryTargetId,
   LocationAccess,
@@ -16,7 +17,18 @@ export type { PathEnv } from '../../../lib/path-env';
 export interface LocationDefinition {
   readonly id: LibraryLocationId;
   readonly kind: ResourceKind;
-  /** Resolved per call so config and environment changes cannot go stale. */
+  /**
+   * Which root this location hangs off. Every v1 location is `home`; adding a
+   * workspace location is a table row, not a signature change.
+   */
+  readonly scope: LibraryScope;
+  /**
+   * Resolved per call so config and environment changes cannot go stale.
+   * Returns null rather than a guessed path when the location cannot exist —
+   * unsupported platform, or a scope whose root `env` does not carry. A
+   * workspace location must never fall back to `homeDir`: that scans the wrong
+   * tree and reports someone else's files as the user's.
+   */
   readonly resolvePath: (env: PathEnv) => string | null;
   readonly access: LocationAccess;
   readonly layout: LibraryLocationLayout;
@@ -37,7 +49,16 @@ export interface TargetDefinition {
   readonly displayNameKey: `library.targets.${LibraryTargetId}`;
   /** Canonical home for target-level config and authentication signals. */
   readonly resolveConfigHome: (env: PathEnv) => string;
-  /** Per kind, highest-precedence location first. */
+  /**
+   * Per kind, highest-precedence location first.
+   *
+   * When workspace locations land, both scopes simply appear in this one
+   * ordered list. **Cross-scope precedence is a per-target fact and belongs
+   * here, never in the resolver**: Claude merges a project file with the home
+   * one while Codex layers them, so "project always wins" is a guess that is
+   * wrong for at least one target. A target that gets it wrong should be one
+   * edited row, not a branch in shared resolution code.
+   */
   readonly reads: Readonly<Record<ResourceKind, readonly LibraryLocationId[]>>;
 }
 
@@ -136,6 +157,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'mango-skills',
     kind: 'skill',
+    scope: 'home',
     resolvePath: mangoSkillsPath,
     access: 'read-write',
     layout: 'directory-of-dirs',
@@ -145,6 +167,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'agents-skills',
     kind: 'skill',
+    scope: 'home',
     resolvePath: homePath('.agents', 'skills'),
     access: 'read-write',
     layout: 'directory-of-dirs',
@@ -154,6 +177,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'claude-skills',
     kind: 'skill',
+    scope: 'home',
     resolvePath: claudePath('skills'),
     access: 'read-write',
     layout: 'directory-of-dirs',
@@ -163,6 +187,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'codex-skills',
     kind: 'skill',
+    scope: 'home',
     // TODO(verify:darwin): Codex documents ~/.agents/skills, not this internal root.
     // TODO(verify:win32): Codex documents ~/.agents/skills, not this internal root.
     resolvePath: codexLinuxOnlyPath('skills'),
@@ -174,6 +199,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'cursor-skills',
     kind: 'skill',
+    scope: 'home',
     resolvePath: homePath('.cursor', 'skills'),
     access: 'read-write',
     layout: 'directory-of-dirs',
@@ -183,6 +209,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'cursor-skills-builtin',
     kind: 'skill',
+    scope: 'home',
     // TODO(verify:darwin): Cursor documents built-ins but not their on-disk path.
     // TODO(verify:win32): Cursor documents built-ins but not their on-disk path.
     resolvePath: cursorLinuxOnlyPath('skills-cursor'),
@@ -194,6 +221,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'mango-agents',
     kind: 'subagent',
+    scope: 'home',
     resolvePath: mangoAgentsPath,
     access: 'read-write',
     layout: 'directory-of-files',
@@ -203,6 +231,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'claude-agents',
     kind: 'subagent',
+    scope: 'home',
     resolvePath: claudePath('agents'),
     access: 'read-write',
     layout: 'directory-of-files',
@@ -212,6 +241,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'codex-agents',
     kind: 'subagent',
+    scope: 'home',
     resolvePath: codexPath('agents'),
     access: 'read-write',
     layout: 'directory-of-files',
@@ -221,6 +251,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'cursor-agents',
     kind: 'subagent',
+    scope: 'home',
     resolvePath: homePath('.cursor', 'agents'),
     access: 'read-write',
     layout: 'directory-of-files',
@@ -230,6 +261,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'mango-instructions',
     kind: 'instruction',
+    scope: 'home',
     resolvePath: homePath('.mango', 'AGENTS.md'),
     access: 'read-write',
     layout: 'single-file',
@@ -240,6 +272,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'claude-instructions',
     kind: 'instruction',
+    scope: 'home',
     resolvePath: claudePath('CLAUDE.md'),
     access: 'read-write',
     layout: 'single-file',
@@ -250,6 +283,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'codex-instructions',
     kind: 'instruction',
+    scope: 'home',
     resolvePath: codexPath('AGENTS.md'),
     access: 'read-write',
     layout: 'single-file',
@@ -260,6 +294,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'cursor-rules',
     kind: 'instruction',
+    scope: 'home',
     // TODO(verify:darwin): Cursor only documents project rule paths cross-platform.
     // TODO(verify:win32): Cursor only documents project rule paths cross-platform.
     resolvePath: cursorLinuxOnlyPath('rules'),
@@ -271,6 +306,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'claude-settings',
     kind: 'setting',
+    scope: 'home',
     resolvePath: claudePath('settings.json'),
     access: 'read-only',
     layout: 'single-file',
@@ -281,6 +317,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'codex-settings',
     kind: 'setting',
+    scope: 'home',
     resolvePath: codexPath('config.toml'),
     access: 'read-only',
     layout: 'single-file',
@@ -291,6 +328,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'cursor-settings',
     kind: 'setting',
+    scope: 'home',
     resolvePath: cursorSettingsPath,
     access: 'read-only',
     layout: 'single-file',
@@ -301,6 +339,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'mango-settings',
     kind: 'setting',
+    scope: 'home',
     resolvePath: homePath('.mango', 'config.toml'),
     access: 'read-only',
     layout: 'single-file',
@@ -311,6 +350,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'codex-hooks',
     kind: 'hook',
+    scope: 'home',
     resolvePath: codexPath('hooks.json'),
     access: 'read-only',
     layout: 'single-file',
@@ -321,6 +361,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'claude-hooks',
     kind: 'hook',
+    scope: 'home',
     resolvePath: claudePath('settings.json'),
     access: 'read-only',
     layout: 'single-file',
@@ -331,6 +372,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   {
     id: 'codex-permission-rules',
     kind: 'hook',
+    scope: 'home',
     resolvePath: codexPath('rules'),
     access: 'read-only',
     layout: 'directory-of-files',

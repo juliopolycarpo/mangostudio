@@ -35,6 +35,8 @@ export {
 } from './defaults';
 export {
   type AppSettings,
+  type AppSettingsPutBody,
+  AppSettingsPutBodySchema,
   AppSettingsSchema,
   type ChatDisplaySettings,
   ChatDisplaySettingsSchema,
@@ -51,6 +53,7 @@ export {
   ImageQualitySchema,
   type LibraryLocationSettings,
   LibraryLocationSettingsSchema,
+  type LibraryLocationToggles,
   type MultiAgentSettings,
   MultiAgentSettingsSchema,
   type ProfileScopedSettings,

@@ -1,4 +1,4 @@
-import type { AppSettings } from '@mangostudio/shared/app-settings';
+import type { AppSettings, AppSettingsPutBody } from '@mangostudio/shared/app-settings';
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
@@ -37,8 +37,8 @@ describe('useGlobalSettings', () => {
     mockGet.mockReset();
     mockPut.mockReset();
     mockGet.mockResolvedValue(mockQueryResult(DEFAULT_APP_SETTINGS));
-    mockPut.mockImplementation((settings: AppSettings) =>
-      Promise.resolve(mockMutationResult(settings))
+    mockPut.mockImplementation((settings: AppSettingsPutBody) =>
+      Promise.resolve(mockMutationResult(settings as AppSettings))
     );
   });
 

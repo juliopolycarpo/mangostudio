@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { Value } from '@sinclair/typebox/value';
 import {
+  AppSettingsPutBodySchema,
+  AppSettingsSchema,
   clampMaxToolIterations,
   DEFAULT_APP_SETTINGS,
   DEFAULT_CHAT_DISPLAY_SETTINGS,
@@ -12,6 +15,7 @@ import {
   DEFAULT_PROMPT_SETTINGS,
   DEFAULT_WORKSPACE_SETTINGS,
   IMAGE_QUALITY_OPTIONS,
+  type LibraryLocationSettings,
   libraryLocationsFor,
   MAX_SUBAGENT_CALLS_MAX,
   MAX_SUBAGENT_CALLS_MIN,
@@ -515,20 +519,48 @@ describe('normalizeAppSettings', () => {
   it('merges dynamic library defaults while keeping MangoStudio native locations enabled', () => {
     expect(
       normalizeLibraryLocationSettings(
-        { 'mango-skills': false, 'mango-agents': false, 'agents-skills': false },
+        { home: { 'mango-skills': false, 'mango-agents': false, 'agents-skills': false } },
         {
-          'mango-skills': true,
-          'mango-agents': true,
-          'agents-skills': true,
-          'codex-skills': true,
+          home: {
+            'mango-skills': true,
+            'mango-agents': true,
+            'agents-skills': true,
+            'codex-skills': true,
+          },
+          workspace: {},
         }
       )
     ).toEqual({
-      'mango-skills': true,
-      'mango-agents': true,
-      'agents-skills': false,
-      'codex-skills': true,
+      home: {
+        'mango-skills': true,
+        'mango-agents': true,
+        'agents-skills': false,
+        'codex-skills': true,
+      },
+      workspace: {},
     });
+  });
+
+  it('lifts a pre-nesting flat map into the home scope', () => {
+    expect(
+      normalizeLibraryLocationSettings({ 'agents-skills': true, 'claude-skills': false })
+    ).toEqual({
+      home: {
+        ...DEFAULT_LIBRARY_LOCATION_SETTINGS.home,
+        'agents-skills': true,
+        'claude-skills': false,
+      },
+      workspace: {},
+    });
+  });
+
+  it('drops toggles written under the reserved workspace scope', () => {
+    expect(
+      normalizeLibraryLocationSettings({
+        home: { 'agents-skills': true },
+        workspace: { 'claude-skills': true },
+      }).workspace
+    ).toEqual({});
   });
 
   it('falls back individual top-level fields when types are invalid', () => {
@@ -586,13 +618,16 @@ describe('normalizeAppSettings', () => {
     expect(result.profileSettings).toEqual({
       [DEFAULT_PROFILE_ID]: {
         libraryLocations: {
-          ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-          'agents-skills': true,
-          'claude-skills': false,
+          home: {
+            ...DEFAULT_LIBRARY_LOCATION_SETTINGS.home,
+            'agents-skills': true,
+            'claude-skills': false,
+          },
+          workspace: {},
         },
       },
     });
-    expect(libraryLocationsFor(result)).toMatchObject({
+    expect(libraryLocationsFor(result).home).toMatchObject({
       'agents-skills': true,
       'claude-skills': false,
     });
@@ -602,13 +637,13 @@ describe('normalizeAppSettings', () => {
     const result = normalizeAppSettings({
       profileSettings: {
         default: {
-          libraryLocations: { 'agents-skills': true },
+          libraryLocations: { home: { 'agents-skills': true }, workspace: {} },
         },
         work: {
-          libraryLocations: { 'claude-skills': true },
+          libraryLocations: { home: { 'claude-skills': true }, workspace: {} },
         },
         personal: {
-          libraryLocations: { 'cursor-skills': true },
+          libraryLocations: { home: { 'cursor-skills': true }, workspace: {} },
         },
       },
     });
@@ -616,8 +651,8 @@ describe('normalizeAppSettings', () => {
     expect(result.profileSettings).toEqual({
       [DEFAULT_PROFILE_ID]: {
         libraryLocations: {
-          ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-          'agents-skills': true,
+          home: { ...DEFAULT_LIBRARY_LOCATION_SETTINGS.home, 'agents-skills': true },
+          workspace: {},
         },
       },
     });
@@ -628,46 +663,47 @@ describe('normalizeAppSettings', () => {
   });
 });
 
+function homeLocations(overrides: Record<string, boolean>): LibraryLocationSettings {
+  return {
+    home: { ...DEFAULT_LIBRARY_LOCATION_SETTINGS.home, ...overrides },
+    workspace: {},
+  };
+}
+
 describe('libraryLocationsFor', () => {
   it('reads locations from the default profile', () => {
-    const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-      'agents-skills': true,
-    });
-    expect(libraryLocationsFor(settings)).toEqual({
-      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-      'agents-skills': true,
-    });
+    const settings = withLibraryLocations(
+      DEFAULT_APP_SETTINGS,
+      DEFAULT_PROFILE_ID,
+      homeLocations({ 'agents-skills': true })
+    );
+    expect(libraryLocationsFor(settings)).toEqual(homeLocations({ 'agents-skills': true }));
   });
 
   it('falls back to the default profile when the requested profile is missing', () => {
-    const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-      'claude-skills': true,
-    });
-    expect(libraryLocationsFor(settings, 'work' as typeof DEFAULT_PROFILE_ID)).toEqual({
-      ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-      'claude-skills': true,
-    });
+    const settings = withLibraryLocations(
+      DEFAULT_APP_SETTINGS,
+      DEFAULT_PROFILE_ID,
+      homeLocations({ 'claude-skills': true })
+    );
+    expect(libraryLocationsFor(settings, 'work' as typeof DEFAULT_PROFILE_ID)).toEqual(
+      homeLocations({ 'claude-skills': true })
+    );
   });
 });
 
 describe('withLibraryLocations', () => {
   it('writes nested locations under the default profile', () => {
     const updated = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-      'agents-skills': true,
-      'claude-skills': false,
+      home: { 'agents-skills': true, 'claude-skills': false },
+      workspace: {},
     });
     expect(updated.profileSettings).toEqual({
       [DEFAULT_PROFILE_ID]: {
-        libraryLocations: {
-          ...DEFAULT_LIBRARY_LOCATION_SETTINGS,
-          'agents-skills': true,
-          'claude-skills': false,
-        },
+        libraryLocations: homeLocations({ 'agents-skills': true, 'claude-skills': false }),
       },
     });
-    expect(libraryLocationsFor(updated)).toMatchObject({
+    expect(libraryLocationsFor(updated).home).toMatchObject({
       'agents-skills': true,
       'claude-skills': false,
     });
@@ -677,9 +713,27 @@ describe('withLibraryLocations', () => {
     const updated = withLibraryLocations(
       DEFAULT_APP_SETTINGS,
       'work' as typeof DEFAULT_PROFILE_ID,
-      { 'cursor-skills': true }
+      { home: { 'cursor-skills': true }, workspace: {} }
     );
     expect(Object.keys(updated.profileSettings)).toEqual([DEFAULT_PROFILE_ID]);
-    expect(libraryLocationsFor(updated)).toMatchObject({ 'cursor-skills': true });
+    expect(libraryLocationsFor(updated).home).toMatchObject({ 'cursor-skills': true });
+  });
+});
+
+describe('AppSettingsPutBodySchema', () => {
+  it('accepts nested library locations without the workspace scope', () => {
+    const body = {
+      ...DEFAULT_APP_SETTINGS,
+      profileSettings: {
+        [DEFAULT_PROFILE_ID]: {
+          libraryLocations: {
+            home: DEFAULT_LIBRARY_LOCATION_SETTINGS.home,
+          },
+        },
+      },
+    };
+
+    expect(Value.Check(AppSettingsPutBodySchema, body)).toBe(true);
+    expect(Value.Check(AppSettingsSchema, body)).toBe(false);
   });
 });

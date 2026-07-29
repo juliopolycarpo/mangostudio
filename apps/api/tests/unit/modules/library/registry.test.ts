@@ -179,6 +179,7 @@ describe('library target registry', () => {
     expect(status).toEqual({
       id: 'cursor-skills-builtin',
       kind: 'skill',
+      scope: 'home',
       path: null,
       access: 'read-only',
       exists: false,

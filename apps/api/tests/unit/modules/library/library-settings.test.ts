@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import { migrateLibraryLocationSettings } from '../../../../src/db/migrations/030_library_location_settings';
 import { migrateProfileScopedAppSettings } from '../../../../src/db/migrations/033_profile_scoped_app_settings';
+import { migrateScopedLibraryLocationSettings } from '../../../../src/db/migrations/034_scoped_library_location_settings';
 import { defaultsForDetectedAgents } from '../../../../src/modules/app-settings/application/app-settings-service';
 
 function detected(targetId: AgentCliStatus['targetId']): AgentCliStatus {
@@ -12,12 +13,18 @@ describe('library location settings', () => {
   it('defaults vendor locations from detected CLIs and keeps MangoStudio native locations on', () => {
     const defaults = defaultsForDetectedAgents([detected('codex')]);
 
-    expect(defaults['mango-skills']).toBe(true);
-    expect(defaults['mango-agents']).toBe(true);
-    expect(defaults['agents-skills']).toBe(true);
-    expect(defaults['codex-skills']).toBe(true);
-    expect(defaults['claude-skills']).toBe(false);
-    expect(defaults['cursor-skills']).toBe(false);
+    expect(defaults.home['mango-skills']).toBe(true);
+    expect(defaults.home['mango-agents']).toBe(true);
+    expect(defaults.home['agents-skills']).toBe(true);
+    expect(defaults.home['codex-skills']).toBe(true);
+    expect(defaults.home['claude-skills']).toBe(false);
+    expect(defaults.home['cursor-skills']).toBe(false);
+  });
+
+  it('buckets defaults by scope and leaves the reserved workspace scope empty', () => {
+    const defaults = defaultsForDetectedAgents([detected('codex')]);
+
+    expect(defaults.workspace).toEqual({});
   });
 
   it('migrates legacy source booleans without dropping unknown keys', () => {
@@ -148,5 +155,71 @@ describe('migrateProfileScopedAppSettings', () => {
     expect(migrateProfileScopedAppSettings('"string"', 'up')).toBe('"string"');
     expect(migrateProfileScopedAppSettings('[]', 'down')).toBe('[]');
     expect(migrateProfileScopedAppSettings('{', 'up')).toBe('{');
+  });
+});
+
+describe('migrateScopedLibraryLocationSettings', () => {
+  const nested = (locations: unknown, extra: Record<string, unknown> = {}) =>
+    JSON.stringify({ profileSettings: { default: { libraryLocations: locations } }, ...extra });
+
+  it('moves the flat toggles under the home scope and reserves workspace on up', () => {
+    const original = nested(
+      { 'mango-skills': true, 'agents-skills': true, 'claude-skills': false },
+      { thinkingEnabled: true }
+    );
+    const migrated = migrateScopedLibraryLocationSettings(original, 'up');
+    const parsed = JSON.parse(migrated);
+
+    expect(parsed.profileSettings.default.libraryLocations).toEqual({
+      home: { 'mango-skills': true, 'agents-skills': true, 'claude-skills': false },
+      workspace: {},
+    });
+    expect(parsed.thinkingEnabled).toBe(true);
+    expect(migrateScopedLibraryLocationSettings(migrated, 'up')).toBe(migrated);
+  });
+
+  it('preserves sibling profile keys and other profiles', () => {
+    const original = JSON.stringify({
+      profileSettings: {
+        default: { libraryLocations: { 'cursor-skills': true }, futureKey: 'kept' },
+        other: { libraryLocations: { 'claude-skills': true } },
+      },
+    });
+    const parsed = JSON.parse(migrateScopedLibraryLocationSettings(original, 'up'));
+
+    expect(parsed.profileSettings.default.futureKey).toBe('kept');
+    expect(parsed.profileSettings.other).toEqual({
+      libraryLocations: { 'claude-skills': true },
+    });
+  });
+
+  it('unnests back to the home toggles on down', () => {
+    const migrated = nested({ home: { 'agents-skills': true }, workspace: {} });
+    const parsed = JSON.parse(migrateScopedLibraryLocationSettings(migrated, 'down'));
+
+    expect(parsed.profileSettings.default.libraryLocations).toEqual({ 'agents-skills': true });
+  });
+
+  it('round-trips flat toggles through up then down', () => {
+    const original = nested({ 'cursor-skills': true }, { futureSetting: { retained: true } });
+    const up = migrateScopedLibraryLocationSettings(original, 'up');
+    const parsed = JSON.parse(migrateScopedLibraryLocationSettings(up, 'down'));
+
+    expect(parsed.profileSettings.default.libraryLocations).toEqual({ 'cursor-skills': true });
+    expect(parsed.futureSetting).toEqual({ retained: true });
+  });
+
+  it('is a no-op when there is nothing nested to move', () => {
+    const flatOnly = JSON.stringify({ libraryLocations: { 'agents-skills': true } });
+    expect(migrateScopedLibraryLocationSettings(flatOnly, 'up')).toBe(flatOnly);
+
+    const alreadyFlat = nested({ 'agents-skills': true });
+    expect(migrateScopedLibraryLocationSettings(alreadyFlat, 'down')).toBe(alreadyFlat);
+  });
+
+  it('leaves non-object JSON unchanged', () => {
+    expect(migrateScopedLibraryLocationSettings('"string"', 'up')).toBe('"string"');
+    expect(migrateScopedLibraryLocationSettings('[]', 'down')).toBe('[]');
+    expect(migrateScopedLibraryLocationSettings('{', 'up')).toBe('{');
   });
 });

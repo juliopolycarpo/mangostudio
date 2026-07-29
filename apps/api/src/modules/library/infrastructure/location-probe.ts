@@ -63,6 +63,9 @@ export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv 
     platform: overrides.platform ?? process.platform,
     homeDir: overrides.homeDir ?? homedir(),
     env,
+    // Omitted rather than defaulted: there is no sensible stand-in for a
+    // repository root, and a wrong one scans a tree the user never named.
+    ...(overrides.workspaceRoot !== undefined && { workspaceRoot: overrides.workspaceRoot }),
   };
 }
 
@@ -89,6 +92,7 @@ export function describeLocation(
     return {
       id: location.id,
       kind: location.kind,
+      scope: location.scope,
       path: null,
       access: location.access,
       exists: false,
@@ -109,6 +113,7 @@ export function describeLocation(
   return {
     id: location.id,
     kind: location.kind,
+    scope: location.scope,
     path,
     access: location.access,
     exists,

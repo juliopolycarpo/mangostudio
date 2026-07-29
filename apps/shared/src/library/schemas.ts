@@ -20,6 +20,28 @@ export const LibraryTargetIdSchema = Type.Union([
 /** Stable id of one code-defined library location. */
 export const LibraryLocationIdSchema = Type.String({ minLength: 1, maxLength: 64 });
 
+/**
+ * Where a location is rooted. `home` resolves under the user's home directory.
+ * `workspace` resolves under a repository root and is **reserved**: v1 defines
+ * no workspace-scoped location, so nothing resolves under it yet.
+ *
+ * Scope is a field rather than a fork of the id space on purpose. The same
+ * logical location exists at both scopes — `.claude/skills` under `~` and under
+ * a repository are one concept read from two roots — so ids stay scope-free and
+ * every map keyed on them stays one map.
+ *
+ * If no workspace location exists when this stops earning its keep, delete the
+ * seam rather than leaving it as decoration.
+ */
+export const LibraryScopeSchema = Type.Union([Type.Literal('home'), Type.Literal('workspace')]);
+
+/**
+ * Runtime companion to `LibraryScopeSchema`. Iterating scopes is a normal need
+ * — nesting settings, building per-scope caches — and re-deriving the list from
+ * the schema at every call site is how one of them ends up out of date.
+ */
+export const LIBRARY_SCOPES = ['home', 'workspace'] as const;
+
 export const LocationAccessSchema = Type.Union([
   Type.Literal('read-write'),
   Type.Literal('read-only'),
@@ -163,7 +185,11 @@ export const LibraryResourceContentSchema = Type.Object({
 export const LibraryLocationStatusSchema = Type.Object({
   id: LibraryLocationIdSchema,
   kind: ResourceKindSchema,
-  /** Null when the code-defined location is unsupported on this platform. */
+  scope: LibraryScopeSchema,
+  /**
+   * Null when the location is unsupported on this platform, and — once
+   * workspace locations exist — when its scope has no root to resolve against.
+   */
   path: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
   access: LocationAccessSchema,
   exists: Type.Boolean(),
@@ -578,6 +604,7 @@ export const LibraryDivergenceAckRequestSchema = Type.Object({
 export type ResourceKind = Static<typeof ResourceKindSchema>;
 export type LibraryTargetId = Static<typeof LibraryTargetIdSchema>;
 export type LibraryLocationId = Static<typeof LibraryLocationIdSchema>;
+export type LibraryScope = Static<typeof LibraryScopeSchema>;
 export type LocationAccess = Static<typeof LocationAccessSchema>;
 export type ResourceFormat = Static<typeof ResourceFormatSchema>;
 export type LibraryInvalidReason = Static<typeof LibraryInvalidReasonSchema>;

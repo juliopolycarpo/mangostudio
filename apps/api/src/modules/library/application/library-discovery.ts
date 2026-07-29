@@ -2,6 +2,7 @@ import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   enabledLibraryLocations,
+  LIBRARY_SCOPES,
   type LibraryLocationId,
   type LibraryResource,
   type ResourceKind,
@@ -48,16 +49,24 @@ export async function discoverLibraryResourcesFromSettings(
   options: Omit<LibraryDiscoveryOptions, 'settings'> = {}
 ): Promise<LibraryResource[]> {
   const pathEnv = options.pathEnv ?? createLibraryPathEnv();
-  const enabledLocations = enabledLibraryLocations(libraryLocationsFor(settings));
+  const locationSettings = libraryLocationsFor(settings);
+  const enabledByScope = new Map(
+    LIBRARY_SCOPES.map((scope) => [scope, enabledLibraryLocations(locationSettings, scope)])
+  );
   const kinds = options.kinds ? new Set(options.kinds) : null;
   const locations = LIBRARY_LOCATION_DEFINITIONS.flatMap((location) => {
-    if (!enabledLocations.has(location.id)) return [];
+    if (!enabledByScope.get(location.scope)?.has(location.id)) return [];
     if (kinds && !kinds.has(location.kind)) return [];
     const path = options.locationPathOverrides?.[location.id] ?? location.resolvePath(pathEnv);
     return path ? [{ location, path }] : [];
   });
+  // Scope joins the key alongside the resolved path, which is what carries the
+  // root: the same location under two workspace roots is two absolute paths and
+  // therefore two entries. Scope is redundant with that today and is in the key
+  // anyway, so a location that ever resolves to the same path at two scopes
+  // cannot silently share one memo entry.
   const signature = locations
-    .map(({ location, path }) => `${location.id}\0${path}`)
+    .map(({ location, path }) => `${location.scope}\0${location.id}\0${path}`)
     .sort()
     .join('\n');
   const cache = options.cache ?? libraryCache;
