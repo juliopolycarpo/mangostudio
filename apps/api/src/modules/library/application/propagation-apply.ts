@@ -193,7 +193,18 @@ async function persistBackupManifest(
   deps: PropagationApplyDeps
 ): Promise<void> {
   await writeBackupManifest(
-    { version: 1, backupId, createdAtMs: deps.backup.now().getTime(), entries: [...written] },
+    {
+      version: 2,
+      backupId,
+      createdAtMs: deps.backup.now().getTime(),
+      entries: [...written],
+      // Recorded by the flow that wrote the set, never derived from the entries
+      // afterwards. An apply that only overwrote pre-existing files leaves every
+      // entry carrying a backup — the shape a removal produces — so a reader
+      // guessing from them would offer to "put back" content this apply created
+      // and undo would delete.
+      operation: 'propagation',
+    },
     deps.backup
   );
   await pruneBackupSets(backupId, deps.backup);
@@ -583,6 +594,10 @@ async function executeOperation(
       destinationPath: result.destinationPath,
       resolvedPath: result.resolvedDestinationPath,
       writtenContentHash,
+      // The identity the coverage matrix uses, so a retained set can name what
+      // it holds rather than counting anonymous entries. A slug alone cannot be
+      // turned back into one.
+      resourceKey: operation.resourceKey,
       ...(result.backupPath && { backupPath: result.backupPath }),
     },
     applied: {

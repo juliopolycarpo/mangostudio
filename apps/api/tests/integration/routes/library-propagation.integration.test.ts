@@ -9,6 +9,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
+  PropagationBackupUsage,
   PropagationPreview,
   PropagationPreviewEntry,
 } from '@mangostudio/shared/library';
@@ -618,9 +619,12 @@ describe('propagation apply, undo, and backup routes', () => {
           entryCount: 1,
           pinned: true,
           lastCopyResourceKeys: ['skill:gh'],
+          operation: 'removal',
+          resourceKeys: ['skill:gh'],
+          evictsNext: false,
         },
       ],
-    };
+    } satisfies PropagationBackupUsage;
     const app = harness({ backupUsage: () => Promise.resolve(usage) });
 
     const response = await app.handle(jsonRequest('/library/propagate/backups', 'GET'));

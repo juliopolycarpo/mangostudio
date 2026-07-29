@@ -1,45 +1,39 @@
 /**
- * The retained-backup list as the only surviving handle on a removal.
+ * The disclosure strip under the library, reduced to what it can carry.
  *
- * The wizard's undo button dies with the wizard, so this list is where a user
- * who closed it — or reopened the app the next day — comes back for the skill
- * they deleted. Offering only a purge there means the app kept the copy and
- * never handed it back.
+ * It states the cost and the retention rule, and hands off to the manager for
+ * anything set-shaped. What it must never do is disappear: the strip is the
+ * only signal on the library page that the app is holding copies at all, and
+ * the only way a user finds the screen that hands them back.
  */
 
 import { en } from '@mangostudio/shared/i18n';
-import type { PropagationBackupUsage, PropagationUndo } from '@mangostudio/shared/library';
-import { userEvent } from '@testing-library/user-event';
+import type { PropagationBackupUsage } from '@mangostudio/shared/library';
 import { afterEach, describe, expect, it } from 'vitest';
 import { BackupUsage } from '../../../../src/features/library/components/BackupUsage';
-import { render, screen, waitFor } from '../../../support/harness/render';
+import { screen } from '../../../support/harness/render';
+import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
-const BACKUP_ID = '2026-07-28T10-00-00.000Z-abc123';
-
 const usage: PropagationBackupUsage = {
-  setCount: 1,
+  setCount: 3,
   sizeBytes: 4096,
   retentionCount: 5,
   retentionBytes: 100_000_000,
   pinnedSizeBytes: 4096,
   sets: [
     {
-      backupId: BACKUP_ID,
+      backupId: '2026-07-28T10-00-00.000Z-abc123',
       createdAtMs: 1_785_000_000_000,
       sizeBytes: 4096,
       entryCount: 1,
       pinned: true,
       lastCopyResourceKeys: ['skill:gh'],
+      operation: 'removal',
+      resourceKeys: ['skill:gh'],
+      evictsNext: false,
     },
   ],
-};
-
-const undone: PropagationUndo = {
-  backupId: BACKUP_ID,
-  restored: [{ locationId: 'claude-skills', destinationPath: '~/.claude/skills/gh' }],
-  removed: [],
-  skipped: [],
 };
 
 const scenario = createFetchScenario();
@@ -48,69 +42,43 @@ afterEach(() => {
   scenario.restore();
 });
 
-async function renderUsage(undoResponse: { body?: unknown; status?: number } = { body: undone }) {
-  scenario
-    .respondWithJson('GET', '/api/library/propagate/backups', { body: usage })
-    .respondWithJson('POST', '/api/library/propagate/undo', undoResponse)
-    .install();
-
-  render(<BackupUsage />);
-  await screen.findByTestId('pinned-backup-row');
+async function renderUsage(body: PropagationBackupUsage | { setCount: number } = usage) {
+  scenario.respondWithJson('GET', '/api/library/propagate/backups', { body }).install();
+  await renderWithRouter(<BackupUsage />);
 }
 
 describe('BackupUsage', () => {
-  it('puts a retained backup back on disk', async () => {
+  it('states what backups cost and the rule that trims them', async () => {
     await renderUsage();
 
-    await userEvent.click(screen.getByTestId('restore-backup'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('restore-backup-result')).toHaveTextContent(
-        en.library.backups.restored.replace('{count}', '1')
-      );
-    });
-    const undoCalls = scenario.fetchMock.mock.calls.filter(([input]) =>
-      String(input).includes('/library/propagate/undo')
+    const strip = await screen.findByTestId('backup-usage');
+    expect(strip).toHaveTextContent(
+      en.library.backups.usage.replace('{count}', '3').replace('{size}', '4.0 KiB')
     );
-    expect(undoCalls).toHaveLength(1);
+    expect(strip).toHaveTextContent(
+      en.library.backups.retention.replace('{count}', '5').replace('{size}', '95.4 MiB')
+    );
   });
 
-  it('names the copies a restore refused to touch', async () => {
+  // The sets themselves moved to a screen with room for them, so this link is
+  // the only route to a removal a user wants back the next day.
+  it('links to the manager where the sets can be restored', async () => {
+    await renderUsage();
+
+    const link = await screen.findByTestId('manage-backups');
+    expect(link).toHaveTextContent(en.library.backups.manage);
+    expect(link).toHaveAttribute('href', '/library/backups');
+  });
+
+  it('discloses nothing when nothing is retained', async () => {
     await renderUsage({
-      body: {
-        ...undone,
-        restored: [],
-        skipped: [
-          {
-            locationId: 'claude-skills',
-            destinationPath: '~/.claude/skills/gh',
-            reason: 'changed-since-apply',
-          },
-        ],
-      } satisfies PropagationUndo,
+      ...usage,
+      setCount: 0,
+      sizeBytes: 0,
+      pinnedSizeBytes: 0,
+      sets: [],
     });
 
-    await userEvent.click(screen.getByTestId('restore-backup'));
-
-    // "0 put back" alone reads like a success; the count and the reason
-    // together are what tell the user the destination moved under them.
-    await waitFor(() => {
-      expect(screen.getByTestId('restore-backup-result')).toHaveTextContent(
-        en.library.result.undoSkipped.replace('{count}', '1')
-      );
-    });
-  });
-
-  it('reports a failed restore instead of leaving the row unchanged', async () => {
-    await renderUsage({ body: { error: 'nope', code: 'INTERNAL' }, status: 500 });
-
-    await userEvent.click(screen.getByTestId('restore-backup'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('restore-backup-error')).toHaveTextContent(
-        en.library.backups.restoreError
-      );
-    });
-    expect(screen.queryByTestId('restore-backup-result')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('backup-usage')).not.toBeInTheDocument();
   });
 });

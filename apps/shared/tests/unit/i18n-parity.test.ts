@@ -4,6 +4,7 @@ import { LtsStatusSchema, RuntimeFindingCodeSchema } from '../../src/environment
 import { en, ptBR } from '../../src/i18n';
 import {
   AdaptNoteSchema,
+  BackupSetOperationSchema,
   LibraryCoverageStateSchema,
   LibraryDivergenceSchema,
   PropagationBlockedReasonSchema,
@@ -74,6 +75,13 @@ const ENUM_COVERAGE = [
     path: 'library.removalFailureReason',
     values: literalValues(RemovalFailureReasonSchema),
     blocks: [en.library.removalFailureReason, ptBR.library.removalFailureReason],
+  },
+  {
+    // An origin with no label is a backup row that cannot say what undoing it
+    // would do, which is the one mistake in this feature that deletes files.
+    path: 'library.backups.origin',
+    values: literalValues(BackupSetOperationSchema),
+    blocks: [en.library.backups.origin, ptBR.library.backups.origin],
   },
 ] as const;
 

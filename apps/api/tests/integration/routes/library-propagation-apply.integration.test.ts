@@ -30,6 +30,7 @@ import { previewLibraryPropagation } from '../../../src/modules/library/applicat
 import {
   type BackupStoreDeps,
   defaultBackupStoreDeps,
+  readBackupManifest,
 } from '../../../src/modules/library/infrastructure/backup-store';
 import { LibraryCache } from '../../../src/modules/library/infrastructure/library-cache';
 import {
@@ -307,6 +308,53 @@ describe('propagation apply — writing and verifying', () => {
 
     const backupPath = join(backupRoot, result.backupId ?? '', 'claude-skills', 'gh', 'SKILL.md');
     expect(readFileSync(backupPath, 'utf8')).toContain('original\n');
+  });
+
+  it('records the flow that wrote the set, and what each entry holds', async () => {
+    writeSkill('mango-skills', 'winner\n');
+    makeDirectories('claude-skills');
+
+    const { taken, request, entry } = await previewSkill();
+    const result = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'mango-skills'))]),
+      applyDeps()
+    );
+
+    const manifest = await readBackupManifest(result.backupId ?? '', backupDeps());
+    expect(manifest?.operation).toBe('propagation');
+    // One entry per destination, every one naming the resource it holds — the
+    // identity the coverage matrix uses, which a slug alone cannot reproduce.
+    expect(manifest?.entries.length).toBeGreaterThan(0);
+    expect(manifest?.entries.every((backed) => backed.resourceKey === 'skill:gh')).toBe(true);
+  });
+
+  /*
+    The case an inferred origin gets wrong. Every entry of an apply that only
+    overwrote pre-existing files carries a `backupPath` — the exact shape a
+    removal produces — so a reader deriving the origin from the entries would
+    call this a removal and offer to "put the removed copies back". Undo would
+    then restore, which happens to be right here, but the same derivation on an
+    apply that created paths would label a delete as a restore.
+  */
+  it('reports a pure-overwrite apply as propagation, not as the removal it looks like', async () => {
+    writeSkill('mango-skills', 'winner\n');
+    writeSkill('agents-skills', 'stale-a\n');
+    writeSkill('claude-skills', 'stale-b\n');
+    writeSkill('cursor-skills', 'stale-c\n');
+
+    const { taken, request, entry } = await previewSkill();
+    const result = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'mango-skills'))]),
+      applyDeps()
+    );
+
+    const manifest = await readBackupManifest(result.backupId ?? '', backupDeps());
+    expect(result.applied.every((item) => item.operation === 'overwrite')).toBe(true);
+    expect(manifest?.entries.length).toBeGreaterThan(0);
+    expect(manifest?.entries.every((backed) => backed.backupPath !== undefined)).toBe(true);
+    expect(manifest?.operation).toBe('propagation');
   });
 });
 

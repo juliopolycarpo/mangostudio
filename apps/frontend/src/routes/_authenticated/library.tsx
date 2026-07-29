@@ -1,4 +1,4 @@
-import { createFileRoute, Outlet } from '@tanstack/react-router';
+import { createFileRoute, Outlet, useRouterState } from '@tanstack/react-router';
 import { LibraryBig } from 'lucide-react';
 import { BackupUsage } from '@/features/library/components/BackupUsage';
 import { LibraryTabs } from '@/features/library/components/LibraryTabs';
@@ -10,6 +10,12 @@ export const Route = createFileRoute('/_authenticated/library')({
 
 function LibraryLayout() {
   const { t } = useI18n();
+  // The strip is a summary and a way in to the manager. On the manager itself
+  // it would restate the same two numbers directly above the list they describe,
+  // under a link pointing at the page already open.
+  const onBackupsPage = useRouterState({
+    select: (state) => state.location.pathname.endsWith('/library/backups'),
+  });
 
   return (
     <div className="h-full overflow-y-auto">
@@ -27,7 +33,7 @@ function LibraryLayout() {
         </div>
         <LibraryTabs />
         <Outlet />
-        <BackupUsage />
+        {!onBackupsPage && <BackupUsage />}
       </div>
     </div>
   );

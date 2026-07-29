@@ -38,6 +38,7 @@ import { Route as AuthenticatedLibrarySubagentsRouteImport } from './routes/_aut
 import { Route as AuthenticatedLibrarySkillsRouteImport } from './routes/_authenticated/library/skills'
 import { Route as AuthenticatedLibrarySettingsRouteImport } from './routes/_authenticated/library/settings'
 import { Route as AuthenticatedLibraryInstructionsRouteImport } from './routes/_authenticated/library/instructions'
+import { Route as AuthenticatedLibraryBackupsRouteImport } from './routes/_authenticated/library/backups'
 import { Route as AuthenticatedLibraryResourceKeyRouteImport } from './routes/_authenticated/library/$resourceKey'
 import { Route as AuthenticatedEnvironmentsRuntimesRouteImport } from './routes/_authenticated/environments/runtimes'
 import { Route as AuthenticatedEnvironmentsHealthRouteImport } from './routes/_authenticated/environments/health'
@@ -210,6 +211,12 @@ const AuthenticatedLibraryInstructionsRoute =
     path: '/instructions',
     getParentRoute: () => AuthenticatedLibraryRoute,
   } as any)
+const AuthenticatedLibraryBackupsRoute =
+  AuthenticatedLibraryBackupsRouteImport.update({
+    id: '/backups',
+    path: '/backups',
+    getParentRoute: () => AuthenticatedLibraryRoute,
+  } as any)
 const AuthenticatedLibraryResourceKeyRoute =
   AuthenticatedLibraryResourceKeyRouteImport.update({
     id: '/$resourceKey',
@@ -260,6 +267,7 @@ export interface FileRoutesByFullPath {
   '/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
   '/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/library/$resourceKey': typeof AuthenticatedLibraryResourceKeyRoute
+  '/library/backups': typeof AuthenticatedLibraryBackupsRoute
   '/library/instructions': typeof AuthenticatedLibraryInstructionsRoute
   '/library/settings': typeof AuthenticatedLibrarySettingsRoute
   '/library/skills': typeof AuthenticatedLibrarySkillsRoute
@@ -293,6 +301,7 @@ export interface FileRoutesByTo {
   '/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
   '/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/library/$resourceKey': typeof AuthenticatedLibraryResourceKeyRoute
+  '/library/backups': typeof AuthenticatedLibraryBackupsRoute
   '/library/instructions': typeof AuthenticatedLibraryInstructionsRoute
   '/library/settings': typeof AuthenticatedLibrarySettingsRoute
   '/library/skills': typeof AuthenticatedLibrarySkillsRoute
@@ -330,6 +339,7 @@ export interface FileRoutesById {
   '/_authenticated/environments/health': typeof AuthenticatedEnvironmentsHealthRoute
   '/_authenticated/environments/runtimes': typeof AuthenticatedEnvironmentsRuntimesRoute
   '/_authenticated/library/$resourceKey': typeof AuthenticatedLibraryResourceKeyRoute
+  '/_authenticated/library/backups': typeof AuthenticatedLibraryBackupsRoute
   '/_authenticated/library/instructions': typeof AuthenticatedLibraryInstructionsRoute
   '/_authenticated/library/settings': typeof AuthenticatedLibrarySettingsRoute
   '/_authenticated/library/skills': typeof AuthenticatedLibrarySkillsRoute
@@ -368,6 +378,7 @@ export interface FileRouteTypes {
     | '/environments/health'
     | '/environments/runtimes'
     | '/library/$resourceKey'
+    | '/library/backups'
     | '/library/instructions'
     | '/library/settings'
     | '/library/skills'
@@ -401,6 +412,7 @@ export interface FileRouteTypes {
     | '/environments/health'
     | '/environments/runtimes'
     | '/library/$resourceKey'
+    | '/library/backups'
     | '/library/instructions'
     | '/library/settings'
     | '/library/skills'
@@ -437,6 +449,7 @@ export interface FileRouteTypes {
     | '/_authenticated/environments/health'
     | '/_authenticated/environments/runtimes'
     | '/_authenticated/library/$resourceKey'
+    | '/_authenticated/library/backups'
     | '/_authenticated/library/instructions'
     | '/_authenticated/library/settings'
     | '/_authenticated/library/skills'
@@ -672,6 +685,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedLibraryInstructionsRouteImport
       parentRoute: typeof AuthenticatedLibraryRoute
     }
+    '/_authenticated/library/backups': {
+      id: '/_authenticated/library/backups'
+      path: '/backups'
+      fullPath: '/library/backups'
+      preLoaderRoute: typeof AuthenticatedLibraryBackupsRouteImport
+      parentRoute: typeof AuthenticatedLibraryRoute
+    }
     '/_authenticated/library/$resourceKey': {
       id: '/_authenticated/library/$resourceKey'
       path: '/$resourceKey'
@@ -740,6 +760,7 @@ const AuthenticatedEnvironmentsRouteWithChildren =
 
 interface AuthenticatedLibraryRouteChildren {
   AuthenticatedLibraryResourceKeyRoute: typeof AuthenticatedLibraryResourceKeyRoute
+  AuthenticatedLibraryBackupsRoute: typeof AuthenticatedLibraryBackupsRoute
   AuthenticatedLibraryInstructionsRoute: typeof AuthenticatedLibraryInstructionsRoute
   AuthenticatedLibrarySettingsRoute: typeof AuthenticatedLibrarySettingsRoute
   AuthenticatedLibrarySkillsRoute: typeof AuthenticatedLibrarySkillsRoute
@@ -749,6 +770,7 @@ interface AuthenticatedLibraryRouteChildren {
 
 const AuthenticatedLibraryRouteChildren: AuthenticatedLibraryRouteChildren = {
   AuthenticatedLibraryResourceKeyRoute: AuthenticatedLibraryResourceKeyRoute,
+  AuthenticatedLibraryBackupsRoute: AuthenticatedLibraryBackupsRoute,
   AuthenticatedLibraryInstructionsRoute: AuthenticatedLibraryInstructionsRoute,
   AuthenticatedLibrarySettingsRoute: AuthenticatedLibrarySettingsRoute,
   AuthenticatedLibrarySkillsRoute: AuthenticatedLibrarySkillsRoute,
