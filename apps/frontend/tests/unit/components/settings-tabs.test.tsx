@@ -9,7 +9,7 @@ vi.mock('@tanstack/react-router', () => ({
 }));
 
 describe('SettingsTabs', () => {
-  it('includes the Agents and Git settings tabs', async () => {
+  it('includes the Agents, Git, and External API settings tabs', async () => {
     const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
 
     render(<SettingsTabs />);
@@ -19,5 +19,9 @@ describe('SettingsTabs', () => {
       '/settings/agents'
     );
     expect(screen.getByRole('link', { name: 'Git' })).toHaveAttribute('href', '/settings/git');
+    expect(screen.getByRole('link', { name: 'External API' })).toHaveAttribute(
+      'href',
+      '/settings/external-api'
+    );
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
+import { ApiKeyScopeSchema } from '../../src/api-keys';
 import { LtsStatusSchema, RuntimeFindingCodeSchema } from '../../src/environments';
 import { en, ptBR } from '../../src/i18n';
 import {
@@ -82,6 +83,16 @@ const ENUM_COVERAGE = [
     path: 'library.backups.origin',
     values: literalValues(BackupSetOperationSchema),
     blocks: [en.library.backups.origin, ptBR.library.backups.origin],
+  },
+  {
+    path: 'settings.externalApi.scope',
+    values: literalValues(ApiKeyScopeSchema),
+    blocks: [en.settings.externalApi.scope, ptBR.settings.externalApi.scope],
+  },
+  {
+    path: 'settings.externalApi.scopeHint',
+    values: literalValues(ApiKeyScopeSchema),
+    blocks: [en.settings.externalApi.scopeHint, ptBR.settings.externalApi.scopeHint],
   },
 ] as const;
 
