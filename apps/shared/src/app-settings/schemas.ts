@@ -120,6 +120,11 @@ export const GitSettingsSchema = Type.Object({
   commitMessage: CommitMessageSettingsSchema,
 });
 
+/** Off by default: the external HTTP API surface is opt-in per user. */
+export const ExternalApiSettingsSchema = Type.Object({
+  enabled: Type.Boolean(),
+});
+
 const AppSettingsFieldsSchema = {
   promptSettings: PromptSettingsSchema,
   globalImageQuality: ImageQualitySchema,
@@ -135,6 +140,7 @@ const AppSettingsFieldsSchema = {
   workspaceSettings: WorkspaceSettingsSchema,
   gitSettings: GitSettingsSchema,
   chatDisplaySettings: ChatDisplaySettingsSchema,
+  externalApiSettings: ExternalApiSettingsSchema,
 } as const;
 
 export const AppSettingsSchema = Type.Object({
@@ -159,5 +165,6 @@ export type ProfileScopedSettings = Static<typeof ProfileScopedSettingsSchema>;
 export type ProfileSettingsMap = Static<typeof ProfileSettingsMapSchema>;
 export type CommitMessageSettings = Static<typeof CommitMessageSettingsSchema>;
 export type GitSettings = Static<typeof GitSettingsSchema>;
+export type ExternalApiSettings = Static<typeof ExternalApiSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;
 export type AppSettingsPutBody = Static<typeof AppSettingsPutBodySchema>;

@@ -30,6 +30,10 @@ export const ERROR_CODES = {
    * validation failure because the fix is the user's, not the client's.
    */
   LAST_COPY_UNACKNOWLEDGED: 'LAST_COPY_UNACKNOWLEDGED',
+  /** The request carried a valid API key, but the owner has not enabled the external API. */
+  EXTERNAL_API_DISABLED: 'EXTERNAL_API_DISABLED',
+  /** A `read-only` API key was used for a non-GET/HEAD/OPTIONS request. */
+  API_KEY_SCOPE_FORBIDDEN: 'API_KEY_SCOPE_FORBIDDEN',
   INTERNAL: 'INTERNAL',
 } as const;
 
