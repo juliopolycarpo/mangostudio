@@ -74,6 +74,8 @@ function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined):
  * id is unavailable before `apiKeyGuard` runs).
  */
 function hashApiKeyHeader(value: string): string {
+  // Fingerprint for in-memory rate-limit counters only; Better Auth verifies the secret later.
+  // codeql[js/insufficient-password-hash]
   const digest = createHmac('sha256', API_KEY_RATE_LIMIT_HMAC_CONTEXT)
     .update(value)
     .digest('hex')
