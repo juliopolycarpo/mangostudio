@@ -31,7 +31,7 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
-import { PropagationRequestError } from '../domain/propagation-error';
+import { LibraryRequestError } from '../domain/library-request-error';
 import { getLibraryLocation, type LocationDefinition, type PathEnv } from '../domain/registry';
 import {
   type BackupEntry,
@@ -39,7 +39,7 @@ import {
   createBackupId,
   defaultBackupStoreDeps,
   discardBackupSet,
-  measureBackupUsage,
+  listBackupSets,
   pruneBackupSets,
   readBackupManifest,
   restoreBackupEntry,
@@ -54,6 +54,7 @@ import {
 } from '../infrastructure/resource-writer';
 import { defaultAdapterRegistry } from './adapters/registry';
 import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
+import { serializeLibraryWrite } from './apply-queue';
 import { acknowledgeDivergence } from './conflict-resolution';
 import { previewLibraryPropagation } from './propagation-preview';
 
@@ -103,28 +104,12 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
   };
 }
 
-/**
- * Applies run one at a time. Two browser tabs applying at once would otherwise
- * interleave backups and swaps; serialized, the second waits and then fails its
- * own state-hash check, which is exactly the outcome the user should get.
- */
-let applyQueue: Promise<unknown> = Promise.resolve();
-
-function serialized<T>(task: () => Promise<T>): Promise<T> {
-  const run = applyQueue.then(task, task);
-  applyQueue = run.then(
-    () => undefined,
-    () => undefined
-  );
-  return run;
-}
-
 export function applyLibraryPropagation(
   userId: string,
   request: PropagationApplyRequest,
   overrides: Partial<PropagationApplyDeps> = {}
 ): Promise<PropagationApply> {
-  return serialized(() => runApply(userId, request, resolveDeps(overrides)));
+  return serializeLibraryWrite(() => runApply(userId, request, resolveDeps(overrides)));
 }
 
 async function runApply(
@@ -136,7 +121,7 @@ async function runApply(
     assertRequestedProfileId(request.profileId, { userId });
   } catch (error) {
     if (error instanceof ProfileMismatchError) {
-      throw new PropagationRequestError(400, error.message);
+      throw new LibraryRequestError(400, error.message);
     }
     throw error;
   }
@@ -148,7 +133,7 @@ async function runApply(
     !constantTimeEquals(preview.previewToken, request.previewToken) ||
     !constantTimeEquals(preview.stateHash, request.stateHash)
   ) {
-    throw new PropagationRequestError(
+    throw new LibraryRequestError(
       409,
       'The library changed since this preview was taken. Preview again before applying.'
     );
@@ -724,15 +709,20 @@ async function rollback(
   return complete;
 }
 
-/** Retained backup count and size, plus the bounds they are trimmed to. */
+/** Retained sets and what they cost, plus the bounds they are trimmed to. */
 export async function describeBackupUsage(
   deps: BackupStoreDeps = defaultBackupStoreDeps
 ): Promise<PropagationBackupUsage> {
-  const usage = await measureBackupUsage(deps);
+  const sets = await listBackupSets(deps);
   return {
-    ...usage,
+    setCount: sets.length,
+    sizeBytes: sets.reduce((total, set) => total + set.sizeBytes, 0),
+    pinnedSizeBytes: sets
+      .filter((set) => set.pinned)
+      .reduce((total, set) => total + set.sizeBytes, 0),
     retentionCount: deps.retentionCount(),
     retentionBytes: deps.retentionBytes(),
+    sets,
   };
 }
 
@@ -757,13 +747,13 @@ export function undoLibraryPropagation(
     hashAt: overrides.hashAt ?? hashResourceAt,
     backup: overrides.backup ?? defaultBackupStoreDeps,
   };
-  return serialized(() => runUndo(backupId, deps));
+  return serializeLibraryWrite(() => runUndo(backupId, deps));
 }
 
 async function runUndo(backupId: string, deps: PropagationUndoDeps): Promise<PropagationUndo> {
   const manifest = await readBackupManifest(backupId, deps.backup).catch(() => null);
   if (!manifest) {
-    throw new PropagationRequestError(
+    throw new LibraryRequestError(
       404,
       `No library backup "${backupId}" is retained. Backups are bounded by count and size.`
     );
@@ -838,8 +828,8 @@ function describeFailure(operation: PlannedOperation, error: unknown): Propagati
   };
 }
 
-function validationError(message: string): PropagationRequestError {
-  return new PropagationRequestError(422, message);
+function validationError(message: string): LibraryRequestError {
+  return new LibraryRequestError(422, message);
 }
 
 function constantTimeEquals(left: string, right: string): boolean {

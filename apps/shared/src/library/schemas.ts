@@ -569,6 +569,25 @@ export const PropagationUndoSchema = Type.Object({
 });
 
 /**
+ * One retained backup set. Listed rather than only counted so a pinned set —
+ * which no retention rule will ever evict — can be seen, sized, and purged.
+ */
+export const PropagationBackupSetSchema = Type.Object({
+  backupId: Type.String({ minLength: 1 }),
+  createdAtMs: Type.Integer({ minimum: 0 }),
+  sizeBytes: Type.Integer({ minimum: 0 }),
+  entryCount: Type.Integer({ minimum: 0 }),
+  /**
+   * True when the set holds the last remaining copy of a resource. Retention
+   * never evicts one: the alternative is deleting a user's only copy of
+   * something to reclaim disk, which is not a trade the app gets to make.
+   */
+  pinned: Type.Boolean(),
+  /** Resources whose final instance this set is the only remaining copy of. */
+  lastCopyResourceKeys: Type.Array(Type.String({ minLength: 1 })),
+});
+
+/**
  * What retained backups currently cost. Surfaced so a directory holding copies
  * of skill trees is never a mystery disk consumer the user has to discover.
  */
@@ -577,6 +596,13 @@ export const PropagationBackupUsageSchema = Type.Object({
   sizeBytes: Type.Integer({ minimum: 0 }),
   retentionCount: Type.Integer({ minimum: 1 }),
   retentionBytes: Type.Integer({ minimum: 1 }),
+  /** Bytes held by pinned sets, which count against the budget but never evict. */
+  pinnedSizeBytes: Type.Integer({ minimum: 0 }),
+  sets: Type.Array(PropagationBackupSetSchema),
+});
+
+export const PropagationBackupPurgeRequestSchema = Type.Object({
+  backupId: Type.String({ minLength: 1, maxLength: 128 }),
 });
 
 /**
@@ -599,6 +625,197 @@ export const LibraryDivergenceAckRequestSchema = Type.Object({
   contentHashes: Type.Array(Type.String({ minLength: 1 }), { minItems: 2, maxItems: 64 }),
   /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
   profileId: Type.Optional(ProfileIdSchema),
+});
+
+/**
+ * What removing one resource from one location would do.
+ *
+ * Deliberately not an `operation: 'delete'` flag on propagation. Propagation
+ * asks *which content wins*; removal asks *which copies go*, and a single
+ * wizard meaning both is one where the destructive path shares a confirm button
+ * with the safe one.
+ */
+export const RemovalOperationSchema = Type.Union([
+  Type.Literal('remove'),
+  /** No instance here. Shown rather than hidden, the same way propagation shows `noop`. */
+  Type.Literal('absent'),
+  Type.Literal('blocked'),
+]);
+
+export const RemovalBlockedReasonSchema = Type.Union([
+  Type.Literal('read-only-location'),
+  Type.Literal('unsupported-location'),
+  Type.Literal('location-unwritable'),
+  /**
+   * The scanner could not read this instance end to end. An instance that
+   * cannot be backed up faithfully cannot be undone, and a removal whose undo
+   * is best-effort is worse than no removal — so it blocks rather than removes.
+   */
+  Type.Literal('invalid-instance'),
+]);
+
+export const RemovalLocationSchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  /** Every target that would stop seeing the resource if this copy goes. */
+  targetIds: Type.Array(LibraryTargetIdSchema),
+  operation: RemovalOperationSchema,
+  /** Absolute path of the copy here; null when there is no instance to remove. */
+  path: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+  /**
+   * Hash of the copy here, which is also its content-group identity: two
+   * locations hold the same version exactly when these match.
+   */
+  contentHash: Type.Optional(Type.String({ minLength: 1 })),
+  modifiedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  /**
+   * True when removing this instance takes the last copy of its version with
+   * it. Not a block and not an extra confirmation — resolving a divergence by
+   * deleting the copy you do not want is legitimate, and arguably the most
+   * common resolution. The user only needs to know which of the two they are doing.
+   */
+  eliminatesContentGroup: Type.Boolean(),
+  blockedReason: Type.Optional(RemovalBlockedReasonSchema),
+});
+
+export const RemovalPreviewEntrySchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  ref: LibraryResourceRefSchema,
+  divergence: LibraryDivergenceSchema,
+  locations: Type.Array(RemovalLocationSchema),
+  /**
+   * Every location holding a copy, including ones this preview does not offer.
+   * The last-copy guard is decided against this list rather than against the
+   * offered rows: a resource is only zeroed when nothing is left *anywhere*,
+   * and a preview scoped to two of its four homes must not be able to claim it.
+   */
+  instanceLocationIds: Type.Array(LibraryLocationIdSchema),
+  /** True when removing every removable location shown would leave no instance anywhere. */
+  wouldRemoveLastCopy: Type.Boolean(),
+});
+
+/**
+ * A staged-removal directory an interrupted apply left behind. Reported rather
+ * than deleted on sight: a stale temp tree beside a destination is the accepted
+ * cost of never leaving a half-removed skill, and quietly deleting one would
+ * discard the only copy of whatever the interrupted apply was holding.
+ */
+export const StagedRemovalLeftoverSchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  path: Type.String({ minLength: 1 }),
+  modifiedAtMs: Type.Integer({ minimum: 0 }),
+});
+
+export const RemovalPreviewRequestSchema = Type.Object({
+  resourceKeys: Type.Array(Type.String({ minLength: 1 }), {
+    minItems: 1,
+    maxItems: PROPAGATION_PREVIEW_MAX_RESOURCES,
+  }),
+  locationIds: Type.Array(LibraryLocationIdSchema, { minItems: 1, maxItems: 64 }),
+  /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
+  profileId: Type.Optional(ProfileIdSchema),
+});
+
+export const RemovalPreviewSchema = Type.Object({
+  previewToken: Type.String({ minLength: 1 }),
+  /**
+   * Covers the same ground it does in propagation and matters more here:
+   * between preview and apply the user may have edited the very copy they are
+   * about to delete, and a rejected apply is the only thing standing between
+   * that edit and its disappearance.
+   */
+  stateHash: Type.String({ minLength: 1 }),
+  entries: Type.Array(RemovalPreviewEntrySchema),
+  staleStagedRemovals: Type.Array(StagedRemovalLeftoverSchema),
+});
+
+export const RemovalLocationDecisionSchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  action: Type.Union([Type.Literal('remove'), Type.Literal('keep')]),
+});
+
+export const RemovalDecisionSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  /** Every location the preview offered, each explicitly removed or kept. */
+  locations: Type.Array(RemovalLocationDecisionSchema),
+});
+
+export const RemovalApplyRequestSchema = Type.Object({
+  previewToken: Type.String({ minLength: 1 }),
+  stateHash: Type.String({ minLength: 1 }),
+  /** The preview request this apply answers, so the token can be re-derived. */
+  request: RemovalPreviewRequestSchema,
+  decisions: Type.Array(RemovalDecisionSchema, {
+    minItems: 1,
+    maxItems: PROPAGATION_PREVIEW_MAX_RESOURCES,
+  }),
+  /**
+   * Resource keys whose final instance the user has explicitly acknowledged.
+   *
+   * A separate field rather than a per-location flag on purpose: a client must
+   * not be able to satisfy it by looping over locations. Removing your only
+   * copy of a skill you wrote is recoverable only through the backup, and only
+   * while it is retained — a different category of action from removing a
+   * duplicate, and the contract says so.
+   */
+  acknowledgeLastCopy: Type.Array(Type.String({ minLength: 1 }), {
+    maxItems: PROPAGATION_PREVIEW_MAX_RESOURCES,
+  }),
+  /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
+  profileId: Type.Optional(ProfileIdSchema),
+});
+
+export const RemovalKeptReasonSchema = Type.Union([
+  Type.Literal('user-kept'),
+  Type.Literal('absent'),
+  Type.Literal('blocked'),
+]);
+
+export const RemovalFailureReasonSchema = Type.Union([
+  Type.Literal('guard-rejected'),
+  Type.Literal('backup-failed'),
+  Type.Literal('remove-failed'),
+  /** The destination still existed after the unlink, so nothing is proven removed. */
+  Type.Literal('verification-failed'),
+]);
+
+export const RemovalRemovedSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  locationId: LibraryLocationIdSchema,
+  path: Type.String({ minLength: 1 }),
+  /** Hash of what was removed, re-read from disk rather than taken from the preview. */
+  contentHash: Type.String({ minLength: 1 }),
+  /** True when this removal took the resource's final remaining instance. */
+  lastCopy: Type.Boolean(),
+});
+
+export const RemovalKeptSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  locationId: LibraryLocationIdSchema,
+  reason: RemovalKeptReasonSchema,
+});
+
+export const RemovalFailureSchema = Type.Object({
+  resourceKey: Type.String({ minLength: 1 }),
+  locationId: LibraryLocationIdSchema,
+  reason: RemovalFailureReasonSchema,
+  message: Type.String(),
+});
+
+export const RemovalApplySchema = Type.Object({
+  /**
+   * Present when anything was removed. Shares propagation's backup namespace,
+   * so `POST /library/propagate/undo` restores either kind of apply.
+   */
+  backupId: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * False when the filesystem matches its pre-apply state — everything landed,
+   * or a failure was fully compensated. True is the alarming case: a failure
+   * whose compensation also failed, leaving some copies already gone.
+   */
+  partial: Type.Boolean(),
+  removed: Type.Array(RemovalRemovedSchema),
+  kept: Type.Array(RemovalKeptSchema),
+  failed: Type.Array(RemovalFailureSchema),
 });
 
 export type ResourceKind = Static<typeof ResourceKindSchema>;
@@ -652,7 +869,24 @@ export type PropagationFailure = Static<typeof PropagationFailureSchema>;
 export type PropagationApply = Static<typeof PropagationApplySchema>;
 export type PropagationUndoRequest = Static<typeof PropagationUndoRequestSchema>;
 export type PropagationUndo = Static<typeof PropagationUndoSchema>;
+export type PropagationBackupSet = Static<typeof PropagationBackupSetSchema>;
 export type PropagationBackupUsage = Static<typeof PropagationBackupUsageSchema>;
+export type RemovalOperation = Static<typeof RemovalOperationSchema>;
+export type RemovalBlockedReason = Static<typeof RemovalBlockedReasonSchema>;
+export type RemovalLocation = Static<typeof RemovalLocationSchema>;
+export type RemovalPreviewEntry = Static<typeof RemovalPreviewEntrySchema>;
+export type StagedRemovalLeftover = Static<typeof StagedRemovalLeftoverSchema>;
+export type RemovalPreviewRequest = Static<typeof RemovalPreviewRequestSchema>;
+export type RemovalPreview = Static<typeof RemovalPreviewSchema>;
+export type RemovalLocationDecision = Static<typeof RemovalLocationDecisionSchema>;
+export type RemovalDecision = Static<typeof RemovalDecisionSchema>;
+export type RemovalApplyRequest = Static<typeof RemovalApplyRequestSchema>;
+export type RemovalKeptReason = Static<typeof RemovalKeptReasonSchema>;
+export type RemovalFailureReason = Static<typeof RemovalFailureReasonSchema>;
+export type RemovalRemoved = Static<typeof RemovalRemovedSchema>;
+export type RemovalKept = Static<typeof RemovalKeptSchema>;
+export type RemovalFailure = Static<typeof RemovalFailureSchema>;
+export type RemovalApply = Static<typeof RemovalApplySchema>;
 export type LibraryDivergenceAck = Static<typeof LibraryDivergenceAckSchema>;
 export type LibraryDivergenceAckRequest = Static<typeof LibraryDivergenceAckRequestSchema>;
 

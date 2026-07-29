@@ -2,19 +2,25 @@
  * Library section for `mango doctor` (location health only — no content hashing).
  */
 
+import type { StagedRemovalLeftover } from '@mangostudio/shared/library';
 import { LIBRARY_LOCATION_DEFINITIONS } from '../modules/library/domain/registry';
 import {
   createLibraryPathEnv,
   describeLocation,
 } from '../modules/library/infrastructure/location-probe';
+import { findStagedRemovalsForLocations } from '../modules/library/infrastructure/tree-removal';
 import type { CheckResult } from './doctor-checks';
 import { fail, ok, warn } from './doctor-checks';
 
 export interface LibraryDoctorDeps {
   readonly listLocations: () => ReturnType<typeof describeLocation>[];
+  /** Temp trees an interrupted removal left beside a destination. */
+  readonly listStagedRemovals: () => Promise<StagedRemovalLeftover[]>;
 }
 
-export function collectLibraryDoctorSection(deps: Partial<LibraryDoctorDeps> = {}): CheckResult[] {
+export async function collectLibraryDoctorSection(
+  deps: Partial<LibraryDoctorDeps> = {}
+): Promise<CheckResult[]> {
   const locations = (deps.listLocations ?? defaultListLocations)();
   const supported = locations.filter((location) => location.path !== null);
   const present = supported.filter((location) => location.exists);
@@ -36,6 +42,19 @@ export function collectLibraryDoctorSection(deps: Partial<LibraryDoctorDeps> = {
     rows.push(warn(location.id, 'not writable'));
   }
 
+  // Reported, never swept. A staged tree still holds the only in-place copy of
+  // whatever the interrupted removal was moving, so the tool that finds it says
+  // where it is and leaves the decision with the person reading the output.
+  const leftovers = await (deps.listStagedRemovals ?? defaultListStagedRemovals)();
+  for (const leftover of leftovers) {
+    rows.push(
+      warn(
+        leftover.locationId,
+        `an interrupted removal left "${leftover.path}" behind; inspect it, then delete it by hand`
+      )
+    );
+  }
+
   rows.push(
     ok(
       'divergence',
@@ -49,4 +68,8 @@ export function collectLibraryDoctorSection(deps: Partial<LibraryDoctorDeps> = {
 function defaultListLocations(): ReturnType<typeof describeLocation>[] {
   const env = createLibraryPathEnv();
   return LIBRARY_LOCATION_DEFINITIONS.map((location) => describeLocation(location.id, env));
+}
+
+function defaultListStagedRemovals(): Promise<StagedRemovalLeftover[]> {
+  return findStagedRemovalsForLocations(LIBRARY_LOCATION_DEFINITIONS, createLibraryPathEnv());
 }

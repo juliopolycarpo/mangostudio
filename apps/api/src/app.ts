@@ -22,6 +22,7 @@ import { gitRoutes } from './modules/git/http/git-routes';
 import { githubRoutes } from './modules/github/http/github-routes';
 import { libraryRoutes } from './modules/library/http/library-routes';
 import { propagationRoutes } from './modules/library/http/propagation-routes';
+import { removalRoutes } from './modules/library/http/removal-routes';
 import { librarySettingsRoutes } from './modules/library/http/settings-routes';
 import { mcpServerRoutes } from './modules/mcp-servers/http/mcp-server-routes';
 import { messageRoutes } from './modules/messages/http/message-routes';
@@ -77,6 +78,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(libraryRoutes)
   .use(librarySettingsRoutes)
   .use(propagationRoutes)
+  .use(removalRoutes)
   .use(settingsRoutes)
   .use(skillRoutes)
   .use(mcpServerRoutes)

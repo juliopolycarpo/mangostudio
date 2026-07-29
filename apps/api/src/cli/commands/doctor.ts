@@ -99,7 +99,7 @@ export interface DoctorDeps {
     options: { probe: boolean; serverRunning: boolean }
   ) => Promise<CheckResult[]>;
   collectEnvironmentChecks: () => Promise<CheckResult[]>;
-  collectLibraryChecks: () => CheckResult[];
+  collectLibraryChecks: () => Promise<CheckResult[]>;
   log: (msg: string) => void;
   exit: (code: number) => void;
 }
@@ -193,7 +193,7 @@ async function collectResults(
   }
 
   if (includeLibrarySection) {
-    results.push(...d.collectLibraryChecks());
+    results.push(...(await d.collectLibraryChecks()));
   }
 
   return results;

@@ -13,6 +13,7 @@ import {
   type PropagationApplyRequest,
   PropagationApplyRequestSchema,
   PropagationApplySchema,
+  PropagationBackupPurgeRequestSchema,
   type PropagationBackupUsage,
   PropagationBackupUsageSchema,
   type PropagationPreview,
@@ -38,13 +39,15 @@ import {
   undoLibraryPropagation,
 } from '../application/propagation-apply';
 import { previewLibraryPropagation } from '../application/propagation-preview';
-import { PropagationRequestError } from '../domain/propagation-error';
+import { LibraryRequestError } from '../domain/library-request-error';
+import { assertBackupId, purgeBackupSet } from '../infrastructure/backup-store';
 
 export interface PropagationRouteService {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
   apply(userId: string, request: PropagationApplyRequest): Promise<PropagationApply>;
   undo(userId: string, backupId: string): Promise<PropagationUndo>;
   backupUsage(): Promise<PropagationBackupUsage>;
+  purgeBackup(backupId: string): Promise<boolean>;
   listAcks(userId: string): Promise<LibraryDivergenceAck[]>;
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<LibraryDivergenceAck>;
   forgetAck(userId: string, resourceKey: string): Promise<void>;
@@ -55,6 +58,7 @@ const defaultPropagationRouteService: PropagationRouteService = {
   apply: (userId, request) => applyLibraryPropagation(userId, request),
   undo: (_userId, backupId) => undoLibraryPropagation(backupId),
   backupUsage: () => describeBackupUsage(),
+  purgeBackup: (backupId) => purgeBackupSet(backupId),
   listAcks: (userId) => listDivergenceAcks(userId),
   acknowledge: (userId, request) => acknowledgeDivergence(userId, request),
   forgetAck: (userId, resourceKey) => forgetDivergenceAck(userId, resourceKey),
@@ -68,9 +72,9 @@ const ERROR_CODE_BY_STATUS = {
 } as const;
 
 function mapPropagationError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
-  if (error instanceof PropagationRequestError) {
+  if (error instanceof LibraryRequestError) {
     set.status = error.status;
-    return { error: error.message, code: ERROR_CODE_BY_STATUS[error.status] };
+    return { error: error.message, code: error.code ?? ERROR_CODE_BY_STATUS[error.status] };
   }
   if (error instanceof ProfileMismatchError) {
     set.status = 400;
@@ -165,6 +169,37 @@ export function createPropagationRoutes(
       {
         response: {
           200: PropagationBackupUsageSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .delete(
+      '/library/propagate/backups/:backupId',
+      async ({ params, set }): Promise<undefined | ApiErrorResponse> => {
+        // Pinning keeps a set holding someone's only copy of a resource out of
+        // every automatic eviction path, which only works if there is an
+        // explicit way to say "yes, really, let it go". This is it.
+        try {
+          assertBackupId(params.backupId);
+        } catch {
+          set.status = 422;
+          return { error: 'Invalid library backup id.', code: ERROR_CODES.VALIDATION };
+        }
+        try {
+          // Idempotent: purging a set that is already gone is the state the
+          // caller asked for, not an error.
+          await service.purgeBackup(params.backupId);
+          set.status = 204;
+          return undefined;
+        } catch (error) {
+          return mapPropagationError(error, set);
+        }
+      },
+      {
+        params: PropagationBackupPurgeRequestSchema,
+        response: {
+          204: t.Void(),
+          422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
         },
       }

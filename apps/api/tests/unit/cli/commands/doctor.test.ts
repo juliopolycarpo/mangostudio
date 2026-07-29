@@ -98,7 +98,7 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
     listMcpServers: () => [],
     collectMcpChecks: () => Promise.resolve([]),
     collectEnvironmentChecks: () => Promise.resolve([]),
-    collectLibraryChecks: () => [],
+    collectLibraryChecks: () => Promise.resolve([]),
     log: () => undefined,
     exit: () => undefined,
     ...overrides,

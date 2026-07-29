@@ -22,7 +22,7 @@ import {
 } from '../../../src/modules/library/application/conflict-resolution';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import { previewLibraryPropagation } from '../../../src/modules/library/application/propagation-preview';
-import { PropagationRequestError } from '../../../src/modules/library/domain/propagation-error';
+import { LibraryRequestError } from '../../../src/modules/library/domain/library-request-error';
 import {
   createPropagationRoutes,
   type PropagationRouteService,
@@ -233,6 +233,7 @@ const unsupportedService: PropagationRouteService = {
   apply: () => Promise.reject(new Error('apply not stubbed')),
   undo: () => Promise.reject(new Error('undo not stubbed')),
   backupUsage: () => Promise.reject(new Error('backupUsage not stubbed')),
+  purgeBackup: () => Promise.reject(new Error('purgeBackup not stubbed')),
   listAcks: () => Promise.reject(new Error('listAcks not stubbed')),
   acknowledge: () => Promise.reject(new Error('acknowledge not stubbed')),
   forgetAck: () => Promise.reject(new Error('forgetAck not stubbed')),
@@ -276,7 +277,7 @@ describe('POST /library/propagate/preview', () => {
     const app = harness({
       preview: (_userId, body) =>
         Promise.reject(
-          new PropagationRequestError(
+          new LibraryRequestError(
             body.resourceKeys.includes('skill:missing') ? 404 : 422,
             'Library resource "skill:missing" was not found.'
           )
@@ -408,7 +409,7 @@ describe('divergence acknowledgement routes', () => {
     expect(withProfile.status).toBe(200);
 
     const stale = harness({
-      acknowledge: () => Promise.reject(new PropagationRequestError(409, 'changed')),
+      acknowledge: () => Promise.reject(new LibraryRequestError(409, 'changed')),
     });
     const conflict = await stale.handle(
       jsonRequest('/library/divergence/acks', 'POST', {
@@ -425,7 +426,7 @@ describe('divergence acknowledgement routes', () => {
     const app = harness({
       acknowledge: () =>
         Promise.reject(
-          new PropagationRequestError(
+          new LibraryRequestError(
             400,
             'Requested profile "work-laptop" does not match the active profile "default".'
           )
@@ -517,7 +518,7 @@ describe('propagation apply, undo, and backup routes', () => {
 
   it('maps a stale preview to 409 so the client re-previews', async () => {
     const app = harness({
-      apply: () => Promise.reject(new PropagationRequestError(409, 'The library changed.')),
+      apply: () => Promise.reject(new LibraryRequestError(409, 'The library changed.')),
     });
 
     const response = await app.handle(jsonRequest('/library/propagate/apply', 'POST', applyBody));
@@ -528,7 +529,7 @@ describe('propagation apply, undo, and backup routes', () => {
 
   it('maps an unreviewable decision to 422', async () => {
     const app = harness({
-      apply: () => Promise.reject(new PropagationRequestError(422, 'Name the winner.')),
+      apply: () => Promise.reject(new LibraryRequestError(422, 'Name the winner.')),
     });
 
     const response = await app.handle(jsonRequest('/library/propagate/apply', 'POST', applyBody));
@@ -572,7 +573,7 @@ describe('propagation apply, undo, and backup routes', () => {
 
   it('reports a backup that retention already discarded as 404', async () => {
     const app = harness({
-      undo: () => Promise.reject(new PropagationRequestError(404, 'No such backup.')),
+      undo: () => Promise.reject(new LibraryRequestError(404, 'No such backup.')),
     });
 
     const response = await app.handle(
@@ -586,8 +587,19 @@ describe('propagation apply, undo, and backup routes', () => {
     const usage = {
       setCount: 3,
       sizeBytes: 4096,
+      pinnedSizeBytes: 1024,
       retentionCount: 10,
       retentionBytes: 512 * 1024 * 1024,
+      sets: [
+        {
+          backupId: 'set-1',
+          createdAtMs: 1,
+          sizeBytes: 1024,
+          entryCount: 1,
+          pinned: true,
+          lastCopyResourceKeys: ['skill:gh'],
+        },
+      ],
     };
     const app = harness({ backupUsage: () => Promise.resolve(usage) });
 

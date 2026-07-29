@@ -12,7 +12,7 @@ import type {
 } from '@mangostudio/shared/library';
 import { previewLibraryPropagation } from '../../../../src/modules/library/application/propagation-preview';
 import type { AdapterCatalog } from '../../../../src/modules/library/domain/format-adapters';
-import { PropagationRequestError } from '../../../../src/modules/library/domain/propagation-error';
+import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
 import { getLibraryLocation } from '../../../../src/modules/library/domain/registry';
 
 function instance(
@@ -437,7 +437,7 @@ describe('previewLibraryPropagation — staleness binding', () => {
 describe('previewLibraryPropagation — request validation', () => {
   it('rejects a malformed resource key', async () => {
     const failure = preview(['not-a-key'], ['claude-skills'], { resources: [ghSkill] });
-    await expect(failure).rejects.toBeInstanceOf(PropagationRequestError);
+    await expect(failure).rejects.toBeInstanceOf(LibraryRequestError);
     await expect(failure).rejects.toMatchObject({ status: 422 });
   });
 
