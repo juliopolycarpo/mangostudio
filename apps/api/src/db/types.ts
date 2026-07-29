@@ -140,6 +140,31 @@ interface VerificationTable {
   updatedAt: string;
 }
 
+interface ApiKeyTable {
+  id: string;
+  configId: string;
+  name: string | null;
+  start: string | null;
+  referenceId: string;
+  prefix: string | null;
+  key: string;
+  refillInterval: number | null;
+  refillAmount: number | null;
+  lastRefillAt: string | null;
+  enabled: number;
+  rateLimitEnabled: number;
+  rateLimitTimeWindow: number | null;
+  rateLimitMax: number | null;
+  requestCount: number;
+  remaining: number | null;
+  lastRequest: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  permissions: string | null;
+  metadata: string | null;
+}
+
 interface UserProviderSettingsTable {
   id: string;
   userId: string;
@@ -289,6 +314,7 @@ export interface Database {
   session: SessionTable;
   account: AccountTable;
   verification: VerificationTable;
+  apikey: ApiKeyTable;
   user_provider_settings: UserProviderSettingsTable;
   user_tool_settings: UserToolSettingsTable;
   user_skill_settings: UserSkillSettingsTable;

@@ -13,9 +13,14 @@ import { getAuth } from '../auth';
 const authMiddleware = new Elysia({ name: 'auth-middleware' }).derive(
   { as: 'scoped' },
   async ({ request }) => {
-    const session = await getAuth().api.getSession({
-      headers: request.headers,
-    });
+    // With the api-key plugin's enableSessionForAPIKeys on, getSession throws
+    // a Better Auth APIError for an invalid/expired x-api-key header instead
+    // of resolving to null. Treat that the same as "no session" — the
+    // downstream 401 in requireAuth (or api-key-guard's own check) is the
+    // right response, not an uncaught crash through this derive.
+    const session = await getAuth()
+      .api.getSession({ headers: request.headers })
+      .catch(() => null);
 
     return {
       user: session?.user ?? null,

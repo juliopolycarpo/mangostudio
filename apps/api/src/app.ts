@@ -29,6 +29,7 @@ import { messageRoutes } from './modules/messages/http/message-routes';
 import { skillRoutes } from './modules/skills/http/skill-routes';
 import { todoRoutes } from './modules/todos/http/todo-routes';
 import { workspaceRoutes } from './modules/workspaces/http/workspace-routes';
+import { apiKeyGuard } from './plugins/api-key-guard';
 import { errorHandler } from './plugins/error-handler';
 import { rateLimit } from './plugins/rate-limit';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
@@ -60,6 +61,11 @@ const api = new Elysia({ prefix: '/api' })
   // Health check — covered by its own generous bucket (registered after the
   // limiter so the limiter's hooks apply to it).
   .get('/health', () => ({ status: 'ok', timestamp: Date.now() }))
+  // Authenticates `x-api-key` requests before any route sees them; a no-op
+  // for cookie-session traffic. Runs once per request here, rather than as
+  // part of authMiddleware (re-registered per route module and never sees
+  // /api/auth/**).
+  .use(apiKeyGuard)
   // Register features
   .use(authRoutes)
   .use(chatRoutes)
@@ -101,7 +107,7 @@ export const app = new Elysia()
       origin: getConfig().corsOrigins,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
     })
   )
   // Serve uploaded files as static assets

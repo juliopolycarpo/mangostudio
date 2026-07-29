@@ -78,7 +78,7 @@ const defaultConfig: RateLimitConfig = {
 };
 
 /** Resolve the request path, preferring Elysia's parsed `path`. */
-function resolvePath(path: string | undefined, url: string): string {
+export function resolvePath(path: string | undefined, url: string): string {
   return path ?? new URL(url).pathname;
 }
 
