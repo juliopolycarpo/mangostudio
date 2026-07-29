@@ -200,7 +200,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
   }
 
   return new Elysia({ name: 'realtime-routes' })
-    .derive({ as: 'scoped' }, async ({ request }) => {
+    .derive(async ({ request }) => {
       const origin = request.headers.get('origin');
       let rejection: RejectionReason = origin && !allowedOrigins.has(origin) ? 'forbidden' : null;
       let userId: string | null = null;

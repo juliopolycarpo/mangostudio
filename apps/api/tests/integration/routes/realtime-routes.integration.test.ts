@@ -36,7 +36,12 @@ function startServer(dependencies: Parameters<typeof createRealtimeRoutes>[0] = 
   const bus = dependencies.bus ?? createRealtimeBus();
   const routes = createRealtimeRoutes({ ...dependencies, bus });
   const apiRoutes = (app: Elysia) =>
-    app.group('/api', (group) => group.use(authRoutes).use(routes));
+    app.group('/api', (group) =>
+      group
+        .use(authRoutes)
+        .use(routes)
+        .get('/realtime-scope-probe', () => ({ ok: true }))
+    );
   const app = createApiTestApp(apiRoutes);
   app.listen(0);
   const port = (app.server as { port?: number } | null)?.port;
@@ -150,6 +155,22 @@ afterEach(() => {
 });
 
 describe('realtime WebSocket authentication', () => {
+  it('does not resolve realtime sessions for neighboring HTTP routes', async () => {
+    let sessionResolutions = 0;
+    const { httpUrl } = startServer({
+      resolveUserId: () => {
+        sessionResolutions += 1;
+        return Promise.resolve(null);
+      },
+    });
+
+    const response = await fetch(`${httpUrl}/api/realtime-scope-probe`);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(sessionResolutions).toBe(0);
+  });
+
   it('sends an authentication error and closes missing sessions with 4401', async () => {
     const { wsUrl } = await startServer();
     const client = connect(wsUrl);
