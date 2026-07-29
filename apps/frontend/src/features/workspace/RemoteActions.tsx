@@ -1,24 +1,27 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { GitBranchInfo } from '@mangostudio/shared/git';
-import { ArrowDown, ArrowUp, CloudDownload } from 'lucide-react';
-import { useState } from 'react';
+import { CloudDownload, CloudUpload } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
+import { readGitPanelPrefs } from './git-panel-prefs';
 import { useGitFetch, useGitPull, useGitPush } from './hooks/use-git-state';
 
 export function RemoteActions({
   chatId,
   branch,
+  failure,
+  onFailureChange,
 }: {
   readonly chatId: string;
   readonly branch: GitBranchInfo;
+  readonly failure: unknown;
+  readonly onFailureChange: (failure: unknown) => void;
 }) {
   const { t } = useI18n();
   const { toast } = useToast();
   const labels = t.git.remote;
-  const [prune, setPrune] = useState(true);
-  const [guidance, setGuidance] = useState<string | null>(null);
   const fetchMutation = useGitFetch(chatId);
   const pullMutation = useGitPull(chatId);
   const pushMutation = useGitPush(chatId);
@@ -32,12 +35,18 @@ export function RemoteActions({
     return null;
   };
 
+  const guidance = resolveGuidance(failure);
+
   const run = async (operation: 'fetch' | 'pull' | 'push') => {
     try {
-      if (operation === 'fetch') await fetchMutation.mutateAsync({ prune });
-      else if (operation === 'pull') await pullMutation.mutateAsync({});
-      else await pushMutation.mutateAsync({});
-      setGuidance(null);
+      if (operation === 'fetch') {
+        await fetchMutation.mutateAsync({ prune: readGitPanelPrefs().pruneOnFetch });
+      } else if (operation === 'pull') {
+        await pullMutation.mutateAsync({});
+      } else {
+        await pushMutation.mutateAsync({});
+      }
+      onFailureChange(null);
       toast(
         operation === 'fetch'
           ? labels.fetched
@@ -47,78 +56,90 @@ export function RemoteActions({
         'success'
       );
     } catch (error) {
-      const nextGuidance = resolveGuidance(error);
-      setGuidance(nextGuidance);
+      onFailureChange(error);
       toast(resolveApiErrorMessage(error, labels.actionError), 'error');
     }
   };
 
+  const pushLabel = branch.upstream
+    ? labels.push.replace('{count}', String(branch.ahead))
+    : labels.publish;
+  const pullLabel = labels.pull.replace('{count}', String(branch.behind));
+
   return (
-    <div className="mt-2 space-y-2 pl-6">
-      {(branch.ahead > 0 || branch.behind > 0) && branch.upstream ? (
-        <p className="font-mono text-[11px] text-on-surface-variant">
-          {labels.syncSummary
-            .replace('{ahead}', String(branch.ahead))
-            .replace('{behind}', String(branch.behind))}
-        </p>
-      ) : null}
-      <div className="flex flex-wrap gap-1.5">
-        <button
-          type="button"
+    <>
+      <div className="flex shrink-0 items-center gap-0.5">
+        <RemoteButton
+          label={labels.fetch}
           disabled={pending}
           onClick={() => void run('fetch')}
-          className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-semibold text-on-surface-variant hover:text-primary disabled:cursor-wait disabled:opacity-50"
-        >
-          <CloudDownload size={11} />
-          {fetchMutation.isPending ? labels.fetching : labels.fetch}
-        </button>
+          icon={<CloudDownload size={13} />}
+        />
         {branch.behind > 0 ? (
-          <button
-            type="button"
+          <RemoteButton
+            label={pullLabel}
+            badge={branch.behind}
+            highlight
             disabled={pending}
             onClick={() => void run('pull')}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary disabled:cursor-wait disabled:opacity-50"
-          >
-            <ArrowDown size={11} />
-            {pullMutation.isPending
-              ? labels.pulling
-              : labels.pull.replace('{count}', String(branch.behind))}
-          </button>
+            icon={<CloudDownload size={13} />}
+          />
         ) : null}
         {/*
           A branch with no upstream reports ahead: 0, so it needs its own entry
           point — otherwise a freshly created branch could never be published.
         */}
         {branch.name !== null && (branch.ahead > 0 || !branch.upstream) ? (
-          <button
-            type="button"
+          <RemoteButton
+            label={pushLabel}
+            badge={branch.upstream ? branch.ahead : undefined}
+            highlight
             disabled={pending}
             onClick={() => void run('push')}
-            className="inline-flex cursor-pointer items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-[10px] font-semibold text-primary disabled:cursor-wait disabled:opacity-50"
-          >
-            <ArrowUp size={11} />
-            {pushMutation.isPending
-              ? labels.pushing
-              : branch.upstream
-                ? labels.push.replace('{count}', String(branch.ahead))
-                : labels.publish}
-          </button>
+            icon={<CloudUpload size={13} />}
+          />
         ) : null}
       </div>
-      <label className="flex cursor-pointer items-center gap-1.5 text-[10px] text-on-surface-variant">
-        <input
-          type="checkbox"
-          checked={prune}
-          onChange={(event) => setPrune(event.target.checked)}
-          className="accent-primary"
-        />
-        {labels.prune}
-      </label>
+
       {guidance ? (
-        <p className="rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5 text-[11px] leading-4 text-warning">
+        <p className="mt-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-2 py-1.5 text-[11px] leading-4 text-warning">
           {guidance}
         </p>
       ) : null}
-    </div>
+    </>
+  );
+}
+
+function RemoteButton({
+  label,
+  icon,
+  badge,
+  highlight = false,
+  disabled,
+  onClick,
+}: {
+  readonly label: string;
+  readonly icon: ReactNode;
+  readonly badge?: number;
+  readonly highlight?: boolean;
+  readonly disabled: boolean;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={`flex h-7 cursor-pointer items-center gap-1 rounded-lg px-1.5 transition-colors disabled:cursor-wait disabled:opacity-50 ${
+        highlight
+          ? 'text-primary hover:bg-primary/10'
+          : 'text-on-surface-variant hover:bg-surface-container-high hover:text-on-surface'
+      }`}
+    >
+      {icon}
+      {badge !== undefined ? <span className="font-mono text-[10px]">{badge}</span> : null}
+    </button>
   );
 }

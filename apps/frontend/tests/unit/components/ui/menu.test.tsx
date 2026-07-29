@@ -172,10 +172,12 @@ describe('SplitButton', () => {
     expect(onPrimary).not.toHaveBeenCalled();
   });
 
-  it('disables both halves together', () => {
+  it('keeps the menu reachable when the primary action is blocked', () => {
     render(<SplitButtonHarness disabled />);
 
     expect(screen.getByRole('button', { name: 'Commit' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'More commit actions' })).toBeDisabled();
+    // The menu holds actions with their own preconditions, so a blocked primary
+    // action must not seal them off.
+    expect(screen.getByRole('button', { name: 'More commit actions' })).toBeEnabled();
   });
 });

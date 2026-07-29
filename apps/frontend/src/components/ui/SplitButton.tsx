@@ -6,6 +6,11 @@ import { Menu } from './Menu';
 interface SplitButtonProps {
   readonly onClick: () => void;
   readonly disabled?: boolean;
+  /**
+   * Kept separate from `disabled`: the menu holds actions with their own
+   * preconditions, so a blocked primary action must not seal them off.
+   */
+  readonly menuDisabled?: boolean;
   readonly loading?: boolean;
   /** Accessible name for the chevron that opens the secondary actions. */
   readonly menuLabel: string;
@@ -24,6 +29,7 @@ interface SplitButtonProps {
 export function SplitButton({
   onClick,
   disabled = false,
+  menuDisabled = false,
   loading = false,
   menuLabel,
   open,
@@ -54,7 +60,7 @@ export function SplitButton({
             size="sm"
             aria-label={menuLabel}
             title={menuLabel}
-            disabled={disabled}
+            disabled={menuDisabled}
             className="h-full rounded-l-none border-l border-on-primary/25"
             {...triggerProps}
           >

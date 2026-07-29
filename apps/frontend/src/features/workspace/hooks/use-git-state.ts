@@ -5,7 +5,9 @@ import type {
   GitBranchesResponse,
   GitCommitDetailsResponse,
   GitDiffResponse,
+  GitHeadMessageResponse,
   GitHistoryResponse,
+  GitPushBody,
   GitRepoState,
   GitStatus,
   InitRepoResponse,
@@ -31,6 +33,11 @@ const gitStateKeys = {
 const gitStashKeys = {
   all: ['git-stashes'] as const,
   detail: (chatId: string) => [...gitStashKeys.all, chatId] as const,
+};
+
+const gitHeadMessageKeys = {
+  all: ['git-head-message'] as const,
+  detail: (chatId: string) => [...gitHeadMessageKeys.all, chatId] as const,
 };
 
 const gitBranchKeys = {
@@ -348,12 +355,22 @@ export function useGitDiff(chatId: string, input: GitDiffInput | null) {
   });
 }
 
+interface RemoteMutationInput {
+  prune?: boolean;
+  force?: GitPushBody['force'];
+}
+
 function useRemoteMutation(chatId: string, operation: 'fetch' | 'pull' | 'push') {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: { prune?: boolean } = {}): Promise<GitRepoState> => {
+    mutationFn: async (input: RemoteMutationInput = {}): Promise<GitRepoState> => {
       const endpoint = client.api.git[operation];
-      const body = operation === 'fetch' ? { chatId, prune: input.prune } : { chatId };
+      const body =
+        operation === 'fetch'
+          ? { chatId, prune: input.prune }
+          : operation === 'push'
+            ? { chatId, ...(input.force ? { force: input.force } : {}) }
+            : { chatId };
       const { data, error } = await endpoint.post(body);
       if (error) throw new ApiError(error.value);
       return data as GitRepoState;
@@ -372,4 +389,20 @@ export function useGitPull(chatId: string) {
 
 export function useGitPush(chatId: string) {
   return useRemoteMutation(chatId, 'push');
+}
+
+/**
+ * The commit an amend would replace. Enabled only while amend mode is active so
+ * the panel does not spawn a `git log` on every render of every chat.
+ */
+export function useGitHeadMessage(chatId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: gitHeadMessageKeys.detail(chatId),
+    enabled,
+    queryFn: async (): Promise<GitHeadMessageResponse> => {
+      const { data, error } = await client.api.git['head-message'].get({ query: { chatId } });
+      if (error) throw new ApiError(error.value);
+      return data as GitHeadMessageResponse;
+    },
+  });
 }
