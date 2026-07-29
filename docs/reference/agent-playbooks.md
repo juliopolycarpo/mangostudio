@@ -13,6 +13,7 @@ Open these first:
 - `apps/api/src/routes/auth.ts`
 - `apps/api/src/plugins/auth-middleware.ts`
 - `apps/api/src/plugins/api-key-guard.ts`
+- `apps/api/src/plugins/rate-limit-policy.ts`
 - `apps/api/src/modules/api-keys/application/api-key-service.ts`
 - `apps/api/src/modules/api-keys/http/api-key-routes.ts`
 - `apps/shared/src/api-keys/schemas.ts`
@@ -22,6 +23,7 @@ Open these first:
 - `apps/frontend/src/routes/login.tsx`
 - `apps/frontend/src/routes/signup.tsx`
 - `apps/frontend/src/routes/_authenticated.tsx` (client-side route guard)
+- `docs/reference/external-api.md` (automation-facing HTTP API keys)
 - `tests/browser-smoke/auth-flow.spec.ts`
 
 ## API Routes And Contracts
