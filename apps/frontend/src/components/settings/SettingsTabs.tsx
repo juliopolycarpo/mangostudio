@@ -1,10 +1,15 @@
 import { Link } from '@tanstack/react-router';
 import { useI18n } from '@/hooks/use-i18n';
 
+// Router Link concatenates `className` with the matching state's className, so
+// the two state classes must stay disjoint from the base and from each other:
+// putting the idle color in the base would leave `text-on-surface-variant/60`
+// on the active tab, fighting `text-primary` on stylesheet order alone.
 const TAB_LINK_BASE =
   'px-3 sm:px-4 py-2.5 text-sm rounded-t-lg transition-all duration-200 whitespace-nowrap';
-const TAB_LINK_IDLE = `${TAB_LINK_BASE} font-medium text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high/60`;
-const TAB_LINK_ACTIVE = `${TAB_LINK_BASE} font-semibold text-primary border-b-2 border-primary -mb-px bg-primary/5`;
+const TAB_LINK_IDLE =
+  'font-medium text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high/60';
+const TAB_LINK_ACTIVE = 'font-semibold text-primary border-b-2 border-primary -mb-px bg-primary/5';
 
 /**
  * Horizontal tab navigation for the Settings page.
@@ -39,10 +44,9 @@ export function SettingsTabs() {
         <Link
           key={to}
           to={to}
-          className={TAB_LINK_IDLE}
-          activeProps={{
-            className: TAB_LINK_ACTIVE,
-          }}
+          className={TAB_LINK_BASE}
+          activeProps={{ className: TAB_LINK_ACTIVE }}
+          inactiveProps={{ className: TAB_LINK_IDLE }}
         >
           {label}
         </Link>
