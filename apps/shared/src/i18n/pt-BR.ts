@@ -1751,6 +1751,10 @@ export const messages = {
       pinned: '{count} fixados, ocupando {size}.',
       pinnedHint:
         'Backups fixados guardam a última cópia de um recurso, então a retenção nunca os apaga.',
+      restore: 'Restaurar',
+      restoring: 'Restaurando...',
+      restored: '{count} restaurados.',
+      restoreError: 'Não foi possível restaurar este backup.',
       purge: 'Descartar',
       purgeConfirm: 'Excluir definitivamente',
       purgeCancel: 'Manter',

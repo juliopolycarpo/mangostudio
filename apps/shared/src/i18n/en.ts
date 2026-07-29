@@ -1730,6 +1730,10 @@ export const messages: Messages = {
       pinned: '{count} pinned, holding {size}.',
       pinnedHint:
         'Pinned sets hold the last remaining copy of a resource, so retention never deletes them.',
+      restore: 'Restore',
+      restoring: 'Restoring...',
+      restored: '{count} put back.',
+      restoreError: 'This backup could not be restored.',
       purge: 'Purge',
       // Two clicks, because the set being purged is the only remaining copy of
       // whatever the removal that created it took.
