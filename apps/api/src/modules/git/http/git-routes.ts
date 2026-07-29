@@ -8,6 +8,7 @@ import {
   CommitBodySchema,
   CommitResponseSchema,
   CreateBranchBodySchema,
+  DeleteBranchBodySchema,
   DiscardPathsBodySchema,
   GenerateCommitMessageBodySchema,
   type GenerateCommitMessageResponse,
@@ -29,6 +30,7 @@ import {
   InitRepoBodySchema,
   type InitRepoResponse,
   InitRepoResponseSchema,
+  RenameBranchBodySchema,
   StagePathsBodySchema,
   StashApplyBodySchema,
   StashDropBodySchema,
@@ -65,12 +67,14 @@ import {
   checkoutRemoteBranch,
   commitChanges,
   createBranch,
+  deleteBranch,
   discardPaths,
   fetchRemote,
   GitWriteError,
   listBranches,
   pullFastForward,
   pushBranch,
+  renameBranch,
   stagePaths,
   stashApply,
   stashDrop,
@@ -577,6 +581,52 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
       },
       {
         body: CreateBranchBodySchema,
+        response: {
+          200: GitRepoStateSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .delete(
+      '/branches',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await deleteBranch(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: DeleteBranchBodySchema,
+        response: {
+          200: GitBranchesResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/branches/rename',
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        if ('error' in resolved) return resolved.error;
+        try {
+          return await renameBranch(resolved.workdir, body, request.signal);
+        } catch (error) {
+          return gitWriteError(error, set);
+        }
+      },
+      {
+        body: RenameBranchBodySchema,
         response: {
           200: GitRepoStateSchema,
           403: ApiErrorResponseSchema,

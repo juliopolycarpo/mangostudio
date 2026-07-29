@@ -3,10 +3,12 @@ import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import type {
   CommitBody,
   CommitResponse,
+  DeleteBranchBody,
   DiscardPathsBody,
   GitBranchesResponse,
   GitRepoState,
   GitStatus,
+  RenameBranchBody,
   StagePathsBody,
   StashApplyBody,
   StashDropBody,
@@ -409,29 +411,33 @@ export async function listBranches(
 ): Promise<GitBranchesResponse> {
   try {
     const root = await requireRepoRoot(workdir, signal);
-    const [localResult, remoteResult] = await Promise.all([
-      runGit(
-        [
-          'for-each-ref',
-          '--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%00',
-          'refs/heads',
-        ],
-        { cwd: root, signal }
-      ),
-      runGit(['for-each-ref', '--format=%(refname:short)%00', 'refs/remotes'], {
-        cwd: root,
-        signal,
-      }),
-    ]);
-    const branches = parseBranchList(localResult.stdout);
-    const localNames = new Set(branches.map((branch) => branch.name));
-    const remotes = parseRemoteBranchList(remoteResult.stdout).filter(
-      (remote) => !localNames.has(remote.name)
-    );
-    return { branches, remotes };
+    return await readBranches(root, signal);
   } catch (error) {
     return mapWriteFailure(error, 'Listing branches');
   }
+}
+
+async function readBranches(root: string, signal?: AbortSignal): Promise<GitBranchesResponse> {
+  const [localResult, remoteResult] = await Promise.all([
+    runGit(
+      [
+        'for-each-ref',
+        '--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%00',
+        'refs/heads',
+      ],
+      { cwd: root, signal }
+    ),
+    runGit(['for-each-ref', '--format=%(refname:short)%00', 'refs/remotes'], {
+      cwd: root,
+      signal,
+    }),
+  ]);
+  const branches = parseBranchList(localResult.stdout);
+  const localNames = new Set(branches.map((branch) => branch.name));
+  const remotes = parseRemoteBranchList(remoteResult.stdout).filter(
+    (remote) => !localNames.has(remote.name)
+  );
+  return { branches, remotes };
 }
 
 export function switchBranch(
@@ -510,6 +516,43 @@ export function createBranch(
   return runRepoMutation(workdir, signal, 'Creating branch', async (root) => {
     await runGit(['check-ref-format', '--branch', name], { cwd: root, signal });
     await runGit(['switch', '-c', name], { cwd: root, signal });
+    return await currentRepoState(workdir, root, signal);
+  });
+}
+
+export function deleteBranch(
+  workdir: string,
+  input: Pick<DeleteBranchBody, 'name' | 'force'>,
+  signal?: AbortSignal
+): Promise<GitBranchesResponse> {
+  return runRepoMutation(workdir, signal, 'Deleting branch', async (root) => {
+    const status = await getRepoStatus(root, signal);
+    if (status.branch.name === input.name) {
+      throw new GitWriteError(
+        'Switch to another branch before deleting this one.',
+        409,
+        ERROR_CODES.CONFLICT
+      );
+    }
+    try {
+      await runGit(['branch', input.force ? '-D' : '-d', '--', input.name], { cwd: root, signal });
+    } catch (error) {
+      mapBranchDeleteFailure(error);
+    }
+    return await readBranches(root, signal);
+  });
+}
+
+export function renameBranch(
+  workdir: string,
+  input: Pick<RenameBranchBody, 'name' | 'newName'>,
+  signal?: AbortSignal
+): Promise<GitRepoState> {
+  // Renaming the checked-out branch changes `status.branch.name`, so the caller
+  // gets the whole repository state back rather than just the branch list.
+  return runRepoMutation(workdir, signal, 'Renaming branch', async (root) => {
+    await runGit(['check-ref-format', '--branch', input.newName], { cwd: root, signal });
+    await runGit(['branch', '-m', '--', input.name, input.newName], { cwd: root, signal });
     return await currentRepoState(workdir, root, signal);
   });
 }
@@ -602,6 +645,18 @@ function mapBranchSwitchFailure(error: unknown): never {
     }
   }
   return mapWriteFailure(error, 'Switching branches');
+}
+
+function mapBranchDeleteFailure(error: unknown): never {
+  if (error instanceof GitCliError && /not fully merged/i.test(combinedCommandOutput(error))) {
+    throw new GitWriteError(
+      'The branch has commits that are not merged anywhere else.',
+      409,
+      ERROR_CODES.BRANCH_NOT_MERGED,
+      commandDetail(error)
+    );
+  }
+  return mapWriteFailure(error, 'Deleting branch');
 }
 
 function mapRemoteFailure(error: unknown, operation: string): never {
