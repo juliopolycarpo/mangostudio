@@ -43,6 +43,8 @@ interface RealtimeSocketState {
   connectionRegistered: boolean;
   unsubscribeBus: (() => void) | null;
   cleanedUp: boolean;
+  /** Serializes async message handlers so topic/rate state cannot race across frames. */
+  messageChain: Promise<void>;
 }
 
 interface RealtimeRouteDependencies {
@@ -192,6 +194,8 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
       accepted.add(topic);
     }
 
+    // Message handlers are serialized per socket, so this check sees committed
+    // topics from prior frames and cannot race another subscribe commit.
     if (state.topics.size + accepted.size > MAX_ACTIVE_TOPICS) {
       ws.send(errorMessage('Realtime subscription limit exceeded', ERROR_CODES.RATE_LIMITED));
       return;
@@ -230,6 +234,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
           connectionRegistered: false,
           unsubscribeBus: null,
           cleanedUp: false,
+          messageChain: Promise.resolve(),
         } satisfies RealtimeSocketState,
       };
     })
@@ -290,57 +295,69 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
         const state = socket.data.realtimeSocket;
         if (state.cleanedUp || state.rejection || !state.userId) return;
 
-        try {
-          if (!acceptsMessage(state)) {
-            cleanupConnection(state, socket.id);
-            sendAndClose(
-              socket,
-              errorMessage('Realtime message rate exceeded', ERROR_CODES.RATE_LIMITED),
-              REALTIME_CLOSE_CODES.RATE_LIMITED,
-              'Rate limited'
-            );
-            return;
-          }
+        const run = async (): Promise<void> => {
+          if (state.cleanedUp || state.rejection || !state.userId) return;
 
-          if (!Value.Check(RealtimeClientMessageSchema, incomingMessage)) {
-            state.invalidMessageCount += 1;
-            const validationError = errorMessage(
-              'Invalid realtime message',
-              ERROR_CODES.VALIDATION
-            );
-            if (state.invalidMessageCount >= 2) {
+          try {
+            if (!acceptsMessage(state)) {
               cleanupConnection(state, socket.id);
               sendAndClose(
                 socket,
-                validationError,
-                REALTIME_CLOSE_CODES.INVALID_MESSAGE,
-                'Invalid message'
+                errorMessage('Realtime message rate exceeded', ERROR_CODES.RATE_LIMITED),
+                REALTIME_CLOSE_CODES.RATE_LIMITED,
+                'Rate limited'
               );
-            } else {
-              socket.send(validationError);
+              return;
             }
-            return;
-          }
 
-          const message = incomingMessage as RealtimeClientMessage;
-          if (message.type === 'ping') {
-            socket.send({ type: 'pong' });
-            return;
-          }
-          if (message.type === 'unsubscribe') {
-            for (const topic of message.topics) {
-              if (topic === SETTINGS_TOPIC || parseGitTopic(topic)) {
-                state.topics.delete(topic);
+            if (!Value.Check(RealtimeClientMessageSchema, incomingMessage)) {
+              state.invalidMessageCount += 1;
+              const validationError = errorMessage(
+                'Invalid realtime message',
+                ERROR_CODES.VALIDATION
+              );
+              if (state.invalidMessageCount >= 2) {
+                cleanupConnection(state, socket.id);
+                sendAndClose(
+                  socket,
+                  validationError,
+                  REALTIME_CLOSE_CODES.INVALID_MESSAGE,
+                  'Invalid message'
+                );
               } else {
-                socket.send(errorMessage('Unsupported realtime topic', ERROR_CODES.UNSUPPORTED));
+                socket.send(validationError);
               }
+              return;
             }
-            return;
+
+            const message = incomingMessage as RealtimeClientMessage;
+            if (message.type === 'ping') {
+              socket.send({ type: 'pong' });
+              return;
+            }
+            if (message.type === 'unsubscribe') {
+              for (const topic of message.topics) {
+                if (topic === SETTINGS_TOPIC || parseGitTopic(topic)) {
+                  state.topics.delete(topic);
+                } else {
+                  socket.send(errorMessage('Unsupported realtime topic', ERROR_CODES.UNSUPPORTED));
+                }
+              }
+              return;
+            }
+            await subscribe(socket, message);
+          } catch (error) {
+            failSocket(socket, error);
           }
-          await subscribe(socket, message);
-        } catch (error) {
-          failSocket(socket, error);
-        }
+        };
+
+        // Keep the chain alive after failures so later frames still serialize.
+        const queued = state.messageChain.then(run, run);
+        state.messageChain = queued.then(
+          () => undefined,
+          () => undefined
+        );
+        await queued;
       },
       close(ws) {
         const socket = ws as unknown as RealtimeSocket;

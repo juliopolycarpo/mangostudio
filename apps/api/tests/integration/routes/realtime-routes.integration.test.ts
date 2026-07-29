@@ -526,6 +526,76 @@ describe('realtime WebSocket limits', () => {
     });
   });
 
+  it('serializes overlapping subscribe frames so jointly overflowing batches stay under 64', async () => {
+    let ownershipGate: Promise<void> = Promise.resolve();
+    let releaseOwnership: (() => void) | undefined;
+    let gateOwnership = false;
+    let ownershipStarted = 0;
+
+    const { bus, httpUrl, wsUrl } = startServer({
+      ownsChat: async () => {
+        ownershipStarted += 1;
+        if (gateOwnership) await ownershipGate;
+        return true;
+      },
+    });
+    const user = await signUp(httpUrl);
+    const client = connect(wsUrl, { Cookie: user.cookie });
+    const seeded = Array.from({ length: 16 }, (_, index) => gitTopic(`seed-${index}`));
+    const firstBatch = Array.from({ length: 32 }, (_, index) => gitTopic(`first-${index}`));
+    const secondBatch = Array.from({ length: 32 }, (_, index) => gitTopic(`second-${index}`));
+
+    await client.opened;
+    await client.nextMessage();
+    send(client.socket, { type: 'subscribe', topics: seeded });
+    await Bun.sleep(50);
+
+    ownershipGate = new Promise<void>((resolve) => {
+      releaseOwnership = resolve;
+    });
+    gateOwnership = true;
+    ownershipStarted = 0;
+
+    send(client.socket, { type: 'subscribe', topics: firstBatch });
+    send(client.socket, { type: 'subscribe', topics: secondBatch });
+
+    // Without per-socket serialization both frames would start ownership work
+    // against the seeded topic set and both commit past 64 active topics.
+    const deadline = Date.now() + 2_000;
+    while (ownershipStarted < 1 && Date.now() < deadline) {
+      await Bun.sleep(5);
+    }
+    expect(ownershipStarted).toBeGreaterThanOrEqual(1);
+    expect(ownershipStarted).toBeLessThanOrEqual(32);
+    releaseOwnership?.();
+
+    expect(await client.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Realtime subscription limit exceeded',
+      code: ERROR_CODES.RATE_LIMITED,
+    });
+
+    const beforeSecondPublish = client.messages.length;
+    bus.publish(user.id, {
+      type: 'invalidate',
+      topic: secondBatch[0] as string,
+      scopes: ['state'],
+    });
+    await Bun.sleep(50);
+    expect(client.messages).toHaveLength(beforeSecondPublish);
+
+    bus.publish(user.id, {
+      type: 'invalidate',
+      topic: firstBatch[0] as string,
+      scopes: ['state'],
+    });
+    expect(await client.nextMessage()).toEqual({
+      type: 'invalidate',
+      topic: firstBatch[0],
+      scopes: ['state'],
+    });
+  });
+
   it('closes the twenty-first message in one second and releases the connection slot', async () => {
     const fixedTime = 10_000;
     const { httpUrl, wsUrl } = startServer({ now: () => fixedTime });
