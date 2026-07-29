@@ -1,6 +1,11 @@
 import { Link } from '@tanstack/react-router';
 import { useI18n } from '@/hooks/use-i18n';
 
+const TAB_LINK_BASE =
+  'px-3 sm:px-4 py-2.5 text-sm rounded-t-lg transition-all duration-200 whitespace-nowrap';
+const TAB_LINK_IDLE = `${TAB_LINK_BASE} font-medium text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high/60`;
+const TAB_LINK_ACTIVE = `${TAB_LINK_BASE} font-semibold text-primary border-b-2 border-primary -mb-px bg-primary/5`;
+
 /**
  * Horizontal tab navigation for the Settings page.
  * Each tab is a TanStack Router Link for bookmarkable URLs.
@@ -33,10 +38,9 @@ export function SettingsTabs() {
         <Link
           key={to}
           to={to}
-          className="px-3 sm:px-4 py-2.5 text-sm font-medium rounded-t-lg transition-all duration-200 text-on-surface-variant/60 hover:text-on-surface hover:bg-surface-container-high/60 whitespace-nowrap"
+          className={TAB_LINK_IDLE}
           activeProps={{
-            className:
-              'px-3 sm:px-4 py-2.5 text-sm font-semibold rounded-t-lg transition-all duration-200 text-primary border-b-2 border-primary -mb-px bg-primary/5 whitespace-nowrap',
+            className: TAB_LINK_ACTIVE,
           }}
         >
           {label}
