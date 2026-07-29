@@ -12,9 +12,12 @@
  * automation scripts do not share counters with browser session traffic.
  */
 
+import { createHmac } from 'node:crypto';
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
-import { computeHash } from '../utils/hash';
 import type { RateLimitBucket } from './rate-limit-types';
+
+/** Domain-separated HMAC context for rate-limit store keys (not credential storage). */
+const API_KEY_RATE_LIMIT_HMAC_CONTEXT = 'mangostudio:rate-limit:api-key:v1';
 
 const ONE_MINUTE_MS = 60_000;
 
@@ -67,11 +70,15 @@ function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined):
 
 /**
  * Stable store id for an API key header value. The raw secret is never stored;
- * this is a truncated SHA-256 digest, not the Better Auth key id (that id is
- * unavailable before `apiKeyGuard` runs).
+ * this is a truncated HMAC-SHA256 fingerprint, not the Better Auth key id (that
+ * id is unavailable before `apiKeyGuard` runs).
  */
 function hashApiKeyHeader(value: string): string {
-  return `key:${computeHash(value).slice(0, 32)}`;
+  const digest = createHmac('sha256', API_KEY_RATE_LIMIT_HMAC_CONTEXT)
+    .update(value)
+    .digest('hex')
+    .slice(0, 32);
+  return `key:${digest}`;
 }
 
 /**
