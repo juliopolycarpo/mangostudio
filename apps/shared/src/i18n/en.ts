@@ -979,6 +979,7 @@ export const messages: Messages = {
         'When off, every key for this account is refused even if it is still listed below.',
       disabledNotice:
         'External API access is off. Existing keys stay listed but every request that presents them is refused.',
+      keysTitle: 'API keys',
       createKey: 'Create key',
       createDisabledAtCap:
         'Limit of {max} active keys reached. Revoke one before creating another.',

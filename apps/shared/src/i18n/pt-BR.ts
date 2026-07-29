@@ -993,6 +993,7 @@ export const messages = {
         'Quando desativado, todas as chaves desta conta são recusadas mesmo que ainda apareçam na lista abaixo.',
       disabledNotice:
         'O acesso à API externa está desativado. As chaves existentes continuam listadas, mas toda requisição que as apresentar é recusada.',
+      keysTitle: 'Chaves de API',
       createKey: 'Criar chave',
       createDisabledAtCap:
         'Limite de {max} chaves ativas atingido. Revogue uma antes de criar outra.',

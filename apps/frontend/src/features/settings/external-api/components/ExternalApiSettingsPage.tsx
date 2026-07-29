@@ -45,6 +45,9 @@ export function ExternalApiSettingsPage({
 
   const activeCount = keys.filter((key) => isKeyActive(key)).length;
   const atCap = activeCount >= API_KEY_MAX_PER_USER;
+  const atCapMessage = formatMessage(s.createDisabledAtCap, {
+    max: String(API_KEY_MAX_PER_USER),
+  });
   const enabled = settings.enabled;
 
   const handleRevoke = (apiKey: ApiKeySummary) => {
@@ -55,25 +58,6 @@ export function ExternalApiSettingsPage({
     });
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <p className="text-sm text-on-surface-variant">{t.common.loading}</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-16">
-        <p className="text-sm text-error">{s.loadError}</p>
-        <Button variant="ghost" size="sm" onClick={() => void refetch()}>
-          {t.common.retry}
-        </Button>
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4">
       <Card variant="solid" className="space-y-3 p-4 sm:p-6">
@@ -81,6 +65,8 @@ export function ExternalApiSettingsPage({
         <p className="text-sm text-on-surface-variant/70">{s.description}</p>
       </Card>
 
+      {/* The toggle is the kill switch for every key on the account, so it stays
+          reachable even when the key list is still loading or failed to load. */}
       <Card variant="solid" className="space-y-5 p-4 sm:p-6">
         <SettingToggle
           label={s.enableLabel}
@@ -98,21 +84,13 @@ export function ExternalApiSettingsPage({
       <Card variant="solid" className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">
-            <h3 className="text-base font-bold text-on-surface">{s.columns.key}</h3>
-            {atCap && (
-              <p className="text-xs text-on-surface-variant/60">
-                {formatMessage(s.createDisabledAtCap, { max: String(API_KEY_MAX_PER_USER) })}
-              </p>
-            )}
+            <h3 className="text-base font-bold text-on-surface">{s.keysTitle}</h3>
+            {atCap && <p className="text-xs text-on-surface-variant/60">{atCapMessage}</p>}
           </div>
           <Button
             size="sm"
-            disabled={atCap}
-            title={
-              atCap
-                ? formatMessage(s.createDisabledAtCap, { max: String(API_KEY_MAX_PER_USER) })
-                : undefined
-            }
+            disabled={atCap || isLoading || Boolean(error)}
+            title={atCap ? atCapMessage : undefined}
             onClick={() => setCreateOpen(true)}
           >
             <Plus size={14} />
@@ -120,7 +98,16 @@ export function ExternalApiSettingsPage({
           </Button>
         </div>
 
-        {keys.length === 0 ? (
+        {isLoading ? (
+          <p className="py-8 text-center text-sm text-on-surface-variant">{t.common.loading}</p>
+        ) : error ? (
+          <div className="flex flex-col items-center gap-3 py-8">
+            <p className="text-sm text-error">{s.loadError}</p>
+            <Button variant="ghost" size="sm" onClick={() => void refetch()}>
+              {t.common.retry}
+            </Button>
+          </div>
+        ) : keys.length === 0 ? (
           <p className="py-8 text-center text-sm text-on-surface-variant/60">{s.empty}</p>
         ) : (
           <div className="overflow-x-auto">
