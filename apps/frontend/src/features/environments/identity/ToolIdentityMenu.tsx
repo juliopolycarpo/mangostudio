@@ -9,6 +9,7 @@
 import { MoreVertical, Pencil, RotateCcw } from 'lucide-react';
 import { useState } from 'react';
 import { Menu, MenuItem } from '@/components/ui/Menu';
+import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { IdentityEditDialog } from './IdentityEditDialog';
@@ -25,6 +26,7 @@ export function ToolIdentityMenu({ identity, defaultName }: ToolIdentityMenuProp
   const { t } = useI18n();
   const labels = t.environments.identity;
   const reset = useResetToolIdentity();
+  const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -62,7 +64,12 @@ export function ToolIdentityMenu({ identity, defaultName }: ToolIdentityMenuProp
           disabled={!identity.customized || reset.isPending}
           onSelect={() => {
             setMenuOpen(false);
-            reset.mutate(identity.subjectKey);
+            // The menu closes on select, so a failure has nowhere inline to
+            // land — without this the name simply would not change and the
+            // user would be left guessing why.
+            reset.mutate(identity.subjectKey, {
+              onError: () => toast(labels.resetFailed, 'error'),
+            });
           }}
         >
           {labels.reset}

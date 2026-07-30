@@ -20,6 +20,8 @@ const claudeIdentity: ResolvedToolIdentity = {
   subjectKey: 'agent:claude',
   name: 'Claude Code',
   monogram: 'CC',
+  storedName: null,
+  storedMonogram: null,
   customized: false,
 };
 
@@ -65,7 +67,13 @@ describe('IdentityEditDialog', () => {
     const user = userEvent.setup();
     render(
       <IdentityEditDialog
-        identity={{ ...claudeIdentity, name: 'Renamed', monogram: 'RE', customized: true }}
+        identity={{
+          ...claudeIdentity,
+          name: 'Renamed',
+          monogram: 'RE',
+          storedName: 'Renamed',
+          customized: true,
+        }}
         defaultName="Claude Code"
         onClose={vi.fn()}
       />
@@ -74,6 +82,43 @@ describe('IdentityEditDialog', () => {
     await user.clear(screen.getByLabelText(en.environments.identity.nameLabel));
 
     expect(screen.getByTitle('Claude Code')).toHaveTextContent('CC');
+  });
+
+  it('keeps a stored monogram that happens to match the derived one', async () => {
+    const user = userEvent.setup();
+    render(
+      <IdentityEditDialog
+        identity={{ ...claudeIdentity, storedMonogram: 'CC', customized: true }}
+        defaultName="Claude Code"
+        onClose={vi.fn()}
+      />
+    );
+
+    // "CC" is both what the user saved and what "Claude Code" derives to.
+    // Seeding the field from the resolved value could not tell those apart, and
+    // renaming would then submit `monogram: null` and drop the saved one.
+    expect(screen.getByLabelText(en.environments.identity.monogramLabel)).toHaveValue('CC');
+
+    await user.type(screen.getByLabelText(en.environments.identity.nameLabel), 'My Agent');
+
+    expect(screen.getByTitle('My Agent')).toHaveTextContent('CC');
+  });
+
+  it('is a labelled modal that closes on Escape', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={onClose} />
+    );
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveAccessibleName(/Claude Code/);
+    expect(screen.getByLabelText(en.environments.identity.nameLabel)).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('explains an unusable monogram instead of letting the request fail', async () => {

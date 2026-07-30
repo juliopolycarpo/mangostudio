@@ -7,7 +7,8 @@
  * included.
  */
 
-import { useState } from 'react';
+import { normalizeMonogram } from '@mangostudio/shared/tool-identity';
+import { type KeyboardEvent, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
@@ -30,11 +31,13 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   const { t } = useI18n();
   const labels = t.environments.identity;
   const save = useSaveToolIdentity();
+  const titleId = useId();
 
-  const [name, setName] = useState(identity.name === defaultName ? '' : identity.name);
-  const [monogram, setMonogram] = useState(
-    identity.monogram === deriveMonogram(identity.name) ? '' : identity.monogram
-  );
+  // Seeded from the stored overrides, never from the resolved values: a stored
+  // monogram that happens to equal the derived one still has to come back as
+  // stored, or the next rename would silently discard it.
+  const [name, setName] = useState(identity.storedName ?? '');
+  const [monogram, setMonogram] = useState(identity.storedMonogram ?? '');
 
   const trimmedName = name.trim();
   const trimmedMonogram = monogram.trim();
@@ -43,7 +46,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   const previewName = trimmedName.length > 0 ? trimmedName : defaultName;
   const previewMonogram =
     trimmedMonogram.length > 0 && !monogramInvalid
-      ? trimmedMonogram.toUpperCase()
+      ? normalizeMonogram(trimmedMonogram)
       : deriveMonogram(previewName);
 
   const handleSave = () => {
@@ -58,12 +61,25 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
     );
   };
 
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Escape') return;
+    event.stopPropagation();
+    onClose();
+  };
+
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus.
     <div
       className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-background/80 p-4 fade-in backdrop-blur-sm duration-200"
       data-testid="identity-edit-dialog"
+      onKeyDown={handleKeyDown}
     >
-      <div className="w-full max-w-sm space-y-5 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-sm space-y-5 rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8"
+      >
         <div className="flex items-center gap-3">
           <ToolAvatar
             subjectKey={identity.subjectKey}
@@ -72,7 +88,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
             size="lg"
           />
           <div className="min-w-0 space-y-0.5">
-            <h3 className="truncate font-bold text-lg text-on-surface">
+            <h3 id={titleId} className="truncate font-bold text-lg text-on-surface">
               {formatMessage(labels.dialogTitle, { name: identity.name })}
             </h3>
             <p className="text-on-surface-variant/60 text-xs">{labels.preview}</p>
@@ -85,6 +101,9 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
               id="tool-identity-name"
               label={labels.nameLabel}
               value={name}
+              // The dialog exists to edit this field; opening it and landing
+              // outside the form is the keyboard user's version of a dead end.
+              autoFocus
               maxLength={64}
               placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
               onChange={(event) => setName(event.target.value)}

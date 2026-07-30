@@ -15,6 +15,15 @@ export interface ResolvedToolIdentity {
   readonly name: string;
   /** One or two characters, uppercased; derived from `name` unless overridden. */
   readonly monogram: string;
+  /**
+   * The stored overrides themselves, per field.
+   *
+   * An editor cannot infer these from `name`/`monogram`: a monogram stored as
+   * "CC" is indistinguishable from one derived from "Claude Code", and a form
+   * that guesses would drop the saved value the next time the tool is renamed.
+   */
+  readonly storedName: string | null;
+  readonly storedMonogram: string | null;
   /** Whether either field is a stored override — drives the Reset affordance. */
   readonly customized: boolean;
 }
@@ -71,6 +80,8 @@ export function resolveToolIdentity(
     // A monogram override survives a rename; without one the monogram tracks
     // whatever the tool is currently called.
     monogram: stored?.monogram ?? deriveMonogram(name),
+    storedName: stored?.displayName ?? null,
+    storedMonogram: stored?.monogram ?? null,
     customized: Boolean(stored),
   };
 }
