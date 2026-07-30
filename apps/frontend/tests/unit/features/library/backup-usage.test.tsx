@@ -67,7 +67,7 @@ describe('BackupUsage', () => {
 
     const link = await screen.findByTestId('manage-backups');
     expect(link).toHaveTextContent(en.library.backups.manage);
-    expect(link).toHaveAttribute('href', '/library/backups');
+    expect(link).toHaveAttribute('href', '/environments/library/backups');
   });
 
   it('discloses nothing when nothing is retained', async () => {

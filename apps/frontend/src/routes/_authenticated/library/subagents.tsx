@@ -1,9 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { MatrixPage } from '@/features/library/components/MatrixPage';
-import { libraryResourcesQueryOptions } from '@/features/library/queries';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/_authenticated/library/subagents')({
-  loader: ({ context: { queryClient } }) =>
-    queryClient.prefetchQuery(libraryResourcesQueryOptions('subagent')),
-  component: () => <MatrixPage kind="subagent" />,
+  beforeLoad: () => {
+    redirect({ to: '/environments/library/subagents', throw: true });
+  },
 });

@@ -1,9 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { MatrixPage } from '@/features/library/components/MatrixPage';
-import { libraryResourcesQueryOptions } from '@/features/library/queries';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/_authenticated/library/instructions')({
-  loader: ({ context: { queryClient } }) =>
-    queryClient.prefetchQuery(libraryResourcesQueryOptions('instruction')),
-  component: () => <MatrixPage kind="instruction" />,
+  beforeLoad: () => {
+    redirect({ to: '/environments/library/instructions', throw: true });
+  },
 });

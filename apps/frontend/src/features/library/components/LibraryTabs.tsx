@@ -10,10 +10,10 @@ export function LibraryTabs() {
   const { t } = useI18n();
 
   const tabs = [
-    { to: '/library/skills' as const, label: t.library.tabs.skills },
-    { to: '/library/subagents' as const, label: t.library.tabs.subagents },
-    { to: '/library/instructions' as const, label: t.library.tabs.instructions },
-    { to: '/library/settings' as const, label: t.library.tabs.settings },
+    { to: '/environments/library/skills' as const, label: t.library.tabs.skills },
+    { to: '/environments/library/subagents' as const, label: t.library.tabs.subagents },
+    { to: '/environments/library/instructions' as const, label: t.library.tabs.instructions },
+    { to: '/environments/library/settings' as const, label: t.library.tabs.settings },
   ];
 
   return (

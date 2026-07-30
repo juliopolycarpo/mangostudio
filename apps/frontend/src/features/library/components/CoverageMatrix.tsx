@@ -214,7 +214,7 @@ function ResourceRow({
       </td>
       <td className="min-w-0 px-2 py-1.5">
         <Link
-          to="/library/$resourceKey"
+          to="/environments/library/$resourceKey"
           params={{ resourceKey: resource.key }}
           aria-label={formatMessage(l.matrix.openDetail, { resource: resource.ref.slug })}
           className="block truncate font-medium text-on-surface hover:text-primary"
