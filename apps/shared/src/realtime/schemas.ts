@@ -1,11 +1,18 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { ApiErrorResponseSchema } from '../errors/schemas';
 
-/** Settings invalidation sections (app / provider / tool settings pages). */
+/**
+ * Settings invalidation sections. The first three are the settings pages; the
+ * fourth is the tool identity registry, which shares the topic because it is
+ * one more per-user preference store — but it is read far outside settings, so
+ * its subscriber lives with the identity query rather than on the settings
+ * layout.
+ */
 export const SettingsScopeSchema = Type.Union([
   Type.Literal('app'),
   Type.Literal('provider'),
   Type.Literal('tool'),
+  Type.Literal('tool-identity'),
 ]);
 export type SettingsScope = Static<typeof SettingsScopeSchema>;
 

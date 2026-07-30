@@ -33,6 +33,7 @@ import {
 } from './modules/realtime/http/realtime-routes';
 import { skillRoutes } from './modules/skills/http/skill-routes';
 import { todoRoutes } from './modules/todos/http/todo-routes';
+import { toolIdentityRoutes } from './modules/tool-identity/http/tool-identity-routes';
 import { workspaceRoutes } from './modules/workspaces/http/workspace-routes';
 import { apiKeyGuard } from './plugins/api-key-guard';
 import { errorHandler } from './plugins/error-handler';
@@ -95,6 +96,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(settingsRoutes)
   .use(skillRoutes)
   .use(mcpServerRoutes)
+  .use(toolIdentityRoutes)
   .use(workspaceRoutes);
 
 /**
