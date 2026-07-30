@@ -56,6 +56,27 @@ async function seedMcpServer(userId: string, slug: string): Promise<void> {
     .execute();
 }
 
+/**
+ * Leaves behind a stored identity whose MCP server no longer exists.
+ *
+ * The write is asserted here rather than fired and forgotten: a reset against a
+ * row that was never stored succeeds too, so a silently failed setup would let
+ * the orphan tests below pass without ever exercising an orphan.
+ */
+async function seedOrphanedIdentity(app: ReturnType<typeof mountApp>): Promise<void> {
+  await seedMcpServer(testUser.id, 'weather');
+
+  const written = await app.handle(
+    jsonRequest('/tool-identities/mcp:weather', 'PUT', { displayName: 'Forecast' })
+  );
+  expect(written.status).toBe(200);
+  expect(((await written.json()) as ToolIdentityUpdateResponse).identity?.displayName).toBe(
+    'Forecast'
+  );
+
+  await getDb().deleteFrom('mcp_servers').where('userId', '=', testUser.id).execute();
+}
+
 beforeEach(() => {
   userSeq += 1;
   testUser = {
@@ -205,13 +226,8 @@ describe('tool identity routes', () => {
   });
 
   it('still resets an identity whose MCP server was deleted', async () => {
-    await seedMcpServer(testUser.id, 'weather');
     const app = mountApp();
-
-    await app.handle(
-      jsonRequest('/tool-identities/mcp:weather', 'PUT', { displayName: 'Forecast' })
-    );
-    await getDb().deleteFrom('mcp_servers').where('userId', '=', testUser.id).execute();
+    await seedOrphanedIdentity(app);
 
     // The label outlives the server it named. Requiring the server to still
     // exist would make the orphan permanently unresettable.
@@ -223,13 +239,8 @@ describe('tool identity routes', () => {
   });
 
   it('clears an orphaned identity through an all-null update too', async () => {
-    await seedMcpServer(testUser.id, 'weather');
     const app = mountApp();
-
-    await app.handle(
-      jsonRequest('/tool-identities/mcp:weather', 'PUT', { displayName: 'Forecast' })
-    );
-    await getDb().deleteFrom('mcp_servers').where('userId', '=', testUser.id).execute();
+    await seedOrphanedIdentity(app);
 
     const cleared = await app.handle(
       jsonRequest('/tool-identities/mcp:weather', 'PUT', { displayName: null, monogram: null })
