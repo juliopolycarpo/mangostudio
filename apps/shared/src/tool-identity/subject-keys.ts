@@ -51,3 +51,19 @@ export function parseSubjectKey(subjectKey: string): ParsedSubjectKey | undefine
 export function toolSubjectKey(kind: ToolIdentityKind, id: string): string {
   return `${kind}:${id}`;
 }
+
+/**
+ * Uppercases a monogram and caps it at two characters.
+ *
+ * The cap has to survive the uppercasing rather than precede it: a ligature
+ * grows when uppercased ("ﬃ" → "FFI"), so a value that satisfied the schema on
+ * the way in can violate it on the way out — and a stored monogram that fails
+ * its own response schema turns every later read into a 500. Slicing by code
+ * point keeps an astral character whole instead of storing half a pair.
+ *
+ * Shared because storing and previewing must agree; a preview that shows
+ * something the server will not store is a lie the user only discovers on save.
+ */
+export function normalizeMonogram(value: string): string {
+  return Array.from(value.toUpperCase()).slice(0, 2).join('');
+}

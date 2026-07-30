@@ -13,4 +13,9 @@ export {
   ToolIdentityUpdateResponseSchema,
   ToolIdentityUpdateSchema,
 } from './schemas';
-export { parseSubjectKey, toolSubjectKey } from './subject-keys';
+export {
+  normalizeMonogram,
+  type ParsedSubjectKey,
+  parseSubjectKey,
+  toolSubjectKey,
+} from './subject-keys';

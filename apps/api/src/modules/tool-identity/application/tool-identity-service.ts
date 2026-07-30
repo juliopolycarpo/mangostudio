@@ -10,6 +10,8 @@
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import {
+  normalizeMonogram,
+  type ParsedSubjectKey,
   parseSubjectKey,
   type ToolIdentity,
   type ToolIdentityListResponse,
@@ -60,20 +62,20 @@ export async function updateToolIdentity(
   subjectKey: string,
   patch: ToolIdentityUpdate
 ): Promise<ToolIdentity | null> {
-  await assertKnownSubject(db, userId, subjectKey);
+  const subject = parseKnownSubject(subjectKey);
 
   const existing = await getToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey);
   const displayName = resolveField(patch.displayName, existing?.displayName ?? null, (value) =>
     value.trim()
   );
-  const monogram = resolveField(patch.monogram, existing?.monogram ?? null, (value) =>
-    value.toUpperCase()
-  );
+  const monogram = resolveField(patch.monogram, existing?.monogram ?? null, normalizeMonogram);
 
   if (displayName === null && monogram === null) {
-    await resetToolIdentity(db, userId, subjectKey);
+    await clearToolIdentity(db, userId, subjectKey);
     return null;
   }
+
+  await assertOwnedMcpSubject(db, userId, subject);
 
   const updatedAt = await upsertToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey, {
     displayName,
@@ -89,25 +91,28 @@ export async function resetToolIdentity(
   userId: string,
   subjectKey: string
 ): Promise<void> {
-  await assertKnownSubject(db, userId, subjectKey);
+  // Grammar and static membership only. Deleting an MCP server must not strand
+  // its label: requiring the server to still exist would make the orphaned row
+  // permanently unresettable, which is the opposite of what a reset is for.
+  parseKnownSubject(subjectKey);
+  await clearToolIdentity(db, userId, subjectKey);
+}
+
+async function clearToolIdentity(
+  db: Kysely<Database>,
+  userId: string,
+  subjectKey: string
+): Promise<void> {
   await deleteToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey);
   publishSettingsInvalidation(userId, 'tool-identity');
 }
 
 /**
- * A subject must exist before it can be labelled. Static kinds are checked
- * against their closed unions; an `mcp:` slug must belong to one of the
- * caller's own servers, so a key cannot be used to probe another user's setup.
- *
- * Rows may orphan later — deleting a server leaves its identity behind — which
- * is harmless: an identity nothing renders is invisible, and resetting it stays
- * available.
+ * Splits a subject key and rejects one whose kind or id the contract does not
+ * know. Everything a write needs except MCP ownership, which only matters when
+ * a row is about to be stored.
  */
-async function assertKnownSubject(
-  db: Kysely<Database>,
-  userId: string,
-  subjectKey: string
-): Promise<void> {
+function parseKnownSubject(subjectKey: string): ParsedSubjectKey {
   const subject = parseSubjectKey(subjectKey);
   if (!subject) {
     throw new ToolIdentityError(
@@ -116,6 +121,19 @@ async function assertKnownSubject(
       ERROR_CODES.VALIDATION
     );
   }
+  return subject;
+}
+
+/**
+ * An `mcp:` label may only be stored against one of the caller's own servers,
+ * so a key cannot be used to probe another user's setup. Checked before a write
+ * rather than on every operation — see `resetToolIdentity`.
+ */
+async function assertOwnedMcpSubject(
+  db: Kysely<Database>,
+  userId: string,
+  subject: ParsedSubjectKey
+): Promise<void> {
   if (subject.kind !== 'mcp') return;
 
   const server = await db

@@ -204,6 +204,57 @@ describe('tool identity routes', () => {
     expect(foreign.status).toBe(422);
   });
 
+  it('still resets an identity whose MCP server was deleted', async () => {
+    await seedMcpServer(testUser.id, 'weather');
+    const app = mountApp();
+
+    await app.handle(
+      jsonRequest('/tool-identities/mcp:weather', 'PUT', { displayName: 'Forecast' })
+    );
+    await getDb().deleteFrom('mcp_servers').where('userId', '=', testUser.id).execute();
+
+    // The label outlives the server it named. Requiring the server to still
+    // exist would make the orphan permanently unresettable.
+    const reset = await app.handle(jsonRequest('/tool-identities/mcp:weather', 'DELETE'));
+    expect(reset.status).toBe(204);
+
+    const listed = await app.handle(new Request('http://localhost/tool-identities'));
+    expect((await listed.json()) as ToolIdentityListResponse).toEqual({ identities: {} });
+  });
+
+  it('clears an orphaned identity through an all-null update too', async () => {
+    await seedMcpServer(testUser.id, 'weather');
+    const app = mountApp();
+
+    await app.handle(
+      jsonRequest('/tool-identities/mcp:weather', 'PUT', { displayName: 'Forecast' })
+    );
+    await getDb().deleteFrom('mcp_servers').where('userId', '=', testUser.id).execute();
+
+    const cleared = await app.handle(
+      jsonRequest('/tool-identities/mcp:weather', 'PUT', { displayName: null, monogram: null })
+    );
+
+    expect(cleared.status).toBe(200);
+    expect(((await cleared.json()) as ToolIdentityUpdateResponse).identity).toBeNull();
+  });
+
+  it('caps a monogram that grows when uppercased', async () => {
+    const app = mountApp();
+
+    // "ﬃ" is one character that uppercases to three. Storing the result
+    // unclipped would violate the response schema and 500 every later read.
+    const written = await app.handle(
+      jsonRequest('/tool-identities/runtime:node', 'PUT', { monogram: 'ﬃ' })
+    );
+    expect(written.status).toBe(200);
+    expect(((await written.json()) as ToolIdentityUpdateResponse).identity?.monogram).toBe('FF');
+
+    const listed = await app.handle(new Request('http://localhost/tool-identities'));
+    expect(listed.status).toBe(200);
+    expect(Value.Check(ToolIdentityListResponseSchema, await listed.json())).toBe(true);
+  });
+
   it('keeps identities isolated per user', async () => {
     const app = mountApp();
     await app.handle(jsonRequest('/tool-identities/agent:claude', 'PUT', { displayName: 'Mine' }));
