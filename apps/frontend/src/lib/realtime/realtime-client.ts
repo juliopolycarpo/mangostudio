@@ -44,6 +44,11 @@ export type RealtimeTopicListener = (signal: RealtimeSignal) => void | Promise<v
 export interface RealtimeClient {
   /** Ref-counted: the socket and the server-side topic are shared per tab. */
   subscribe(topic: string, listener: RealtimeTopicListener): () => void;
+  /**
+   * Drops the live transport and opens a new one when listeners remain. Used when
+   * the authenticated user changes so the handshake picks up fresh cookies.
+   */
+  reconnectForSession(): void;
 }
 
 export interface RealtimeClientOptions {
@@ -220,6 +225,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   function reconcileTopics(): void {
     lingerTimer = undefined;
     if (listeners.size === 0) {
+      boundAuthenticatedUserId = undefined;
       teardown();
       return;
     }
@@ -313,12 +319,19 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
       case 'ready':
         handleReady();
         return;
-      case 'subscribed':
+      case 'subscribed': {
+        const stale: string[] = [];
         for (const topic of message.topics) {
+          if (!listeners.has(topic)) {
+            stale.push(topic);
+            continue;
+          }
           activeTopics.add(topic);
           dispatch(topic, SUBSCRIBED_SIGNAL);
         }
+        if (stale.length > 0) sendTopicFrames('unsubscribe', stale);
         return;
+      }
       case 'invalidate':
         dispatch(message.topic, { type: 'invalidate', message });
         return;
@@ -382,6 +395,22 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
     };
   }
 
+  function reconnectForSession(): void {
+    if (phase === 'stopped') return;
+    clearReconnectTimer();
+    clearFlushTimer();
+    clearLingerTimer();
+    closeSocket();
+    requestedTopics = new Set();
+    activeTopics = new Set();
+    awaitingPong = false;
+    if (listeners.size === 0) {
+      phase = 'idle';
+      return;
+    }
+    connect();
+  }
+
   function subscribe(topic: string, listener: RealtimeTopicListener): () => void {
     if (topic.length === 0) throw new TypeError('topic must not be empty');
 
@@ -406,14 +435,28 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
     };
   }
 
-  return { subscribe };
+  return { subscribe, reconnectForSession };
 }
 
 let sharedClient: RealtimeClient | null = null;
+/** Last user bound to the tab singleton; cleared when the socket fully tears down. */
+let boundAuthenticatedUserId: string | undefined;
+
+/**
+ * Ensures the shared socket was authenticated for `userId`. Reconnects when the
+ * signed-in user changes so a linger window cannot keep the previous session.
+ */
+export function bindRealtimeClientToUser(userId: string): void {
+  const previous = boundAuthenticatedUserId;
+  if (previous === userId) return;
+  boundAuthenticatedUserId = userId;
+  if (previous !== undefined) sharedClient?.reconnectForSession();
+}
 
 /** Drops the tab singleton so the next subscribe opens a new connection. */
 export function resetRealtimeClient(): void {
   sharedClient = null;
+  boundAuthenticatedUserId = undefined;
 }
 
 /** The one socket per tab. Created on first use so no module import opens one. */

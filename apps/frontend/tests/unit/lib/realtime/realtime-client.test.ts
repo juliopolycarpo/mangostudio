@@ -1,6 +1,7 @@
 import { REALTIME_CLOSE_CODES } from '@mangostudio/shared/realtime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  bindRealtimeClientToUser,
   createRealtimeClient,
   getRealtimeClient,
   type RealtimeClient,
@@ -518,6 +519,21 @@ describe('createRealtimeClient', () => {
     expect(frames(socket).at(-1)).toEqual({ type: 'subscribe', topics: ['git:chat-1'] });
   });
 
+  it('unsubscribes a late subscribed ack for a topic already released past linger', () => {
+    const client = createClient();
+    const release = client.subscribe('git:chat-1', () => undefined);
+    client.subscribe('settings', () => undefined);
+    const socket = makeReady();
+    socket.emit({ type: 'subscribed', topics: ['git:chat-1', 'settings'] });
+
+    release();
+    vi.advanceTimersByTime(LINGER_MS);
+    expect(frames(socket).at(-1)).toEqual({ type: 'unsubscribe', topics: ['git:chat-1'] });
+
+    socket.emit({ type: 'subscribed', topics: ['git:chat-1'] });
+    expect(frames(socket).at(-1)).toEqual({ type: 'unsubscribe', topics: ['git:chat-1'] });
+  });
+
   it('escalates the reconnect delay 500/1000/2000/4000/8000/15000', () => {
     const client = createClient();
     client.subscribe('settings', () => undefined);
@@ -757,5 +773,19 @@ describe('getRealtimeClient', () => {
     expect(afterReject).not.toBe(shared);
     afterReject.subscribe('settings', () => undefined);
     expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it('reconnects the shared socket when the authenticated user changes', () => {
+    const client = getRealtimeClient();
+    bindRealtimeClientToUser('user-a');
+    client.subscribe('settings', () => undefined);
+    const first = FakeWebSocket.instances[0];
+    first?.open();
+    first?.emit({ type: 'ready' });
+    first?.emit({ type: 'subscribed', topics: ['settings'] });
+
+    bindRealtimeClientToUser('user-b');
+    expect(FakeWebSocket.instances).toHaveLength(2);
+    expect(first?.closedWith).toBeDefined();
   });
 });

@@ -9,8 +9,10 @@ interface Subscription {
   release: ReturnType<typeof vi.fn>;
 }
 
-let subscriptions: Subscription[] = [];
-let subscribe = vi.fn();
+const mocks = vi.hoisted(() => ({
+  bindRealtimeClientToUser: vi.fn(),
+  subscribe: vi.fn(),
+}));
 
 vi.mock('@/lib/auth-client', () => ({
   authClient: {
@@ -21,17 +23,22 @@ vi.mock('@/lib/auth-client', () => ({
 // The seam is the client module, not the WebSocket global. Hoisted rather than
 // per-test doMock so instrumented runs do not re-import React for every case.
 vi.mock('@/lib/realtime/realtime-client', () => ({
-  getRealtimeClient: () => ({ subscribe }),
+  bindRealtimeClientToUser: mocks.bindRealtimeClientToUser,
+  getRealtimeClient: () => ({ subscribe: mocks.subscribe }),
 }));
 
 describe('useRealtimeInvalidation', () => {
+  let subscriptions: Subscription[] = [];
+
   beforeEach(() => {
     subscriptions = [];
-    subscribe = vi.fn((topic: string, listener: RealtimeTopicListener) => {
+    mocks.subscribe.mockImplementation((topic: string, listener: RealtimeTopicListener) => {
       const release = vi.fn();
       subscriptions.push({ topic, listener, release });
       return release;
     });
+    mocks.subscribe.mockClear();
+    mocks.bindRealtimeClientToUser.mockClear();
   });
 
   function only(): Subscription {
@@ -44,14 +51,15 @@ describe('useRealtimeInvalidation', () => {
   it('subscribes once on mount', () => {
     renderHook(() => useRealtimeInvalidation('settings', vi.fn()));
 
-    expect(subscribe).toHaveBeenCalledOnce();
+    expect(mocks.bindRealtimeClientToUser).toHaveBeenCalledWith('user-test');
+    expect(mocks.subscribe).toHaveBeenCalledOnce();
     expect(only().topic).toBe('settings');
   });
 
   it('never subscribes for a null topic', () => {
     renderHook(() => useRealtimeInvalidation(null, vi.fn()));
 
-    expect(subscribe).not.toHaveBeenCalled();
+    expect(mocks.subscribe).not.toHaveBeenCalled();
   });
 
   it('unsubscribes on unmount', () => {
@@ -85,7 +93,7 @@ describe('useRealtimeInvalidation', () => {
     );
     rerender({ topic: null });
 
-    expect(subscribe).toHaveBeenCalledOnce();
+    expect(mocks.subscribe).toHaveBeenCalledOnce();
     expect(only().release).toHaveBeenCalledOnce();
   });
 
@@ -103,7 +111,7 @@ describe('useRealtimeInvalidation', () => {
       rerender({ label });
     }
 
-    expect(subscribe).toHaveBeenCalledOnce();
+    expect(mocks.subscribe).toHaveBeenCalledOnce();
 
     // The ref is reassigned during render, so the signal reaches the newest
     // closure rather than the one captured at subscribe time.

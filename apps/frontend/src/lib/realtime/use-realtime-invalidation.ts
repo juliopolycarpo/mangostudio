@@ -1,6 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { authClient } from '@/lib/auth-client';
-import { getRealtimeClient, type RealtimeSignal } from './realtime-client';
+import {
+  bindRealtimeClientToUser,
+  getRealtimeClient,
+  type RealtimeSignal,
+} from './realtime-client';
 
 /**
  * Subscribes to a realtime topic for the lifetime of the component and reports
@@ -30,6 +34,7 @@ export function useRealtimeInvalidation(
 
   useEffect(() => {
     if (topic === null || userId === undefined) return;
+    bindRealtimeClientToUser(userId);
     return getRealtimeClient().subscribe(topic, (signal) => onSignalRef.current(signal));
   }, [topic, userId]);
 }
