@@ -303,6 +303,13 @@ export const messages: Messages = {
 
   settings: {
     title: 'Settings',
+    autoSave: {
+      saving: 'Saving...',
+      saved: 'Saved',
+      error: 'Not saved',
+      errorToast: 'Could not save settings.',
+      errorRevertedToast: 'Could not save settings. Your last change was reverted.',
+    },
     tabs: {
       general: 'General',
       connectors: 'Connectors',

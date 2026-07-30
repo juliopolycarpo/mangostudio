@@ -6,6 +6,8 @@ import { ApiError } from '@/lib/utils';
 export const appSettingsKeys = {
   all: ['app-settings'] as const,
   current: () => [...appSettingsKeys.all, 'current'] as const,
+  /** Mutation key: lets the layout observe auto-save state it does not own. */
+  save: () => [...appSettingsKeys.all, 'save'] as const,
 };
 
 export function appSettingsQueryOptions() {

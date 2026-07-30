@@ -346,7 +346,15 @@ describe('Git write routes', () => {
       await expectInvalidation(postJson(app, '/git/fetch', { chatId }), 'fetch');
       await expectInvalidation(postJson(app, '/git/pull', { chatId }), 'pull');
       await expectInvalidation(postJson(app, '/git/push', { chatId }), 'push');
-    }
+    },
+    // Every other case in this file covers one operation; this one walks the
+    // whole write surface to prove no operation publishes the wrong scope, so
+    // it spawns ~20 sequential Git subprocesses plus a push against a shared
+    // runner. It landed with ~1s of headroom under bun's 5s default and has
+    // been drifting into it as the suite grows, so the budget is stated rather
+    // than inherited. It is not a slow test to be tolerated — if it ever
+    // approaches this number, something has genuinely regressed.
+    30_000
   );
 
   it.skipIf(!hasGit)('refuses to widen a selection through a magic pathspec', async () => {

@@ -1,9 +1,10 @@
 import type { AppSettings, AppSettingsPutBody } from '@mangostudio/shared/app-settings';
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
+import { en } from '@mangostudio/shared/i18n';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
 import { client } from '../../../src/lib/api-client';
-import { act, renderHook, waitFor } from '../../support/harness/render';
+import { act, renderHook, screen, waitFor } from '../../support/harness/render';
 
 vi.mock('../../../src/lib/api-client', () => ({
   client: {
@@ -335,6 +336,186 @@ describe('useGlobalSettings', () => {
     });
   });
 
+  it('coalesces a typing burst into a single PUT', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // Separate acts, so each keystroke commits its own render. The debounce has
+    // to survive those re-renders: a timer keyed on the unstable `useMutation`
+    // result would be flushed by the effect cleanup on every one of them.
+    for (const value of ['d', 'dr', 'dra', 'draft']) {
+      act(() => {
+        result.current.setTextSystemPrompt(value);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      });
+    }
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      promptSettings: { textSystemPrompt: 'draft' },
+    });
+  });
+
+  it('flushes a still-pending save when the hook unmounts', async () => {
+    const { result, unmount } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setTextSystemPrompt('draft left behind');
+    });
+
+    expect(mockPut).not.toHaveBeenCalled();
+
+    unmount();
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      promptSettings: { textSystemPrompt: 'draft left behind' },
+    });
+  });
+
+  it('rolls the burst back to its starting point and reports a failed save', async () => {
+    // Held open so the optimistic state is observable before the failure lands.
+    let failPut: (() => void) | undefined;
+    mockPut.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          failPut = () =>
+            resolve(mockMutationResult(null, { value: { error: 'settings write failed' } }));
+        })
+    );
+
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setTextSystemPrompt('draft');
+      result.current.setTextSystemPrompt('final draft');
+    });
+
+    // Optimistic: the burst is on screen well before the request settles.
+    await waitFor(() => expect(result.current.promptSettings.textSystemPrompt).toBe('final draft'));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    act(() => failPut?.());
+
+    // Back to where the burst started, not to its first intermediate value.
+    await waitFor(() =>
+      expect(result.current.promptSettings.textSystemPrompt).toBe(
+        DEFAULT_APP_SETTINGS.promptSettings.textSystemPrompt
+      )
+    );
+    expect(screen.getByText(en.settings.autoSave.errorRevertedToast)).toBeTruthy();
+  });
+
+  /**
+   * Two PUTs overlap when an edit lands while an earlier one is still open. The
+   * pair can settle in either order, and only the newest submission may touch
+   * the cache — an older response must never reinstate a value the user has
+   * already typed past, nor drag the rollback target forward with it.
+   */
+  describe('overlapping saves', () => {
+    /** Holds every PUT open so their settle order can be chosen by the test. */
+    function holdEveryPut(): Array<(result: MockPutResult) => void> {
+      const settlePut: Array<(result: MockPutResult) => void> = [];
+      mockPut.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            settlePut.push(resolve);
+          })
+      );
+      return settlePut;
+    }
+
+    function failedPut(): MockPutResult {
+      return mockMutationResult(null, { value: { error: 'settings write failed' } });
+    }
+
+    function savedPut(textSystemPrompt: string): MockPutResult {
+      return mockMutationResult({
+        ...DEFAULT_APP_SETTINGS,
+        promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt },
+      });
+    }
+
+    /**
+     * Settles a held PUT and lets its mutation callbacks run before returning,
+     * so what the next edit sees is the state they left behind.
+     */
+    async function settle(
+      resolvePut: ((result: MockPutResult) => void) | undefined,
+      putResult: MockPutResult
+    ): Promise<void> {
+      await act(async () => {
+        resolvePut?.(putResult);
+        await Promise.resolve();
+      });
+    }
+
+    it('does not claim a rollback when a superseded save fails', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => useGlobalSettings());
+
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+      act(() => result.current.setTextSystemPrompt('first'));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+      act(() => result.current.setTextSystemPrompt('second'));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
+
+      // The older PUT fails after a newer one has already been submitted.
+      act(() => settlePut[0]?.(failedPut()));
+
+      await waitFor(() => expect(screen.getByText(en.settings.autoSave.errorToast)).toBeTruthy());
+      // Nothing was reverted — the newer value is still on screen — so telling
+      // the user it was would send them looking for an edit that is still there.
+      expect(result.current.promptSettings.textSystemPrompt).toBe('second');
+      expect(screen.queryByText(en.settings.autoSave.errorRevertedToast)).toBeNull();
+    });
+
+    it('rolls back to the last confirmed value, not to an unconfirmed one', async () => {
+      const burstStart = 'persisted baseline';
+      mockGet.mockResolvedValue(
+        mockQueryResult({
+          ...DEFAULT_APP_SETTINGS,
+          promptSettings: {
+            ...DEFAULT_APP_SETTINGS.promptSettings,
+            textSystemPrompt: burstStart,
+          },
+        })
+      );
+
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => useGlobalSettings());
+
+      await waitFor(() => expect(result.current.promptSettings.textSystemPrompt).toBe(burstStart));
+
+      act(() => result.current.setTextSystemPrompt('first'));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+      act(() => result.current.setTextSystemPrompt('second'));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
+
+      // The first PUT settles while the second is still open, so the burst —
+      // and the rollback target it started from — is not over.
+      await settle(settlePut[0], savedPut('first'));
+
+      act(() => result.current.setTextSystemPrompt('third'));
+      await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(3));
+
+      await settle(settlePut[1], failedPut());
+      await settle(settlePut[2], failedPut());
+
+      // 'second' was never persisted: restoring it would leave a value the
+      // server rejected on screen, with refetch-on-focus off to correct it.
+      await waitFor(() => expect(result.current.promptSettings.textSystemPrompt).toBe(burstStart));
+    });
+  });
+
   it('adds and removes custom rules through the cached app settings state', async () => {
     const { result } = renderHook(() => useGlobalSettings());
 
@@ -355,7 +536,12 @@ describe('useGlobalSettings', () => {
     });
 
     await waitFor(() => expect(result.current.promptSettings.customRules).toEqual([]));
-    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
+    // The count is deliberately not asserted: the debounce coalesces edits made
+    // inside one window, so what has to hold is that the last PUT carries the
+    // final state.
+    await waitFor(() =>
+      expect(mockPut.mock.lastCall?.[0]).toMatchObject({ promptSettings: { customRules: [] } })
+    );
   });
 
   it('resetSettings restores the shared defaults and persists them', async () => {
