@@ -7,6 +7,7 @@ import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import { LIBRARY_SCOPES } from '@mangostudio/shared/library';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
+import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';
 import { agentCliDetectionService } from '../../environments/application/agent-cli-detection';
 import {
   LIBRARY_LOCATION_DEFINITIONS,
@@ -45,13 +46,14 @@ export async function getAppSettings(db: Kysely<Database>, userId: string): Prom
   return getSavedAppSettings(db, userId, await libraryLocationDefaults());
 }
 
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function updateAppSettings(
   db: Kysely<Database>,
   userId: string,
   settings: AppSettings
 ): Promise<AppSettings> {
-  return upsertAppSettings(db, userId, normalizeAppSettings(settings));
+  const persistedSettings = await upsertAppSettings(db, userId, normalizeAppSettings(settings));
+  publishSettingsInvalidation(userId, 'app');
+  return persistedSettings;
 }
 
 export function defaultsForDetectedAgents(

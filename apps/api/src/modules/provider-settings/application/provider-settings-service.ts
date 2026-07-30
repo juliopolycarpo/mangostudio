@@ -14,6 +14,7 @@ import {
   isProviderType,
   mergeProviderRuntimeSettings,
 } from '../../../services/providers/core/provider-settings-policy';
+import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';
 import {
   getProviderSettings,
   listProviderSettings,
@@ -73,6 +74,7 @@ export async function updateProviderSettingsDescriptor(
     provider,
   } satisfies Partial<ProviderRuntimeSettings>);
   const persistedSettings = await upsertProviderSettings(db, userId, provider, nextSettings);
+  publishSettingsInvalidation(userId, 'provider');
   return buildProviderSettingsDescriptor(provider, persistedSettings);
 }
 

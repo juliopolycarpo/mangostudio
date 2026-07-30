@@ -12,6 +12,7 @@ import {
   type McpBridgeTool,
 } from '../../../services/mcp/tool-bridge';
 import { isMcpToolName, parseMcpToolName } from '../../../services/mcp/tool-naming';
+import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';
 import {
   getAllTools,
   getDefaultToolSettings,
@@ -55,6 +56,18 @@ export async function listToolSettingsDescriptors(
 }
 
 export async function updateToolSettingsDescriptor(
+  db: Kysely<Database>,
+  userId: string,
+  toolName: string,
+  updates: UpdateToolSettingsBody
+): Promise<ToolSettingsDescriptor> {
+  const descriptor = await writeToolSettings(db, userId, toolName, updates);
+  publishSettingsInvalidation(userId, 'tool');
+  return descriptor;
+}
+
+/** Both branches persist to `user_tool_settings`; only the validation differs. */
+async function writeToolSettings(
   db: Kysely<Database>,
   userId: string,
   toolName: string,
