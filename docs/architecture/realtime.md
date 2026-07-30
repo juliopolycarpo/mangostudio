@@ -130,10 +130,67 @@ stale and refresh relevant HTTP queries after receiving `ready`. After
 subscribing to additional topics, refresh again after `subscribed`. Reconnects
 must use bounded backoff and must stop on `4401`.
 
+A known gap: after a laptop wake, a socket sitting in a 30 s backoff is not
+short-circuited by `online` or `visibilitychange`. TanStack Query's
+`refetchOnReconnect` already covers freshness in that window, so the socket
+reconnecting a few seconds later costs nothing observable.
+
 The bus only reaches sockets in the current API process. Deployments with
 multiple API workers require an external fan-out layer before they can promise
 cross-worker delivery. Until then, realtime is a cache-freshness optimization,
 not a consistency or durability boundary.
+
+## Browser Client
+
+The browser half lives in `apps/frontend/src/lib/realtime/`:
+`realtime-client.ts` owns the connection, `parse-server-message.ts` narrows
+inbound frames, and `use-realtime-invalidation.ts` is the React entry point.
+
+One socket serves the whole tab. `getRealtimeClient()` creates it lazily on the
+first subscribe, so a tab that mounts nothing never opens a connection.
+Topics are ref-counted: many components may hold the same topic, and the
+server-side subscription is dropped only once the last one releases it.
+
+`useRealtimeInvalidation(topic, onSignal)` subscribes for the lifetime of a
+component and hands every signal to a callback. Callers invalidate with their
+own query client, so the module carries no query-key or topic knowledge.
+The two signals are `{ type: 'invalidate', message }` and
+`{ type: 'subscribed' }`.
+
+`subscribed` is the assume-stale barrier. Because events published while a
+socket was down are lost, an ack — on first connect, on reconnect, and on an
+idempotent re-subscribe — means anything cached for that topic may predate the
+subscription and should be refreshed. There is no separate `ready` signal:
+every topic that can receive an invalidation is acked, so one would only cause
+a second refresh.
+
+Client rules the module enforces:
+
+| Rule                  | Behavior                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| No frame before ready | Sends are gated on the protocol phase, not `readyState`, which also spans OPEN-before-`ready`.                            |
+| Batched subscribes    | Same-tick adds coalesce into one frame, chunked at 32 topics.                                                             |
+| Rejected topics       | A topic answered with an `error` instead of an ack is terminal for that socket and retried on the next connect.           |
+| Linger                | Dropping the last listener starts a single-shot ~5 s reconcile, so StrictMode churn costs no frames.                      |
+| Heartbeat             | One timer at `REALTIME_IDLE_TIMEOUT_SECONDS / 2.5`; a missed pong forces a reconnect. Any inbound frame is proof of life. |
+| Backoff               | 1 s→30 s with half jitter, reset only after 10 s of proven stability rather than on `ready`.                              |
+
+The heartbeat is derived from the shared idle timeout so the ping cadence and
+the window it must beat cannot drift. It also acts as a liveness watchdog: it is
+what detects a half-open socket after a laptop sleep, where `onclose` never
+fires.
+
+Backoff is gated on stability, not on `ready`, so a server that acknowledges a
+connection and then drops it — eight tabs against the per-user connection limit
+— still escalates instead of hot-looping.
+
+Close-code policy:
+
+| Close code                | Client behavior                                            |
+| ------------------------- | ---------------------------------------------------------- |
+| `4401`                    | Stop permanently and return to the authentication flow.    |
+| `4403`, `4400`            | Stop permanently; reconnecting replays the same rejection. |
+| `4429`, `1011`, transport | Reconnect with backoff; `4429` starts at the ceiling.      |
 
 ## Adding A Topic
 

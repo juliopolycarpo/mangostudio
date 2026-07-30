@@ -44,6 +44,8 @@ open:
 - `apps/shared/src/realtime/`
 - `apps/api/src/modules/realtime/http/realtime-routes.ts`
 - `apps/api/src/services/realtime/realtime-bus.ts`
+- `apps/frontend/src/lib/realtime/realtime-client.ts` (one socket per tab)
+- `apps/frontend/src/lib/realtime/use-realtime-invalidation.ts` (consumer entry point)
 - the producer's application mutation path
 - `apps/api/src/modules/chats/domain/chat-ownership.ts` for chat-scoped topics
 - `apps/api/tests/integration/routes/realtime-routes.integration.test.ts`
