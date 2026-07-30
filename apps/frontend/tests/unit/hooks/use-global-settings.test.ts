@@ -336,6 +336,29 @@ describe('useGlobalSettings', () => {
     });
   });
 
+  it('coalesces a typing burst into a single PUT', async () => {
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // Separate acts, so each keystroke commits its own render. The debounce has
+    // to survive those re-renders: a timer keyed on the unstable `useMutation`
+    // result would be flushed by the effect cleanup on every one of them.
+    for (const value of ['d', 'dr', 'dra', 'draft']) {
+      act(() => {
+        result.current.setTextSystemPrompt(value);
+      });
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 40));
+      });
+    }
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      promptSettings: { textSystemPrompt: 'draft' },
+    });
+  });
+
   it('flushes a still-pending save when the hook unmounts', async () => {
     const { result, unmount } = renderHook(() => useGlobalSettings());
 
@@ -410,7 +433,12 @@ describe('useGlobalSettings', () => {
     });
 
     await waitFor(() => expect(result.current.promptSettings.customRules).toEqual([]));
-    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(2));
+    // The count is deliberately not asserted: the debounce coalesces edits made
+    // inside one window, so what has to hold is that the last PUT carries the
+    // final state.
+    await waitFor(() =>
+      expect(mockPut.mock.lastCall?.[0]).toMatchObject({ promptSettings: { customRules: [] } })
+    );
   });
 
   it('resetSettings restores the shared defaults and persists them', async () => {

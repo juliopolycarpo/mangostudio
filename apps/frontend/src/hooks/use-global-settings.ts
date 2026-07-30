@@ -76,6 +76,13 @@ export function useGlobalSettings() {
    * so by then the optimistic value is all that is left.
    */
   const rollbackRef = useRef<AppSettings | null>(null);
+  /**
+   * Monotonic submission counter. An edit made while a PUT is still open starts
+   * a second one, and the two can settle out of order, so only the newest
+   * submission is allowed to write the cache — an older response must never
+   * reinstate a value the user has already moved past.
+   */
+  const saveSequenceRef = useRef(0);
   const { data, isLoading, error } = useQuery({
     ...appSettingsQueryOptions(),
     placeholderData: DEFAULT_APP_SETTINGS,
@@ -84,26 +91,44 @@ export function useGlobalSettings() {
   const mutation = useMutation({
     mutationKey: appSettingsKeys.save(),
     mutationFn: updateAppSettings,
-    onMutate: () => ({ previousSettings: rollbackRef.current }),
+    onMutate: () => {
+      saveSequenceRef.current += 1;
+      return { previousSettings: rollbackRef.current, sequence: saveSequenceRef.current };
+    },
     onError: (_error, _nextSettings, context) => {
       // A silent rollback reads as a control that simply refused to move.
       toast(t.settings.autoSave.errorToast, 'error');
-      if (!context?.previousSettings) return;
+      // A superseded save must not roll back: a newer submission either already
+      // persisted its value or will report its own failure against it.
+      if (context?.sequence !== saveSequenceRef.current) return;
+      if (!context.previousSettings) return;
       queryClient.setQueryData(appSettingsKeys.current(), context.previousSettings);
     },
-    onSuccess: (savedSettings) => {
+    onSuccess: (savedSettings, _nextSettings, context) => {
+      // Re-marked here so the echo window still covers the server's own event,
+      // which cannot arrive before the write that triggered it has settled. Only
+      // a successful write publishes one, so a failure leaves the window closed
+      // and the next invalidation is free to repair the rolled-back cache.
+      markAppSettingsLocalWrite();
+      if (context.sequence !== saveSequenceRef.current) return;
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
     },
     onSettled: () => {
-      // Re-marked here so the echo window still covers the server's own event,
-      // which cannot arrive before the write that triggered it has settled.
-      markAppSettingsLocalWrite();
       // A save queued mid-flight keeps the burst — and its rollback target — open.
       if (pendingSaveRef.current === null) rollbackRef.current = null;
     },
   });
 
   const settings = useMemo(() => normalizeAppSettings(data ?? DEFAULT_APP_SETTINGS), [data]);
+
+  /**
+   * `useMutation` returns a fresh object on every render, so the debounce must
+   * key off `mutate` — which is stable for the observer's lifetime — and never
+   * off the result object: the unmount-flush effect below re-runs its cleanup
+   * whenever its dependency changes, so an unstable one would flush the pending
+   * save on every re-render and the debounce would never coalesce anything.
+   */
+  const { mutate } = mutation;
 
   const flushPendingSave = useCallback(() => {
     if (saveTimerRef.current) {
@@ -115,8 +140,8 @@ export function useGlobalSettings() {
     if (!pendingSettings) return;
 
     pendingSaveRef.current = null;
-    mutation.mutate(pendingSettings);
-  }, [mutation]);
+    mutate(pendingSettings);
+  }, [mutate]);
 
   useEffect(
     () => () => {
