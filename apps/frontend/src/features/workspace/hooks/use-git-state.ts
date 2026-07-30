@@ -13,7 +13,7 @@ import type {
   InitRepoResponse,
   StashListResponse,
 } from '@mangostudio/shared/git';
-import { GIT_SCOPES, type GitScope } from '@mangostudio/shared/realtime';
+import { GIT_SCOPES, type GitScope, gitTopic } from '@mangostudio/shared/realtime';
 import {
   type QueryClient,
   queryOptions,
@@ -24,6 +24,7 @@ import {
 } from '@tanstack/react-query';
 import { useEffect } from 'react';
 import { client } from '@/lib/api-client';
+import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 import { githubContextKeys } from './use-github-context';
 
@@ -160,6 +161,28 @@ async function invalidateGitScopes(
 
 export function useGitState(chatId: string) {
   return useQuery(gitStateQueryOptions(chatId));
+}
+
+/**
+ * Keeps every mounted Git panel fresh across tabs and server-side workspace
+ * changes. A subscription acknowledgement invalidates every slice because
+ * events may have been missed while the socket was disconnected.
+ */
+export function useGitRealtimeInvalidation(chatId: string): void {
+  const queryClient = useQueryClient();
+
+  useRealtimeInvalidation(gitTopic(chatId), (signal) => {
+    if (signal.type === 'subscribed') {
+      return invalidateGitScopes(queryClient, chatId, GIT_SCOPES);
+    }
+    // The realtime client dispatches only exact-topic matches to this listener,
+    // so a git subscription has already narrowed the validated event's scopes.
+    return invalidateGitScopes(
+      queryClient,
+      chatId,
+      (signal.message.scopes as readonly GitScope[] | undefined) ?? GIT_SCOPES
+    );
+  });
 }
 
 export function useInitRepo(chatId: string) {

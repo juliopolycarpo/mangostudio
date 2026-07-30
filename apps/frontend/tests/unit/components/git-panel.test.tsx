@@ -66,6 +66,7 @@ vi.mock('../../../src/features/workspace/hooks/use-github-context', () => ({
 }));
 
 vi.mock('../../../src/features/workspace/hooks/use-git-state', () => ({
+  useGitRealtimeInvalidation: () => undefined,
   useGitState: () => ({
     data: hooks.data,
     error: hooks.error,
