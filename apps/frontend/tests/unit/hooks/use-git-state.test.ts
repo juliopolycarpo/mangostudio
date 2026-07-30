@@ -1,8 +1,8 @@
 import type { GitStatus } from '@mangostudio/shared/git';
+import { GIT_SCOPES } from '@mangostudio/shared/realtime';
 import { useQuery } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  GIT_SCOPES,
   gitWriteScopes,
   useCommit,
   useDeleteBranch,

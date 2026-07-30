@@ -13,6 +13,7 @@ import type {
   InitRepoResponse,
   StashListResponse,
 } from '@mangostudio/shared/git';
+import { GIT_SCOPES, type GitScope } from '@mangostudio/shared/realtime';
 import {
   type QueryClient,
   queryOptions,
@@ -62,21 +63,12 @@ const gitDiffKeys = {
     [...gitDiffKeys.all, chatId, input.path, input.staged ?? false, input.commit ?? null] as const,
 };
 
-/** Query families a git write may invalidate. Each mutation declares its own set. */
-export const GIT_SCOPES = [
-  'state',
-  'stashes',
-  'branches',
-  'history',
-  'commits',
-  'diffs',
-  'github',
-] as const;
-export type GitScope = (typeof GIT_SCOPES)[number];
-
 /**
  * Declarative invalidation map: each write states what it can change so a
  * single-file stage click does not refetch history or every cached commit.
+ *
+ * Scope names come from the shared realtime contract, which is also what the
+ * server sends on a `git:<chatId>` invalidation.
  */
 export const gitWriteScopes = {
   init: GIT_SCOPES,

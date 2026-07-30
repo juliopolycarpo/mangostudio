@@ -13,7 +13,7 @@ export const SETTINGS_SCOPES: readonly SettingsScope[] = SettingsScopeSchema.any
   (literal) => literal.const
 );
 
-/** Git panel cache slices; mirrors frontend invalidation scopes until PR 008 re-exports. */
+/** Git panel cache slices. Single source of truth for the frontend's write-scope map. */
 export const GitScopeSchema = Type.Union([
   Type.Literal('state'),
   Type.Literal('stashes'),
