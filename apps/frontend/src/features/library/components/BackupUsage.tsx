@@ -43,7 +43,7 @@ export function BackupUsage() {
         })}
       </p>
       <Link
-        to="/library/backups"
+        to="/environments/library/backups"
         className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
         data-testid="manage-backups"
       >

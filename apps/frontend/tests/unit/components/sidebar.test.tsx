@@ -24,6 +24,17 @@ describe('Sidebar', () => {
     expect(screen.getAllByRole('button', { name: /settings/i }).length).toBeGreaterThanOrEqual(1);
   });
 
+  // The library lives under the environments umbrella now, so a Library entry
+  // here would be a second way in to a surface that already has one.
+  it('offers no standalone Library entry', () => {
+    render(<Sidebar {...defaultProps} />);
+
+    expect(screen.queryByRole('button', { name: /library/i })).toBeNull();
+    expect(screen.getAllByRole('button', { name: /environments/i }).length).toBeGreaterThanOrEqual(
+      1
+    );
+  });
+
   it('highlights Studio when it is the current page', () => {
     render(<Sidebar {...defaultProps} currentPage="studio" />);
 

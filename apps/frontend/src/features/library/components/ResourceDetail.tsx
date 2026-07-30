@@ -239,14 +239,14 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
 function kindTab(resource: LibraryResource) {
   switch (resource.ref.kind) {
     case 'subagent':
-      return '/library/subagents' as const;
+      return '/environments/library/subagents' as const;
     case 'instruction':
-      return '/library/instructions' as const;
+      return '/environments/library/instructions' as const;
     case 'setting':
     case 'hook':
-      return '/library/settings' as const;
+      return '/environments/library/settings' as const;
     default:
-      return '/library/skills' as const;
+      return '/environments/library/skills' as const;
   }
 }
 

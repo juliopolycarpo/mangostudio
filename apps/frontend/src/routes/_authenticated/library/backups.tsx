@@ -1,8 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { BackupList } from '@/features/library/components/BackupList';
-import { backupUsageQueryOptions } from '@/features/library/queries';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/_authenticated/library/backups')({
-  loader: ({ context: { queryClient } }) => queryClient.prefetchQuery(backupUsageQueryOptions()),
-  component: BackupList,
+  beforeLoad: () => {
+    redirect({ to: '/environments/library/backups', throw: true });
+  },
 });

@@ -63,8 +63,10 @@ function AuthenticatedLayout() {
   if (currentPath.includes('/gallery')) activePage = 'gallery';
   if (currentPath.includes('/settings')) activePage = 'settings';
   if (currentPath.includes('/studio')) activePage = 'studio';
-  if (currentPath.includes('/environments')) activePage = 'environments';
-  if (currentPath.includes('/library')) activePage = 'library';
+  // `/library/*` only ever redirects into the umbrella now, but it stays mapped
+  // so the nav does not flash a different entry while the redirect resolves.
+  if (currentPath.includes('/environments') || currentPath.includes('/library'))
+    activePage = 'environments';
 
   return (
     <AppContext value={app}>

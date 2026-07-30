@@ -2,7 +2,7 @@ import type { useNavigate } from '@tanstack/react-router';
 import { useCallback } from 'react';
 import type { useChats } from '@/features/chat/hooks/use-chats';
 
-export type AppPage = 'chat' | 'environments' | 'gallery' | 'library' | 'settings' | 'studio';
+export type AppPage = 'chat' | 'environments' | 'gallery' | 'settings' | 'studio';
 
 interface UseChatRouteActionsParams {
   readonly chats: ReturnType<typeof useChats>;
@@ -50,7 +50,6 @@ export function useChatRouteActions({ chats, navigate }: UseChatRouteActionsPara
         chat: '/',
         environments: '/environments',
         gallery: '/gallery',
-        library: '/library',
         settings: '/settings',
         studio: '/studio',
       } as const;

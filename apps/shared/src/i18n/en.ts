@@ -1516,7 +1516,6 @@ export const messages: Messages = {
       cursor: 'Cursor',
     },
     title: 'Library',
-    nav: 'Library',
     subtitle: 'What each agent sees, where it lives, and where the copies disagree.',
     tabs: {
       skills: 'Skills',
@@ -1947,9 +1946,12 @@ export const messages: Messages = {
     nav: 'Environments',
     subtitle: 'What is installed, what is wrong, and what actually runs when you type.',
     tabs: {
-      runtimes: 'Runtimes',
+      // Label only: the tab still lives at /environments/runtimes and every
+      // runtime id on the wire is unchanged.
+      runtimes: 'Toolchains',
       agents: 'Agents',
       health: 'Health',
+      library: 'Library',
     },
     // Product names — identical in every locale, but centralized here so the UI
     // never renders a raw id such as `nvm` or `mangostudio`.

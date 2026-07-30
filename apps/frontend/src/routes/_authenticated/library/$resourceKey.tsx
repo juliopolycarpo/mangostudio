@@ -1,14 +1,7 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { ResourceDetail } from '@/features/library/components/ResourceDetail';
-import { libraryResourceQueryOptions } from '@/features/library/queries';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/_authenticated/library/$resourceKey')({
-  loader: ({ context: { queryClient }, params }) =>
-    queryClient.prefetchQuery(libraryResourceQueryOptions(params.resourceKey)),
-  component: ResourceDetailRoute,
+  beforeLoad: ({ params }) => {
+    redirect({ to: '/environments/library/$resourceKey', params, throw: true });
+  },
 });
-
-function ResourceDetailRoute() {
-  const { resourceKey } = Route.useParams();
-  return <ResourceDetail resourceKey={resourceKey} />;
-}
