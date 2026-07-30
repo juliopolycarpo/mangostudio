@@ -16,3 +16,21 @@ export function getApiBaseUrl(): string {
 
   return 'http://localhost:3001';
 }
+
+const HTTPS_PREFIX = 'https:';
+const HTTP_PREFIX = 'http:';
+
+/**
+ * WebSocket origin for the realtime channel, derived from the API base URL so
+ * both halves of the app always target the same host.
+ *
+ * The scheme is swapped by explicit prefix slicing rather than a substring
+ * replace: a protocol-less `VITE_API_URL` such as `localhost:3001` must stay
+ * untouched instead of becoming `wsocalhost:3001`.
+ */
+export function getWebSocketBaseUrl(): string {
+  const base = getApiBaseUrl();
+  if (base.startsWith(HTTPS_PREFIX)) return `wss:${base.slice(HTTPS_PREFIX.length)}`;
+  if (base.startsWith(HTTP_PREFIX)) return `ws:${base.slice(HTTP_PREFIX.length)}`;
+  return base;
+}

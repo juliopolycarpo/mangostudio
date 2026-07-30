@@ -49,3 +49,39 @@ describe('getApiBaseUrl', () => {
     expect(result).toBe('http://localhost:3001');
   });
 });
+
+describe('getWebSocketBaseUrl', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  it('maps https to wss', async () => {
+    vi.stubEnv('VITE_API_URL', 'https://api.example.com');
+    const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
+
+    expect(getWebSocketBaseUrl()).toBe('wss://api.example.com');
+  });
+
+  it('maps http to ws', async () => {
+    vi.stubEnv('VITE_API_URL', 'http://custom-api:9000');
+    const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
+
+    expect(getWebSocketBaseUrl()).toBe('ws://custom-api:9000');
+  });
+
+  it('leaves a protocol-less base url unchanged', async () => {
+    vi.stubEnv('VITE_API_URL', 'localhost:3001');
+    const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
+
+    expect(getWebSocketBaseUrl()).toBe('localhost:3001');
+  });
+
+  it('derives the scheme from the browser origin when VITE_API_URL is not set', async () => {
+    const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
+
+    // jsdom serves the suite over http, so the origin maps to a ws:// base
+    expect(getWebSocketBaseUrl()).toBe(window.location.origin.replace('http:', 'ws:'));
+    expect(getWebSocketBaseUrl().startsWith('ws://')).toBe(true);
+  });
+});
