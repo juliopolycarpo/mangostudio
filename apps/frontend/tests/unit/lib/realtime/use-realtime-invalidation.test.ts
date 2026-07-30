@@ -12,6 +12,12 @@ interface Subscription {
 let subscriptions: Subscription[] = [];
 let subscribe = vi.fn();
 
+vi.mock('@/lib/auth-client', () => ({
+  authClient: {
+    useSession: () => ({ data: { user: { id: 'user-test' } } }),
+  },
+}));
+
 // The seam is the client module, not the WebSocket global. Hoisted rather than
 // per-test doMock so instrumented runs do not re-import React for every case.
 vi.mock('@/lib/realtime/realtime-client', () => ({

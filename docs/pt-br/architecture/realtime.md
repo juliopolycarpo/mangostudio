@@ -191,11 +191,11 @@ continua escalando em vez de entrar em laço quente.
 
 Política de códigos de fechamento:
 
-| Código                     | Comportamento do cliente                                   |
-| -------------------------- | ---------------------------------------------------------- |
-| `4401`                     | Para em definitivo e volta ao fluxo de autenticação.       |
-| `4403`, `4400`             | Para em definitivo; reconectar repetiria a mesma rejeição. |
-| `4429`, `1011`, transporte | Reconecta com backoff; `4429` já começa no teto.           |
+| Código                     | Comportamento do cliente                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `4401`                     | Para em definitivo e volta ao fluxo de autenticação; o singleton da aba é descartado para a nova sessão abrir outro socket. |
+| `4403`, `4400`             | Para em definitivo; reconectar repetiria a mesma rejeição.                                                                  |
+| `4429`, `1011`, transporte | Reconecta com backoff; `4429` já começa no teto.                                                                            |
 
 ## Como Adicionar Um Tópico
 

@@ -186,11 +186,11 @@ connection and then drops it — eight tabs against the per-user connection limi
 
 Close-code policy:
 
-| Close code                | Client behavior                                            |
-| ------------------------- | ---------------------------------------------------------- |
-| `4401`                    | Stop permanently and return to the authentication flow.    |
-| `4403`, `4400`            | Stop permanently; reconnecting replays the same rejection. |
-| `4429`, `1011`, transport | Reconnect with backoff; `4429` starts at the ceiling.      |
+| Close code                | Client behavior                                                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `4401`                    | Stop permanently and return to the authentication flow; the tab singleton is discarded so a new session can open a fresh socket. |
+| `4403`, `4400`            | Stop permanently; reconnecting replays the same rejection.                                                                       |
+| `4429`, `1011`, transport | Reconnect with backoff; `4429` starts at the ceiling.                                                                            |
 
 ## Adding A Topic
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { authClient } from '@/lib/auth-client';
 import { getRealtimeClient, type RealtimeSignal } from './realtime-client';
 
 /**
@@ -24,9 +25,11 @@ export function useRealtimeInvalidation(
   // the effect therefore depends on the topic alone.
   const onSignalRef = useRef(onSignal);
   onSignalRef.current = onSignal;
+  const { data: session } = authClient.useSession();
+  const userId = session?.user?.id;
 
   useEffect(() => {
-    if (topic === null) return;
+    if (topic === null || userId === undefined) return;
     return getRealtimeClient().subscribe(topic, (signal) => onSignalRef.current(signal));
-  }, [topic]);
+  }, [topic, userId]);
 }

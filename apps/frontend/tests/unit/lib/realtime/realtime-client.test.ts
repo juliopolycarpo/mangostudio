@@ -7,6 +7,7 @@ import {
   type RealtimeClientOptions,
   type RealtimeSignal,
   type RealtimeTopicListener,
+  resetRealtimeClient,
 } from '@/lib/realtime/realtime-client';
 
 /** Heartbeat cadence: the idle timeout (60 s) divided by 2.5. */
@@ -727,7 +728,34 @@ describe('createRealtimeClient', () => {
 });
 
 describe('getRealtimeClient', () => {
+  beforeEach(() => {
+    FakeWebSocket.instances = [];
+    resetRealtimeClient();
+    vi.stubGlobal('WebSocket', FakeWebSocket as unknown as typeof WebSocket);
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    resetRealtimeClient();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
   it('returns one shared client per tab', () => {
     expect(getRealtimeClient()).toBe(getRealtimeClient());
+  });
+
+  it('replaces the shared client after a 4401 so reauthentication can reconnect', () => {
+    const shared = getRealtimeClient();
+    shared.subscribe('settings', () => undefined);
+    const socket = FakeWebSocket.instances[0];
+    socket?.open();
+    socket?.emit({ type: 'ready' });
+    socket?.drop(REALTIME_CLOSE_CODES.UNAUTHORIZED);
+
+    const afterReject = getRealtimeClient();
+    expect(afterReject).not.toBe(shared);
+    afterReject.subscribe('settings', () => undefined);
+    expect(FakeWebSocket.instances).toHaveLength(2);
   });
 });

@@ -52,6 +52,12 @@ export interface RealtimeClientOptions {
   readonly resolveUrl?: () => string;
   /** Called once when the server rejects the session with `4401`. */
   readonly onUnauthorized?: () => void;
+  /**
+   * Called after the client enters the terminal `stopped` phase for `4401`.
+   * The tab singleton uses this to drop the shared instance so a later
+   * authenticated session gets a new socket instead of a dead one.
+   */
+  readonly onAuthSessionRejected?: () => void;
   /** Jitter source, injectable so the backoff schedule is assertable. */
   readonly random?: () => number;
 }
@@ -68,6 +74,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   const createSocket = options.createSocket ?? ((url: string) => new WebSocket(url));
   const resolveUrl = options.resolveUrl ?? (() => `${getWebSocketBaseUrl()}${REALTIME_PATH}`);
   const onUnauthorized = options.onUnauthorized ?? scheduleLoginRedirect;
+  const onAuthSessionRejected = options.onAuthSessionRejected;
   const random = options.random ?? Math.random;
 
   let phase: Phase = 'idle';
@@ -329,6 +336,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
 
     if (code === REALTIME_CLOSE_CODES.UNAUTHORIZED) {
       stop();
+      onAuthSessionRejected?.();
       onUnauthorized();
       return;
     }
@@ -403,8 +411,17 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
 
 let sharedClient: RealtimeClient | null = null;
 
+/** Drops the tab singleton so the next subscribe opens a new connection. */
+export function resetRealtimeClient(): void {
+  sharedClient = null;
+}
+
 /** The one socket per tab. Created on first use so no module import opens one. */
 export function getRealtimeClient(): RealtimeClient {
-  sharedClient ??= createRealtimeClient();
+  sharedClient ??= createRealtimeClient({
+    onAuthSessionRejected: () => {
+      sharedClient = null;
+    },
+  });
   return sharedClient;
 }
