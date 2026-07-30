@@ -1,7 +1,11 @@
 import { SETTINGS_SCOPES, SETTINGS_TOPIC, type SettingsScope } from '@mangostudio/shared/realtime';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
+import { type RefObject, useEffect, useRef } from 'react';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
-import { hasRecentAppSettingsLocalWrite } from '../app/local-write-window';
+import {
+  appSettingsLocalWriteWindowRemainingMs,
+  hasRecentAppSettingsLocalWrite,
+} from '../app/local-write-window';
 import { appSettingsKeys } from '../app/queries';
 import { providerSettingsKeys } from '../providers/queries';
 import { toolSettingsKeys } from '../tools/queries';
@@ -20,7 +24,11 @@ const SECTION_QUERY_KEYS: Record<SettingsScope, readonly unknown[]> = {
  * App settings auto-save is debounced and optimistic, so its own echo lands
  * while the edit is often still in the user's hands. Dropping just that scope
  * keeps the other sections live: a `provider` event still applies during an app
- * settings edit, and the next `app` event applies once the window closes.
+ * settings edit.
+ *
+ * Dropping is never the last word: `scheduleDeferredAppRefresh` re-applies the
+ * scope once the window closes, because this filter cannot tell a self-echo
+ * from another tab's write.
  *
  * Events only — a subscription acknowledgement bypasses this, since nothing
  * replays it.
@@ -39,11 +47,57 @@ async function invalidateScopes(
   );
 }
 
+type DeferredRefreshRef = RefObject<ReturnType<typeof setTimeout> | null>;
+
+/**
+ * Applies an `app` invalidation that the echo window dropped, once that window
+ * has closed. Suppressing the echo is only safe if the suppression is a delay
+ * rather than a discard: the event may have come from another tab, and nothing
+ * republishes it (`refetchOnWindowFocus` is off, and the socket only replays on
+ * reconnect). Waiting the window out is what makes the two cases equivalent —
+ * a genuine remote change lands late, and this tab's own echo refetches a value
+ * it already holds.
+ *
+ * Re-arms itself if a fresh edit reopened the window while it waited, so a
+ * continuous typing burst refreshes once at the end rather than mid-keystroke.
+ */
+function scheduleDeferredAppRefresh(timerRef: DeferredRefreshRef, refreshApp: () => void): void {
+  if (timerRef.current !== null) clearTimeout(timerRef.current);
+  timerRef.current = setTimeout(() => {
+    timerRef.current = null;
+    if (hasRecentAppSettingsLocalWrite()) {
+      scheduleDeferredAppRefresh(timerRef, refreshApp);
+      return;
+    }
+    refreshApp();
+  }, appSettingsLocalWriteWindowRemainingMs());
+}
+
+function cancelDeferredAppRefresh(timerRef: DeferredRefreshRef): void {
+  if (timerRef.current === null) return;
+  clearTimeout(timerRef.current);
+  timerRef.current = null;
+}
+
 async function invalidateEventScopes(
   queryClient: QueryClient,
+  timerRef: DeferredRefreshRef,
   scopes: readonly SettingsScope[]
 ): Promise<void> {
-  await invalidateScopes(queryClient, applicableScopes(scopes));
+  const applicable = applicableScopes(scopes);
+
+  if (scopes.includes('app')) {
+    if (applicable.includes('app')) {
+      // Applied now, so anything held back is already covered.
+      cancelDeferredAppRefresh(timerRef);
+    } else {
+      scheduleDeferredAppRefresh(timerRef, () => {
+        void invalidateScopes(queryClient, ['app']);
+      });
+    }
+  }
+
+  await invalidateScopes(queryClient, applicable);
 }
 
 /**
@@ -58,9 +112,13 @@ async function invalidateEventScopes(
  */
 export function useSettingsRealtimeInvalidation(): void {
   const queryClient = useQueryClient();
+  const deferredAppRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => cancelDeferredAppRefresh(deferredAppRefreshRef), []);
 
   useRealtimeInvalidation(SETTINGS_TOPIC, (signal) => {
     if (signal.type === 'subscribed') {
+      cancelDeferredAppRefresh(deferredAppRefreshRef);
       // Not filtered through the echo window: the ack stands in for every event
       // lost while the socket was down and is never replayed, so skipping `app`
       // here would leave that section stale until a reload
@@ -72,6 +130,7 @@ export function useSettingsRealtimeInvalidation(): void {
     // scopes are already settings sections.
     return invalidateEventScopes(
       queryClient,
+      deferredAppRefreshRef,
       (signal.message.scopes as readonly SettingsScope[] | undefined) ?? SETTINGS_SCOPES
     );
   });

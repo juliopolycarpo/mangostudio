@@ -32,6 +32,15 @@ export function hasRecentAppSettingsLocalWrite(): boolean {
   return Date.now() - lastLocalWriteAtMs < LOCAL_WRITE_WINDOW_MS;
 }
 
+/**
+ * How long the window still has to run, or `0` once it has closed. Lets a
+ * caller that dropped an `app` invalidation wait the window out and apply it
+ * afterwards, instead of discarding it for good.
+ */
+export function appSettingsLocalWriteWindowRemainingMs(): number {
+  return Math.max(LOCAL_WRITE_WINDOW_MS - (Date.now() - lastLocalWriteAtMs), 0);
+}
+
 /** Test hook: the window is module state and outlives a single render tree. */
 export function resetAppSettingsLocalWriteWindow(): void {
   lastLocalWriteAtMs = Number.NEGATIVE_INFINITY;

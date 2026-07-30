@@ -134,6 +134,105 @@ describe('useSettingsRealtimeInvalidation', () => {
     expect(refetch.app).not.toHaveBeenCalled();
   });
 
+  it('refreshes app on a subscription acknowledgement even mid-write', async () => {
+    const { refetch } = mountSettingsSections();
+    markAppSettingsLocalWrite();
+
+    await act(async () => {
+      await listener({ type: 'subscribed' });
+    });
+
+    // The ack stands in for events lost while the socket was down and is never
+    // replayed, so the echo window must not swallow it.
+    await waitFor(() => expect(refetch.app).toHaveBeenCalledOnce());
+  });
+
+  it('re-applies a dropped app event once the local write window closes', async () => {
+    vi.useFakeTimers();
+    try {
+      const { refetch } = mountSettingsSections();
+      markAppSettingsLocalWrite();
+
+      await act(async () => {
+        await listener({
+          type: 'invalidate',
+          message: { type: 'invalidate', topic: 'settings', scopes: ['app'] },
+        });
+      });
+
+      expect(refetch.app).not.toHaveBeenCalled();
+
+      // The event may have come from another tab, and nothing republishes it —
+      // suppression has to be a delay, not a discard.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_100);
+      });
+
+      expect(refetch.app).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('holds a dropped app event back while edits keep reopening the window', async () => {
+    vi.useFakeTimers();
+    try {
+      const { refetch } = mountSettingsSections();
+      markAppSettingsLocalWrite();
+
+      await act(async () => {
+        await listener({
+          type: 'invalidate',
+          message: { type: 'invalidate', topic: 'settings', scopes: ['app'] },
+        });
+      });
+
+      // A continuous burst: each edit reopens the window before the deferred
+      // refresh can fire, so it must re-arm rather than refetch mid-keystroke.
+      for (let i = 0; i < 4; i += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1_500);
+        });
+        markAppSettingsLocalWrite();
+      }
+
+      expect(refetch.app).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_100);
+      });
+
+      expect(refetch.app).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a deferred app refresh when the section unmounts', async () => {
+    vi.useFakeTimers();
+    try {
+      const { refetch, unmount } = mountSettingsSections();
+      markAppSettingsLocalWrite();
+
+      await act(async () => {
+        await listener({
+          type: 'invalidate',
+          message: { type: 'invalidate', topic: 'settings', scopes: ['app'] },
+        });
+      });
+
+      unmount();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_100);
+      });
+
+      expect(refetch.app).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('applies an app event once the local write window has closed', async () => {
     const { refetch } = mountSettingsSections();
     markAppSettingsLocalWrite();
