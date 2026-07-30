@@ -2,10 +2,12 @@
  * Unit tests for ProviderSettingsPage component.
  */
 
+import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import type * as TanstackRouter from '@tanstack/react-router';
-import { screen } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProviderSettingsPage } from '../../../src/features/settings/providers/components/ProviderSettingsPage';
+import { providerSettingsKeys } from '../../../src/features/settings/providers/queries';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
@@ -53,6 +55,17 @@ const DEEPSEEK_DESCRIPTOR = {
   },
   runtimeAvailable: true,
 };
+
+/**
+ * Renders the page under the shared harness while handing its query client back
+ * to the test, so a realtime invalidation can be replayed against it.
+ */
+let capturedQueryClient: QueryClient | undefined;
+
+function ProviderSettingsPageProbe() {
+  capturedQueryClient = useQueryClient();
+  return <ProviderSettingsPage />;
+}
 
 describe('ProviderSettingsPage', () => {
   const fetchScenario = createFetchScenario();
@@ -154,5 +167,77 @@ describe('ProviderSettingsPage', () => {
     expect(screen.queryByText('Save')).not.toBeInTheDocument();
     expect(screen.queryByText('Cancel')).not.toBeInTheDocument();
     expect(screen.queryByText(/reset/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The settings realtime channel refetches this descriptor when any tab writes
+   * provider settings, so the controls have to follow a descriptor they did not
+   * ask for — otherwise the section keeps showing what it loaded with and the
+   * next local edit PUTs that whole stale form back over the remote change.
+   */
+  describe('remote descriptor changes', () => {
+    /** Exposes the harness query client so a realtime invalidation can be replayed. */
+    function renderWithQueryClient() {
+      capturedQueryClient = undefined;
+      const view = render(<ProviderSettingsPageProbe />);
+      const queryClient = capturedQueryClient;
+      if (!queryClient) throw new Error('Expected a query client from the harness');
+      return { ...view, queryClient };
+    }
+
+    async function refreshDescriptor(queryClient: QueryClient) {
+      await act(async () => {
+        await queryClient.invalidateQueries({
+          queryKey: providerSettingsKeys.detail('deepseek'),
+        });
+      });
+    }
+
+    it('reflects a descriptor refreshed by another tab', async () => {
+      fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
+        body: DEEPSEEK_DESCRIPTOR,
+      });
+
+      const { queryClient } = renderWithQueryClient();
+
+      await screen.findByText('DeepSeek');
+      expect(screen.getByLabelText(/enable thinking/i)).toBeChecked();
+
+      fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
+        body: {
+          ...DEEPSEEK_DESCRIPTOR,
+          settings: { ...DEEPSEEK_DESCRIPTOR.settings, thinkingEnabled: false },
+        },
+      });
+      await refreshDescriptor(queryClient);
+
+      await waitFor(() => expect(screen.getByLabelText(/enable thinking/i)).not.toBeChecked());
+    });
+
+    it('keeps a local edit made while the descriptor was refreshing', async () => {
+      fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
+        body: DEEPSEEK_DESCRIPTOR,
+      });
+
+      const { queryClient } = renderWithQueryClient();
+
+      await screen.findByText('DeepSeek');
+
+      // The user turns thinking off locally; the remote change raises the
+      // iteration cap, a field they have not touched.
+      fireEvent.click(screen.getByLabelText(/enable thinking/i));
+
+      fetchScenario.respondWithJson('GET', '/api/settings/providers/deepseek', {
+        body: {
+          ...DEEPSEEK_DESCRIPTOR,
+          settings: { ...DEEPSEEK_DESCRIPTOR.settings, maxToolIterations: 30 },
+        },
+      });
+      await refreshDescriptor(queryClient);
+
+      // Adopting the remote form wholesale would put the toggle back on under
+      // the user's hand.
+      expect(screen.getByLabelText(/enable thinking/i)).not.toBeChecked();
+    });
   });
 });

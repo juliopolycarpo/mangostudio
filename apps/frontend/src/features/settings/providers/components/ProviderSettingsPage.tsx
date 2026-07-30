@@ -99,6 +99,28 @@ function ProviderSettingsEditor({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const dirty = !areProviderSettingsEqual(form, committedForm);
 
+  // Both states are seeded once at mount, so a descriptor refreshed by another
+  // tab's write would never reach these controls — the section would keep
+  // showing the value it loaded with, and the next local edit would PUT that
+  // whole stale form back over the remote change. Adopt the remote value only
+  // into a form the user has not edited: one still matching the descriptor this
+  // editor was last showing has no local edit to lose.
+  const shownFormRef = useRef(initialForm);
+
+  useEffect(() => {
+    const nextForm = formFromDescriptor(descriptor.settings);
+    const shownForm = shownFormRef.current;
+    if (areProviderSettingsEqual(shownForm, nextForm)) return;
+    shownFormRef.current = nextForm;
+
+    setForm((currentForm) =>
+      areProviderSettingsEqual(currentForm, shownForm) ? nextForm : currentForm
+    );
+    // Always the newest known server state, so a dirty form stays dirty against
+    // it and a failed save rolls back to what the server actually holds.
+    setCommittedForm(nextForm);
+  }, [descriptor.settings]);
+
   const persistForm = useCallback(async () => {
     if (!dirty) return;
 
