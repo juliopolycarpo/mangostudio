@@ -171,6 +171,41 @@ describe('agent CLI detection', () => {
     expect(findingCodes(status)).not.toContain('config-home-missing');
   });
 
+  it('warns when an agent CLI is installed only outside PATH', async () => {
+    const configHome = '/home/tester/.claude';
+    const cliPath = '/opt/claude/bin/claude';
+    const definition = {
+      ...CLAUDE_AGENT_CLI_DEFINITION,
+      runtime: {
+        ...CLAUDE_AGENT_CLI_DEFINITION.runtime,
+        wellKnownDirs: () => ['/opt/claude/bin'],
+      },
+    };
+    const service = createAgentCliDetectionService({
+      definitions: [definition],
+      createScanDeps: (runtimeDefinition) =>
+        scanDeps(runtimeDefinition, {
+          path: '',
+          exists: (path) => path === cliPath,
+        }),
+      createPathEnv: () => ({ ...LINUX_ENV, env: { PATH: '' } }),
+      fs: new FakeAuthSignalFs(
+        new Map([[`${configHome}/.credentials.json`, 'never read']]),
+        new Set([configHome])
+      ),
+      describeLocations: () => [],
+    });
+
+    const status = await service.getAgentCliStatus('claude');
+
+    expect(status?.health).toBe('warn');
+    expect(status?.effective).toBeUndefined();
+    expect(status?.findings).toContainEqual({
+      code: 'installed-but-not-on-path',
+      params: { runtime: 'claude', path: cliPath },
+    });
+  });
+
   it('preserves duplicate and PATH-shadowing analysis for agent CLIs', async () => {
     const configHome = '/home/tester/.claude';
     const service = createAgentCliDetectionService({

@@ -44,6 +44,7 @@ export const RuntimeHealthSchema = Type.Union([
 
 export const RuntimeFindingCodeSchema = Type.Union([
   Type.Literal('not-found'),
+  Type.Literal('installed-but-not-on-path'),
   Type.Literal('shadowed-by-earlier-path'),
   Type.Literal('multiple-versions'),
   Type.Literal('version-below-minimum'),

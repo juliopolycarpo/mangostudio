@@ -128,6 +128,32 @@ describe('analyzeRuntimeScan', () => {
     expect(status.health).toBe('ok');
   });
 
+  it('warns when a runtime is installed only outside PATH', () => {
+    const status = analyzeRuntimeScan(
+      NODE_RUNTIME_DEFINITION,
+      {
+        installations: [
+          {
+            path: '/opt/node/bin/node',
+            rawPath: '/opt/node/bin/node',
+            version: 'v22.13.0',
+            origin: 'well-known',
+            effective: false,
+          },
+        ],
+        failures: [],
+      },
+      { installable: false, probedAtMs: 1_700_000_000_000 }
+    );
+
+    expect(status.health).toBe('warn');
+    expect(status.effective).toBeUndefined();
+    expect(status.findings).toContainEqual({
+      code: 'installed-but-not-on-path',
+      params: { runtime: 'node', path: '/opt/node/bin/node' },
+    });
+  });
+
   it('distinguishes a missing runtime from failed executable probes', () => {
     const missing = analyzeRuntimeScan(
       NODE_RUNTIME_DEFINITION,

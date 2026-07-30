@@ -48,12 +48,24 @@ export function analyzeRuntimeScan(
   const canonicalInstallations = scan.installations.filter(
     (installation) => installation.aliasOf === undefined
   );
-  const effective =
-    scan.installations.find((installation) => installation.effective) ?? scan.installations[0];
-  const effectiveCanonical = canonicalInstallations[0];
+  const firstCanonical = canonicalInstallations[0];
+  const effective = scan.installations.find((installation) => installation.effective);
+  const effectiveCanonical =
+    effective === undefined
+      ? undefined
+      : canonicalInstallations.find((installation) => installation.path === effective.path);
 
-  if (canonicalInstallations.length === 0 && scan.failures.length === 0) {
+  if (firstCanonical === undefined && scan.failures.length === 0) {
     findings.push({ code: 'not-found', params: { runtime: definition.id } });
+  }
+  if (firstCanonical !== undefined && effective === undefined) {
+    findings.push({
+      code: 'installed-but-not-on-path',
+      params: {
+        runtime: definition.id,
+        path: firstCanonical.rawPath,
+      },
+    });
   }
 
   const versions = [...new Set(canonicalInstallations.map((installation) => installation.version))];
