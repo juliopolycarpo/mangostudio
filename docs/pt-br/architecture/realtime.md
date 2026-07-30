@@ -31,10 +31,11 @@ publicam por `apps/api/src/services/realtime/realtime-bus.ts`.
 4. O servidor envia `{"type":"ready"}`. O cliente não deve assinar tópicos
    antes dessa mensagem.
 5. Mensagens de subscribe autorizam cada tópico solicitado. Apenas tópicos
-   aceitos entram no conjunto ativo do socket. Depois que pelo menos um tópico
-   é confirmado, o servidor envia `{"type":"subscribed","topics":[...]}` com
-   esses tópicos recém-ativados para o cliente atualizar o cache atrás dessa
-   barreira.
+   recém-aceitos entram no conjunto ativo do socket. Quando pelo menos um
+   tópico solicitado está ativo depois disso (recém-ativado ou já ativo), o
+   servidor envia `{"type":"subscribed","topics":[...]}` com esse subconjunto
+   ativo efetivo para o cliente atualizar o cache atrás dessa barreira —
+   inclusive em re-subscribe idempotente de um conjunto já ativo.
 6. Um evento do bus só é encaminhado quando o id de usuário corresponde à
    inscrição do socket e o tópico está ativo nele.
 7. Fluxos de fechamento e falha removem o listener e a vaga de conexão de forma
@@ -106,11 +107,13 @@ O servidor Elysia raiz aplica limites de transporte a todas as rotas WebSocket:
 | Ação por backpressure   | Fechar |
 
 A rota realtime também permite no máximo 8 conexões por usuário, 20 mensagens
-de aplicação por segundo em cada socket, 20 frames pendentes por socket e 64
-tópicos ativos por socket. A contagem de taxa acontece na admissão, antes de o
-frame entrar na fila serializada, para que autorização lenta de subscribe não
-reinicie a janela de taxa nem retenha trabalho ilimitado. Uma operação de
-subscribe que ultrapassaria 64 tópicos é rejeitada atomicamente.
+de aplicação por segundo em cada socket, 20 mensagens de aplicação pendentes
+por socket e 64 tópicos ativos por socket. A contagem de taxa acontece na
+admissão, antes de a mensagem entrar na fila serializada, para que autorização
+lenta de subscribe não reinicie a janela de taxa nem retenha trabalho
+ilimitado. Uma operação de subscribe que ultrapassaria 64 tópicos é rejeitada
+atomicamente. O limite de mensagens pendentes limita mensagens do cliente
+aguardando esse handler, não frames brutos de transporte WebSocket.
 
 | Código | Significado                                   |
 | ------ | --------------------------------------------- |
@@ -121,8 +124,8 @@ subscribe que ultrapassaria 64 tópicos é rejeitada atomicamente.
 | `1011` | Falha inesperada no servidor                  |
 
 Ultrapassar o limite de tópicos ativos retorna `RATE_LIMITED` sem fechar o
-socket. Limites de conexão, de taxa de mensagens e de fila pendente fecham com
-`4429`.
+socket. Limites de conexão, de taxa de mensagens e de fila de mensagens
+pendentes fecham com `4429`.
 
 ## Degradação E Recuperação
 

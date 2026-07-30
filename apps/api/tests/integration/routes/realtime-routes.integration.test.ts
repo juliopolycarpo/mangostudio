@@ -403,6 +403,26 @@ describe('realtime WebSocket subscriptions', () => {
     expect(client.messages).toHaveLength(beforeForeignPublish);
   });
 
+  it('acknowledges idempotent re-subscribe of already-active topics', async () => {
+    const { httpUrl, wsUrl } = startServer();
+    const user = await signUp(httpUrl);
+    const client = connect(wsUrl, { Cookie: user.cookie });
+
+    await client.opened;
+    await client.nextMessage();
+    send(client.socket, { type: 'subscribe', topics: [SETTINGS_TOPIC] });
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [SETTINGS_TOPIC],
+    });
+
+    send(client.socket, { type: 'subscribe', topics: [SETTINGS_TOPIC] });
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [SETTINGS_TOPIC],
+    });
+  });
+
   it('acknowledges topic activation only after ownership commits', async () => {
     let releaseOwnership: (() => void) | undefined;
     const ownershipGate = new Promise<void>((resolve) => {
@@ -781,7 +801,7 @@ describe('realtime WebSocket limits', () => {
     expect(ownershipCalls).toBe(1);
   });
 
-  it('closes when pending frames already fill the per-socket queue', async () => {
+  it('closes when pending messages already fill the per-socket queue', async () => {
     let clock = 10_000;
     let ownershipGate: Promise<void> = Promise.resolve();
     let releaseOwnership: (() => void) | undefined;

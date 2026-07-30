@@ -27,10 +27,12 @@ through `apps/api/src/services/realtime/realtime-bus.ts`.
 3. The route subscribes to the user-scoped bus.
 4. The server sends `{"type":"ready"}`. Clients must not subscribe before this
    message.
-5. Subscribe messages authorize each requested topic. Only accepted topics are
-   added to the socket's active set. After at least one topic commits, the
-   server sends `{"type":"subscribed","topics":[...]}` with those newly
-   activated topics so clients can refresh behind that barrier.
+5. Subscribe messages authorize each requested topic. Only newly accepted
+   topics are added to the socket's active set. When at least one requested
+   topic is active afterward (newly activated or already active), the server
+   sends `{"type":"subscribed","topics":[...]}` with that effective active
+   subset so clients can refresh behind that barrier — including idempotent
+   re-subscribe of an already-active set.
 6. A bus event is forwarded only when its user id matches the socket's bus
    subscription and its topic is active on that socket.
 7. Close and failure paths idempotently remove the bus listener and connection
@@ -100,11 +102,13 @@ The root Elysia server applies transport limits to every WebSocket route:
 | Backpressure behavior | Close  |
 
 The realtime route additionally allows at most 8 connections per user, 20
-application messages per second per socket, 20 pending frames per socket, and
-64 active topics per socket. Message-rate accounting happens on admission,
-before a frame is queued for serialized handling, so slow subscribe authorization
-cannot reset the rate window or retain unbounded work. A subscribe operation that
-would exceed 64 topics is rejected atomically.
+application messages per second per socket, 20 pending application messages
+per socket, and 64 active topics per socket. Message-rate accounting happens
+on admission, before a message is queued for serialized handling, so slow
+subscribe authorization cannot reset the rate window or retain unbounded work.
+A subscribe operation that would exceed 64 topics is rejected atomically.
+The pending-message cap bounds queued client messages awaiting that handler,
+not raw WebSocket transport frames.
 
 | Close code | Meaning                                  |
 | ---------- | ---------------------------------------- |
@@ -115,7 +119,8 @@ would exceed 64 topics is rejected atomically.
 | `1011`     | Unexpected server failure                |
 
 Exceeding the active-topic limit returns `RATE_LIMITED` without closing the
-socket. Connection, message-rate, and pending-queue limits close with `4429`.
+socket. Connection, message-rate, and pending-message-queue limits close with
+`4429`.
 
 ## Degradation And Recovery
 

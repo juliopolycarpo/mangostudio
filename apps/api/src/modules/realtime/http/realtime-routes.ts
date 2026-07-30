@@ -208,8 +208,13 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
       return;
     }
     for (const topic of accepted) state.topics.add(topic);
-    if (accepted.size > 0) {
-      ws.send({ type: 'subscribed', topics: [...accepted] });
+    // Ack the effective active subset of the request. Newly activated topics
+    // still commit first; already-active topics are included so an idempotent
+    // re-subscribe (client replaying its desired set) still gets a barrier.
+    // Empty, failed, and atomic topic-limit rejects still send no ack.
+    const activated = [...new Set(message.topics.filter((topic) => state.topics.has(topic)))];
+    if (activated.length > 0) {
+      ws.send({ type: 'subscribed', topics: activated });
     }
   }
 
