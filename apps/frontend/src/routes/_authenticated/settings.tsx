@@ -1,6 +1,7 @@
 import { createFileRoute, Outlet } from '@tanstack/react-router';
 import { Settings } from 'lucide-react';
 import { SettingsTabs } from '@/components/settings/SettingsTabs';
+import { useSettingsRealtimeInvalidation } from '@/features/settings/hooks/use-settings-realtime';
 import { useI18n } from '@/hooks/use-i18n';
 
 export const Route = createFileRoute('/_authenticated/settings')({
@@ -9,6 +10,7 @@ export const Route = createFileRoute('/_authenticated/settings')({
 
 function SettingsLayout() {
   const { t } = useI18n();
+  useSettingsRealtimeInvalidation();
 
   return (
     <div className="h-full overflow-y-auto">
