@@ -10,14 +10,19 @@
  *
  * The monogram is user content and is rendered as text. It is never injected as
  * markup, and it never widens beyond the two characters the contract allows.
+ *
+ * The chip itself is decorative: it always sits beside the name it stands for,
+ * so it carries a tooltip rather than an accessible label it would only repeat.
  */
 
 import type { CSSProperties } from 'react';
 import { toolAvatarPalette } from './tool-avatar-palette';
 
-export type ToolAvatarSize = 'sm' | 'md' | 'lg';
+export type ToolAvatarSize = 'xs' | 'sm' | 'md' | 'lg';
 
 const SIZE_CLASS: Record<ToolAvatarSize, string> = {
+  /** Dense lists — the capability inspector, where rows are 11px tall text. */
+  xs: 'size-5 rounded-md text-[9px]',
   sm: 'size-6 rounded-lg text-[10px]',
   md: 'size-9 rounded-xl text-xs',
   lg: 'size-12 rounded-2xl text-base',
@@ -27,10 +32,7 @@ interface ToolAvatarProps {
   /** `<kind>:<id>` — the colour source, stable across renames. */
   readonly subjectKey: string;
   readonly monogram: string;
-  /**
-   * Effective tool name. Used as the accessible label so a screen reader hears
-   * the tool, not two stray letters.
-   */
+  /** Effective tool name, shown on hover. */
   readonly name: string;
   readonly size?: ToolAvatarSize;
   readonly className?: string;
@@ -57,10 +59,9 @@ export function ToolAvatar({
       data-subject-key={subjectKey}
       data-palette-slot={palette.slot}
       style={style}
-      // Adjacent to a visible name in most surfaces, so the label is the
-      // fallback rather than a duplicate announcement.
-      role="img"
-      aria-label={name}
+      // Decorative: every surface prints the name next to the chip, so
+      // announcing it here would say the tool's name twice.
+      aria-hidden="true"
       title={name}
       className={`inline-flex shrink-0 select-none items-center justify-center font-bold uppercase leading-none ${SIZE_CLASS[size]} ${className}`}
     >

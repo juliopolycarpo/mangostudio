@@ -27,7 +27,7 @@ describe('ToolAvatar', () => {
   it('renders the monogram as text under the tool name', () => {
     render(<ToolAvatar subjectKey="agent:claude" monogram="CC" name="Claude Code" />);
 
-    const avatar = screen.getByRole('img', { name: 'Claude Code' });
+    const avatar = screen.getByTitle('Claude Code');
     expect(avatar).toHaveTextContent('CC');
     expect(avatar).toHaveAttribute('data-palette-slot', toolAvatarPalette('agent:claude').slot);
   });
@@ -35,7 +35,7 @@ describe('ToolAvatar', () => {
   it('never interprets a monogram as markup', () => {
     render(<ToolAvatar subjectKey="mcp:weather" monogram="<b" name="Weather" />);
 
-    const avatar = screen.getByRole('img', { name: 'Weather' });
+    const avatar = screen.getByTitle('Weather');
     expect(avatar).toHaveTextContent('<b');
     expect(avatar.querySelector('b')).toBeNull();
   });
@@ -43,7 +43,7 @@ describe('ToolAvatar', () => {
   it('carries both themes so the palette is not tied to the theme context', () => {
     render(<ToolAvatar subjectKey="runtime:bun" monogram="BU" name="Bun" />);
 
-    const style = screen.getByRole('img', { name: 'Bun' }).getAttribute('style') ?? '';
+    const style = screen.getByTitle('Bun').getAttribute('style') ?? '';
     expect(style).toContain('--tool-avatar-bg-dark');
     expect(style).toContain('--tool-avatar-bg-light');
   });
@@ -58,7 +58,7 @@ describe('IdentityEditDialog', () => {
 
     await user.type(screen.getByLabelText(en.environments.identity.nameLabel), 'My Agent');
 
-    expect(screen.getByRole('img', { name: 'My Agent' })).toHaveTextContent('MA');
+    expect(screen.getByTitle('My Agent')).toHaveTextContent('MA');
   });
 
   it('falls back to the default name when the field is cleared', async () => {
@@ -73,7 +73,7 @@ describe('IdentityEditDialog', () => {
 
     await user.clear(screen.getByLabelText(en.environments.identity.nameLabel));
 
-    expect(screen.getByRole('img', { name: 'Claude Code' })).toHaveTextContent('CC');
+    expect(screen.getByTitle('Claude Code')).toHaveTextContent('CC');
   });
 
   it('explains an unusable monogram instead of letting the request fail', async () => {

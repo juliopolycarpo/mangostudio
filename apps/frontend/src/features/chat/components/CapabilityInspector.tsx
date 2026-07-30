@@ -19,6 +19,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ListChecks, SlidersHorizontal } from 'lucide-react';
 import { useState } from 'react';
+import { ToolAvatar } from '@/components/ui/ToolAvatar';
+import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import type { ChatCapabilitiesSelection } from '../hooks/use-chat-capabilities';
 import { chatCapabilitiesQueryOptions } from '../hooks/use-chat-capabilities';
@@ -245,11 +247,24 @@ function McpServerRows({
   tools: CapabilityToolEntry[];
   labels: CapabilityLabels;
 }) {
+  // Read-only surface: the inspector shows what the user calls a server, but
+  // the tool names it contributes to the turn are untouched by any rename.
+  const { resolve } = useToolIdentities();
+  const identity = resolve('mcp', server.slug, server.name);
+
   return (
     <div className="space-y-0.5">
       <CapabilityRow
         labels={labels}
-        title={server.name}
+        title={identity.name}
+        avatar={
+          <ToolAvatar
+            subjectKey={identity.subjectKey}
+            monogram={identity.monogram}
+            name={identity.name}
+            size="xs"
+          />
+        }
         subtitle={labels.health[server.health]}
         state={server.state}
         reasonText={reasonText(labels, server.reason)}
@@ -301,6 +316,7 @@ function CapabilitySection({
 function CapabilityRow({
   labels,
   title,
+  avatar,
   subtitle,
   state,
   reasonText,
@@ -308,6 +324,8 @@ function CapabilityRow({
 }: {
   labels: CapabilityLabels;
   title: string;
+  /** Identity chip for rows that stand for a tool rather than one capability. */
+  avatar?: React.ReactNode;
   subtitle?: string;
   state: CapabilityState;
   reasonText?: string;
@@ -319,6 +337,7 @@ function CapabilityRow({
         className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${STATE_DOT_CLASS[state]}`}
         aria-hidden
       />
+      {avatar}
       <span className="min-w-0">
         <span
           className={`block truncate text-xs ${
