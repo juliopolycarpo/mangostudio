@@ -63,7 +63,8 @@ import {
   getHeadMessage,
   listHistory,
 } from '../application/git-navigation-service';
-import { getRepoState, initRepo } from '../application/git-status-service';
+import type { GitInvalidationTarget } from '../application/git-realtime-service';
+import { getRepoState } from '../application/git-status-service';
 import {
   checkoutRemoteBranch,
   commitChanges,
@@ -72,6 +73,7 @@ import {
   discardPaths,
   fetchRemote,
   GitWriteError,
+  initRepo,
   listBranches,
   pullFastForward,
   pushBranch,
@@ -123,10 +125,17 @@ async function routeWorkdir(
   chatId: string,
   userId: string,
   set: { status?: number | string }
-): Promise<{ workdir: string; chat: ChatRecord } | { error: ApiErrorResponse }> {
+): Promise<
+  | { workdir: string; chat: ChatRecord; invalidationTarget: GitInvalidationTarget }
+  | { error: ApiErrorResponse }
+> {
   const resolution = await resolveChatWorkdir(chatId, userId, getDb());
   if (resolution.state === 'ok') {
-    return { workdir: resolution.workdir, chat: resolution.chat };
+    return {
+      workdir: resolution.workdir,
+      chat: resolution.chat,
+      invalidationTarget: { userId, chatId: resolution.chat.id },
+    };
   }
   if (resolution.state === 'no-workdir') {
     return { error: chatWorkdirConflict(set) };
@@ -166,7 +175,7 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await initRepo(resolved.workdir, request.signal);
+          return await initRepo(resolved.workdir, resolved.invalidationTarget, request.signal);
         } catch (error) {
           return gitCommandError(error, set);
         }
@@ -189,7 +198,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await stagePaths(resolved.workdir, body, request.signal);
+          return await stagePaths(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -213,7 +227,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await unstagePaths(resolved.workdir, body, request.signal);
+          return await unstagePaths(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -237,7 +256,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await discardPaths(resolved.workdir, body, request.signal);
+          return await discardPaths(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -330,7 +354,13 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
 
         try {
           const settings = await getAppSettings(db, userId);
-          return await commitChanges(resolved.workdir, body, settings.gitSettings, request.signal);
+          return await commitChanges(
+            resolved.workdir,
+            body,
+            settings.gitSettings,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -387,7 +417,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await stashSave(resolved.workdir, body, request.signal);
+          return await stashSave(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -411,7 +446,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await stashPop(resolved.workdir, body, request.signal);
+          return await stashPop(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -435,7 +475,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await stashApply(resolved.workdir, body, request.signal);
+          return await stashApply(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -459,7 +504,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await stashDrop(resolved.workdir, body, request.signal);
+          return await stashDrop(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -529,7 +579,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await switchBranch(resolved.workdir, body.name, request.signal);
+          return await switchBranch(
+            resolved.workdir,
+            body.name,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -552,7 +607,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await checkoutRemoteBranch(resolved.workdir, body.remoteRef, request.signal);
+          return await checkoutRemoteBranch(
+            resolved.workdir,
+            body.remoteRef,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -575,7 +635,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await createBranch(resolved.workdir, body.name, request.signal);
+          return await createBranch(
+            resolved.workdir,
+            body.name,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -598,7 +663,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await deleteBranch(resolved.workdir, body, request.signal);
+          return await deleteBranch(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -621,7 +691,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await renameBranch(resolved.workdir, body, request.signal);
+          return await renameBranch(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -713,7 +788,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await fetchRemote(resolved.workdir, body.prune ?? false, request.signal);
+          return await fetchRemote(
+            resolved.workdir,
+            body.prune ?? false,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -736,7 +816,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await pullFastForward(resolved.workdir, request.signal);
+          return await pullFastForward(
+            resolved.workdir,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -759,7 +843,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await pushBranch(resolved.workdir, body, request.signal);
+          return await pushBranch(
+            resolved.workdir,
+            body,
+            resolved.invalidationTarget,
+            request.signal
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }

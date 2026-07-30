@@ -1,4 +1,4 @@
-import type { GitRepoState, InitRepoResponse } from '@mangostudio/shared/git';
+import type { GitRepoState } from '@mangostudio/shared/git';
 import { parseGitStatus } from '../domain/status-parser';
 import { GitCliError, isGitAvailable, runGit } from '../infrastructure/git-cli';
 
@@ -43,13 +43,4 @@ export async function getRepoState(workdir: string, signal?: AbortSignal): Promi
   if (!root) return { state: 'not-a-repo', workdir };
 
   return { state: 'repo', workdir, root, status: await getRepoStatus(root, signal) };
-}
-
-export async function initRepo(workdir: string, signal?: AbortSignal): Promise<InitRepoResponse> {
-  if (!(await isGitAvailable())) {
-    throw new GitCliError(['init'], null, 'Git is not available.');
-  }
-  await runGit(['init'], { cwd: workdir, signal });
-  const result = await runGit(['rev-parse', '--show-toplevel'], { cwd: workdir, signal });
-  return { root: result.stdout.trim() };
 }

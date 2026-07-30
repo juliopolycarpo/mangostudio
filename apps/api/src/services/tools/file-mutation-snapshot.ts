@@ -11,6 +11,7 @@ import {
   insertCheckpointRow,
   updateCheckpointAfterHash,
 } from '../../modules/file-checkpoints/infrastructure/checkpoint-repository';
+import { scheduleGitFileMutationInvalidation } from '../../modules/git/application/git-realtime-service';
 import { containsNulByte } from './builtin/_fs-utils';
 import type { ToolContext } from './types';
 
@@ -125,6 +126,7 @@ export async function recordFileMutationAfterHash(
   if (captured.rowId === null) return;
   const db = context.db ?? getDb();
   await updateCheckpointAfterHash(db, captured.rowId, afterHash ?? CHECKPOINT_ABSENT_HASH);
+  scheduleGitFileMutationInvalidation({ userId: context.userId, chatId: context.chatId });
 }
 
 export function attachBeforeFields<T extends object>(

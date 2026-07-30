@@ -7,9 +7,14 @@ import {
   GitRepoStateSchema,
   InitRepoResponseSchema,
 } from '@mangostudio/shared/git';
+import { GIT_SCOPES, gitTopic, type RealtimeInvalidateEvent } from '@mangostudio/shared/realtime';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
+import {
+  createRealtimeBus,
+  setRealtimeBusForTests,
+} from '../../../src/services/realtime/realtime-bus';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import {
   createApiTestApp,
@@ -58,6 +63,7 @@ function getState(app: ReturnType<typeof createAuthenticatedApiTestApp>['app'], 
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
+  setRealtimeBusForTests(undefined);
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -69,6 +75,10 @@ describe('git routes', () => {
     await bindWorkdir(chat.id, workdir);
     const { app, restore } = createAuthenticatedApiTestApp(user, gitRoutes);
     restoreAuth = restore;
+    const bus = createRealtimeBus();
+    const events: RealtimeInvalidateEvent[] = [];
+    bus.subscribe(user.id, (event) => events.push(event));
+    setRealtimeBusForTests(bus);
 
     const before = await getState(app, chat.id);
     const beforePayload = (await before.json()) as GitRepoState;
@@ -87,6 +97,13 @@ describe('git routes', () => {
     expect(initialized.status).toBe(200);
     expect(Value.Check(InitRepoResponseSchema, initializedPayload)).toBe(true);
     expect(initializedPayload).toEqual({ root: workdir });
+    expect(events).toEqual([
+      {
+        type: 'invalidate',
+        topic: gitTopic(chat.id),
+        scopes: [...GIT_SCOPES],
+      },
+    ]);
 
     const after = await getState(app, chat.id);
     const afterPayload = (await after.json()) as GitRepoState;
