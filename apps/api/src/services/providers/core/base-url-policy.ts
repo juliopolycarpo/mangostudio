@@ -1,6 +1,6 @@
 /**
- * Validates provider base URLs to prevent SSRF attacks.
- * Rejects loopback, RFC1918 private, and link-local addresses.
+ * Validates outbound URLs to prevent SSRF attacks.
+ * Rejects loopback, RFC1918 private, unique-local, and link-local addresses.
  */
 
 import { lookup } from 'node:dns/promises';
@@ -36,13 +36,38 @@ function isBlockedIPv4(ip: string): boolean {
   return BLOCKED_IPV4_RANGES.some(([network, mask]) => (num & mask) === (network & mask));
 }
 
+/**
+ * First 16-bit group of an IPv6 address, or null when it cannot be read.
+ *
+ * An address that starts with `::` has a zero first group by definition, which
+ * is why the leading-`::` case is answered before any parsing.
+ */
+function firstHextet(ip: string): number | null {
+  if (ip.startsWith('::')) return 0;
+  const group = ip.split(':', 1)[0];
+  if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+  return Number.parseInt(group, 16);
+}
+
+/**
+ * Blocked v6 ranges are matched on the leading bits rather than on the text of
+ * the address. `fe80::/10` spans `fe80` through `febf`, so a prefix-string test
+ * lets `fe81::1` through — and unique-local `fc00::/7` has no distinctive text
+ * prefix at all, since it covers both `fc..` and `fd..`.
+ */
 function isBlockedIPv6(ip: string): boolean {
-  const normalized = ip.toLowerCase();
-  if (normalized === '::1') return true;
-  if (normalized.startsWith('fe80')) return true;
+  // A scope id (`fe80::1%eth0`) names an interface, not a host, and is not part
+  // of the address being classified.
+  const normalized = ip.toLowerCase().split('%')[0];
+  if (normalized === '::1' || normalized === '::') return true;
   // IPv4-mapped IPv6 (::ffff:x.x.x.x)
   const v4Match = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
   if (v4Match) return isBlockedIPv4(v4Match[1]);
+
+  const leading = firstHextet(normalized);
+  if (leading === null) return false;
+  if ((leading & 0xfe00) === 0xfc00) return true; // fc00::/7 — unique local
+  if ((leading & 0xffc0) === 0xfe80) return true; // fe80::/10 — link local
   return false;
 }
 
