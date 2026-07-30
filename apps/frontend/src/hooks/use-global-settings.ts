@@ -96,13 +96,22 @@ export function useGlobalSettings() {
       return { previousSettings: rollbackRef.current, sequence: saveSequenceRef.current };
     },
     onError: (_error, _nextSettings, context) => {
-      // A silent rollback reads as a control that simply refused to move.
-      toast(t.settings.autoSave.errorToast, 'error');
       // A superseded save must not roll back: a newer submission either already
       // persisted its value or will report its own failure against it.
-      if (context?.sequence !== saveSequenceRef.current) return;
-      if (!context.previousSettings) return;
-      queryClient.setQueryData(appSettingsKeys.current(), context.previousSettings);
+      const restoredSettings =
+        context?.sequence === saveSequenceRef.current ? context.previousSettings : null;
+      if (restoredSettings) {
+        queryClient.setQueryData(appSettingsKeys.current(), restoredSettings);
+      }
+      // A silent failure reads as a control that simply refused to move, so the
+      // toast is unconditional — but only the branch that actually restored the
+      // cache may claim the change was reverted. A superseded save leaves the
+      // newer value on screen, and telling the user it was rolled back would
+      // send them looking for an edit that is still there.
+      toast(
+        restoredSettings ? t.settings.autoSave.errorRevertedToast : t.settings.autoSave.errorToast,
+        'error'
+      );
     },
     onSuccess: (savedSettings, _nextSettings, context) => {
       // Re-marked here so the echo window still covers the server's own event,
@@ -113,7 +122,13 @@ export function useGlobalSettings() {
       if (context.sequence !== saveSequenceRef.current) return;
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
     },
-    onSettled: () => {
+    onSettled: (_savedSettings, _error, _nextSettings, context) => {
+      // A newer submission still in flight keeps the burst open just as a queued
+      // save does. Clearing the baseline while one is outstanding would let the
+      // next edit adopt an optimistic value the server has not confirmed as its
+      // rollback target, so a later failure would restore something that was
+      // never persisted.
+      if (context?.sequence !== saveSequenceRef.current) return;
       // A save queued mid-flight keeps the burst — and its rollback target — open.
       if (pendingSaveRef.current === null) rollbackRef.current = null;
     },
