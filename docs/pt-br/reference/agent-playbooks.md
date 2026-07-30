@@ -35,6 +35,23 @@ Abra estes arquivos primeiro:
 - o hook, serviço ou rota correspondente no frontend
 - os testes relevantes da API e do frontend
 
+## Invalidação Em Tempo Real
+
+Leia primeiro [`../architecture/realtime.md`](../architecture/realtime.md).
+Depois, abra:
+
+- `apps/shared/src/realtime/`
+- `apps/api/src/modules/realtime/http/realtime-routes.ts`
+- `apps/api/src/services/realtime/realtime-bus.ts`
+- o fluxo de mutação da aplicação que publica o evento
+- `apps/api/src/modules/chats/domain/chat-ownership.ts` para tópicos de chat
+- `apps/api/tests/integration/routes/realtime-routes.integration.test.ts`
+
+Mantenha o canal somente para invalidação. Novos tópicos de recursos precisam
+de gramática TypeBox compartilhada, autorização de ownership na rota, cobertura
+com servidor real para mesmo usuário e usuários diferentes, e um mapeamento no
+frontend que busque os dados novamente por HTTP.
+
 ## Chat, Streaming E Geração
 
 Leia primeiro `../architecture/continuation.md` e `../providers/development.md` para contexto sobre a arquitetura de continuação e os padrões de integração de provedores.

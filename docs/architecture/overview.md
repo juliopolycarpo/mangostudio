@@ -52,6 +52,7 @@ modules/<domain>/
 | `tool-settings`     | A/H/I   | Per-tool enable/disable and parameter overrides                 |
 | `prompt-rules`      | A/H     | System prompt composition, rule file resolution                 |
 | `attachments`       | A/I     | File upload, validation, storage, provider delivery             |
+| `realtime`          | H       | Cookie-authenticated, user-scoped cache invalidation            |
 
 A = Application, D = Domain, H = HTTP, I = Infrastructure
 
@@ -61,7 +62,9 @@ Simple modules skip layers that would add ceremony without value:
 
 - **No `domain/`** — when business rules are self-evident (e.g., app-settings is a simple CRUD wrapper with normalization).
 - **No `http/`** — when the module is purely infrastructural (e.g., `generated-images/` only has a repository).
-- **No `application/`** — never; all modules have at least one service.
+- **No `application/`** — only for bridge modules whose policy and data work is delegated to
+  existing services (for example, `realtime` delegates fan-out to the realtime bus and
+  ownership checks to `chats`).
 
 ## Data Flow
 
@@ -106,6 +109,13 @@ stream-text-turn.ts (orchestrator)
   └─ Persist turn → yield SSE events
 ```
 
+### Realtime Invalidation
+
+`/api/ws` is an invalidation-only bridge from the user-scoped in-process bus to
+authenticated browser tabs. Entity data continues to travel over HTTP. See
+[`realtime.md`](./realtime.md) for the protocol, security boundaries, limits,
+degradation model, and topic-extension workflow.
+
 ### Subagent Delegation Enforcement
 
 Subagent delegation is executed through the `delegate_to_agent` tool. The orchestrator enforces a response contract so the parent agent always receives a usable final result, even when a provider ends a subagent run after tool calls without emitting assistant text.
@@ -142,7 +152,7 @@ explicitly enabled behind a trusted reverse proxy.
 
 ### Error Handling
 
-- API errors use `ApiErrorResponse` from `@mangostudio/shared/contracts`: `{ error: string, code?: string, details?: Record<string, string> }`. The HTTP status is carried by the response, not the body.
+- API errors use `ApiErrorResponse` from `@mangostudio/shared/errors`: `{ error: string, code?: string, details?: Record<string, string> }`. The HTTP status is carried by the response, not the body.
 - Streaming errors use `SSEErrorEvent` from `@mangostudio/shared/streaming`: `{ type: 'error', error, done: true }`.
 - Domain errors extend `Error` with typed codes (e.g., `ChatNotFoundError`, `ToolParameterError`).
 - The centralized `error-handler.ts` plugin maps thrown errors to HTTP responses.
@@ -223,6 +233,7 @@ The shared package is framework-agnostic and importable by both API and frontend
 shared/src/
   contracts/           → Barrel export of all contract types
   <module>/            → Per-module contracts + TypeBox schemas
+  realtime/            → WebSocket invalidation messages, topics, and close codes
   streaming/           → SSE event types + schemas
   types/               → Domain types (provider, agent-events, gallery)
   i18n/                → Portuguese/English dictionaries + type system

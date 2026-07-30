@@ -36,6 +36,22 @@ Open these first:
 - the matching frontend hook, service, or route
 - the relevant API and frontend tests
 
+## Realtime Invalidation
+
+Read [`../architecture/realtime.md`](../architecture/realtime.md) first. Then
+open:
+
+- `apps/shared/src/realtime/`
+- `apps/api/src/modules/realtime/http/realtime-routes.ts`
+- `apps/api/src/services/realtime/realtime-bus.ts`
+- the producer's application mutation path
+- `apps/api/src/modules/chats/domain/chat-ownership.ts` for chat-scoped topics
+- `apps/api/tests/integration/routes/realtime-routes.integration.test.ts`
+
+Keep the channel invalidation-only. New resource topics need a shared TypeBox
+grammar, route-side ownership authorization, same-user and cross-user
+real-server coverage, and a frontend mapping that refetches data over HTTP.
+
 ## Chat, Streaming, And Generation
 
 First read `docs/architecture/continuation.md` and `docs/providers/development.md` for
