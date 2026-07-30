@@ -1542,7 +1542,6 @@ export const messages = {
       cursor: 'Cursor',
     },
     title: 'Biblioteca',
-    nav: 'Biblioteca',
     subtitle: 'O que cada agente enxerga, onde está e onde as cópias discordam.',
     tabs: {
       skills: 'Skills',
@@ -1970,6 +1969,7 @@ export const messages = {
       runtimes: 'Runtimes',
       agents: 'Agentes',
       health: 'Diagnóstico',
+      library: 'Biblioteca',
     },
     // Nomes próprios de produtos — iguais em todos os idiomas, mas centralizados
     // aqui para que a UI nunca use um id cru como `nvm` ou `mangostudio`.

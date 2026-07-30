@@ -1516,7 +1516,6 @@ export const messages: Messages = {
       cursor: 'Cursor',
     },
     title: 'Library',
-    nav: 'Library',
     subtitle: 'What each agent sees, where it lives, and where the copies disagree.',
     tabs: {
       skills: 'Skills',
@@ -1950,6 +1949,7 @@ export const messages: Messages = {
       runtimes: 'Runtimes',
       agents: 'Agents',
       health: 'Health',
+      library: 'Library',
     },
     // Product names — identical in every locale, but centralized here so the UI
     // never renders a raw id such as `nvm` or `mangostudio`.

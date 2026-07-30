@@ -1,5 +1,7 @@
 /**
- * Top-level navigation for the environments surface.
+ * Top-level navigation for the environments umbrella: everything about the
+ * user's tooling, library included. The library tab opens a section that
+ * renders a second strip of its own.
  */
 
 import { TabNav } from '@/components/ui/TabNav';
@@ -15,6 +17,7 @@ export function EnvironmentTabs() {
         { to: '/environments/runtimes', label: t.environments.tabs.runtimes },
         { to: '/environments/agents', label: t.environments.tabs.agents },
         { to: '/environments/health', label: t.environments.tabs.health },
+        { to: '/environments/library', label: t.environments.tabs.library },
       ]}
     />
   );
