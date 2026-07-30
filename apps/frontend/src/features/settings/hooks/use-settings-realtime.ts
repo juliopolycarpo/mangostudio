@@ -29,9 +29,6 @@ const SECTION_QUERY_KEYS: Record<SettingsScope, readonly unknown[]> = {
  * Dropping is never the last word: `scheduleDeferredAppRefresh` re-applies the
  * scope once the window closes, because this filter cannot tell a self-echo
  * from another tab's write.
- *
- * Events only — a subscription acknowledgement bypasses this, since nothing
- * replays it.
  */
 function applicableScopes(scopes: readonly SettingsScope[]): readonly SettingsScope[] {
   if (!hasRecentAppSettingsLocalWrite()) return scopes;
@@ -79,6 +76,16 @@ function cancelDeferredAppRefresh(timerRef: DeferredRefreshRef): void {
   timerRef.current = null;
 }
 
+/**
+ * Applies an invalidation, holding the `app` scope back while this tab is
+ * mid-write and re-applying it once the window closes. Both a real event and a
+ * subscription acknowledgement come through here: the ack must not skip the
+ * wait either, because the refetch it triggers would replace the cache that
+ * `saveSettings` reads to build its next value, and the following keystroke
+ * would then carry the server's older object into the pending PUT — dropping
+ * every edit made before the ack landed. Deferring keeps the refresh; it only
+ * moves it past the burst.
+ */
 async function invalidateEventScopes(
   queryClient: QueryClient,
   timerRef: DeferredRefreshRef,
@@ -108,7 +115,8 @@ async function invalidateEventScopes(
  * Mounted once at the layout rather than per page so the subscription survives
  * navigation between sections instead of churning a socket topic each time.
  * A subscription acknowledgement refreshes every section because events
- * published while the socket was down are not replayed.
+ * published while the socket was down are not replayed; it is never dropped,
+ * only delayed behind an open write window like any other `app` refresh.
  */
 export function useSettingsRealtimeInvalidation(): void {
   const queryClient = useQueryClient();
@@ -116,22 +124,17 @@ export function useSettingsRealtimeInvalidation(): void {
 
   useEffect(() => () => cancelDeferredAppRefresh(deferredAppRefreshRef), []);
 
-  useRealtimeInvalidation(SETTINGS_TOPIC, (signal) => {
-    if (signal.type === 'subscribed') {
-      cancelDeferredAppRefresh(deferredAppRefreshRef);
-      // Not filtered through the echo window: the ack stands in for every event
-      // lost while the socket was down and is never replayed, so skipping `app`
-      // here would leave that section stale until a reload
-      // (`refetchOnWindowFocus` is off). A refetch cannot lose an in-flight
-      // edit — the pending save still carries it to the server.
-      return invalidateScopes(queryClient, SETTINGS_SCOPES);
-    }
-    // Only exact-topic matches reach this listener, so the validated event's
-    // scopes are already settings sections.
-    return invalidateEventScopes(
+  useRealtimeInvalidation(SETTINGS_TOPIC, (signal) =>
+    invalidateEventScopes(
       queryClient,
       deferredAppRefreshRef,
-      (signal.message.scopes as readonly SettingsScope[] | undefined) ?? SETTINGS_SCOPES
-    );
-  });
+      // The ack covers every section: events published while the socket was
+      // down are not replayed, so there is nothing narrower to go on. Only
+      // exact-topic matches reach this listener, so a real event's scopes are
+      // already settings sections.
+      signal.type === 'subscribed'
+        ? SETTINGS_SCOPES
+        : ((signal.message.scopes as readonly SettingsScope[] | undefined) ?? SETTINGS_SCOPES)
+    )
+  );
 }

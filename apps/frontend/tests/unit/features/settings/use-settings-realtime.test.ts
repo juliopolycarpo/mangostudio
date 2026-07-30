@@ -134,17 +134,34 @@ describe('useSettingsRealtimeInvalidation', () => {
     expect(refetch.app).not.toHaveBeenCalled();
   });
 
-  it('refreshes app on a subscription acknowledgement even mid-write', async () => {
-    const { refetch } = mountSettingsSections();
-    markAppSettingsLocalWrite();
+  it('defers only the app half of a subscription acknowledgement mid-write', async () => {
+    vi.useFakeTimers();
+    try {
+      const { refetch } = mountSettingsSections();
+      markAppSettingsLocalWrite();
 
-    await act(async () => {
-      await listener({ type: 'subscribed' });
-    });
+      await act(async () => {
+        await listener({ type: 'subscribed' });
+      });
 
-    // The ack stands in for events lost while the socket was down and is never
-    // replayed, so the echo window must not swallow it.
-    await waitFor(() => expect(refetch.app).toHaveBeenCalledOnce());
+      // Sections this tab is not writing have nothing to lose.
+      expect(refetch.provider).toHaveBeenCalledOnce();
+      expect(refetch.tool).toHaveBeenCalledOnce();
+      // Refetching app now would replace the cache `saveSettings` builds its
+      // next value from, so the following keystroke would carry the server's
+      // older object into the pending PUT.
+      expect(refetch.app).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_100);
+      });
+
+      // Deferred, never dropped: the ack stands in for events lost while the
+      // socket was down and nothing replays it.
+      expect(refetch.app).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('re-applies a dropped app event once the local write window closes', async () => {
