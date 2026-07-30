@@ -27,8 +27,11 @@ import {
 } from '@mangostudio/shared/workspaces';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useToast } from '@/components/ui/Toast';
 import { updateAppSettings } from '@/features/settings/app/api';
+import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
 import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
+import { useI18n } from '@/hooks/use-i18n';
 
 export {
   DEFAULT_CHAT_TITLE_SETTINGS,
@@ -51,29 +54,52 @@ function createCustomRule(): RuleFileSetting {
   };
 }
 
+/**
+ * App settings auto-save. Every setter writes the cache immediately and lets a
+ * trailing debounce carry the whole object to the server, so a burst of edits
+ * costs one PUT.
+ *
+ * The PUT replaces the full settings object, which makes concurrent edits from
+ * two tabs last-writer-wins on the whole object rather than per field. That is
+ * accepted for a local-first, single-user app; a realtime `app` invalidation
+ * brings the loser back in sync as soon as its own write window closes.
+ */
 export function useGlobalSettings() {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const { t } = useI18n();
   const pendingSaveRef = useRef<AppSettings | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * State to restore when a save fails, captured when an edit burst starts.
+   * It cannot be read at mutate time: the setters write the cache immediately,
+   * so by then the optimistic value is all that is left.
+   */
+  const rollbackRef = useRef<AppSettings | null>(null);
   const { data, isLoading, error } = useQuery({
     ...appSettingsQueryOptions(),
     placeholderData: DEFAULT_APP_SETTINGS,
   });
 
   const mutation = useMutation({
+    mutationKey: appSettingsKeys.save(),
     mutationFn: updateAppSettings,
-    onMutate: (nextSettings: AppSettings) => {
-      const previousSettings =
-        queryClient.getQueryData<AppSettings>(appSettingsKeys.current()) ?? DEFAULT_APP_SETTINGS;
-      queryClient.setQueryData(appSettingsKeys.current(), nextSettings);
-      return { previousSettings };
-    },
+    onMutate: () => ({ previousSettings: rollbackRef.current }),
     onError: (_error, _nextSettings, context) => {
+      // A silent rollback reads as a control that simply refused to move.
+      toast(t.settings.autoSave.errorToast, 'error');
       if (!context?.previousSettings) return;
       queryClient.setQueryData(appSettingsKeys.current(), context.previousSettings);
     },
     onSuccess: (savedSettings) => {
       queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
+    },
+    onSettled: () => {
+      // Re-marked here so the echo window still covers the server's own event,
+      // which cannot arrive before the write that triggered it has settled.
+      markAppSettingsLocalWrite();
+      // A save queued mid-flight keeps the burst — and its rollback target — open.
+      if (pendingSaveRef.current === null) rollbackRef.current = null;
     },
   });
 
@@ -105,9 +131,16 @@ export function useGlobalSettings() {
         queryClient.getQueryData<AppSettings>(appSettingsKeys.current()) ?? DEFAULT_APP_SETTINGS
       );
 
+      rollbackRef.current ??= currentSettings;
+      // Normalizing here is what keeps auto-save from ever sending an
+      // out-of-range value: every clamp the schema declares is applied to the
+      // local edit before it is queued.
       const nextSettings = normalizeAppSettings(updater(currentSettings));
       queryClient.setQueryData(appSettingsKeys.current(), nextSettings);
       pendingSaveRef.current = nextSettings;
+      // Opens the echo window at the first keystroke, not at the PUT, so the
+      // whole debounce is protected too.
+      markAppSettingsLocalWrite();
 
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);

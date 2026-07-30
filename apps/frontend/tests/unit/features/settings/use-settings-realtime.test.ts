@@ -1,5 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  markAppSettingsLocalWrite,
+  resetAppSettingsLocalWriteWindow,
+} from '@/features/settings/app/local-write-window';
 import { useSettingsRealtimeInvalidation } from '@/features/settings/hooks/use-settings-realtime';
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
 import { act, renderHook, waitFor } from '../../../support/harness/render';
@@ -64,6 +68,7 @@ describe('useSettingsRealtimeInvalidation', () => {
       return release;
     });
     mocks.subscribe.mockClear();
+    resetAppSettingsLocalWriteWindow();
   });
 
   it('invalidates only the signaled section and unsubscribes on unmount', async () => {
@@ -112,5 +117,35 @@ describe('useSettingsRealtimeInvalidation', () => {
     await waitFor(() => expect(refetch.app).toHaveBeenCalledOnce());
     expect(refetch.provider).toHaveBeenCalledOnce();
     expect(refetch.tool).toHaveBeenCalledOnce();
+  });
+
+  it('ignores an app echo while this tab is mid-write, but keeps other sections live', async () => {
+    const { refetch } = mountSettingsSections();
+    markAppSettingsLocalWrite();
+
+    await act(async () => {
+      await listener({
+        type: 'invalidate',
+        message: { type: 'invalidate', topic: 'settings', scopes: ['app', 'provider'] },
+      });
+    });
+
+    await waitFor(() => expect(refetch.provider).toHaveBeenCalledOnce());
+    expect(refetch.app).not.toHaveBeenCalled();
+  });
+
+  it('applies an app event once the local write window has closed', async () => {
+    const { refetch } = mountSettingsSections();
+    markAppSettingsLocalWrite();
+    resetAppSettingsLocalWriteWindow();
+
+    await act(async () => {
+      await listener({
+        type: 'invalidate',
+        message: { type: 'invalidate', topic: 'settings', scopes: ['app'] },
+      });
+    });
+
+    await waitFor(() => expect(refetch.app).toHaveBeenCalledOnce());
   });
 });

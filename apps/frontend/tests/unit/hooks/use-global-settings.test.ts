@@ -1,9 +1,10 @@
 import type { AppSettings, AppSettingsPutBody } from '@mangostudio/shared/app-settings';
 import { DEFAULT_APP_SETTINGS, MAX_TOOL_ITERATIONS_MAX } from '@mangostudio/shared/app-settings';
+import { en } from '@mangostudio/shared/i18n';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useGlobalSettings } from '../../../src/hooks/use-global-settings';
 import { client } from '../../../src/lib/api-client';
-import { act, renderHook, waitFor } from '../../support/harness/render';
+import { act, renderHook, screen, waitFor } from '../../support/harness/render';
 
 vi.mock('../../../src/lib/api-client', () => ({
   client: {
@@ -333,6 +334,60 @@ describe('useGlobalSettings', () => {
     expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
       promptSettings: { textSystemPrompt: 'final prompt' },
     });
+  });
+
+  it('flushes a still-pending save when the hook unmounts', async () => {
+    const { result, unmount } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setTextSystemPrompt('draft left behind');
+    });
+
+    expect(mockPut).not.toHaveBeenCalled();
+
+    unmount();
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    expect(mockPut.mock.calls[0]?.[0]).toMatchObject({
+      promptSettings: { textSystemPrompt: 'draft left behind' },
+    });
+  });
+
+  it('rolls the burst back to its starting point and reports a failed save', async () => {
+    // Held open so the optimistic state is observable before the failure lands.
+    let failPut: (() => void) | undefined;
+    mockPut.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          failPut = () =>
+            resolve(mockMutationResult(null, { value: { error: 'settings write failed' } }));
+        })
+    );
+
+    const { result } = renderHook(() => useGlobalSettings());
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    act(() => {
+      result.current.setTextSystemPrompt('draft');
+      result.current.setTextSystemPrompt('final draft');
+    });
+
+    // Optimistic: the burst is on screen well before the request settles.
+    await waitFor(() => expect(result.current.promptSettings.textSystemPrompt).toBe('final draft'));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+
+    act(() => failPut?.());
+
+    // Back to where the burst started, not to its first intermediate value.
+    await waitFor(() =>
+      expect(result.current.promptSettings.textSystemPrompt).toBe(
+        DEFAULT_APP_SETTINGS.promptSettings.textSystemPrompt
+      )
+    );
+    expect(screen.getByText(en.settings.autoSave.errorToast)).toBeTruthy();
   });
 
   it('adds and removes custom rules through the cached app settings state', async () => {

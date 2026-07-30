@@ -306,6 +306,12 @@ export const messages = {
 
   settings: {
     title: 'Configurações',
+    autoSave: {
+      saving: 'Salvando...',
+      saved: 'Salvo',
+      error: 'Não salvo',
+      errorToast: 'Não foi possível salvar as configurações. Sua última alteração foi revertida.',
+    },
     tabs: {
       general: 'Geral',
       connectors: 'Conectores',

@@ -1,6 +1,7 @@
 import { SETTINGS_SCOPES, SETTINGS_TOPIC, type SettingsScope } from '@mangostudio/shared/realtime';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
+import { hasRecentAppSettingsLocalWrite } from '../app/local-write-window';
 import { appSettingsKeys } from '../app/queries';
 import { providerSettingsKeys } from '../providers/queries';
 import { toolSettingsKeys } from '../tools/queries';
@@ -15,12 +16,25 @@ const SECTION_QUERY_KEYS: Record<SettingsScope, readonly unknown[]> = {
   tool: toolSettingsKeys.all,
 };
 
+/**
+ * App settings auto-save is debounced and optimistic, so its own echo lands
+ * while the edit is often still in the user's hands. Dropping just that scope
+ * keeps the other sections live: a `provider` event still applies during an app
+ * settings edit, and the next `app` event applies once the window closes.
+ */
+function applicableScopes(scopes: readonly SettingsScope[]): readonly SettingsScope[] {
+  if (!hasRecentAppSettingsLocalWrite()) return scopes;
+  return scopes.filter((scope) => scope !== 'app');
+}
+
 async function invalidateSettingsScopes(
   queryClient: QueryClient,
   scopes: readonly SettingsScope[]
 ): Promise<void> {
   await Promise.all(
-    scopes.map((scope) => queryClient.invalidateQueries({ queryKey: SECTION_QUERY_KEYS[scope] }))
+    applicableScopes(scopes).map((scope) =>
+      queryClient.invalidateQueries({ queryKey: SECTION_QUERY_KEYS[scope] })
+    )
   );
 }
 

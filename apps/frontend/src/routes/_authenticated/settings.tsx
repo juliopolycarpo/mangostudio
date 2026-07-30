@@ -1,5 +1,6 @@
 import { createFileRoute, Outlet } from '@tanstack/react-router';
 import { Settings } from 'lucide-react';
+import { SettingsSaveIndicator } from '@/components/settings/SettingsSaveIndicator';
 import { SettingsTabs } from '@/components/settings/SettingsTabs';
 import { useSettingsRealtimeInvalidation } from '@/features/settings/hooks/use-settings-realtime';
 import { useI18n } from '@/hooks/use-i18n';
@@ -22,6 +23,7 @@ function SettingsLayout() {
           <h1 className="text-2xl sm:text-3xl font-bold font-headline text-on-background">
             {t.settings.title}
           </h1>
+          <SettingsSaveIndicator />
         </div>
         <SettingsTabs />
         <Outlet />
