@@ -168,7 +168,14 @@ Open these first:
 - `apps/shared/src/library/schemas.ts` (single source of truth for every shape)
 - `apps/frontend/src/features/library/` (`format.ts` holds the cell-state rules,
   `propagation.ts` mirrors the apply contract's validation)
-- `apps/frontend/src/routes/_authenticated/library/`
+- `apps/frontend/src/routes/_authenticated/environments/library/` (the pages;
+  `environments/library.tsx` is the section layout and its tab strip)
+- `apps/frontend/src/routes/_authenticated/library/` (redirect stubs only —
+  every file forwards a pre-move `/library/*` bookmark and renders nothing)
+
+The library is a section of the environments umbrella, not a top-level surface:
+its URLs live under `/environments/library`, and the sidebar reaches it through
+the Environments entry.
 
 There is no canonical copy of a resource: when versions diverge, only a human
 picks the winner. The API refuses an apply that does not name one, and the UI is
@@ -182,7 +189,7 @@ that have to come with it. Precedence between a workspace copy and a home copy
 is a per-target fact and belongs in `TargetDefinition.reads`, never in a
 resolver.
 
-## Environments (Runtimes, Version Managers, Agent CLIs)
+## Environments (Toolchains, Version Managers, Agent CLIs, Library)
 
 Open these first:
 
@@ -194,6 +201,11 @@ Open these first:
 - `apps/shared/src/environments/schemas.ts` (single source of truth for every shape)
 - `apps/frontend/src/features/environments/` (`format.ts` holds the presentation rules)
 - `apps/frontend/src/routes/_authenticated/environments/`
+
+The umbrella covers everything about the user's tooling, so its tabs are
+Toolchains, Agents, Health, and Library — the last one nests the whole library
+surface above. "Toolchains" is an i18n label: the route is still
+`/environments/runtimes` and `RuntimeIdSchema` is unchanged.
 
 ## MCP Servers
 

@@ -199,11 +199,18 @@ routes/                → TanStack Router file-based pages
     gallery.tsx         → Image gallery
     settings.tsx        → Settings layout
     studio.tsx          → Image workspace
+    environments.tsx    → Environments umbrella layout
+    environments/       → Toolchains, agents, health
+      library.tsx       → Library section layout (second-level tabs)
+      library/          → Coverage matrix, backups, resource detail
+    library/            → Redirect stubs for pre-move /library/* bookmarks
 
 features/              → Domain feature modules
   chat/                → Chat UI, components, hooks, services
+  environments/        → Environment cards, health, install actions
   gallery/             → Gallery page + queries
   generation/          → Text/image generation hooks + types
+  library/             → Coverage matrix, divergence, propagation wizards
   settings/            → Settings sub-modules (app, connectors, providers, tools, prompts)
   sidebar/             → Sidebar + context ring
 
