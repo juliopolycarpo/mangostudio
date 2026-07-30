@@ -19,10 +19,12 @@ test('library surface renders its coverage matrix', async ({ page }) => {
   await page.locator('form#signup-form button[type="submit"]').click();
   await expect(page).not.toHaveURL(/\/signup/, { timeout: 10_000 });
 
-  await page.goto('/library');
+  await page.goto('/environments/library');
 
-  // The index route redirects to the skills tab.
-  await expect(page).toHaveURL(/\/library\/skills/, { timeout: 10_000 });
+  // The section index redirects to the skills tab. Anchored, because every one
+  // of these paths ends in the pre-move URL and would match a loose pattern
+  // while sitting on the redirect instead of the page.
+  await expect(page).toHaveURL(/\/environments\/library\/skills$/, { timeout: 10_000 });
   await expect(page.getByTestId('coverage-matrix')).toBeVisible({ timeout: 20_000 });
 
   // A column per target, whether or not the scan found any rows to fill them.
@@ -31,15 +33,20 @@ test('library surface renders its coverage matrix', async ({ page }) => {
   }
 
   await page.getByRole('link', { name: 'Subagents' }).click();
-  await expect(page).toHaveURL(/\/library\/subagents/);
+  await expect(page).toHaveURL(/\/environments\/library\/subagents$/);
 
   await page.getByRole('link', { name: 'Settings', exact: true }).click();
-  await expect(page).toHaveURL(/\/library\/settings/);
+  await expect(page).toHaveURL(/\/environments\/library\/settings$/);
   await expect(
     page.getByTestId('settings-comparison').or(page.getByTestId('library-empty'))
   ).toBeVisible({
     timeout: 15_000,
   });
+
+  // The bookmark promise, in a real browser: a pre-move URL still lands on the
+  // page it used to name.
+  await page.goto('/library/subagents');
+  await expect(page).toHaveURL(/\/environments\/library\/subagents$/, { timeout: 10_000 });
 
   expect(consoleErrors).toEqual([]);
 });

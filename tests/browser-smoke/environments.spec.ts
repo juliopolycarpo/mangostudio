@@ -32,5 +32,13 @@ test('environments surface renders its runtime cards', async ({ page }) => {
   await expect(page).toHaveURL(/\/environments\/agents/);
   await expect(page.getByTestId('agent-cli-card').first()).toBeVisible({ timeout: 15_000 });
 
+  // The library is a section of this umbrella, so its tab has to reach it from
+  // here and the relabelled first tab has to lead back.
+  await page.getByRole('link', { name: 'Library' }).click();
+  await expect(page).toHaveURL(/\/environments\/library\/skills$/, { timeout: 10_000 });
+
+  await page.getByRole('link', { name: 'Toolchains' }).click();
+  await expect(page).toHaveURL(/\/environments\/runtimes$/);
+
   expect(consoleErrors).toEqual([]);
 });
