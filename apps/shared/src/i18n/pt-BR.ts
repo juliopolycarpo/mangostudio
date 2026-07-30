@@ -1966,7 +1966,9 @@ export const messages = {
     nav: 'Ambientes',
     subtitle: 'O que está instalado, o que está errado e o que realmente roda quando você digita.',
     tabs: {
-      runtimes: 'Runtimes',
+      // Rótulo apenas: a aba continua em /environments/runtimes e nenhum id de
+      // runtime muda. "Toolchains" fica sem tradução, como "Runtime" e "PATH".
+      runtimes: 'Toolchains',
       agents: 'Agentes',
       health: 'Diagnóstico',
       library: 'Biblioteca',

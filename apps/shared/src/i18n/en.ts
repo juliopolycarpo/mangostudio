@@ -1946,7 +1946,9 @@ export const messages: Messages = {
     nav: 'Environments',
     subtitle: 'What is installed, what is wrong, and what actually runs when you type.',
     tabs: {
-      runtimes: 'Runtimes',
+      // Label only: the tab still lives at /environments/runtimes and every
+      // runtime id on the wire is unchanged.
+      runtimes: 'Toolchains',
       agents: 'Agents',
       health: 'Health',
       library: 'Library',
