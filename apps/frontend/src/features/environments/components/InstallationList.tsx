@@ -8,7 +8,8 @@
 
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { displayName, type InstallationGroup, pathPosition } from '../format';
+import { type InstallationGroup, pathPosition } from '../format';
+import { useToolIdentities } from '../identity/use-tool-identities';
 
 interface InstallationListProps {
   /**
@@ -21,6 +22,7 @@ interface InstallationListProps {
 export function InstallationList({ groups }: InstallationListProps) {
   const { t } = useI18n();
   const e = t.environments;
+  const { resolve } = useToolIdentities();
 
   if (groups.length === 0) return null;
 
@@ -48,7 +50,7 @@ export function InstallationList({ groups }: InstallationListProps) {
             {canonical.managedBy && (
               <span className="text-xs text-on-surface-variant/60">
                 {formatMessage(e.runtimes.managedByLabel, {
-                  manager: displayName(t, canonical.managedBy),
+                  manager: resolve('version-manager', canonical.managedBy).name,
                 })}
               </span>
             )}

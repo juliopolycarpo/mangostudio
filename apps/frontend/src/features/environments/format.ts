@@ -14,10 +14,20 @@ import type {
   RuntimeInstallation,
 } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
+import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
+import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { formatMessage } from '@/lib/i18n-format';
 
-/** Params that name a runtime, agent, or version manager rather than a value. */
-const IDENTIFIER_PARAMS = new Set(['runtime', 'targetId', 'manager']);
+/**
+ * Params that name a runtime, agent, or version manager rather than a value,
+ * mapped to the identity kind that names the same thing. The param name is what
+ * tells us which registry entry a bare id belongs to.
+ */
+const IDENTIFIER_PARAM_KINDS: Record<string, ToolIdentityKind> = {
+  runtime: 'runtime',
+  targetId: 'agent',
+  manager: 'version-manager',
+};
 
 /** Params carrying a zero-based PATH index the UI shows one-based. */
 const PATH_INDEX_PARAMS = new Set(['effectivePathIndex', 'shadowedPathIndex']);
@@ -29,6 +39,26 @@ const PATH_INDEX_PARAMS = new Set(['effectivePathIndex', 'shadowedPathIndex']);
  */
 export function displayName(t: Messages, id: string): string {
   return (t.environments.names as Record<string, string | undefined>)[id] ?? id;
+}
+
+/**
+ * Custom names by subject key. Injected rather than imported so these helpers
+ * stay React-free; `useToolIdentities` is what feeds it.
+ */
+export type ToolNameLookup = (subjectKey: string) => string | undefined;
+
+/**
+ * The name to print for a tool: the user's own name first, then the chain
+ * `displayName` already implements. Callers without a lookup keep the old
+ * behaviour exactly.
+ */
+function toolDisplayName(
+  t: Messages,
+  kind: ToolIdentityKind,
+  id: string,
+  lookup?: ToolNameLookup
+): string {
+  return lookup?.(toolSubjectKey(kind, id)) ?? displayName(t, id);
 }
 
 /** PATH entries are shown one-based: `PATH #1` is the first directory searched. */
@@ -50,14 +80,19 @@ export function guardReasonLabel(t: Messages, reason: InstallGuardReason): strin
 
 /**
  * Renders one finding as a sentence that names its consequence. Identifier
- * params become product names, PATH indices become one-based, and an
- * `ltsStatus` param becomes its translated label.
+ * params become the tool's effective name, PATH indices become one-based, and
+ * an `ltsStatus` param becomes its translated label.
  */
-export function describeFinding(t: Messages, finding: RuntimeFinding): string {
+export function describeFinding(
+  t: Messages,
+  finding: RuntimeFinding,
+  lookup?: ToolNameLookup
+): string {
   const params: Record<string, string> = {};
   for (const [key, value] of Object.entries(finding.params ?? {})) {
-    if (IDENTIFIER_PARAMS.has(key)) {
-      params[key] = displayName(t, value);
+    const identifierKind = IDENTIFIER_PARAM_KINDS[key];
+    if (identifierKind) {
+      params[key] = toolDisplayName(t, identifierKind, value, lookup);
     } else if (PATH_INDEX_PARAMS.has(key)) {
       const parsed = Number(value);
       params[key] = Number.isFinite(parsed) ? String(pathPosition(parsed)) : value;

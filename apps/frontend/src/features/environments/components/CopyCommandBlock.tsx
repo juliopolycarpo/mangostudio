@@ -12,7 +12,8 @@ import { Button } from '@/components/ui/Button';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { displayName, guardReasonLabel } from '../format';
+import { guardReasonLabel } from '../format';
+import { useToolIdentities } from '../identity/use-tool-identities';
 
 interface CopyCommandBlockProps {
   recipe: InstallRecipePreview;
@@ -24,6 +25,7 @@ export function CopyCommandBlock({ recipe, message }: CopyCommandBlockProps) {
   const { t } = useI18n();
   const s = t.environments.install;
   const { copy, copied, failed: copyFailed } = useClipboard();
+  const { resolve } = useToolIdentities();
 
   // Each blocker keeps a key naming where it came from, so two guards that
   // happen to render the same sentence stay two lines.
@@ -38,7 +40,9 @@ export function CopyCommandBlock({ recipe, message }: CopyCommandBlockProps) {
     reasons.push({
       key: 'missing-requirements',
       text: formatMessage(s.missingRequirements, {
-        requirements: recipe.missingRequirements.map((id) => displayName(t, id)).join(', '),
+        requirements: recipe.missingRequirements
+          .map((id) => resolve('runtime', id).name)
+          .join(', '),
       }),
     });
   }

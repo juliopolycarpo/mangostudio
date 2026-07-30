@@ -133,6 +133,21 @@ body {
   z-index: 100;
 }
 
+/* ── Tool identity avatars ── */
+/* The palette is defined once in TypeScript (`tool-avatar-palette.ts`) so the
+   contrast test reads the same values the browser paints. `ToolAvatar` hands
+   both themes' pairs down as custom properties and these two rules choose,
+   which keeps the component free of the theme context. */
+[data-tool-avatar] {
+  background-color: var(--tool-avatar-bg-dark);
+  color: var(--tool-avatar-fg-dark);
+}
+
+[data-theme="light"] [data-tool-avatar] {
+  background-color: var(--tool-avatar-bg-light);
+  color: var(--tool-avatar-fg-light);
+}
+
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
 }

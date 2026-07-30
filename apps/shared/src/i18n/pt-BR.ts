@@ -2007,6 +2007,25 @@ export const messages = {
       copied: 'Comando copiado',
       copyFailed: 'Não foi possível copiar o comando.',
     },
+    // Renomear é só exibição: o id no fio, os nomes de ferramenta que os
+    // provedores enxergam e todos os caminhos da API continuam iguais.
+    identity: {
+      menu: 'Opções de identidade de {name}',
+      rename: 'Renomear…',
+      reset: 'Voltar ao padrão',
+      dialogTitle: 'Renomear {name}',
+      nameLabel: 'Nome exibido',
+      namePlaceholder: '{name}',
+      nameHint: 'Deixe vazio para manter o nome padrão. Só muda o que você lê.',
+      monogramLabel: 'Monograma',
+      monogramHint: 'Um ou dois caracteres para o avatar. Deixe vazio para derivar do nome.',
+      monogramInvalid: 'Use um ou dois caracteres, sem espaços.',
+      preview: 'Prévia',
+      save: 'Salvar',
+      cancel: 'Cancelar',
+      saveFailed: 'Não foi possível salvar o nome.',
+      resetFailed: 'Não foi possível voltar a identidade ao padrão.',
+    },
     loadError: 'Não foi possível carregar o estado do ambiente.',
     checkedAt: 'Verificado às {time}',
     runtimes: {

@@ -7,8 +7,9 @@
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { describeFinding, displayName } from '../format';
+import { describeFinding } from '../format';
 import { useEnvironmentHealth } from '../hooks/use-runtime-status';
+import { useToolIdentities } from '../identity/use-tool-identities';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { FindingIcon } from './FindingList';
 
@@ -16,6 +17,9 @@ export function HealthPage() {
   const { t } = useI18n();
   const e = t.environments;
   const { entries, isPending, error, refetch } = useEnvironmentHealth();
+  // The health scopes are exactly the static identity kinds, so an entry names
+  // its subject the same way that subject's own card does.
+  const { resolve, lookup } = useToolIdentities();
 
   if (isPending && entries.length === 0) {
     return <EnvironmentPageState variant="loading" />;
@@ -52,10 +56,10 @@ export function HealthPage() {
                 <FindingIcon severity={entry.severity} size={18} />
                 <div className="min-w-0 space-y-1">
                   <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/60">
-                    {e.health.scope[entry.scope]} · {displayName(t, entry.subjectId)}
+                    {e.health.scope[entry.scope]} · {resolve(entry.scope, entry.subjectId).name}
                   </p>
                   <p className="text-sm text-on-surface-variant">
-                    {describeFinding(t, entry.finding)}
+                    {describeFinding(t, entry.finding, lookup)}
                   </p>
                 </div>
               </li>

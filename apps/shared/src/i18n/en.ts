@@ -1987,6 +1987,25 @@ export const messages: Messages = {
       copied: 'Command copied',
       copyFailed: 'The command could not be copied.',
     },
+    // Renaming is display-only: the id on the wire, the tool names providers
+    // see, and every API path stay exactly as they were.
+    identity: {
+      menu: 'Identity options for {name}',
+      rename: 'Rename…',
+      reset: 'Reset to default',
+      dialogTitle: 'Rename {name}',
+      nameLabel: 'Display name',
+      namePlaceholder: '{name}',
+      nameHint: 'Leave empty to keep the default name. Only what you read changes.',
+      monogramLabel: 'Monogram',
+      monogramHint: 'One or two characters for the avatar. Leave empty to derive it from the name.',
+      monogramInvalid: 'Use one or two characters, without spaces.',
+      preview: 'Preview',
+      save: 'Save',
+      cancel: 'Cancel',
+      saveFailed: 'The name could not be saved.',
+      resetFailed: 'The identity could not be reset.',
+    },
     loadError: 'The environment state could not be loaded.',
     checkedAt: 'Checked at {time}',
     runtimes: {
