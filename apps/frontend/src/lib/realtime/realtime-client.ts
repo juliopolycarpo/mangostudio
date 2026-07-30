@@ -225,7 +225,6 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   function reconcileTopics(): void {
     lingerTimer = undefined;
     if (listeners.size === 0) {
-      boundAuthenticatedUserId = undefined;
       teardown();
       return;
     }
@@ -329,7 +328,10 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
           activeTopics.add(topic);
           dispatch(topic, SUBSCRIBED_SIGNAL);
         }
-        if (stale.length > 0) sendTopicFrames('unsubscribe', stale);
+        if (stale.length > 0) {
+          sendTopicFrames('unsubscribe', stale);
+          for (const topic of stale) requestedTopics.delete(topic);
+        }
         return;
       }
       case 'invalidate':
