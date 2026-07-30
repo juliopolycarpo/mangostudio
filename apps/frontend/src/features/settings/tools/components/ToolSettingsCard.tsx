@@ -109,6 +109,36 @@ export function ToolSettingsCard({ descriptor }: ToolSettingsCardProps) {
     };
   }, []);
 
+  // Now that a write from another tab refetches this list, the descriptor can
+  // change under a mounted card while `enabled`/`params` — local state — stay
+  // put. Left alone, the next `hasUnsavedParams` comparison reads the remote
+  // value as a local edit and autosaves the stale params straight back over it,
+  // which the other tab then sees as *its* remote change: two tabs on this page
+  // would trade writes forever. Adopt a remote change only where the user has
+  // not edited, since state still matching the descriptor this card was last
+  // showing has no local edit to lose.
+  const shownDescriptorRef = useRef(descriptor);
+
+  useEffect(() => {
+    const shownDescriptor = shownDescriptorRef.current;
+    if (shownDescriptor === descriptor) return;
+    shownDescriptorRef.current = descriptor;
+
+    if (shownDescriptor.enabled !== descriptor.enabled) {
+      setEnabled((currentEnabled) =>
+        currentEnabled === shownDescriptor.enabled ? descriptor.enabled : currentEnabled
+      );
+    }
+
+    if (!areToolParametersEqual(shownDescriptor.parameters, descriptor.parameters)) {
+      setParams((currentParams) =>
+        areToolParametersEqual(currentParams, shownDescriptor.parameters)
+          ? { ...descriptor.parameters }
+          : currentParams
+      );
+    }
+  }, [descriptor]);
+
   const handleToggle = useCallback(async () => {
     const newEnabled = !enabled;
     setEnabled(newEnabled);
