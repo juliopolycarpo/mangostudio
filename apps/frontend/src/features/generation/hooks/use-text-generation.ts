@@ -334,6 +334,8 @@ export function useTextGeneration({
         activeTurnRef.current = null;
         stream.setAbortController(null);
         stream.setIsGenerating(false);
+        // Realtime normally refreshes mounted Git panels; keep this as the
+        // degradation path when the socket is unavailable or reconnecting.
         void invalidateGitState(queryClient, activeChatId);
         invalidateChatFileCheckpoints(queryClient, activeChatId);
         if (createdChatDuringRequest) {

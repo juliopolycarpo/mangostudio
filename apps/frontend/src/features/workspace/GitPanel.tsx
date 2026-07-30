@@ -34,6 +34,7 @@ import { readGitPanelPrefs, writeGitPanelPrefs } from './git-panel-prefs';
 import {
   type GitDiscardSelection,
   useDiscardPaths,
+  useGitRealtimeInvalidation,
   useGitState,
   useInitRepo,
   useStagePaths,
@@ -68,6 +69,7 @@ const STATUS_PRESENTATION: Readonly<Record<GitFileStatus, StatusPresentation>> =
 export function GitPanel({ chatId }: GitPanelProps) {
   const { t } = useI18n();
   const labels = t.git;
+  useGitRealtimeInvalidation(chatId);
   const stateQuery = useGitState(chatId);
   const githubQuery = useGithubContext(chatId, stateQuery.data);
   const initMutation = useInitRepo(chatId);

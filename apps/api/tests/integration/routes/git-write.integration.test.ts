@@ -11,10 +11,24 @@ import {
   type StashListResponse,
   StashListResponseSchema,
 } from '@mangostudio/shared/git';
+import {
+  GIT_SCOPES,
+  type GitScope,
+  gitTopic,
+  type RealtimeInvalidateEvent,
+} from '@mangostudio/shared/realtime';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
 import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
+import {
+  type GitWriteOperation,
+  gitWriteScopes,
+} from '../../../src/modules/git/application/git-realtime-service';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
+import {
+  createRealtimeBus,
+  setRealtimeBusForTests,
+} from '../../../src/services/realtime/realtime-bus';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import {
   createApiTestApp,
@@ -24,6 +38,26 @@ import {
 const hasGit = Bun.which('git') !== null;
 const tempDirs: string[] = [];
 let restoreAuth: (() => void) | null = null;
+
+const EXPECTED_WRITE_SCOPES = {
+  init: GIT_SCOPES,
+  stage: ['state', 'diffs'],
+  unstage: ['state', 'diffs'],
+  discard: ['state', 'diffs'],
+  commit: ['state', 'history', 'commits', 'branches', 'diffs', 'github'],
+  stashSave: ['state', 'stashes', 'diffs'],
+  stashPop: ['state', 'stashes', 'diffs'],
+  stashApply: ['state', 'stashes', 'diffs'],
+  stashDrop: ['stashes'],
+  createBranch: ['state', 'branches'],
+  deleteBranch: ['branches'],
+  renameBranch: ['state', 'branches', 'github'],
+  switchBranch: ['state', 'branches', 'history', 'diffs', 'github'],
+  checkoutRemote: ['state', 'branches', 'history', 'diffs', 'github'],
+  fetch: ['state', 'branches', 'github'],
+  pull: ['state', 'branches', 'history', 'commits', 'diffs', 'github'],
+  push: ['state', 'branches', 'github'],
+} as const satisfies Record<GitWriteOperation, readonly GitScope[]>;
 
 async function createTempRepo(): Promise<string> {
   const path = await realpath(await mkdtemp(join(tmpdir(), 'mango-git-write-routes-')));
@@ -115,10 +149,16 @@ function getBranches(app: ReturnType<typeof createAuthenticatedApiTestApp>['app'
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
+  setRealtimeBusForTests(undefined);
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
 describe('Git write routes', () => {
+  it('keeps every write operation on the canonical Git scope vocabulary', () => {
+    expect(gitWriteScopes).toEqual(EXPECTED_WRITE_SCOPES);
+    expect(new Set(Object.values(gitWriteScopes).flat())).toEqual(new Set(GIT_SCOPES));
+  });
+
   it.skipIf(!hasGit)('stages and unstages explicit paths or the complete index', async () => {
     const workdir = await createTempRepo();
     await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
@@ -126,7 +166,11 @@ describe('Git write routes', () => {
     await runFixtureGit(workdir, ['commit', '-m', 'initial']);
     await writeFile(join(workdir, 'tracked.txt'), 'changed\n');
     await writeFile(join(workdir, 'untracked.txt'), 'new\n');
-    const { app, chatId } = await createRouteFixture(workdir);
+    const { app, chatId, user } = await createRouteFixture(workdir);
+    const bus = createRealtimeBus();
+    const events: RealtimeInvalidateEvent[] = [];
+    bus.subscribe(user.id, (event) => events.push(event));
+    setRealtimeBusForTests(bus);
 
     const stagedPath = await postJson(app, '/git/stage', {
       chatId,
@@ -165,7 +209,145 @@ describe('Git write routes', () => {
       path: 'untracked.txt',
       status: 'untracked',
     });
+    expect(events).toEqual([
+      {
+        type: 'invalidate',
+        topic: gitTopic(chatId),
+        scopes: ['state', 'diffs'],
+      },
+      {
+        type: 'invalidate',
+        topic: gitTopic(chatId),
+        scopes: ['state', 'diffs'],
+      },
+      {
+        type: 'invalidate',
+        topic: gitTopic(chatId),
+        scopes: ['state', 'diffs'],
+      },
+      {
+        type: 'invalidate',
+        topic: gitTopic(chatId),
+        scopes: ['state', 'diffs'],
+      },
+    ]);
   });
+
+  it.skipIf(!hasGit)(
+    'publishes the expected chat-scoped event after every successful Git mutation',
+    async () => {
+      const remote = await realpath(await mkdtemp(join(tmpdir(), 'mango-git-realtime-remote-')));
+      tempDirs.push(remote);
+      await runFixtureGit(remote, ['init', '--bare', '--initial-branch=main']);
+
+      const workdir = await createTempRepo();
+      await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+      await runFixtureGit(workdir, ['add', 'tracked.txt']);
+      await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+      await runFixtureGit(workdir, ['branch', '-M', 'main']);
+      await runFixtureGit(workdir, ['remote', 'add', 'origin', remote]);
+      await runFixtureGit(workdir, ['push', '-u', 'origin', 'main']);
+      await runFixtureGit(workdir, ['switch', '-c', 'feat/remote-only']);
+      await runFixtureGit(workdir, ['push', '-u', 'origin', 'feat/remote-only']);
+      await runFixtureGit(workdir, ['switch', 'main']);
+      await runFixtureGit(workdir, ['branch', '-D', 'feat/remote-only']);
+
+      const { app, chatId, user } = await createRouteFixture(workdir);
+      const bus = createRealtimeBus();
+      const events: RealtimeInvalidateEvent[] = [];
+      bus.subscribe(user.id, (event) => events.push(event));
+      setRealtimeBusForTests(bus);
+
+      const expectInvalidation = async (
+        responsePromise: Promise<Response>,
+        operation: Exclude<GitWriteOperation, 'init' | 'stage' | 'unstage'>
+      ): Promise<Response> => {
+        const before = events.length;
+        const response = await responsePromise;
+        expect(response.status, operation).toBe(200);
+        expect(events.slice(before), operation).toEqual([
+          {
+            type: 'invalidate',
+            topic: gitTopic(chatId),
+            scopes: [...EXPECTED_WRITE_SCOPES[operation]],
+          },
+        ]);
+        return response;
+      };
+
+      await writeFile(join(workdir, 'tracked.txt'), 'discard me\n');
+      await expectInvalidation(
+        postJson(app, '/git/discard', {
+          chatId,
+          paths: ['tracked.txt'],
+          mode: 'tracked',
+        }),
+        'discard'
+      );
+
+      await writeFile(join(workdir, 'tracked.txt'), 'committed\n');
+      await postJson(app, '/git/stage', { chatId, all: true });
+      await expectInvalidation(
+        postJson(app, '/git/commit', { chatId, title: 'realtime commit' }),
+        'commit'
+      );
+
+      await writeFile(join(workdir, 'tracked.txt'), 'stashed\n');
+      await expectInvalidation(postJson(app, '/git/stash', { chatId }), 'stashSave');
+      await expectInvalidation(
+        postJson(app, '/git/stash/apply', { chatId, index: 0 }),
+        'stashApply'
+      );
+      await postJson(app, '/git/discard', {
+        chatId,
+        paths: ['tracked.txt'],
+        mode: 'tracked',
+      });
+      await expectInvalidation(postJson(app, '/git/stash/pop', { chatId, index: 0 }), 'stashPop');
+      await postJson(app, '/git/discard', {
+        chatId,
+        paths: ['tracked.txt'],
+        mode: 'tracked',
+      });
+
+      await writeFile(join(workdir, 'tracked.txt'), 'drop this stash\n');
+      await postJson(app, '/git/stash', { chatId });
+      await expectInvalidation(postJson(app, '/git/stash/drop', { chatId, index: 0 }), 'stashDrop');
+
+      await expectInvalidation(
+        postJson(app, '/git/branches', { chatId, name: 'feat/realtime' }),
+        'createBranch'
+      );
+      await expectInvalidation(
+        postJson(app, '/git/branches/rename', {
+          chatId,
+          name: 'feat/realtime',
+          newName: 'feat/live',
+        }),
+        'renameBranch'
+      );
+      await expectInvalidation(
+        postJson(app, '/git/branches/switch', { chatId, name: 'main' }),
+        'switchBranch'
+      );
+      await expectInvalidation(
+        deleteJson(app, '/git/branches', { chatId, name: 'feat/live' }),
+        'deleteBranch'
+      );
+      await expectInvalidation(
+        postJson(app, '/git/branches/checkout-remote', {
+          chatId,
+          remoteRef: 'origin/feat/remote-only',
+        }),
+        'checkoutRemote'
+      );
+      await postJson(app, '/git/branches/switch', { chatId, name: 'main' });
+
+      await expectInvalidation(postJson(app, '/git/fetch', { chatId }), 'fetch');
+      await expectInvalidation(postJson(app, '/git/pull', { chatId }), 'pull');
+      await expectInvalidation(postJson(app, '/git/push', { chatId }), 'push');
+    }
+  );
 
   it.skipIf(!hasGit)('refuses to widen a selection through a magic pathspec', async () => {
     const workdir = await createTempRepo();
