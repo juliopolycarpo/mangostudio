@@ -2,13 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 describe('api-client 401 handling', () => {
   let capturedFetcher: ((url: string, init?: RequestInit) => Promise<Response>) | null = null;
-  let navigateToLoginPageMock = vi.fn();
+  let scheduleLoginRedirectMock = vi.fn();
 
   beforeEach(() => {
     capturedFetcher = null;
-    navigateToLoginPageMock = vi.fn();
+    scheduleLoginRedirectMock = vi.fn();
     vi.resetModules();
-    vi.useFakeTimers();
 
     vi.doMock('@elysiajs/eden', () => ({
       treaty: vi.fn((_baseUrl: string, options: { fetcher?: typeof fetch }) => {
@@ -18,14 +17,8 @@ describe('api-client 401 handling', () => {
     }));
 
     vi.doMock('../../../src/lib/auth-navigate', () => ({
-      navigateToLoginPage: navigateToLoginPageMock,
+      scheduleLoginRedirect: scheduleLoginRedirectMock,
     }));
-
-    // Replace jsdom's non-configurable location with a mutable plain object
-    // @ts-expect-error jsdom allows deleting window.location
-    window.location = undefined;
-    // @ts-expect-error assigning a plain object to window.location
-    window.location = { href: 'http://localhost:3000/', pathname: '/' };
   });
 
   function getFetcher(): (url: string, init?: RequestInit) => Promise<Response> {
@@ -35,7 +28,7 @@ describe('api-client 401 handling', () => {
     return capturedFetcher;
   }
 
-  it('triggers auth navigation on 401', async () => {
+  it('schedules the login redirect on 401', async () => {
     globalThis.fetch = vi
       .fn()
       .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
@@ -46,63 +39,7 @@ describe('api-client 401 handling', () => {
     const fetcher = getFetcher();
     await fetcher('/api/test', {});
 
-    vi.advanceTimersByTime(100);
-    expect(navigateToLoginPageMock).toHaveBeenCalledOnce();
-  });
-
-  it('does not navigate multiple times for concurrent 401s', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
-
-    await import('../../../src/lib/api-client');
-    const fetcher = getFetcher();
-
-    await fetcher('/api/a', {});
-    await fetcher('/api/b', {});
-
-    vi.advanceTimersByTime(100);
-    expect(navigateToLoginPageMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('does not navigate when already on /login', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
-
-    // @ts-expect-error test-only replacement of jsdom location
-    window.location = {
-      href: 'http://localhost:3000/login',
-      pathname: '/login',
-    };
-
-    await import('../../../src/lib/api-client');
-    const fetcher = getFetcher();
-
-    await fetcher('/api/test', {});
-    vi.advanceTimersByTime(100);
-
-    expect(navigateToLoginPageMock).not.toHaveBeenCalled();
-  });
-
-  it('does not navigate when already on /signup', async () => {
-    globalThis.fetch = vi
-      .fn()
-      .mockResolvedValue(new Response('', { status: 401 })) as unknown as typeof fetch;
-
-    // @ts-expect-error test-only replacement of jsdom location
-    window.location = {
-      href: 'http://localhost:3000/signup',
-      pathname: '/signup',
-    };
-
-    await import('../../../src/lib/api-client');
-    const fetcher = getFetcher();
-
-    await fetcher('/api/test', {});
-    vi.advanceTimersByTime(100);
-
-    expect(navigateToLoginPageMock).not.toHaveBeenCalled();
+    expect(scheduleLoginRedirectMock).toHaveBeenCalledOnce();
   });
 
   it('returns the response for non-401 statuses', async () => {
@@ -115,5 +52,6 @@ describe('api-client 401 handling', () => {
 
     const result = await fetcher('/api/test', {});
     expect(result.status).toBe(200);
+    expect(scheduleLoginRedirectMock).not.toHaveBeenCalled();
   });
 });
