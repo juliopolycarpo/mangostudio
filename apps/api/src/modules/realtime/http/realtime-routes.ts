@@ -3,6 +3,7 @@ import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import {
   parseGitTopic,
   REALTIME_CLOSE_CODES,
+  REALTIME_IDLE_TIMEOUT_SECONDS,
   type RealtimeClientMessage,
   RealtimeClientMessageSchema,
   type RealtimeErrorMessage,
@@ -27,7 +28,7 @@ const MAX_ACTIVE_TOPICS = 64;
 const MESSAGE_RATE_WINDOW_MS = 1_000;
 
 export const REALTIME_WEBSOCKET_OPTIONS = {
-  idleTimeout: 60,
+  idleTimeout: REALTIME_IDLE_TIMEOUT_SECONDS,
   maxPayloadLength: 16 * 1024,
   backpressureLimit: 64 * 1024,
   closeOnBackpressureLimit: true,

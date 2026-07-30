@@ -5,6 +5,7 @@ export {
   gitTopic,
   parseGitTopic,
   REALTIME_CLOSE_CODES,
+  REALTIME_IDLE_TIMEOUT_SECONDS,
   type RealtimeClientMessage,
   RealtimeClientMessageSchema,
   type RealtimeErrorMessage,

@@ -167,6 +167,12 @@ export const RealtimeServerMessageSchema = Type.Union([
 ]);
 export type RealtimeServerMessage = Static<typeof RealtimeServerMessageSchema>;
 
+/**
+ * Server-side idle timeout. Clients derive their heartbeat interval from this
+ * value so the ping cadence cannot drift away from the window it must beat.
+ */
+export const REALTIME_IDLE_TIMEOUT_SECONDS = 60;
+
 /** Stable close codes used by WebSocket clients to choose reconnect behavior. */
 export const REALTIME_CLOSE_CODES = {
   INVALID_MESSAGE: 4400,
