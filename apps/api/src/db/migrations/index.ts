@@ -33,6 +33,7 @@ import { profileScopedRows } from './032_profile_scoped_rows';
 import { profileScopedAppSettings } from './033_profile_scoped_app_settings';
 import { scopedLibraryLocationSettings } from './034_scoped_library_location_settings';
 import { apiKeys } from './035_api_keys';
+import { userToolIdentities } from './036_user_tool_identities';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -70,4 +71,5 @@ export const allMigrations = {
   '033_profile_scoped_app_settings': profileScopedAppSettings,
   '034_scoped_library_location_settings': scopedLibraryLocationSettings,
   '035_api_keys': apiKeys,
+  '036_user_tool_identities': userToolIdentities,
 };

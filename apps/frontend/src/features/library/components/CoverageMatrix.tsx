@@ -18,6 +18,8 @@ import type {
 import { Link } from '@tanstack/react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useMemo, useRef } from 'react';
+import { ToolAvatar } from '@/components/ui/ToolAvatar';
+import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { CELL_GLYPHS, type CoverageCellState, coverageCells, type LocationGroup } from '../format';
@@ -56,6 +58,9 @@ export function CoverageMatrix({
 }: CoverageMatrixProps) {
   const { t } = useI18n();
   const l = t.library;
+  // A column is an agent, and it is named here exactly as its environments card
+  // names it — the matrix is the same tools seen from a different angle.
+  const { resolve } = useToolIdentities();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const rows = useMemo<MatrixRow[]>(
@@ -124,15 +129,27 @@ export function CoverageMatrix({
             >
               {l.matrix.resourceColumn}
             </th>
-            {targets.map((target) => (
-              <th
-                key={target.id}
-                scope="col"
-                className="px-2 py-2 text-center font-label font-semibold text-[11px] text-on-surface-variant/70 uppercase tracking-wider"
-              >
-                {l.targets[target.id]}
-              </th>
-            ))}
+            {targets.map((target) => {
+              const identity = resolve('agent', target.id, l.targets[target.id]);
+              return (
+                <th
+                  key={target.id}
+                  scope="col"
+                  data-target-id={target.id}
+                  className="px-2 py-2 text-center font-label font-semibold text-[11px] text-on-surface-variant/70 uppercase tracking-wider"
+                >
+                  <span className="flex items-center justify-center gap-1.5">
+                    <ToolAvatar
+                      subjectKey={identity.subjectKey}
+                      monogram={identity.monogram}
+                      name={identity.name}
+                      size="xs"
+                    />
+                    <span className="truncate">{identity.name}</span>
+                  </span>
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>

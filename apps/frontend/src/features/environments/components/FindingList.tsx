@@ -6,6 +6,7 @@ import type { RuntimeFinding } from '@mangostudio/shared/environments';
 import { CircleAlert, TriangleAlert } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { describeFinding, type FindingSeverity, findingSeverity, keyedFindings } from '../format';
+import { useToolIdentities } from '../identity/use-tool-identities';
 
 interface FindingListProps {
   findings: readonly RuntimeFinding[];
@@ -28,6 +29,9 @@ export function FindingIcon({ severity, size = 16 }: { severity: FindingSeverity
 
 export function FindingList({ findings, className = '' }: FindingListProps) {
   const { t } = useI18n();
+  // A finding that names a tool must call it whatever the user calls it, or the
+  // sentence stops matching the card it sits under.
+  const { lookup } = useToolIdentities();
 
   if (findings.length === 0) return null;
 
@@ -40,7 +44,7 @@ export function FindingList({ findings, className = '' }: FindingListProps) {
           data-finding-code={finding.code}
         >
           <FindingIcon severity={findingSeverity(finding)} />
-          <span className="min-w-0">{describeFinding(t, finding)}</span>
+          <span className="min-w-0">{describeFinding(t, finding, lookup)}</span>
         </li>
       ))}
     </ul>

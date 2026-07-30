@@ -12,10 +12,13 @@ import type {
   LtsStatus,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { displayName, ltsLabel } from '../format';
 import { useProbeVersionManager } from '../hooks/use-runtime-status';
+import { ToolIdentityMenu } from '../identity/ToolIdentityMenu';
+import { useToolIdentities } from '../identity/use-tool-identities';
 import { FindingList } from './FindingList';
 import { InstallAction } from './InstallAction';
 import { ProbeButton } from './ProbeButton';
@@ -45,7 +48,10 @@ export function NodeVersionTable({ status, recipes }: NodeVersionTableProps) {
   const { t } = useI18n();
   const e = t.environments;
   const probe = useProbeVersionManager();
-  const manager = displayName(t, status.id);
+  const { resolve } = useToolIdentities();
+  const defaultManagerName = displayName(t, status.id);
+  const identity = resolve('version-manager', status.id, defaultManagerName);
+  const manager = identity.name;
 
   const managerInstallRecipe = recipes.find(
     (recipe) => recipe.runtimeId === status.id && recipe.action === 'install'
@@ -73,15 +79,24 @@ export function NodeVersionTable({ status, recipes }: NodeVersionTableProps) {
   return (
     <section className="space-y-3" data-testid="node-version-table">
       <div className="flex items-center justify-between gap-2">
-        <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-          {formatMessage(e.versions.title, { manager })}
-        </p>
+        <div className="flex min-w-0 items-center gap-2">
+          <ToolAvatar
+            subjectKey={identity.subjectKey}
+            monogram={identity.monogram}
+            name={manager}
+            size="sm"
+          />
+          <p className="truncate font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+            {formatMessage(e.versions.title, { manager })}
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <ProbeButton
             isPending={probe.isPending}
             isError={probe.isError}
             onProbe={() => probe.mutate(status.id)}
           />
+          <ToolIdentityMenu identity={identity} defaultName={defaultManagerName} />
         </div>
       </div>
 

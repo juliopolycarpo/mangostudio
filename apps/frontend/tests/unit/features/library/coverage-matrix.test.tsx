@@ -64,16 +64,21 @@ describe('CoverageMatrix', () => {
   it('renders one column per target, in registry order', async () => {
     await renderMatrix([resource()]);
 
-    const headers = screen.getAllByRole('columnheader').map((header) => header.textContent);
+    const headers = screen.getAllByRole('columnheader');
 
-    expect(headers).toEqual([
-      '',
-      en.library.matrix.resourceColumn,
-      en.library.targets.mangostudio,
-      en.library.targets.claude,
-      en.library.targets.codex,
-      en.library.targets.cursor,
+    // Identity comes from the target id rather than the text: each header also
+    // renders the target's avatar, and the monogram is part of its textContent.
+    expect(headers.map((header) => header.getAttribute('data-target-id'))).toEqual([
+      null,
+      null,
+      'mangostudio',
+      'claude',
+      'codex',
+      'cursor',
     ]);
+    expect(headers[1]).toHaveTextContent(en.library.matrix.resourceColumn);
+    expect(headers[2]).toHaveTextContent(en.library.targets.mangostudio);
+    expect(headers[3]).toHaveTextContent(en.library.targets.claude);
   });
 
   it('labels every cell with the resource, the target, and the state', async () => {

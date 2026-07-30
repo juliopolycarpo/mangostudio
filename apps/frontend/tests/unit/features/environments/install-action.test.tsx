@@ -45,6 +45,17 @@ function sseResponse(events: readonly InstallStreamEvent[]): Response {
 describe('InstallAction', () => {
   const fetchMock = vi.fn();
 
+  /**
+   * Requests aimed at the install endpoints. The card also reads unrelated data
+   * (tool identities), so "no doomed install" has to be asserted against the
+   * endpoint rather than against the whole fetch mock.
+   */
+  function installRequests(): unknown[][] {
+    return fetchMock.mock.calls.filter(([input]) =>
+      String(input).includes('/api/environments/install')
+    );
+  }
+
   beforeEach(() => {
     vi.stubGlobal('fetch', fetchMock);
   });
@@ -67,7 +78,7 @@ describe('InstallAction', () => {
     expect(block.textContent).toContain(
       en.environments.install.guardBlocked['server-not-loopback']
     );
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(installRequests()).toHaveLength(0);
   });
 
   it('explains a missing requirement instead of firing a doomed request', async () => {
@@ -83,7 +94,7 @@ describe('InstallAction', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Install LTS' }));
 
     expect(screen.getByTestId('copy-command-block').textContent).toContain('Install first: nvm');
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(installRequests()).toHaveLength(0);
   });
 
   it('renders nothing when the server never offered the recipe', () => {

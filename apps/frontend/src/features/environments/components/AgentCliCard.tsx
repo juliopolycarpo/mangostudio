@@ -12,8 +12,9 @@ import type { Messages } from '@mangostudio/shared/i18n';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { displayName } from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
+import { ToolIdentityHeader } from '../identity/ToolIdentityHeader';
+import { useToolIdentities } from '../identity/use-tool-identities';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { InstallAction } from './InstallAction';
@@ -28,7 +29,8 @@ export function AgentCliCard({ status, recipes }: AgentCliCardProps) {
   const { t } = useI18n();
   const e = t.environments;
   const probe = useProbeAgentCli();
-  const name = displayName(t, status.targetId);
+  const { resolve } = useToolIdentities();
+  const name = resolve('agent', status.targetId).name;
   const installRecipe = recipes.find(
     (recipe) => recipe.runtimeId === status.id && recipe.action === 'install'
   );
@@ -39,24 +41,27 @@ export function AgentCliCard({ status, recipes }: AgentCliCardProps) {
       data-testid="agent-cli-card"
       data-target-id={status.targetId}
     >
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <h2 className="text-lg font-bold text-on-surface">{name}</h2>
+      <ToolIdentityHeader
+        kind="agent"
+        id={status.targetId}
+        subtitle={
           <p className="text-xs text-on-surface-variant/60">
             {status.effective
               ? `${e.agents.versionLabel} ${status.effective.version}`
               : e.agents.notInstalled}
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <HealthBadge health={status.health} />
-          <ProbeButton
-            isPending={probe.isPending}
-            isError={probe.isError}
-            onProbe={() => probe.mutate(status.targetId)}
-          />
-        </div>
-      </header>
+        }
+        actions={
+          <>
+            <HealthBadge health={status.health} />
+            <ProbeButton
+              isPending={probe.isPending}
+              isError={probe.isError}
+              onProbe={() => probe.mutate(status.targetId)}
+            />
+          </>
+        }
+      />
 
       <dl className="grid gap-2 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-4">
         <dt className="text-on-surface-variant/60">{e.agents.configHomeLabel}</dt>

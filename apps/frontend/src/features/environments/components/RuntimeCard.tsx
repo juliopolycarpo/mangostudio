@@ -10,8 +10,10 @@ import type { InstallRecipePreview, RuntimeStatus } from '@mangostudio/shared/en
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { displayName, groupInstallations, pathPosition } from '../format';
+import { groupInstallations, pathPosition } from '../format';
 import { useProbeRuntime } from '../hooks/use-runtime-status';
+import { ToolIdentityHeader } from '../identity/ToolIdentityHeader';
+import { useToolIdentities } from '../identity/use-tool-identities';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { InstallAction } from './InstallAction';
@@ -28,7 +30,8 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
   const { t } = useI18n();
   const e = t.environments;
   const probe = useProbeRuntime();
-  const name = displayName(t, status.id);
+  const { resolve } = useToolIdentities();
+  const name = resolve('runtime', status.id).name;
 
   // Never trust array order for "which one runs": the effective flag is the
   // only authority, and it is what the header renders.
@@ -49,27 +52,30 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
       data-testid="runtime-card"
       data-runtime-id={status.id}
     >
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
-          <h2 className="text-lg font-bold text-on-surface">{name}</h2>
-          {/* Nothing installed is not "0 versions": the body already says so. */}
-          {groups.length > 0 && (
+      <ToolIdentityHeader
+        kind="runtime"
+        id={status.id}
+        subtitle={
+          // Nothing installed is not "0 versions": the body already says so.
+          groups.length > 0 ? (
             <p className="text-xs text-on-surface-variant/60">
               {groups.length === 1
                 ? e.runtimes.singleVersion
                 : formatMessage(e.runtimes.versionCount, { count: String(groups.length) })}
             </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <HealthBadge health={status.health} />
-          <ProbeButton
-            isPending={probe.isPending}
-            isError={probe.isError}
-            onProbe={() => probe.mutate(status.id)}
-          />
-        </div>
-      </header>
+          ) : undefined
+        }
+        actions={
+          <>
+            <HealthBadge health={status.health} />
+            <ProbeButton
+              isPending={probe.isPending}
+              isError={probe.isError}
+              onProbe={() => probe.mutate(status.id)}
+            />
+          </>
+        }
+      />
 
       {effective ? (
         <section className="space-y-1" data-testid="effective-installation">
@@ -93,7 +99,7 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
                 : e.origins[effective.origin],
               effective.managedBy
                 ? formatMessage(e.runtimes.managedByLabel, {
-                    manager: displayName(t, effective.managedBy),
+                    manager: resolve('version-manager', effective.managedBy).name,
                   })
                 : null,
               // A symlink chain is one row; the paths that reach it are an

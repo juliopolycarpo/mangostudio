@@ -207,6 +207,24 @@ Toolchains, Agents, Health, and Library — the last one nests the whole library
 surface above. "Toolchains" is an i18n label: the route is still
 `/environments/runtimes` and `RuntimeIdSchema` is unchanged.
 
+### Tool identity (names and avatars)
+
+- `apps/shared/src/tool-identity/` (subject-key grammar and the stored shape)
+- `apps/api/src/modules/tool-identity/` (list, upsert, reset; publishes the
+  `tool-identity` settings invalidation scope)
+- `apps/frontend/src/features/environments/identity/` (`resolve.ts` is the
+  fallback chain; `use-tool-identities.ts` is what every surface calls)
+- `apps/frontend/src/components/ui/ToolAvatar.tsx` and
+  `tool-avatar-palette.ts` (literal colour pairs per theme, asserted for
+  contrast)
+
+A subject key is `<kind>:<id>` over ids that already exist elsewhere
+(`agent:claude`, `runtime:bun`, `version-manager:nvm`, `mcp:<slug>`). The
+registry is **display-only**: an override changes what a human reads and
+nothing else, so no wire id, provider-facing tool name, or API path may be
+derived from it. Consumers live in environments cards, `library/CoverageMatrix`,
+`settings/mcp`, and the chat capability inspector.
+
 ## MCP Servers
 
 Open these first:
@@ -219,6 +237,10 @@ Open these first:
 - `apps/shared/src/mcp/`
 - `apps/frontend/src/features/settings/mcp/`
 - Reference: `docs/reference/mcp.md`
+
+A server's card shows its tool identity name, not its stored `name`, whenever
+the user set one — see the Environments playbook. Tool namespacing is unaffected:
+`tool-naming.ts` still builds every name from the slug.
 
 ## Attachments
 

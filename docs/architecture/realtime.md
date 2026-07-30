@@ -83,12 +83,17 @@ source of truth and refresh relevant queries after `subscribed` (and after
 
 | Topic          | Authorization                    | Optional scopes                                                         |
 | -------------- | -------------------------------- | ----------------------------------------------------------------------- |
-| `settings`     | Any authenticated cookie session | `app`, `provider`, `tool`                                               |
+| `settings`     | Any authenticated cookie session | `app`, `provider`, `tool`, `tool-identity`                              |
 | `git:<chatId>` | The user must own `<chatId>`     | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
 
 Foreign Git topics remain unsubscribed and return the same non-enumerating
 `NOT_FOUND` response as an unavailable topic. Unknown topic grammars return
 `UNSUPPORTED`.
+
+A scope is not owned by whoever mounts the topic. `tool-identity` rides the
+`settings` topic because it is one more per-user preference store, but tool
+avatars are drawn on environments, library, MCP, and chat surfaces, so its
+subscriber lives with the identity query rather than on the settings layout.
 
 ## Limits And Close Codes
 

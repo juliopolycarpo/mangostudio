@@ -11,10 +11,21 @@ import { providerSettingsKeys } from '../providers/queries';
 import { toolSettingsKeys } from '../tools/queries';
 
 /**
+ * Scopes this layout owns. `tool-identity` rides the same topic but is read
+ * across environments, library, and chat, so its own query subscribes wherever
+ * it is mounted instead of depending on a settings page being open.
+ */
+type SettingsPageScope = Exclude<SettingsScope, 'tool-identity'>;
+
+function isSettingsPageScope(scope: SettingsScope): scope is SettingsPageScope {
+  return scope !== 'tool-identity';
+}
+
+/**
  * Section → cache family. Each section maps to the root of its query-key
  * family, so a write to one section never refetches the other two.
  */
-const SECTION_QUERY_KEYS: Record<SettingsScope, readonly unknown[]> = {
+const SECTION_QUERY_KEYS: Record<SettingsPageScope, readonly unknown[]> = {
   app: appSettingsKeys.all,
   provider: providerSettingsKeys.all,
   tool: toolSettingsKeys.all,
@@ -30,14 +41,15 @@ const SECTION_QUERY_KEYS: Record<SettingsScope, readonly unknown[]> = {
  * scope once the window closes, because this filter cannot tell a self-echo
  * from another tab's write.
  */
-function applicableScopes(scopes: readonly SettingsScope[]): readonly SettingsScope[] {
-  if (!hasRecentAppSettingsLocalWrite()) return scopes;
-  return scopes.filter((scope) => scope !== 'app');
+function applicableScopes(scopes: readonly SettingsScope[]): readonly SettingsPageScope[] {
+  const pageScopes = scopes.filter(isSettingsPageScope);
+  if (!hasRecentAppSettingsLocalWrite()) return pageScopes;
+  return pageScopes.filter((scope) => scope !== 'app');
 }
 
 async function invalidateScopes(
   queryClient: QueryClient,
-  scopes: readonly SettingsScope[]
+  scopes: readonly SettingsPageScope[]
 ): Promise<void> {
   await Promise.all(
     scopes.map((scope) => queryClient.invalidateQueries({ queryKey: SECTION_QUERY_KEYS[scope] }))

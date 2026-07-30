@@ -288,6 +288,21 @@ interface LibraryDivergenceAcksTable {
   acknowledgedAt: number;
 }
 
+interface UserToolIdentitiesTable {
+  id: string;
+  userId: string;
+  /** Reserved profile scope; always `default` until profiles ship. */
+  profileId: string;
+  /** `<kind>:<id>` — one override per tool per user+profile. */
+  subjectKey: string;
+  /** Null falls back to the product name, never to blank. */
+  displayName: string | null;
+  /** Stored uppercased; null falls back to the name-derived monogram. */
+  monogram: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 interface ChatTodosTable {
   /** One row per chat; the list is always replaced wholesale. */
   chatId: string;
@@ -325,6 +340,7 @@ export interface Database {
   file_checkpoints: FileCheckpointsTable;
   environment_install_runs: EnvironmentInstallRunsTable;
   library_divergence_acks: LibraryDivergenceAcksTable;
+  user_tool_identities: UserToolIdentitiesTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
 }
@@ -357,3 +373,5 @@ export type EnvironmentInstallRunInsert = Insertable<EnvironmentInstallRunsTable
 
 export type LibraryDivergenceAckSelect = Selectable<LibraryDivergenceAcksTable>;
 export type LibraryDivergenceAckInsert = Insertable<LibraryDivergenceAcksTable>;
+
+export type ToolIdentitySelect = Selectable<UserToolIdentitiesTable>;

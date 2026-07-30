@@ -46,6 +46,22 @@ export class ApiError extends Error {
 }
 
 /**
+ * Throws an `ApiError` from an Eden error channel that TypeScript sees as `{}`.
+ *
+ * Eden Treaty loses the error type for hyphenated route segments (`/api-keys`,
+ * `/tool-identities`) even though the runtime payload carries `.value` like any
+ * other. Narrowing here keeps those modules reading like the ones where the
+ * type survives, instead of each restating the same cast.
+ */
+export function throwApiError(error: unknown): never {
+  const value =
+    error && typeof error === 'object' && 'value' in error
+      ? (error as { value: unknown }).value
+      : error;
+  throw new ApiError(value);
+}
+
+/**
  * Picks the user-facing message for a failed request: the API's own error text
  * when the server sent one, otherwise the caller's localized label.
  */

@@ -59,7 +59,7 @@ describe('realtime topic helpers', () => {
   });
 
   it('exposes scope lists derived from schemas', () => {
-    expect(SETTINGS_SCOPES).toEqual(['app', 'provider', 'tool']);
+    expect(SETTINGS_SCOPES).toEqual(['app', 'provider', 'tool', 'tool-identity']);
     expect(GIT_SCOPES).toContain('state');
     expect(GIT_SCOPES).toContain('github');
     expect(GIT_SCOPES).toHaveLength(7);
