@@ -19,15 +19,24 @@ let redirectScheduled = false;
  * every rejected-session path (HTTP 401s and the realtime `4401` close code) so
  * they cannot each queue their own redirect.
  */
+function isAuthRoute(pathname: string): boolean {
+  return pathname === '/login' || pathname === '/signup';
+}
+
 export function scheduleLoginRedirect(): void {
   if (redirectScheduled) return;
-  if (window.location.pathname === '/login' || window.location.pathname === '/signup') return;
+  if (isAuthRoute(window.location.pathname)) return;
   redirectScheduled = true;
   // Small delay so in-flight parallel requests don't each trigger a redirect
   setTimeout(() => {
-    navigateToLoginPage();
-    // Re-arm for future sessions: SPA navigation never reloads the page, so the
-    // module-level flag would otherwise stay true and suppress every later 401.
-    redirectScheduled = false;
+    try {
+      // Recheck: the user may have reached /login or /signup during the debounce.
+      if (isAuthRoute(window.location.pathname)) return;
+      navigateToLoginPage();
+    } finally {
+      // Re-arm for future sessions: SPA navigation never reloads the page, so the
+      // module-level flag would otherwise stay true and suppress every later 401.
+      redirectScheduled = false;
+    }
   }, 100);
 }

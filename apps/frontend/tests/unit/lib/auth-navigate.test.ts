@@ -1,8 +1,12 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigateToLoginPage, setAuthNavigate } from '../../../src/lib/auth-navigate';
 
 function mockHandler() {
   // noop — test-only callback
+}
+
+function setPath(pathname: string) {
+  window.history.replaceState({}, '', pathname);
 }
 
 describe('auth-navigate', () => {
@@ -45,12 +49,12 @@ describe('scheduleLoginRedirect', () => {
     // A fresh module instance per test so the debounce flag never leaks.
     vi.resetModules();
     vi.useFakeTimers();
+    setPath('/');
+  });
 
-    // Replace jsdom's non-configurable location with a mutable plain object
-    // @ts-expect-error jsdom allows deleting window.location
-    window.location = undefined;
-    // @ts-expect-error assigning a plain object to window.location
-    window.location = { href: 'http://localhost:3000/', pathname: '/' };
+  afterEach(() => {
+    vi.useRealTimers();
+    setPath('/');
   });
 
   async function loadModule() {
@@ -91,8 +95,7 @@ describe('scheduleLoginRedirect', () => {
   });
 
   it('does not navigate when already on /login', async () => {
-    // @ts-expect-error test-only replacement of jsdom location
-    window.location = { href: 'http://localhost:3000/login', pathname: '/login' };
+    setPath('/login');
     const { scheduleLoginRedirect } = await loadModule();
 
     scheduleLoginRedirect();
@@ -102,13 +105,28 @@ describe('scheduleLoginRedirect', () => {
   });
 
   it('does not navigate when already on /signup', async () => {
-    // @ts-expect-error test-only replacement of jsdom location
-    window.location = { href: 'http://localhost:3000/signup', pathname: '/signup' };
+    setPath('/signup');
     const { scheduleLoginRedirect } = await loadModule();
 
     scheduleLoginRedirect();
     vi.advanceTimersByTime(100);
 
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('does not navigate when the user reaches an auth route during the debounce', async () => {
+    const { scheduleLoginRedirect } = await loadModule();
+
+    scheduleLoginRedirect();
+    setPath('/login');
+    vi.advanceTimersByTime(100);
+
+    expect(navigate).not.toHaveBeenCalled();
+
+    // Flag must re-arm even when the navigate is skipped.
+    setPath('/');
+    scheduleLoginRedirect();
+    vi.advanceTimersByTime(100);
+    expect(navigate).toHaveBeenCalledOnce();
   });
 });
