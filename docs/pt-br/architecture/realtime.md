@@ -135,10 +135,67 @@ potencialmente desatualizado e atualizar as queries HTTP relevantes depois de
 receber `ready`. Depois de assinar tópicos adicionais, atualize de novo após
 `subscribed`. Reconexões devem usar backoff limitado e parar em `4401`.
 
+Uma limitação conhecida: depois de o notebook acordar, um socket parado em um
+backoff de 30 s não é encurtado por `online` nem por `visibilitychange`. O
+`refetchOnReconnect` do TanStack Query já cobre a atualização nessa janela,
+então reconectar alguns segundos depois não tem custo observável.
+
 O bus alcança apenas sockets no processo atual da API. Deployments com vários
 workers da API exigem uma camada externa de fan-out antes de prometer entrega
 entre workers. Até lá, realtime é uma otimização de atualização de cache, não
 uma fronteira de consistência ou durabilidade.
+
+## Cliente Do Navegador
+
+A metade do navegador fica em `apps/frontend/src/lib/realtime/`:
+`realtime-client.ts` cuida da conexão, `parse-server-message.ts` restringe os
+frames recebidos e `use-realtime-invalidation.ts` é o ponto de entrada React.
+
+Um único socket serve toda a aba. `getRealtimeClient()` o cria de forma
+preguiçosa no primeiro subscribe, então uma aba que não monta nada nunca abre
+conexão. Os tópicos têm contagem de referências: vários componentes podem manter
+o mesmo tópico, e a assinatura no servidor só é removida quando o último deles é
+liberado.
+
+`useRealtimeInvalidation(topic, onSignal)` assina durante o ciclo de vida de um
+componente e entrega cada sinal a um callback. Quem chama invalida com o próprio
+query client, portanto o módulo não conhece query keys nem tópicos. Os dois
+sinais são `{ type: 'invalidate', message }` e `{ type: 'subscribed' }`.
+
+`subscribed` é a barreira de "considere desatualizado". Como eventos publicados
+enquanto o socket estava fora são perdidos, uma confirmação — na primeira
+conexão, na reconexão e em um re-subscribe idempotente — significa que qualquer
+cache daquele tópico pode ser anterior à assinatura e deve ser atualizado. Não
+existe um sinal separado de `ready`: todo tópico que pode receber uma
+invalidation é confirmado, então isso só causaria uma segunda atualização.
+
+Regras que o módulo garante:
+
+| Regra                       | Comportamento                                                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Nenhum frame antes de ready | Os envios são limitados pela fase do protocolo, não por `readyState`, que também cobre OPEN antes de `ready`.               |
+| Subscribes agrupados        | Adições no mesmo tick são agrupadas em um frame, fatiado em 32 tópicos.                                                     |
+| Tópicos rejeitados          | Um tópico respondido com `error` em vez de confirmação é terminal naquele socket e só é tentado de novo na próxima conexão. |
+| Linger                      | Perder o último listener inicia uma reconciliação única de ~5 s, então a repetição do StrictMode não custa frames.          |
+| Heartbeat                   | Um timer em `REALTIME_IDLE_TIMEOUT_SECONDS / 2.5`; um pong perdido força a reconexão. Qualquer frame recebido prova vida.   |
+| Backoff                     | 1 s→30 s com meio jitter, reiniciado só após 10 s de estabilidade comprovada, não em `ready`.                               |
+
+O heartbeat é derivado do timeout de inatividade compartilhado, para que a
+cadência do ping e a janela que ele precisa vencer não se desalinhem. Ele também
+funciona como watchdog de liveness: é o que detecta um socket meio aberto depois
+de o notebook dormir, caso em que `onclose` nunca dispara.
+
+O backoff depende de estabilidade, não de `ready`, então um servidor que aceita a
+conexão e depois a derruba — oito abas contra o limite de conexões por usuário —
+continua escalando em vez de entrar em laço quente.
+
+Política de códigos de fechamento:
+
+| Código                     | Comportamento do cliente                                                                                                    |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `4401`                     | Para em definitivo e volta ao fluxo de autenticação; o singleton da aba é descartado para a nova sessão abrir outro socket. |
+| `4403`, `4400`             | Para em definitivo; reconectar repetiria a mesma rejeição.                                                                  |
+| `4429`, `1011`, transporte | Reconecta com backoff; `4429` já começa no teto.                                                                            |
 
 ## Como Adicionar Um Tópico
 

@@ -13,7 +13,7 @@ export const SETTINGS_SCOPES: readonly SettingsScope[] = SettingsScopeSchema.any
   (literal) => literal.const
 );
 
-/** Git panel cache slices; mirrors frontend invalidation scopes until PR 008 re-exports. */
+/** Git panel cache slices. Single source of truth for the frontend's write-scope map. */
 export const GitScopeSchema = Type.Union([
   Type.Literal('state'),
   Type.Literal('stashes'),
@@ -166,6 +166,12 @@ export const RealtimeServerMessageSchema = Type.Union([
   RealtimeErrorMessageSchema,
 ]);
 export type RealtimeServerMessage = Static<typeof RealtimeServerMessageSchema>;
+
+/**
+ * Server-side idle timeout. Clients derive their heartbeat interval from this
+ * value so the ping cadence cannot drift away from the window it must beat.
+ */
+export const REALTIME_IDLE_TIMEOUT_SECONDS = 60;
 
 /** Stable close codes used by WebSocket clients to choose reconnect behavior. */
 export const REALTIME_CLOSE_CODES = {

@@ -115,6 +115,14 @@ export default defineConfig({
   server: {
     port: mangoConfig.frontendPort,
     proxy: {
+      // Must precede '/api' — Vite matches proxy entries in insertion order, and
+      // the '/api' entry's socket timeout would otherwise apply to the upgraded
+      // WebSocket and tear the realtime channel down mid-session.
+      '/api/ws': {
+        target: apiTarget,
+        changeOrigin: true,
+        ws: true,
+      },
       '/api': {
         target: apiTarget,
         changeOrigin: true,
