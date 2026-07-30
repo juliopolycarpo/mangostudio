@@ -2029,6 +2029,8 @@ export const messages: Messages = {
     // sentence lives, so it cannot be skipped.
     findings: {
       'not-found': '{runtime} was not found on PATH or in any well-known location.',
+      'installed-but-not-on-path':
+        '{runtime} is installed at {path} but not on PATH, so your shell cannot run it.',
       'shadowed-by-earlier-path':
         'Typing the command runs {shadowedPath} (PATH #{shadowedPathIndex}), not {effectivePath} (PATH #{effectivePathIndex}).',
       'multiple-versions':

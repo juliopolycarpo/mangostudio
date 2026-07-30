@@ -269,6 +269,7 @@ export async function scanRuntime(
   const installations: RuntimeInstallation[] = [];
   const failures: RuntimeScanFailure[] = [];
   const firstPathByRealpath = new Map<string, string>();
+  let hasEffectiveInstallation = false;
   const { stopWhen } = deps;
   const candidates = [...iterateBinaryCandidates(definition, deps)].filter(
     (candidate) => !candidate.requiresExistenceCheck || deps.pathExists(candidate.path)
@@ -337,19 +338,24 @@ export async function scanRuntime(
     const aliasOf = firstPathByRealpath.get(realpathKey);
     firstPathByRealpath.set(realpathKey, aliasOf ?? candidate.path);
     const managedBy = detectVersionManager(candidate.path, path, deps);
+    const origin: RuntimeOrigin =
+      candidate.origin === 'configured'
+        ? 'configured'
+        : managedBy
+          ? 'version-manager'
+          : candidate.origin;
+    // Only candidates discovered through PATH can win normal shell lookup.
+    // Version-manager binaries retain that provenance through `pathIndex`.
+    const effective: boolean = candidate.origin === 'path' && !hasEffectiveInstallation;
+    hasEffectiveInstallation ||= effective;
 
     installations.push({
       path,
       rawPath: candidate.path,
       version,
-      origin:
-        candidate.origin === 'configured'
-          ? 'configured'
-          : managedBy
-            ? 'version-manager'
-            : candidate.origin,
+      origin,
       ...(candidate.pathIndex !== undefined && { pathIndex: candidate.pathIndex }),
-      effective: installations.length === 0,
+      effective,
       ...(aliasOf !== undefined && { aliasOf }),
       ...(managedBy !== undefined && { managedBy }),
     });

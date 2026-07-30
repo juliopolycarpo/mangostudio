@@ -160,6 +160,7 @@ describe('scanRuntime', () => {
       origin: 'version-manager',
       managedBy: 'volta',
       pathIndex: 0,
+      effective: true,
     });
   });
 
@@ -203,7 +204,7 @@ describe('scanRuntime', () => {
         rawPath: '/opt/custom/node',
         version: 'v22.13.0',
         origin: 'configured',
-        effective: true,
+        effective: false,
       },
     ]);
   });
@@ -225,7 +226,7 @@ describe('scanRuntime', () => {
     });
   });
 
-  it('classifies a Bun hit outside PATH as well-known', async () => {
+  it('keeps a Bun installation found only outside PATH ineffective', async () => {
     const bunPath = '/home/tester/.bun/bin/bun';
     const result = await scanRuntime(
       BUN_RUNTIME_DEFINITION,
@@ -240,7 +241,7 @@ describe('scanRuntime', () => {
       rawPath: bunPath,
       version: '1.2.3',
       origin: 'well-known',
-      effective: true,
+      effective: false,
     });
   });
 

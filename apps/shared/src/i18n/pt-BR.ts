@@ -2050,6 +2050,8 @@ export const messages = {
     // dita, então ela não pode ser esquecida.
     findings: {
       'not-found': '{runtime} não foi encontrado no PATH nem nos locais conhecidos.',
+      'installed-but-not-on-path':
+        '{runtime} está instalado em {path}, mas não está no PATH e o shell não consegue executá-lo.',
       'shadowed-by-earlier-path':
         'Digitar o comando roda {shadowedPath} (PATH #{shadowedPathIndex}), não {effectivePath} (PATH #{effectivePathIndex}).',
       'multiple-versions':
