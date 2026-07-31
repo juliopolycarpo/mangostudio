@@ -97,7 +97,7 @@ async function execute(
     assertWorkdirContainment(cwd, context.workdirPolicy);
   }
   const settings = normalizeShellToolSettings(context.parameters);
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const result = await runtime.shell.run(
     {
       kind,

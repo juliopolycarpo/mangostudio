@@ -88,6 +88,7 @@ export const messages: Messages = {
         agentAllowlist: 'not in the agent tool allowlist',
         toolSettingDisabled: 'disabled in tool settings',
         nameOverProviderLimit: 'name exceeds the provider limit',
+        environmentUnsupported: 'not supported by the selected environment',
         serverDisabled: 'server is disabled',
         serverUnavailable: 'server is unavailable',
         delegationDisabled: 'delegation is disabled in multi-agent settings',

@@ -1,4 +1,5 @@
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/types';
 import { getConfig } from '../../../lib/config';
 import { stringifyToolResult } from '../../../modules/generation/application/tool-result-utils';
@@ -100,6 +101,7 @@ function buildAllowedToolNameSet(tools: ToolDefinition[] | undefined): ReadonlyS
 interface CursorToolExecutionContext {
   userId: string;
   chatId: string;
+  environmentId?: string;
   assistantMessageId?: string;
   workdir?: string;
   workdirPolicy?: WorkdirPolicy;
@@ -108,6 +110,7 @@ interface CursorToolExecutionContext {
 
 function toolExecutionFromRequest(req: {
   userId: string;
+  environmentId?: string;
   chatId?: string;
   assistantMessageId?: string;
   workdir?: string;
@@ -117,6 +120,7 @@ function toolExecutionFromRequest(req: {
   return {
     userId: req.userId,
     chatId: req.chatId ?? '',
+    environmentId: req.environmentId,
     assistantMessageId: req.assistantMessageId,
     workdir: req.workdir,
     workdirPolicy: req.workdirPolicy,
@@ -141,6 +145,7 @@ export async function executeCursorCustomTool(
       {
         userId: ctx.userId,
         chatId: ctx.chatId,
+        environmentId: ctx.environmentId ?? LOCAL_ENVIRONMENT_ID,
         // Sidecar-routed mutations belong to the turn that spawned them, so the
         // per-message checkpoint covers them like any builtin tool call.
         assistantMessageId: ctx.assistantMessageId,

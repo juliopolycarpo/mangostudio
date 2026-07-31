@@ -21,6 +21,7 @@ export interface CreateChatData {
   title: string;
   model?: string | null;
   userId: string;
+  environmentId?: string;
 }
 
 export interface UpdateChatData {
@@ -81,7 +82,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     lastUsedMode: null,
     selectedAgentId: null,
     workdir: null,
-    environmentId: LOCAL_ENVIRONMENT_ID,
+    environmentId: data.environmentId ?? LOCAL_ENVIRONMENT_ID,
     restrictToolsToWorkdir: null,
     userId: data.userId,
     lastProviderState: null,

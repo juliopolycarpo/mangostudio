@@ -55,6 +55,7 @@ async function runPipeline(chatId: string, calls: [string, { name: string; argsS
   for await (const item of executeStandardToolCallsWithProgress(calls, {
     userId: USER_ID,
     chatId,
+    environmentId: 'local',
     settingsByToolName: new Map(),
     allowedToolNames: new Set([TODO_WRITE_TOOL_NAME, TODO_READ_TOOL_NAME]),
   })) {

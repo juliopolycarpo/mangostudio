@@ -113,6 +113,7 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
         {
           userId: 'user-1',
           chatId: 'chat-1',
+          environmentId: 'local',
           settingsByToolName,
           allowedToolNames: new Set(['bash']),
         }
@@ -169,6 +170,7 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
         {
           userId: 'user-1',
           chatId: 'chat-1',
+          environmentId: 'local',
           settingsByToolName,
           allowedToolNames: new Set(['bash']),
           signal: controller.signal,
@@ -232,6 +234,7 @@ describe('executeStandardToolCallsWithProgress result shaping', () => {
       {
         userId: 'user-1',
         chatId: 'chat-1',
+        environmentId: 'local',
         settingsByToolName: new Map(),
         allowedToolNames: new Set([TODO_WRITE_TOOL_NAME]),
       }

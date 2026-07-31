@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { getDb } from '../../../../src/db/database';
 import { resolveAgentRuntime } from '../../../../src/modules/generation/application/resolve-agent-runtime';
 import { upsertToolSettings } from '../../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
@@ -11,6 +12,23 @@ import type { McpClientHandle } from '../../../../src/services/mcp/types';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
 
 let seq = 0;
+const RUNTIME_MANIFEST: RuntimeCapabilityManifest = {
+  platform: 'linux',
+  arch: 'x64',
+  pathStyle: 'posix',
+  homeDir: '/home/tester',
+  shells: ['bash'],
+  git: { available: true },
+  features: {
+    tools: true,
+    git: true,
+    probing: false,
+    mcp: false,
+    library: false,
+    checkpoints: true,
+  },
+};
+
 function nextUserId(): string {
   seq += 1;
   return `user-runtime-mcp-${seq}`;
@@ -67,7 +85,13 @@ function makeProfile(toolNames: string[]): AgentProfile {
 }
 
 function resolveWithProfile(userId: string, profile: AgentProfile) {
-  return resolveAgentRuntime({ db: getDb(), userId, provider: 'openai', profile });
+  return resolveAgentRuntime({
+    db: getDb(),
+    userId,
+    provider: 'openai',
+    profile,
+    runtimeManifest: RUNTIME_MANIFEST,
+  });
 }
 
 afterEach(async () => {

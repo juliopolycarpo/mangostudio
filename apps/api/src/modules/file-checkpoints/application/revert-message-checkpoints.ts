@@ -1,9 +1,7 @@
 import {
-  PathAccessError,
   RUNTIME_ABSENT_HASH,
   RuntimeSnapshotConflictError,
   type RuntimeSnapshotRevertParams,
-  resolveContainmentRoot,
 } from '@mangostudio/runtime';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
@@ -42,15 +40,17 @@ export async function revertMessageFileCheckpoints(
     path,
     afterHash,
   }));
-  const containmentRoot = await resolveRevertContainmentRoot(db, chatId);
-  const runtime = await getRuntimeClient();
+  const runtimeContext = await resolveRevertRuntimeContext(db, chatId);
+  const runtime = await getRuntimeClient(runtimeContext.userId, runtimeContext.environmentId);
   let result: { revertedFiles: number };
   try {
     result = await runtime.snapshot.revert({
       chatId,
       expected,
       operations,
-      ...(containmentRoot ? { containmentRoot } : {}),
+      ...(runtimeContext.containmentRoot
+        ? { containmentRoot: runtimeContext.containmentRoot }
+        : {}),
     });
   } catch (error) {
     if (error instanceof RuntimeSnapshotConflictError) {
@@ -67,16 +67,28 @@ export async function revertMessageFileCheckpoints(
  * When tools are restricted to the chat workdir, revert uses the same runtime
  * containment root so checkpoint paths cannot escape after the fact.
  */
-async function resolveRevertContainmentRoot(
+async function resolveRevertRuntimeContext(
   db: Kysely<Database>,
   chatId: string
-): Promise<string | undefined> {
+): Promise<{
+  userId: string;
+  environmentId: string;
+  containmentRoot?: string;
+}> {
   const chat = await db
     .selectFrom('chats')
-    .select(['userId', 'workdir', 'restrictToolsToWorkdir'])
+    .select(['userId', 'environmentId', 'workdir', 'restrictToolsToWorkdir'])
     .where('id', '=', chatId)
     .executeTakeFirst();
-  if (!chat?.workdir || !chat.userId) return undefined;
+  if (!chat?.userId) {
+    throw new Error(`Cannot resolve runtime for missing chat "${chatId}".`);
+  }
+
+  const base = {
+    userId: chat.userId,
+    environmentId: chat.environmentId,
+  };
+  if (!chat.workdir) return base;
 
   const appSettings = await getAppSettings(db, chat.userId);
   const chatOverride =
@@ -87,16 +99,7 @@ async function resolveRevertContainmentRoot(
     chatOverride
   );
   const policy = buildWorkdirPolicy(chat.workdir, restricted);
-  if (!policy?.restricted) return undefined;
-
-  try {
-    return resolveContainmentRoot(policy.root);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Working directory is not accessible.';
-    throw new PathAccessError(
-      `Cannot resolve the chat working directory "${policy.root}": ${message}`
-    );
-  }
+  return policy?.restricted ? { ...base, containmentRoot: policy.root } : base;
 }
 
 async function buildRevertOperations(

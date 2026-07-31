@@ -7,7 +7,6 @@ export {
   assertInsideWorkdir,
   isInside,
   isPathPrefix,
-  resolveContainmentRoot,
   resolvePathForContainment,
   WorkdirContainmentError,
 } from '@mangostudio/runtime';

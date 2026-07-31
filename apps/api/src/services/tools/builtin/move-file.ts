@@ -79,7 +79,7 @@ export async function executeMoveFile(
     throw new PathAccessError('Source and destination must be different paths.');
   }
 
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.moveFile(
     {
       chatId: context.chatId,

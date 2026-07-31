@@ -71,7 +71,7 @@ export async function executeCreateFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.createFile(
     {
       chatId: context.chatId,

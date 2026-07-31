@@ -84,7 +84,7 @@ export async function executeEditFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.editFile(
     {
       chatId: context.chatId,

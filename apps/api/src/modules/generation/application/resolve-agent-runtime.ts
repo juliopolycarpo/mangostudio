@@ -1,5 +1,6 @@
 import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import type { ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -50,6 +51,7 @@ export interface ResolveAgentRuntimeInput {
   readonly provider: ProviderType;
   readonly requestRuntimeSettings?: Partial<ProviderRuntimeSettings>;
   readonly profile?: AgentProfile;
+  readonly runtimeManifest: RuntimeCapabilityManifest;
 }
 
 export function resolveRuntimeAgentId(
@@ -80,6 +82,7 @@ export async function resolveAgentRuntime(
     toolSettings,
     registeredTools: getAllTools(),
     mcpServers: mcpServerSnapshots,
+    runtimeManifest: input.runtimeManifest,
   });
   const toolDefinitions = effectiveToolDefinitions(toolCandidates);
   const allowedToolNames = new Set(toolDefinitions.map((definition) => definition.name));

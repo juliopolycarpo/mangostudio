@@ -131,7 +131,7 @@ export async function executeGrep(
     workdir: context.workdir,
     workdirPolicy: context.workdirPolicy,
   });
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const result = await runtime.fs.grep(
     {
       pattern: args.pattern,

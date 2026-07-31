@@ -281,6 +281,7 @@ describe('MCP call serialization', () => {
       {
         userId,
         chatId: 'query-count-chat',
+        environmentId: 'local',
         settingsByToolName: new Map(),
         allowedToolNames: new Set(['mcp__query-count__run']),
         db: countedDb,

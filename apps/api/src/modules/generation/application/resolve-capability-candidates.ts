@@ -8,6 +8,10 @@
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { CapabilityReasonCode } from '@mangostudio/shared/capabilities';
+import type {
+  RuntimeCapabilityManifest,
+  RuntimeShellKind,
+} from '@mangostudio/shared/runtime-protocol';
 import type { ToolSettingsCategory } from '@mangostudio/shared/tool-settings';
 import type { McpBridgeServerSnapshot } from '../../../services/mcp/tool-bridge';
 import { parseMcpToolName, toolNameMatches } from '../../../services/mcp/tool-naming';
@@ -18,7 +22,11 @@ import type { EffectiveToolSettings, RegisteredTool } from '../../../services/to
 /** Reasons a candidate can be rejected at runtime resolution. */
 type ToolCandidateReason = Extract<
   CapabilityReasonCode,
-  'agent-tools-disabled' | 'agent-allowlist' | 'tool-setting-disabled' | 'name-over-provider-limit'
+  | 'agent-tools-disabled'
+  | 'agent-allowlist'
+  | 'tool-setting-disabled'
+  | 'name-over-provider-limit'
+  | 'environment-unsupported'
 >;
 
 export interface ToolCapabilityCandidate {
@@ -42,6 +50,7 @@ export interface ResolveToolCandidatesInput {
   readonly toolSettings: ReadonlyMap<string, EffectiveToolSettings>;
   readonly registeredTools: ReadonlyArray<RegisteredTool>;
   readonly mcpServers: ReadonlyArray<McpBridgeServerSnapshot>;
+  readonly runtimeManifest: RuntimeCapabilityManifest;
 }
 
 /**
@@ -89,7 +98,16 @@ function resolveBuiltinCandidate(
 
   const settings = getSafeEffectiveToolSettings(tool, input.toolSettings.get(name));
   if (!settings.enabled) return { ...base, reason: 'tool-setting-disabled' };
+  const requiredShell = requiredShellForTool(name);
+  if (requiredShell && !input.runtimeManifest.shells.includes(requiredShell)) {
+    return { ...base, reason: 'environment-unsupported' };
+  }
   return { ...base, definition: tool.buildDefinition?.(settings) ?? tool.definition };
+}
+
+function requiredShellForTool(name: string): RuntimeShellKind | undefined {
+  if (name === 'bash' || name === 'zsh' || name === 'powershell') return name;
+  return undefined;
 }
 
 function resolveMcpCandidates(

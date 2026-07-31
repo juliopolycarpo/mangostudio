@@ -86,6 +86,7 @@ export const messages = {
         agentAllowlist: 'fora da lista de permissões do agente',
         toolSettingDisabled: 'desativada nas configurações de ferramentas',
         nameOverProviderLimit: 'nome excede o limite do provedor',
+        environmentUnsupported: 'não é compatível com o ambiente selecionado',
         serverDisabled: 'servidor desativado',
         serverUnavailable: 'servidor indisponível',
         delegationDisabled: 'delegação desativada nas configurações multi-agente',

@@ -85,7 +85,7 @@ export async function executeGlob(
   const settings = normalizeGlobToolSettings(context.parameters);
   const cwd = resolveCwd(args.cwd, settings, context);
 
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const result = await runtime.fs.glob(
     {
       pattern: args.pattern,

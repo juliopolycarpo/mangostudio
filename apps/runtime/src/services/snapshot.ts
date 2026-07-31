@@ -112,10 +112,15 @@ export async function revertRuntimeSnapshots(
       try {
         assertInsideWorkdir(params.containmentRoot, path);
       } catch (error) {
+        if (error instanceof PathAccessError) throw error;
         if (error instanceof WorkdirContainmentError) {
           throw new PathAccessError(error.message);
         }
-        throw error;
+        const message =
+          error instanceof Error ? error.message : 'Working directory is not accessible.';
+        throw new PathAccessError(
+          `Cannot resolve the chat working directory "${params.containmentRoot}": ${message}`
+        );
       }
     }
   }
