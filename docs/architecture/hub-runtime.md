@@ -16,7 +16,8 @@ executors.
 | Authentication, users, chats, and provider orchestration                      | Hub (`apps/api`)                | Runtime requests never carry authority that the hub has not already established.                                                                                                                |
 | Tool definitions, settings, argument parsing, and workdir policy              | Hub (`apps/api`)                | The hub decides whether tools are restricted to a chat workdir; path resolution happens before runtime invocation, in the target's path style.                                                  |
 | Workspace browse and validate (`workspace.browse`, `workspace.validate`)      | Runtime (`apps/runtime`)        | Directory listing and workdir existence checks; hub routes are thin RuntimeClient facades.                                                                                                      |
-| Path containment algorithm                                                    | Runtime (`apps/runtime`)        | Shared `isPathPrefix` / ancestor resolution / `assertInsideWorkdir`; hub keeps the workdir-policy decision.                                                                                     |
+| Lexical path resolution and containment                                       | Hub (`apps/api`)                | `TargetPaths` resolves `~` and relative input in the target's style, then checks allowed, denied, and containment roots as string prefixes. Decides; never the last word.                       |
+| Link-resolved path containment                                                | Runtime (`apps/runtime`)        | Shared `isPathPrefix` / ancestor resolution / `assertInsideWorkdir`. Only the host holding the filesystem can see that a name inside a root is a symlink out of it.                             |
 | Path policy on filesystem calls                                               | Hub policy, runtime enforcement | The hub serializes allowed, denied, and containment roots as `pathPolicy`; the runtime enforces them link-resolved on every filesystem method, including the candidates glob and grep discover. |
 | Filesystem reads, writes, patches, glob, and grep                             | Runtime (`apps/runtime`)        | The runtime owns host I/O, mutation locking, and result hashing.                                                                                                                                |
 | Shell discovery, environment filtering, execution, timeout, and output bounds | Runtime (`apps/runtime`)        | The hub selects settings; the runtime applies them where the process is spawned.                                                                                                                |
@@ -165,10 +166,16 @@ the hub turns those into one absolute path before it calls. Both inputs to that 
 about the target, and both arrive in the `hello` manifest:
 
 - `homeDir` expands `~`. The hub's own `HOME` describes the wrong machine, and on Windows it
-  is usually not set at all.
-- `pathStyle` selects the separator and the notion of absoluteness used to join and fold the
-  result. Resolution is purely lexical and never consults the hub's working directory, which
-  is a directory the target need not have.
+  is usually not set at all. A manifest is a claim by the other end, so a `homeDir` that is
+  not absolute in the target's own style is dropped: `~` then stays literal and fails as a
+  name the target does not have, rather than resolving against the hub's working directory.
+- `pathStyle` selects the separator, the notion of absoluteness used to join and fold the
+  result, and whether two paths that differ only in case are the same path — on a `win32`
+  target they are, so comparisons fold case while the paths themselves keep theirs.
+  Resolution is purely lexical and never consults the hub's working directory, which is a
+  directory the target need not have. The one base it cannot check for itself is the chat
+  working directory; `resolveWorkdirRelativePath` refuses a relative one rather than
+  silently anchoring it to the hub.
 
 `RuntimeClient.paths` exposes both, read from the connection that will receive the call, so
 one environment's manifest cannot be paired with another's connection.

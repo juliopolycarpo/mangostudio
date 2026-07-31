@@ -486,7 +486,8 @@ tears the connection down.
 WSL is a launcher over that same transport, not a protocol of its own:
 
 - `apps/api/src/modules/environments/domain/wsl-output.ts` (UTF-16LE + localized listing)
-- `apps/api/src/modules/environments/application/wsl-detection.ts` (`GET /environments/wsl`)
+- `apps/api/src/modules/environments/application/wsl-detection.ts` (detection service, win32 gate)
+- `apps/api/src/modules/environments/http/environment-routes.ts` (`GET /environments/wsl`)
 - `apps/api/src/modules/environments/domain/wsl-runtime-release.ts` (argv, scripts, asset names)
 - `apps/api/src/modules/environments/infrastructure/wsl-provisioner.ts` (download, verify, install)
 
