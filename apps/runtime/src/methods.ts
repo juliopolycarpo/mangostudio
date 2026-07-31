@@ -255,6 +255,19 @@ export interface RuntimeShellResult {
   readonly durationMs: number;
 }
 
+export interface RuntimeGitExecParams {
+  readonly args: readonly string[];
+  readonly cwd: string;
+  readonly timeoutMs?: number;
+  readonly acceptedExitCodes?: readonly number[];
+}
+
+export interface RuntimeGitExecResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
 export interface RuntimeSnapshotCaptureParams {
   readonly path: string;
 }
@@ -341,6 +354,10 @@ export interface RuntimeMethodMap {
   'shell.run': {
     readonly params: RuntimeShellRunParams;
     readonly result: RuntimeShellResult;
+  };
+  'git.exec': {
+    readonly params: RuntimeGitExecParams;
+    readonly result: RuntimeGitExecResult;
   };
   'snapshot.capture': {
     readonly params: RuntimeSnapshotCaptureParams;

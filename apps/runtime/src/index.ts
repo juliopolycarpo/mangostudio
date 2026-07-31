@@ -52,6 +52,12 @@ export {
   readFileWithObservedMtime,
 } from './services/fs-utils';
 export {
+  buildGitArgv,
+  buildGitEnvironment,
+  execGit,
+  GitExecutionError,
+} from './services/git';
+export {
   findShellExecutable,
   isShellAvailable,
   runShellCommand,

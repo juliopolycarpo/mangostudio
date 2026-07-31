@@ -9,6 +9,7 @@ export type RuntimeServiceErrorKind =
   | 'stale_file'
   | 'stale_line_numbers'
   | 'shell_execution'
+  | 'git_execution'
   | 'snapshot_conflict'
   | 'snapshot_too_large';
 

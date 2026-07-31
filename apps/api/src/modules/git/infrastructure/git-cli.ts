@@ -1,26 +1,9 @@
-const DEFAULT_TIMEOUT_MS = 15_000;
-const MAX_OUTPUT_BYTES = 1024 * 1024;
-
-const GIT_ENV_KEYS = [
-  'PATH',
-  'HOME',
-  'USERPROFILE',
-  'HOMEDRIVE',
-  'HOMEPATH',
-  'SystemRoot',
-  'SYSTEMROOT',
-  'TMPDIR',
-  'TMP',
-  'TEMP',
-  'XDG_CONFIG_HOME',
-  'GIT_CONFIG_GLOBAL',
-  'PROGRAMDATA',
-  // Commit signing resolves its key through the SSH agent or a relocated GnuPG
-  // home; without these, `--gpg-sign` fails for correctly configured users.
-  'SSH_AUTH_SOCK',
-  'GNUPGHOME',
-  'GPG_TTY',
-] as const;
+import {
+  RuntimeRemoteError,
+  buildGitArgv as runtimeBuildGitArgv,
+  buildGitEnvironment as runtimeBuildGitEnvironment,
+} from '@mangostudio/runtime';
+import { getRuntimeClient } from '../../../services/runtime-client';
 
 export interface RunGitOptions {
   readonly cwd: string;
@@ -61,141 +44,102 @@ export class GitCliError extends Error {
   }
 }
 
-interface CappedOutput {
-  readonly text: string;
-  readonly truncated: boolean;
-}
-
 let availabilityProbe: Promise<boolean> | null = null;
 
 /** Builds the direct argv passed to Bun.spawn; no shell is involved. */
 export function buildGitArgv(args: readonly string[]): string[] {
-  return ['git', ...args];
+  return runtimeBuildGitArgv(args);
 }
 
 /** Keeps only process state Git needs, then forces deterministic non-interactive behavior. */
 export function buildGitEnvironment(
   source: NodeJS.ProcessEnv = process.env
 ): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of GIT_ENV_KEYS) {
-    const value = source[key];
-    if (value !== undefined) env[key] = value;
-  }
-  env.GIT_TERMINAL_PROMPT = '0';
-  env.GIT_OPTIONAL_LOCKS = '0';
-  env.LC_ALL = 'C';
-  return env;
+  return runtimeBuildGitEnvironment(source);
 }
 
-/** Runs Git with bounded output and fails with structured, log-safe command context. */
+/** Runs Git via the runtime `git.exec` method and maps failures to GitCliError. */
 export async function runGit(
   args: readonly string[],
   options: RunGitOptions
 ): Promise<GitCommandResult> {
-  let proc: ReturnType<typeof spawnGit>;
   try {
-    proc = spawnGit(args, options.cwd);
+    const runtime = await getRuntimeClient();
+    return await runtime.git.exec(
+      {
+        args,
+        cwd: options.cwd,
+        timeoutMs: options.timeoutMs,
+        acceptedExitCodes: options.acceptedExitCodes,
+      },
+      { signal: options.signal }
+    );
   } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Unable to start Git.';
-    throw new GitCliError(args, null, detail);
+    throw mapGitFailure(args, error);
   }
-  let termination: 'timeout' | 'abort' | null = null;
-
-  const kill = (reason: 'timeout' | 'abort') => {
-    if (termination || proc.exitCode !== null) return;
-    termination = reason;
-    try {
-      proc.kill('SIGKILL');
-    } catch {
-      // The child may have exited between the state check and kill.
-    }
-  };
-
-  const timeoutId = setTimeout(() => kill('timeout'), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-  const abortHandler = () => kill('abort');
-  options.signal?.addEventListener('abort', abortHandler, { once: true });
-  if (options.signal?.aborted) abortHandler();
-
-  try {
-    const [stdout, stderr] = await Promise.all([
-      readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES),
-      readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES),
-    ]);
-    const exitCode = await proc.exited;
-
-    if (termination === 'abort') {
-      throw new GitCliError(args, exitCode, 'Git command aborted.', true);
-    }
-    if (termination === 'timeout') {
-      throw new GitCliError(args, exitCode, 'Git command timed out.');
-    }
-    if (stdout.truncated || stderr.truncated) {
-      throw new GitCliError(args, exitCode, `Git output exceeded ${MAX_OUTPUT_BYTES} bytes.`);
-    }
-    if (exitCode !== 0 && !options.acceptedExitCodes?.includes(exitCode)) {
-      throw new GitCliError(args, exitCode, stderr.text, false, stdout.text);
-    }
-
-    return { stdout: stdout.text, stderr: stderr.text, exitCode };
-  } finally {
-    clearTimeout(timeoutId);
-    options.signal?.removeEventListener('abort', abortHandler);
-  }
-}
-
-function spawnGit(args: readonly string[], cwd: string) {
-  return Bun.spawn(buildGitArgv(args), {
-    cwd,
-    env: buildGitEnvironment(),
-    stdin: 'ignore',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
 }
 
 /** Probes Git once per process; availability is stable for the lifetime of the server. */
 export function isGitAvailable(): Promise<boolean> {
-  availabilityProbe ??= runGit(['--version'], { cwd: process.cwd(), timeoutMs: 5_000 }).then(
-    () => true,
-    () => false
-  );
+  availabilityProbe ??= probeGitAvailability();
   return availabilityProbe;
 }
 
-async function readStreamCapped(
-  stream: ReadableStream<Uint8Array>,
-  maxBytes: number
-): Promise<CappedOutput> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let capturedBytes = 0;
-  let truncated = false;
-
+async function probeGitAvailability(): Promise<boolean> {
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-
-      const remaining = maxBytes - capturedBytes;
-      if (remaining <= 0) {
-        truncated = true;
-        continue;
-      }
-      chunks.push(value.subarray(0, remaining));
-      capturedBytes += Math.min(value.byteLength, remaining);
-      if (value.byteLength > remaining) truncated = true;
-    }
-  } finally {
-    reader.releaseLock();
+    const runtime = await getRuntimeClient();
+    return runtime.manifest.git.available;
+  } catch {
+    // Fall through to a direct exec probe when the runtime handshake is unavailable.
   }
-
-  const bytes = new Uint8Array(capturedBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
+  try {
+    await runGit(['--version'], { cwd: process.cwd(), timeoutMs: 5_000 });
+    return true;
+  } catch {
+    return false;
   }
-  return { text: new TextDecoder().decode(bytes), truncated };
+}
+
+function mapGitFailure(args: readonly string[], error: unknown): GitCliError {
+  if (isAbortError(error)) {
+    return new GitCliError(args, null, 'Git command aborted.', true);
+  }
+  if (error instanceof RuntimeRemoteError && detailString(error, 'kind') === 'git_execution') {
+    return new GitCliError(
+      detailStringArray(error, 'args') ?? args,
+      detailExitCode(error),
+      detailString(error, 'stderr') ?? error.message,
+      detailBoolean(error, 'aborted'),
+      detailString(error, 'stdout') ?? ''
+    );
+  }
+  if (error instanceof Error) {
+    return new GitCliError(args, null, error.message);
+  }
+  return new GitCliError(args, null, 'Git command failed.');
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function detailString(error: RuntimeRemoteError, key: string): string | undefined {
+  const value = error.details?.[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function detailBoolean(error: RuntimeRemoteError, key: string): boolean {
+  return error.details?.[key] === true;
+}
+
+function detailExitCode(error: RuntimeRemoteError): number | null {
+  const value = error.details?.exitCode;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return null;
+}
+
+function detailStringArray(error: RuntimeRemoteError, key: string): string[] | undefined {
+  const value = error.details?.[key];
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) return undefined;
+  return value;
 }

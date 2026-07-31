@@ -13,6 +13,8 @@ import {
   type RuntimeDeleteFileResult,
   type RuntimeEditFileParams,
   type RuntimeEditFileResult,
+  type RuntimeGitExecParams,
+  type RuntimeGitExecResult,
   type RuntimeGlobParams,
   type RuntimeGlobResult,
   type RuntimeGrepParams,
@@ -93,6 +95,13 @@ interface RuntimeShellClient {
   run(params: RuntimeShellRunParams, options?: RuntimeRequestOptions): Promise<RuntimeShellResult>;
 }
 
+interface RuntimeGitClient {
+  exec(
+    params: RuntimeGitExecParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeGitExecResult>;
+}
+
 interface RuntimeSnapshotClient {
   capture(
     params: RuntimeSnapshotCaptureParams,
@@ -112,6 +121,7 @@ interface RuntimeSnapshotClient {
 export class RuntimeClient {
   readonly fs: RuntimeFsClient;
   readonly shell: RuntimeShellClient;
+  readonly git: RuntimeGitClient;
   readonly snapshot: RuntimeSnapshotClient;
 
   constructor(private readonly protocol: RuntimeProtocolClient) {
@@ -130,6 +140,9 @@ export class RuntimeClient {
     };
     this.shell = {
       run: (params, options) => this.request('shell.run', params, options),
+    };
+    this.git = {
+      exec: (params, options) => this.request('git.exec', params, options),
     };
     this.snapshot = {
       capture: (params, options) => this.request('snapshot.capture', params, options),

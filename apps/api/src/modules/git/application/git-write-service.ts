@@ -38,6 +38,8 @@ import { getRepoRoot, getRepoStatus } from './git-status-service';
 type PathSelection = Pick<StagePathsBody | UnstagePathsBody, 'all' | 'paths'>;
 
 const mutationQueues = new Map<string, Promise<void>>();
+/** Local environment id until chat-scoped environment routing lands. */
+const LOCAL_ENVIRONMENT_ID = 'local';
 const COMMIT_TIMEOUT_MS = 60_000;
 const REMOTE_TIMEOUT_MS = 120_000;
 const MERGE_CONFLICT_PATTERN = /CONFLICT|Merge conflict|needs merge/i;
@@ -56,20 +58,22 @@ export class GitWriteError extends Error {
 
 /** Serializes index mutations for one repository while allowing other repos to proceed. */
 async function withMutationLock<T>(root: string, mutation: () => Promise<T>): Promise<T> {
-  const previous = mutationQueues.get(root) ?? Promise.resolve();
+  // Prefixed by environment id so concurrent environments can share a repo root safely later.
+  const key = `${LOCAL_ENVIRONMENT_ID}:${root}`;
+  const previous = mutationQueues.get(key) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
     release = resolve;
   });
   const queue = previous.then(() => current);
-  mutationQueues.set(root, queue);
+  mutationQueues.set(key, queue);
 
   await previous;
   try {
     return await mutation();
   } finally {
     release();
-    if (mutationQueues.get(root) === queue) mutationQueues.delete(root);
+    if (mutationQueues.get(key) === queue) mutationQueues.delete(key);
   }
 }
 

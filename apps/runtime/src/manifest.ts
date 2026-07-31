@@ -14,7 +14,7 @@ export function createLocalRuntimeManifest(): RuntimeCapabilityManifest {
     git: inspectGit(),
     features: {
       tools: true,
-      git: false,
+      git: true,
       probing: false,
       mcp: false,
       library: false,
