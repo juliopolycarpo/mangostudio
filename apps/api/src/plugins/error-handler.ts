@@ -25,6 +25,15 @@ export const errorHandler = new Elysia({ name: 'error-handler' }).onError(
       return { error: 'Invalid request body', code: ERROR_CODES.VALIDATION };
     }
 
+    // A file whose bytes are not the type a route accepts is a bad request, not
+    // a server fault. Elysia raises this outside the `VALIDATION` code, so
+    // without its own arm it fell through to a 500 and told the user nothing.
+    if (code === 'INVALID_FILE_TYPE') {
+      console.error('[error-handler][INVALID_FILE_TYPE] rejected upload');
+      set.status = 422;
+      return { error: 'Unsupported file type', code: ERROR_CODES.VALIDATION };
+    }
+
     console.error(`[error-handler][${code}]`, error);
 
     if (code === 'NOT_FOUND') {
