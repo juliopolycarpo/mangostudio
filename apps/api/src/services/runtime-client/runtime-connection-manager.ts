@@ -9,7 +9,12 @@ let localClientPromise: Promise<RuntimeClient> | undefined;
  * replace this factory without changing tool executors.
  */
 export function getRuntimeClient(): Promise<RuntimeClient> {
-  localClientPromise ??= createLocalClient();
+  localClientPromise ??= createLocalClient().catch((error: unknown) => {
+    // Caching a rejection would strand every filesystem and shell tool until the
+    // process restarts; drop it so the next call retries the handshake.
+    localClientPromise = undefined;
+    throw error;
+  });
   return localClientPromise;
 }
 

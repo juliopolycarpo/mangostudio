@@ -51,6 +51,7 @@ export class RuntimeHost {
   }
 
   start(): void {
+    if (!this.#port) throw new Error('Runtime host is not attached to a transport.');
     this.#send({
       type: 'hello',
       protocolVersion: this.#protocolVersion,
@@ -119,6 +120,9 @@ export class RuntimeHost {
     this.#activeRequests.set(frame.id, controller);
     try {
       const result = await handler(frame.params, { signal: controller.signal });
+      // Inside the try on purpose: a result the transport cannot frame — one
+      // past the frame-size limit, say — becomes an error response for the
+      // caller instead of a rejection nobody awaits.
       this.#send({ type: 'res', id: frame.id, ok: result });
     } catch (error) {
       this.#sendError(frame.id, errorPayloadFor(error, controller.signal));
@@ -128,12 +132,17 @@ export class RuntimeHost {
   }
 
   #sendError(id: string, err: RuntimeErrorPayload): void {
-    this.#send({ type: 'res', id, err });
+    try {
+      this.#send({ type: 'res', id, err });
+    } catch {
+      // The port is gone or the peer is closed; there is nobody left to notify.
+    }
   }
 
   #send(frame: RuntimeFrame): void {
-    if (!this.#port) throw new Error('Runtime host is not attached to a transport.');
-    this.#port.send(frame);
+    // close() detaches the port while cancelled handlers may still be settling,
+    // so a late frame has no destination and must not throw into a void call.
+    this.#port?.send(frame);
   }
 }
 

@@ -143,4 +143,109 @@ describe('in-process runtime transport', () => {
       connection.close();
     }
   });
+
+  it('settles a pending readiness promise when the client closes first', async () => {
+    const ports = createInProcessPortPair({ validateFrames: true });
+    const client = new RuntimeProtocolClient(ports.hub, { hubVersion: 'hub-test' });
+    // No host is attached, so the hello frame never arrives.
+    const ready = client.waitUntilReady();
+    const request = client.request('snapshot.hash', { path: '/workspace/file.txt' });
+
+    client.close();
+
+    await expect(ready).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' });
+    await expect(request).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' });
+  });
+
+  it('releases the host and the port when the handshake fails', async () => {
+    // A host one major version ahead makes the client reject the hello frame.
+    const host = new RuntimeHost({
+      runtimeVersion: 'runtime-test',
+      manifest,
+      handlers: new Map(),
+      protocolVersion: '2.0',
+    });
+
+    await expect(
+      connectInProcessRuntime(host, { hubVersion: 'hub-test', validateFrames: true })
+    ).rejects.toMatchObject({ code: 'PROTOCOL_MISMATCH' });
+
+    // Nothing is left attached, so the failed attempt leaked no port pair.
+    expect(() => host.start()).toThrow('Runtime host is not attached to a transport.');
+  });
+
+  it('does not reject into the void when a request settles after close', async () => {
+    let releaseHandler: (() => void) | undefined;
+    const host = createHost(
+      new Map([
+        [
+          'snapshot.hash',
+          (_params, { signal }) =>
+            new Promise((_, reject) => {
+              // Cancellation completes a tick after teardown clears the port,
+              // exactly like a killed child process reaping asynchronously.
+              releaseHandler = () =>
+                reject(new DOMException('Cancelled by teardown', 'AbortError'));
+              signal.addEventListener('abort', () => setTimeout(() => releaseHandler?.(), 0), {
+                once: true,
+              });
+            }),
+        ],
+      ])
+    );
+    const connection = await connectInProcessRuntime(host, {
+      hubVersion: 'hub-test',
+      validateFrames: true,
+    });
+
+    const unhandled: unknown[] = [];
+    const captureUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', captureUnhandled);
+
+    try {
+      const request = connection.client.request('snapshot.hash', { path: '/workspace/file.txt' });
+      // Let the request register before teardown so the handler is genuinely
+      // in flight rather than never dispatched.
+      await Bun.sleep(0);
+      connection.close();
+
+      await expect(request).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' });
+      // Long enough for the handler's deferred rejection to reach the detached
+      // host, which is where the send used to throw.
+      await Bun.sleep(20);
+      expect(unhandled).toEqual([]);
+      expect(releaseHandler).toBeDefined();
+    } finally {
+      process.off('unhandledRejection', captureUnhandled);
+    }
+  });
+
+  it('answers with an error frame when a result cannot be encoded', async () => {
+    const host = createHost(
+      new Map([
+        [
+          'snapshot.hash',
+          // `ok` is Type.Unknown, so a BigInt clears schema validation and then
+          // fails at JSON.stringify — the same shape of failure as a result past
+          // the frame-size limit, without allocating 16 MiB in a unit test.
+          async () => ({ hash: 1n }),
+        ],
+      ])
+    );
+    const connection = await connectInProcessRuntime(host, {
+      hubVersion: 'hub-test',
+      validateFrames: true,
+    });
+
+    try {
+      await expect(
+        connection.client.request('snapshot.hash', { path: '/workspace/file.txt' })
+      ).rejects.toMatchObject({
+        name: 'RuntimeRemoteError',
+        code: 'INTERNAL',
+      });
+    } finally {
+      connection.close();
+    }
+  });
 });

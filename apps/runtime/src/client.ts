@@ -37,6 +37,7 @@ export class RuntimeProtocolClient {
   readonly #port: RuntimeFramePort;
   readonly #protocolVersion: RuntimeProtocolVersion;
   readonly #ready: Promise<void>;
+  #closed = false;
   #detach: () => void;
   #handshakeTimer?: ReturnType<typeof setTimeout>;
   #rejectReady: (error: Error) => void = () => undefined;
@@ -53,6 +54,9 @@ export class RuntimeProtocolClient {
       this.#resolveReady = resolve;
       this.#rejectReady = reject;
     });
+    // The handshake can fail before anyone awaits waitUntilReady(); without a
+    // subscriber the rejection would surface as an unhandled rejection.
+    this.#ready.catch(() => undefined);
     this.#detach = port.onFrame((frame) => this.#receive(frame));
     this.#handshakeTimer = setTimeout(() => {
       this.#rejectReady(
@@ -81,6 +85,12 @@ export class RuntimeProtocolClient {
     options: RuntimeRequestOptions = {}
   ): Promise<RuntimeMethodMap[K]['result']> {
     await this.#ready;
+    // Awaiting #ready yields, so close() can land between the call and here.
+    // Without this the send below throws a bare transport error instead of the
+    // protocol error every caller already handles.
+    if (this.#closed) {
+      throw new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.');
+    }
     const id = `runtime-${++this.#requestSequence}`;
 
     return await new Promise<RuntimeMethodMap[K]['result']>((resolve, reject) => {
@@ -123,8 +133,15 @@ export class RuntimeProtocolClient {
   }
 
   close(): void {
+    this.#closed = true;
     clearTimeout(this.#handshakeTimer);
     this.#detach();
+    // Settling #ready is what unblocks a waitUntilReady() or a request() that
+    // is still parked on the handshake; on an already-settled promise this is a
+    // no-op.
+    this.#rejectReady(
+      new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.')
+    );
     for (const pending of this.#pending.values()) {
       pending.cleanup();
       pending.reject(
