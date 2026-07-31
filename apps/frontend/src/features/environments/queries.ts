@@ -8,6 +8,7 @@
 
 import type {
   AgentCliStatusList,
+  CreateEnvironmentBody,
   Environment,
   InstallRecipePreview,
   RuntimeStatusList,
@@ -60,6 +61,21 @@ function replaceEnvironment(queryClient: QueryClient, environment: Environment):
   queryClient.setQueryData<Environment[]>(environmentKeys.entities(), (current) =>
     current?.map((item) => (item.id === environment.id ? environment : item))
   );
+}
+
+export function useCreateEnvironmentMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: CreateEnvironmentBody) => {
+      const { data, error } = await client.api.environments.post(body);
+      if (error) throw new ApiError(error.value);
+      return data as Environment;
+    },
+    // A new row changes the list's shape rather than one entry, and its status
+    // starts moving the moment the server sees it, so refetch instead of
+    // splicing a snapshot that is already stale.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: environmentKeys.entities() }),
+  });
 }
 
 export function useUpdateEnvironmentMutation() {

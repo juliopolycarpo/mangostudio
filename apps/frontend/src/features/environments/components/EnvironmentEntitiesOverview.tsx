@@ -1,5 +1,5 @@
 import type { Environment, EnvironmentConnectionState } from '@mangostudio/shared/environments';
-import { Cable, Check, Pencil, Server, Trash2, Unplug, X } from 'lucide-react';
+import { Cable, Check, Pencil, Plus, Server, Trash2, Unplug, X } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -11,6 +11,7 @@ import {
   useRemoveEnvironmentMutation,
   useUpdateEnvironmentMutation,
 } from '../queries';
+import { AddEnvironmentDialog } from './AddEnvironmentDialog';
 import { EnvironmentPageState } from './EnvironmentPageState';
 
 const STATUS_RAIL: Record<EnvironmentConnectionState, string> = {
@@ -23,17 +24,30 @@ const STATUS_RAIL: Record<EnvironmentConnectionState, string> = {
 export function EnvironmentEntitiesOverview() {
   const { t } = useI18n();
   const environments = useEnvironmentEntitiesQuery();
+  const [adding, setAdding] = useState(false);
 
   return (
     <section className="space-y-3" data-testid="overview-environments">
-      <div>
-        <h2 className="font-headline text-lg font-bold text-on-surface">
-          {t.environments.entities.title}
-        </h2>
-        <p className="mt-0.5 text-sm text-on-surface-variant/60">
-          {t.environments.entities.description}
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="font-headline text-lg font-bold text-on-surface">
+            {t.environments.entities.title}
+          </h2>
+          <p className="mt-0.5 text-sm text-on-surface-variant/60">
+            {t.environments.entities.description}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-primary/10 px-2.5 text-xs font-semibold text-primary transition-colors hover:bg-primary/15"
+        >
+          <Plus size={13} />
+          {t.environments.entities.add.trigger}
+        </button>
       </div>
+
+      {adding ? <AddEnvironmentDialog onClose={() => setAdding(false)} /> : null}
 
       {environments.isPending && !environments.data ? (
         <EnvironmentPageState variant="loading" size="section" />

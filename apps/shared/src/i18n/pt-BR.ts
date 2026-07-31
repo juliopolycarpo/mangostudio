@@ -2106,6 +2106,28 @@ export const messages = {
       shells: 'Shells: {shells}',
       checkpoints: 'Checkpoints',
       platform: '{platform} · {arch}',
+      add: {
+        trigger: 'Adicionar ambiente',
+        title: 'Adicionar um ambiente',
+        description: 'Rode as ferramentas do chat, os workspaces e o Git em um processo separado.',
+        kindLabel: 'Transporte',
+        stdioSummary: 'Processo local (avançado)',
+        stdioHint:
+          'Inicia o runtime que acompanha o MangoStudio como um processo filho nesta máquina.',
+        idLabel: 'Identificador',
+        idHint: 'Letras minúsculas, dígitos e hifens simples. Não pode ser alterado depois.',
+        idInvalid: 'Use letras minúsculas, dígitos e hifens simples.',
+        nameLabel: 'Nome de exibição',
+        nameRequired: 'Dê um nome ao ambiente.',
+        binaryPathLabel: 'Caminho do binário do runtime',
+        binaryPathHint: 'Deixe vazio para usar o runtime instalado junto ao MangoStudio.',
+        cwdLabel: 'Diretório de trabalho',
+        cwdHint: 'Deixe vazio para herdar o diretório em que o MangoStudio foi iniciado.',
+        optional: 'Opcional',
+        submit: 'Adicionar ambiente',
+        cancel: 'Cancelar',
+        createFailed: 'Não foi possível criar o ambiente.',
+      },
     },
     runtimes: {
       description:
