@@ -96,6 +96,11 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
     }
   };
 
+  const cancelEditing = () => {
+    setName(environment.name);
+    setEditing(false);
+  };
+
   const removeEnvironment = async () => {
     if (!window.confirm(formatMessage(labels.removeConfirm, { name: environment.name }))) {
       return;
@@ -128,6 +133,17 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
                   <input
                     value={name}
                     onChange={(event) => setName(event.target.value)}
+                    onKeyDown={(event) => {
+                      // The field sits outside a form, so Enter and Escape have
+                      // to be bound here to reach the Save and Cancel buttons.
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        if (!busy) void saveName();
+                      } else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        cancelEditing();
+                      }
+                    }}
                     className="h-8 w-full rounded-lg border border-primary/35 bg-surface-container-lowest px-2 text-sm font-semibold text-on-surface outline-none focus:ring-1 focus:ring-primary/25"
                   />
                 </label>
@@ -180,10 +196,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setName(environment.name);
-                  setEditing(false);
-                }}
+                onClick={cancelEditing}
                 disabled={busy}
                 className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-on-surface-variant hover:bg-surface-container-high disabled:opacity-45"
               >

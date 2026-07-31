@@ -220,6 +220,43 @@ describe('OverviewPage', () => {
     expect(await within(remote).findByRole('heading', { name: 'Build host' })).toBeInTheDocument();
   });
 
+  it('commits an inline rename with Enter and abandons it with Escape', async () => {
+    const user = userEvent.setup();
+    installOverviewScenario();
+    scenario.respondWithJson('PUT', '/api/environments/remote-dev', {
+      body: { ...ENVIRONMENTS[1], name: 'Build host', updatedAt: 2 },
+    });
+
+    await renderWithRouter(<OverviewPage />);
+
+    const remote = await waitFor(() => {
+      const card = screen
+        .getAllByTestId('environment-entity-card')
+        .find((candidate) => candidate.getAttribute('data-environment-id') === 'remote-dev');
+      expect(card).toBeDefined();
+      return card as HTMLElement;
+    });
+
+    // Escape abandons the edit and restores the persisted name.
+    await user.click(within(remote).getByRole('button', { name: 'Edit name' }));
+    await user.clear(within(remote).getByRole('textbox', { name: 'Environment name' }));
+    await user.type(within(remote).getByRole('textbox', { name: 'Environment name' }), 'Discarded');
+    await user.keyboard('{Escape}');
+    expect(
+      await within(remote).findByRole('heading', { name: ENVIRONMENTS[1]?.name })
+    ).toBeInTheDocument();
+
+    // Enter saves without reaching for the mouse.
+    await user.click(within(remote).getByRole('button', { name: 'Edit name' }));
+    await user.clear(within(remote).getByRole('textbox', { name: 'Environment name' }));
+    await user.type(
+      within(remote).getByRole('textbox', { name: 'Environment name' }),
+      'Build host{Enter}'
+    );
+
+    expect(await within(remote).findByRole('heading', { name: 'Build host' })).toBeInTheDocument();
+  });
+
   it('counts a tool the shell cannot reach as needing attention', async () => {
     installOverviewScenario();
 
