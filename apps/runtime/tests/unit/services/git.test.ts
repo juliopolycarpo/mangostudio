@@ -63,6 +63,22 @@ describe('git CLI boundary', () => {
     );
   });
 
+  it('rejects timeouts that would fire the kill timer immediately', async () => {
+    for (const timeoutMs of [0, -1, Number.NaN, '5000' as unknown as number]) {
+      await expect(
+        execGit({ args: ['status'], cwd: process.cwd(), timeoutMs })
+      ).rejects.toBeInstanceOf(RuntimeToolArgumentError);
+    }
+  });
+
+  it('rejects accepted exit codes that are not an integer array', async () => {
+    for (const acceptedExitCodes of [1 as unknown as number[], [1.5], ['1' as unknown as number]]) {
+      await expect(
+        execGit({ args: ['status'], cwd: process.cwd(), acceptedExitCodes })
+      ).rejects.toBeInstanceOf(RuntimeToolArgumentError);
+    }
+  });
+
   it('rejects a string command field', async () => {
     await expect(
       execGit({

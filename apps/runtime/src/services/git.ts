@@ -178,6 +178,24 @@ function validateGitExecParams(params: RuntimeGitExecParams): {
   if (typeof params.cwd !== 'string' || params.cwd.length === 0) {
     throw new RuntimeToolArgumentError('git.exec requires a non-empty cwd string.');
   }
+  // Both fields cross the wire untyped: a non-positive timeout fires the kill timer
+  // immediately, and a non-array acceptedExitCodes throws a raw TypeError at the
+  // exit-code check instead of a structured protocol error.
+  if (
+    params.timeoutMs !== undefined &&
+    (typeof params.timeoutMs !== 'number' ||
+      !Number.isFinite(params.timeoutMs) ||
+      params.timeoutMs <= 0)
+  ) {
+    throw new RuntimeToolArgumentError('git.exec timeoutMs must be a positive finite number.');
+  }
+  if (
+    params.acceptedExitCodes !== undefined &&
+    (!Array.isArray(params.acceptedExitCodes) ||
+      params.acceptedExitCodes.some((code) => !Number.isInteger(code)))
+  ) {
+    throw new RuntimeToolArgumentError('git.exec acceptedExitCodes must be an array of integers.');
+  }
   // Reject a legacy/string command field if a caller smuggles it onto the object.
   if ('command' in params && (params as { command?: unknown }).command !== undefined) {
     throw new RuntimeToolArgumentError(
