@@ -7,7 +7,7 @@
  * images included.
  */
 
-import { normalizeMonogram } from '@mangostudio/shared/tool-identity';
+import { normalizeMonogram, TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
 import { type KeyboardEvent, useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -83,6 +83,11 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   // Switching to upload without picking anything would ask the server to store
   // an image that does not exist.
   const fileMissing = imageMode === 'upload' && !file && !hasStoredUpload;
+  // Checked here rather than left to the upload's rejection, because saving is
+  // two requests: the rename lands first, and a file the server was always
+  // going to refuse would leave that half applied for no reason. The server
+  // still enforces the bound — this only keeps a known-bad file from starting.
+  const fileTooLarge = imageMode === 'upload' && (file?.size ?? 0) > TOOL_IMAGE_MAX_BYTES;
 
   const previewName = trimmedName.length > 0 ? trimmedName : defaultName;
   const previewMonogram =
@@ -98,7 +103,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
     urlInvalid
   );
 
-  const blocked = monogramInvalid || urlInvalid || fileMissing;
+  const blocked = monogramInvalid || urlInvalid || fileMissing || fileTooLarge;
 
   const handleSave = () => {
     if (blocked) return;
@@ -193,6 +198,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
             file={file}
             onFileChange={setFile}
             hasStoredUpload={hasStoredUpload}
+            fileTooLarge={fileTooLarge}
             url={imageUrl}
             onUrlChange={setImageUrl}
             cache={cacheImage}

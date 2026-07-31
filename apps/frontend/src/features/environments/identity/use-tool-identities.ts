@@ -86,6 +86,12 @@ export function useToolIdentities(): ToolIdentityResolver {
  * default", so the dialog never has to reason about which of them changed. The
  * image is the exception: an absent `image` means "leave it", which is what
  * lets a file upload be a second request without the first one wiping it.
+ *
+ * Two requests means a failure can land between them, with the rename stored
+ * and the image not. The cache is therefore refreshed on settlement rather than
+ * on success: a save that failed halfway has still changed something, and the
+ * dialog stays open on its error, so what the rest of the page shows has to be
+ * what was actually stored.
  */
 export function useSaveToolIdentity() {
   const queryClient = useQueryClient();
@@ -109,7 +115,7 @@ export function useSaveToolIdentity() {
         await uploadToolIdentityImage(variables.subjectKey, variables.imageFile);
       }
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: toolIdentityKeys.all }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: toolIdentityKeys.all }),
   });
 }
 

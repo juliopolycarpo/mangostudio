@@ -25,6 +25,8 @@ interface ToolImageFieldsProps {
   readonly onFileChange: (file: File | null) => void;
   /** True when the identity already holds an upload, so no new file is needed. */
   readonly hasStoredUpload: boolean;
+  /** The picked file is over the stored limit and saving is blocked on it. */
+  readonly fileTooLarge: boolean;
   readonly url: string;
   readonly onUrlChange: (url: string) => void;
   readonly cache: boolean;
@@ -38,6 +40,7 @@ export function ToolImageFields({
   file,
   onFileChange,
   hasStoredUpload,
+  fileTooLarge,
   url,
   onUrlChange,
   cache,
@@ -107,7 +110,11 @@ export function ToolImageFields({
               {file?.name ?? (hasStoredUpload ? labels.imageStoredFile : labels.imageNoFile)}
             </span>
           </div>
-          <p className="text-on-surface-variant/60 text-xs">{labels.imageFileHint}</p>
+          {fileTooLarge ? (
+            <p className="text-error text-xs">{labels.imageFileTooLarge}</p>
+          ) : (
+            <p className="text-on-surface-variant/60 text-xs">{labels.imageFileHint}</p>
+          )}
           {/* Owner-specified: uploading is the user asserting a right they have. */}
           <p className="text-on-surface-variant/60 text-xs">{labels.imageRightsNotice}</p>
         </div>

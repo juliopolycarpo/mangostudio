@@ -2010,6 +2010,7 @@ export const messages: Messages = {
       imageNoFile: 'No file chosen',
       imageStoredFile: 'Using the image you uploaded',
       imageFileHint: 'PNG, JPEG, or WebP, up to 512 KB. SVG files are not accepted.',
+      imageFileTooLarge: 'That file is larger than 512 KB. Choose a smaller one.',
       imageRightsNotice: 'Only upload an image you hold the rights to use.',
       imageUrlLabel: 'Image address',
       imageUrlPlaceholder: 'https://example.com/logo.png',

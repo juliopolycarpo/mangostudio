@@ -2030,6 +2030,7 @@ export const messages = {
       imageNoFile: 'Nenhum arquivo escolhido',
       imageStoredFile: 'Usando a imagem que você enviou',
       imageFileHint: 'PNG, JPEG ou WebP, até 512 KB. Arquivos SVG não são aceitos.',
+      imageFileTooLarge: 'Esse arquivo tem mais de 512 KB. Escolha um menor.',
       imageRightsNotice: 'Envie apenas uma imagem cujos direitos de uso sejam seus.',
       imageUrlLabel: 'Endereço da imagem',
       imageUrlPlaceholder: 'https://exemplo.com/logo.png',

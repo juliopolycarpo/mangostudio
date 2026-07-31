@@ -10,6 +10,7 @@
  */
 
 import { en } from '@mangostudio/shared/i18n';
+import { TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -311,6 +312,26 @@ describe('IdentityEditDialog', () => {
     // Uploading is the user asserting a right they hold, so the dialog says so
     // before the file picker opens rather than after the fact.
     expect(screen.getByText(labels.imageRightsNotice)).toBeInTheDocument();
+  });
+
+  it('refuses an oversized file before any of the save has been sent', async () => {
+    const user = userEvent.setup();
+    render(
+      <IdentityEditDialog identity={claudeIdentity} defaultName="Claude Code" onClose={vi.fn()} />
+    );
+
+    const labels = en.environments.identity;
+    await user.click(screen.getByRole('radio', { name: labels.imageModeUpload }));
+    await user.upload(
+      screen.getByLabelText(labels.imageChoose),
+      new File([new Uint8Array(TOOL_IMAGE_MAX_BYTES + 1)], 'huge.png', { type: 'image/png' })
+    );
+
+    // Saving is two requests, and the rename is the one that goes first. A file
+    // the server was always going to refuse would leave that half applied, so
+    // the size is checked here rather than learned from the upload's rejection.
+    expect(screen.getByText(labels.imageFileTooLarge)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: labels.save })).toBeDisabled();
   });
 
   it('opens on the image the tool already has', () => {
