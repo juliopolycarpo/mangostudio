@@ -120,7 +120,21 @@ export function resolveWorkdirRelativePath(
       `Relative path "${inputPath}" cannot be resolved: no working directory is bound to this chat. Pass an absolute path.`
     );
   }
-  return paths.join(expandHome(workdir, paths), expanded);
+
+  // The chat's workdir is validated by the runtime that owns it before it is
+  // stored, and rebinding a chat to another environment clears it — so this
+  // holds. It is asserted anyway because the alternative is silent: `resolve`
+  // answers a relative base with the *hub's* working directory, which on a
+  // Windows hub driving a Linux target is a path on the wrong machine
+  // altogether. Failing here is the difference between a refused call and a
+  // write that lands somewhere nobody named.
+  const base = expandHome(workdir, paths);
+  if (!paths.isAbsolute(base)) {
+    throw new PathAccessError(
+      `Relative path "${inputPath}" cannot be resolved: the working directory "${workdir}" is not an absolute path on this environment. Pass an absolute path.`
+    );
+  }
+  return paths.join(base, expanded);
 }
 
 export function resolveAndValidatePath(inputPath: string, options: ResolvePathOptions): string {

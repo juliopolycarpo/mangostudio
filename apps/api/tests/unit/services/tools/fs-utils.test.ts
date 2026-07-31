@@ -164,6 +164,20 @@ describe('resolveAndValidatePath', () => {
     );
   });
 
+  it('rejects a relative path when the workdir is not absolute on the target', () => {
+    // A Windows workdir paired with a Linux target: `resolve` would answer with
+    // the hub's own working directory rather than refusing.
+    expect(() =>
+      resolveAndValidatePath('src/index.ts', {
+        paths,
+        settings: { allowedPaths: [], deniedPaths: [] },
+        workdirPolicy: { root: 'C:\\Users\\tester\\project', restricted: false },
+      })
+    ).toThrow(
+      'the working directory "C:\\Users\\tester\\project" is not an absolute path on this environment'
+    );
+  });
+
   it('rejects a relative path that escapes a restricted workdir', () => {
     expect(() =>
       resolveAndValidatePath('../../etc/passwd', {
