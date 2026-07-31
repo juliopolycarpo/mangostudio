@@ -9,12 +9,12 @@ import { clampIntegerSetting, getOptionalString, getRequiredVerbatimString } fro
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  createRuntimePathFilter,
   getRequiredPathArg,
   normalizePathValidationSettings,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 
 const GREP_TOOL_NAME = 'grep';
@@ -126,12 +126,14 @@ export async function executeGrep(
 ): Promise<GrepToolResult> {
   const settings = normalizeGrepToolSettings(context.parameters);
   const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
-  const rootPath = resolveAndValidatePath(path, {
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const options = {
     settings,
     workdir: context.workdir,
     workdirPolicy: context.workdirPolicy,
-  });
-  const runtime = await getRuntimeClient(context.userId, context.environmentId);
+    paths: runtime.paths,
+  };
+  const rootPath = resolveAndValidatePath(path, options);
   const result = await runtime.fs.grep(
     {
       pattern: args.pattern,
@@ -143,7 +145,7 @@ export async function executeGrep(
       maxMatchesPerFile: settings.maxMatchesPerFile,
       maxFileSizeBytes: settings.maxFileSizeBytes,
       includeDotfiles: settings.includeDotfiles,
-      ...createRuntimePathFilter(settings, context.workdirPolicy),
+      ...runtimePathPolicy(options),
     },
     context.signal ? { signal: context.signal } : undefined
   );

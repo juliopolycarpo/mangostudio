@@ -14,6 +14,7 @@ import {
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 
 const MOVE_FILE_TOOL_NAME = 'move_file';
@@ -67,10 +68,12 @@ export async function executeMoveFile(
   context: ToolContext
 ): Promise<MoveFileToolResult> {
   const settings = normalizeMoveFileToolSettings(context.parameters);
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const validationOptions = {
     settings,
     workdir: context.workdir,
     workdirPolicy: context.workdirPolicy,
+    paths: runtime.paths,
   };
   const from = resolveAndValidatePath(args.from, validationOptions);
   const to = resolveAndValidatePath(args.to, validationOptions);
@@ -79,7 +82,6 @@ export async function executeMoveFile(
     throw new PathAccessError('Source and destination must be different paths.');
   }
 
-  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.moveFile(
     {
       chatId: context.chatId,
@@ -88,6 +90,7 @@ export async function executeMoveFile(
       resolvedFrom: from,
       resolvedTo: to,
       captureSnapshot: Boolean(context.assistantMessageId),
+      ...runtimePathPolicy(validationOptions),
     },
     context.signal ? { signal: context.signal } : undefined
   );

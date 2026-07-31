@@ -86,9 +86,7 @@ describe('runtime filesystem service', () => {
       maxResults: 100,
       includeDotfiles: false,
       absolute: true,
-      allowedRoots: [root],
-      deniedRoots: [denied],
-      containmentRoot: root,
+      pathPolicy: { allowedRoots: [root], deniedRoots: [denied], containmentRoot: root },
     });
 
     expect(result.matches).toEqual([join(root, 'visible.txt')]);
@@ -107,11 +105,9 @@ describe('runtime filesystem service', () => {
       maxResults: 100,
       includeDotfiles: false,
       absolute: true,
-      allowedRoots: [],
-      deniedRoots: [],
       // The hub sends the workdir lexically. Candidates are matched link-resolved,
       // so an uncanonicalized root here excludes everything inside itself.
-      containmentRoot: linked,
+      pathPolicy: { allowedRoots: [], deniedRoots: [], containmentRoot: linked },
     });
 
     expect(result.matches).toEqual([join(linked, 'visible.txt')]);
@@ -132,8 +128,7 @@ describe('runtime filesystem service', () => {
       maxResults: 100,
       includeDotfiles: false,
       absolute: true,
-      allowedRoots: [root],
-      deniedRoots: [denied],
+      pathPolicy: { allowedRoots: [root], deniedRoots: [denied] },
     });
 
     expect(result.matches).toEqual([]);
@@ -156,9 +151,90 @@ describe('runtime filesystem service', () => {
         maxMatchesPerFile: 10,
         maxFileSizeBytes: 1_000_000,
         includeDotfiles: false,
-        allowedRoots: [root],
-        deniedRoots: [denied],
+        pathPolicy: { allowedRoots: [root], deniedRoots: [denied] },
       })
     ).rejects.toThrow(PathAccessError);
+  });
+});
+
+/**
+ * The hub checks these paths too, but only lexically: it cannot see that a name
+ * inside the working directory is a link out of it, because the link is on this
+ * filesystem and not the hub's. These cover the paths the hub names directly —
+ * the ones that reach the disk without a walk to filter them.
+ */
+describe('runtime filesystem path policy', () => {
+  let root: string;
+  let outside: string;
+
+  beforeEach(() => {
+    root = join(tempDir, 'workspace');
+    outside = join(tempDir, 'outside');
+    mkdirSync(root, { recursive: true });
+    mkdirSync(outside, { recursive: true });
+  });
+
+  it('refuses to read through a symlink that leaves the containment root', async () => {
+    await Bun.write(join(outside, 'secret.txt'), 'secret');
+    symlinkSync(join(outside, 'secret.txt'), join(root, 'alias.txt'));
+
+    await expect(
+      runtimeFsService.readFile({
+        chatId: 'chat-policy',
+        inputPath: 'alias.txt',
+        resolvedPath: join(root, 'alias.txt'),
+        pathPolicy: { allowedRoots: [], deniedRoots: [], containmentRoot: root },
+      })
+    ).rejects.toThrow(PathAccessError);
+  });
+
+  it('refuses a move whose destination escapes through a linked directory', async () => {
+    await Bun.write(join(root, 'file.txt'), 'contents');
+    symlinkSync(outside, join(root, 'link'));
+
+    await expect(
+      runtimeFsService.moveFile({
+        chatId: 'chat-policy',
+        inputFrom: 'file.txt',
+        inputTo: 'link/file.txt',
+        resolvedFrom: join(root, 'file.txt'),
+        resolvedTo: join(root, 'link', 'file.txt'),
+        captureSnapshot: false,
+        pathPolicy: { allowedRoots: [], deniedRoots: [], containmentRoot: root },
+      })
+    ).rejects.toThrow(PathAccessError);
+  });
+
+  it('refuses a patch operation that targets a denied root', async () => {
+    const denied = join(root, 'private');
+    mkdirSync(denied, { recursive: true });
+
+    await expect(
+      runtimeFsService.applyPatch({
+        chatId: 'chat-policy',
+        captureSnapshot: false,
+        operations: [
+          {
+            type: 'add',
+            inputPath: 'private/new.txt',
+            resolvedPath: join(denied, 'new.txt'),
+            content: 'planted',
+          },
+        ],
+        pathPolicy: { allowedRoots: [], deniedRoots: [denied] },
+      })
+    ).rejects.toThrow(PathAccessError);
+  });
+
+  it('leaves calls without a policy unrestricted', async () => {
+    const created = await runtimeFsService.createFile({
+      chatId: 'chat-policy',
+      inputPath: 'plain.txt',
+      resolvedPath: join(outside, 'plain.txt'),
+      content: 'ok\n',
+      captureSnapshot: false,
+    });
+
+    expect(created.result.bytesWritten).toBe(3);
   });
 });

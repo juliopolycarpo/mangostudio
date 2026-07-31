@@ -13,7 +13,9 @@ import {
   normalizePathValidationSettings,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
+  type ResolvePathOptions,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 import { parseV4aPatch, type V4aPatchOperation } from './_v4a-patch';
 
@@ -75,13 +77,20 @@ export async function executeApplyPatch(
 ): Promise<ApplyPatchToolResult> {
   const parsed = parseV4aPatch(args.patch);
   const settings = normalizeApplyPatchToolSettings(context.parameters);
-  const operations = resolveOperations(parsed.operations, settings, context);
   const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const validationOptions = {
+    settings,
+    workdir: context.workdir,
+    workdirPolicy: context.workdirPolicy,
+    paths: runtime.paths,
+  };
+  const operations = resolveOperations(parsed.operations, validationOptions);
   const { result, mutations } = await runtime.fs.applyPatch(
     {
       chatId: context.chatId,
       operations,
       captureSnapshot: Boolean(context.assistantMessageId),
+      ...runtimePathPolicy(validationOptions),
     },
     context.signal ? { signal: context.signal } : undefined
   );
@@ -91,14 +100,13 @@ export async function executeApplyPatch(
 
 function resolveOperations(
   operations: readonly V4aPatchOperation[],
-  settings: ApplyPatchToolSettings,
-  context: ToolContext
+  validationOptions: ResolvePathOptions
 ): RuntimePatchOperation[] {
   const resolved: RuntimePatchOperation[] = [];
   const failures: Array<{ description: string; error: unknown }> = [];
   for (const operation of operations) {
     try {
-      resolved.push(resolveOperation(operation, settings, context));
+      resolved.push(resolveOperation(operation, validationOptions));
     } catch (error) {
       failures.push({ description: describeOperation(operation), error });
     }
@@ -109,14 +117,8 @@ function resolveOperations(
 
 function resolveOperation(
   operation: V4aPatchOperation,
-  settings: ApplyPatchToolSettings,
-  context: ToolContext
+  validationOptions: ResolvePathOptions
 ): RuntimePatchOperation {
-  const validationOptions = {
-    settings,
-    workdir: context.workdir,
-    workdirPolicy: context.workdirPolicy,
-  };
   const resolvedPath = resolveAndValidatePath(operation.path, validationOptions);
   if (operation.type === 'add') {
     return {

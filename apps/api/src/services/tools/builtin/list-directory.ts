@@ -13,6 +13,7 @@ import {
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 
 const LIST_DIRECTORY_TOOL_NAME = 'list_directory';
@@ -62,15 +63,17 @@ export async function executeListDirectory(
 ): Promise<ListDirectoryToolResult> {
   const settings = normalizeListDirectoryToolSettings(context.parameters);
   const path = getRequiredPathArg(args.path ?? context.workdir, 'path');
-  const resolvedPath = resolveAndValidatePath(path, {
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const options = {
     settings,
     workdir: context.workdir,
     workdirPolicy: context.workdirPolicy,
-  });
+    paths: runtime.paths,
+  };
+  const resolvedPath = resolveAndValidatePath(path, options);
 
-  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const result = await runtime.fs.listDirectory(
-    { inputPath: path, resolvedPath },
+    { inputPath: path, resolvedPath, ...runtimePathPolicy(options) },
     context.signal ? { signal: context.signal } : undefined
   );
   return { ...result, entries: [...result.entries] };

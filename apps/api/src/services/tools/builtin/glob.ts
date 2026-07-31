@@ -8,12 +8,13 @@ import { clampIntegerSetting, getOptionalString, getRequiredString } from '../ar
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  createRuntimePathFilter,
   normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
+  type ResolvePathOptions,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 
 const GLOB_TOOL_NAME = 'glob';
@@ -57,7 +58,7 @@ const definition = {
       cwd: {
         type: 'string',
         description:
-          'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory when available, otherwise the process working directory.',
+          'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory.',
       },
     },
     required: ['pattern'],
@@ -84,9 +85,15 @@ export async function executeGlob(
   context: ToolContext
 ): Promise<GlobToolResult> {
   const settings = normalizeGlobToolSettings(context.parameters);
-  const cwd = resolveCwd(args.cwd, settings, context);
-
   const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const options = {
+    settings,
+    workdir: context.workdir,
+    workdirPolicy: context.workdirPolicy,
+    paths: runtime.paths,
+  };
+  const cwd = resolveCwd(args.cwd, options, context);
+
   const result = await runtime.fs.glob(
     {
       pattern: args.pattern,
@@ -94,7 +101,7 @@ export async function executeGlob(
       maxResults: settings.maxResults,
       includeDotfiles: settings.includeDotfiles,
       absolute: settings.absolute,
-      ...createRuntimePathFilter(settings, context.workdirPolicy),
+      ...runtimePathPolicy(options),
     },
     context.signal ? { signal: context.signal } : undefined
   );
@@ -110,7 +117,7 @@ export async function executeGlob(
  */
 function resolveCwd(
   input: string | undefined,
-  settings: PathValidationSettings,
+  options: ResolvePathOptions,
   context: ToolContext
 ): string {
   const policy = context.workdirPolicy;
@@ -120,11 +127,7 @@ function resolveCwd(
       'No directory to search: this chat has no working directory bound. Pass an absolute cwd.'
     );
   }
-  return resolveAndValidatePath(base, {
-    settings,
-    workdir: context.workdir,
-    workdirPolicy: policy,
-  });
+  return resolveAndValidatePath(base, options);
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GlobToolResult> {

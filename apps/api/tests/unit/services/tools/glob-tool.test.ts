@@ -14,6 +14,7 @@ import {
 } from '../../../../src/services/tools/builtin/glob';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { withTargetHome } from './support/target-home';
 import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
 
 let tempDir: string;
@@ -223,16 +224,12 @@ describe('executeGlob', () => {
     expect(threw).toBe(true);
   });
 
-  it('expands ~ in cwd', async () => {
+  it('expands ~ in cwd to the home directory the runtime reports', async () => {
     await seedTree();
-    const originalHome = Bun.env.HOME;
-    Bun.env.HOME = tempDir;
-    try {
-      const result = await executeGlob({ pattern: '*.ts', cwd: '~' }, makeContext());
-      expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
-    } finally {
-      Bun.env.HOME = originalHome;
-    }
+    const result = await withTargetHome(tempDir, () =>
+      executeGlob({ pattern: '*.ts', cwd: '~' }, makeContext())
+    );
+    expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
   });
 
   it('returns no matches when nothing matches the pattern', async () => {

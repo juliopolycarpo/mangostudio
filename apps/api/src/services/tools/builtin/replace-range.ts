@@ -14,6 +14,7 @@ import {
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 
 const REPLACE_RANGE_TOOL_NAME = 'replace_range';
@@ -83,13 +84,15 @@ export async function executeReplaceRange(
   context: ToolContext
 ): Promise<ReplaceRangeToolResult> {
   const settings = normalizeReplaceRangeToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, {
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const options = {
     settings,
     workdir: context.workdir,
     workdirPolicy: context.workdirPolicy,
-  });
+    paths: runtime.paths,
+  };
+  const resolvedPath = resolveAndValidatePath(args.path, options);
 
-  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.replaceRange(
     {
       chatId: context.chatId,
@@ -99,6 +102,7 @@ export async function executeReplaceRange(
       endLine: args.endLine,
       content: args.content,
       captureSnapshot: Boolean(context.assistantMessageId),
+      ...runtimePathPolicy(options),
     },
     context.signal ? { signal: context.signal } : undefined
   );

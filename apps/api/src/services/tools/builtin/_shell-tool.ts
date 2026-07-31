@@ -89,15 +89,16 @@ async function execute(
 ): Promise<ShellCommandResult> {
   const command = getRequiredString(args.command, 'command');
   const requestedCwd = getOptionalString(args.cwd) ?? context.workdir;
+  const settings = normalizeShellToolSettings(context.parameters);
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const resolution = { ...context, paths: runtime.paths };
   // Spawn with the same resolved path that was validated, so `~` and relative
   // inputs cannot diverge between the containment check and the child process.
   // Relative input anchors to the chat workdir, matching the filesystem tools.
-  const cwd = requestedCwd ? resolveWorkdirRelativePath(requestedCwd, context) : undefined;
+  const cwd = requestedCwd ? resolveWorkdirRelativePath(requestedCwd, resolution) : undefined;
   if (cwd) {
-    assertWorkdirContainment(cwd, context.workdirPolicy);
+    assertWorkdirContainment(cwd, resolution);
   }
-  const settings = normalizeShellToolSettings(context.parameters);
-  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const result = await runtime.shell.run(
     {
       kind,

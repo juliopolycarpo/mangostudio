@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { PathAccessError } from '../../errors';
 import type { RuntimeGlobParams, RuntimeGlobResult } from '../../methods';
-import { compileRuntimePathGuard } from '../fs-utils';
+import { compilePolicyGuard } from '../fs-path-policy';
 
 export async function globRuntimePaths(
   params: RuntimeGlobParams,
@@ -10,7 +10,7 @@ export async function globRuntimePaths(
   const matches: string[] = [];
   let truncated = false;
   const glob = new Bun.Glob(params.pattern);
-  const allows = compileRuntimePathGuard(params);
+  const allows = compilePolicyGuard(params.pathPolicy);
 
   try {
     for await (const match of glob.scan({

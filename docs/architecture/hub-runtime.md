@@ -11,20 +11,20 @@ executors.
 
 ## Ownership
 
-| Concern                                                                       | Owner                           | Notes                                                                                                                         |
-| ----------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Authentication, users, chats, and provider orchestration                      | Hub (`apps/api`)                | Runtime requests never carry authority that the hub has not already established.                                              |
-| Tool definitions, settings, argument parsing, and workdir policy              | Hub (`apps/api`)                | The hub decides whether tools are restricted to a chat workdir; path resolution still happens before runtime invocation.      |
-| Workspace browse and validate (`workspace.browse`, `workspace.validate`)      | Runtime (`apps/runtime`)        | Directory listing and workdir existence checks; hub routes are thin RuntimeClient facades.                                    |
-| Path containment algorithm                                                    | Runtime (`apps/runtime`)        | Shared `isPathPrefix` / ancestor resolution / `assertInsideWorkdir`; hub keeps the workdir-policy decision.                   |
-| Recursive path filtering                                                      | Hub policy, runtime enforcement | The hub serializes allowed, denied, and containment roots; runtime glob and grep enforce them for every discovered candidate. |
-| Filesystem reads, writes, patches, glob, and grep                             | Runtime (`apps/runtime`)        | The runtime owns host I/O, mutation locking, and result hashing.                                                              |
-| Shell discovery, environment filtering, execution, timeout, and output bounds | Runtime (`apps/runtime`)        | The hub selects settings; the runtime applies them where the process is spawned.                                              |
-| Git CLI execution (`git.exec`, argv-array-only)                               | Runtime (`apps/runtime`)        | Hardened spawn, env whitelist, timeout, and output bounds; the hub keeps parsers, locks, and routes.                          |
-| Per-chat read freshness state                                                 | Runtime (`apps/runtime`)        | This cache is disposable and can be rebuilt through normal reads.                                                             |
-| Pre-mutation capture, current-state hashing, and revert effects               | Runtime (`apps/runtime`)        | Mutation responses include serializable before snapshots and resulting hashes. Optional `containmentRoot` on revert.          |
-| Checkpoint manifests, blobs, retention, and reverted state                    | Hub (`apps/api`)                | Durable checkpoint state remains in SQLite and hub-managed blob storage.                                                      |
-| Frame schemas, compatibility, and NDJSON codec                                | Shared (`apps/shared`)          | Both sides import the same framework-agnostic contract.                                                                       |
+| Concern                                                                       | Owner                           | Notes                                                                                                                                                                                           |
+| ----------------------------------------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authentication, users, chats, and provider orchestration                      | Hub (`apps/api`)                | Runtime requests never carry authority that the hub has not already established.                                                                                                                |
+| Tool definitions, settings, argument parsing, and workdir policy              | Hub (`apps/api`)                | The hub decides whether tools are restricted to a chat workdir; path resolution happens before runtime invocation, in the target's path style.                                                  |
+| Workspace browse and validate (`workspace.browse`, `workspace.validate`)      | Runtime (`apps/runtime`)        | Directory listing and workdir existence checks; hub routes are thin RuntimeClient facades.                                                                                                      |
+| Path containment algorithm                                                    | Runtime (`apps/runtime`)        | Shared `isPathPrefix` / ancestor resolution / `assertInsideWorkdir`; hub keeps the workdir-policy decision.                                                                                     |
+| Path policy on filesystem calls                                               | Hub policy, runtime enforcement | The hub serializes allowed, denied, and containment roots as `pathPolicy`; the runtime enforces them link-resolved on every filesystem method, including the candidates glob and grep discover. |
+| Filesystem reads, writes, patches, glob, and grep                             | Runtime (`apps/runtime`)        | The runtime owns host I/O, mutation locking, and result hashing.                                                                                                                                |
+| Shell discovery, environment filtering, execution, timeout, and output bounds | Runtime (`apps/runtime`)        | The hub selects settings; the runtime applies them where the process is spawned.                                                                                                                |
+| Git CLI execution (`git.exec`, argv-array-only)                               | Runtime (`apps/runtime`)        | Hardened spawn, env whitelist, timeout, and output bounds; the hub keeps parsers, locks, and routes.                                                                                            |
+| Per-chat read freshness state                                                 | Runtime (`apps/runtime`)        | This cache is disposable and can be rebuilt through normal reads.                                                                                                                               |
+| Pre-mutation capture, current-state hashing, and revert effects               | Runtime (`apps/runtime`)        | Mutation responses include serializable before snapshots and resulting hashes. Optional `containmentRoot` on revert.                                                                            |
+| Checkpoint manifests, blobs, retention, and reverted state                    | Hub (`apps/api`)                | Durable checkpoint state remains in SQLite and hub-managed blob storage.                                                                                                                        |
+| Frame schemas, compatibility, and NDJSON codec                                | Shared (`apps/shared`)          | Both sides import the same framework-agnostic contract.                                                                                                                                         |
 
 The runtime must not import API modules or persist product state. The hub must not bypass
 the runtime client for execution that belongs to the runtime.
@@ -122,6 +122,32 @@ mismatch, and for stdio it also refuses a runtime whose release version differs 
 older install left behind. `mango doctor` reports whether the sibling binary is present and
 whether its version matches. It reports a warning rather than a failure: a hub without it still serves
 chats through the embedded Local runtime, it just cannot start stdio environments.
+
+## Paths Across Hosts
+
+An environment need not run the operating system the hub runs on, and there is no path
+translation layer: a path inside a WSL distro is a native Linux path from end to end, and
+nothing rewrites it on the way. What the hub does instead is *resolve* in the target's
+terms.
+
+Tools take absolute paths, `~` paths, and paths relative to the chat working directory, and
+the hub turns those into one absolute path before it calls. Both inputs to that are facts
+about the target, and both arrive in the `hello` manifest:
+
+- `homeDir` expands `~`. The hub's own `HOME` describes the wrong machine, and on Windows it
+  is usually not set at all.
+- `pathStyle` selects the separator and the notion of absoluteness used to join and fold the
+  result. Resolution is purely lexical and never consults the hub's working directory, which
+  is a directory the target need not have.
+
+`RuntimeClient.paths` exposes both, read from the connection that will receive the call, so
+one environment's manifest cannot be paired with another's connection.
+
+Policy is decided the same way and enforced somewhere else. The hub checks allowed roots,
+denied roots, and workdir containment lexically, then sends the same roots along as
+`pathPolicy`; the runtime re-checks the call's paths after following symlinks, because a
+link inside the working directory that points out of it exists on the target's disk and is
+invisible from the hub. A call with nothing configured and no restriction carries no policy.
 
 ## Extending the Boundary
 

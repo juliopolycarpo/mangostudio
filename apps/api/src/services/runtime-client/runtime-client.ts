@@ -55,6 +55,7 @@ import {
 } from '@mangostudio/runtime';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
+import { createTargetPaths, type TargetPaths } from './target-paths';
 
 interface RuntimeFsClient {
   readFile(
@@ -145,6 +146,7 @@ export class RuntimeClient {
   readonly git: RuntimeGitClient;
   readonly snapshot: RuntimeSnapshotClient;
   readonly workspace: RuntimeWorkspaceClient;
+  private targetPaths?: TargetPaths;
 
   constructor(
     private readonly protocol: RuntimeProtocolClient,
@@ -184,6 +186,16 @@ export class RuntimeClient {
 
   get manifest(): RuntimeCapabilityManifest {
     return this.protocol.manifest;
+  }
+
+  /**
+   * Path semantics of the target, for the resolution the hub still does before
+   * it calls. Read from this client so a caller cannot pair one environment's
+   * manifest with another environment's connection.
+   */
+  get paths(): TargetPaths {
+    this.targetPaths ??= createTargetPaths(this.protocol.manifest);
+    return this.targetPaths;
   }
 
   get runtimeVersion(): string {

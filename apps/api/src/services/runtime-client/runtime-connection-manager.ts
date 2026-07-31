@@ -9,10 +9,7 @@ import type {
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type {
-  RuntimeCapabilityManifest,
-  RuntimeErrorCode,
-} from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 import { getVersion } from '../../lib/config';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
@@ -136,17 +133,6 @@ function normalizeUnavailable(error: unknown): RuntimeRemoteError {
 function statusErrorCode(error: unknown): RuntimeErrorCode {
   return error instanceof RuntimeRemoteError ? error.code : 'RUNTIME_UNAVAILABLE';
 }
-
-/**
- * Built-in tools still expand `~` and join relative paths with the hub's own
- * `node:path` and `HOME` before handing the result to a runtime client (see
- * `resolveWorkdirRelativePath`). That is sound only while both ends agree on
- * path style, so a runtime that disagrees is refused at connect rather than fed
- * paths it would misread. Lift this once resolution moves behind the manifest —
- * WSL and SSH targets need that before they can connect.
- */
-const HUB_PATH_STYLE: RuntimeCapabilityManifest['pathStyle'] =
-  process.platform === 'win32' ? 'win32' : 'posix';
 
 export class RuntimeConnectionManager {
   readonly #connectors: RuntimeConnectionManagerOptions['connectors'];
@@ -333,15 +319,10 @@ export class RuntimeConnectionManager {
       );
     }
 
-    const connection = await connector(definition, onUnavailable);
-    const { pathStyle } = connection.client.manifest;
-    if (pathStyle !== HUB_PATH_STYLE) {
-      connection.close();
-      throw unavailable(
-        `Environment "${definition.id}" uses ${pathStyle} paths, which this host cannot address yet.`
-      );
-    }
-    return connection;
+    // A runtime whose path style differs from the hub's is addressed on its own
+    // terms: tools resolve `~` and relative input through the connection's
+    // manifest, and the runtime re-checks the result against its own filesystem.
+    return await connector(definition, onUnavailable);
   }
 
   /**

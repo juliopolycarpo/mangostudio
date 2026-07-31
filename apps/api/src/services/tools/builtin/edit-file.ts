@@ -14,6 +14,7 @@ import {
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 
 const EDIT_FILE_TOOL_NAME = 'edit_file';
@@ -78,13 +79,15 @@ export async function executeEditFile(
   context: ToolContext
 ): Promise<EditFileToolResult> {
   const settings = normalizeEditFileToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, {
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const options = {
     settings,
     workdir: context.workdir,
     workdirPolicy: context.workdirPolicy,
-  });
+    paths: runtime.paths,
+  };
+  const resolvedPath = resolveAndValidatePath(args.path, options);
 
-  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.editFile(
     {
       chatId: context.chatId,
@@ -94,6 +97,7 @@ export async function executeEditFile(
       newString: args.newString,
       ...(args.replaceAll !== undefined ? { replaceAll: args.replaceAll } : {}),
       captureSnapshot: Boolean(context.assistantMessageId),
+      ...runtimePathPolicy(options),
     },
     context.signal ? { signal: context.signal } : undefined
   );

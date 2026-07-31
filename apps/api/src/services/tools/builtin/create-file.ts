@@ -14,6 +14,7 @@ import {
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 
 const CREATE_FILE_TOOL_NAME = 'create_file';
@@ -65,13 +66,15 @@ export async function executeCreateFile(
   context: ToolContext
 ): Promise<CreateFileToolResult> {
   const settings = normalizeCreateFileToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, {
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const options = {
     settings,
     workdir: context.workdir,
     workdirPolicy: context.workdirPolicy,
-  });
+    paths: runtime.paths,
+  };
+  const resolvedPath = resolveAndValidatePath(args.path, options);
 
-  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.createFile(
     {
       chatId: context.chatId,
@@ -79,6 +82,7 @@ export async function executeCreateFile(
       resolvedPath,
       content: args.content,
       captureSnapshot: Boolean(context.assistantMessageId),
+      ...runtimePathPolicy(options),
     },
     context.signal ? { signal: context.signal } : undefined
   );
