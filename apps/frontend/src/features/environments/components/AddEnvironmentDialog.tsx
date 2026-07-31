@@ -43,9 +43,8 @@ function suggestId(name: string): string {
 }
 
 /** The one to offer first: the host's default, else whatever is configurable. */
-function preferredDistro(distributions: readonly WslDistribution[]): string {
-  const available = distributions.filter((distribution) => !distribution.environmentId);
-  return (available.find((distribution) => distribution.default) ?? available[0])?.name ?? '';
+function preferredDistro(offered: readonly WslDistribution[]): string {
+  return (offered.find((distribution) => distribution.default) ?? offered[0])?.name ?? '';
 }
 
 export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
@@ -68,10 +67,15 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const wsl = useWslDetectionQuery(true);
   const distributions = wsl.data?.distributions ?? [];
   const wslOffered = wsl.data?.available === true;
+  const offered = distributions.filter((distribution) => !distribution.environmentId);
 
   // The host picks the distribution, not the user typing its name. Until one is
   // touched, the tab tracks whatever the host calls default.
-  const selectedDistro = distro || preferredDistro(distributions);
+  const selectedDistro = distro || preferredDistro(offered);
+  // A name chosen from one listing is not a choice against the next one: the
+  // detection refetches while the dialog is open, and a distribution can be
+  // claimed by another environment or removed from the host between them.
+  const selectionOffered = offered.some((distribution) => distribution.name === selectedDistro);
 
   useEffect(() => {
     if (kind !== 'wsl' || nameEdited || !selectedDistro) return;
@@ -85,7 +89,7 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
     trimmedName.length === 0 ||
     effectiveId.length === 0 ||
     idInvalid ||
-    (kind === 'wsl' && !selectedDistro);
+    (kind === 'wsl' && !selectionOffered);
 
   const handleSubmit = async () => {
     if (blocked) return;

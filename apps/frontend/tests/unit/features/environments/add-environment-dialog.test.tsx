@@ -56,6 +56,13 @@ const CREATED: Environment = {
   status: { state: 'disconnected' },
 };
 
+function wslRequestCount(): number {
+  return scenario.fetchMock.mock.calls.filter(([input]) => {
+    const url = input instanceof Request ? input.url : String(input);
+    return url.includes('/api/environments/wsl');
+  }).length;
+}
+
 function createdRequestBody(): Record<string, unknown> {
   const call = scenario.fetchMock.mock.calls.find(
     ([, init]) => (init as RequestInit | undefined)?.method?.toUpperCase() === 'POST'
@@ -229,6 +236,23 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const configured = within(list).getByRole('button', { name: /docker-desktop/ });
     expect(configured).toBeDisabled();
     expect(configured).toHaveTextContent('docker');
+  });
+
+  it('refreshes the listing once a distribution has been claimed', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+    await waitFor(() => expect(wslRequestCount()).toBe(1));
+
+    await user.click(within(dialog).getByRole('tab', { name: labels.wslSummary }));
+    const list = await within(dialog).findByTestId('wsl-distribution-list');
+    await user.click(within(list).getByRole('button', { name: /Debian/ }));
+    await user.click(within(dialog).getByRole('button', { name: labels.submit }));
+
+    await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());
+    // Which distributions are configured is derived from the environments list,
+    // so creating one dates the listing. Left alone it keeps serving the old
+    // answer for its whole staleTime and offers this distribution again.
+    await waitFor(() => expect(wslRequestCount()).toBe(2));
   });
 
   it('drops the stdio-only fields while the WSL tab is open', async () => {

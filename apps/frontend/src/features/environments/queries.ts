@@ -65,6 +65,16 @@ function replaceEnvironment(queryClient: QueryClient, environment: Environment):
   );
 }
 
+/**
+ * The WSL listing marks which distributions an environment already claims, so
+ * it is derived from the environments list and goes stale whenever that list
+ * changes shape. Without this, adding one distribution and reopening the dialog
+ * inside the `staleTime` window offers it again.
+ */
+function invalidateWslDetection(queryClient: QueryClient): Promise<void> {
+  return queryClient.invalidateQueries({ queryKey: environmentKeys.wsl() });
+}
+
 export function useCreateEnvironmentMutation() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -76,7 +86,10 @@ export function useCreateEnvironmentMutation() {
     // A new row changes the list's shape rather than one entry, and its status
     // starts moving the moment the server sees it, so refetch instead of
     // splicing a snapshot that is already stale.
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: environmentKeys.entities() }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+      await invalidateWslDetection(queryClient);
+    },
   });
 }
 
@@ -88,7 +101,12 @@ export function useUpdateEnvironmentMutation() {
       if (error) throw new ApiError(error.value);
       return data as Environment;
     },
-    onSuccess: (environment) => replaceEnvironment(queryClient, environment),
+    // An update can carry a new transport config, which is what decides the
+    // distribution an environment claims.
+    onSuccess: (environment) => {
+      replaceEnvironment(queryClient, environment);
+      return invalidateWslDetection(queryClient);
+    },
   });
 }
 
@@ -128,6 +146,8 @@ export function useRemoveEnvironmentMutation() {
       queryClient.setQueryData<Environment[]>(environmentKeys.entities(), (current) =>
         current?.filter((environment) => environment.id !== id)
       );
+      // Removing an environment is what frees the distribution it claimed.
+      return invalidateWslDetection(queryClient);
     },
   });
 }
