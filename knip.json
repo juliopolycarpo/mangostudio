@@ -37,7 +37,7 @@
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "apps/runtime": {
-      "entry": ["tests/**/*.test.ts"],
+      "entry": ["src/cli.ts", "tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/cli": {
