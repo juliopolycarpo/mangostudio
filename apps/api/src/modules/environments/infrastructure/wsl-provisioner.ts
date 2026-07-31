@@ -53,6 +53,8 @@ export interface DistroCommandResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number;
+  /** Set when the command was killed rather than exiting, which a timeout does. */
+  readonly signal?: string;
 }
 
 export interface WslProvisionerDeps extends SafeFetchDeps {
@@ -216,6 +218,13 @@ function sha256(bytes: Uint8Array): string {
 
 function describe(result: DistroCommandResult): string {
   const detail = result.stderr.trim() || result.stdout.trim();
+  // A killed command usually says nothing at all, and "exited with code -1" is
+  // the least useful thing to tell someone whose distribution took too long to
+  // boot — which is the cause this timeout exists for.
+  if (result.signal) {
+    const cause = `it was stopped by ${result.signal} after ${DISTRO_COMMAND_TIMEOUT_MS / 1000}s`;
+    return detail ? `${detail} (${cause})` : cause;
+  }
   return detail || `the command exited with code ${result.exitCode}`;
 }
 
@@ -244,8 +253,21 @@ function runInDistroWithWsl(
     child.stderr.on('data', (chunk: Buffer) => {
       stderr = appendBounded(stderr, chunk);
     });
-    child.on('error', reject);
-    child.on('close', (code) => resolve({ stdout, stderr, exitCode: code ?? -1 }));
+    // Every other failure here arrives as a `WslProvisioningError` carrying
+    // something the user can act on, and a host with WSL support but no
+    // `wsl.exe` on the hub's PATH is the one spawn failure worth naming.
+    child.on('error', (error: NodeJS.ErrnoException) => {
+      reject(
+        new WslProvisioningError(
+          error.code === 'ENOENT'
+            ? 'Could not run "wsl.exe". WSL is not installed on this host, or it is not on the PATH MangoStudio was started with.'
+            : `Could not run "wsl.exe": ${error.message}`
+        )
+      );
+    });
+    child.on('close', (code, signal) =>
+      resolve({ stdout, stderr, exitCode: code ?? -1, ...(signal ? { signal } : {}) })
+    );
 
     // The archive is written before stdin closes, which is the end-of-input tar
     // waits for. An early exit surfaces as EPIPE and is already reported by the

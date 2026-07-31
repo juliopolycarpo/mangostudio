@@ -165,6 +165,20 @@ describe('WslProvisioner', () => {
     );
   });
 
+  it('names the signal when a command is killed instead of exiting', async () => {
+    // What the timeout looks like from here: no output, no exit code, and a
+    // stopped distribution that never finished booting.
+    const provisioner = createWslProvisioner({
+      version: () => VERSION,
+      runInDistro: () =>
+        Promise.resolve({ stdout: '', stderr: '', exitCode: -1, signal: 'SIGTERM' }),
+    });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
+      /Could not start the "Ubuntu" distribution: it was stopped by SIGTERM after 120s/
+    );
+  });
+
   it('reports a runtime that lands but will not execute', async () => {
     const { provisioner } = harness({
       // The unpack succeeds; only running the result fails, which is what a
