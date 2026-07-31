@@ -146,7 +146,36 @@ describe('WslProvisioner', () => {
   it('says so when the release publishes no build for the distribution', async () => {
     const { provisioner } = harness({ checksums: 'unrelated content\n' });
 
-    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(/does not publish/);
+    // Nothing to download here, so the offline advice would be a dead end: the
+    // answer is a newer MangoStudio or a hand-placed binary.
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
+      /does not publish .* put a matching runtime at ~\/\.mango\/bin\/mangostudio-runtime/s
+    );
+  });
+
+  it('names both ways out when the release cannot be reached', async () => {
+    const provisioner = createWslProvisioner({
+      version: () => VERSION,
+      cacheDir: (version) => `/cache/${version}`,
+      readCache: () => Promise.resolve(null),
+      runInDistro: (_distro, script) =>
+        script.includes('uname -m')
+          ? Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'))
+          : Promise.resolve({ stdout: '', stderr: 'not found', exitCode: 127 }),
+      fetch: ((_input: string | URL): Promise<Response> =>
+        Promise.reject(new Error('getaddrinfo ENOTFOUND'))) as typeof fetch,
+    });
+
+    // An air-gapped or proxied hub has no other move, so both are spelled out:
+    // where the cache expects the archive, and where the binary belongs.
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
+      new RegExp(
+        `Could not download .*\\. Either download .*/${ASSET} to /cache/${VERSION}/${ASSET} ` +
+          'on this host and connect again, or put the 1\\.2\\.3 runtime at ' +
+          '~/\\.mango/bin/mangostudio-runtime inside "Ubuntu" yourself\\.',
+        's'
+      )
+    );
   });
 
   it('reports a distribution that cannot start', async () => {

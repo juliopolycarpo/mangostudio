@@ -24,6 +24,9 @@ const RUNTIME_ARCHIVE_MEMBER = 'mangostudio-runtime';
 /** Where an incoming runtime is assembled before it takes over the name above. */
 const STAGED_ARCHIVE_MEMBER = `${RUNTIME_ARCHIVE_MEMBER}.incoming`;
 
+/** Where the runtime ends up, written the way someone would type it. */
+export const DISTRO_RUNTIME_PATH = `~/${DISTRO_RUNTIME_DIR}/${RUNTIME_ARCHIVE_MEMBER}`;
+
 export type LinuxPlatformId = 'linux-x64' | 'linux-arm64' | 'linux-x64-musl' | 'linux-arm64-musl';
 
 export interface DistroPlatformProbe {

@@ -21,6 +21,7 @@ import { getHomeMangoDir, getVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
 import {
+  DISTRO_RUNTIME_PATH,
   type DistroPlatformProbe,
   findReleaseChecksum,
   INSTALL_SCRIPT,
@@ -48,6 +49,12 @@ export class WslProvisioningError extends Error {
     this.name = 'WslProvisioningError';
   }
 }
+
+/**
+ * Failing to *reach* the release, as opposed to reaching one that has nothing
+ * to offer. Only this one has an offline answer worth printing.
+ */
+class WslDownloadError extends WslProvisioningError {}
 
 export interface DistroCommandResult {
   readonly stdout: string;
@@ -118,7 +125,17 @@ async function install(deps: WslProvisionerDeps, distro: string, version: string
   }
 
   const assetName = releaseArchiveName(version, platformId);
-  const archive = await loadArchive(deps, version, assetName);
+  // Getting the bytes is the step that needs the network, so it is the step
+  // with an offline answer. A hub that cannot reach the release should say what
+  // to do about it rather than only what went wrong.
+  const archive = await loadArchive(deps, version, assetName).catch((error: unknown) => {
+    if (error instanceof WslDownloadError) {
+      throw new WslProvisioningError(
+        `${error.message} ${manualInstallHint(deps, distro, version, assetName)}`
+      );
+    }
+    throw error;
+  });
 
   const result = await deps.runInDistro(distro, INSTALL_SCRIPT, { stdin: archive });
   if (result.exitCode !== 0) {
@@ -126,6 +143,25 @@ async function install(deps: WslProvisionerDeps, distro: string, version: string
       `Could not unpack the runtime inside "${distro}": ${describe(result)}`
     );
   }
+}
+
+/**
+ * The two ways out when the release cannot be reached: drop the archive where
+ * the cache would have put it and reconnect, or place the binary in the
+ * distribution directly. Both are named because a hub behind a proxy, on an air
+ * gap, or on a release whose assets were pulled has no other move.
+ */
+function manualInstallHint(
+  deps: WslProvisionerDeps,
+  distro: string,
+  version: string,
+  assetName: string
+): string {
+  return (
+    `Either download ${releaseAssetUrl(version, assetName)} to ` +
+    `${join(deps.cacheDir(version), assetName)} on this host and connect again, ` +
+    `or put the ${version} runtime at ${DISTRO_RUNTIME_PATH} inside "${distro}" yourself.`
+  );
 }
 
 async function probePlatform(
@@ -186,7 +222,7 @@ async function fetchExpectedChecksum(
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);
   if (!expected) {
     throw new WslProvisioningError(
-      `Release v${version} does not publish ${assetName}, so there is no Linux runtime to install. Update MangoStudio, or install the runtime in the distribution by hand.`
+      `Release v${version} does not publish ${assetName}, so there is no Linux runtime to install. Update MangoStudio, or put a matching runtime at ${DISTRO_RUNTIME_PATH} in the distribution yourself.`
     );
   }
   return expected;
@@ -206,7 +242,7 @@ async function download(
     return result.bytes;
   } catch (error) {
     if (error instanceof SafeFetchError) {
-      throw new WslProvisioningError(`Could not download ${url}: ${error.message}`);
+      throw new WslDownloadError(`Could not download ${url}: ${error.message}.`);
     }
     throw error;
   }
