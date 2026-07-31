@@ -97,7 +97,10 @@ describe('mangostudio-runtime binary', () => {
         env: { ...process.env, VERSION: '9.9.9-test' },
         stdin: 'pipe',
         stdout: 'pipe',
-        stderr: 'pipe',
+        // Inherited rather than piped: nothing here reads stderr, and a runtime
+        // that logged more than the pipe buffer holds would block on the write
+        // and hang this test until the spawn timeout.
+        stderr: 'inherit',
       });
 
       const decoder = new RuntimeFrameDecoder();

@@ -8,6 +8,7 @@
  * goes to stderr, which the hub forwards into its own logs.
  */
 
+import { Console } from 'node:console';
 import { getRuntimeVersion } from './config';
 import { createLocalRuntimeHost } from './runtime';
 import { createStdioFramePort, type StdioFramePortClosure } from './transports/stdio';
@@ -112,12 +113,25 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
 /**
  * stdout is the protocol stream, so one stray `console.log` anywhere in the
  * runtime would inject a record the hub's decoder has to reject — taking the
- * whole connection down. Route the stdout console methods to stderr, which the
- * hub already collects.
+ * whole connection down. `log` is only the obvious emitter: `dir`, `table`,
+ * `group`, `count`, `timeEnd` and friends write to stdout too. Rather than
+ * enumerate them — and flatten the stateful ones onto `error` in the process —
+ * give the console a stream pair that points at stderr, which the hub already
+ * collects, and let every method keep its own behaviour.
  */
 function redirectConsoleToStderr(): void {
-  const forward = console.error.bind(console);
-  Object.assign(globalThis.console, { log: forward, info: forward, debug: forward });
+  // A console whose stream pair points at stderr on both sides. Copying its
+  // methods over the global keeps each one's own behaviour — group indentation,
+  // table rendering, the `count` and `time` tallies — while the writes land on
+  // the stream the hub reads as diagnostics.
+  const stderrConsole = new Console({ stdout: process.stderr, stderr: process.stderr });
+  Object.assign(globalThis.console, stderrConsole);
+  // `write` is Bun's own raw emitter, not part of the node Console surface, so
+  // the copy above leaves it aimed at the protocol stream.
+  globalThis.console.write = (data: string): number => {
+    process.stderr.write(data);
+    return data.length;
+  };
 }
 
 if (import.meta.main) {
