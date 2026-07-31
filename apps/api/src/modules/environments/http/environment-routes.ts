@@ -14,6 +14,7 @@ import {
   VersionManagerIdSchema,
   VersionManagerStatusListSchema,
   VersionManagerStatusSchema,
+  WslDetectionSchema,
 } from '@mangostudio/shared/environments';
 import {
   type ApiErrorResponse,
@@ -38,6 +39,12 @@ import {
   type VersionManagerDetectionService,
   versionManagerDetectionService,
 } from '../application/version-manager-detection';
+import {
+  markConfiguredDistributions,
+  type WslDetectionService,
+  wslDetectionService,
+} from '../application/wsl-detection';
+import { environmentConfigFor, isEnvironmentConfigValid } from '../domain/environment-config';
 import { createEnvironmentEntityRoutes } from './environment-entity-routes';
 import { createInstallRoutes } from './install-routes';
 
@@ -98,7 +105,8 @@ export function createEnvironmentRoutes(
   versionManagerService: VersionManagerDetectionService = versionManagerDetectionService,
   agentService: AgentCliDetectionService = agentCliDetectionService,
   environmentInstallService: InstallService = installService,
-  entityService: EnvironmentService = environmentService
+  entityService: EnvironmentService = environmentService,
+  wslService: WslDetectionService = wslDetectionService
 ) {
   return new Elysia()
     .use(requireAuth)
@@ -182,8 +190,38 @@ export function createEnvironmentRoutes(
         },
       }
     )
+    .get(
+      '/environments/wsl',
+      async ({ user }) => {
+        const detection = await wslService.detect();
+        if (detection.distributions.length === 0) return detection;
+        return {
+          ...detection,
+          distributions: markConfiguredDistributions(
+            detection.distributions,
+            await configuredWslDistros(entityService, user?.id ?? '')
+          ),
+        };
+      },
+      { response: { 200: WslDetectionSchema } }
+    )
     .use(createInstallRoutes(environmentInstallService))
     .use(createEnvironmentEntityRoutes(entityService));
+}
+
+/** Distribution name → environment id, for the distros already configured. */
+async function configuredWslDistros(
+  service: EnvironmentService,
+  userId: string
+): Promise<Map<string, string>> {
+  const environments = await service.list(userId);
+  const configured = new Map<string, string>();
+  for (const environment of environments) {
+    if (environment.transportKind !== 'wsl') continue;
+    if (!isEnvironmentConfigValid('wsl', environment.config)) continue;
+    configured.set(environmentConfigFor('wsl', environment.config).distro, environment.id);
+  }
+  return configured;
 }
 
 export const environmentRoutes = createEnvironmentRoutes();

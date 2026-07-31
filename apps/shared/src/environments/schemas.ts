@@ -77,6 +77,38 @@ export const SshEnvironmentConfigSchema = Type.Object(
   { additionalProperties: Type.Never() }
 );
 
+/**
+ * A distribution `wsl.exe -l -v` reported. `state` is passed through as the
+ * Windows shell printed it: that column is localized, so mapping it to an enum
+ * would either lie on a non-English host or drop the information entirely.
+ */
+export const WslDistributionSchema = Type.Object(
+  {
+    name: Type.String({ minLength: 1, maxLength: 128 }),
+    state: Type.String({ maxLength: 64 }),
+    wslVersion: Type.Integer({ minimum: 1, maximum: 9 }),
+    default: Type.Boolean(),
+    /** Set when an environment is already configured for this distribution. */
+    environmentId: Type.Optional(EnvironmentIdSchema),
+  },
+  { additionalProperties: false }
+);
+
+export const WslUnavailableReasonSchema = Type.Union([
+  Type.Literal('not-windows'),
+  Type.Literal('wsl-not-installed'),
+  Type.Literal('probe-failed'),
+]);
+
+export const WslDetectionSchema = Type.Object(
+  {
+    available: Type.Boolean(),
+    distributions: Type.Array(WslDistributionSchema),
+    reason: Type.Optional(WslUnavailableReasonSchema),
+  },
+  { additionalProperties: false }
+);
+
 export const EnvironmentTransportConfigSchema = Type.Union([
   Type.Object(
     {
@@ -225,6 +257,9 @@ export type WslEnvironmentConfig = Static<typeof WslEnvironmentConfigSchema>;
 export type WebSocketEnvironmentConfig = Static<typeof WebSocketEnvironmentConfigSchema>;
 export type HttpEnvironmentConfig = Static<typeof HttpEnvironmentConfigSchema>;
 export type SshEnvironmentConfig = Static<typeof SshEnvironmentConfigSchema>;
+export type WslDistribution = Static<typeof WslDistributionSchema>;
+export type WslUnavailableReason = Static<typeof WslUnavailableReasonSchema>;
+export type WslDetection = Static<typeof WslDetectionSchema>;
 export type EnvironmentTransportConfig = Static<typeof EnvironmentTransportConfigSchema>;
 export type CreateEnvironmentBody = Static<typeof CreateEnvironmentBodySchema>;
 export type UpdateEnvironmentBody = Static<typeof UpdateEnvironmentBodySchema>;
