@@ -7,6 +7,7 @@ import { ROOT_DIR } from './config';
 import {
   type BinaryTarget,
   filterBinaryTargets,
+  platformArchiveLayout,
   releaseArchiveFileName,
   runtimeBinaryName,
 } from './release-targets';
@@ -109,11 +110,7 @@ export function platformArchiveMembers(
   plan: PlatformArchivePlan,
   options: { readonly includeCursorSidecar: boolean }
 ): string[] {
-  const members = [plan.platform.name, runtimeBinaryName(plan.platform.name)];
-  if (options.includeCursorSidecar) {
-    members.push('cursor-sidecar');
-  }
-  return members;
+  return platformArchiveLayout(plan.platform.name, options).sourceDirMembers;
 }
 
 function createFrontendArchivePlan(

@@ -5,6 +5,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import {
   ALL_BINARY_TARGETS,
+  platformArchiveLayout,
   type ReleasePlatformId,
   releaseArchiveFileName,
 } from './release-targets';
@@ -70,11 +71,9 @@ export function createDistributionManifest(
   const targets = ALL_BINARY_TARGETS.map((target) => {
     const npmPlatform = NPM_PLATFORMS.find((platform) => platform.arch === target.arch);
     const sourceDir = join(options.rootDir, '.mango', 'out', target.arch);
-    const archiveMembers = [
-      target.name,
-      ...(existsSync(join(sourceDir, 'cursor-sidecar')) ? ['cursor-sidecar'] : []),
-      'README.md',
-    ];
+    const archiveMembers = platformArchiveLayout(target.name, {
+      includeCursorSidecar: existsSync(join(sourceDir, 'cursor-sidecar')),
+    }).extractedMembers;
 
     return {
       id: target.arch,
