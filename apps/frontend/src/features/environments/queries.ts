@@ -14,6 +14,7 @@ import type {
   RuntimeStatusList,
   UpdateEnvironmentBody,
   VersionManagerStatusList,
+  WslDetection,
 } from '@mangostudio/shared/environments';
 import { ENVIRONMENTS_TOPIC } from '@mangostudio/shared/realtime';
 import {
@@ -36,6 +37,7 @@ export const environmentKeys = {
   versionManagers: () => [...environmentKeys.all, 'version-managers'] as const,
   agents: () => [...environmentKeys.all, 'agents'] as const,
   installRecipes: () => [...environmentKeys.all, 'install-recipes'] as const,
+  wsl: () => [...environmentKeys.all, 'wsl'] as const,
 };
 
 function environmentEntitiesQueryOptions() {
@@ -162,6 +164,23 @@ export function agentCliStatusesQueryOptions() {
       const { data, error } = await client.api.environments.agents.get();
       if (error) throw new ApiError(error.value);
       return data as AgentCliStatusList;
+    },
+  });
+}
+
+/**
+ * Detection runs `wsl.exe`, which boots nothing but does talk to the Windows
+ * host, so it is only fetched while the picker that needs it is open.
+ */
+export function useWslDetectionQuery(enabled: boolean) {
+  return useQuery({
+    queryKey: environmentKeys.wsl(),
+    enabled,
+    staleTime: STALE_TIME_MS,
+    queryFn: async () => {
+      const { data, error } = await client.api.environments.wsl.get();
+      if (error) throw new ApiError(error.value);
+      return data as WslDetection;
     },
   });
 }

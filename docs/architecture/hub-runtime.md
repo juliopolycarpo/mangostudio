@@ -65,6 +65,7 @@ checkpoint errors.
 | ------------------------- | ------- | -------------------------------------------------------------------------------------------- |
 | Embedded in-process ports | Current | FIFO structured frames; development and tests round-trip every frame through the byte codec. |
 | Local runtime process     | Current | Bounded NDJSON over the child's pipes, using the same handshake and request ids.             |
+| WSL distribution          | Current | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.       |
 | Other runtime placements  | Future  | Implement `RuntimeFramePort` without changing method handlers or API tool executors.         |
 
 The shared NDJSON codec validates every frame, buffers partial lines, and rejects records
@@ -122,6 +123,35 @@ mismatch, and for stdio it also refuses a runtime whose release version differs 
 older install left behind. `mango doctor` reports whether the sibling binary is present and
 whether its version matches. It reports a warning rather than a failure: a hub without it still serves
 chats through the embedded Local runtime, it just cannot start stdio environments.
+
+## WSL Transport
+
+`transportKind: 'wsl'` carries `{ distro }` and is a launcher over the stdio transport
+rather than a protocol of its own. The argv is
+`wsl.exe -d <distro> --exec sh -c 'exec "$HOME/.mango/bin/mangostudio-runtime" "$@"'
+mangostudio-runtime`, which the stdio spawn then appends `--stdio` to. The distribution
+name is an argv entry and the script is a constant, so a name containing spaces, quotes,
+or shell metacharacters is data throughout. `$HOME` is expanded by the distribution's own
+shell because `wsl.exe --exec` expands nothing and the hub does not know where a
+distribution's home directory is.
+
+`GET /environments/wsl` lists what the Windows host reports and marks distributions an
+environment already points at. It is gated to win32 and answers every other platform with
+a typed reason instead of a spawn that cannot work. Reading `wsl.exe --list --verbose`
+means decoding UTF-16LE (UTF-8 under `WSL_UTF8`) and parsing by column shape: the headers
+and the state column are localized, and the columns are padded to their widest value.
+
+Connect provisions on demand. The distribution is asked which runtime it has, and when
+that is absent, unrunnable, or from another release, the Linux build for this hub's own
+version is fetched from its release, verified against that release's `SHA256SUMS`, cached
+under `~/.mango/runtime-cache/<version>/`, and piped into the distribution's own `tar`. A
+hub update is therefore absorbed by reinstalling rather than by a handshake failure the
+user cannot act on. There is no standalone runtime asset in a release yet, so the platform
+archive is fetched and one member is extracted from it.
+
+A stopped distribution boots when the runtime starts, so the first connection to one is
+slow — the Add Environment copy says so. Distributions on musl (Alpine) get the musl build:
+the target is probed for architecture and C library together.
 
 ## Paths Across Hosts
 

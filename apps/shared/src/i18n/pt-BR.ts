@@ -2123,6 +2123,13 @@ export const messages = {
         binaryPathHint: 'Deixe vazio para usar o runtime instalado junto ao MangoStudio.',
         cwdLabel: 'Diretório de trabalho',
         cwdHint: 'Deixe vazio para herdar o diretório em que o MangoStudio foi iniciado.',
+        wslSummary: 'WSL',
+        wslHint:
+          'Executa ferramentas, workspaces e Git dentro de uma distribuição Linux nesta máquina. A primeira conexão instala o runtime nela e inicia a distribuição, então demora um pouco.',
+        wslDistroLabel: 'Distribuição',
+        wslDefault: 'Padrão',
+        wslConfigured: 'Já usada por {id}',
+        wslEmpty: 'Nenhuma distribuição WSL está instalada nesta máquina.',
         optional: 'Opcional',
         submit: 'Adicionar ambiente',
         cancel: 'Cancelar',
