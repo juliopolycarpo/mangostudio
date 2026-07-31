@@ -43,6 +43,8 @@ import {
   type RuntimeSnapshotRevertResult,
   type RuntimeWorkspaceBrowseParams,
   type RuntimeWorkspaceBrowseResult,
+  type RuntimeWorkspaceResolveContainedParams,
+  type RuntimeWorkspaceResolveContainedResult,
   type RuntimeWorkspaceValidateParams,
   type RuntimeWorkspaceValidateResult,
   type RuntimeWriteFileParams,
@@ -130,6 +132,10 @@ interface RuntimeWorkspaceClient {
     params: RuntimeWorkspaceValidateParams,
     options?: RuntimeRequestOptions
   ): Promise<RuntimeWorkspaceValidateResult>;
+  resolveContained(
+    params: RuntimeWorkspaceResolveContainedParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeWorkspaceResolveContainedResult>;
 }
 
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
@@ -168,6 +174,8 @@ export class RuntimeClient {
     this.workspace = {
       browse: (params = {}, options) => this.request('workspace.browse', params, options),
       validate: (params, options) => this.request('workspace.validate', params, options),
+      resolveContained: (params, options) =>
+        this.request('workspace.resolve-contained', params, options),
     };
   }
 

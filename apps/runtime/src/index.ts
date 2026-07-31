@@ -89,8 +89,10 @@ export {
 export {
   browseWorkspace,
   MAX_WORKSPACE_DIRECTORY_ENTRIES,
+  resolveContainedWorkspacePath,
   validateWorkdir,
   WorkspaceBrowserError,
+  WorkspaceContainmentError,
 } from './services/workspace';
 export { resolveWorkspacePath, WorkspacePathError } from './services/workspace-path';
 export {

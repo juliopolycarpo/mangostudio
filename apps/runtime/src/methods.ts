@@ -323,6 +323,17 @@ export interface RuntimeWorkspaceValidateParams {
   readonly requireAbsolute?: boolean;
 }
 
+export interface RuntimeWorkspaceResolveContainedParams {
+  readonly root: string;
+  /** Root-relative path, in either separator style; the runtime applies its own. */
+  readonly path: string;
+}
+
+export interface RuntimeWorkspaceResolveContainedResult {
+  /** Root-relative canonical path, or null when nothing exists at that location. */
+  readonly relativePath: string | null;
+}
+
 export interface RuntimeSnapshotRevertResult {
   readonly revertedFiles: number;
 }
@@ -399,6 +410,10 @@ export interface RuntimeMethodMap {
   'workspace.validate': {
     readonly params: RuntimeWorkspaceValidateParams;
     readonly result: RuntimeWorkspaceValidateResult;
+  };
+  'workspace.resolve-contained': {
+    readonly params: RuntimeWorkspaceResolveContainedParams;
+    readonly result: RuntimeWorkspaceResolveContainedResult;
   };
 }
 

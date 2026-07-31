@@ -5,7 +5,11 @@ import { runtimeFsService } from './services/fs';
 import { execGit } from './services/git';
 import { runShellCommand } from './services/shell';
 import { captureFileSnapshot, hashFileAtPath, revertRuntimeSnapshots } from './services/snapshot';
-import { browseWorkspace, validateWorkdir } from './services/workspace';
+import {
+  browseWorkspace,
+  resolveContainedWorkspacePath,
+  validateWorkdir,
+} from './services/workspace';
 
 /** Registers the protocol methods owned by the runtime in this release. */
 export function createRuntimeMethodHandlers(): ReadonlyMap<string, RuntimeMethodHandler> {
@@ -34,6 +38,7 @@ export function createRuntimeMethodHandlers(): ReadonlyMap<string, RuntimeMethod
     handler('workspace.validate', (params) =>
       validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })
     ),
+    handler('workspace.resolve-contained', (params) => resolveContainedWorkspacePath(params)),
   ]);
 }
 

@@ -1,14 +1,19 @@
 import type { Dirent } from 'node:fs';
-import { access, constants, readdir, stat } from 'node:fs/promises';
+import { access, constants, readdir, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, parse, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, relative, resolve, sep } from 'node:path';
 import type {
   DirectoryEntry,
   ListDirectoryResponse,
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
 import { RuntimeServiceError } from '../errors';
-import type { RuntimeWorkspaceBrowseParams, RuntimeWorkspaceValidateResult } from '../methods';
+import type {
+  RuntimeWorkspaceBrowseParams,
+  RuntimeWorkspaceResolveContainedParams,
+  RuntimeWorkspaceResolveContainedResult,
+  RuntimeWorkspaceValidateResult,
+} from '../methods';
 import { resolveWorkspacePath, WorkspacePathError } from './workspace-path';
 
 /** Protocol-layer cap on directory listing size. */
@@ -162,6 +167,50 @@ export async function browseWorkspace(
     separator: sep as '/' | '\\',
     ...(truncated ? { truncated: true } : {}),
   };
+}
+
+export class WorkspaceContainmentError extends RuntimeServiceError {
+  constructor(readonly requestedPath: string) {
+    super('workspace_containment', `Invalid repository path: ${requestedPath}`, {
+      requestedPath,
+    });
+    this.name = 'WorkspaceContainmentError';
+  }
+}
+
+/**
+ * Resolves a root-relative path to its real location and re-checks containment
+ * after following symlinks. Runs runtime-side because both halves are host
+ * facts: `realpath` reads the filesystem that owns the root, and separator
+ * normalization must follow that host's path style, not the hub's.
+ *
+ * Returns null when nothing exists at the location — callers treat that as
+ * "no content to read" rather than an escape.
+ */
+export async function resolveContainedWorkspacePath(
+  params: RuntimeWorkspaceResolveContainedParams
+): Promise<RuntimeWorkspaceResolveContainedResult> {
+  const realRoot = await realpath(resolve(params.root));
+
+  let realPath: string;
+  try {
+    // Both separators are treated as boundaries so a foreign-style path from the
+    // hub resolves the same way it would natively.
+    realPath = await realpath(resolve(realRoot, params.path.replaceAll('\\', '/')));
+  } catch {
+    return { relativePath: null };
+  }
+
+  const relativePath = relative(realRoot, realPath);
+  if (
+    relativePath.length === 0 ||
+    relativePath === '..' ||
+    relativePath.startsWith(`..${sep}`) ||
+    isAbsolute(relativePath)
+  ) {
+    throw new WorkspaceContainmentError(params.path);
+  }
+  return { relativePath };
 }
 
 export async function validateWorkdir(
