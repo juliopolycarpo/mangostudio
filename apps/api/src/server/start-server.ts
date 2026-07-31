@@ -131,7 +131,7 @@ async function gracefulStop(): Promise<void> {
   staleTurnReconcileSweep = null;
   await flushObservabilitySnapshot();
   await closeAllMcpClients();
-  closeAllRuntimeConnections();
+  await closeAllRuntimeConnections();
   await removeState();
   await closeDb();
 }

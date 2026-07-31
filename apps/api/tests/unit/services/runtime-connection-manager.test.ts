@@ -254,6 +254,95 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
   });
 
+  it('latches a runtime that dies immediately after every handshake', async () => {
+    let attempts = 0;
+    let dropConnection: (() => void) | undefined;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: (_definition, onUnavailable) => {
+          attempts += 1;
+          dropConnection = onUnavailable;
+          return Promise.resolve(fakeConnection(() => undefined));
+        },
+      },
+    });
+
+    // A completed handshake only shows the runtime started. Starts that die on
+    // arrival still have to reach the cap, or every caller respawns one anew.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await manager.getClient('user-1', 'devbox');
+      dropConnection?.();
+      advanceSeconds(60);
+    }
+    expect(attempts).toBe(5);
+
+    const latched = await manager.getClient('user-1', 'devbox').catch((error) => error);
+    expect(latched.message).toContain('stopped retrying');
+    expect(attempts).toBe(5);
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('error');
+  });
+
+  it('starts a fresh count after a connection that lasted', async () => {
+    let attempts = 0;
+    let dropConnection: (() => void) | undefined;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: (_definition, onUnavailable) => {
+          attempts += 1;
+          dropConnection = onUnavailable;
+          return attempts <= 4
+            ? Promise.reject(new Error('runtime exited'))
+            : Promise.resolve(fakeConnection(() => undefined));
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await manager.getClient('user-1', 'devbox').catch(() => undefined);
+      advanceSeconds(60);
+    }
+
+    // The fifth attempt connects and stays up, so the earlier failures stop
+    // counting against it — losing it later is a first failure, not a latch.
+    await manager.getClient('user-1', 'devbox');
+    advanceSeconds(60);
+    dropConnection?.();
+
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('disconnected');
+    advanceSeconds(60);
+    await manager.getClient('user-1', 'devbox');
+    expect(attempts).toBe(6);
+  });
+
+  it('clears a latched backoff when the environment is enabled again', async () => {
+    let attempts = 0;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => {
+          attempts += 1;
+          return Promise.reject(new Error('runtime exited'));
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await manager.getClient('user-1', 'devbox').catch(() => undefined);
+      advanceSeconds(60);
+    }
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('error');
+
+    // Re-enabling answers whatever the failures were about, so the next call
+    // gets an attempt rather than the latch a disabled environment earned.
+    manager.clearBackoff('user-1', 'devbox');
+
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('disconnected');
+    await manager.getClient('user-1', 'devbox').catch(() => undefined);
+    expect(attempts).toBe(6);
+  });
+
   it('closes every live connection on shutdown', async () => {
     let closeCalls = 0;
     const manager = new RuntimeConnectionManager({
@@ -264,7 +353,7 @@ describe('RuntimeConnectionManager', () => {
 
     await manager.getClient('user-1', 'devbox');
     await manager.getClient('user-2', 'buildbox');
-    manager.closeAll();
+    await manager.closeAll();
 
     expect(closeCalls).toBe(2);
     expect(manager.getStatus('user-1', 'devbox').state).toBe('disconnected');

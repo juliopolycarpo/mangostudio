@@ -101,19 +101,26 @@ Lifecycle:
   `RUNTIME_UNAVAILABLE` and moves the environment to `disconnected` rather than `error`: the
   target is usually still there, only the process is gone.
 - **Reconnection is a deadline, not a timer.** Nothing is scheduled; the next caller that needs
-  the runtime pays for the retry, and while inside the exponential backoff window the attempt
-  fails fast. Five consecutive failures — or any protocol mismatch, which cannot fix itself —
-  latch the environment until someone connects it explicitly. A disabled, deleted, or simply
-  unused environment therefore never respawns on its own.
-- **Shutdown** closes every connection, so runtime children are reaped with the hub.
+  the runtime pays for the retry, and while inside the exponential backoff window (1s, 2s, 4s,
+  8s) the attempt fails fast. Five consecutive failures — or any protocol mismatch, which
+  cannot fix itself — latch the environment until someone connects it explicitly. A disabled,
+  deleted, or simply unused environment therefore never respawns on its own.
+- **A handshake is not proof of health.** A connection that dies within ten seconds keeps
+  counting toward that cap instead of clearing it, so a runtime that crashes on startup latches
+  like any other failure rather than being respawned once per caller forever. Enabling an
+  environment again clears whatever the count reached while it was off.
+- **Shutdown** closes every connection and waits for the children to exit — bounded, so one
+  that ignores both signals delays the hub rather than holding it open — so none are orphaned.
 
 Known gap: Windows has no POSIX signals, so killing a runtime there terminates the runtime
 itself but not shell children it already spawned. The runtime's own cancellation path reaps
 those in the normal case; a hard kill can still leave them.
 
-The hub and the runtime ship from one release and the handshake refuses a major/minor
-mismatch, so `mango doctor` reports whether the sibling binary is present and whether its
-version matches. It reports a warning rather than a failure: a hub without it still serves
+The hub and the runtime ship from one release. The handshake refuses a major/minor protocol
+mismatch, and for stdio it also refuses a runtime whose release version differs from the hub's
+— the protocol version only moves when the wire format does, so it cannot catch a binary an
+older install left behind. `mango doctor` reports whether the sibling binary is present and
+whether its version matches. It reports a warning rather than a failure: a hub without it still serves
 chats through the embedded Local runtime, it just cannot start stdio environments.
 
 ## Extending the Boundary

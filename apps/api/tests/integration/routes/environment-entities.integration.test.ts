@@ -258,7 +258,9 @@ describe('environment entity routes', () => {
               },
             },
           } as RuntimeClient,
-          close: () => closeCalls++,
+          close: () => {
+            closeCalls += 1;
+          },
         }),
     });
 
@@ -317,7 +319,9 @@ describe('environment entity routes', () => {
               },
             },
           } as RuntimeClient,
-          close: () => closeCalls++,
+          close: () => {
+            closeCalls += 1;
+          },
         }),
     });
 

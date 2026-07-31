@@ -140,6 +140,11 @@ export function createEnvironmentService(
       // the write lands means a rejected update leaves the connection intact.
       if (input.enabled === false || input.config !== undefined) {
         manager.disconnect(userId, id);
+      } else if (input.enabled === true) {
+        // Calls that reached it while it was disabled each recorded a failure,
+        // which can already have latched the backoff. Re-enabling is the answer
+        // to that, so clear it here rather than making the user press Connect.
+        manager.clearBackoff(userId, id);
       }
       publish(userId);
       return toEnvironment(updated, manager);

@@ -36,7 +36,8 @@ export interface RuntimeEnvironmentDefinition {
 
 export interface ManagedRuntimeConnection {
   readonly client: RuntimeClient;
-  close(): void;
+  /** May resolve when an out-of-process runtime is gone; in-process is immediate. */
+  close(): void | Promise<void>;
 }
 
 export type RuntimeEnvironmentResolver = (
@@ -60,8 +61,10 @@ interface RuntimeConnectionEntry {
   status: EnvironmentConnectionStatus;
   connection?: ManagedRuntimeConnection;
   connecting?: Promise<RuntimeClient>;
-  /** Consecutive failures since the last successful connect. */
+  /** Consecutive failures since the last connection that proved itself. */
   failureCount: number;
+  /** Epoch ms of the last successful handshake, used to judge that. */
+  connectedAtMs?: number;
   /**
    * Epoch ms before which a lazy connect fails fast instead of respawning.
    * `Infinity` latches the environment until someone connects it explicitly.
@@ -69,10 +72,22 @@ interface RuntimeConnectionEntry {
   retryAfterMs: number;
 }
 
-/** 1s, 2s, 4s, 8s, 16s — then the attempt cap latches the environment. */
+/**
+ * 1s, 2s, 4s, 8s — the fifth failure hits the attempt cap and latches the
+ * environment instead of waiting again. `RECONNECT_MAX_DELAY_MS` only binds if
+ * `MAX_RECONNECT_ATTEMPTS` grows past the point where doubling reaches it.
+ */
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 const MAX_RECONNECT_ATTEMPTS = 5;
+
+/**
+ * How long a connection must survive to count as healthy. A runtime that dies
+ * moments after every handshake would otherwise clear the failure count on each
+ * attempt and never reach the cap, respawning for as long as callers keep
+ * asking — the crash loop the backoff exists to stop.
+ */
+const HEALTHY_CONNECTION_MS = 10_000;
 
 function connectionKey(userId: string, environmentId: string): string {
   return `${userId}:${environmentId}`;
@@ -211,7 +226,11 @@ export class RuntimeConnectionManager {
           throw unavailable('Runtime connection was closed.');
         }
         entry.connection = connection;
-        entry.failureCount = 0;
+        entry.connectedAtMs = Date.now();
+        // The failure count is not cleared here: a handshake only shows the
+        // runtime started, and one that dies straight after every start is
+        // exactly the case the cap has to catch. `#markUnavailable` clears it
+        // once the connection has actually lasted.
         entry.retryAfterMs = 0;
         entry.status = {
           state: 'connected',
@@ -251,11 +270,13 @@ export class RuntimeConnectionManager {
   }
 
   /**
-   * Releases every live connection. Runtime children are the hub's
-   * responsibility, so shutdown closes them rather than leaving orphans behind.
+   * Releases every live connection and resolves once their processes are gone.
+   * Runtime children are the hub's responsibility, so shutdown waits for them
+   * rather than exiting mid-kill and leaving orphans behind.
    */
-  closeAll(): void {
-    for (const entry of this.#entries.values()) this.#release(entry);
+  async closeAll(): Promise<void> {
+    const closings = [...this.#entries.values()].map((entry) => this.#release(entry));
+    await Promise.all(closings);
   }
 
   /**
@@ -263,14 +284,34 @@ export class RuntimeConnectionManager {
    * history: the next connect is a fresh decision, not a continuation of the
    * one that was just abandoned.
    */
-  #release(entry: RuntimeConnectionEntry): void {
+  #release(entry: RuntimeConnectionEntry): void | Promise<void> {
     entry.revision += 1;
-    entry.connection?.close();
+    const closed = entry.connection?.close();
     entry.connection = undefined;
     entry.connecting = undefined;
+    entry.connectedAtMs = undefined;
     entry.failureCount = 0;
     entry.retryAfterMs = 0;
     entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
+    return closed;
+  }
+
+  /**
+   * Forgets a backoff without touching a live connection. Re-enabling an
+   * environment says the cause was addressed, and the failures it collected
+   * while disabled — every lazy call reaching it earned one — would otherwise
+   * outlive that, latching it until someone pressed Connect.
+   */
+  clearBackoff(userId: string, environmentId: string): void {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (!entry || (entry.failureCount === 0 && entry.retryAfterMs === 0)) return;
+
+    entry.failureCount = 0;
+    entry.retryAfterMs = 0;
+    if (entry.status.state === 'error') {
+      entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
+    }
+    this.#publish(userId);
   }
 
   async #openConnection(
@@ -312,9 +353,14 @@ export class RuntimeConnectionManager {
     const entry = this.#entries.get(key);
     if (!entry || entry.revision !== revision || !entry.connection) return;
 
-    entry.connection.close();
+    // The child is already gone; nothing waits on the kill that confirms it.
+    void entry.connection.close();
     entry.connection = undefined;
-    entry.failureCount += 1;
+    // A connection that ran for a while and then died starts a fresh count; one
+    // that died on arrival continues the old one toward the cap.
+    const healthy = Date.now() - (entry.connectedAtMs ?? 0) >= HEALTHY_CONNECTION_MS;
+    entry.connectedAtMs = undefined;
+    entry.failureCount = healthy ? 1 : entry.failureCount + 1;
     entry.retryAfterMs = retryDeadline(entry.failureCount, 'RUNTIME_UNAVAILABLE');
     entry.status = {
       // A latched deadline is what `error` means here, so read it rather than
@@ -378,6 +424,10 @@ async function connectStdioRuntime(
     onClosed: onUnavailable,
   });
   return {
+    // Both signals are wired on purpose and `#markUnavailable` is idempotent, so
+    // a child that dies mid-request reporting through both costs nothing. Neither
+    // covers the other: the pipe closing catches a death with no request in
+    // flight, and a request failing catches a child that answers but is gone.
     client: new RuntimeClient(connection.client, onUnavailable),
     close: () => connection.close(),
   };
@@ -395,8 +445,8 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
 }
 
 /** Releases every runtime connection this process opened. Used by shutdown. */
-export function closeAllRuntimeConnections(): void {
-  managerInstance?.closeAll();
+export async function closeAllRuntimeConnections(): Promise<void> {
+  await managerInstance?.closeAll();
 }
 
 export function getRuntimeClient(
