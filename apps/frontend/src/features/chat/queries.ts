@@ -48,9 +48,13 @@ function updateChatListCache(
 }
 
 function applyChatUpdates<T extends ChatWithContext>(chat: T, updates: UpdateChatBody): T {
+  const environmentChanged =
+    updates.environmentId !== undefined && updates.environmentId !== chat.environmentId;
+
   return {
     ...chat,
     ...updates,
+    ...(environmentChanged ? { workdir: null } : {}),
   };
 }
 

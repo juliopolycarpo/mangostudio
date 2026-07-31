@@ -43,6 +43,8 @@ interface ChatPageProps {
   isAgentListLoading?: boolean;
   onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
   onSelectedAgentIdChange?: (agentId: string) => void;
+  environmentId?: string | null;
+  onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
   workdir?: string | null;
   workspaceSettings?: WorkspaceSettings;
   onWorkspacePanelWidthChange?: (width: number) => void;
@@ -105,6 +107,8 @@ export function ChatPage({
   isAgentListLoading = false,
   onAgentExecutionModeChange,
   onSelectedAgentIdChange,
+  environmentId = null,
+  onEnvironmentChange,
   workdir = null,
   workspaceSettings = DEFAULT_WORKSPACE_SETTINGS,
   onWorkspacePanelWidthChange,
@@ -197,6 +201,8 @@ export function ChatPage({
             isAgentListLoading={isAgentListLoading}
             onAgentExecutionModeChange={onAgentExecutionModeChange}
             onSelectedAgentIdChange={onSelectedAgentIdChange}
+            environmentId={environmentId}
+            onEnvironmentChange={onEnvironmentChange}
             workdir={workdir}
             onWorkdirClick={onOpenWorkdirPicker}
           />
@@ -215,6 +221,7 @@ export function ChatPage({
       {onCloseWorkdirPicker && onSelectWorkdir ? (
         <WorkdirPickerDialog
           open={isWorkdirPickerOpen}
+          chatId={chatId ?? undefined}
           initialPath={workdir || workspaceSettings.defaultWorkdir}
           defaultWorkdir={workspaceSettings.defaultWorkdir}
           recentWorkdirs={workspaceSettings.recentWorkdirs}

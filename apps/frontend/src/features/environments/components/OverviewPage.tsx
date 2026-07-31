@@ -1,9 +1,8 @@
 /**
  * The landing page of the environments umbrella.
  *
- * Four summaries of the four tabs, each reading queries those tabs already own
- * — the overview introduces no endpoint of its own, so a number it shows is a
- * number some other screen can be opened to verify.
+ * Diagnostic summaries read the queries their tabs already own, while the
+ * entity section reads the environment API that also drives chat selection.
  *
  * Sections are siblings on purpose: the grid grows an Environments block once
  * environments are entities, and that is an addition here, not a rewrite.
@@ -15,6 +14,7 @@ import {
   useInstallRecipes,
   useRuntimeStatuses,
 } from '../hooks/use-runtime-status';
+import { EnvironmentEntitiesOverview } from './EnvironmentEntitiesOverview';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { OverviewAgentCard } from './OverviewAgentCard';
 import { OverviewHealthRollup } from './OverviewHealthRollup';
@@ -29,6 +29,7 @@ export function OverviewPage() {
     <div className="space-y-6">
       <p className="text-sm text-on-surface-variant/60">{t.environments.overview.description}</p>
 
+      <EnvironmentEntitiesOverview />
       <AgentsOverview />
       <ToolchainsOverview />
 

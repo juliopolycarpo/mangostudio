@@ -8,23 +8,111 @@
 
 import type {
   AgentCliStatusList,
+  Environment,
   InstallRecipePreview,
   RuntimeStatusList,
+  UpdateEnvironmentBody,
   VersionManagerStatusList,
 } from '@mangostudio/shared/environments';
-import { queryOptions } from '@tanstack/react-query';
+import { ENVIRONMENTS_TOPIC } from '@mangostudio/shared/realtime';
+import {
+  type QueryClient,
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
+import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 
 const STALE_TIME_MS = 30_000;
 
 export const environmentKeys = {
   all: ['environments'] as const,
+  entities: () => [...environmentKeys.all, 'entities'] as const,
   runtimes: () => [...environmentKeys.all, 'runtimes'] as const,
   versionManagers: () => [...environmentKeys.all, 'version-managers'] as const,
   agents: () => [...environmentKeys.all, 'agents'] as const,
   installRecipes: () => [...environmentKeys.all, 'install-recipes'] as const,
 };
+
+function environmentEntitiesQueryOptions() {
+  return queryOptions({
+    queryKey: environmentKeys.entities(),
+    queryFn: async () => {
+      const { data, error } = await client.api.environments.get();
+      if (error) throw new ApiError(error.value);
+      return data as Environment[];
+    },
+  });
+}
+
+export function useEnvironmentEntitiesQuery() {
+  const queryClient = useQueryClient();
+  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, () =>
+    queryClient.invalidateQueries({ queryKey: environmentKeys.entities() })
+  );
+  return useQuery(environmentEntitiesQueryOptions());
+}
+
+function replaceEnvironment(queryClient: QueryClient, environment: Environment): void {
+  queryClient.setQueryData<Environment[]>(environmentKeys.entities(), (current) =>
+    current?.map((item) => (item.id === environment.id ? environment : item))
+  );
+}
+
+export function useUpdateEnvironmentMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, updates }: { id: string; updates: UpdateEnvironmentBody }) => {
+      const { data, error } = await client.api.environments({ id }).put(updates);
+      if (error) throw new ApiError(error.value);
+      return data as Environment;
+    },
+    onSuccess: (environment) => replaceEnvironment(queryClient, environment),
+  });
+}
+
+export function useConnectEnvironmentMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await client.api.environments({ id }).connect.post();
+      if (error) throw new ApiError(error.value);
+      return data as Environment;
+    },
+    onSuccess: (environment) => replaceEnvironment(queryClient, environment),
+  });
+}
+
+export function useDisconnectEnvironmentMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await client.api.environments({ id }).disconnect.post();
+      if (error) throw new ApiError(error.value);
+      return data as Environment;
+    },
+    onSuccess: (environment) => replaceEnvironment(queryClient, environment),
+  });
+}
+
+export function useRemoveEnvironmentMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await client.api.environments({ id }).delete();
+      if (error) throw new ApiError(error.value);
+      return data;
+    },
+    onSuccess: (_, id) => {
+      queryClient.setQueryData<Environment[]>(environmentKeys.entities(), (current) =>
+        current?.filter((environment) => environment.id !== id)
+      );
+    },
+  });
+}
 
 export function runtimeStatusesQueryOptions() {
   return queryOptions({

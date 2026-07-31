@@ -1,13 +1,15 @@
 /**
- * The overview is four summaries of four tabs, each reading its own queries.
+ * The overview combines environment entities with summaries of the diagnostic tabs.
  *
- * That independence is the whole design, so it is what these assert: the four
+ * That independence is the whole design, so it is what these assert: the
  * sections arrive from the real query layer, the health numbers match what the
  * cards themselves would say, and a section whose data never loads costs
  * exactly its own block.
  */
 
+import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OverviewPage } from '../../../../src/features/environments/components/OverviewPage';
 import { screen, waitFor, within } from '../../../support/harness/render';
@@ -17,6 +19,49 @@ import { fullCoverage, instance, resource, TARGETS } from '../library/fixtures';
 import { agentCliStatus, installation, runtimeStatus } from './fixtures';
 
 const scenario = createFetchScenario();
+
+const ENVIRONMENTS: Environment[] = [
+  {
+    id: 'local',
+    name: 'Local',
+    transportKind: 'in-process',
+    config: {},
+    enabled: true,
+    virtual: true,
+    createdAt: null,
+    updatedAt: null,
+    status: {
+      state: 'connected',
+      manifest: {
+        platform: 'linux',
+        arch: 'x64',
+        pathStyle: 'posix',
+        homeDir: '/home/dev',
+        shells: ['bash'],
+        git: { available: true, version: '2.47.0' },
+        features: {
+          tools: true,
+          git: true,
+          probing: true,
+          mcp: true,
+          library: true,
+          checkpoints: true,
+        },
+      },
+    },
+  },
+  {
+    id: 'remote-dev',
+    name: 'Remote dev',
+    transportKind: 'stdio',
+    config: {},
+    enabled: true,
+    virtual: false,
+    createdAt: 1,
+    updatedAt: 1,
+    status: { state: 'disconnected' },
+  },
+];
 
 const AGENTS = [
   agentCliStatus({
@@ -81,6 +126,7 @@ const RESOURCES = [
 function installOverviewScenario() {
   scenario
     .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+    .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
     .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
     .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
     .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
@@ -98,10 +144,28 @@ afterEach(() => {
 });
 
 describe('OverviewPage', () => {
-  it('summarizes all four tabs on the landing page', async () => {
+  it('surfaces execution targets alongside the diagnostic summaries', async () => {
     installOverviewScenario();
 
     await renderWithRouter(<OverviewPage />);
+
+    const environments = await screen.findByTestId('overview-environments');
+    const cards = within(environments).getAllByTestId('environment-entity-card');
+    const local = cards.find(
+      (card) => card.getAttribute('data-environment-id') === 'local'
+    ) as HTMLElement;
+    const remote = cards.find(
+      (card) => card.getAttribute('data-environment-id') === 'remote-dev'
+    ) as HTMLElement;
+    expect(local).toBeDefined();
+    expect(remote).toBeDefined();
+    expect(within(local).getByRole('heading', { name: 'Local' })).toBeInTheDocument();
+    expect(within(local).getByText('Connected')).toBeInTheDocument();
+    expect(within(local).getByText('Git 2.47.0')).toBeInTheDocument();
+    expect(within(local).getByText('Checkpoints')).toBeInTheDocument();
+    expect(within(remote).getByRole('button', { name: 'Connect' })).toBeInTheDocument();
+    expect(within(remote).getByRole('button', { name: 'Edit name' })).toBeInTheDocument();
+    expect(within(remote).getByRole('button', { name: 'Remove' })).toBeInTheDocument();
 
     const agents = await screen.findByTestId('overview-agents');
     expect(within(agents).getAllByTestId('overview-agent-card')).toHaveLength(2);
@@ -126,6 +190,34 @@ describe('OverviewPage', () => {
         name: en.environments.overview.open.replace('{section}', en.environments.tabs.agents),
       })
     ).toHaveAttribute('href', '/environments/agents');
+  });
+
+  it('renames a persisted execution environment inline', async () => {
+    const user = userEvent.setup();
+    const renamed = {
+      ...ENVIRONMENTS[1],
+      name: 'Build host',
+      updatedAt: 2,
+    };
+    installOverviewScenario();
+    scenario.respondWithJson('PUT', '/api/environments/remote-dev', { body: renamed });
+
+    await renderWithRouter(<OverviewPage />);
+
+    const remote = await waitFor(() => {
+      const card = screen
+        .getAllByTestId('environment-entity-card')
+        .find((candidate) => candidate.getAttribute('data-environment-id') === 'remote-dev');
+      expect(card).toBeDefined();
+      return card as HTMLElement;
+    });
+    await user.click(within(remote).getByRole('button', { name: 'Edit name' }));
+    const input = within(remote).getByRole('textbox', { name: 'Environment name' });
+    await user.clear(input);
+    await user.type(input, 'Build host');
+    await user.click(within(remote).getByRole('button', { name: 'Save' }));
+
+    expect(await within(remote).findByRole('heading', { name: 'Build host' })).toBeInTheDocument();
   });
 
   it('counts a tool the shell cannot reach as needing attention', async () => {
@@ -172,6 +264,7 @@ describe('OverviewPage', () => {
     // fine by never having asked.
     scenario
       .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
       .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
       .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
@@ -198,6 +291,7 @@ describe('OverviewPage', () => {
     // Every request but the library's resource scan, which is left unhandled.
     scenario
       .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
       .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
       .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })

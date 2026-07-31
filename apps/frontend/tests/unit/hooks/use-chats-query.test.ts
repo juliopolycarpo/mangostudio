@@ -169,6 +169,42 @@ describe('useUpdateChatMutation', () => {
     expect(result.current.detail).toEqual(updatedChat);
   });
 
+  it('clears a cached workdir when the execution environment changes', async () => {
+    const chatWithWorkdir: Chat = {
+      ...EXISTING_CHAT,
+      environmentId: 'local',
+      workdir: '/srv/local-project',
+    };
+
+    const { result } = renderHook(() => {
+      const mutation = useUpdateChatMutation();
+      const queryClient = useQueryClient();
+      return { mutation, queryClient };
+    });
+
+    act(() => {
+      result.current.queryClient.setQueryData(chatKeys.lists(), [chatWithWorkdir]);
+      result.current.queryClient.setQueryData(chatKeys.detail(chatWithWorkdir.id), chatWithWorkdir);
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        id: chatWithWorkdir.id,
+        updates: { environmentId: 'remote-dev' },
+      });
+    });
+
+    const expected = {
+      ...chatWithWorkdir,
+      environmentId: 'remote-dev',
+      workdir: null,
+    };
+    expect(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([expected]);
+    expect(result.current.queryClient.getQueryData(chatKeys.detail(chatWithWorkdir.id))).toEqual(
+      expected
+    );
+  });
+
   it('throws when the API returns an error', async () => {
     mockPut.mockResolvedValue(fail('Not found'));
 

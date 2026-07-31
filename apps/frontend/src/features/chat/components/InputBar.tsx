@@ -4,6 +4,7 @@ import type { ChatAttachment } from '@mangostudio/shared/chat';
 import { FileText, FolderOpen, Image, Mic, Send, Square, X } from 'lucide-react';
 import { useState } from 'react';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
+import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
 import { CapabilityInspector } from './CapabilityInspector';
@@ -37,6 +38,8 @@ interface Props {
   isAgentListLoading?: boolean;
   onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
   onSelectedAgentIdChange?: (agentId: string) => void;
+  environmentId?: string | null;
+  onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
   workdir?: string | null;
   onWorkdirClick?: () => void;
 }
@@ -69,6 +72,8 @@ export function InputBar({
   isAgentListLoading = false,
   onAgentExecutionModeChange,
   onSelectedAgentIdChange,
+  environmentId = null,
+  onEnvironmentChange,
   workdir = null,
   onWorkdirClick,
 }: Props) {
@@ -126,6 +131,14 @@ export function InputBar({
                   </button>
                 ))}
               </div>
+            ) : null}
+
+            {environmentId && onEnvironmentChange ? (
+              <EnvironmentSelector
+                environmentId={environmentId}
+                disabled={disabled || isGenerating}
+                onEnvironmentChange={onEnvironmentChange}
+              />
             ) : null}
 
             {agentExecutionMode === 'agent' && onSelectedAgentIdChange ? (

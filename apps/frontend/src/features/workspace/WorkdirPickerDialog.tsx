@@ -20,6 +20,7 @@ import { useDirectoryListing, validateWorkspacePath } from './use-directory-list
 
 interface WorkdirPickerDialogProps {
   open: boolean;
+  chatId?: string;
   initialPath?: string | null;
   defaultWorkdir?: string;
   recentWorkdirs?: ReadonlyArray<string>;
@@ -81,6 +82,7 @@ export function browseErrorMessage(error: unknown, s: WorkdirBrowseErrorMessages
 
 export function WorkdirPickerDialog({
   open,
+  chatId,
   initialPath = null,
   defaultWorkdir = '',
   recentWorkdirs = [],
@@ -100,7 +102,7 @@ export function WorkdirPickerDialog({
   const [isValidating, setIsValidating] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const listing = useDirectoryListing(requestedPath, open);
+  const listing = useDirectoryListing(requestedPath, open, chatId);
   const visibleEntries = useMemo(
     () => listing.data?.entries.filter((entry) => showHidden || !entry.hidden) ?? [],
     [listing.data?.entries, showHidden]
@@ -146,7 +148,7 @@ export function WorkdirPickerDialog({
     setIsValidating(true);
     setActionError(null);
     try {
-      const validation = await validateWorkspacePath(candidate);
+      const validation = await validateWorkspacePath(candidate, chatId);
       if (!validation.ok || !validation.resolvedPath) {
         setActionError(
           validationMessage(validation.reason, s.validationReasons, s.validationError)
