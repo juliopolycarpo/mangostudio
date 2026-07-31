@@ -68,10 +68,13 @@ describe('ToolAvatar', () => {
 
     const image = screen.getByTitle('Claude Code').querySelector('img');
     expect(image).toHaveAttribute('src', 'https://cdn.example.com/logo.png');
-    // No referrer and no cookies: the remote host learns that someone fetched
-    // the image, and nothing about which page or which session did.
+    // No referrer: the remote host learns that someone fetched the image, and
+    // nothing about which page did.
     expect(image).toHaveAttribute('referrerpolicy', 'no-referrer');
-    expect(image).toHaveAttribute('crossorigin', 'anonymous');
+    // And no `crossorigin`, which would demand a CORS header that ordinary
+    // image hosts do not send — the load would fail and the avatar would show
+    // its monogram instead of the picture the user asked for.
+    expect(image).not.toHaveAttribute('crossorigin');
   });
 
   it('sends the session with an image our own API is holding', () => {

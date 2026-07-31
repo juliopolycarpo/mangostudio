@@ -92,11 +92,15 @@ export function ToolAvatar({
           src={image.src}
           alt=""
           loading="lazy"
-          // A third-party host is told as little as possible: no referrer, and
-          // no cookies. Our own API is the opposite case — the bytes are behind
-          // the session, so the request has to carry it.
+          // A third-party host is told as little as possible: `no-referrer`
+          // keeps which page drew the avatar out of the request. It stops there
+          // on purpose — `crossorigin` would put the load in CORS mode, and a
+          // host that serves images without `Access-Control-Allow-Origin` (most
+          // of them) would fail it, so hotlinking would only ever draw the
+          // monogram. Our own API is the opposite case: the bytes are behind the
+          // session, so that request has to carry it.
           referrerPolicy={image.remote ? 'no-referrer' : undefined}
-          crossOrigin={image.remote ? 'anonymous' : 'use-credentials'}
+          crossOrigin={image.remote ? undefined : 'use-credentials'}
           onError={() => setFailedSrc(image.src)}
           className="size-full object-cover"
         />
