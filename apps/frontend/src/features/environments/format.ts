@@ -7,11 +7,14 @@
  */
 
 import type {
+  InstallAction,
   InstallGuardReason,
+  InstallRecipePreview,
   LtsStatus,
   RuntimeFinding,
   RuntimeHealth,
   RuntimeInstallation,
+  RuntimeStatus,
 } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
@@ -192,6 +195,39 @@ export function groupInstallations(
 /** Installations outside PATH sort last; they can never be the one that runs. */
 function pathIndexRank(installation: RuntimeInstallation): number {
   return installation.pathIndex ?? Number.MAX_SAFE_INTEGER;
+}
+
+export interface EffectiveInstallation {
+  readonly groups: readonly InstallationGroup[];
+  /** The alias group holding the binary that runs, if any installation does. */
+  readonly group: InstallationGroup | undefined;
+  readonly installation: RuntimeInstallation | undefined;
+}
+
+/**
+ * Which binary actually runs, and the alias group that reaches it.
+ *
+ * Array order is never the authority: the `effective` flag is, and after
+ * aliases collapse the grouped view is what carries it. The status's own
+ * `effective` field stays the fallback for a payload that flags nothing.
+ */
+export function effectiveInstallation(status: RuntimeStatus): EffectiveInstallation {
+  const groups = groupInstallations(status.installations);
+  const group = groups.find((candidate) => candidate.effective);
+  return { groups, group, installation: group?.canonical ?? status.effective };
+}
+
+/**
+ * The catalog entry that performs one action for one runtime. Undefined means
+ * the action is not offered here, which every caller renders as "no button"
+ * rather than as a disabled one.
+ */
+export function findInstallRecipe(
+  recipes: readonly InstallRecipePreview[],
+  runtimeId: string,
+  action: InstallAction
+): InstallRecipePreview | undefined {
+  return recipes.find((recipe) => recipe.runtimeId === runtimeId && recipe.action === action);
 }
 
 /** Human-readable byte count for the installer download disclosure. */
