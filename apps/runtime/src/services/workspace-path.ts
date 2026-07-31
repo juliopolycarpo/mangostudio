@@ -33,7 +33,7 @@ export function resolveWorkspacePath(
 
   const expandedPath = expandHome(path);
   if (options?.requireAbsolute && !isAbsolute(expandedPath)) {
-    throw new WorkspacePathError('Directory browsing requires an absolute path.');
+    throw new WorkspacePathError('An absolute path is required.');
   }
 
   return resolve(expandedPath);
