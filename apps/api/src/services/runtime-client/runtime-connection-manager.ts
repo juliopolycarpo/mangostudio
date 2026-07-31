@@ -9,6 +9,10 @@ import type {
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import type {
+  RuntimeCapabilityManifest,
+  RuntimeErrorCode,
+} from '@mangostudio/shared/runtime-protocol';
 import { getVersion } from '../../lib/config';
 import {
   assertEnvironmentConfig,
@@ -63,11 +67,32 @@ function unavailable(message: string): RuntimeRemoteError {
   return new RuntimeRemoteError('RUNTIME_UNAVAILABLE', message);
 }
 
+/**
+ * Callers branch on `RUNTIME_UNAVAILABLE` to decide that a tool call failed
+ * because its target is gone, so every connect failure keeps that code when it
+ * is thrown. The specific cause is preserved separately on the connection
+ * status, which is what the Environments UI reads.
+ */
 function normalizeUnavailable(error: unknown): RuntimeRemoteError {
   return error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE'
     ? error
     : unavailable(error instanceof Error ? error.message : String(error));
 }
+
+function statusErrorCode(error: unknown): RuntimeErrorCode {
+  return error instanceof RuntimeRemoteError ? error.code : 'RUNTIME_UNAVAILABLE';
+}
+
+/**
+ * Built-in tools still expand `~` and join relative paths with the hub's own
+ * `node:path` and `HOME` before handing the result to a runtime client (see
+ * `resolveWorkdirRelativePath`). That is sound only while both ends agree on
+ * path style, so a runtime that disagrees is refused at connect rather than fed
+ * paths it would misread. Lift this once resolution moves behind the manifest —
+ * WSL and SSH targets need that before they can connect.
+ */
+const HUB_PATH_STYLE: RuntimeCapabilityManifest['pathStyle'] =
+  process.platform === 'win32' ? 'win32' : 'posix';
 
 export class RuntimeConnectionManager {
   readonly #connectors: RuntimeConnectionManagerOptions['connectors'];
@@ -142,7 +167,7 @@ export class RuntimeConnectionManager {
           entry.connection = undefined;
           entry.status = {
             state: 'error',
-            errorCode: 'RUNTIME_UNAVAILABLE',
+            errorCode: statusErrorCode(error),
             ...this.#cachedManifest(entry),
           };
           this.#publish(userId);
@@ -187,7 +212,16 @@ export class RuntimeConnectionManager {
         `The ${definition.transportKind} environment transport is not available yet.`
       );
     }
-    return await connector(definition, onUnavailable);
+
+    const connection = await connector(definition, onUnavailable);
+    const { pathStyle } = connection.client.manifest;
+    if (pathStyle !== HUB_PATH_STYLE) {
+      connection.close();
+      throw unavailable(
+        `Environment "${definition.id}" uses ${pathStyle} paths, which this host cannot address yet.`
+      );
+    }
+    return connection;
   }
 
   #markUnavailable(key: string, userId: string, revision: number): void {

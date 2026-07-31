@@ -42,9 +42,12 @@ function definition(transportKind: EnvironmentTransportKind = 'stdio', config: u
   };
 }
 
-function fakeConnection(onClose: () => void): ManagedRuntimeConnection {
+function fakeConnection(
+  onClose: () => void,
+  manifest: RuntimeCapabilityManifest = TEST_MANIFEST
+): ManagedRuntimeConnection {
   return {
-    client: { manifest: TEST_MANIFEST } as RuntimeClient,
+    client: { manifest } as RuntimeClient,
     close: onClose,
   };
 }
@@ -116,6 +119,50 @@ describe('RuntimeConnectionManager', () => {
 
     await manager.connect('user-1', 'devbox').catch(() => undefined);
     expect(attempts).toBe(2);
+  });
+
+  it('reports the runtime error code on the status while still throwing RUNTIME_UNAVAILABLE', async () => {
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () =>
+          Promise.reject(new RuntimeRemoteError('PROTOCOL_MISMATCH', 'hub is newer than runtime')),
+      },
+    });
+
+    const error = await manager.connect('user-1', 'devbox').catch((caught) => caught);
+    // Tool callers branch on RUNTIME_UNAVAILABLE, so the thrown code is fixed…
+    expect(error.code).toBe('RUNTIME_UNAVAILABLE');
+    // …while the card can still tell a version mismatch from an unreachable host.
+    expect(manager.getStatus('user-1', 'devbox')).toEqual({
+      state: 'error',
+      errorCode: 'PROTOCOL_MISMATCH',
+    });
+  });
+
+  it('refuses a runtime whose path style the hub cannot address', async () => {
+    let closeCalls = 0;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () =>
+          Promise.resolve(
+            fakeConnection(() => closeCalls++, {
+              ...TEST_MANIFEST,
+              pathStyle: process.platform === 'win32' ? 'posix' : 'win32',
+            })
+          ),
+      },
+    });
+
+    const error = await manager.connect('user-1', 'devbox').catch((caught) => caught);
+    expect(error).toBeInstanceOf(RuntimeRemoteError);
+    expect(error.code).toBe('RUNTIME_UNAVAILABLE');
+    expect(error.message).toContain('paths');
+    // The transport was opened before the manifest could be read, so refusing it
+    // has to hand the connection back rather than leak the process or socket.
+    expect(closeCalls).toBe(1);
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('error');
   });
 
   it('revalidates stored config before invoking a connector', async () => {
