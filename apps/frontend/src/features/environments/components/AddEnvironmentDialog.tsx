@@ -26,11 +26,16 @@ interface AddEnvironmentDialogProps {
 
 /** Derives an id from a name so the common case needs one field, not two. */
 function suggestId(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, ENVIRONMENT_ID_MAX_LENGTH);
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, ENVIRONMENT_ID_MAX_LENGTH)
+      // The cut can land just after an internal dash, and a trailing one fails
+      // the pattern — leaving submit disabled over an id the user never typed.
+      .replace(/-+$/, '')
+  );
 }
 
 export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
@@ -117,6 +122,9 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
             value={name}
             autoFocus
             maxLength={ENVIRONMENT_NAME_MAX_LENGTH}
+            // Only once something was typed: a blank untouched field is the
+            // starting state, not a mistake worth flagging.
+            error={name.length > 0 && trimmedName.length === 0 ? labels.nameRequired : undefined}
             onChange={(event) => setName(event.target.value)}
           />
 
