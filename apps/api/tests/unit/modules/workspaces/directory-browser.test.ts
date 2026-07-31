@@ -1,13 +1,22 @@
+/**
+ * Hub facade smoke tests. Algorithm coverage lives in `@mangostudio/runtime`.
+ */
+
 import { afterEach, describe, expect, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { listDirectory } from '../../../../src/modules/workspaces/application/directory-browser';
+import {
+  requireValidWorkdir,
+  validateWorkdir,
+  WorkdirValidationError,
+} from '../../../../src/modules/workspaces/application/workdir-validation';
 
 const tempDirs: string[] = [];
 
 async function createTempDir(): Promise<string> {
-  const path = await mkdtemp(join(tmpdir(), 'mango-workspace-browser-'));
+  const path = await mkdtemp(join(tmpdir(), 'mango-workspace-facade-'));
   tempDirs.push(path);
   return path;
 }
@@ -16,73 +25,28 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-describe('listDirectory', () => {
-  it('returns directories only, sorted case-insensitively, with hidden metadata', async () => {
-    const root = await createTempDir();
-    await Promise.all([
-      mkdir(join(root, 'zeta')),
-      mkdir(join(root, 'Alpha')),
-      mkdir(join(root, 'beta')),
-      mkdir(join(root, '.hidden')),
-      writeFile(join(root, 'notes.txt'), 'not a directory'),
-    ]);
-
-    const result = await listDirectory(root);
-
-    expect(result.entries.map((entry) => entry.name)).toEqual(['.hidden', 'Alpha', 'beta', 'zeta']);
-    expect(result.entries.find((entry) => entry.name === '.hidden')?.hidden).toBe(true);
-    expect(result.entries.find((entry) => entry.name === 'Alpha')?.hidden).toBe(false);
-    expect(result.entries.every((entry) => entry.path.startsWith(root))).toBe(true);
-  });
-
-  it('follows directory symlinks without including file symlinks', async () => {
-    const root = await createTempDir();
-    const target = join(root, 'target');
-    const file = join(root, 'file.txt');
-    await mkdir(target);
-    await writeFile(file, 'file');
-    await symlink(target, join(root, 'directory-link'));
-    await symlink(file, join(root, 'file-link'));
-
-    const result = await listDirectory(root);
-
-    expect(result.entries.map((entry) => entry.name)).toEqual(['directory-link', 'target']);
-  });
-
-  it('rejects relative browse paths', async () => {
+describe('workspace facades', () => {
+  it('listDirectory still returns DirectoryBrowserError for relative paths', async () => {
     await expect(listDirectory('relative/path')).rejects.toMatchObject({
       name: 'DirectoryBrowserError',
       code: 'VALIDATION',
     });
   });
 
-  it('maps missing paths without exposing raw filesystem messages', async () => {
+  it('listDirectory browses through the runtime client', async () => {
     const root = await createTempDir();
+    await mkdir(join(root, 'child'));
 
-    await expect(listDirectory(join(root, 'missing'))).rejects.toEqual(
-      expect.objectContaining({
-        name: 'DirectoryBrowserError',
-        reason: 'not-found',
-      })
-    );
+    const result = await listDirectory(root);
+    expect(result.entries.map((entry) => entry.name)).toEqual(['child']);
   });
 
-  it.skipIf(process.platform === 'win32')(
-    'maps unreadable directories to permission-denied',
-    async () => {
-      const root = await createTempDir();
-      const unreadable = join(root, 'unreadable');
-      await mkdir(unreadable);
-      await chmod(unreadable, 0o000);
+  it('validateWorkdir and requireValidWorkdir keep hub error types', async () => {
+    const root = await createTempDir();
 
-      try {
-        await expect(listDirectory(unreadable)).rejects.toMatchObject({
-          name: 'DirectoryBrowserError',
-          reason: 'permission-denied',
-        });
-      } finally {
-        await chmod(unreadable, 0o700);
-      }
-    }
-  );
+    expect(await validateWorkdir(root)).toMatchObject({ ok: true });
+    await expect(requireValidWorkdir(join(root, 'missing'))).rejects.toBeInstanceOf(
+      WorkdirValidationError
+    );
+  });
 });

@@ -13,6 +13,7 @@ export const ListDirectoryResponseSchema = Type.Object({
   home: Type.String(),
   roots: Type.Array(Type.String()),
   separator: Type.Union([Type.Literal('/'), Type.Literal('\\')]),
+  truncated: Type.Optional(Type.Boolean()),
 });
 
 export const ValidatePathBodySchema = Type.Object({

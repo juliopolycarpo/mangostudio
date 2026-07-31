@@ -58,6 +58,15 @@ export {
   GitExecutionError,
 } from './services/git';
 export {
+  assertInsideWorkdir,
+  isInside,
+  isPathPrefix,
+  resolveContainmentRoot,
+  resolvePathForContainment,
+  resolvePathThroughExistingAncestor,
+  WorkdirContainmentError,
+} from './services/path-containment';
+export {
   findShellExecutable,
   isShellAvailable,
   runShellCommand,
@@ -77,6 +86,13 @@ export {
   hashFileAtPath,
   RuntimeSnapshotConflictError,
 } from './services/snapshot';
+export {
+  browseWorkspace,
+  MAX_WORKSPACE_DIRECTORY_ENTRIES,
+  validateWorkdir,
+  WorkspaceBrowserError,
+} from './services/workspace';
+export { resolveWorkspacePath, WorkspacePathError } from './services/workspace-path';
 export {
   createInProcessPortPair,
   type InProcessPortPair,

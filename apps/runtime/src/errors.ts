@@ -10,6 +10,8 @@ export type RuntimeServiceErrorKind =
   | 'stale_line_numbers'
   | 'shell_execution'
   | 'git_execution'
+  | 'workspace_browser'
+  | 'workdir_validation'
   | 'snapshot_conflict'
   | 'snapshot_too_large';
 

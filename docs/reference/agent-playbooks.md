@@ -320,6 +320,13 @@ Open these first:
 
 ### API layering
 
+Workspace filesystem browsing and workdir validation run in the runtime via
+`workspace.browse` / `workspace.validate`. Hub modules under
+`application/directory-browser.ts` and `application/workdir-validation.ts` are
+thin RuntimeClient facades that preserve HTTP error types. Path-containment
+helpers re-export from `@mangostudio/runtime`; workdir-policy decisions stay in
+the hub.
+
 Every git route lives in `http/git-routes.ts` behind `routeWorkdir()` (chat ownership
 plus workdir resolution) and `gitWriteError()` (typed failures), and declares the same
 `403/404/409/422/500: ApiErrorResponseSchema` set.

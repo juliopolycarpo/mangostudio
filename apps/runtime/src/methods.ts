@@ -1,4 +1,8 @@
 import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
+import type {
+  ListDirectoryResponse,
+  WorkdirValidationReason,
+} from '@mangostudio/shared/workspaces';
 
 export const RUNTIME_ABSENT_HASH = 'absent';
 
@@ -282,6 +286,8 @@ export interface RuntimeSnapshotHashResult {
 
 export interface RuntimeSnapshotRevertParams {
   readonly chatId: string;
+  /** When set, every revert path must stay inside this root after symlink resolution. */
+  readonly containmentRoot?: string;
   readonly expected: readonly {
     readonly path: string;
     readonly afterHash: string;
@@ -300,6 +306,21 @@ export interface RuntimeSnapshotRevertParams {
         readonly contentBase64: string;
       }
   )[];
+}
+
+export interface RuntimeWorkspaceBrowseParams {
+  readonly path?: string;
+}
+
+export type RuntimeWorkspaceBrowseResult = ListDirectoryResponse;
+
+export type RuntimeWorkspaceValidateResult =
+  | { readonly ok: true; readonly resolvedPath: string }
+  | { readonly ok: false; readonly reason: WorkdirValidationReason };
+
+export interface RuntimeWorkspaceValidateParams {
+  readonly path: string;
+  readonly requireAbsolute?: boolean;
 }
 
 export interface RuntimeSnapshotRevertResult {
@@ -370,6 +391,14 @@ export interface RuntimeMethodMap {
   'snapshot.revert': {
     readonly params: RuntimeSnapshotRevertParams;
     readonly result: RuntimeSnapshotRevertResult;
+  };
+  'workspace.browse': {
+    readonly params: RuntimeWorkspaceBrowseParams;
+    readonly result: RuntimeWorkspaceBrowseResult;
+  };
+  'workspace.validate': {
+    readonly params: RuntimeWorkspaceValidateParams;
+    readonly result: RuntimeWorkspaceValidateResult;
   };
 }
 
