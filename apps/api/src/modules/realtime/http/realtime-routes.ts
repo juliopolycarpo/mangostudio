@@ -1,6 +1,7 @@
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import {
+  ENVIRONMENTS_TOPIC,
   parseGitTopic,
   REALTIME_CLOSE_CODES,
   REALTIME_IDLE_TIMEOUT_SECONDS,
@@ -185,7 +186,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
 
     for (const topic of message.topics) {
       if (state.topics.has(topic) || accepted.has(topic)) continue;
-      if (topic === SETTINGS_TOPIC) {
+      if (topic === SETTINGS_TOPIC || topic === ENVIRONMENTS_TOPIC) {
         accepted.add(topic);
         continue;
       }
@@ -367,7 +368,11 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
             }
             if (message.type === 'unsubscribe') {
               for (const topic of message.topics) {
-                if (topic === SETTINGS_TOPIC || parseGitTopic(topic)) {
+                if (
+                  topic === SETTINGS_TOPIC ||
+                  topic === ENVIRONMENTS_TOPIC ||
+                  parseGitTopic(topic)
+                ) {
                   state.topics.delete(topic);
                 } else {
                   socket.send(errorMessage('Unsupported realtime topic', ERROR_CODES.UNSUPPORTED));

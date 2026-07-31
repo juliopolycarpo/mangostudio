@@ -12,6 +12,10 @@ import {
   createEnvironmentRepository,
   type UpdateEnvironmentRecord,
 } from '../../../src/modules/environments/infrastructure/environment-repository';
+import {
+  createRealtimeBus,
+  setRealtimeBusForTests,
+} from '../../../src/services/realtime/realtime-bus';
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestUser } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
@@ -30,6 +34,7 @@ afterEach(async () => {
   await getDb().deleteFrom('chats').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('user').where('id', '=', TEST_USER.id).execute();
+  setRealtimeBusForTests(undefined);
 });
 
 function createTestApp() {
@@ -245,5 +250,34 @@ describe('environment entity routes', () => {
       code: 'CONFLICT',
       error: 'The stdio environment transport is not available yet.',
     });
+  });
+
+  it('publishes user-scoped invalidations after persisted entity changes', async () => {
+    const bus = createRealtimeBus();
+    const events: string[] = [];
+    setRealtimeBusForTests(bus);
+    bus.subscribe(TEST_USER.id, (event) => events.push(event.topic));
+    const { app } = createTestApp();
+
+    await app.handle(
+      new Request(
+        'http://localhost/environments',
+        jsonRequest('POST', {
+          id: 'event-box',
+          name: 'Event box',
+          transportKind: 'stdio',
+          config: {},
+        })
+      )
+    );
+    await app.handle(
+      new Request(
+        'http://localhost/environments/event-box',
+        jsonRequest('PUT', { name: 'Renamed box' })
+      )
+    );
+    await app.handle(new Request('http://localhost/environments/event-box', jsonRequest('DELETE')));
+
+    expect(events).toEqual(['environments', 'environments', 'environments']);
   });
 });

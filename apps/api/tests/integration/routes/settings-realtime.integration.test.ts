@@ -27,6 +27,7 @@ const OTHER_USER = {
 let restoreAuth: (() => void) | null = null;
 let unsubscribe: (() => void) | null = null;
 let events: RealtimeInvalidateEvent[] = [];
+type SettingsInvalidateEvent = Extract<RealtimeInvalidateEvent, { topic: typeof SETTINGS_TOPIC }>;
 
 function collectEventsFor(userId: string): void {
   const bus = createRealtimeBus();
@@ -39,8 +40,8 @@ function collectEventsFor(userId: string): void {
 
 function settingsScopes(): (readonly SettingsScope[] | undefined)[] {
   return events
-    .filter((event) => event.topic === SETTINGS_TOPIC)
-    .map((event) => event.scopes as readonly SettingsScope[] | undefined);
+    .filter((event): event is SettingsInvalidateEvent => event.topic === SETTINGS_TOPIC)
+    .map((event) => event.scopes);
 }
 
 function jsonRequest(path: string, body: unknown): Request {

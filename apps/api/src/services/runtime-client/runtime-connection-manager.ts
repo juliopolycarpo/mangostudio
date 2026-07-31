@@ -15,6 +15,7 @@ import {
   isEnvironmentConfigValid,
 } from '../../modules/environments/domain/environment-config';
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
+import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { RuntimeClient } from './runtime-client';
 
 export interface RuntimeEnvironmentDefinition {
@@ -248,6 +249,7 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
   managerInstance ??= new RuntimeConnectionManager({
     resolveEnvironment,
     connectors: { 'in-process': connectLocalRuntime },
+    publish: publishEnvironmentInvalidation,
   });
   return managerInstance;
 }

@@ -88,7 +88,8 @@ HTTP como fonte da verdade e atualizar as queries relevantes depois de
 
 | Tópico         | Autorização                            | Escopos opcionais                                                       |
 | -------------- | -------------------------------------- | ----------------------------------------------------------------------- |
-| `settings`     | Qualquer sessão autenticada por cookie | `app`, `provider`, `tool`                                               |
+| `settings`     | Qualquer sessão autenticada por cookie | `app`, `provider`, `tool`, `tool-identity`                              |
+| `environments` | Qualquer sessão autenticada por cookie | Nenhum                                                                  |
 | `git:<chatId>` | O usuário deve ser dono de `<chatId>`  | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
 
 Tópicos Git de outro usuário permanecem sem assinatura e retornam a mesma

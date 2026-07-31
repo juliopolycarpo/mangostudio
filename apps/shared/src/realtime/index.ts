@@ -1,4 +1,5 @@
 export {
+  ENVIRONMENTS_TOPIC,
   GIT_SCOPES,
   type GitScope,
   GitScopeSchema,

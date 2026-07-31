@@ -4,6 +4,7 @@ import type {
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import {
   getRuntimeConnectionManager,
   type RuntimeConnectionManager,
@@ -64,7 +65,8 @@ function toEnvironment(record: EnvironmentRecord, manager: RuntimeConnectionMana
 
 export function createEnvironmentService(
   repository: EnvironmentRepository = environmentRepository,
-  manager: RuntimeConnectionManager = getRuntimeConnectionManager()
+  manager: RuntimeConnectionManager = getRuntimeConnectionManager(),
+  publish: (userId: string) => void = publishEnvironmentInvalidation
 ): EnvironmentService {
   async function requireRecord(userId: string, id: string): Promise<EnvironmentRecord> {
     if (id === LOCAL_ENVIRONMENT_ID) return localRecord(userId);
@@ -105,6 +107,7 @@ export function createEnvironmentService(
       if (!record) {
         throw new EnvironmentServiceError(`Environment "${input.id}" already exists.`, 409);
       }
+      publish(userId);
       return toEnvironment(record, manager);
     },
 
@@ -128,6 +131,7 @@ export function createEnvironmentService(
       if (!updated) {
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
+      publish(userId);
       return toEnvironment(updated, manager);
     },
 
@@ -146,6 +150,7 @@ export function createEnvironmentService(
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
       manager.disconnect(userId, id);
+      publish(userId);
     },
 
     async connect(userId, id) {

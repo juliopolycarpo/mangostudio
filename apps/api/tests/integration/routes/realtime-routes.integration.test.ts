@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import {
+  ENVIRONMENTS_TOPIC,
   gitTopic,
   REALTIME_CLOSE_CODES,
   type RealtimeServerMessage,
@@ -311,6 +312,41 @@ describe('realtime WebSocket origins and liveness', () => {
 });
 
 describe('realtime WebSocket subscriptions', () => {
+  it('delivers user-scoped environment invalidations without a resource ownership lookup', async () => {
+    const { bus, httpUrl, wsUrl } = startServer();
+    const firstUser = await signUp(httpUrl);
+    const secondUser = await signUp(httpUrl);
+    const firstClient = connect(wsUrl, { Cookie: firstUser.cookie });
+    const secondClient = connect(wsUrl, { Cookie: secondUser.cookie });
+
+    await Promise.all([firstClient.opened, secondClient.opened]);
+    await Promise.all([firstClient.nextMessage(), secondClient.nextMessage()]);
+    send(firstClient.socket, { type: 'subscribe', topics: [ENVIRONMENTS_TOPIC] });
+    send(secondClient.socket, { type: 'subscribe', topics: [ENVIRONMENTS_TOPIC] });
+    expect(await firstClient.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [ENVIRONMENTS_TOPIC],
+    });
+    expect(await secondClient.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [ENVIRONMENTS_TOPIC],
+    });
+
+    bus.publish(firstUser.id, { type: 'invalidate', topic: ENVIRONMENTS_TOPIC });
+    expect(await firstClient.nextMessage()).toEqual({
+      type: 'invalidate',
+      topic: ENVIRONMENTS_TOPIC,
+    });
+    await Bun.sleep(50);
+    expect(secondClient.messages.some((message) => message.type === 'invalidate')).toBe(false);
+
+    bus.publish(secondUser.id, { type: 'invalidate', topic: ENVIRONMENTS_TOPIC });
+    expect(await secondClient.nextMessage()).toEqual({
+      type: 'invalidate',
+      topic: ENVIRONMENTS_TOPIC,
+    });
+  });
+
   it('delivers settings invalidations only to subscribed sockets for the same user', async () => {
     const { bus, httpUrl, wsUrl } = startServer();
     const firstUser = await signUp(httpUrl);

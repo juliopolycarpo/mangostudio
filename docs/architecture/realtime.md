@@ -84,6 +84,7 @@ source of truth and refresh relevant queries after `subscribed` (and after
 | Topic          | Authorization                    | Optional scopes                                                         |
 | -------------- | -------------------------------- | ----------------------------------------------------------------------- |
 | `settings`     | Any authenticated cookie session | `app`, `provider`, `tool`, `tool-identity`                              |
+| `environments` | Any authenticated cookie session | None                                                                    |
 | `git:<chatId>` | The user must own `<chatId>`     | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
 
 Foreign Git topics remain unsubscribed and return the same non-enumerating

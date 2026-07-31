@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
+  ENVIRONMENTS_TOPIC,
   GIT_SCOPES,
   gitTopic,
   parseGitTopic,
@@ -15,6 +16,7 @@ import {
 describe('realtime topic helpers', () => {
   it('round-trips settings and git topics', () => {
     expect(SETTINGS_TOPIC).toBe('settings');
+    expect(ENVIRONMENTS_TOPIC).toBe('environments');
     expect(gitTopic('chat-abc')).toBe('git:chat-abc');
     expect(parseGitTopic(gitTopic('chat-abc'))).toBe('chat-abc');
     expect(parseGitTopic('settings')).toBeUndefined();
@@ -71,7 +73,7 @@ describe('realtime client messages', () => {
     expect(
       Value.Check(RealtimeClientMessageSchema, {
         type: 'subscribe',
-        topics: [SETTINGS_TOPIC, gitTopic('c1')],
+        topics: [SETTINGS_TOPIC, ENVIRONMENTS_TOPIC, gitTopic('c1')],
       })
     ).toBe(true);
     expect(
@@ -130,7 +132,13 @@ describe('realtime server messages', () => {
     expect(
       Value.Check(RealtimeServerMessageSchema, {
         type: 'subscribed',
-        topics: [SETTINGS_TOPIC, gitTopic('chat-1')],
+        topics: [SETTINGS_TOPIC, ENVIRONMENTS_TOPIC, gitTopic('chat-1')],
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'invalidate',
+        topic: ENVIRONMENTS_TOPIC,
       })
     ).toBe(true);
     expect(
