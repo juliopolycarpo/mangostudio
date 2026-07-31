@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PathAccessError, RuntimeServiceError } from '../../errors';
 import type { RuntimeGrepParams, RuntimeGrepResult } from '../../methods';
-import { containsNulByte, isRuntimePathAllowed } from '../fs-utils';
+import { compileRuntimePathGuard, containsNulByte } from '../fs-utils';
 
 const BINARY_PROBE_BYTES = 1024;
 const DEFAULT_FILE_GLOB = '**/*';
@@ -14,14 +14,24 @@ export class GrepPatternError extends RuntimeServiceError {
   }
 }
 
-export async function grepRuntimeFiles(params: RuntimeGrepParams): Promise<RuntimeGrepResult> {
+export async function grepRuntimeFiles(
+  params: RuntimeGrepParams,
+  signal?: AbortSignal
+): Promise<RuntimeGrepResult> {
   const regex = buildRegex(params.pattern, params.caseInsensitive);
+  const allows = compileRuntimePathGuard(params);
   const rootStats = await statSafe(params.resolvedPath, params.inputPath);
   const matches: Array<{ file: string; line: number; text: string }> = [];
   let filesScanned = 0;
   let truncated = false;
 
   if (rootStats.isFile()) {
+    // The directory branch filters every candidate it discovers; a single-file
+    // search is subject to the same policy, and the runtime is the boundary
+    // that has to enforce it once the hub is no longer in-process.
+    if (!allows(params.resolvedPath)) {
+      throw new PathAccessError(`Path "${params.inputPath}" is not searchable by this tool.`);
+    }
     const fileTruncated = await searchFile({
       absolute: params.resolvedPath,
       display: params.resolvedPath,
@@ -51,8 +61,9 @@ export async function grepRuntimeFiles(params: RuntimeGrepParams): Promise<Runti
       onlyFiles: true,
       absolute: false,
     })) {
+      signal?.throwIfAborted();
       const absolute = resolve(params.resolvedPath, relativePath);
-      if (!isRuntimePathAllowed(absolute, params)) continue;
+      if (!allows(absolute)) continue;
       filesScanned++;
       const fileTruncated = await searchFile({
         absolute,

@@ -32,7 +32,7 @@ export const runtimeFsService = {
   deleteFile: (params: RuntimeDeleteFileParams) => deleteRuntimeFile(params),
   moveFile: (params: RuntimeMoveFileParams) => moveRuntimeFile(params),
   listDirectory: (params: RuntimeListDirectoryParams) => listRuntimeDirectory(params),
-  glob: (params: RuntimeGlobParams) => globRuntimePaths(params),
-  grep: (params: RuntimeGrepParams) => grepRuntimeFiles(params),
+  glob: (params: RuntimeGlobParams, signal?: AbortSignal) => globRuntimePaths(params, signal),
+  grep: (params: RuntimeGrepParams, signal?: AbortSignal) => grepRuntimeFiles(params, signal),
   applyPatch: (params: RuntimeApplyPatchParams) => applyRuntimePatch(params),
 };

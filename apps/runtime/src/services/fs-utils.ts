@@ -269,24 +269,61 @@ function isLinkUnsupported(error: unknown): boolean {
   return typeof error.code === 'string' && LINK_UNSUPPORTED_CODES.has(error.code);
 }
 
-export function isRuntimePathAllowed(path: string, filter: RuntimePathFilter): boolean {
-  const absolute = resolve(path);
-  if (
-    filter.allowedRoots.length > 0 &&
-    !filter.allowedRoots.some((root) => isPathPrefix(resolve(root), absolute))
-  ) {
-    return false;
+interface CompiledPathRoot {
+  readonly lexical: string;
+  readonly canonical: string;
+}
+
+/**
+ * Compiles a path policy into a per-candidate predicate. Roots are canonicalized
+ * once here rather than per candidate, because glob and grep call the predicate
+ * for every entry they walk.
+ *
+ * Allow and deny are matched against the link-resolved candidate, not its
+ * lexical form: a symlink inside an allowed root that points at a denied one
+ * would otherwise pass both prefix tests and hand back the denied file. Deny
+ * additionally keeps the lexical test so a root that cannot be canonicalized
+ * still blocks its literal prefix.
+ * // Usage: const allows = compileRuntimePathGuard(params); allows(candidate)
+ */
+export function compileRuntimePathGuard(filter: RuntimePathFilter): (path: string) => boolean {
+  const allowedRoots = filter.allowedRoots.map(compilePathRoot);
+  const deniedRoots = filter.deniedRoots.map(compilePathRoot);
+  const containmentRoot = filter.containmentRoot;
+  if (allowedRoots.length === 0 && deniedRoots.length === 0 && !containmentRoot) {
+    return () => true;
   }
-  if (filter.deniedRoots.some((root) => isPathPrefix(resolve(root), absolute))) {
-    return false;
+
+  return (path: string) => {
+    const absolute = resolve(path);
+    const effective = resolvePathThroughExistingAncestor(absolute);
+    if (
+      allowedRoots.length > 0 &&
+      !allowedRoots.some((root) => isPathPrefix(root.canonical, effective))
+    ) {
+      return false;
+    }
+    if (
+      deniedRoots.some(
+        (root) => isPathPrefix(root.canonical, effective) || isPathPrefix(root.lexical, absolute)
+      )
+    ) {
+      return false;
+    }
+    if (containmentRoot && !isPathPrefix(containmentRoot, effective)) return false;
+    return true;
+  };
+}
+
+function compilePathRoot(root: string): CompiledPathRoot {
+  const lexical = resolve(root);
+  try {
+    return { lexical, canonical: realpathSync(lexical) };
+  } catch {
+    // A configured root that does not exist yet still has a meaningful lexical
+    // prefix; falling back keeps the policy usable instead of throwing.
+    return { lexical, canonical: lexical };
   }
-  if (
-    filter.containmentRoot &&
-    !isPathPrefix(filter.containmentRoot, resolvePathThroughExistingAncestor(absolute))
-  ) {
-    return false;
-  }
-  return true;
 }
 
 function isPathPrefix(root: string, candidate: string): boolean {

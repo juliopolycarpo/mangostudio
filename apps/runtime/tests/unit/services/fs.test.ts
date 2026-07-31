@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { clearFileFreshness } from '../../../src';
+import { clearFileFreshness, PathAccessError } from '../../../src';
 import { runtimeFsService } from '../../../src/services/fs';
 
 let tempDir: string;
@@ -92,5 +92,50 @@ describe('runtime filesystem service', () => {
     });
 
     expect(result.matches).toEqual([join(root, 'visible.txt')]);
+  });
+
+  it('denies a symlink whose target resolves into a denied root', async () => {
+    const root = join(tempDir, 'workspace');
+    const denied = join(root, 'private');
+    mkdirSync(denied, { recursive: true });
+    await Bun.write(join(denied, 'secret.txt'), 'secret');
+    // Lexically "alias.txt" sits directly in the allowed root; only the resolved
+    // target is denied.
+    symlinkSync(join(denied, 'secret.txt'), join(root, 'alias.txt'));
+
+    const result = await runtimeFsService.glob({
+      pattern: '*.txt',
+      cwd: root,
+      maxResults: 100,
+      includeDotfiles: false,
+      absolute: true,
+      allowedRoots: [root],
+      deniedRoots: [denied],
+    });
+
+    expect(result.matches).toEqual([]);
+  });
+
+  it('applies the path filter when grep targets a single file', async () => {
+    const root = join(tempDir, 'workspace');
+    const denied = join(root, 'private');
+    mkdirSync(denied, { recursive: true });
+    await Bun.write(join(denied, 'secret.txt'), 'token = hunter2');
+    symlinkSync(join(denied, 'secret.txt'), join(root, 'alias.txt'));
+
+    await expect(
+      runtimeFsService.grep({
+        pattern: 'hunter2',
+        inputPath: 'alias.txt',
+        resolvedPath: join(root, 'alias.txt'),
+        caseInsensitive: false,
+        maxResults: 10,
+        maxMatchesPerFile: 10,
+        maxFileSizeBytes: 1_000_000,
+        includeDotfiles: false,
+        allowedRoots: [root],
+        deniedRoots: [denied],
+      })
+    ).rejects.toThrow(PathAccessError);
   });
 });
