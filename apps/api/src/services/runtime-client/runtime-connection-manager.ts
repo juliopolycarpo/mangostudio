@@ -16,11 +16,13 @@ import type {
 import { getVersion } from '../../lib/config';
 import {
   assertEnvironmentConfig,
+  environmentConfigFor,
   isEnvironmentConfigValid,
 } from '../../modules/environments/domain/environment-config';
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { RuntimeClient } from './runtime-client';
+import { launchStdioRuntime } from './stdio-runtime-launcher';
 
 export interface RuntimeEnvironmentDefinition {
   readonly id: string;
@@ -57,10 +59,46 @@ interface RuntimeConnectionEntry {
   status: EnvironmentConnectionStatus;
   connection?: ManagedRuntimeConnection;
   connecting?: Promise<RuntimeClient>;
+  /** Consecutive failures since the last successful connect. */
+  failureCount: number;
+  /**
+   * Epoch ms before which a lazy connect fails fast instead of respawning.
+   * `Infinity` latches the environment until someone connects it explicitly.
+   */
+  retryAfterMs: number;
 }
+
+/** 1s, 2s, 4s, 8s, 16s — then the attempt cap latches the environment. */
+const RECONNECT_BASE_DELAY_MS = 1_000;
+const RECONNECT_MAX_DELAY_MS = 30_000;
+const MAX_RECONNECT_ATTEMPTS = 5;
 
 function connectionKey(userId: string, environmentId: string): string {
   return `${userId}:${environmentId}`;
+}
+
+/**
+ * Backoff is a deadline rather than a timer: nothing is scheduled, so a
+ * disabled, deleted, or simply unused environment never respawns on its own,
+ * and there is no pending callback for shutdown to forget to cancel. The next
+ * caller that actually needs the runtime pays for the retry.
+ */
+function retryDeadline(failureCount: number, errorCode: RuntimeErrorCode): number {
+  // A stale binary cannot fix itself by being asked again; require a reinstall
+  // and an explicit reconnect rather than burning attempts on it.
+  if (errorCode === 'PROTOCOL_MISMATCH' || failureCount >= MAX_RECONNECT_ATTEMPTS) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const delay = Math.min(RECONNECT_BASE_DELAY_MS * 2 ** (failureCount - 1), RECONNECT_MAX_DELAY_MS);
+  return Date.now() + delay;
+}
+
+function describeBackoff(environmentId: string, entry: RuntimeConnectionEntry): string {
+  if (entry.retryAfterMs === Number.POSITIVE_INFINITY) {
+    return `Environment "${environmentId}" stopped retrying after ${entry.failureCount} failed connection attempt(s). Reconnect it once the cause is fixed.`;
+  }
+  const seconds = Math.max(1, Math.ceil((entry.retryAfterMs - Date.now()) / 1_000));
+  return `Environment "${environmentId}" is unavailable; the next connection attempt is allowed in ${seconds}s.`;
 }
 
 function unavailable(message: string): RuntimeRemoteError {
@@ -125,7 +163,16 @@ export class RuntimeConnectionManager {
     return await this.connect(userId, environmentId);
   }
 
-  async connect(userId: string, environmentId: string): Promise<RuntimeClient> {
+  /**
+   * Opens a connection, or returns the live one. `force` marks the deliberate
+   * connect actions — a user pressing Connect, or a route acting on their
+   * behalf — which clear a backoff instead of being held by it.
+   */
+  async connect(
+    userId: string,
+    environmentId: string,
+    options: { readonly force?: boolean } = {}
+  ): Promise<RuntimeClient> {
     const key = connectionKey(userId, environmentId);
     const current = this.#entries.get(key);
     if (current?.connection) return current.connection.client;
@@ -134,8 +181,16 @@ export class RuntimeConnectionManager {
     const entry = current ?? {
       revision: 0,
       status: { state: 'disconnected' as const },
+      failureCount: 0,
+      retryAfterMs: 0,
     };
     this.#entries.set(key, entry);
+    if (options.force) {
+      entry.failureCount = 0;
+      entry.retryAfterMs = 0;
+    } else if (Date.now() < entry.retryAfterMs) {
+      throw unavailable(describeBackoff(environmentId, entry));
+    }
     const revision = ++entry.revision;
     entry.status = { state: 'connecting', ...this.#cachedManifest(entry) };
     this.#publish(userId);
@@ -155,6 +210,8 @@ export class RuntimeConnectionManager {
           throw unavailable('Runtime connection was closed.');
         }
         entry.connection = connection;
+        entry.failureCount = 0;
+        entry.retryAfterMs = 0;
         entry.status = {
           state: 'connected',
           manifest: connection.client.manifest,
@@ -164,10 +221,13 @@ export class RuntimeConnectionManager {
       })
       .catch((error: unknown) => {
         if (entry.revision === revision) {
+          const errorCode = statusErrorCode(error);
           entry.connection = undefined;
+          entry.failureCount += 1;
+          entry.retryAfterMs = retryDeadline(entry.failureCount, errorCode);
           entry.status = {
             state: 'error',
-            errorCode: statusErrorCode(error),
+            errorCode,
             ...this.#cachedManifest(entry),
           };
           this.#publish(userId);
@@ -190,8 +250,26 @@ export class RuntimeConnectionManager {
     entry.connection?.close();
     entry.connection = undefined;
     entry.connecting = undefined;
+    // Taking an environment down deliberately clears its failure history: the
+    // next connect is a fresh decision, not a continuation of the old one.
+    entry.failureCount = 0;
+    entry.retryAfterMs = 0;
     entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
     this.#publish(userId);
+  }
+
+  /**
+   * Releases every live connection. Runtime children are the hub's
+   * responsibility, so shutdown closes them rather than leaving orphans behind.
+   */
+  closeAll(): void {
+    for (const entry of this.#entries.values()) {
+      entry.revision += 1;
+      entry.connection?.close();
+      entry.connection = undefined;
+      entry.connecting = undefined;
+      entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
+    }
   }
 
   async #openConnection(
@@ -224,14 +302,21 @@ export class RuntimeConnectionManager {
     return connection;
   }
 
+  /**
+   * A runtime that dies is disconnected, not broken: the target is usually
+   * still there and the next caller should get a fresh process. The backoff
+   * deadline is what keeps a crash loop from respawning on every tool call.
+   */
   #markUnavailable(key: string, userId: string, revision: number): void {
     const entry = this.#entries.get(key);
     if (!entry || entry.revision !== revision || !entry.connection) return;
 
     entry.connection.close();
     entry.connection = undefined;
+    entry.failureCount += 1;
+    entry.retryAfterMs = retryDeadline(entry.failureCount, 'RUNTIME_UNAVAILABLE');
     entry.status = {
-      state: 'error',
+      state: entry.failureCount >= MAX_RECONNECT_ATTEMPTS ? 'error' : 'disconnected',
       errorCode: 'RUNTIME_UNAVAILABLE',
       ...this.#cachedManifest(entry),
     };
@@ -277,15 +362,36 @@ async function connectLocalRuntime(
   };
 }
 
+async function connectStdioRuntime(
+  definition: RuntimeEnvironmentDefinition,
+  onUnavailable: () => void
+): Promise<ManagedRuntimeConnection> {
+  const connection = await launchStdioRuntime({
+    environmentId: definition.id,
+    config: environmentConfigFor('stdio', definition.config),
+    hubVersion: getVersion(),
+    onClosed: onUnavailable,
+  });
+  return {
+    client: new RuntimeClient(connection.client, onUnavailable),
+    close: () => connection.close(),
+  };
+}
+
 let managerInstance: RuntimeConnectionManager | undefined;
 
 export function getRuntimeConnectionManager(): RuntimeConnectionManager {
   managerInstance ??= new RuntimeConnectionManager({
     resolveEnvironment,
-    connectors: { 'in-process': connectLocalRuntime },
+    connectors: { 'in-process': connectLocalRuntime, stdio: connectStdioRuntime },
     publish: publishEnvironmentInvalidation,
   });
   return managerInstance;
+}
+
+/** Releases every runtime connection this process opened. Used by shutdown. */
+export function closeAllRuntimeConnections(): void {
+  managerInstance?.closeAll();
 }
 
 export function getRuntimeClient(

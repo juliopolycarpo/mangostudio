@@ -166,7 +166,9 @@ export function createEnvironmentService(
     async connect(userId, id) {
       await requireRecord(userId, id);
       try {
-        await manager.connect(userId, id);
+        // A deliberate connect clears any backoff: the user is telling us the
+        // cause was fixed, so waiting out a retry window would be theatre.
+        await manager.connect(userId, id, { force: true });
       } catch (error) {
         // The row can be removed between the guard above and the manager's own
         // lookup, which reports it as an unavailable runtime. That is a missing

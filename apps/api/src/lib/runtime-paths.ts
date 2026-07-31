@@ -60,6 +60,42 @@ export function getDefaultFrontendDir(): string {
   return join(getRuntimeBaseDir(), 'public');
 }
 
+/** Filename of the runtime binary that ships beside the hub executable. */
+const RUNTIME_BINARY_NAME =
+  process.platform === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
+
+/**
+ * Path of the runtime binary that ships beside the hub executable, or null in a
+ * source checkout where no binary is built.
+ */
+export function getRuntimeBinaryPath(): string | null {
+  return isStandaloneExecutable() ? join(getRuntimeBaseDir(), RUNTIME_BINARY_NAME) : null;
+}
+
+export interface RuntimeLaunchCommand {
+  readonly command: string;
+  readonly args: readonly string[];
+}
+
+/**
+ * argv prefix for a runtime child process. A standalone install runs the
+ * sibling binary; a source checkout runs the workspace entry through the
+ * current Bun. Every element is a discrete argument — the transport never
+ * accepts a command string to interpolate.
+ */
+export function resolveRuntimeLaunchCommand(binaryPath?: string): RuntimeLaunchCommand {
+  const override = binaryPath?.trim();
+  if (override) return { command: override, args: [] };
+
+  const sibling = getRuntimeBinaryPath();
+  if (sibling) return { command: sibling, args: [] };
+
+  return {
+    command: process.execPath,
+    args: [join(import.meta.dir, '../../../runtime/src/cli.ts')],
+  };
+}
+
 /** Returns the Cursor SDK sidecar script path for the current runtime mode. */
 export function getCursorSidecarScriptPath(): string {
   const override = getConfig().cursor.sidecarScriptPath.trim();

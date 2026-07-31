@@ -36,3 +36,25 @@ export function assertEnvironmentConfig(
     throw new Error(`Invalid ${transportKind} environment configuration.`);
   }
 }
+
+type EnvironmentConfigByKind = {
+  [K in EnvironmentTransportKind]: Extract<
+    EnvironmentTransportConfig,
+    { transportKind: K }
+  >['config'];
+};
+
+/**
+ * Validates a stored config and narrows it to the shape its transport kind
+ * implies, so transport launchers read typed fields instead of casting the
+ * `unknown` a database row carries.
+ */
+export function environmentConfigFor<K extends EnvironmentTransportKind>(
+  transportKind: K,
+  config: unknown
+): EnvironmentConfigByKind[K] {
+  if (!isEnvironmentConfigValid(transportKind, config)) {
+    throw new Error(`Invalid ${transportKind} environment configuration.`);
+  }
+  return config as EnvironmentConfigByKind[K];
+}
