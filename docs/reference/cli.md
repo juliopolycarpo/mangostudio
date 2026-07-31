@@ -46,6 +46,28 @@ copy-paste commands, or:
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
 
+## `mangostudio-runtime`
+
+Every channel installs a second binary beside `mangostudio`. It is the execution
+host for environments configured to run out of process: MangoStudio spawns it and
+speaks its protocol over the child's pipes. It is not meant to be run by hand, and
+it must stay in the same directory as the main binary — that is how MangoStudio
+finds it.
+
+| Command                       | Description                                                   |
+| ----------------------------- | ------------------------------------------------------------- |
+| `mangostudio-runtime --stdio` | Serve the runtime protocol over stdin/stdout (NDJSON frames). |
+| `mangostudio-runtime --help`  | Print usage. Bare invocation does the same.                   |
+| `--version`, `-v`             | Print the runtime version, which matches the MangoStudio one. |
+
+`stdio` also works as a bare word for each mode (`mangostudio-runtime stdio`).
+
+In `--stdio` mode stdout carries protocol frames and nothing else; every diagnostic
+goes to stderr, which MangoStudio collects into its own logs. `mangostudio doctor`
+reports whether this binary is present and whether its version matches the hub's —
+a mismatch is refused at the protocol handshake, so reinstall rather than mixing
+releases.
+
 Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
 `127.0.0.1`.
 
