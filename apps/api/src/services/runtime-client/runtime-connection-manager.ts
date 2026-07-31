@@ -17,7 +17,9 @@ import {
   environmentConfigFor,
   isEnvironmentConfigValid,
 } from '../../modules/environments/domain/environment-config';
+import { wslLaunchCommand } from '../../modules/environments/domain/wsl-runtime-release';
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
+import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-provisioner';
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { RuntimeClient } from './runtime-client';
 import { spawnRuntimeChild } from './spawn-runtime-child';
@@ -414,12 +416,47 @@ async function connectStdioRuntime(
   };
 }
 
+/**
+ * A WSL distribution is a launcher over the stdio transport rather than a
+ * protocol of its own, so the only work here is making sure a runtime the hub's
+ * own release built for Linux is in the distribution first. That is also how a
+ * hub update is absorbed: the stale binary is replaced instead of failing the
+ * handshake with nothing the user can act on.
+ */
+async function connectWslRuntime(
+  definition: RuntimeEnvironmentDefinition,
+  onUnavailable: () => void
+): Promise<ManagedRuntimeConnection> {
+  if (process.platform !== 'win32') {
+    throw unavailable(
+      `Environment "${definition.id}" runs in a WSL distribution, which only a Windows host can start.`
+    );
+  }
+  const { distro } = environmentConfigFor('wsl', definition.config);
+  await wslProvisioner.ensure(distro);
+
+  const connection = await spawnRuntimeChild({
+    environmentId: definition.id,
+    launch: wslLaunchCommand(distro),
+    hubVersion: getVersion(),
+    onClosed: onUnavailable,
+  });
+  return {
+    client: new RuntimeClient(connection.client, onUnavailable),
+    close: () => connection.close(),
+  };
+}
+
 let managerInstance: RuntimeConnectionManager | undefined;
 
 export function getRuntimeConnectionManager(): RuntimeConnectionManager {
   managerInstance ??= new RuntimeConnectionManager({
     resolveEnvironment,
-    connectors: { 'in-process': connectLocalRuntime, stdio: connectStdioRuntime },
+    connectors: {
+      'in-process': connectLocalRuntime,
+      stdio: connectStdioRuntime,
+      wsl: connectWslRuntime,
+    },
     publish: publishEnvironmentInvalidation,
   });
   return managerInstance;
