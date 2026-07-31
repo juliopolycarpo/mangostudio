@@ -14,7 +14,7 @@ import {
   resolveContainedPath,
   validateRepoPaths,
 } from '../domain/path-validation';
-import { GitCliError, runGit } from '../infrastructure/git-cli';
+import { GitCliError, type GitRuntimeSelection, runGit } from '../infrastructure/git-cli';
 import { GitWriteError, mapWriteFailure, requireRepoRoot } from './git-write-service';
 
 const HISTORY_PAGE_SIZE = 20;
@@ -23,10 +23,11 @@ const BINARY_DIFF_PATTERN = /^Binary files |^GIT binary patch$/m;
 export async function listHistory(
   workdir: string,
   cursor: string | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
 ): Promise<GitHistoryResponse> {
   try {
-    const root = await requireRepoRoot(workdir, signal);
+    const root = await requireRepoRoot(workdir, signal, selection);
     const offset = Number(cursor ?? 0);
     const result = await runGit(
       [
@@ -36,7 +37,7 @@ export async function listHistory(
         `--max-count=${HISTORY_PAGE_SIZE + 1}`,
         `--skip=${offset}`,
       ],
-      { cwd: root, signal }
+      { cwd: root, signal, ...selection }
     );
     const commits = parseHistoryLog(result.stdout);
     const hasMore = commits.length > HISTORY_PAGE_SIZE;
@@ -56,10 +57,15 @@ export async function listHistory(
  */
 async function readSignoffIdentity(
   root: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
 ): Promise<string | undefined> {
   try {
-    const result = await runGit(['var', 'GIT_COMMITTER_IDENT'], { cwd: root, signal });
+    const result = await runGit(['var', 'GIT_COMMITTER_IDENT'], {
+      cwd: root,
+      signal,
+      ...selection,
+    });
     return parseCommitterIdentity(result.stdout);
   } catch {
     // Without an identity git cannot sign off either, so every trailer stays.
@@ -74,13 +80,14 @@ async function readSignoffIdentity(
 export async function getHeadMessage(
   workdir: string,
   signOff: boolean,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
 ): Promise<GitHeadMessageResponse> {
   try {
-    const root = await requireRepoRoot(workdir, signal);
+    const root = await requireRepoRoot(workdir, signal, selection);
     const [result, signoffIdentity] = await Promise.all([
-      runGit(['log', '-1', '--format=%H%x00%B'], { cwd: root, signal }),
-      signOff ? readSignoffIdentity(root, signal) : undefined,
+      runGit(['log', '-1', '--format=%H%x00%B'], { cwd: root, signal, ...selection }),
+      signOff ? readSignoffIdentity(root, signal, selection) : undefined,
     ]);
     const separator = result.stdout.indexOf('\0');
     if (separator < 0) {
@@ -101,23 +108,26 @@ export async function getHeadMessage(
 export async function getCommitDetails(
   workdir: string,
   hash: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
 ): Promise<GitCommitDetailsResponse> {
   try {
-    const root = await requireRepoRoot(workdir, signal);
+    const root = await requireRepoRoot(workdir, signal, selection);
     const [summaryResult, nameStatusResult, numstatResult] = await Promise.all([
       // `-s` suppresses the diff, so the totals come from `sumCommitFiles`.
       runGit(['show', '-s', `--format=${GIT_LOG_FORMAT}`, hash], {
         cwd: root,
         signal,
+        ...selection,
       }),
       runGit(
         ['diff-tree', '--root', '--no-commit-id', '--name-status', '-r', '-z', '-M', '-C', hash],
-        { cwd: root, signal }
+        { cwd: root, signal, ...selection }
       ),
       runGit(['diff-tree', '--root', '--no-commit-id', '--numstat', '-r', '-z', '-M', '-C', hash], {
         cwd: root,
         signal,
+        ...selection,
       }),
     ]);
     const commit = parseHistoryLog(summaryResult.stdout)[0];
@@ -144,10 +154,11 @@ export async function getCommitDetails(
 export async function getFileDiff(
   workdir: string,
   input: { path: string; staged?: boolean; commit?: string },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
 ): Promise<GitDiffResponse> {
   try {
-    const root = await requireRepoRoot(workdir, signal);
+    const root = await requireRepoRoot(workdir, signal, selection);
     const [pathspec] = validateRepoPaths(root, [input.path]);
     if (!pathspec) throw new GitPathValidationError(input.path);
 
@@ -165,7 +176,7 @@ export async function getFileDiff(
             '--',
             pathspec,
           ],
-          { cwd: root, signal }
+          { cwd: root, signal, ...selection }
         )
       ).stdout;
     } else {
@@ -179,20 +190,21 @@ export async function getFileDiff(
             '--',
             pathspec,
           ],
-          { cwd: root, signal }
+          { cwd: root, signal, ...selection }
         )
       ).stdout;
-      if (!input.staged && !diff && !(await isTracked(root, pathspec, signal))) {
+      if (!input.staged && !diff && !(await isTracked(root, pathspec, signal, selection))) {
         // `--no-index` reads the worktree directly instead of walking it as Git
         // does, so it follows symlinks out of the repository. Re-resolve the
         // path and re-check containment before handing it over.
-        const containedPath = await resolveContainedPath(root, input.path);
+        const containedPath = await resolveContainedPath(root, input.path, selection);
         diff = containedPath
           ? (
               await runGit(['diff', '--no-index', '--no-color', '--', '/dev/null', containedPath], {
                 cwd: root,
                 signal,
                 acceptedExitCodes: [1],
+                ...selection,
               })
             ).stdout
           : '';
@@ -211,9 +223,18 @@ export async function getFileDiff(
   }
 }
 
-async function isTracked(root: string, pathspec: string, signal?: AbortSignal): Promise<boolean> {
+async function isTracked(
+  root: string,
+  pathspec: string,
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
+): Promise<boolean> {
   try {
-    await runGit(['ls-files', '--error-unmatch', '--', pathspec], { cwd: root, signal });
+    await runGit(['ls-files', '--error-unmatch', '--', pathspec], {
+      cwd: root,
+      signal,
+      ...selection,
+    });
     return true;
   } catch (error) {
     if (error instanceof GitCliError && error.exitCode === 1) return false;

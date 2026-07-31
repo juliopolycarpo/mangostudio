@@ -3,10 +3,18 @@ import {
   buildGitArgv as runtimeBuildGitArgv,
   buildGitEnvironment as runtimeBuildGitEnvironment,
 } from '@mangostudio/runtime';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getRuntimeClient } from '../../../services/runtime-client';
+
+export interface GitRuntimeSelection {
+  readonly userId: string;
+  readonly environmentId: string;
+}
 
 export interface RunGitOptions {
   readonly cwd: string;
+  readonly userId?: string;
+  readonly environmentId?: string;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly acceptedExitCodes?: readonly number[];
@@ -44,7 +52,7 @@ export class GitCliError extends Error {
   }
 }
 
-let availabilityProbe: Promise<boolean> | null = null;
+const availabilityProbes = new Map<string, Promise<boolean>>();
 
 /** Builds the direct argv passed to Bun.spawn; no shell is involved. */
 export function buildGitArgv(args: readonly string[]): string[] {
@@ -64,7 +72,7 @@ export async function runGit(
   options: RunGitOptions
 ): Promise<GitCommandResult> {
   try {
-    const runtime = await getRuntimeClient();
+    const runtime = await getRuntimeClient(options.userId, options.environmentId);
     return await runtime.git.exec(
       {
         args,
@@ -86,24 +94,38 @@ export async function runGit(
  * unavailable until restart. `getRuntimeClient` drops cached rejections for the
  * same reason.
  */
-export function isGitAvailable(): Promise<boolean> {
-  availabilityProbe ??= probeGitAvailability().then((available) => {
-    if (!available) availabilityProbe = null;
+export function isGitAvailable(
+  selection: GitRuntimeSelection = {
+    userId: 'local',
+    environmentId: LOCAL_ENVIRONMENT_ID,
+  }
+): Promise<boolean> {
+  const key = `${selection.userId}:${selection.environmentId}`;
+  const current = availabilityProbes.get(key);
+  if (current) return current;
+
+  const probe = probeGitAvailability(selection).then((available) => {
+    if (!available) availabilityProbes.delete(key);
     return available;
   });
-  return availabilityProbe;
+  availabilityProbes.set(key, probe);
+  return probe;
 }
 
-async function probeGitAvailability(): Promise<boolean> {
+async function probeGitAvailability(selection: GitRuntimeSelection): Promise<boolean> {
   try {
-    const runtime = await getRuntimeClient();
+    const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
     return runtime.manifest.git.available;
   } catch {
     // Fall through to a second attempt when the handshake itself failed; the
     // connection manager drops the cached rejection, so this can reconnect.
   }
   try {
-    await runGit(['--version'], { cwd: process.cwd(), timeoutMs: 5_000 });
+    await runGit(['--version'], {
+      cwd: process.cwd(),
+      timeoutMs: 5_000,
+      ...selection,
+    });
     return true;
   } catch {
     return false;

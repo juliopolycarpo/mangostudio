@@ -41,6 +41,7 @@ export type GitWriteOperation = keyof typeof gitWriteScopes;
 export interface GitInvalidationTarget {
   readonly userId: string;
   readonly chatId: string;
+  readonly environmentId: string;
 }
 
 function invalidationKey(target: GitInvalidationTarget): string {

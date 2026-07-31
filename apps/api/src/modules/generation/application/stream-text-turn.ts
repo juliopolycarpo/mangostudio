@@ -52,6 +52,10 @@ export async function* streamTextTurn(
   } catch (error: unknown) {
     yield* finalizeTurnError(session, error);
   } finally {
-    publishGitTurnCompletionInvalidation({ userId: input.userId, chatId: input.chatId });
+    publishGitTurnCompletionInvalidation({
+      userId: input.userId,
+      chatId: input.chatId,
+      environmentId: session.environmentId,
+    });
   }
 }

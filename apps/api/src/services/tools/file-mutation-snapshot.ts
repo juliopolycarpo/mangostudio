@@ -1,4 +1,5 @@
 import type { RuntimeBeforeSnapshot, RuntimeMutationSnapshot } from '@mangostudio/runtime';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { FileCheckpointOp } from '@mangostudio/shared/file-checkpoints';
 import { getDb } from '../../db/database';
 import {
@@ -56,7 +57,11 @@ export async function persistRuntimeMutations(
     for (const mutation of mutations) {
       captured.push(await persistRuntimeMutation(context, mutation));
     }
-    scheduleGitFileMutationInvalidation({ userId: context.userId, chatId: context.chatId });
+    scheduleGitFileMutationInvalidation({
+      userId: context.userId,
+      chatId: context.chatId,
+      environmentId: context.environmentId ?? LOCAL_ENVIRONMENT_ID,
+    });
     return captured;
   });
 }

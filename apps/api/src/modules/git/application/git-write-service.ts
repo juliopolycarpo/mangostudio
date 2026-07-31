@@ -27,7 +27,13 @@ import {
 import { buildCommitArgs } from '../domain/commit-command';
 import { GitPathValidationError, validateRepoPaths } from '../domain/path-validation';
 import { parseStashList } from '../domain/stash-parser';
-import { GitCliError, isGitAvailable, runGit } from '../infrastructure/git-cli';
+import {
+  GitCliError,
+  type GitRuntimeSelection,
+  isGitAvailable,
+  type RunGitOptions,
+  runGit,
+} from '../infrastructure/git-cli';
 import {
   type GitInvalidationTarget,
   type GitWriteOperation,
@@ -38,8 +44,6 @@ import { getRepoRoot, getRepoStatus } from './git-status-service';
 type PathSelection = Pick<StagePathsBody | UnstagePathsBody, 'all' | 'paths'>;
 
 const mutationQueues = new Map<string, Promise<void>>();
-/** Local environment id until chat-scoped environment routing lands. */
-const LOCAL_ENVIRONMENT_ID = 'local';
 const COMMIT_TIMEOUT_MS = 60_000;
 const REMOTE_TIMEOUT_MS = 120_000;
 const MERGE_CONFLICT_PATTERN = /CONFLICT|Merge conflict|needs merge/i;
@@ -57,9 +61,12 @@ export class GitWriteError extends Error {
 }
 
 /** Serializes index mutations for one repository while allowing other repos to proceed. */
-async function withMutationLock<T>(root: string, mutation: () => Promise<T>): Promise<T> {
-  // Prefixed by environment id so concurrent environments can share a repo root safely later.
-  const key = `${LOCAL_ENVIRONMENT_ID}:${root}`;
+async function withMutationLock<T>(
+  environmentId: string,
+  root: string,
+  mutation: () => Promise<T>
+): Promise<T> {
+  const key = `${environmentId}:${root}`;
   const previous = mutationQueues.get(key) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => {
@@ -77,11 +84,27 @@ async function withMutationLock<T>(root: string, mutation: () => Promise<T>): Pr
   }
 }
 
-export async function requireRepoRoot(workdir: string, signal?: AbortSignal): Promise<string> {
-  if (!(await isGitAvailable())) {
+function runtimeSelection(target: GitInvalidationTarget): GitRuntimeSelection {
+  return { userId: target.userId, environmentId: target.environmentId };
+}
+
+function runSelectedGit(
+  selection: GitRuntimeSelection,
+  args: readonly string[],
+  options: RunGitOptions
+) {
+  return runGit(args, { ...options, ...selection });
+}
+
+export async function requireRepoRoot(
+  workdir: string,
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
+): Promise<string> {
+  if (!(await isGitAvailable(selection))) {
     throw new GitWriteError('Git is not available on this system.', 409, ERROR_CODES.CONFLICT);
   }
-  const root = await getRepoRoot(workdir, signal);
+  const root = await getRepoRoot(workdir, signal, selection);
   if (root) return root;
   throw new GitWriteError('Working directory is not a Git repository.', 409, ERROR_CODES.CONFLICT);
 }
@@ -89,9 +112,15 @@ export async function requireRepoRoot(workdir: string, signal?: AbortSignal): Pr
 async function currentRepoState(
   workdir: string,
   root: string,
+  selection: GitRuntimeSelection,
   signal?: AbortSignal
 ): Promise<GitRepoState> {
-  return { state: 'repo', workdir, root, status: await getRepoStatus(root, signal) };
+  return {
+    state: 'repo',
+    workdir,
+    root,
+    status: await getRepoStatus(root, signal, selection),
+  };
 }
 
 function commandDetail(error: GitCliError): string | undefined {
@@ -130,9 +159,17 @@ export function mapWriteFailure(error: unknown, operation: string): never {
   throw error;
 }
 
-async function hasHead(root: string, signal?: AbortSignal): Promise<boolean> {
+async function hasHead(
+  root: string,
+  selection: GitRuntimeSelection,
+  signal?: AbortSignal
+): Promise<boolean> {
   try {
-    await runGit(['rev-parse', '--verify', 'HEAD'], { cwd: root, signal });
+    await runGit(['rev-parse', '--verify', 'HEAD'], {
+      cwd: root,
+      signal,
+      ...selection,
+    });
     return true;
   } catch (error) {
     if (error instanceof GitCliError && error.exitCode === 128) return false;
@@ -181,14 +218,16 @@ function mapCommitFailure(error: unknown, operation: string): never {
  */
 async function runRepoMutation<T>(
   workdir: string,
+  target: GitInvalidationTarget,
   signal: AbortSignal | undefined,
   operation: string,
   mutation: (root: string) => Promise<T>,
   mapFailure: (error: unknown, operation: string) => never = mapWriteFailure
 ): Promise<T> {
   try {
-    const root = await requireRepoRoot(workdir, signal);
-    return await withMutationLock(root, () => mutation(root));
+    const selection = runtimeSelection(target);
+    const root = await requireRepoRoot(workdir, signal, selection);
+    return await withMutationLock(target.environmentId, root, () => mutation(root));
   } catch (error) {
     return mapFailure(error, operation);
   }
@@ -217,14 +256,18 @@ export function initRepo(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'init',
-    (async () => {
-      if (!(await isGitAvailable())) {
+    withMutationLock(invalidationTarget.environmentId, workdir, async () => {
+      const selection = runtimeSelection(invalidationTarget);
+      if (!(await isGitAvailable(selection))) {
         throw new GitCliError(['init'], null, 'Git is not available.');
       }
-      await runGit(['init'], { cwd: workdir, signal });
-      const result = await runGit(['rev-parse', '--show-toplevel'], { cwd: workdir, signal });
+      await runSelectedGit(selection, ['init'], { cwd: workdir, signal });
+      const result = await runSelectedGit(selection, ['rev-parse', '--show-toplevel'], {
+        cwd: workdir,
+        signal,
+      });
       return { root: result.stdout.trim() };
-    })()
+    })
   );
 }
 
@@ -237,13 +280,14 @@ export function stagePaths(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'stage',
-    runRepoMutation(workdir, signal, 'Staging files', async (root) => {
+    runRepoMutation(workdir, invalidationTarget, signal, 'Staging files', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
       const paths = selectedPaths(root, selection);
-      await runGit(selection.all ? ['add', '-A'] : ['add', '--', ...paths], {
+      await runSelectedGit(runtime, selection.all ? ['add', '-A'] : ['add', '--', ...paths], {
         cwd: root,
         signal,
       });
-      return await getRepoStatus(root, signal);
+      return await getRepoStatus(root, signal, runtime);
     })
   );
 }
@@ -257,17 +301,18 @@ export function unstagePaths(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'unstage',
-    runRepoMutation(workdir, signal, 'Unstaging files', async (root) => {
+    runRepoMutation(workdir, invalidationTarget, signal, 'Unstaging files', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
       const paths = selectedPaths(root, selection);
       const args =
-        selection.all || !(await hasHead(root, signal))
+        selection.all || !(await hasHead(root, runtime, signal))
           ? ['reset', '--', ...paths]
           : ['restore', '--staged', '--', ...paths];
-      await runGit(args, {
+      await runSelectedGit(runtime, args, {
         cwd: root,
         signal,
       });
-      return await getRepoStatus(root, signal);
+      return await getRepoStatus(root, signal, runtime);
     })
   );
 }
@@ -281,15 +326,19 @@ export function discardPaths(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'discard',
-    runRepoMutation(workdir, signal, 'Discarding changes', async (root) => {
+    runRepoMutation(workdir, invalidationTarget, signal, 'Discarding changes', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
       const pathspecs = validateRepoPaths(root, input.paths);
       if (input.mode === 'tracked') {
         // Restore only the worktree so staged index entries survive.
-        await runGit(['restore', '--worktree', '--', ...pathspecs], { cwd: root, signal });
-        return await getRepoStatus(root, signal);
+        await runSelectedGit(runtime, ['restore', '--worktree', '--', ...pathspecs], {
+          cwd: root,
+          signal,
+        });
+        return await getRepoStatus(root, signal, runtime);
       }
 
-      const status = await getRepoStatus(root, signal);
+      const status = await getRepoStatus(root, signal, runtime);
       const untracked = new Set(status.untracked.map((change) => change.path));
       for (const path of input.paths) {
         if (!untracked.has(path)) {
@@ -300,8 +349,11 @@ export function discardPaths(
           );
         }
       }
-      await runGit(['clean', '-f', '--', ...pathspecs], { cwd: root, signal });
-      const cleaned = await getRepoStatus(root, signal);
+      await runSelectedGit(runtime, ['clean', '-f', '--', ...pathspecs], {
+        cwd: root,
+        signal,
+      });
+      const cleaned = await getRepoStatus(root, signal, runtime);
       // `git clean -f` refuses to delete a directory owned by another Git
       // repository and still exits 0, so a surviving entry is a silent no-op that
       // must not be reported to the caller as a successful deletion.
@@ -331,11 +383,13 @@ export function commitChanges(
     'commit',
     runRepoMutation(
       workdir,
+      invalidationTarget,
       signal,
       'Commit',
       async (root) => {
+        const runtime = runtimeSelection(invalidationTarget);
         const amend = input.amend ?? false;
-        if (amend && !(await hasHead(root, signal))) {
+        if (amend && !(await hasHead(root, runtime, signal))) {
           throw new GitWriteError(
             'There is no commit to amend.',
             409,
@@ -345,7 +399,8 @@ export function commitChanges(
 
         const title = input.title.trim();
         const body = input.body?.trim() || undefined;
-        await runGit(
+        await runSelectedGit(
+          runtime,
           buildCommitArgs({
             title,
             body,
@@ -356,7 +411,10 @@ export function commitChanges(
           { cwd: root, signal, timeoutMs: COMMIT_TIMEOUT_MS }
         );
 
-        const result = await runGit(['log', '-1', '--format=%H%x00%s'], { cwd: root, signal });
+        const result = await runSelectedGit(runtime, ['log', '-1', '--format=%H%x00%s'], {
+          cwd: root,
+          signal,
+        });
         const separator = result.stdout.indexOf('\0');
         return {
           hash: result.stdout.slice(0, separator).trim(),
@@ -377,9 +435,11 @@ export function stashSave(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'stashSave',
-    runRepoMutation(workdir, signal, 'Saving stash', async (root) => {
+    runRepoMutation(workdir, invalidationTarget, signal, 'Saving stash', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
       const message = input.message?.trim();
-      await runGit(
+      await runSelectedGit(
+        runtime,
         [
           'stash',
           'push',
@@ -388,7 +448,7 @@ export function stashSave(
         ],
         { cwd: root, signal }
       );
-      return await currentRepoState(workdir, root, signal);
+      return await currentRepoState(workdir, root, runtime, signal);
     })
   );
 }
@@ -423,9 +483,13 @@ export function stashDrop(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'stashDrop',
-    runRepoMutation(workdir, signal, 'Dropping stash', async (root) => {
-      await runGit(['stash', 'drop', `stash@{${input.index ?? 0}}`], { cwd: root, signal });
-      return await readStashList(root, signal);
+    runRepoMutation(workdir, invalidationTarget, signal, 'Dropping stash', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
+      await runSelectedGit(runtime, ['stash', 'drop', `stash@{${input.index ?? 0}}`], {
+        cwd: root,
+        signal,
+      });
+      return await readStashList(root, signal, runtime);
     })
   );
 }
@@ -441,9 +505,13 @@ function restoreStash(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     invalidationOperation,
-    runRepoMutation(workdir, signal, 'Applying stash', async (root) => {
+    runRepoMutation(workdir, invalidationTarget, signal, 'Applying stash', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
       try {
-        await runGit(['stash', command, `stash@{${index}}`], { cwd: root, signal });
+        await runSelectedGit(runtime, ['stash', command, `stash@{${index}}`], {
+          cwd: root,
+          signal,
+        });
       } catch (error) {
         // Only a merge-conflict failure means the stash actually landed; other
         // failures (a dirty index, a missing entry) must not be reported as an
@@ -452,7 +520,7 @@ function restoreStash(
           error instanceof GitCliError &&
           MERGE_CONFLICT_PATTERN.test(combinedCommandOutput(error))
         ) {
-          const status = await getRepoStatus(root, signal);
+          const status = await getRepoStatus(root, signal, runtime);
           if (status.conflicted.length > 0) {
             throw new GitWriteError(
               'The stash was applied with conflicts. Resolve them in the working tree.',
@@ -464,38 +532,55 @@ function restoreStash(
         }
         throw error;
       }
-      return await currentRepoState(workdir, root, signal);
+      return await currentRepoState(workdir, root, runtime, signal);
     })
   );
 }
 
-export async function stashList(workdir: string, signal?: AbortSignal): Promise<StashListResponse> {
+export async function stashList(
+  workdir: string,
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
+): Promise<StashListResponse> {
   try {
-    const root = await requireRepoRoot(workdir, signal);
-    return await readStashList(root, signal);
+    const root = await requireRepoRoot(workdir, signal, selection);
+    return await readStashList(root, signal, selection);
   } catch (error) {
     return mapWriteFailure(error, 'Listing stashes');
   }
 }
 
-async function readStashList(root: string, signal?: AbortSignal): Promise<StashListResponse> {
-  const result = await runGit(['stash', 'list', '--format=%gd%x00%gs'], { cwd: root, signal });
+async function readStashList(
+  root: string,
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
+): Promise<StashListResponse> {
+  const result = await runGit(['stash', 'list', '--format=%gd%x00%gs'], {
+    cwd: root,
+    signal,
+    ...selection,
+  });
   return { stashes: parseStashList(result.stdout) };
 }
 
 export async function listBranches(
   workdir: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
 ): Promise<GitBranchesResponse> {
   try {
-    const root = await requireRepoRoot(workdir, signal);
-    return await readBranches(root, signal);
+    const root = await requireRepoRoot(workdir, signal, selection);
+    return await readBranches(root, signal, selection);
   } catch (error) {
     return mapWriteFailure(error, 'Listing branches');
   }
 }
 
-async function readBranches(root: string, signal?: AbortSignal): Promise<GitBranchesResponse> {
+async function readBranches(
+  root: string,
+  signal?: AbortSignal,
+  selection?: GitRuntimeSelection
+): Promise<GitBranchesResponse> {
   const [localResult, remoteResult] = await Promise.all([
     runGit(
       [
@@ -503,11 +588,12 @@ async function readBranches(root: string, signal?: AbortSignal): Promise<GitBran
         '--format=%(refname:short)%1f%(HEAD)%1f%(upstream:short)%1f%(upstream:track,nobracket)%00',
         'refs/heads',
       ],
-      { cwd: root, signal }
+      { cwd: root, signal, ...selection }
     ),
     runGit(['for-each-ref', '--format=%(refname:short)%00', 'refs/remotes'], {
       cwd: root,
       signal,
+      ...selection,
     }),
   ]);
   const branches = parseBranchList(localResult.stdout);
@@ -527,13 +613,14 @@ export function switchBranch(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'switchBranch',
-    runRepoMutation(workdir, signal, 'Switching branches', async (root) => {
+    runRepoMutation(workdir, invalidationTarget, signal, 'Switching branches', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
       try {
-        await runGit(['switch', '--', name], { cwd: root, signal });
+        await runSelectedGit(runtime, ['switch', '--', name], { cwd: root, signal });
       } catch (error) {
         mapBranchSwitchFailure(error);
       }
-      return await currentRepoState(workdir, root, signal);
+      return await currentRepoState(workdir, root, runtime, signal);
     })
   );
 }
@@ -551,46 +638,63 @@ export function checkoutRemoteBranch(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'checkoutRemote',
-    runRepoMutation(workdir, signal, 'Checking out remote branch', async (root) => {
-      const slash = remoteRef.indexOf('/');
-      if (slash <= 0 || slash === remoteRef.length - 1 || remoteRef.includes('\0')) {
-        throw new GitWriteError('Remote branch ref is invalid.', 422, ERROR_CODES.VALIDATION);
-      }
-      const localName = remoteRef.slice(slash + 1);
-
-      // `--quiet` turns a missing ref into exit 1 with no output; every other
-      // failure (a malformed ref, an unreadable object store, an aborted command)
-      // still raises and must not be reported as a missing branch.
-      const verified = await runGit(
-        ['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteRef}`],
-        { cwd: root, signal, acceptedExitCodes: [1] }
-      );
-      if (verified.exitCode !== 0) {
-        throw new GitWriteError(
-          `Remote branch was not found: ${remoteRef}`,
-          404,
-          ERROR_CODES.NOT_FOUND
-        );
-      }
-
-      try {
-        if (await hasLocalBranch(root, localName, signal)) {
-          await runGit(['switch', '--', localName], { cwd: root, signal });
-        } else {
-          await runGit(['switch', '--track', '--', remoteRef], { cwd: root, signal });
+    runRepoMutation(
+      workdir,
+      invalidationTarget,
+      signal,
+      'Checking out remote branch',
+      async (root) => {
+        const runtime = runtimeSelection(invalidationTarget);
+        const slash = remoteRef.indexOf('/');
+        if (slash <= 0 || slash === remoteRef.length - 1 || remoteRef.includes('\0')) {
+          throw new GitWriteError('Remote branch ref is invalid.', 422, ERROR_CODES.VALIDATION);
         }
-      } catch (error) {
-        mapBranchSwitchFailure(error);
+        const localName = remoteRef.slice(slash + 1);
+
+        // `--quiet` turns a missing ref into exit 1 with no output; every other
+        // failure (a malformed ref, an unreadable object store, an aborted command)
+        // still raises and must not be reported as a missing branch.
+        const verified = await runSelectedGit(
+          runtime,
+          ['rev-parse', '--verify', '--quiet', `refs/remotes/${remoteRef}`],
+          { cwd: root, signal, acceptedExitCodes: [1] }
+        );
+        if (verified.exitCode !== 0) {
+          throw new GitWriteError(
+            `Remote branch was not found: ${remoteRef}`,
+            404,
+            ERROR_CODES.NOT_FOUND
+          );
+        }
+
+        try {
+          if (await hasLocalBranch(root, localName, runtime, signal)) {
+            await runSelectedGit(runtime, ['switch', '--', localName], { cwd: root, signal });
+          } else {
+            await runSelectedGit(runtime, ['switch', '--track', '--', remoteRef], {
+              cwd: root,
+              signal,
+            });
+          }
+        } catch (error) {
+          mapBranchSwitchFailure(error);
+        }
+        return await currentRepoState(workdir, root, runtime, signal);
       }
-      return await currentRepoState(workdir, root, signal);
-    })
+    )
   );
 }
 
-async function hasLocalBranch(root: string, name: string, signal?: AbortSignal): Promise<boolean> {
+async function hasLocalBranch(
+  root: string,
+  name: string,
+  selection: GitRuntimeSelection,
+  signal?: AbortSignal
+): Promise<boolean> {
   const result = await runGit(['show-ref', '--verify', '--quiet', `refs/heads/${name}`], {
     cwd: root,
     signal,
+    ...selection,
     acceptedExitCodes: [1],
   });
   return result.exitCode === 0;
@@ -605,10 +709,14 @@ export function createBranch(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'createBranch',
-    runRepoMutation(workdir, signal, 'Creating branch', async (root) => {
-      await runGit(['check-ref-format', '--branch', name], { cwd: root, signal });
-      await runGit(['switch', '-c', name], { cwd: root, signal });
-      return await currentRepoState(workdir, root, signal);
+    runRepoMutation(workdir, invalidationTarget, signal, 'Creating branch', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
+      await runSelectedGit(runtime, ['check-ref-format', '--branch', name], {
+        cwd: root,
+        signal,
+      });
+      await runSelectedGit(runtime, ['switch', '-c', name], { cwd: root, signal });
+      return await currentRepoState(workdir, root, runtime, signal);
     })
   );
 }
@@ -622,8 +730,9 @@ export function deleteBranch(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'deleteBranch',
-    runRepoMutation(workdir, signal, 'Deleting branch', async (root) => {
-      const status = await getRepoStatus(root, signal);
+    runRepoMutation(workdir, invalidationTarget, signal, 'Deleting branch', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
+      const status = await getRepoStatus(root, signal, runtime);
       if (status.branch.name === input.name) {
         throw new GitWriteError(
           'Switch to another branch before deleting this one.',
@@ -632,14 +741,14 @@ export function deleteBranch(
         );
       }
       try {
-        await runGit(['branch', input.force ? '-D' : '-d', '--', input.name], {
+        await runSelectedGit(runtime, ['branch', input.force ? '-D' : '-d', '--', input.name], {
           cwd: root,
           signal,
         });
       } catch (error) {
         mapBranchDeleteFailure(error);
       }
-      return await readBranches(root, signal);
+      return await readBranches(root, signal, runtime);
     })
   );
 }
@@ -655,10 +764,17 @@ export function renameBranch(
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     'renameBranch',
-    runRepoMutation(workdir, signal, 'Renaming branch', async (root) => {
-      await runGit(['check-ref-format', '--branch', input.newName], { cwd: root, signal });
-      await runGit(['branch', '-m', '--', input.name, input.newName], { cwd: root, signal });
-      return await currentRepoState(workdir, root, signal);
+    runRepoMutation(workdir, invalidationTarget, signal, 'Renaming branch', async (root) => {
+      const runtime = runtimeSelection(invalidationTarget);
+      await runSelectedGit(runtime, ['check-ref-format', '--branch', input.newName], {
+        cwd: root,
+        signal,
+      });
+      await runSelectedGit(runtime, ['branch', '-m', '--', input.name, input.newName], {
+        cwd: root,
+        signal,
+      });
+      return await currentRepoState(workdir, root, runtime, signal);
     })
   );
 }
@@ -675,8 +791,8 @@ export function fetchRemote(
     'Fetching remote',
     invalidationTarget,
     'fetch',
-    async (root) => {
-      await runGit(['fetch', ...(prune ? ['--prune'] : [])], {
+    async (root, runtime) => {
+      await runSelectedGit(runtime, ['fetch', ...(prune ? ['--prune'] : [])], {
         cwd: root,
         signal,
         timeoutMs: REMOTE_TIMEOUT_MS,
@@ -696,8 +812,12 @@ export function pullFastForward(
     'Pulling changes',
     invalidationTarget,
     'pull',
-    async (root) => {
-      await runGit(['pull', '--ff-only'], { cwd: root, signal, timeoutMs: REMOTE_TIMEOUT_MS });
+    async (root, runtime) => {
+      await runSelectedGit(runtime, ['pull', '--ff-only'], {
+        cwd: root,
+        signal,
+        timeoutMs: REMOTE_TIMEOUT_MS,
+      });
     }
   );
 }
@@ -714,8 +834,8 @@ export function pushBranch(
     'Pushing changes',
     invalidationTarget,
     'push',
-    async (root) => {
-      const status = await getRepoStatus(root, signal);
+    async (root, runtime) => {
+      const status = await getRepoStatus(root, signal, runtime);
       if (!status.branch.name) {
         throw new GitWriteError(
           'Create or switch to a branch before pushing.',
@@ -738,10 +858,14 @@ export function pushBranch(
         : [
             'push',
             '--set-upstream',
-            await defaultPushRemote(root, signal),
+            await defaultPushRemote(root, runtime, signal),
             `refs/heads/${status.branch.name}`,
           ];
-      await runGit(args, { cwd: root, signal, timeoutMs: REMOTE_TIMEOUT_MS });
+      await runSelectedGit(runtime, args, {
+        cwd: root,
+        signal,
+        timeoutMs: REMOTE_TIMEOUT_MS,
+      });
     }
   );
 }
@@ -752,26 +876,32 @@ function runRemoteMutation(
   operation: string,
   invalidationTarget: GitInvalidationTarget,
   invalidationOperation: 'fetch' | 'pull' | 'push',
-  command: (root: string) => Promise<void>
+  command: (root: string, selection: GitRuntimeSelection) => Promise<void>
 ): Promise<GitRepoState> {
   return publishAfterSuccessfulMutation(
     invalidationTarget,
     invalidationOperation,
     runRepoMutation(
       workdir,
+      invalidationTarget,
       signal,
       operation,
       async (root) => {
-        await command(root);
-        return await currentRepoState(workdir, root, signal);
+        const runtime = runtimeSelection(invalidationTarget);
+        await command(root, runtime);
+        return await currentRepoState(workdir, root, runtime, signal);
       },
       mapRemoteFailure
     )
   );
 }
 
-async function defaultPushRemote(root: string, signal?: AbortSignal): Promise<string> {
-  const result = await runGit(['remote'], { cwd: root, signal });
+async function defaultPushRemote(
+  root: string,
+  selection: GitRuntimeSelection,
+  signal?: AbortSignal
+): Promise<string> {
+  const result = await runGit(['remote'], { cwd: root, signal, ...selection });
   const remotes = result.stdout.split(/\r?\n/).filter(Boolean);
   if (remotes.includes('origin')) return 'origin';
   if (remotes.length === 1 && remotes[0]) return remotes[0];
