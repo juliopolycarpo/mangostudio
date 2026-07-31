@@ -299,6 +299,14 @@ interface UserToolIdentitiesTable {
   displayName: string | null;
   /** Stored uppercased; null falls back to the name-derived monogram. */
   monogram: string | null;
+  /** `upload` | `url`; null means the avatar draws its monogram. */
+  imageSource: string | null;
+  /** Remote address for an `url` image, kept even once the bytes are cached. */
+  imageUrl: string | null;
+  /** Stored bytes relative to the tool-image directory; null when hotlinked. */
+  imagePath: string | null;
+  /** Type validated on write and pinned on serve; never re-sniffed from disk. */
+  imageMimeType: string | null;
   createdAt: number;
   updatedAt: number;
 }

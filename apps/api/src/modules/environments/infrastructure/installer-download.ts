@@ -2,13 +2,9 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  type ValidateBaseUrlOptions,
-  validateBaseUrl,
-} from '../../../services/providers/core/base-url-policy';
+import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
 
 const MAX_INSTALLER_REDIRECTS = 5;
-const INSTALLER_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 interface InstallerDownloadRequest {
   readonly url: string;
@@ -38,16 +34,10 @@ export class InstallerDownloadError extends Error {
   }
 }
 
-interface InstallerDownloadDeps {
-  readonly fetch: typeof fetch;
+interface InstallerDownloadDeps extends SafeFetchDeps {
   readonly createTempDir: () => Promise<string>;
   readonly writeFile: (path: string, data: Uint8Array) => Promise<void>;
   readonly removeDir: (path: string) => Promise<void>;
-  /**
-   * Hostname resolver for the address policy. Injectable so tests exercise the
-   * real policy without depending on DNS.
-   */
-  readonly resolveHostname?: ValidateBaseUrlOptions['resolveHostname'];
 }
 
 const defaultDeps: InstallerDownloadDeps = {
@@ -57,80 +47,7 @@ const defaultDeps: InstallerDownloadDeps = {
   removeDir: (path) => rm(path, { recursive: true, force: true }),
 };
 
-/**
- * The server fetches this URL on a user's behalf, so an attacker-controlled
- * redirect is an SSRF primitive: a hijacked installer host could point the fetch
- * at a link-local metadata endpoint or an internal service, and the resolved URL
- * would then be presented to the user as the artifact's trusted origin. Every
- * hop is checked against the same address policy that guards provider base URLs.
- */
-async function assertReachableUrl(deps: InstallerDownloadDeps, url: URL): Promise<void> {
-  try {
-    await validateBaseUrl(
-      url.href,
-      deps.resolveHostname ? { resolveHostname: deps.resolveHostname } : {}
-    );
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : 'Unknown address policy failure.';
-    throw new InstallerDownloadError(`Installer host was refused: ${detail}`);
-  }
-}
-
-async function fetchInstaller(
-  deps: InstallerDownloadDeps,
-  requestedUrl: URL,
-  signal: AbortSignal | undefined
-): Promise<{ response: Response; resolvedUrl: URL }> {
-  let currentUrl = requestedUrl;
-  let redirectCount = 0;
-
-  while (true) {
-    await assertReachableUrl(deps, currentUrl);
-    const response = await deps.fetch(currentUrl, {
-      redirect: 'manual',
-      ...(signal && { signal }),
-    });
-    if (!INSTALLER_REDIRECT_STATUSES.has(response.status)) {
-      const resolvedUrl = response.url ? new URL(response.url) : currentUrl;
-      if (resolvedUrl.protocol !== 'https:') {
-        throw new InstallerDownloadError('Installer resolved to a non-HTTPS URL.');
-      }
-      return { response, resolvedUrl };
-    }
-
-    if (redirectCount >= MAX_INSTALLER_REDIRECTS) {
-      throw new InstallerDownloadError('Installer exceeded the redirect limit.');
-    }
-    const location = response.headers.get('location');
-    if (!location) {
-      throw new InstallerDownloadError('Installer redirect did not include a location.');
-    }
-
-    let nextUrl: URL;
-    try {
-      nextUrl = new URL(location, currentUrl);
-    } catch {
-      throw new InstallerDownloadError('Installer redirected to an invalid URL.');
-    }
-    if (nextUrl.protocol !== 'https:') {
-      throw new InstallerDownloadError('Installer redirected to a non-HTTPS URL.');
-    }
-    await response.body?.cancel().catch(() => undefined);
-    currentUrl = nextUrl;
-    redirectCount += 1;
-  }
-}
-
-function validateRequest(request: InstallerDownloadRequest): URL {
-  let url: URL;
-  try {
-    url = new URL(request.url);
-  } catch {
-    throw new InstallerDownloadError('Installer URL is invalid.');
-  }
-  if (url.protocol !== 'https:') {
-    throw new InstallerDownloadError('Installer URL must use HTTPS.');
-  }
+function assertSizeBounds(request: InstallerDownloadRequest): void {
   if (
     !Number.isSafeInteger(request.minBytes) ||
     !Number.isSafeInteger(request.maxBytes) ||
@@ -139,44 +56,44 @@ function validateRequest(request: InstallerDownloadRequest): URL {
   ) {
     throw new InstallerDownloadError('Installer size bounds are invalid.');
   }
-  return url;
 }
 
-async function readResponseBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    throw new InstallerDownloadError(`Installer exceeds the ${maxBytes}-byte limit.`);
-  }
-  if (!response.body) {
-    throw new InstallerDownloadError('Installer response had no body.');
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
+/**
+ * The installer is fetched from a URL a recipe supplies and then executed, so a
+ * hijacked host redirecting into an internal service is the threat that matters
+ * here. `safeFetchBytes` owns that: HTTPS only, every hop re-checked against the
+ * address policy, and a cap enforced while the body streams. What stays here is
+ * what only an installer knows — that the payload has to look like a shell
+ * script rather than a login page.
+ */
+async function fetchInstallerBytes(
+  deps: InstallerDownloadDeps,
+  request: InstallerDownloadRequest,
+  signal: AbortSignal | undefined
+): Promise<{ bytes: Uint8Array; url: string }> {
   try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      size += value.byteLength;
-      if (size > maxBytes) {
-        await reader.cancel();
-        throw new InstallerDownloadError(`Installer exceeds the ${maxBytes}-byte limit.`);
-      }
-      chunks.push(value);
+    const result = await safeFetchBytes(
+      request.url,
+      {
+        maxBytes: request.maxBytes,
+        maxRedirects: MAX_INSTALLER_REDIRECTS,
+        ...(signal && { signal }),
+      },
+      deps
+    );
+    return { bytes: result.bytes, url: result.url };
+  } catch (error) {
+    // Cancellation is checked before the refusal branch: an abort surfaces as a
+    // `SafeFetchError` like any other failure, so testing that first would
+    // report a caller's own cancellation as the host having refused us.
+    if (signal?.aborted) {
+      throw new InstallerDownloadError('Installer download was cancelled.');
     }
-  } finally {
-    reader.releaseLock();
+    if (error instanceof SafeFetchError) {
+      throw new InstallerDownloadError(`Installer download refused: ${error.message}`);
+    }
+    throw error;
   }
-
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
 }
 
 function assertShellScript(bytes: Uint8Array, minBytes: number): void {
@@ -206,25 +123,8 @@ export function createInstallerDownloader(
 
   return {
     async download(request, options = {}) {
-      const requestedUrl = validateRequest(request);
-      let response: Response;
-      let resolvedUrl: URL;
-      try {
-        ({ response, resolvedUrl } = await fetchInstaller(deps, requestedUrl, options.signal));
-      } catch (error) {
-        if (error instanceof InstallerDownloadError) throw error;
-        if (options.signal?.aborted) {
-          throw new InstallerDownloadError('Installer download was cancelled.');
-        }
-        const detail = error instanceof Error ? error.message : 'Unknown network error.';
-        throw new InstallerDownloadError(`Installer download failed: ${detail}`);
-      }
-
-      if (!response.ok) {
-        throw new InstallerDownloadError(`Installer download returned HTTP ${response.status}.`);
-      }
-
-      const bytes = await readResponseBounded(response, request.maxBytes);
+      assertSizeBounds(request);
+      const { bytes, url } = await fetchInstallerBytes(deps, request, options.signal);
       assertShellScript(bytes, request.minBytes);
 
       const tempDir = await deps.createTempDir();
@@ -238,7 +138,7 @@ export function createInstallerDownloader(
 
       return {
         path,
-        url: resolvedUrl.href,
+        url,
         sizeBytes: bytes.byteLength,
         sha256: createHash('sha256').update(bytes).digest('hex'),
         cleanup: () => deps.removeDir(tempDir),

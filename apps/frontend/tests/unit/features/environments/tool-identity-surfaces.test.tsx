@@ -32,6 +32,7 @@ const RENAMED_CLAUDE = identities({
     subjectKey: 'agent:claude',
     displayName: 'Работа',
     monogram: null,
+    image: null,
     updatedAt: 1,
   },
 });
@@ -114,6 +115,7 @@ describe('tool identity across surfaces', () => {
           subjectKey: 'mcp:weather',
           displayName: 'Forecast',
           monogram: 'FC',
+          image: null,
           updatedAt: 1,
         },
       }),

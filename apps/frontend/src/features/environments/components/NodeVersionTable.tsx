@@ -84,6 +84,7 @@ export function NodeVersionTable({ status, recipes }: NodeVersionTableProps) {
             subjectKey={identity.subjectKey}
             monogram={identity.monogram}
             name={manager}
+            image={identity.image}
             size="sm"
           />
           <p className="truncate font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">

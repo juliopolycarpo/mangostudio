@@ -1,6 +1,6 @@
 /**
- * The chip that stands in for a tool: its monogram on the colour derived from
- * its subject key.
+ * The chip that stands in for a tool: its own image, or its monogram on the
+ * colour derived from its subject key.
  *
  * Both themes' colours are handed down as custom properties and CSS picks one
  * (see the `[data-tool-avatar]` rules in `index.css`). Doing it that way keeps
@@ -15,10 +15,20 @@
  * so it carries a tooltip rather than an accessible label it would only repeat.
  */
 
-import type { CSSProperties } from 'react';
+import { type CSSProperties, useState } from 'react';
 import { toolAvatarPalette } from './tool-avatar-palette';
 
 export type ToolAvatarSize = 'xs' | 'sm' | 'md' | 'lg';
+
+/**
+ * A resolved image address and how it must be requested. Lives with the
+ * component that renders it, since `remote` exists to decide two attributes.
+ */
+export interface ToolImageDisplay {
+  readonly src: string;
+  /** Loaded straight from a third-party host rather than from our API. */
+  readonly remote: boolean;
+}
 
 const SIZE_CLASS: Record<ToolAvatarSize, string> = {
   /** Dense lists — the capability inspector, where rows are 11px tall text. */
@@ -34,6 +44,8 @@ interface ToolAvatarProps {
   readonly monogram: string;
   /** Effective tool name, shown on hover. */
   readonly name: string;
+  /** Custom image, if the user set one. Absent means draw the monogram. */
+  readonly image?: ToolImageDisplay | null;
   readonly size?: ToolAvatarSize;
   readonly className?: string;
 }
@@ -42,9 +54,14 @@ export function ToolAvatar({
   subjectKey,
   monogram,
   name,
+  image = null,
   size = 'md',
   className = '',
 }: ToolAvatarProps) {
+  // Tracked as the address that failed rather than as a flag, so pointing the
+  // avatar at a different image gives that one its own chance to load.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+
   const palette = toolAvatarPalette(subjectKey);
   const style = {
     '--tool-avatar-bg-dark': palette.dark.bg,
@@ -52,6 +69,11 @@ export function ToolAvatar({
     '--tool-avatar-bg-light': palette.light.bg,
     '--tool-avatar-fg-light': palette.light.fg,
   } as CSSProperties;
+
+  // A remote address can rot, 404, or refuse to be embedded. None of that
+  // should leave a hole where the tool used to be, so the monogram — which
+  // needs nothing but the name — is what a failed load falls back to.
+  const showImage = image !== null && image.src !== failedSrc;
 
   return (
     <span
@@ -63,9 +85,28 @@ export function ToolAvatar({
       // announcing it here would say the tool's name twice.
       aria-hidden="true"
       title={name}
-      className={`inline-flex shrink-0 select-none items-center justify-center font-bold uppercase leading-none ${SIZE_CLASS[size]} ${className}`}
+      className={`inline-flex shrink-0 select-none items-center justify-center overflow-hidden font-bold uppercase leading-none ${SIZE_CLASS[size]} ${className}`}
     >
-      {monogram}
+      {showImage ? (
+        <img
+          src={image.src}
+          alt=""
+          loading="lazy"
+          // A third-party host is told as little as possible: `no-referrer`
+          // keeps which page drew the avatar out of the request. It stops there
+          // on purpose — `crossorigin` would put the load in CORS mode, and a
+          // host that serves images without `Access-Control-Allow-Origin` (most
+          // of them) would fail it, so hotlinking would only ever draw the
+          // monogram. Our own API is the opposite case: the bytes are behind the
+          // session, so that request has to carry it.
+          referrerPolicy={image.remote ? 'no-referrer' : undefined}
+          crossOrigin={image.remote ? undefined : 'use-credentials'}
+          onError={() => setFailedSrc(image.src)}
+          className="size-full object-cover"
+        />
+      ) : (
+        monogram
+      )}
     </span>
   );
 }

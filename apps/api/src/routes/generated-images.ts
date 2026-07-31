@@ -1,5 +1,6 @@
-import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
+import { extname } from 'node:path';
 import { Elysia } from 'elysia';
+import { resolveContainedPath } from '../utils/paths';
 
 const GENERATED_IMAGE_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
@@ -13,16 +14,7 @@ const MIME_BY_EXTENSION = {
 } as const;
 
 export function resolveGeneratedImagePath(imagesDir: string, requestedPath: string): string | null {
-  const root = resolve(imagesDir);
-  const filePath = resolve(root, requestedPath);
-  const relativePath = relative(root, filePath);
-
-  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
-    return null;
-  }
-
-  if (relativePath.split(sep).includes('..')) return null;
-  return filePath;
+  return resolveContainedPath(imagesDir, requestedPath);
 }
 
 function getGeneratedImageContentType(filePath: string): string | undefined {

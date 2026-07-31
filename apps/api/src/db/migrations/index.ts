@@ -34,6 +34,7 @@ import { profileScopedAppSettings } from './033_profile_scoped_app_settings';
 import { scopedLibraryLocationSettings } from './034_scoped_library_location_settings';
 import { apiKeys } from './035_api_keys';
 import { userToolIdentities } from './036_user_tool_identities';
+import { toolIdentityImages } from './037_tool_identity_images';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -72,4 +73,5 @@ export const allMigrations = {
   '034_scoped_library_location_settings': scopedLibraryLocationSettings,
   '035_api_keys': apiKeys,
   '036_user_tool_identities': userToolIdentities,
+  '037_tool_identity_images': toolIdentityImages,
 };

@@ -18,6 +18,7 @@ function makeConfig(dbPath: string): MangoConfig {
     database: { path: dbPath },
     uploads: { dir: '/data/uploads' },
     images: { dir: '/data/images' },
+    toolImages: { dir: '/data/tool-images' },
     agents: { dir: '/data/agents' },
     skills: { dir: '/data/skills' },
     library: {

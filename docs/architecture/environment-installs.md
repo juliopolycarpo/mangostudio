@@ -54,9 +54,10 @@ nvm is loaded directly from its detected `nvm.sh`, so the user's login profile i
 
 Official script installers have a prepare step before execution:
 
-1. Fetch the code-owned HTTPS URL, allowing only HTTPS redirects. Every hop, including the first,
-   is checked against the same address policy used for provider base URLs, so a hijacked
-   installer host cannot redirect the server onto a loopback, private, or link-local endpoint.
+1. Fetch the code-owned HTTPS URL through `apps/api/src/lib/safe-fetch.ts`, allowing only HTTPS
+   redirects. Every hop, including the first, is checked against the same address policy used for
+   provider base URLs, so a hijacked installer host cannot redirect the server onto a loopback,
+   private, unique-local, or link-local endpoint.
 2. Stream the response through a size bound before allocating the complete body.
 3. Reject empty or implausibly small responses, oversized responses, HTML, and content without a
    shell shebang.

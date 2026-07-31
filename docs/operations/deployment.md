@@ -23,6 +23,7 @@ volume:
 - `/data/.mango/database.sqlite`
 - `/data/.mango/uploads`
 - `/data/.mango/images`
+- `/data/.mango/tool-images`
 - `/data/.mango/agents`
 
 Useful environment variables:
@@ -35,6 +36,7 @@ Useful environment variables:
 | `DATABASE_PATH`      | Override SQLite path, default `/data/.mango/database.sqlite` |
 | `UPLOADS_DIR`        | Override uploaded file storage path                          |
 | `IMAGES_DIR`         | Override generated image storage path                        |
+| `TOOL_IMAGES_DIR`    | Override custom tool avatar storage path                     |
 | `AGENTS_DIR`         | Override agent settings storage path                         |
 | `BETTER_AUTH_URL`    | Public URL when deployed behind a domain                     |
 | `TRUST_PROXY`        | Set to `true` only behind a header-overwriting proxy         |

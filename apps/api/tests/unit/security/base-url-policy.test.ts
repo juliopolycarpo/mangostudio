@@ -76,10 +76,96 @@ describe('base-url-policy', () => {
     ) as unknown as Promise<void>);
   });
 
-  it('rejects IPv6 link-local', async () => {
-    await (expect(validateBaseUrl('http://[fe80::1]/v1')).rejects.toThrow(
+  it('rejects IPv6 link-local across the whole /10, not just the fe80 prefix', async () => {
+    // fe80::/10 runs to febf::. Matching the text "fe80" covers a sixteenth of
+    // the range and lets the rest of it reach an interface-local peer.
+    for (const address of ['fe80::1', 'fe81::1', 'febf:ffff::1']) {
+      await (expect(validateBaseUrl(`http://[${address}]/v1`)).rejects.toThrow(
+        UnsafeBaseUrlError
+      ) as unknown as Promise<void>);
+    }
+  });
+
+  it('rejects IPv6 unique-local addresses', async () => {
+    // fc00::/7 is the v6 equivalent of RFC1918 and spans both fc.. and fd..,
+    // the half that container and mesh networks actually hand out.
+    for (const address of ['fc00::1', 'fd12:3456:789a::1']) {
+      await (expect(validateBaseUrl(`http://[${address}]/v1`)).rejects.toThrow(
+        UnsafeBaseUrlError
+      ) as unknown as Promise<void>);
+    }
+  });
+
+  it('rejects the IPv6 unspecified address and ignores a scope id', async () => {
+    await (expect(validateBaseUrl('http://[::]/v1')).rejects.toThrow(
       UnsafeBaseUrlError
     ) as unknown as Promise<void>);
+    await (expect(
+      validateBaseUrl('https://mesh.example.test/v1', {
+        resolveHostname: resolveHostnameTo({ address: 'fe80::1%eth0', family: 6 }),
+      })
+    ).rejects.toThrow(UnsafeBaseUrlError) as unknown as Promise<void>);
+  });
+
+  it('rejects IPv4-mapped IPv6 whichever way the address is written', async () => {
+    // `new URL()` rewrites `[::ffff:127.0.0.1]` as `[::ffff:7f00:1]`, so the
+    // dotted form a blocklist is written against is not the form that arrives.
+    // Both spellings name the same host and both have to be refused.
+    for (const address of [
+      '::ffff:127.0.0.1',
+      '::ffff:7f00:1',
+      '::ffff:169.254.169.254',
+      '::ffff:a9fe:a9fe',
+      '::ffff:10.0.0.1',
+      '::ffff:c0a8:1',
+    ]) {
+      await (expect(validateBaseUrl(`http://[${address}]/v1`)).rejects.toThrow(
+        UnsafeBaseUrlError
+      ) as unknown as Promise<void>);
+    }
+  });
+
+  it('rejects IPv4-compatible IPv6 and fully expanded loopback', async () => {
+    // `::7f00:1` is the deprecated v4-compatible form of 127.0.0.1, and a
+    // resolver is free to answer with unabbreviated text.
+    for (const address of ['::7f00:1', '::127.0.0.1', '0:0:0:0:0:0:0:1']) {
+      await (expect(
+        validateBaseUrl('https://mesh.example.test/v1', {
+          resolveHostname: resolveHostnameTo({ address, family: 6 }),
+        })
+      ).rejects.toThrow(UnsafeBaseUrlError) as unknown as Promise<void>);
+    }
+  });
+
+  it('rejects an IPv6 address it cannot parse rather than treating it as public', async () => {
+    for (const address of [
+      'not-an-address',
+      '1:2:3:4:5:6:7:8:9',
+      'fe80::1::2',
+      '::ffff:999.1.1.1',
+    ]) {
+      await (expect(
+        validateBaseUrl('https://mesh.example.test/v1', {
+          resolveHostname: resolveHostnameTo({ address, family: 6 }),
+        })
+      ).rejects.toThrow(UnsafeBaseUrlError) as unknown as Promise<void>);
+    }
+  });
+
+  it('still allows a public IPv4-mapped address', async () => {
+    expect(
+      await validateBaseUrl('https://[::ffff:104.18.33.45]/v1', {
+        resolveHostname: resolveHostnameTo({ address: '::ffff:6812:212d', family: 6 }),
+      })
+    ).toBeUndefined();
+  });
+
+  it('still allows public IPv6 addresses', async () => {
+    expect(
+      await validateBaseUrl('https://[2606:4700::1111]/v1', {
+        resolveHostname: resolveHostnameTo({ address: '2606:4700::1111', family: 6 }),
+      })
+    ).toBeUndefined();
   });
 
   it('rejects hostnames that resolve to blocked private addresses', async () => {

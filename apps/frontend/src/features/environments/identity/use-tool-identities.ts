@@ -8,14 +8,18 @@
  */
 
 import { SETTINGS_TOPIC, type SettingsScope } from '@mangostudio/shared/realtime';
-import type { ToolIdentityKind, ToolIdentityMap } from '@mangostudio/shared/tool-identity';
+import type {
+  ToolIdentityKind,
+  ToolIdentityMap,
+  ToolImageUpdate,
+} from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { displayName, type ToolNameLookup } from '../format';
-import { resetToolIdentity, updateToolIdentity } from './api';
+import { resetToolIdentity, updateToolIdentity, uploadToolIdentityImage } from './api';
 import { toolIdentitiesQueryOptions, toolIdentityKeys } from './queries';
 import { type ResolvedToolIdentity, resolveToolIdentity } from './resolve';
 
@@ -76,24 +80,42 @@ export function useToolIdentities(): ToolIdentityResolver {
 }
 
 /**
- * Saves a rename. Both fields are sent explicitly, `null` meaning "back to the
- * derived default", so the dialog never has to reason about which of them
- * changed.
+ * Saves a rename and whatever the image should become.
+ *
+ * Name and monogram are sent explicitly, `null` meaning "back to the derived
+ * default", so the dialog never has to reason about which of them changed. The
+ * image is the exception: an absent `image` means "leave it", which is what
+ * lets a file upload be a second request without the first one wiping it.
+ *
+ * Two requests means a failure can land between them, with the rename stored
+ * and the image not. The cache is therefore refreshed on settlement rather than
+ * on success: a save that failed halfway has still changed something, and the
+ * dialog stays open on its error, so what the rest of the page shows has to be
+ * what was actually stored.
  */
 export function useSaveToolIdentity() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (variables: {
+    mutationFn: async (variables: {
       subjectKey: string;
       displayName: string | null;
       monogram: string | null;
-    }) =>
-      updateToolIdentity(variables.subjectKey, {
+      image?: ToolImageUpdate | null;
+      /** Uploaded after the update, since multipart cannot ride along with it. */
+      imageFile?: File | null;
+    }) => {
+      await updateToolIdentity(variables.subjectKey, {
         displayName: variables.displayName,
         monogram: variables.monogram,
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: toolIdentityKeys.all }),
+        ...(variables.image !== undefined && { image: variables.image }),
+      });
+
+      if (variables.imageFile) {
+        await uploadToolIdentityImage(variables.subjectKey, variables.imageFile);
+      }
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: toolIdentityKeys.all }),
   });
 }
 
