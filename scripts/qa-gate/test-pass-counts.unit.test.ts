@@ -10,6 +10,7 @@ describe('parseTestPassCounts', () => {
 @mangostudio/frontend test:unit:vitest: Tests 42 passed
 @mangostudio/api test:unit:  120 pass
 @mangostudio/shared test:unit:  18 pass
+@mangostudio/runtime test:unit:  57 pass
 `);
 
     expect(stats).toEqual({
@@ -17,6 +18,7 @@ describe('parseTestPassCounts', () => {
       frontend: 73,
       api: 120,
       shared: 18,
+      runtime: 57,
     });
   });
 
@@ -27,6 +29,7 @@ describe('parseTestPassCounts', () => {
 @mangostudio/frontend test:coverage:  31 pass
 @mangostudio/api test:coverage:  812 pass
 @mangostudio/shared test:coverage:  96 pass
+@mangostudio/runtime test:coverage:  57 pass
 `);
 
     expect(stats).toEqual({
@@ -34,6 +37,7 @@ describe('parseTestPassCounts', () => {
       frontend: 285,
       api: 812,
       shared: 96,
+      runtime: 57,
     });
   });
 });

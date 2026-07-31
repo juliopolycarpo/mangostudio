@@ -86,5 +86,5 @@ export const WORKSPACE_DPRINT_PATHS: Record<WorkspaceName, string[]> = {
   frontend: ['apps/frontend/AGENTS.md', 'apps/frontend/bunfig.toml'],
   api: ['apps/api/AGENTS.md', 'apps/api/bunfig.toml'],
   shared: ['apps/shared/AGENTS.md', 'apps/shared/bunfig.toml'],
-  runtime: ['apps/runtime/AGENTS.md'],
+  runtime: ['apps/runtime/AGENTS.md', 'apps/runtime/bunfig.toml'],
 };

@@ -120,6 +120,8 @@ describe('parseQaMetricsEnvelope', () => {
   });
 
   it('rejects a schema version drift', () => {
-    expect(() => parse(makeEnvelope({ schemaVersion: 2 }))).toThrow('schema version');
+    expect(() => parse(makeEnvelope({ schemaVersion: QA_METRICS_SCHEMA_VERSION + 1 }))).toThrow(
+      'schema version'
+    );
   });
 });

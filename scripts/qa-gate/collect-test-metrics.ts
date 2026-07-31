@@ -30,7 +30,7 @@ const collectSuiteStats = async () => {
   return {
     exitCode: parseOptionalInt(exitCodeArg),
     durationSeconds: parseOptionalInt(durationArg),
-    passed: counts.root + counts.frontend + counts.api + counts.shared,
+    passed: Object.values(counts).reduce((sum, count) => sum + count, 0),
     ...counts,
   };
 };

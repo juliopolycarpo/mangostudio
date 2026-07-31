@@ -41,15 +41,12 @@ export interface DependencyStats {
  * Outcome of the single authoritative test pass (`bun run test --coverage`),
  * which runs every workspace's full suite plus the root scripts tests.
  */
-export interface TestSuiteStats {
+export type TestSuiteStats = {
   readonly exitCode: number | null;
   readonly durationSeconds: number | null;
   readonly passed: number;
   readonly root: number;
-  readonly frontend: number;
-  readonly api: number;
-  readonly shared: number;
-}
+} & Readonly<Record<WorkspaceName, number>>;
 
 export interface ToolingCheckStats {
   readonly checkExitCode: number;

@@ -1,0 +1,3 @@
+[test]
+coverageReporter = ["text", "lcov"]
+coverageDir = "../../.mango/artifacts/coverage/runtime"

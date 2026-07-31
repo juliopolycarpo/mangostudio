@@ -42,7 +42,7 @@ export const renderCoverageSection = (base: Metrics | null, head: Metrics | null
   return [
     '### Coverage',
     '',
-    '_API/shared branches and statements are source-derived from LCOV line hits because Bun LCOV does not emit branch or statement records._',
+    '_API/shared/runtime branches and statements are source-derived from LCOV line hits because Bun LCOV does not emit branch or statement records._',
     '',
     '| Workspace | Metric | Base | Head | Δ |',
     '|---|---|---|---|---|',
