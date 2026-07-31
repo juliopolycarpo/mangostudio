@@ -1,3 +1,4 @@
+import { createMockChat } from '@mangostudio/shared/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatWithContext } from '../../../src/features/chat/queries';
 import { useAgentSelection } from '../../../src/hooks/use-agent-selection';
@@ -11,13 +12,13 @@ vi.mock('../../../src/features/settings/agents/queries', () => ({
   }),
 }));
 
-const CHAT: ChatWithContext = {
+const CHAT: ChatWithContext = createMockChat({
   id: 'chat-1',
   title: 'Workspace chat',
   createdAt: 1,
   updatedAt: 1,
   workdir: null,
-};
+});
 
 describe('useAgentSelection workdir binding', () => {
   const updateChatAgentSelection = vi.fn(() => Promise.resolve());

@@ -9,6 +9,7 @@ import type {
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
 import { getRuntimeClient } from '../../../services/runtime-client';
+import type { RuntimeSelection } from './workdir-validation';
 
 const REASON_MESSAGES: Record<WorkdirValidationReason | 'invalid-path', string> = {
   'invalid-path': 'Directory browsing requires an absolute path.',
@@ -27,9 +28,12 @@ export class DirectoryBrowserError extends Error {
   }
 }
 
-export async function listDirectory(path?: string): Promise<ListDirectoryResponse> {
+export async function listDirectory(
+  path?: string,
+  selection?: RuntimeSelection
+): Promise<ListDirectoryResponse> {
   try {
-    const runtime = await getRuntimeClient();
+    const runtime = await getRuntimeClient(selection?.userId, selection?.environmentId);
     return await runtime.workspace.browse(path === undefined ? {} : { path });
   } catch (error) {
     throw mapBrowseFailure(error);

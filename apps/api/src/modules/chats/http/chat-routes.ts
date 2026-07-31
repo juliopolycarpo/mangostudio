@@ -1,4 +1,6 @@
 import {
+  ChatListSchema,
+  ChatSchema,
   CompactChatBodySchema,
   CreateChatBodySchema,
   GenerateChatTitleBodySchema,
@@ -26,7 +28,7 @@ import {
 } from '../application/generate-chat-title';
 import { getChatMessagesUseCase } from '../application/get-chat-messages';
 import { listChatsUseCase } from '../application/list-chats';
-import { updateChatUseCase } from '../application/update-chat';
+import { EnvironmentSelectionError, updateChatUseCase } from '../application/update-chat';
 import { ChatNotFoundError } from '../domain/chat-ownership';
 
 function apiError(error: string, code: string): ApiErrorResponse {
@@ -38,10 +40,13 @@ export const chatRoutes = (app: Elysia) =>
     app
       .use(requireAuth)
       /** List all chats for the authenticated user ordered by most recently updated. */
-      // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
-      .get('/', async ({ user }) => {
-        return listChatsUseCase(user?.id ?? '', getDb());
-      })
+      .get(
+        '/',
+        ({ user }) => {
+          return listChatsUseCase(user?.id ?? '', getDb());
+        },
+        { response: { 200: ChatListSchema } }
+      )
 
       /** Create a new chat for the authenticated user. */
       .post(
@@ -53,7 +58,7 @@ export const chatRoutes = (app: Elysia) =>
             getDb()
           );
         },
-        { body: CreateChatBodySchema }
+        { body: CreateChatBodySchema, response: { 200: ChatSchema } }
       )
 
       .post(
@@ -98,6 +103,7 @@ export const chatRoutes = (app: Elysia) =>
                   lastUsedMode: body.lastUsedMode,
                   selectedAgentId: body.selectedAgentId,
                   workdir: body.workdir,
+                  environmentId: body.environmentId,
                   restrictToolsToWorkdir: body.restrictToolsToWorkdir,
                 },
               },
@@ -105,9 +111,16 @@ export const chatRoutes = (app: Elysia) =>
             );
             return { success: true };
           } catch (error) {
-            if (error instanceof WorkdirValidationError) {
+            if (
+              error instanceof WorkdirValidationError ||
+              error instanceof EnvironmentSelectionError
+            ) {
               set.status = 422;
               return apiError(error.message, ERROR_CODES.VALIDATION);
+            }
+            if (error instanceof ChatNotFoundError) {
+              set.status = 404;
+              return apiError('Chat not found', ERROR_CODES.NOT_FOUND);
             }
             if (error instanceof WorkspacePathError) {
               set.status = 400;

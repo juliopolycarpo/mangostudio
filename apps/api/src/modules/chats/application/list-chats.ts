@@ -7,6 +7,7 @@ import {
 } from '../../../services/providers/core/context-policy';
 import { parseContinuationEnvelope } from '../../../services/providers/core/continuation-envelope';
 import { listByUserId } from '../infrastructure/chat-repository';
+import { toPublicChat } from './public-chat';
 
 export function extractContextInfo(
   contextState: string | null | undefined,
@@ -46,8 +47,7 @@ function extractLegacyContextInfo(providerState: string | null | undefined): Con
 
 export async function listChatsUseCase(userId: string, db: Kysely<Database>) {
   const rows = await listByUserId(userId, db);
-  return rows.map((row) => {
-    const { lastContextState, lastProviderState, ...chat } = row;
-    return { ...chat, contextInfo: extractContextInfo(lastContextState, lastProviderState) };
-  });
+  return rows.map((row) =>
+    toPublicChat(row, extractContextInfo(row.lastContextState, row.lastProviderState))
+  );
 }

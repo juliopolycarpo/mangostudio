@@ -48,6 +48,26 @@ export const ContextInfoSchema = Type.Object({
 
 export type ContextInfo = Static<typeof ContextInfoSchema>;
 
+export const ChatSchema = Type.Object({
+  id: Type.String(),
+  title: Type.String(),
+  createdAt: Type.Number(),
+  updatedAt: Type.Number(),
+  model: Type.Union([Type.String(), Type.Null()]),
+  textModel: Type.Union([Type.String(), Type.Null()]),
+  imageModel: Type.Union([Type.String(), Type.Null()]),
+  lastUsedMode: Type.Union([InteractionModeSchema, Type.Null()]),
+  selectedAgentId: Type.Union([Type.String(), Type.Null()]),
+  workdir: Type.Union([Type.String(), Type.Null()]),
+  environmentId: Type.String({ minLength: 1 }),
+  restrictToolsToWorkdir: Type.Union([Type.Boolean(), Type.Null()]),
+  contextInfo: Type.Optional(Type.Union([ContextInfoSchema, Type.Null()])),
+});
+
+export const ChatListSchema = Type.Array(ChatSchema);
+
+export type Chat = Static<typeof ChatSchema>;
+
 export const ContextSettingsSchema = Type.Object({
   compactionBehavior: ContextCompactionBehaviorSchema,
   warningThreshold: Type.Number({ minimum: 0.5, maximum: 0.99 }),
@@ -107,6 +127,7 @@ export const UpdateChatBodySchema = Type.Object({
   lastUsedMode: Type.Optional(InteractionModeSchema),
   selectedAgentId: Type.Optional(Type.String()),
   workdir: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  environmentId: Type.Optional(Type.String({ minLength: 1 })),
   restrictToolsToWorkdir: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),
 });
 

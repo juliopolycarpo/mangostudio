@@ -16,8 +16,14 @@ export const ListDirectoryResponseSchema = Type.Object({
   truncated: Type.Optional(Type.Boolean()),
 });
 
+export const ListDirectoryQuerySchema = Type.Object({
+  path: Type.Optional(Type.String()),
+  chatId: Type.Optional(Type.String({ minLength: 1 })),
+});
+
 export const ValidatePathBodySchema = Type.Object({
   path: Type.String({ minLength: 1 }),
+  chatId: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 export const WorkdirValidationReasonSchema = Type.Union([
@@ -75,6 +81,7 @@ export const WorkspaceSettingsSchema = Type.Object({
 
 export type DirectoryEntry = Static<typeof DirectoryEntrySchema>;
 export type ListDirectoryResponse = Static<typeof ListDirectoryResponseSchema>;
+export type ListDirectoryQuery = Static<typeof ListDirectoryQuerySchema>;
 export type ValidatePathBody = Static<typeof ValidatePathBodySchema>;
 export type WorkdirValidationReason = Static<typeof WorkdirValidationReasonSchema>;
 export type ValidatePathResponse = Static<typeof ValidatePathResponseSchema>;

@@ -1,10 +1,12 @@
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ListDirectoryResponse, ValidatePathResponse } from '@mangostudio/shared/workspaces';
-import { ValidatePathBodySchema } from '@mangostudio/shared/workspaces';
-import { Elysia, t } from 'elysia';
+import { ListDirectoryQuerySchema, ValidatePathBodySchema } from '@mangostudio/shared/workspaces';
+import { Elysia } from 'elysia';
+import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
 import { DirectoryBrowserError, listDirectory } from '../application/directory-browser';
-import { validateWorkdir } from '../application/workdir-validation';
+import { type RuntimeSelection, validateWorkdir } from '../application/workdir-validation';
 import { WorkspacePathError } from '../application/workspace-path';
 
 function handleDirectoryBrowserError(
@@ -37,26 +39,45 @@ function handleDirectoryBrowserError(
   return { error: 'Unexpected directory browsing error.', code: ERROR_CODES.INTERNAL };
 }
 
+async function resolveRuntimeSelection(
+  userId: string,
+  chatId: string | undefined
+): Promise<RuntimeSelection | null> {
+  if (!chatId) return null;
+  const chat = await getOwnedChat(chatId, userId, getDb());
+  return chat ? { userId, environmentId: chat.environmentId } : null;
+}
+
 export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/fs', (app) =>
   app
     .get(
       '/',
-      async ({ query, set }): Promise<ListDirectoryResponse | ApiErrorResponse> => {
+      async ({ query, set, user }): Promise<ListDirectoryResponse | ApiErrorResponse> => {
         try {
-          return await listDirectory(query.path);
+          const selection = await resolveRuntimeSelection(user?.id ?? '', query.chatId);
+          if (query.chatId && !selection) {
+            set.status = 404;
+            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          }
+          return await listDirectory(query.path, selection ?? undefined);
         } catch (error) {
           return handleDirectoryBrowserError(error, set);
         }
       },
       {
-        query: t.Object({ path: t.Optional(t.String()) }),
+        query: ListDirectoryQuerySchema,
       }
     )
     .post(
       '/validate',
-      async ({ body, set }): Promise<ValidatePathResponse | ApiErrorResponse> => {
+      async ({ body, set, user }): Promise<ValidatePathResponse | ApiErrorResponse> => {
         try {
-          return await validateWorkdir(body.path);
+          const selection = await resolveRuntimeSelection(user?.id ?? '', body.chatId);
+          if (body.chatId && !selection) {
+            set.status = 404;
+            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          }
+          return await validateWorkdir(body.path, selection ?? undefined);
         } catch (error) {
           if (error instanceof WorkspacePathError) {
             set.status = 400;

@@ -4,6 +4,7 @@
  */
 
 import type { Chat } from '@mangostudio/shared';
+import { createMockChat } from '@mangostudio/shared/test-utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -15,12 +16,12 @@ import {
 import type * as ApiClient from '../../../src/lib/api-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
-const EXISTING_CHAT: Chat = {
+const EXISTING_CHAT: Chat = createMockChat({
   id: 'chat-existing',
   title: 'Existing Chat',
   createdAt: 1,
   updatedAt: 1,
-};
+});
 
 // vi.mock is hoisted to the top of the file by Vitest, so mock variables must
 // be declared with vi.hoisted() to avoid temporal dead zone errors.
@@ -58,7 +59,12 @@ describe('useCreateChatMutation', () => {
   });
 
   it('calls the API and returns the created chat', async () => {
-    const newChat: Chat = { id: 'chat-new', title: 'My Chat', createdAt: 1, updatedAt: 1 };
+    const newChat = createMockChat({
+      id: 'chat-new',
+      title: 'My Chat',
+      createdAt: 1,
+      updatedAt: 1,
+    });
     mockPost.mockResolvedValue(ok(newChat));
 
     const { result } = renderHook(() => useCreateChatMutation());
@@ -73,7 +79,12 @@ describe('useCreateChatMutation', () => {
   });
 
   it('updates the cached chat list and detail after success', async () => {
-    const newChat: Chat = { id: 'chat-new', title: 'My Chat', createdAt: 2, updatedAt: 2 };
+    const newChat = createMockChat({
+      id: 'chat-new',
+      title: 'My Chat',
+      createdAt: 2,
+      updatedAt: 2,
+    });
     mockPost.mockResolvedValue(ok(newChat));
 
     const { result } = renderHook(() => {

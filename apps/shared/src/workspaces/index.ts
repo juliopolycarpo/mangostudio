@@ -4,6 +4,8 @@ export {
   CHAT_SIDEBAR_WIDTH_MIN,
   type DirectoryEntry,
   DirectoryEntrySchema,
+  type ListDirectoryQuery,
+  ListDirectoryQuerySchema,
   type ListDirectoryResponse,
   ListDirectoryResponseSchema,
   RECENT_WORKDIRS_MAX,

@@ -1,10 +1,21 @@
 import type { Chat } from '@mangostudio/shared';
+import { createMockChat } from '@mangostudio/shared/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useChats } from '../../../src/features/chat/hooks/use-chats';
 import { act, renderHook } from '../../support/harness/render';
 
-const CHAT_A: Chat = { id: 'chat-a', title: 'Alpha', createdAt: 1, updatedAt: 1 };
-const CHAT_B: Chat = { id: 'chat-b', title: 'Beta', createdAt: 2, updatedAt: 2 };
+const CHAT_A: Chat = createMockChat({
+  id: 'chat-a',
+  title: 'Alpha',
+  createdAt: 1,
+  updatedAt: 1,
+});
+const CHAT_B: Chat = createMockChat({
+  id: 'chat-b',
+  title: 'Beta',
+  createdAt: 2,
+  updatedAt: 2,
+});
 
 type ChatsQueryResult = {
   data: Chat[] | undefined;
