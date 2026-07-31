@@ -53,10 +53,15 @@ describe('API key authentication', () => {
         body: JSON.stringify({ title: 'From an API key' }),
       })
     );
-    const payload = (await response.json()) as { userId: string };
+    const payload = (await response.json()) as { id: string };
 
     expect(response.status).toBe(200);
-    expect(payload.userId).toBe(user.id);
+    const createdChat = await getDb()
+      .selectFrom('chats')
+      .select('userId')
+      .where('id', '=', payload.id)
+      .executeTakeFirstOrThrow();
+    expect(createdChat.userId).toBe(user.id);
   });
 
   it('rejects an unknown key with 401', async () => {
