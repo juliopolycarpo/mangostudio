@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { clearFileFreshness, PathAccessError } from '../../../src';
@@ -75,19 +75,22 @@ describe('runtime snapshot revert containment', () => {
     ).rejects.toBeInstanceOf(PathAccessError);
   });
 
-  it('rejects symlink escapes that leave the containment root', async () => {
-    mkdirSync(join(tempDir, 'nested'));
-    const linkPath = join(tempDir, 'escape-link');
-    symlinkSync(outsideDir, linkPath);
-    const escaped = join(linkPath, 'planted.txt');
+  // Directory symlinks need elevation or developer mode on Windows.
+  it.skipIf(process.platform === 'win32')(
+    'rejects symlink escapes that leave the containment root',
+    async () => {
+      const linkPath = join(tempDir, 'escape-link');
+      symlinkSync(outsideDir, linkPath);
+      const escaped = join(linkPath, 'planted.txt');
 
-    await expect(
-      revertRuntimeSnapshots({
-        chatId: 'chat-1',
-        containmentRoot: tempDir,
-        expected: [{ path: escaped, afterHash: 'deadbeef' }],
-        operations: [{ type: 'create', path: escaped }],
-      })
-    ).rejects.toBeInstanceOf(PathAccessError);
-  });
+      await expect(
+        revertRuntimeSnapshots({
+          chatId: 'chat-1',
+          containmentRoot: tempDir,
+          expected: [{ path: escaped, afterHash: 'deadbeef' }],
+          operations: [{ type: 'create', path: escaped }],
+        })
+      ).rejects.toBeInstanceOf(PathAccessError);
+    }
+  );
 });

@@ -10,6 +10,9 @@ import {
 
 const tempDirs: string[] = [];
 
+/** Windows ignores POSIX mode bits and root bypasses them, so 0o000 stays readable. */
+const cannotTestModeBits = process.platform === 'win32' || process.getuid?.() === 0;
+
 async function createTempDir(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), 'mango-workspace-browser-'));
   tempDirs.push(path);
@@ -40,19 +43,23 @@ describe('browseWorkspace', () => {
     expect(result.truncated).toBeUndefined();
   });
 
-  it('follows directory symlinks without including file symlinks', async () => {
-    const root = await createTempDir();
-    const target = join(root, 'target');
-    const file = join(root, 'file.txt');
-    await mkdir(target);
-    await writeFile(file, 'file');
-    await symlink(target, join(root, 'directory-link'));
-    await symlink(file, join(root, 'file-link'));
+  // Directory symlinks need elevation or developer mode on Windows.
+  it.skipIf(process.platform === 'win32')(
+    'follows directory symlinks without including file symlinks',
+    async () => {
+      const root = await createTempDir();
+      const target = join(root, 'target');
+      const file = join(root, 'file.txt');
+      await mkdir(target);
+      await writeFile(file, 'file');
+      await symlink(target, join(root, 'directory-link'));
+      await symlink(file, join(root, 'file-link'));
 
-    const result = await browseWorkspace({ path: root });
+      const result = await browseWorkspace({ path: root });
 
-    expect(result.entries.map((entry) => entry.name)).toEqual(['directory-link', 'target']);
-  });
+      expect(result.entries.map((entry) => entry.name)).toEqual(['directory-link', 'target']);
+    }
+  );
 
   it('rejects relative browse paths', async () => {
     await expect(browseWorkspace({ path: 'relative/path' })).rejects.toMatchObject({
@@ -88,23 +95,20 @@ describe('browseWorkspace', () => {
     expect(result.truncated).toBe(true);
   });
 
-  it.skipIf(process.platform === 'win32')(
-    'maps unreadable directories to permission-denied',
-    async () => {
-      const root = await createTempDir();
-      const unreadable = join(root, 'unreadable');
-      await mkdir(unreadable);
-      await chmod(unreadable, 0o000);
+  it.skipIf(cannotTestModeBits)('maps unreadable directories to permission-denied', async () => {
+    const root = await createTempDir();
+    const unreadable = join(root, 'unreadable');
+    await mkdir(unreadable);
+    await chmod(unreadable, 0o000);
 
-      try {
-        await expect(browseWorkspace({ path: unreadable })).rejects.toMatchObject({
-          name: 'WorkspaceBrowserError',
-          reason: 'permission-denied',
-        });
-        expect(WorkspaceBrowserError).toBeDefined();
-      } finally {
-        await chmod(unreadable, 0o700);
-      }
+    try {
+      await expect(browseWorkspace({ path: unreadable })).rejects.toMatchObject({
+        name: 'WorkspaceBrowserError',
+        reason: 'permission-denied',
+      });
+      expect(WorkspaceBrowserError).toBeDefined();
+    } finally {
+      await chmod(unreadable, 0o700);
     }
-  );
+  });
 });

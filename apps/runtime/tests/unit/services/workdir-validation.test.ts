@@ -7,6 +7,9 @@ import { WorkspacePathError } from '../../../src/services/workspace-path';
 
 const tempDirs: string[] = [];
 
+/** Windows ignores POSIX mode bits and root bypasses them, so 0o000 stays readable. */
+const cannotTestModeBits = process.platform === 'win32' || process.getuid?.() === 0;
+
 async function createTempDir(): Promise<string> {
   const path = await mkdtemp(join(tmpdir(), 'mango-workdir-validation-'));
   tempDirs.push(path);
@@ -43,22 +46,19 @@ describe('validateWorkdir', () => {
     await expect(validateWorkdir('   ')).rejects.toBeInstanceOf(WorkspacePathError);
   });
 
-  it.skipIf(process.platform === 'win32')(
-    'maps inaccessible directories to permission-denied',
-    async () => {
-      const root = await createTempDir();
-      const inaccessible = join(root, 'inaccessible');
-      await mkdir(inaccessible);
-      await chmod(inaccessible, 0o000);
+  it.skipIf(cannotTestModeBits)('maps inaccessible directories to permission-denied', async () => {
+    const root = await createTempDir();
+    const inaccessible = join(root, 'inaccessible');
+    await mkdir(inaccessible);
+    await chmod(inaccessible, 0o000);
 
-      try {
-        expect(await validateWorkdir(inaccessible)).toEqual({
-          ok: false,
-          reason: 'permission-denied',
-        });
-      } finally {
-        await chmod(inaccessible, 0o700);
-      }
+    try {
+      expect(await validateWorkdir(inaccessible)).toEqual({
+        ok: false,
+        reason: 'permission-denied',
+      });
+    } finally {
+      await chmod(inaccessible, 0o700);
     }
-  );
+  });
 });
