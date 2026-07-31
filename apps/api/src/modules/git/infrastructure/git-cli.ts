@@ -79,9 +79,18 @@ export async function runGit(
   }
 }
 
-/** Probes Git once per process; availability is stable for the lifetime of the server. */
+/**
+ * Probes Git once per process. A positive result is cached for the lifetime of the
+ * server; a negative one is not, because it can mean "the runtime handshake was
+ * down" rather than "Git is missing", and pinning that would report Git as
+ * unavailable until restart. `getRuntimeClient` drops cached rejections for the
+ * same reason.
+ */
 export function isGitAvailable(): Promise<boolean> {
-  availabilityProbe ??= probeGitAvailability();
+  availabilityProbe ??= probeGitAvailability().then((available) => {
+    if (!available) availabilityProbe = null;
+    return available;
+  });
   return availabilityProbe;
 }
 
@@ -90,7 +99,8 @@ async function probeGitAvailability(): Promise<boolean> {
     const runtime = await getRuntimeClient();
     return runtime.manifest.git.available;
   } catch {
-    // Fall through to a direct exec probe when the runtime handshake is unavailable.
+    // Fall through to a second attempt when the handshake itself failed; the
+    // connection manager drops the cached rejection, so this can reconnect.
   }
   try {
     await runGit(['--version'], { cwd: process.cwd(), timeoutMs: 5_000 });
