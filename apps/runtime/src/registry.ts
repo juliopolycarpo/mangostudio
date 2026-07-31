@@ -1,3 +1,4 @@
+import { RuntimeToolArgumentError } from './errors';
 import type { RuntimeHandlerContext, RuntimeMethodHandler } from './host';
 import type { RuntimeMethod, RuntimeMethodMap } from './methods';
 import { runtimeFsService } from './services/fs';
@@ -15,8 +16,8 @@ export function createRuntimeMethodHandlers(): ReadonlyMap<string, RuntimeMethod
     handler('fs.delete-file', (params) => runtimeFsService.deleteFile(params)),
     handler('fs.move-file', (params) => runtimeFsService.moveFile(params)),
     handler('fs.list-directory', (params) => runtimeFsService.listDirectory(params)),
-    handler('fs.glob', (params) => runtimeFsService.glob(params)),
-    handler('fs.grep', (params) => runtimeFsService.grep(params)),
+    handler('fs.glob', (params, context) => runtimeFsService.glob(params, context.signal)),
+    handler('fs.grep', (params, context) => runtimeFsService.grep(params, context.signal)),
     handler('fs.apply-patch', (params) => runtimeFsService.applyPatch(params)),
     handler('shell.run', (params, context) =>
       runShellCommand({ ...params, signal: context.signal })
@@ -47,5 +48,9 @@ function handler<K extends RuntimeMethod>(
 
 function assertParamsObject(method: string, params: unknown): asserts params is object {
   if (typeof params === 'object' && params !== null && !Array.isArray(params)) return;
-  throw new TypeError(`Runtime method "${method}" requires an object params payload.`);
+  // A bare TypeError reaches the client as an unclassified INTERNAL error;
+  // errorPayloadFor only forwards `kind` for RuntimeServiceError instances.
+  throw new RuntimeToolArgumentError(
+    `Runtime method "${method}" requires an object params payload.`
+  );
 }
