@@ -9,7 +9,8 @@ export type RuntimeServiceErrorKind =
   | 'stale_file'
   | 'stale_line_numbers'
   | 'shell_execution'
-  | 'snapshot_conflict';
+  | 'snapshot_conflict'
+  | 'snapshot_too_large';
 
 export class RuntimeServiceError extends Error {
   constructor(
