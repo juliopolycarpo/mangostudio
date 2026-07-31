@@ -38,7 +38,7 @@ class StdioFramePort implements RuntimeFramePort {
   readonly #output: NodeJS.WritableStream;
   readonly #onData: (chunk: Buffer | string) => void;
   readonly #onEnd: () => void;
-  readonly #onInputError: (error: Error) => void;
+  readonly #onInputError: () => void;
   readonly #onOutputError: () => void;
   #closed = false;
 
@@ -51,9 +51,12 @@ class StdioFramePort implements RuntimeFramePort {
 
     this.#onData = (chunk) => this.#receive(chunk);
     this.#onEnd = () => this.#drain();
-    this.#onInputError = (error) => this.#tearDown({ kind: 'protocol-error', error });
-    // A peer that dies mid-write breaks the pipe. That is the peer hanging up,
-    // not a protocol violation, so it reads as EOF.
+    // A broken pipe in either direction is the peer hanging up, not a protocol
+    // violation: EPIPE, ECONNRESET and EIO say the process went away mid-read
+    // just as they do mid-write. `protocol-error` is reserved for records the
+    // codec refuses, which is what makes the runtime exit non-zero and the hub
+    // log a reason — neither of which fits a peer that simply died.
+    this.#onInputError = () => this.#tearDown({ kind: 'eof' });
     this.#onOutputError = () => this.#tearDown({ kind: 'eof' });
 
     this.#input.on('data', this.#onData);
