@@ -21,6 +21,13 @@ const canSpawnRuntime = hasRuntimeEntry && hasPosixShell;
 
 const SHELL_DEFAULTS = { kind: 'bash', timeoutMs: 10_000, maxOutputBytes: 65_536 } as const;
 
+/**
+ * What the child will announce: it inherits this process's environment, so the
+ * two resolve the version the same way. The handshake refuses a hub and runtime
+ * from different releases, so anything that expects to connect must match it.
+ */
+const RUNTIME_VERSION = process.env.VERSION || 'dev';
+
 let workdir = '';
 
 beforeAll(async () => {
@@ -38,7 +45,7 @@ describe('spawnRuntimeChild', () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
-        hubVersion: 'hub-test',
+        hubVersion: RUNTIME_VERSION,
         onClosed: () => undefined,
       });
 
@@ -70,7 +77,7 @@ describe('spawnRuntimeChild', () => {
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
         cwd: workdir,
-        hubVersion: 'hub-test',
+        hubVersion: RUNTIME_VERSION,
         onClosed: () => undefined,
       });
 
@@ -93,7 +100,7 @@ describe('spawnRuntimeChild', () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
-        hubVersion: 'hub-test',
+        hubVersion: RUNTIME_VERSION,
         onClosed: () => undefined,
       });
 
@@ -117,7 +124,7 @@ describe('spawnRuntimeChild', () => {
       const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
         launch: resolveRuntimeLaunchCommand(),
-        hubVersion: 'hub-test',
+        hubVersion: RUNTIME_VERSION,
         onClosed: () => {
           closedCount += 1;
         },
@@ -138,6 +145,43 @@ describe('spawnRuntimeChild', () => {
       // A close after the loss must stay silent rather than reporting it twice.
       connection.close();
       expect(closedCount).toBe(1);
+    },
+    30_000
+  );
+
+  it.skipIf(!hasRuntimeEntry)(
+    'refuses a runtime left over from a different release',
+    async () => {
+      // Same protocol, different release: the wire format still parses, so only
+      // the release comparison can catch a binary an old install left behind.
+      const error = await spawnRuntimeChild({
+        environmentId: 'devbox',
+        launch: resolveRuntimeLaunchCommand(),
+        hubVersion: `${RUNTIME_VERSION}-other`,
+        onClosed: () => undefined,
+      }).catch((caught) => caught);
+
+      expect(error.code).toBe('PROTOCOL_MISMATCH');
+      expect(error.message).toContain('Reinstall MangoStudio');
+    },
+    30_000
+  );
+
+  it.skipIf(!canSpawnRuntime)(
+    'blames the working directory rather than the binary when the cwd is gone',
+    async () => {
+      const error = await spawnRuntimeChild({
+        environmentId: 'devbox',
+        launch: resolveRuntimeLaunchCommand(),
+        cwd: join(workdir, 'no-such-directory'),
+        hubVersion: RUNTIME_VERSION,
+        handshakeTimeoutMs: 5_000,
+        onClosed: () => undefined,
+      }).catch((caught) => caught);
+
+      expect(error.message).toContain('no-such-directory');
+      // Reinstalling would not help; the configured directory is the problem.
+      expect(error.message).not.toContain('Reinstall MangoStudio');
     },
     30_000
   );

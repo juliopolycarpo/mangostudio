@@ -10,6 +10,7 @@
  */
 
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
 import {
   createStdioFramePort,
   RuntimeProtocolClient,
@@ -24,6 +25,8 @@ import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 const HANDSHAKE_TIMEOUT_MS = 5_000;
 /** Grace between SIGTERM and SIGKILL when a runtime does not unwind on its own. */
 const KILL_GRACE_MS = 2_000;
+/** Further wait after SIGKILL before a waiting caller stops expecting an exit. */
+const KILL_DEADLINE_MS = 2_000;
 const MAX_STDERR_CHARS = 16_384;
 const STDERR_EXCERPT_MAX_CHARS = 2_000;
 
@@ -31,7 +34,8 @@ const logger = createDiagnosticLogger('runtime-stdio');
 
 export interface SpawnedRuntimeConnection {
   readonly client: RuntimeProtocolClient;
-  close(): void;
+  /** Resolves once the child process is gone, so shutdown can wait for it. */
+  close(): Promise<void>;
 }
 
 export interface SpawnRuntimeChildOptions {
@@ -70,8 +74,9 @@ export async function spawnRuntimeChild(
 
   let connected = false;
   let released = false;
-  const release = (notify: boolean, reason: string): void => {
-    if (released) return;
+  let exited: Promise<void> = Promise.resolve();
+  const release = (notify: boolean, reason: string): Promise<void> => {
+    if (released) return exited;
     released = true;
     if (notify) {
       logger.warn('connection_lost', {
@@ -83,8 +88,9 @@ export async function spawnRuntimeChild(
     // Closing the client ends the child's stdin, which is how a healthy runtime
     // is asked to unwind; the kill covers one that will not.
     client.close();
-    terminate(child);
+    exited = terminate(child);
     if (notify) options.onClosed();
+    return exited;
   };
 
   const client = new RuntimeProtocolClient(
@@ -103,6 +109,9 @@ export async function spawnRuntimeChild(
     {
       hubVersion: options.hubVersion,
       handshakeTimeoutMs: options.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS,
+      // The runtime ships inside the hub's own distribution, so a binary from
+      // another release is a stale install rather than a peer to negotiate with.
+      requireMatchingRelease: true,
     }
   );
 
@@ -112,7 +121,13 @@ export async function spawnRuntimeChild(
     release(false, 'handshake failed');
     throw asRuntimeError(
       error,
-      describeLaunchFailure({ command: launch.command, error, spawnError, stderr: stderrTail })
+      describeLaunchFailure({
+        command: launch.command,
+        error,
+        spawnError,
+        stderr: stderrTail,
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+      })
     );
   }
   connected = true;
@@ -133,10 +148,21 @@ function describeLaunchFailure(context: {
   readonly error: unknown;
   readonly spawnError: Error | null;
   readonly stderr: string;
+  readonly cwd?: string;
 }): string {
   if (context.error instanceof RuntimeProtocolError) return context.error.message;
 
   const spawnCode = (context.spawnError as { code?: string } | null)?.code;
+  // A working directory the target cannot enter fails the spawn with the same
+  // codes a bad executable does, so blame it before the binary: telling someone
+  // to reinstall over a mistyped cwd sends them to the wrong fix entirely.
+  if (
+    (spawnCode === 'ENOENT' || spawnCode === 'EACCES') &&
+    context.cwd &&
+    !isUsableDir(context.cwd)
+  ) {
+    return `The working directory ${context.cwd} configured on this environment is missing or not readable.`;
+  }
   if (spawnCode === 'ENOENT') {
     return `The runtime binary was not found at ${context.command}. Reinstall MangoStudio so it ships beside the hub, or set a binary path on this environment.`;
   }
@@ -167,18 +193,41 @@ function excerpt(stderr: string): string {
   return stderr.trim().slice(-STDERR_EXCERPT_MAX_CHARS);
 }
 
+function isUsableDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /**
+ * Resolves once the child is actually gone, so shutdown can wait for it: the
+ * escalation below only helps if the hub is still alive to run it, and a caller
+ * that exits first leaves a runtime that ignored SIGTERM orphaned. Bounded, so
+ * a child that cannot be killed at all delays the exit rather than blocking it.
+ *
  * Windows has no POSIX signals, so `kill` there terminates the runtime itself
  * but not shell children it already spawned. Those are reaped by the runtime's
  * own cancellation path in the normal case; a hard kill can still leave them.
  */
-function terminate(child: ChildProcessWithoutNullStreams): void {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill('SIGTERM');
+function terminate(child: ChildProcessWithoutNullStreams): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
 
-  const escalation = setTimeout(() => {
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-  }, KILL_GRACE_MS);
-  escalation.unref?.();
-  child.once('exit', () => clearTimeout(escalation));
+  return new Promise<void>((resolve) => {
+    const finish = (): void => {
+      clearTimeout(escalation);
+      clearTimeout(giveUp);
+      child.off('exit', finish);
+      resolve();
+    };
+    const escalation = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    }, KILL_GRACE_MS);
+    const giveUp = setTimeout(finish, KILL_GRACE_MS + KILL_DEADLINE_MS);
+    escalation.unref?.();
+    giveUp.unref?.();
+    child.once('exit', finish);
+    child.kill('SIGTERM');
+  });
 }

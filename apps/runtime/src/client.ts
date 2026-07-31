@@ -5,6 +5,7 @@ import {
   type RuntimeEventFrame,
   type RuntimeFrame,
   type RuntimeHelloFrame,
+  RuntimeProtocolError,
   type RuntimeProtocolVersion,
   type RuntimeResponseFrame,
 } from '@mangostudio/shared/runtime-protocol';
@@ -27,6 +28,14 @@ export interface RuntimeProtocolClientOptions {
   readonly hubVersion: string;
   readonly protocolVersion?: RuntimeProtocolVersion;
   readonly handshakeTimeoutMs?: number;
+  /**
+   * Refuse a runtime whose release version differs from the hub's. Set by the
+   * transports where the two ship as one distribution and are meant to travel
+   * together, so a leftover binary from an older install is rejected instead of
+   * being trusted for method semantics it may no longer share. The protocol
+   * version alone cannot catch that: it only changes when the wire format does.
+   */
+  readonly requireMatchingRelease?: boolean;
 }
 
 /** Hub-side request multiplexer for any runtime frame transport. */
@@ -37,6 +46,7 @@ export class RuntimeProtocolClient {
   readonly #port: RuntimeFramePort;
   readonly #protocolVersion: RuntimeProtocolVersion;
   readonly #ready: Promise<void>;
+  readonly #requireMatchingRelease: boolean;
   #closed = false;
   #detach: () => void;
   #handshakeTimer?: ReturnType<typeof setTimeout>;
@@ -50,6 +60,7 @@ export class RuntimeProtocolClient {
     this.#port = port;
     this.#hubVersion = options.hubVersion;
     this.#protocolVersion = options.protocolVersion ?? RUNTIME_PROTOCOL_VERSION;
+    this.#requireMatchingRelease = options.requireMatchingRelease ?? false;
     this.#ready = new Promise<void>((resolve, reject) => {
       this.#resolveReady = resolve;
       this.#rejectReady = reject;
@@ -171,6 +182,14 @@ export class RuntimeProtocolClient {
   #completeHandshake(frame: RuntimeHelloFrame): void {
     try {
       assertRuntimeProtocolCompatible(this.#protocolVersion, frame.protocolVersion);
+      if (this.#requireMatchingRelease && frame.runtimeVersion !== this.#hubVersion) {
+        throw new RuntimeProtocolError(
+          'PROTOCOL_MISMATCH',
+          `Runtime ${frame.runtimeVersion} does not match hub ${this.#hubVersion}. ` +
+            'Reinstall MangoStudio so the hub and runtime come from the same release.',
+          { hubVersion: this.#hubVersion, runtimeVersion: frame.runtimeVersion }
+        );
+      }
       this.#runtimeManifest = frame.manifest;
       this.#runtimeVersion = frame.runtimeVersion;
       this.#port.send({
