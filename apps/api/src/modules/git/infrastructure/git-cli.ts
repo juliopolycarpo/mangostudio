@@ -52,8 +52,6 @@ export class GitCliError extends Error {
   }
 }
 
-const availabilityProbes = new Map<string, Promise<boolean>>();
-
 /** Builds the direct argv passed to Bun.spawn; no shell is involved. */
 export function buildGitArgv(args: readonly string[]): string[] {
   return runtimeBuildGitArgv(args);
@@ -88,37 +86,26 @@ export async function runGit(
 }
 
 /**
- * Probes Git once per process. A positive result is cached for the lifetime of the
- * server; a negative one is not, because it can mean "the runtime handshake was
- * down" rather than "Git is missing", and pinning that would report Git as
- * unavailable until restart. `getRuntimeClient` drops cached rejections for the
- * same reason.
+ * Reads Git availability from the connected runtime's manifest on every call
+ * rather than memoizing it. A memo keyed by environment outlives the connection
+ * it described: disconnects, config changes, and a deleted id recreated against
+ * a different target would all keep answering for the old runtime. The
+ * connection manager already caches the connection and its manifest, so a
+ * connected environment costs a map lookup here. The `--version` fallback
+ * covers a failed handshake only — the manager drops cached rejections, so it
+ * gets one reconnect attempt before Git is reported unavailable.
  */
-export function isGitAvailable(
+export async function isGitAvailable(
   selection: GitRuntimeSelection = {
     userId: 'local',
     environmentId: LOCAL_ENVIRONMENT_ID,
   }
 ): Promise<boolean> {
-  const key = `${selection.userId}:${selection.environmentId}`;
-  const current = availabilityProbes.get(key);
-  if (current) return current;
-
-  const probe = probeGitAvailability(selection).then((available) => {
-    if (!available) availabilityProbes.delete(key);
-    return available;
-  });
-  availabilityProbes.set(key, probe);
-  return probe;
-}
-
-async function probeGitAvailability(selection: GitRuntimeSelection): Promise<boolean> {
   try {
     const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
     return runtime.manifest.git.available;
   } catch {
-    // Fall through to a second attempt when the handshake itself failed; the
-    // connection manager drops the cached rejection, so this can reconnect.
+    // Fall through to a second attempt when the handshake itself failed.
   }
   try {
     await runGit(['--version'], {
