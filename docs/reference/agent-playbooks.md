@@ -203,9 +203,40 @@ Open these first:
 - `apps/frontend/src/routes/_authenticated/environments/`
 
 The umbrella covers everything about the user's tooling, so its tabs are
-Toolchains, Agents, Health, and Library — the last one nests the whole library
-surface above. "Toolchains" is an i18n label: the route is still
+Overview, Toolchains, Agents, Health, and Library — the last one nests the whole
+library surface above. "Toolchains" is an i18n label: the route is still
 `/environments/runtimes` and `RuntimeIdSchema` is unchanged.
+
+### Overview (the landing page)
+
+- `apps/frontend/src/routes/_authenticated/environments/index.tsx` (prefetches,
+  never `ensure`s — sections render their own pending state)
+- `apps/frontend/src/features/environments/components/OverviewPage.tsx`
+  (composition plus the agents grid and toolchains strip)
+- `OverviewSection.tsx` (heading, link to the summarized tab, per-section
+  loading and error states)
+- `OverviewAgentCard.tsx`, `OverviewToolchainCard.tsx`,
+  `OverviewHealthRollup.tsx`, `OverviewLibrarySnapshot.tsx`
+
+The overview **adds no endpoint**: every section reads the queries its tab
+already owns, so any number on it can be verified by opening that tab. A number
+that is not already served is dropped, never fetched from something new here.
+
+Sections are independent by design — one failing query costs its own block and
+nothing else — and they are siblings, so a new one is an addition rather than a
+rewrite. Rollups read the reported `health`, not the finding list, which is what
+keeps a tool installed off PATH counted as needing attention here exactly as its
+own card says.
+
+### Cards
+
+`components/ToolCard.tsx` is the anatomy every tool card shares: identity header
+(avatar, effective name, the rename/reset menu), body, actions footer. Cards
+differ in body, never in shell, and the id hook each one is found by
+(`data-runtime-id`, `data-target-id`) is passed through it rather than derived —
+tests key on those attributes. Presentation rules stay in `format.ts` where they
+can be asserted without a rendered tree: which binary is effective, which recipe
+performs an action, which finding a summary leads with, and the health rollup.
 
 ### Tool identity (names and avatars)
 

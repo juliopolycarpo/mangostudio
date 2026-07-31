@@ -22,6 +22,7 @@ import { useToolIdentities } from '../identity/use-tool-identities';
 import { FindingList } from './FindingList';
 import { InstallAction } from './InstallAction';
 import { ProbeButton } from './ProbeButton';
+import { CardSectionLabel } from './ToolCard';
 
 interface NodeVersionTableProps {
   status: VersionManagerStatus;
@@ -87,9 +88,9 @@ export function NodeVersionTable({ status, recipes }: NodeVersionTableProps) {
             image={identity.image}
             size="sm"
           />
-          <p className="truncate font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+          <CardSectionLabel className="truncate">
             {formatMessage(e.versions.title, { manager })}
-          </p>
+          </CardSectionLabel>
         </div>
         <div className="flex items-center gap-2">
           <ProbeButton

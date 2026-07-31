@@ -7,11 +7,14 @@
  */
 
 import type {
+  InstallAction,
   InstallGuardReason,
+  InstallRecipePreview,
   LtsStatus,
   RuntimeFinding,
   RuntimeHealth,
   RuntimeInstallation,
+  RuntimeStatus,
 } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
@@ -123,6 +126,45 @@ export function findingSeverity(finding: RuntimeFinding): FindingSeverity {
   return FAIL_CODES.has(finding.code) ? 'fail' : 'warn';
 }
 
+/**
+ * The one finding a summary card leads with: worst severity first, and among
+ * equals the one the probe reported first. A card with room for a single line
+ * must spend it on the thing that actually stops the tool from working.
+ */
+export function worstFinding(findings: readonly RuntimeFinding[]): RuntimeFinding | undefined {
+  let worst: RuntimeFinding | undefined;
+  for (const finding of findings) {
+    if (worst === undefined) {
+      worst = finding;
+    } else if (findingSeverity(worst) === 'warn' && findingSeverity(finding) === 'fail') {
+      worst = finding;
+    }
+  }
+  return worst;
+}
+
+export type HealthRollup = Readonly<Record<RuntimeHealth, number>>;
+
+const EMPTY_ROLLUP: HealthRollup = { ok: 0, warn: 0, missing: 0, error: 0 };
+
+/**
+ * How many probed things sit in each health state.
+ *
+ * Counted from the reported `health` rather than from findings, so a runtime
+ * that is installed somewhere the shell cannot reach it lands in `warn` here
+ * exactly as it does on its own card — the rollup can never be the cheerful
+ * summary of a page that says otherwise.
+ */
+export function healthRollup(
+  statuses: readonly (readonly { readonly health: RuntimeHealth }[])[]
+): HealthRollup {
+  const counts = { ...EMPTY_ROLLUP };
+  for (const list of statuses) {
+    for (const status of list) counts[status.health] += 1;
+  }
+  return counts;
+}
+
 export interface KeyedFinding {
   readonly key: string;
   readonly finding: RuntimeFinding;
@@ -192,6 +234,39 @@ export function groupInstallations(
 /** Installations outside PATH sort last; they can never be the one that runs. */
 function pathIndexRank(installation: RuntimeInstallation): number {
   return installation.pathIndex ?? Number.MAX_SAFE_INTEGER;
+}
+
+export interface EffectiveInstallation {
+  readonly groups: readonly InstallationGroup[];
+  /** The alias group holding the binary that runs, if any installation does. */
+  readonly group: InstallationGroup | undefined;
+  readonly installation: RuntimeInstallation | undefined;
+}
+
+/**
+ * Which binary actually runs, and the alias group that reaches it.
+ *
+ * Array order is never the authority: the `effective` flag is, and after
+ * aliases collapse the grouped view is what carries it. The status's own
+ * `effective` field stays the fallback for a payload that flags nothing.
+ */
+export function effectiveInstallation(status: RuntimeStatus): EffectiveInstallation {
+  const groups = groupInstallations(status.installations);
+  const group = groups.find((candidate) => candidate.effective);
+  return { groups, group, installation: group?.canonical ?? status.effective };
+}
+
+/**
+ * The catalog entry that performs one action for one runtime. Undefined means
+ * the action is not offered here, which every caller renders as "no button"
+ * rather than as a disabled one.
+ */
+export function findInstallRecipe(
+  recipes: readonly InstallRecipePreview[],
+  runtimeId: string,
+  action: InstallAction
+): InstallRecipePreview | undefined {
+  return recipes.find((recipe) => recipe.runtimeId === runtimeId && recipe.action === action);
 }
 
 /** Human-readable byte count for the installer download disclosure. */

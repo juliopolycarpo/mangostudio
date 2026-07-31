@@ -1966,6 +1966,7 @@ export const messages = {
     nav: 'Ambientes',
     subtitle: 'O que está instalado, o que está errado e o que realmente roda quando você digita.',
     tabs: {
+      overview: 'Visão geral',
       // Rótulo apenas: a aba continua em /environments/runtimes e nenhum id de
       // runtime muda. "Toolchains" fica sem tradução, como "Runtime" e "PATH".
       runtimes: 'Toolchains',
@@ -2047,6 +2048,20 @@ export const messages = {
     },
     loadError: 'Não foi possível carregar o estado do ambiente.',
     checkedAt: 'Verificado às {time}',
+    overview: {
+      description: 'Com o que esta máquina roda agentes e o que precisa de atenção.',
+      // Cada seção resume uma aba, então o link diz qual delas abre.
+      open: 'Abrir {section}',
+      agentDetails: 'Detalhes',
+      agentsEmpty: 'Nenhuma CLI de agente foi encontrada nesta máquina.',
+      agentsEmptyHint: 'O MangoStudio pode instalar uma para você pela aba Agentes.',
+      toolchainsEmpty: 'Nenhuma toolchain foi encontrada nesta máquina.',
+      healthClear: 'Nada precisa de atenção.',
+      libraryEmpty: 'Nenhum recurso de biblioteca foi encontrado ainda.',
+      libraryPresent: '{count} presentes',
+      libraryDivergent: '{count} divergentes',
+      libraryNone: 'Ainda não lê nada',
+    },
     runtimes: {
       description:
         'Uma vez que dois binários com o mesmo nome existem, só um roda. Aqui está qual.',

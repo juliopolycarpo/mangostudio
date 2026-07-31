@@ -10,15 +10,15 @@ import type { InstallRecipePreview, RuntimeStatus } from '@mangostudio/shared/en
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { groupInstallations, pathPosition } from '../format';
+import { effectiveInstallation, findInstallRecipe, pathPosition } from '../format';
 import { useProbeRuntime } from '../hooks/use-runtime-status';
-import { ToolIdentityHeader } from '../identity/ToolIdentityHeader';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { InstallAction } from './InstallAction';
 import { InstallationList } from './InstallationList';
 import { ProbeButton } from './ProbeButton';
+import { CardSectionLabel, ToolCard } from './ToolCard';
 
 interface RuntimeCardProps {
   status: RuntimeStatus;
@@ -33,55 +33,63 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
   const { resolve } = useToolIdentities();
   const name = resolve('runtime', status.id).name;
 
-  // Never trust array order for "which one runs": the effective flag is the
-  // only authority, and it is what the header renders.
-  const groups = groupInstallations(status.installations);
-  const effectiveGroup = groups.find((group) => group.effective);
-  const effective = effectiveGroup?.canonical ?? status.effective;
+  const { groups, group: effectiveGroup, installation: effective } = effectiveInstallation(status);
 
-  const installRecipe = recipes.find(
-    (recipe) => recipe.runtimeId === status.id && recipe.action === 'install'
-  );
-  const updateRecipe = recipes.find(
-    (recipe) => recipe.runtimeId === status.id && recipe.action === 'update'
-  );
+  const installRecipe = findInstallRecipe(recipes, status.id, 'install');
+  const updateRecipe = findInstallRecipe(recipes, status.id, 'update');
 
   return (
-    <article
-      className="space-y-4 rounded-2xl border border-outline-variant/15 bg-surface-container-high p-5 sm:p-6"
-      data-testid="runtime-card"
-      data-runtime-id={status.id}
+    <ToolCard
+      kind="runtime"
+      id={status.id}
+      testId="runtime-card"
+      dataAttributes={{ 'data-runtime-id': status.id }}
+      subtitle={
+        // Nothing installed is not "0 versions": the body already says so.
+        groups.length > 0 ? (
+          <p className="text-xs text-on-surface-variant/60">
+            {groups.length === 1
+              ? e.runtimes.singleVersion
+              : formatMessage(e.runtimes.versionCount, { count: String(groups.length) })}
+          </p>
+        ) : undefined
+      }
+      actions={
+        <>
+          <HealthBadge health={status.health} />
+          <ProbeButton
+            isPending={probe.isPending}
+            isError={probe.isError}
+            onProbe={() => probe.mutate(status.id)}
+          />
+        </>
+      }
+      // Install or update, never both — and nothing at all when the registry
+      // has no recipe for this runtime. A fragment would always be truthy, so
+      // the card would close on an empty footer and the gap above it.
+      footer={
+        status.installations.length === 0
+          ? installRecipe && (
+              <InstallAction
+                recipe={installRecipe}
+                input={{ kind: 'none' }}
+                label={formatMessage(e.runtimes.install, { runtime: name })}
+                variant="primary"
+                icon={<Download size={14} />}
+              />
+            )
+          : updateRecipe && (
+              <InstallAction
+                recipe={updateRecipe}
+                input={{ kind: 'none' }}
+                label={formatMessage(e.runtimes.update, { runtime: name })}
+              />
+            )
+      }
     >
-      <ToolIdentityHeader
-        kind="runtime"
-        id={status.id}
-        subtitle={
-          // Nothing installed is not "0 versions": the body already says so.
-          groups.length > 0 ? (
-            <p className="text-xs text-on-surface-variant/60">
-              {groups.length === 1
-                ? e.runtimes.singleVersion
-                : formatMessage(e.runtimes.versionCount, { count: String(groups.length) })}
-            </p>
-          ) : undefined
-        }
-        actions={
-          <>
-            <HealthBadge health={status.health} />
-            <ProbeButton
-              isPending={probe.isPending}
-              isError={probe.isError}
-              onProbe={() => probe.mutate(status.id)}
-            />
-          </>
-        }
-      />
-
       {effective ? (
         <section className="space-y-1" data-testid="effective-installation">
-          <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-            {e.runtimes.effectiveLabel}
-          </p>
+          <CardSectionLabel>{e.runtimes.effectiveLabel}</CardSectionLabel>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="font-mono text-base font-semibold text-on-surface">
               {effective.version}
@@ -126,33 +134,12 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
 
       {groups.length > 1 && (
         <section className="space-y-2">
-          <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-            {e.runtimes.otherInstallations}
-          </p>
+          <CardSectionLabel>{e.runtimes.otherInstallations}</CardSectionLabel>
           <InstallationList groups={groups.filter((group) => !group.effective)} />
         </section>
       )}
 
       {children}
-
-      <footer className="flex flex-wrap items-center gap-2">
-        {status.installations.length === 0 && installRecipe && (
-          <InstallAction
-            recipe={installRecipe}
-            input={{ kind: 'none' }}
-            label={formatMessage(e.runtimes.install, { runtime: name })}
-            variant="primary"
-            icon={<Download size={14} />}
-          />
-        )}
-        {status.installations.length > 0 && updateRecipe && (
-          <InstallAction
-            recipe={updateRecipe}
-            input={{ kind: 'none' }}
-            label={formatMessage(e.runtimes.update, { runtime: name })}
-          />
-        )}
-      </footer>
-    </article>
+    </ToolCard>
   );
 }

@@ -1,10 +1,6 @@
 /**
  * One agent CLI: version, config home, auth state, and the Library locations it
  * reads and writes.
- *
- * `authSignal: 'unknown'` renders "Sign-in state unknown", never "Not signed
- * in" — a file-presence probe genuinely cannot see a system keychain, and
- * claiming otherwise would be a lie the user cannot check.
  */
 
 import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/environments';
@@ -12,13 +8,15 @@ import type { Messages } from '@mangostudio/shared/i18n';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { findInstallRecipe } from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
-import { ToolIdentityHeader } from '../identity/ToolIdentityHeader';
 import { useToolIdentities } from '../identity/use-tool-identities';
+import { AgentAuthState } from './AgentAuthState';
 import { FindingList } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { InstallAction } from './InstallAction';
 import { ProbeButton } from './ProbeButton';
+import { CardSectionLabel, ToolCard } from './ToolCard';
 
 interface AgentCliCardProps {
   status: AgentCliStatus;
@@ -31,38 +29,43 @@ export function AgentCliCard({ status, recipes }: AgentCliCardProps) {
   const probe = useProbeAgentCli();
   const { resolve } = useToolIdentities();
   const name = resolve('agent', status.targetId).name;
-  const installRecipe = recipes.find(
-    (recipe) => recipe.runtimeId === status.id && recipe.action === 'install'
-  );
+  const installRecipe = findInstallRecipe(recipes, status.id, 'install');
 
   return (
-    <article
-      className="space-y-4 rounded-2xl border border-outline-variant/15 bg-surface-container-high p-5 sm:p-6"
-      data-testid="agent-cli-card"
-      data-target-id={status.targetId}
+    <ToolCard
+      kind="agent"
+      id={status.targetId}
+      testId="agent-cli-card"
+      dataAttributes={{ 'data-target-id': status.targetId }}
+      subtitle={
+        <p className="text-xs text-on-surface-variant/60">
+          {status.effective
+            ? `${e.agents.versionLabel} ${status.effective.version}`
+            : e.agents.notInstalled}
+        </p>
+      }
+      actions={
+        <>
+          <HealthBadge health={status.health} />
+          <ProbeButton
+            isPending={probe.isPending}
+            isError={probe.isError}
+            onProbe={() => probe.mutate(status.targetId)}
+          />
+        </>
+      }
+      footer={
+        !status.effective && installRecipe ? (
+          <InstallAction
+            recipe={installRecipe}
+            input={{ kind: 'none' }}
+            label={formatMessage(e.runtimes.install, { runtime: name })}
+            variant="primary"
+            icon={<Download size={14} />}
+          />
+        ) : null
+      }
     >
-      <ToolIdentityHeader
-        kind="agent"
-        id={status.targetId}
-        subtitle={
-          <p className="text-xs text-on-surface-variant/60">
-            {status.effective
-              ? `${e.agents.versionLabel} ${status.effective.version}`
-              : e.agents.notInstalled}
-          </p>
-        }
-        actions={
-          <>
-            <HealthBadge health={status.health} />
-            <ProbeButton
-              isPending={probe.isPending}
-              isError={probe.isError}
-              onProbe={() => probe.mutate(status.targetId)}
-            />
-          </>
-        }
-      />
-
       <dl className="grid gap-2 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-4">
         <dt className="text-on-surface-variant/60">{e.agents.configHomeLabel}</dt>
         <dd className="min-w-0 break-all font-mono text-xs text-on-surface-variant">
@@ -70,15 +73,13 @@ export function AgentCliCard({ status, recipes }: AgentCliCardProps) {
         </dd>
       </dl>
 
-      <AuthState status={status} />
+      <AgentAuthState status={status} />
 
       <FindingList findings={status.findings} />
 
       {status.locations.length > 0 && (
         <section className="space-y-2">
-          <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-            {e.agents.locations}
-          </p>
+          <CardSectionLabel>{e.agents.locations}</CardSectionLabel>
           <ul className="space-y-1.5">
             {status.locations.map((location) => (
               <li
@@ -102,17 +103,7 @@ export function AgentCliCard({ status, recipes }: AgentCliCardProps) {
           </ul>
         </section>
       )}
-
-      {!status.effective && installRecipe && (
-        <InstallAction
-          recipe={installRecipe}
-          input={{ kind: 'none' }}
-          label={formatMessage(e.runtimes.install, { runtime: name })}
-          variant="primary"
-          icon={<Download size={14} />}
-        />
-      )}
-    </article>
+    </ToolCard>
   );
 }
 
@@ -123,30 +114,4 @@ function locationState(
   if (location.path === null) return e.agents.locationUnsupported;
   if (!location.exists) return e.agents.locationMissing;
   return location.writable ? e.agents.locationWritable : e.agents.locationReadOnly;
-}
-
-function AuthState({ status }: { status: AgentCliStatus }) {
-  const { t } = useI18n();
-  const e = t.environments.agents;
-
-  // The unknown signal is its own state. Collapsing it into "not signed in"
-  // would report a keychain-backed login as a failure.
-  if (status.authSignal === 'unknown') {
-    return (
-      <div className="space-y-0.5" data-testid="auth-state" data-auth-signal="unknown">
-        <p className="text-sm text-on-surface-variant">{e.authUnknown}</p>
-        <p className="text-xs text-on-surface-variant/60">{e.authUnknownHint}</p>
-      </div>
-    );
-  }
-
-  return (
-    <p
-      className={`text-sm ${status.authenticated ? 'text-primary' : 'text-tertiary'}`}
-      data-testid="auth-state"
-      data-auth-signal={status.authSignal}
-    >
-      {status.authenticated ? e.authSignedIn : e.authSignedOut}
-    </p>
-  );
 }

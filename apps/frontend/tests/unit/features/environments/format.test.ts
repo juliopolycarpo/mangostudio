@@ -10,10 +10,12 @@ import {
   formatBytes,
   formatDuration,
   groupInstallations,
+  healthRollup,
   keyedFindings,
   pathPosition,
+  worstFinding,
 } from '../../../../src/features/environments/format';
-import { installation } from './fixtures';
+import { agentCliStatus, installation, runtimeStatus } from './fixtures';
 
 describe('groupInstallations', () => {
   it('puts the effective binary first even when it is last in the array', () => {
@@ -113,6 +115,46 @@ describe('keyedFindings', () => {
     const keys = keyedFindings(findings).map((entry) => entry.key);
 
     expect(new Set(keys).size).toBe(3);
+  });
+});
+
+describe('worstFinding', () => {
+  it('picks the failure over the warnings whatever order they arrived in', () => {
+    const finding = worstFinding([
+      { code: 'multiple-versions', params: { runtime: 'node', versions: '18, 22' } },
+      { code: 'not-found', params: { runtime: 'node' } },
+      { code: 'outdated-lts', params: { version: '18.19.0', ltsStatus: 'lts-superseded' } },
+    ]);
+
+    expect(finding?.code).toBe('not-found');
+  });
+
+  it('keeps the first of several equals, so the card does not reshuffle', () => {
+    const finding = worstFinding([
+      { code: 'outdated-lts', params: { version: '18.19.0', ltsStatus: 'lts-superseded' } },
+      { code: 'multiple-versions', params: { runtime: 'node', versions: '18, 22' } },
+    ]);
+
+    expect(finding?.code).toBe('outdated-lts');
+  });
+
+  it('has nothing to lead with when nothing is wrong', () => {
+    expect(worstFinding([])).toBeUndefined();
+  });
+});
+
+describe('healthRollup', () => {
+  it('counts every state across the lists it is given', () => {
+    const counts = healthRollup([
+      [runtimeStatus({ id: 'bun' }), runtimeStatus({ id: 'node', health: 'warn' })],
+      [agentCliStatus({ health: 'missing' }), agentCliStatus({ health: 'error' })],
+    ]);
+
+    expect(counts).toEqual({ ok: 1, warn: 1, missing: 1, error: 1 });
+  });
+
+  it('reports zeros rather than absent keys for an empty machine', () => {
+    expect(healthRollup([[], []])).toEqual({ ok: 0, warn: 0, missing: 0, error: 0 });
   });
 });
 

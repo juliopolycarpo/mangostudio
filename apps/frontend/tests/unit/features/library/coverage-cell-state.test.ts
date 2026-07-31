@@ -14,6 +14,7 @@ import {
   coverageCells,
   majorityContentHash,
   presentTargetCount,
+  summarizeCoverageByTarget,
 } from '../../../../src/features/library/format';
 import { fullCoverage, instance, resource } from './fixtures';
 
@@ -278,5 +279,44 @@ describe('a tie between versions', () => {
 
     expect(cells[0].state).toBe('divergent');
     expect(cells[1].state).toBe('divergent');
+  });
+});
+
+describe('summarizeCoverageByTarget', () => {
+  const divergentSkill = resource({
+    instances: [
+      instance({ locationId: 'agents-skills', contentHash: 'aaa' }),
+      instance({ locationId: 'claude-skills', contentHash: 'aaa' }),
+      instance({ locationId: 'cursor-skills', contentHash: 'bbb' }),
+    ],
+    coverage: fullCoverage({
+      mangostudio: { state: 'present', effectiveLocationId: 'agents-skills' },
+      claude: { state: 'present', effectiveLocationId: 'claude-skills' },
+      cursor: { state: 'present', effectiveLocationId: 'cursor-skills' },
+    }),
+    divergence: 'divergent',
+  });
+
+  it('counts divergent copies inside the present total, not beside it', () => {
+    const summaries = summarizeCoverageByTarget(
+      [divergentSkill],
+      ['mangostudio', 'claude', 'codex', 'cursor']
+    );
+
+    expect(summaries).toEqual([
+      { targetId: 'mangostudio', present: 1, divergent: 0 },
+      { targetId: 'claude', present: 1, divergent: 0 },
+      // Reads nothing: absent is a normal answer, not a gap to fill.
+      { targetId: 'codex', present: 0, divergent: 0 },
+      // The odd copy out, which is the number worth opening the matrix for.
+      { targetId: 'cursor', present: 1, divergent: 1 },
+    ]);
+  });
+
+  it('keeps a line for a target no resource reaches', () => {
+    const summaries = summarizeCoverageByTarget([], ['mangostudio', 'claude']);
+
+    expect(summaries.map((summary) => summary.targetId)).toEqual(['mangostudio', 'claude']);
+    expect(summaries.every((summary) => summary.present === 0)).toBe(true);
   });
 });
