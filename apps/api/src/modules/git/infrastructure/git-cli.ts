@@ -91,9 +91,11 @@ export async function runGit(
  * it described: disconnects, config changes, and a deleted id recreated against
  * a different target would all keep answering for the old runtime. The
  * connection manager already caches the connection and its manifest, so a
- * connected environment costs a map lookup here. The `--version` fallback
- * covers a failed handshake only — the manager drops cached rejections, so it
- * gets one reconnect attempt before Git is reported unavailable.
+ * connected environment costs a map lookup here.
+ *
+ * A runtime the hub cannot reach has no Git the hub can run, so an unreachable
+ * environment is reported unavailable rather than probed a second time: any
+ * such probe would have to travel through the same connection that just failed.
  */
 export async function isGitAvailable(
   selection: GitRuntimeSelection = {
@@ -104,16 +106,6 @@ export async function isGitAvailable(
   try {
     const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
     return runtime.manifest.git.available;
-  } catch {
-    // Fall through to a second attempt when the handshake itself failed.
-  }
-  try {
-    await runGit(['--version'], {
-      cwd: process.cwd(),
-      timeoutMs: 5_000,
-      ...selection,
-    });
-    return true;
   } catch {
     return false;
   }
