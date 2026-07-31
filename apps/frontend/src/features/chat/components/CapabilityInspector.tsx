@@ -32,6 +32,7 @@ const REASON_LABEL_KEY: Record<CapabilityReasonCode, keyof CapabilityLabels['rea
   'agent-allowlist': 'agentAllowlist',
   'tool-setting-disabled': 'toolSettingDisabled',
   'name-over-provider-limit': 'nameOverProviderLimit',
+  'environment-unsupported': 'environmentUnsupported',
   'server-disabled': 'serverDisabled',
   'server-unavailable': 'serverUnavailable',
   'delegation-disabled': 'delegationDisabled',

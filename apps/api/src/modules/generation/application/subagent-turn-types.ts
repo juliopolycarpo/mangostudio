@@ -53,6 +53,7 @@ export interface SubagentRuntimeInput {
   readonly db: Kysely<Database>;
   readonly userId: string;
   readonly chatId: string;
+  readonly environmentId: string;
   /** Parent turn's assistant message, so subagent file mutations join its checkpoint. */
   readonly assistantMessageId?: string;
   readonly workdir?: string;

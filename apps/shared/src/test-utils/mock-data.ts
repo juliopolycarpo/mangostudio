@@ -48,8 +48,14 @@ export function createMockChat(overrides: Partial<Chat> = {}): Chat {
     title: faker.lorem.words(3),
     createdAt: now - 1000,
     updatedAt: now,
+    model: null,
     textModel: MOCK_MODELS.text.id,
     imageModel: MOCK_MODELS.image.id,
+    lastUsedMode: null,
+    selectedAgentId: null,
+    workdir: null,
+    environmentId: 'local',
+    restrictToolsToWorkdir: null,
     ...overrides,
   };
 }

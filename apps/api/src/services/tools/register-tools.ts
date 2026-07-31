@@ -1,4 +1,3 @@
-import { isShellAvailable } from './builtin/_shell-exec';
 import { register as registerApplyPatchTool } from './builtin/apply-patch';
 import { register as registerAskUserQuestionTool } from './builtin/ask-user-question';
 import { register as registerBashTool } from './builtin/bash';
@@ -20,7 +19,11 @@ import { register as registerTodoTools } from './builtin/todo';
 import { register as registerWriteFileTool } from './builtin/write-file';
 import { register as registerZshTool } from './builtin/zsh';
 
-/** Registers all bundled tools available on this host. // Usage: registerTools() */
+/**
+ * Registers every bundled tool. Runtime-specific eligibility is resolved from
+ * the selected environment's capability manifest for each turn.
+ * // Usage: registerTools()
+ */
 export function registerTools(): void {
   registerGetCurrentDatetimeTool();
   registerGenerateImageTool();
@@ -39,11 +42,7 @@ export function registerTools(): void {
   registerSkillTool();
   registerAskUserQuestionTool();
   registerTodoTools();
-  registerAvailableShellTools();
-}
-
-function registerAvailableShellTools(): void {
-  if (isShellAvailable('bash')) registerBashTool();
-  if (isShellAvailable('zsh')) registerZshTool();
-  if (isShellAvailable('powershell')) registerPowerShellTool();
+  registerBashTool();
+  registerZshTool();
+  registerPowerShellTool();
 }

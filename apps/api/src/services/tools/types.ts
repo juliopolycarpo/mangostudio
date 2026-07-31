@@ -29,6 +29,11 @@ export interface WorkdirPolicy {
 export interface ToolContext {
   userId: string;
   chatId: string;
+  /**
+   * Chat-owned runtime environment used for filesystem, shell, and checkpoint I/O.
+   * Direct non-chat invocations omit it and use the Local runtime.
+   */
+  environmentId?: string;
   /** Assistant message id for the active turn; drives per-message file checkpoints. */
   assistantMessageId?: string;
   /** Optional DB handle for checkpoint persistence (generation passes the turn db). */

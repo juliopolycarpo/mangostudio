@@ -11,6 +11,7 @@ import {
 import type { ContextInfo } from '@/features/generation/types';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
+import { invalidateChatCapabilities } from './hooks/capability-invalidation';
 
 // ---------------------------------------------------------------------------
 // Chat query keys
@@ -47,10 +48,22 @@ function updateChatListCache(
   );
 }
 
+/**
+ * Mirrors the server's rule exactly: switching environments clears the workdir
+ * only when the request did not supply one. Clearing it unconditionally would
+ * blank a workdir the server just accepted, and the PUT returns `{ success }`
+ * rather than the chat, so nothing would correct the cache.
+ */
 function applyChatUpdates<T extends ChatWithContext>(chat: T, updates: UpdateChatBody): T {
+  const clearsWorkdir =
+    updates.environmentId !== undefined &&
+    updates.environmentId !== chat.environmentId &&
+    updates.workdir === undefined;
+
   return {
     ...chat,
     ...updates,
+    ...(clearsWorkdir ? { workdir: null } : {}),
   };
 }
 
@@ -85,6 +98,10 @@ export function useUpdateChatMutation() {
       return data;
     },
     onSuccess: (_, variables) => {
+      const previousEnvironmentId = queryClient.getQueryData<ChatWithContext>(
+        chatKeys.detail(variables.id)
+      )?.environmentId;
+
       queryClient.setQueryData<ChatWithContext | undefined>(
         chatKeys.detail(variables.id),
         (current) => (current ? applyChatUpdates(current, variables.updates) : current)
@@ -94,6 +111,17 @@ export function useUpdateChatMutation() {
           item.id === variables.id ? applyChatUpdates(item, variables.updates) : item
         )
       );
+
+      // Shell and tool eligibility now come from the selected runtime's manifest,
+      // but the capability key holds only chat/model/agent and the invalidation
+      // registry does not watch chat queries. Without this the inspector keeps
+      // showing the previous environment's capabilities until it goes stale.
+      if (
+        variables.updates.environmentId !== undefined &&
+        variables.updates.environmentId !== previousEnvironmentId
+      ) {
+        void invalidateChatCapabilities(queryClient);
+      }
     },
   });
 }

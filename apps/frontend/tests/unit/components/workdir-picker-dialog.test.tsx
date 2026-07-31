@@ -20,33 +20,42 @@ describe('WorkdirPickerDialog', () => {
   it('navigates server folders, reveals hidden entries, and selects the current path', async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    fetchScenario.respondWithJson('GET', '/api/workspace/fs?path=%2Fsrv%2Fprojects', {
-      body: {
-        path: '/srv/projects',
-        parent: '/srv',
-        entries: [
-          { name: '.private', path: '/srv/projects/.private', hidden: true },
-          { name: 'mangostudio', path: '/srv/projects/mangostudio', hidden: false },
-        ],
-        home: '/home/mango',
-        roots: ['/'],
-        separator: '/',
-      },
-    });
-    fetchScenario.respondWithJson('GET', '/api/workspace/fs?path=%2Fsrv%2Fprojects%2Fmangostudio', {
-      body: {
-        path: '/srv/projects/mangostudio',
-        parent: '/srv/projects',
-        entries: [],
-        home: '/home/mango',
-        roots: ['/'],
-        separator: '/',
-      },
-    });
+    fetchScenario.respondWithJson(
+      'GET',
+      '/api/workspace/fs?path=%2Fsrv%2Fprojects&chatId=chat-remote',
+      {
+        body: {
+          path: '/srv/projects',
+          parent: '/srv',
+          entries: [
+            { name: '.private', path: '/srv/projects/.private', hidden: true },
+            { name: 'mangostudio', path: '/srv/projects/mangostudio', hidden: false },
+          ],
+          home: '/home/mango',
+          roots: ['/'],
+          separator: '/',
+        },
+      }
+    );
+    fetchScenario.respondWithJson(
+      'GET',
+      '/api/workspace/fs?path=%2Fsrv%2Fprojects%2Fmangostudio&chatId=chat-remote',
+      {
+        body: {
+          path: '/srv/projects/mangostudio',
+          parent: '/srv/projects',
+          entries: [],
+          home: '/home/mango',
+          roots: ['/'],
+          separator: '/',
+        },
+      }
+    );
 
     render(
       <WorkdirPickerDialog
         open
+        chatId="chat-remote"
         initialPath="/srv/projects"
         recentWorkdirs={['/srv/other']}
         onSelect={onSelect}
@@ -73,7 +82,7 @@ describe('WorkdirPickerDialog', () => {
   it('validates a manually entered server path before browsing it', async () => {
     const user = userEvent.setup();
     fetchScenario
-      .respondWithJson('GET', '/api/workspace/fs', {
+      .respondWithJson('GET', '/api/workspace/fs?chatId=chat-remote', {
         body: {
           path: '/home/mango',
           parent: '/home',
@@ -86,7 +95,7 @@ describe('WorkdirPickerDialog', () => {
       .respondWithJson('POST', '/api/workspace/fs/validate', {
         body: { ok: true, resolvedPath: '/srv/manual' },
       })
-      .respondWithJson('GET', '/api/workspace/fs?path=%2Fsrv%2Fmanual', {
+      .respondWithJson('GET', '/api/workspace/fs?path=%2Fsrv%2Fmanual&chatId=chat-remote', {
         body: {
           path: '/srv/manual',
           parent: '/srv',
@@ -97,9 +106,10 @@ describe('WorkdirPickerDialog', () => {
         },
       });
 
-    render(<WorkdirPickerDialog open onSelect={vi.fn()} onClose={vi.fn()} />);
+    render(<WorkdirPickerDialog open chatId="chat-remote" onSelect={vi.fn()} onClose={vi.fn()} />);
 
     const pathInput = await screen.findByLabelText('Server path');
+    await waitFor(() => expect(pathInput).toHaveValue('/home/mango'));
     await user.clear(pathInput);
     await user.type(pathInput, '/srv/manual');
     await user.click(screen.getByRole('button', { name: 'Open' }));
@@ -107,7 +117,10 @@ describe('WorkdirPickerDialog', () => {
     await waitFor(() => expect(screen.getByTitle('/srv/manual')).toBeInTheDocument());
     expect(fetchScenario.fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('/api/workspace/fs/validate'),
-      expect.objectContaining({ method: 'POST' })
+      expect.objectContaining({
+        body: JSON.stringify({ path: '/srv/manual', chatId: 'chat-remote' }),
+        method: 'POST',
+      })
     );
   });
 });

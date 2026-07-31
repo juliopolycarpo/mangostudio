@@ -16,7 +16,7 @@ import {
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
 import type { AIProvider } from '../../../src/services/providers/types';
-import { insertTestUser, type UserFixture } from '../../support/factories';
+import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
 import {
   createApiTestApp,
   createAuthenticatedApiTestApp,
@@ -101,6 +101,23 @@ describe('GET /chats', () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(Array.isArray(body)).toBe(true);
+  });
+
+  it('returns the selected environment without persistence-only fields', async () => {
+    const chat = await insertTestChat(TEST_USER.id, { title: 'Environment Chat' });
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/chats'));
+    const body = (await response.json()) as Array<Record<string, unknown>>;
+    const result = body.find((item) => item.id === chat.id);
+
+    expect(response.status).toBe(200);
+    expect(result?.environmentId).toBe('local');
+    expect(result).not.toHaveProperty('userId');
+    expect(result).not.toHaveProperty('lastProviderState');
+    expect(result).not.toHaveProperty('lastContextState');
   });
 
   it('returns persisted context info without provider internals', async () => {
@@ -196,6 +213,10 @@ describe('POST /chats', () => {
     expect(body).toHaveProperty('id');
     expect(typeof body.id).toBe('string');
     expect((body.id as string).length).toBeGreaterThan(0);
+    expect(body.environmentId).toBe('local');
+    expect(body).not.toHaveProperty('userId');
+    expect(body).not.toHaveProperty('lastProviderState');
+    expect(body).not.toHaveProperty('lastContextState');
   });
 
   it('does not accept client-supplied id in body', async () => {
@@ -447,6 +468,84 @@ describe('PUT /chats/:id', () => {
     expect(await missing.json()).toMatchObject({ code: 'VALIDATION' });
     expect(notDirectory.status).toBe(422);
     expect(await notDirectory.json()).toMatchObject({ code: 'VALIDATION' });
+  });
+
+  it('selects only owned environments and clears a stale workdir on change', async () => {
+    const db = getDb();
+    const suffix = Date.now();
+    const environmentId = `remote-${suffix}`;
+    await db
+      .insertInto('environments')
+      .values({
+        id: environmentId,
+        userId: TEST_USER.id,
+        name: 'Remote',
+        transportKind: 'stdio',
+        configJson: '{}',
+        enabled: 1,
+        createdAt: suffix,
+        updatedAt: suffix,
+      })
+      .execute();
+    const chat = await insertTestChat(TEST_USER.id, { title: 'Environment Target' });
+    await db
+      .updateTable('chats')
+      .set({ workdir: '/local-only/path' })
+      .where('id', '=', chat.id)
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+    const update = (id: string, environment: string) =>
+      app.handle(
+        new Request(`http://localhost/chats/${id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ environmentId: environment }),
+        })
+      );
+
+    const selected = await update(chat.id, environmentId);
+    expect(selected.status).toBe(200);
+    expect(
+      await db
+        .selectFrom('chats')
+        .select(['environmentId', 'workdir'])
+        .where('id', '=', chat.id)
+        .executeTakeFirst()
+    ).toEqual({ environmentId, workdir: null });
+
+    const missing = await update(chat.id, `missing-${suffix}`);
+    expect(missing.status).toBe(422);
+    expect(await missing.json()).toEqual({
+      error: `Environment "missing-${suffix}" was not found.`,
+      code: 'VALIDATION',
+    });
+
+    const missingChat = await update(`missing-chat-${suffix}`, 'local');
+    expect(missingChat.status).toBe(404);
+    expect(await missingChat.json()).toEqual({
+      error: 'Chat not found',
+      code: 'NOT_FOUND',
+    });
+
+    // The environment check shares the write's transaction, so a rejected
+    // selection must not leave the rest of the same request persisted.
+    const rejected = await app.handle(
+      new Request(`http://localhost/chats/${chat.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ environmentId: `missing-${suffix}`, title: 'Should not persist' }),
+      })
+    );
+    expect(rejected.status).toBe(422);
+    expect(
+      await db
+        .selectFrom('chats')
+        .select(['environmentId', 'title'])
+        .where('id', '=', chat.id)
+        .executeTakeFirst()
+    ).toEqual({ environmentId, title: 'Environment Target' });
   });
 
   it('returns 422 when body is missing required schema fields', async () => {

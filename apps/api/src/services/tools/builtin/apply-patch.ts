@@ -76,7 +76,7 @@ export async function executeApplyPatch(
   const parsed = parseV4aPatch(args.patch);
   const settings = normalizeApplyPatchToolSettings(context.parameters);
   const operations = resolveOperations(parsed.operations, settings, context);
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.applyPatch(
     {
       chatId: context.chatId,

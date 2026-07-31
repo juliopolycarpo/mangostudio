@@ -1,9 +1,12 @@
-export type { Chat, Message } from './entities';
+export type { Message } from './entities';
 export {
+  type Chat,
   type ChatAttachment,
   type ChatAttachmentKind,
   ChatAttachmentKindSchema,
   ChatAttachmentSchema,
+  ChatListSchema,
+  ChatSchema,
   type CompactChatBody,
   CompactChatBodySchema,
   type ContextCompactionBehavior,

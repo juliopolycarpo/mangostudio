@@ -111,7 +111,7 @@ export async function executeReadFile(
   const startLine = args.startLine ?? READ_FILE_DEFAULT_START_LINE;
   const maxLines = args.maxLines ?? READ_FILE_DEFAULT_MAX_LINES;
 
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   return await runtime.fs.readFile(
     {
       chatId: context.chatId,

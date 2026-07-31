@@ -103,6 +103,7 @@ export interface DelegationRuntime {
   db: Kysely<Database>;
   userId: string;
   chatId: string;
+  environmentId: string;
   /** Delegating turn's assistant message; subagent mutations share its checkpoint. */
   assistantMessageId?: string;
   parentAgentProfile: AgentProfile;
@@ -152,6 +153,7 @@ export type ToolExecutionProgressItem =
 export interface StandardToolExecutionContext {
   userId: string;
   chatId: string;
+  environmentId: string;
   assistantMessageId?: string;
   workdir?: string;
   workdirPolicy?: WorkdirPolicy;
@@ -282,6 +284,7 @@ async function executeStandardToolCall(
           {
             userId: context.userId,
             chatId: context.chatId,
+            environmentId: context.environmentId,
             assistantMessageId: context.assistantMessageId,
             db: context.db,
             workdir: context.workdir,
@@ -552,6 +555,7 @@ async function executeDelegationToolCall(
     db: runtime.db,
     userId: runtime.userId,
     chatId: runtime.chatId,
+    environmentId: runtime.environmentId,
     assistantMessageId: runtime.assistantMessageId,
     workdir: runtime.workdir,
     workdirPolicy: runtime.workdirPolicy,

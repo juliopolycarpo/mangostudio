@@ -284,7 +284,12 @@ interface CompiledPathRoot {
 export function compileRuntimePathGuard(filter: RuntimePathFilter): (path: string) => boolean {
   const allowedRoots = filter.allowedRoots.map(compilePathRoot);
   const deniedRoots = filter.deniedRoots.map(compilePathRoot);
-  const containmentRoot = filter.containmentRoot;
+  // Canonicalized like the allow and deny roots, because candidates below are
+  // matched link-resolved: a workdir reached through a symlink would otherwise
+  // never prefix its own contents and every recursive walk would come back empty.
+  const containmentRoot = filter.containmentRoot
+    ? compilePathRoot(filter.containmentRoot)
+    : undefined;
   if (allowedRoots.length === 0 && deniedRoots.length === 0 && !containmentRoot) {
     return () => true;
   }
@@ -305,7 +310,7 @@ export function compileRuntimePathGuard(filter: RuntimePathFilter): (path: strin
     ) {
       return false;
     }
-    if (containmentRoot && !isPathPrefix(containmentRoot, effective)) return false;
+    if (containmentRoot && !isPathPrefix(containmentRoot.canonical, effective)) return false;
     return true;
   };
 }

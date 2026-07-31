@@ -1,3 +1,5 @@
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Kysely, Selectable, Updateable } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
@@ -10,6 +12,7 @@ function toOverrideFlag(value: number | null): boolean | null {
 function mapChatRow(row: Selectable<Database['chats']>): ChatRecord {
   return {
     ...row,
+    lastUsedMode: row.lastUsedMode as InteractionMode | null,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
   };
 }
@@ -18,6 +21,7 @@ export interface CreateChatData {
   title: string;
   model?: string | null;
   userId: string;
+  environmentId?: string;
 }
 
 export interface UpdateChatData {
@@ -28,6 +32,7 @@ export interface UpdateChatData {
   lastUsedMode?: string;
   selectedAgentId?: string;
   workdir?: string | null;
+  environmentId?: string;
   restrictToolsToWorkdir?: boolean | null;
 }
 
@@ -39,9 +44,10 @@ export interface ChatRecord {
   model: string | null;
   textModel: string | null;
   imageModel: string | null;
-  lastUsedMode: string | null;
+  lastUsedMode: InteractionMode | null;
   selectedAgentId: string | null;
   workdir: string | null;
+  environmentId: string;
   restrictToolsToWorkdir: boolean | null;
   userId: string | null;
   lastProviderState: string | null;
@@ -76,6 +82,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     lastUsedMode: null,
     selectedAgentId: null,
     workdir: null,
+    environmentId: data.environmentId ?? LOCAL_ENVIRONMENT_ID,
     restrictToolsToWorkdir: null,
     userId: data.userId,
     lastProviderState: null,
@@ -102,6 +109,7 @@ export async function updateChat(
   if (data.lastUsedMode !== undefined) dbUpdates.lastUsedMode = data.lastUsedMode;
   if (data.selectedAgentId !== undefined) dbUpdates.selectedAgentId = data.selectedAgentId;
   if (data.workdir !== undefined) dbUpdates.workdir = data.workdir;
+  if (data.environmentId !== undefined) dbUpdates.environmentId = data.environmentId;
   if (data.restrictToolsToWorkdir !== undefined) {
     dbUpdates.restrictToolsToWorkdir =
       data.restrictToolsToWorkdir === null ? null : data.restrictToolsToWorkdir ? 1 : 0;
@@ -137,6 +145,7 @@ export async function verifyChatOwnership(
 /** Chat fields a generation turn needs; excludes the large persisted state blobs. */
 export interface OwnedChatRecord {
   workdir: string | null;
+  environmentId: string;
   restrictToolsToWorkdir: boolean | null;
 }
 
@@ -147,13 +156,14 @@ export async function getOwnedChat(
 ): Promise<OwnedChatRecord | undefined> {
   const row = await db
     .selectFrom('chats')
-    .select(['workdir', 'restrictToolsToWorkdir'])
+    .select(['workdir', 'environmentId', 'restrictToolsToWorkdir'])
     .where('id', '=', chatId)
     .where('userId', '=', userId)
     .executeTakeFirst();
   if (!row) return undefined;
   return {
     workdir: row.workdir,
+    environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
   };
 }

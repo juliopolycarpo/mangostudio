@@ -97,7 +97,7 @@ describe('git routes', () => {
     expect(initialized.status).toBe(200);
     expect(Value.Check(InitRepoResponseSchema, initializedPayload)).toBe(true);
     expect(initializedPayload).toEqual({ root: workdir });
-    expect(events).toEqual([
+    expect(events.filter((event) => event.topic === gitTopic(chat.id))).toEqual([
       {
         type: 'invalidate',
         topic: gitTopic(chat.id),

@@ -5,7 +5,7 @@
  */
 
 import type { ProviderType } from '@mangostudio/shared/types';
-import { isShellAvailable, type ShellKind } from '../../src/services/tools/builtin/_shell-exec';
+import type { ShellKind } from '../../src/services/tools/builtin/_shell-exec';
 
 const EXPECTED_PROVIDER_TYPES = [
   'anthropic',
@@ -40,9 +40,9 @@ const REQUIRED_TOOL_NAMES = [
 
 const SHELL_TOOL_NAMES = ['bash', 'zsh', 'powershell'] as const satisfies readonly ShellKind[];
 
-/** Sorted tool names expected on this host (shell tools only when available). // Usage: expectedToolNames() */
+/** Sorted tool names registered before per-environment capability filtering. */
 export function expectedToolNames(): string[] {
-  return [...REQUIRED_TOOL_NAMES, ...SHELL_TOOL_NAMES.filter(isShellAvailable)].sort();
+  return [...REQUIRED_TOOL_NAMES, ...SHELL_TOOL_NAMES].sort();
 }
 
 /** Sorted provider types expected after registration. // Usage: expectedProviderTypes() */

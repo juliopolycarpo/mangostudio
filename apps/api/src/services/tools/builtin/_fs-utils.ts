@@ -12,7 +12,6 @@ import type { ToolParameterDescriptor } from '@mangostudio/shared/tool-settings'
 import {
   assertInsideWorkdir,
   isPathPrefix,
-  resolveContainmentRoot,
 } from '../../../modules/workspaces/application/path-containment';
 import { normalizePathList, normalizeStringList, type PathListItem } from '../list-normalization';
 import type { WorkdirPolicy } from '../types';
@@ -140,24 +139,8 @@ export function createRuntimePathFilter(
   return {
     allowedRoots: enabledRoots(settings.allowedPaths),
     deniedRoots: enabledRoots(settings.deniedPaths),
-    ...(workdirPolicy?.restricted
-      ? { containmentRoot: canonicalContainmentRoot(workdirPolicy.root) }
-      : {}),
+    ...(workdirPolicy?.restricted ? { containmentRoot: workdirPolicy.root } : {}),
   };
-}
-
-/**
- * resolveContainmentRoot realpaths the workdir, which can still raise a raw
- * ENOENT if the directory disappears after resolveAndValidatePath succeeded.
- * Tool callers only handle PathAccessError, so translate it here.
- */
-function canonicalContainmentRoot(root: string): string {
-  try {
-    return resolveContainmentRoot(root);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Working directory is not accessible.';
-    throw new PathAccessError(`Cannot resolve the chat working directory "${root}": ${message}`);
-  }
 }
 
 function enabledRoots(paths: readonly PathListItem[]): string[] {

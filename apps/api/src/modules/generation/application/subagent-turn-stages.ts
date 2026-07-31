@@ -17,6 +17,7 @@ import type {
   ModelCapabilities,
   ToolDefinition,
 } from '../../../services/providers/types';
+import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
 import { ASK_USER_QUESTION_TOOL_NAME } from '../../../services/tools/builtin/ask-user-question';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
@@ -89,6 +90,7 @@ export async function prepareSubagentTurn(
   const provider = resolvedModel.providerType
     ? getRegisteredProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
+  const runtimeClient = await getRuntimeClient(input.userId, input.environmentId);
   const runtime = await resolveAgentRuntime({
     db: input.db,
     userId: input.userId,
@@ -97,6 +99,7 @@ export async function prepareSubagentTurn(
     provider: provider.providerType,
     requestRuntimeSettings: getSubagentRuntimeSettings(input.targetProfile),
     profile: input.targetProfile,
+    runtimeManifest: runtimeClient.manifest,
   });
   // Subagents can neither delegate further nor ask the human: their turn
   // result flows to the parent model, not the UI, so a question card would
@@ -155,6 +158,7 @@ export async function runPlainSubagentText(session: SubagentTurnSession): Promis
   return await generatePlainSubagentText({
     provider: session.provider,
     userId: session.input.userId,
+    environmentId: session.input.environmentId,
     prompt: session.prompt,
     modelName: session.resolvedModel.modelId,
     systemPrompt: session.runtime.effectiveSystemPrompt,
@@ -194,6 +198,7 @@ export async function runSubagentStreamLoop(
 
     for await (const event of generateAgentTurnStream({
       userId: input.userId,
+      environmentId: input.environmentId,
       chatId: input.chatId,
       assistantMessageId: input.assistantMessageId,
       workdir: input.workdir,
@@ -257,6 +262,7 @@ export async function runSubagentStreamLoop(
       db: input.db,
       userId: input.userId,
       chatId: input.chatId,
+      environmentId: input.environmentId,
       assistantMessageId: input.assistantMessageId,
       allowedToolNames: session.allowedToolNames,
       settingsByToolName: runtime.toolSettingsByName,
@@ -292,6 +298,7 @@ export async function recoverSubagentSummary(
   const followUpText = await streamSubagentSummarizeTurn({
     provider,
     userId: input.userId,
+    environmentId: input.environmentId,
     modelName: resolvedModel.modelId,
     runtime,
     providerState,
@@ -482,6 +489,7 @@ function getSubagentRuntimeSettings(profile: AgentProfile): Partial<ProviderRunt
 async function generatePlainSubagentText(input: {
   readonly provider: AIProvider;
   readonly userId: string;
+  readonly environmentId: string;
   readonly prompt: string;
   readonly modelName: string;
   readonly systemPrompt?: string;
@@ -492,6 +500,7 @@ async function generatePlainSubagentText(input: {
     let text = '';
     for await (const chunk of input.provider.generateTextStream({
       userId: input.userId,
+      environmentId: input.environmentId,
       history: [],
       prompt: input.prompt,
       systemPrompt: input.systemPrompt,
@@ -515,6 +524,7 @@ async function generatePlainSubagentText(input: {
 
   const result = await input.provider.generateText({
     userId: input.userId,
+    environmentId: input.environmentId,
     history: [],
     prompt: input.prompt,
     systemPrompt: input.systemPrompt,
@@ -537,6 +547,7 @@ async function generatePlainSubagentText(input: {
 async function streamSubagentSummarizeTurn(input: {
   readonly provider: AIProvider;
   readonly userId: string;
+  readonly environmentId: string;
   readonly modelName: string;
   readonly runtime: ResolvedAgentRuntime;
   readonly providerState: string | null;
@@ -549,6 +560,7 @@ async function streamSubagentSummarizeTurn(input: {
   try {
     for await (const event of input.provider.generateAgentTurnStream({
       userId: input.userId,
+      environmentId: input.environmentId,
       modelName: input.modelName,
       agentId: input.runtime.profile.id,
       agentRuntimeHash: input.runtime.runtimeHash,
@@ -589,6 +601,7 @@ async function executeSubagentTools(input: {
   readonly db: Kysely<Database>;
   readonly userId: string;
   readonly chatId: string;
+  readonly environmentId: string;
   readonly assistantMessageId?: string;
   readonly workdir?: string;
   readonly workdirPolicy?: WorkdirPolicy;
@@ -652,6 +665,7 @@ async function executeSubagentTools(input: {
             {
               userId: input.userId,
               chatId: input.chatId,
+              environmentId: input.environmentId,
               // A subagent's file mutations belong to the delegating turn, so they
               // land in the same per-message checkpoint the Revert affordance uses.
               assistantMessageId: input.assistantMessageId,

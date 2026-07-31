@@ -94,6 +94,29 @@ describe('runtime filesystem service', () => {
     expect(result.matches).toEqual([join(root, 'visible.txt')]);
   });
 
+  it('matches inside a containment root reached through a symlink', async () => {
+    const real = join(tempDir, 'real-workspace');
+    const linked = join(tempDir, 'linked-workspace');
+    mkdirSync(real, { recursive: true });
+    await Bun.write(join(real, 'visible.txt'), 'visible');
+    symlinkSync(real, linked);
+
+    const result = await runtimeFsService.glob({
+      pattern: '**/*.txt',
+      cwd: linked,
+      maxResults: 100,
+      includeDotfiles: false,
+      absolute: true,
+      allowedRoots: [],
+      deniedRoots: [],
+      // The hub sends the workdir lexically. Candidates are matched link-resolved,
+      // so an uncanonicalized root here excludes everything inside itself.
+      containmentRoot: linked,
+    });
+
+    expect(result.matches).toEqual([join(linked, 'visible.txt')]);
+  });
+
   it('denies a symlink whose target resolves into a denied root', async () => {
     const root = join(tempDir, 'workspace');
     const denied = join(root, 'private');

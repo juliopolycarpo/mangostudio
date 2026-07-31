@@ -32,6 +32,8 @@ export const CapabilityReasonCodeSchema = Type.Union([
   Type.Literal('tool-setting-disabled'),
   /** The namespaced MCP name exceeds the provider tool-name cap. */
   Type.Literal('name-over-provider-limit'),
+  /** The selected execution environment does not provide this capability. */
+  Type.Literal('environment-unsupported'),
   /** The owning MCP server is toggled off. */
   Type.Literal('server-disabled'),
   /** The owning MCP server failed to connect or list tools in budget. */

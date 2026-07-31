@@ -42,6 +42,7 @@ interface OwnedChat {
   model: string | null;
   textModel: string | null;
   imageModel: string | null;
+  environmentId: string;
 }
 
 function buildSummaryParts(
@@ -78,6 +79,7 @@ async function loadOwnedChat(
     model: chat.model,
     textModel: chat.textModel,
     imageModel: chat.imageModel,
+    environmentId: chat.environmentId,
   };
 }
 
@@ -92,6 +94,7 @@ async function generateSummary(params: {
   providerType?: ProviderType;
   userId: string;
   chatId: string;
+  environmentId: string;
   db: Kysely<Database>;
 }): Promise<string> {
   const history = await loadHistory(params.chatId, {}, params.db);
@@ -102,6 +105,8 @@ async function generateSummary(params: {
     : await getProviderForModel(params.modelName, params.userId);
   const result = await provider.generateText({
     userId: params.userId,
+    environmentId: params.environmentId,
+    chatId: params.chatId,
     history: [],
     prompt: formatSummaryPrompt(history),
     systemPrompt: SUMMARY_SYSTEM_PROMPT,
@@ -166,7 +171,7 @@ export async function compactChatUseCase(
   input: CompactChatInput,
   db: Kysely<Database>
 ): Promise<ContextCompactionResponse> {
-  await loadOwnedChat(input.chatId, input.userId, db);
+  const chat = await loadOwnedChat(input.chatId, input.userId, db);
   const resolvedModel = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,
@@ -177,6 +182,7 @@ export async function compactChatUseCase(
     providerType: resolvedModel.providerType,
     userId: input.userId,
     chatId: input.chatId,
+    environmentId: chat.environmentId,
     db,
   });
   const result = await persistSummaryMessage({
@@ -205,10 +211,16 @@ export async function summarizeToNewChatUseCase(
     providerType: resolvedModel.providerType,
     userId: input.userId,
     chatId: input.chatId,
+    environmentId: sourceChat.environmentId,
     db,
   });
   const nextChat = await createChat(
-    { title: sourceChat.title, model: sourceChat.model, userId: input.userId },
+    {
+      title: sourceChat.title,
+      model: sourceChat.model,
+      userId: input.userId,
+      environmentId: sourceChat.environmentId,
+    },
     db
   );
 

@@ -35,6 +35,7 @@ export type GitScope = Static<typeof GitScopeSchema>;
 export const GIT_SCOPES: readonly GitScope[] = GitScopeSchema.anyOf.map((literal) => literal.const);
 
 export const SETTINGS_TOPIC = 'settings' as const;
+export const ENVIRONMENTS_TOPIC = 'environments' as const;
 
 const GIT_TOPIC_PREFIX = 'git:' as const;
 const MAX_REALTIME_TOPICS_PER_MESSAGE = 32;
@@ -145,8 +146,19 @@ const RealtimeGitInvalidateMessageSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const RealtimeEnvironmentsInvalidateMessageSchema = Type.Object(
+  {
+    type: Type.Literal('invalidate'),
+    topic: Type.Literal(ENVIRONMENTS_TOPIC),
+    /** Keeps the invalidate union ergonomic while rejecting scopes on this topic. */
+    scopes: Type.Optional(Type.Never()),
+  },
+  { additionalProperties: false }
+);
+
 export const RealtimeInvalidateMessageSchema = Type.Union([
   RealtimeSettingsInvalidateMessageSchema,
+  RealtimeEnvironmentsInvalidateMessageSchema,
   RealtimeGitInvalidateMessageSchema,
 ]);
 export type RealtimeInvalidateMessage = Static<typeof RealtimeInvalidateMessageSchema>;

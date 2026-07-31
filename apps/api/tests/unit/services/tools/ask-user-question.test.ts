@@ -104,6 +104,7 @@ describe('ask_user_question execution pipeline', () => {
       {
         userId: 'user-question-test',
         chatId: 'chat-1',
+        environmentId: 'local',
         settingsByToolName: new Map(),
         allowedToolNames: new Set([ASK_USER_QUESTION_TOOL_NAME]),
       }

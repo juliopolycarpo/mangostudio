@@ -68,7 +68,7 @@ export async function executeListDirectory(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const result = await runtime.fs.listDirectory(
     { inputPath: path, resolvedPath },
     context.signal ? { signal: context.signal } : undefined

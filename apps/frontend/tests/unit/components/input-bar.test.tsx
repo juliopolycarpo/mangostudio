@@ -1,8 +1,10 @@
+import type { Environment } from '@mangostudio/shared/environments';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { InputBar } from '../../../src/features/chat/components/InputBar';
 import { render } from '../../support/harness/render';
+import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 function renderInputBar(overrides: Partial<React.ComponentProps<typeof InputBar>> = {}) {
   const props: React.ComponentProps<typeof InputBar> = {
@@ -68,6 +70,56 @@ describe('InputBar — chat-only composer', () => {
     await user.click(screen.getByRole('button', { name: 'Agent' }));
 
     expect(onAgentExecutionModeChange).toHaveBeenCalledWith('agent');
+  });
+
+  it('changes the chat execution environment from the composer pill', async () => {
+    const scenario = createFetchScenario();
+    const environments: Environment[] = [
+      {
+        id: 'local',
+        name: 'Local',
+        transportKind: 'in-process',
+        config: {},
+        enabled: true,
+        virtual: true,
+        createdAt: null,
+        updatedAt: null,
+        status: { state: 'connected' },
+      },
+      {
+        id: 'remote-dev',
+        name: 'Remote dev',
+        transportKind: 'ssh',
+        config: { host: 'dev.example.test' },
+        enabled: true,
+        virtual: false,
+        createdAt: 1,
+        updatedAt: 1,
+        status: { state: 'disconnected' },
+      },
+    ];
+    scenario.respondWithJson('GET', '/api/environments', { body: environments }).install();
+
+    try {
+      const user = userEvent.setup();
+      const onEnvironmentChange = vi.fn().mockResolvedValue(undefined);
+      renderInputBar({
+        chatId: 'chat-1',
+        environmentId: 'local',
+        onEnvironmentChange,
+      });
+
+      const selector = await screen.findByRole('combobox', {
+        name: 'Select execution environment',
+      });
+      expect(selector).toHaveValue('local');
+      expect(screen.getByTestId('environment-selector')).toHaveAttribute('data-state', 'connected');
+      await user.selectOptions(selector, 'remote-dev');
+
+      expect(onEnvironmentChange).toHaveBeenCalledWith('remote-dev');
+    } finally {
+      scenario.restore();
+    }
   });
 
   it('shows the active workdir basename in Agent mode and reopens the picker', async () => {

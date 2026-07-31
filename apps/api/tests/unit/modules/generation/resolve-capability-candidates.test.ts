@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import {
   effectiveToolDefinitions,
+  type ResolveToolCandidatesInput,
   resolveToolCandidates,
 } from '../../../../src/modules/generation/application/resolve-capability-candidates';
 import type { McpBridgeServerSnapshot } from '../../../../src/services/mcp/tool-bridge';
@@ -10,6 +12,31 @@ import type {
   RegisteredTool,
   ToolDefinition,
 } from '../../../../src/services/tools/types';
+
+const RUNTIME_MANIFEST: RuntimeCapabilityManifest = {
+  platform: 'linux',
+  arch: 'x64',
+  pathStyle: 'posix',
+  homeDir: '/home/tester',
+  shells: ['bash', 'zsh', 'powershell'],
+  git: { available: true, version: '2.0.0' },
+  features: {
+    tools: true,
+    git: true,
+    probing: false,
+    mcp: false,
+    library: false,
+    checkpoints: true,
+  },
+};
+
+function resolveCandidates(
+  input: Omit<ResolveToolCandidatesInput, 'runtimeManifest'> & {
+    runtimeManifest?: RuntimeCapabilityManifest;
+  }
+) {
+  return resolveToolCandidates({ runtimeManifest: RUNTIME_MANIFEST, ...input });
+}
 
 function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
   return {
@@ -85,7 +112,7 @@ describe('resolveToolCandidates', () => {
   it('marks builtin candidates agent-tools-disabled when the profile disables tools', () => {
     // Real callers pass no MCP servers when tools are disabled (see
     // resolveAgentRuntime), so only the builtin gate is exercised here.
-    const candidates = resolveToolCandidates({
+    const candidates = resolveCandidates({
       profile: makeProfile({ toolsEnabled: false }),
       toolSettings: new Map(),
       registeredTools: [makeRegisteredTool('alpha'), makeRegisteredTool('beta')],
@@ -100,7 +127,7 @@ describe('resolveToolCandidates', () => {
   });
 
   it('rejects names outside the agent allowlist with agent-allowlist', () => {
-    const candidates = resolveToolCandidates({
+    const candidates = resolveCandidates({
       profile: makeProfile({ toolNames: ['alpha', 'mcp__srv__*'] }),
       toolSettings: new Map(),
       registeredTools: [makeRegisteredTool('alpha'), makeRegisteredTool('beta')],
@@ -115,7 +142,7 @@ describe('resolveToolCandidates', () => {
   });
 
   it('treats an empty allowlist as rejecting every candidate', () => {
-    const candidates = resolveToolCandidates({
+    const candidates = resolveCandidates({
       profile: makeProfile({ toolNames: [] }),
       toolSettings: new Map(),
       registeredTools: [makeRegisteredTool('alpha')],
@@ -126,7 +153,7 @@ describe('resolveToolCandidates', () => {
   });
 
   it('rejects tools disabled in settings with tool-setting-disabled', () => {
-    const candidates = resolveToolCandidates({
+    const candidates = resolveCandidates({
       profile: makeProfile(),
       toolSettings: settingsMap({
         alpha: { enabled: false },
@@ -149,7 +176,7 @@ describe('resolveToolCandidates', () => {
     const optIn = makeRegisteredTool('bash');
     optIn.settings.enabledByDefault = false;
 
-    const candidates = resolveToolCandidates({
+    const candidates = resolveCandidates({
       profile: makeProfile(),
       toolSettings: new Map(),
       registeredTools: [optIn],
@@ -161,7 +188,7 @@ describe('resolveToolCandidates', () => {
 
   it('reports overlong MCP names with provenance and keeps them out of the definitions', () => {
     const overlongName = `mcp__srv__${'x'.repeat(80)}`;
-    const candidates = resolveToolCandidates({
+    const candidates = resolveCandidates({
       profile: makeProfile(),
       toolSettings: new Map(),
       registeredTools: [],
@@ -187,7 +214,7 @@ describe('resolveToolCandidates', () => {
       buildDefinition: () => dynamicDefinition,
     });
 
-    const candidates = resolveToolCandidates({
+    const candidates = resolveCandidates({
       profile: makeProfile(),
       toolSettings: new Map(),
       registeredTools: [dynamicTool, makeRegisteredTool('beta')],
@@ -203,8 +230,25 @@ describe('resolveToolCandidates', () => {
     ]);
   });
 
+  it('rejects shell tools missing from the selected environment manifest', () => {
+    const candidates = resolveCandidates({
+      profile: makeProfile(),
+      toolSettings: settingsMap({ bash: { enabled: true }, zsh: { enabled: true } }),
+      registeredTools: [makeRegisteredTool('bash'), makeRegisteredTool('zsh')],
+      mcpServers: [],
+      runtimeManifest: { ...RUNTIME_MANIFEST, shells: ['bash'] },
+    });
+
+    const byName = new Map(candidates.map((candidate) => [candidate.name, candidate]));
+    expect(byName.get('bash')?.definition).toBeDefined();
+    expect(byName.get('zsh')?.reason).toBe('environment-unsupported');
+    expect(effectiveToolDefinitions(candidates).map((definition) => definition.name)).toEqual([
+      'bash',
+    ]);
+  });
+
   it('carries provenance metadata on every candidate', () => {
-    const candidates = resolveToolCandidates({
+    const candidates = resolveCandidates({
       profile: makeProfile(),
       toolSettings: new Map(),
       registeredTools: [makeRegisteredTool('alpha')],

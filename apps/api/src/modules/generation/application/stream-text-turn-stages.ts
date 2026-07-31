@@ -74,6 +74,7 @@ export interface StreamTextTurnSession {
   db: Kysely<Database>;
   chatId: string;
   userId: string;
+  environmentId: string;
   signal?: AbortSignal;
   userMsgId: string;
   aiMsgId: string;
@@ -180,6 +181,7 @@ export async function prepareStreamTextTurn(
     workdirPolicy,
     chatId,
     userId,
+    environmentId,
   } = turnContext;
   const { modelId } = resolvedModel;
   const runtimeSettings = agentRuntime.runtimeSettings;
@@ -230,6 +232,7 @@ export async function prepareStreamTextTurn(
     db,
     chatId,
     userId,
+    environmentId,
     signal: input.signal,
     userMsgId,
     aiMsgId,
@@ -571,6 +574,7 @@ async function* executePendingToolCalls(
     db,
     userId,
     chatId,
+    environmentId,
     agentRuntime,
     multiAgentSettings,
     allowedToolNames,
@@ -588,6 +592,7 @@ async function* executePendingToolCalls(
     db,
     userId,
     chatId,
+    environmentId,
     assistantMessageId: session.aiMsgId,
     parentAgentProfile: agentRuntime.profile,
     parentModelName: modelId,
@@ -607,6 +612,7 @@ async function* executePendingToolCalls(
     for await (const item of executeStandardToolCallsWithProgress(pendingCallEntries, {
       userId,
       chatId,
+      environmentId,
       assistantMessageId: session.aiMsgId,
       workdir,
       workdirPolicy,
@@ -641,6 +647,7 @@ async function* executePendingToolCalls(
           for await (const item of executeStandardToolCallsWithProgress(nonImageEntries, {
             userId,
             chatId,
+            environmentId,
             assistantMessageId: session.aiMsgId,
             workdir,
             workdirPolicy,
@@ -699,6 +706,7 @@ export async function* runAgentToolLoop(
     runtimeAttachments,
     chatId,
     userId,
+    environmentId,
     signal,
     input,
   } = session;
@@ -727,6 +735,7 @@ export async function* runAgentToolLoop(
     const req: AgentTurnRequest = {
       userId,
       chatId,
+      environmentId,
       assistantMessageId: session.aiMsgId,
       workdir: session.workdir,
       workdirPolicy: session.workdirPolicy,
@@ -809,6 +818,7 @@ export async function* runLegacyTextStream(
 
   for await (const chunk of generateTextStream({
     userId,
+    environmentId: session.environmentId,
     chatId,
     assistantMessageId: session.aiMsgId,
     workdir: session.workdir,
@@ -883,6 +893,7 @@ export async function* runSingleShotTextGeneration(
 
   const result = await generateText({
     userId,
+    environmentId: session.environmentId,
     chatId,
     workdir: session.workdir,
     workdirPolicy: session.workdirPolicy,

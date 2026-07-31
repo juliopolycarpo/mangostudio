@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
 import { getRuntimeClient } from '../../../services/runtime-client';
+import type { GitRuntimeSelection } from '../infrastructure/git-cli';
 
 export class GitPathValidationError extends Error {
   constructor(path: string) {
@@ -57,10 +58,14 @@ export function validateRepoPaths(root: string, paths: readonly string[]): strin
  * that owns the repository, and resolving it here would consult the hub's
  * filesystem once the runtime is remote.
  */
-export async function resolveContainedPath(root: string, path: string): Promise<string | null> {
+export async function resolveContainedPath(
+  root: string,
+  path: string,
+  selection?: GitRuntimeSelection
+): Promise<string | null> {
   validateRepoPaths(root, [path]);
 
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(selection?.userId, selection?.environmentId);
   try {
     const { relativePath } = await runtime.workspace.resolveContained({ root, path });
     return relativePath;

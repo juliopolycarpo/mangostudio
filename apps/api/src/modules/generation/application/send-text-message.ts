@@ -9,7 +9,7 @@ import {
 import { generateId } from '../../../utils/id';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
-import { assertChatOwnership } from '../../chats/domain/chat-ownership';
+import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
 import { loadHistory } from '../../messages/infrastructure/message-repository';
 import {
   persistAiResponse,
@@ -56,7 +56,7 @@ export async function sendTextMessage(
   input: SendTextMessageInput,
   db: Kysely<Database>
 ): Promise<SendTextMessageResult> {
-  await assertChatOwnership(input.chatId, input.userId, db);
+  const chat = await getOwnedChatOrThrow(input.chatId, input.userId, db);
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
   await assertChatAttachmentIdsAvailable(
@@ -108,6 +108,8 @@ export async function sendTextMessage(
   await warmupPromise;
   const result = await provider.generateText({
     userId: input.userId,
+    environmentId: chat.environmentId,
+    chatId: input.chatId,
     history,
     prompt: input.prompt,
     systemPrompt: input.systemPrompt,

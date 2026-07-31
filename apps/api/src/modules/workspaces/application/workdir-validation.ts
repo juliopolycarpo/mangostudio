@@ -21,12 +21,17 @@ export type WorkdirValidationResult =
   | { ok: true; resolvedPath: string }
   | { ok: false; reason: WorkdirValidationReason };
 
+export interface RuntimeSelection {
+  readonly userId: string;
+  readonly environmentId: string;
+}
+
 export async function validateWorkdir(
   path: string,
-  options?: { requireAbsolute?: boolean }
+  options?: { requireAbsolute?: boolean } & Partial<RuntimeSelection>
 ): Promise<WorkdirValidationResult> {
   try {
-    const runtime = await getRuntimeClient();
+    const runtime = await getRuntimeClient(options?.userId, options?.environmentId);
     return await runtime.workspace.validate({
       path,
       requireAbsolute: options?.requireAbsolute,
@@ -36,8 +41,11 @@ export async function validateWorkdir(
   }
 }
 
-export async function requireValidWorkdir(path: string): Promise<string> {
-  const validation = await validateWorkdir(path);
+export async function requireValidWorkdir(
+  path: string,
+  selection?: RuntimeSelection
+): Promise<string> {
+  const validation = await validateWorkdir(path, selection);
   if (!validation.ok) {
     throw new WorkdirValidationError(validation.reason);
   }

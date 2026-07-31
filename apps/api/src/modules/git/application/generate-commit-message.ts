@@ -30,6 +30,7 @@ export class NoCommitChangesError extends Error {
 export interface GenerateCommitMessageInput {
   readonly userId: string;
   readonly chatId: string;
+  readonly environmentId: string;
   readonly repoRoot: string;
   readonly status: GitStatus;
   readonly requestedModel?: string;
@@ -40,11 +41,16 @@ export interface GenerateCommitMessageInput {
   readonly signal?: AbortSignal;
 }
 
-async function recentCommitSubjects(root: string, signal?: AbortSignal): Promise<string[]> {
+async function recentCommitSubjects(
+  root: string,
+  input: Pick<GenerateCommitMessageInput, 'userId' | 'environmentId' | 'signal'>
+): Promise<string[]> {
   try {
     const result = await runGit(['log', '--format=%s', `-${RECENT_COMMIT_SUBJECTS_LIMIT}`], {
       cwd: root,
-      signal,
+      signal: input.signal,
+      userId: input.userId,
+      environmentId: input.environmentId,
     });
     return result.stdout
       .split('\n')
@@ -89,12 +95,16 @@ export async function generateCommitMessageUseCase(
     runGit(['diff', '--cached', '--no-ext-diff', '--no-color'], {
       cwd: input.repoRoot,
       signal: input.signal,
+      userId: input.userId,
+      environmentId: input.environmentId,
     }),
     runGit(['diff', '--no-ext-diff', '--no-color'], {
       cwd: input.repoRoot,
       signal: input.signal,
+      userId: input.userId,
+      environmentId: input.environmentId,
     }),
-    recentCommitSubjects(input.repoRoot, input.signal),
+    recentCommitSubjects(input.repoRoot, input),
   ]);
   const commitContext = buildCommitContextWithMetadata({
     status: input.status,
@@ -120,6 +130,7 @@ export async function generateCommitMessageUseCase(
   const result = await provider.generateText({
     userId: input.userId,
     chatId: input.chatId,
+    environmentId: input.environmentId,
     history: [],
     prompt: commitContext.context,
     systemPrompt: input.systemPrompt,

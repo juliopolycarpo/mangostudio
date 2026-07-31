@@ -89,7 +89,7 @@ export async function executeReplaceRange(
     workdirPolicy: context.workdirPolicy,
   });
 
-  const runtime = await getRuntimeClient();
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const { result, mutations } = await runtime.fs.replaceRange(
     {
       chatId: context.chatId,

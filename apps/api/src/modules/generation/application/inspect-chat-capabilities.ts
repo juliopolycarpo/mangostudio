@@ -27,11 +27,12 @@ import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
+import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { extractContextInfo } from '../../chats/application/list-chats';
-import { assertChatOwnership } from '../../chats/domain/chat-ownership';
+import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
 import { getById } from '../../chats/infrastructure/chat-repository';
 import { listMcpServerRows } from '../../mcp-servers/infrastructure/mcp-server-repository';
 import { listSkills } from '../../skills/application/skill-discovery';
@@ -58,7 +59,7 @@ export interface InspectChatCapabilitiesInput {
 export async function inspectChatCapabilities(
   input: InspectChatCapabilitiesInput
 ): Promise<ChatCapabilitiesResponse> {
-  await assertChatOwnership(input.chatId, input.userId, input.db);
+  const ownedChat = await getOwnedChatOrThrow(input.chatId, input.userId, input.db);
 
   const requestedAgentId = resolveRuntimeAgentId(input.agentMode, input.agentId);
   const profile = await getAgentProfile(input.db, input.userId, requestedAgentId);
@@ -70,10 +71,9 @@ export async function inspectChatCapabilities(
   const provider = resolvedModel.providerType
     ? getProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
+  const runtimeClient = await getRuntimeClient(input.userId, ownedChat.environmentId);
 
   const [chat, agentRuntime, appSettings, serverRows, skills] = await Promise.all([
-    // Ownership stays centralized in the domain helper above; this second read
-    // deliberately fetches the row needed to project its persisted context.
     getById(input.chatId, input.db),
     resolveAgentRuntime({
       db: input.db,
@@ -82,6 +82,7 @@ export async function inspectChatCapabilities(
       agentId: input.agentId,
       provider: provider.providerType,
       profile,
+      runtimeManifest: runtimeClient.manifest,
     }),
     getAppSettings(input.db, input.userId),
     listMcpServerRows(input.db, input.userId),

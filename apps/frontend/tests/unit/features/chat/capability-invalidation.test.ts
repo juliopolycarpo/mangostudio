@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { registerCapabilityInvalidationSources } from '../../../../src/features/chat/hooks/capability-invalidation';
 import { chatCapabilitiesQueryOptions } from '../../../../src/features/chat/hooks/use-chat-capabilities';
 import { chatKeys } from '../../../../src/features/chat/queries';
+import { environmentKeys } from '../../../../src/features/environments/queries';
 import { appSettingsKeys } from '../../../../src/features/settings/app/queries';
 import { skillSettingsKeys } from '../../../../src/features/settings/skills/queries';
 import { toolSettingsKeys } from '../../../../src/features/settings/tools/queries';
@@ -64,6 +65,32 @@ describe('capability invalidation registry', () => {
     queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
 
     queryClient.setQueryData(chatKeys.lists(), []);
+    await flushScheduledInvalidation();
+
+    expect(queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(false);
+    unregister();
+  });
+
+  it('invalidates capabilities when the environment entity list changes', async () => {
+    const queryClient = new QueryClient();
+    const unregister = registerCapabilityInvalidationSources(queryClient);
+    queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
+
+    // A connect, disconnect, or config change republishes the entity list, and
+    // shell eligibility is read from the selected runtime's manifest.
+    queryClient.setQueryData(environmentKeys.entities(), []);
+    await flushScheduledInvalidation();
+
+    expect(queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(true);
+    unregister();
+  });
+
+  it('ignores toolchain probe regions that share the environments root', async () => {
+    const queryClient = new QueryClient();
+    const unregister = registerCapabilityInvalidationSources(queryClient);
+    queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
+
+    queryClient.setQueryData(environmentKeys.runtimes(), []);
     await flushScheduledInvalidation();
 
     expect(queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(false);

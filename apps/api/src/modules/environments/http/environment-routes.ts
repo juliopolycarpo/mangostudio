@@ -28,6 +28,7 @@ import {
   type AgentCliDetectionService,
   agentCliDetectionService,
 } from '../application/agent-cli-detection';
+import { type EnvironmentService, environmentService } from '../application/environment-service';
 import { type InstallService, installService } from '../application/install-service';
 import {
   type RuntimeDetectionService,
@@ -37,6 +38,7 @@ import {
   type VersionManagerDetectionService,
   versionManagerDetectionService,
 } from '../application/version-manager-detection';
+import { createEnvironmentEntityRoutes } from './environment-entity-routes';
 import { createInstallRoutes } from './install-routes';
 
 const runtimeIdParams = t.Object({ id: RuntimeIdSchema });
@@ -95,7 +97,8 @@ export function createEnvironmentRoutes(
   runtimeService: RuntimeDetectionService = runtimeDetectionService,
   versionManagerService: VersionManagerDetectionService = versionManagerDetectionService,
   agentService: AgentCliDetectionService = agentCliDetectionService,
-  environmentInstallService: InstallService = installService
+  environmentInstallService: InstallService = installService,
+  entityService: EnvironmentService = environmentService
 ) {
   return new Elysia()
     .use(requireAuth)
@@ -179,7 +182,8 @@ export function createEnvironmentRoutes(
         },
       }
     )
-    .use(createInstallRoutes(environmentInstallService));
+    .use(createInstallRoutes(environmentInstallService))
+    .use(createEnvironmentEntityRoutes(entityService));
 }
 
 export const environmentRoutes = createEnvironmentRoutes();

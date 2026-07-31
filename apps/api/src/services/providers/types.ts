@@ -114,6 +114,8 @@ export interface GenerationConfig {
 /** Request for a single agentic turn — supports tool calling and provider-side continuation. */
 export interface AgentTurnRequest {
   userId: string;
+  /** Chat-owned runtime environment for provider-routed tool execution. */
+  environmentId?: string;
   /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
   chatId?: string;
   /** Assistant message of the turn — file mutations run by the provider join its checkpoint. */
@@ -167,6 +169,8 @@ export interface AgentTurnRequest {
 /** Input for text generation. */
 export interface TextGenerationRequest {
   userId: string;
+  /** Chat-owned runtime environment for provider-routed tool execution. */
+  environmentId?: string;
   /** Owning chat — required for provider-routed tool execution (e.g. Cursor sidecar RPC). */
   chatId?: string;
   /** Assistant message of the turn — file mutations run by the provider join its checkpoint. */

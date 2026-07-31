@@ -3,10 +3,18 @@ import {
   buildGitArgv as runtimeBuildGitArgv,
   buildGitEnvironment as runtimeBuildGitEnvironment,
 } from '@mangostudio/runtime';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getRuntimeClient } from '../../../services/runtime-client';
+
+export interface GitRuntimeSelection {
+  readonly userId: string;
+  readonly environmentId: string;
+}
 
 export interface RunGitOptions {
   readonly cwd: string;
+  readonly userId?: string;
+  readonly environmentId?: string;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
   readonly acceptedExitCodes?: readonly number[];
@@ -44,8 +52,6 @@ export class GitCliError extends Error {
   }
 }
 
-let availabilityProbe: Promise<boolean> | null = null;
-
 /** Builds the direct argv passed to Bun.spawn; no shell is involved. */
 export function buildGitArgv(args: readonly string[]): string[] {
   return runtimeBuildGitArgv(args);
@@ -64,7 +70,7 @@ export async function runGit(
   options: RunGitOptions
 ): Promise<GitCommandResult> {
   try {
-    const runtime = await getRuntimeClient();
+    const runtime = await getRuntimeClient(options.userId, options.environmentId);
     return await runtime.git.exec(
       {
         args,
@@ -80,30 +86,33 @@ export async function runGit(
 }
 
 /**
- * Probes Git once per process. A positive result is cached for the lifetime of the
- * server; a negative one is not, because it can mean "the runtime handshake was
- * down" rather than "Git is missing", and pinning that would report Git as
- * unavailable until restart. `getRuntimeClient` drops cached rejections for the
- * same reason.
+ * Reads Git availability from the connected runtime's manifest on every call
+ * rather than memoizing it. A memo keyed by environment outlives the connection
+ * it described: disconnects, config changes, and a deleted id recreated against
+ * a different target would all keep answering for the old runtime. The
+ * connection manager already caches the connection and its manifest, so a
+ * connected environment costs a map lookup here. The `--version` fallback
+ * covers a failed handshake only — the manager drops cached rejections, so it
+ * gets one reconnect attempt before Git is reported unavailable.
  */
-export function isGitAvailable(): Promise<boolean> {
-  availabilityProbe ??= probeGitAvailability().then((available) => {
-    if (!available) availabilityProbe = null;
-    return available;
-  });
-  return availabilityProbe;
-}
-
-async function probeGitAvailability(): Promise<boolean> {
+export async function isGitAvailable(
+  selection: GitRuntimeSelection = {
+    userId: 'local',
+    environmentId: LOCAL_ENVIRONMENT_ID,
+  }
+): Promise<boolean> {
   try {
-    const runtime = await getRuntimeClient();
+    const runtime = await getRuntimeClient(selection.userId, selection.environmentId);
     return runtime.manifest.git.available;
   } catch {
-    // Fall through to a second attempt when the handshake itself failed; the
-    // connection manager drops the cached rejection, so this can reconnect.
+    // Fall through to a second attempt when the handshake itself failed.
   }
   try {
-    await runGit(['--version'], { cwd: process.cwd(), timeoutMs: 5_000 });
+    await runGit(['--version'], {
+      cwd: process.cwd(),
+      timeoutMs: 5_000,
+      ...selection,
+    });
     return true;
   } catch {
     return false;

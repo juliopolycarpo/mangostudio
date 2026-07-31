@@ -134,7 +134,11 @@ async function routeWorkdir(
     return {
       workdir: resolution.workdir,
       chat: resolution.chat,
-      invalidationTarget: { userId, chatId: resolution.chat.id },
+      invalidationTarget: {
+        userId,
+        chatId: resolution.chat.id,
+        environmentId: resolution.chat.environmentId,
+      },
     };
   }
   if (resolution.state === 'no-workdir') {
@@ -153,7 +157,10 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if (resolution.state !== 'ok') return chatAccessDenied(resolution, set);
 
         try {
-          return await getRepoState(resolution.workdir, request.signal);
+          return await getRepoState(resolution.workdir, request.signal, {
+            userId: user?.id ?? '',
+            environmentId: resolution.chat.environmentId,
+          });
         } catch (error) {
           return gitCommandError(error, set);
         }
@@ -288,7 +295,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const { workdir, chat } = resolved;
 
         try {
-          const repoState = await getRepoState(workdir, request.signal);
+          const repoState = await getRepoState(
+            workdir,
+            request.signal,
+            resolved.invalidationTarget
+          );
           if (repoState.state !== 'repo') {
             set.status = 409;
             return {
@@ -300,6 +311,7 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           return await generateCommitMessageUseCase({
             userId,
             chatId: chat.id,
+            environmentId: chat.environmentId,
             repoRoot: repoState.root,
             status: repoState.status,
             requestedModel: body.model,
@@ -392,7 +404,8 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           return await getHeadMessage(
             resolved.workdir,
             settings.gitSettings.signOff,
-            request.signal
+            request.signal,
+            resolved.invalidationTarget
           );
         } catch (error) {
           return gitWriteError(error, set);
@@ -533,7 +546,7 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         if ('error' in resolved) return resolved.error;
 
         try {
-          return await stashList(resolved.workdir, request.signal);
+          return await stashList(resolved.workdir, request.signal, resolved.invalidationTarget);
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -556,7 +569,7 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await listBranches(resolved.workdir, request.signal);
+          return await listBranches(resolved.workdir, request.signal, resolved.invalidationTarget);
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -719,7 +732,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await listHistory(resolved.workdir, query.cursor, request.signal);
+          return await listHistory(
+            resolved.workdir,
+            query.cursor,
+            request.signal,
+            resolved.invalidationTarget
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -742,7 +760,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await getCommitDetails(resolved.workdir, query.hash, request.signal);
+          return await getCommitDetails(
+            resolved.workdir,
+            query.hash,
+            request.signal,
+            resolved.invalidationTarget
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -765,7 +788,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
         if ('error' in resolved) return resolved.error;
         try {
-          return await getFileDiff(resolved.workdir, query, request.signal);
+          return await getFileDiff(
+            resolved.workdir,
+            query,
+            request.signal,
+            resolved.invalidationTarget
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }

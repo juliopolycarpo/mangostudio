@@ -13,6 +13,7 @@ import {
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
 import type { AIProvider, ToolDefinition } from '../../../services/providers/types';
+import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
 import type { WorkdirPolicy } from '../../../services/tools/types';
@@ -58,6 +59,7 @@ export interface TurnContextInput {
 export interface TurnContext {
   chatId: string;
   userId: string;
+  environmentId: string;
   prompt: string;
   attachmentIds: string[];
   interactionMode: 'chat' | 'agent';
@@ -105,6 +107,7 @@ export async function resolveTurnContext(
   const provider = providerType
     ? getProvider(providerType)
     : await getProviderForModel(modelId, input.userId);
+  const runtimeClient = await getRuntimeClient(input.userId, chat.environmentId);
 
   const [agentRuntime, appSettings] = await Promise.all([
     resolveAgentRuntime({
@@ -115,6 +118,7 @@ export async function resolveTurnContext(
       provider: provider.providerType,
       requestRuntimeSettings: getRequestRuntimeSettings(provider.providerType, input),
       profile: resolvedAgentProfile,
+      runtimeManifest: runtimeClient.manifest,
     }),
     getAppSettings(db, input.userId),
   ]);
@@ -170,6 +174,7 @@ export async function resolveTurnContext(
   return {
     chatId: input.chatId,
     userId: input.userId,
+    environmentId: chat.environmentId,
     prompt: input.prompt,
     attachmentIds,
     interactionMode,
