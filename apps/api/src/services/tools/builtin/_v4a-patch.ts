@@ -41,7 +41,7 @@ interface V4aHunkLine {
   readonly lineNumber: number;
 }
 
-export interface V4aUpdateHunk {
+interface V4aUpdateHunk {
   readonly marker?: string;
   readonly lines: readonly V4aHunkLine[];
   readonly lineNumber: number;

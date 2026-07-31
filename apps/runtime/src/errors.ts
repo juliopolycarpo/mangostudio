@@ -3,6 +3,7 @@ import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 export type RuntimeServiceErrorKind =
   | 'path_access'
   | 'tool_argument'
+  | 'grep_pattern'
   | 'file_not_read'
   | 'partial_read'
   | 'stale_file'

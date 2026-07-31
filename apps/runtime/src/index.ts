@@ -1,3 +1,4 @@
+export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 export { RuntimeProtocolClient, type RuntimeRequestOptions } from './client';
 export {
   PathAccessError,
@@ -12,6 +13,7 @@ export {
 } from './host';
 export { createLocalRuntimeManifest } from './manifest';
 export type * from './methods';
+export { RUNTIME_ABSENT_HASH } from './methods';
 export { createRuntimeMethodHandlers } from './registry';
 export { createLocalRuntimeHost } from './runtime';
 export {

@@ -1,15 +1,15 @@
 import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { PathAccessError, RuntimeToolArgumentError } from '../../errors';
+import { PathAccessError, RuntimeServiceError } from '../../errors';
 import type { RuntimeGrepParams, RuntimeGrepResult } from '../../methods';
 import { containsNulByte, isRuntimePathAllowed } from '../fs-utils';
 
 const BINARY_PROBE_BYTES = 1024;
 const DEFAULT_FILE_GLOB = '**/*';
 
-export class GrepPatternError extends RuntimeToolArgumentError {
+export class GrepPatternError extends RuntimeServiceError {
   constructor(message: string) {
-    super(message);
+    super('grep_pattern', message);
     this.name = 'GrepPatternError';
   }
 }

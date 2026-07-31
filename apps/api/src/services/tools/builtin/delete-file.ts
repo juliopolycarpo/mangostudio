@@ -3,25 +3,12 @@
  * Deletes a regular file after confirming the chat has read its current contents.
  */
 
-import { unlink } from 'node:fs/promises';
-import {
-  assertFresh,
-  FileNotReadError,
-  forgetFile,
-  StaleFileError,
-  withPathLocks,
-} from '../file-freshness';
-import {
-  ensureFileMutationCheckpoint,
-  recordFileMutationAfterHash,
-} from '../file-mutation-snapshot';
+import { getRuntimeClient } from '../../runtime-client';
+import { persistRuntimeMutations } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  assertRegularFilePath,
-  explainUnreadableMutationTarget,
   getRequiredPathArg,
-  isErrnoException,
   normalizePathValidationSettings,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
@@ -77,31 +64,18 @@ export async function executeDeleteFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  return await withPathLocks([resolvedPath], async () => {
-    await assertRegularFilePath(resolvedPath, 'delete');
-
-    try {
-      await assertFresh(context.chatId, resolvedPath);
-    } catch (error) {
-      if (error instanceof FileNotReadError) {
-        throw await explainUnreadableMutationTarget(resolvedPath, 'delete', error);
-      }
-      throw error;
-    }
-
-    const captured = await ensureFileMutationCheckpoint(context, resolvedPath, 'delete');
-
-    try {
-      await unlink(resolvedPath);
-    } catch (error) {
-      if (isErrnoException(error, 'ENOENT')) throw new StaleFileError(resolvedPath);
-      throw error;
-    }
-
-    forgetFile(context.chatId, resolvedPath);
-    await recordFileMutationAfterHash(context, captured, null);
-    return { path: args.path, deleted: true };
-  });
+  const runtime = await getRuntimeClient();
+  const { result, mutations } = await runtime.fs.deleteFile(
+    {
+      chatId: context.chatId,
+      inputPath: args.path,
+      resolvedPath,
+      captureSnapshot: Boolean(context.assistantMessageId),
+    },
+    context.signal ? { signal: context.signal } : undefined
+  );
+  await persistRuntimeMutations(context, mutations);
+  return result;
 }
 
 function execute(
