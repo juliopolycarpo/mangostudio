@@ -8,6 +8,7 @@ import {
   filterBinaryTargets,
   type ReleasePlatformId,
   releaseArchiveFileName,
+  runtimeBinaryName,
 } from '../lib/release-targets';
 import { archiveReleaseAssets } from '../release/archive-assets';
 
@@ -50,6 +51,7 @@ const stageMuslPlatforms = (outDir: string, arches: readonly ReleasePlatformId[]
     const sourceDir = join(outDir, arch);
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
+    writeFileSync(join(sourceDir, 'mangostudio-runtime'), 'runtime binary');
   }
 };
 
@@ -74,6 +76,7 @@ const createMuslReleasePlan = (options: {
       platform: target,
       sourceDir,
       binaryPath: join(sourceDir, target.name),
+      runtimeBinaryPath: join(sourceDir, runtimeBinaryName(target.name)),
       cursorSidecarDir: join(sourceDir, 'cursor-sidecar'),
       readmePath: join(outDir, 'README.md'),
       assetName,
@@ -107,6 +110,7 @@ describe.serial('archiveReleaseAssets', () => {
     const sourceDir = join(outDir, 'linux-x64');
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
+    writeFileSync(join(sourceDir, 'mangostudio-runtime'), 'runtime binary');
     writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
 
     const plan = createReleaseAssetPlan({
@@ -129,6 +133,7 @@ describe.serial('archiveReleaseAssets', () => {
     const sidecarDir = join(sourceDir, 'cursor-sidecar');
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
+    writeFileSync(join(sourceDir, 'mangostudio-runtime'), 'runtime binary');
     writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
     mkdirSync(sidecarDir, { recursive: true });
     writeFileSync(join(sidecarDir, 'run-agent.mjs'), '#!/usr/bin/env node');

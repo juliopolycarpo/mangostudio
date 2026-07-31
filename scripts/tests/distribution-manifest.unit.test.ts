@@ -11,7 +11,11 @@ import {
   parseDistributionManifest,
   validateDistributionManifest,
 } from '../lib/distribution-manifest';
-import { ALL_BINARY_TARGETS, releaseArchiveFileName } from '../lib/release-targets';
+import {
+  ALL_BINARY_TARGETS,
+  type ReleasePlatformId,
+  releaseArchiveFileName,
+} from '../lib/release-targets';
 
 let tempDirs: string[] = [];
 
@@ -20,7 +24,10 @@ afterEach(() => {
   tempDirs = [];
 });
 
-function fixture(): { rootDir: string; manifest: ReturnType<typeof createDistributionManifest> } {
+function fixture(options: { readonly cursorSidecarTargets?: readonly ReleasePlatformId[] } = {}): {
+  rootDir: string;
+  manifest: ReturnType<typeof createDistributionManifest>;
+} {
   const rootDir = mkdtempSync(join(tmpdir(), 'mango-distribution-'));
   tempDirs.push(rootDir);
   mkdirSync(join(rootDir, '.mango', 'out'), { recursive: true });
@@ -35,6 +42,10 @@ function fixture(): { rootDir: string; manifest: ReturnType<typeof createDistrib
     const targetDir = join(rootDir, '.mango', 'out', target.arch);
     mkdirSync(targetDir, { recursive: true });
     writeFileSync(join(targetDir, target.name), target.arch);
+    if (options.cursorSidecarTargets?.includes(target.arch)) {
+      mkdirSync(join(targetDir, 'cursor-sidecar'), { recursive: true });
+      writeFileSync(join(targetDir, 'cursor-sidecar', 'index.js'), 'sidecar');
+    }
     writeFileSync(
       join(rootDir, 'release-assets', releaseArchiveFileName('1.2.3', target)),
       `archive-${target.arch}`
@@ -84,6 +95,39 @@ describe('distribution manifest', () => {
     expect(
       manifest.targets.find((target) => target.id === 'linux-x64-musl')?.npmPackage
     ).toBeNull();
+  });
+
+  test('promises the same archive layout the release archives actually contain', () => {
+    const { manifest } = fixture();
+
+    // extract-target.ts asserts the extracted members equal this list exactly,
+    // so a binary that ships without being named here fails every smoke job.
+    expect(manifest.targets.find((target) => target.id === 'linux-x64')?.archiveMembers).toEqual([
+      'mangostudio',
+      'mangostudio-runtime',
+      'README.md',
+    ]);
+    expect(manifest.targets.find((target) => target.id === 'windows-x64')?.archiveMembers).toEqual([
+      'mangostudio.exe',
+      'mangostudio-runtime.exe',
+      'README.md',
+    ]);
+  });
+
+  test('records the Cursor sidecar only for targets that built one', () => {
+    const { manifest } = fixture({ cursorSidecarTargets: ['linux-x64'] });
+
+    expect(manifest.targets.find((target) => target.id === 'linux-x64')?.archiveMembers).toEqual([
+      'mangostudio',
+      'mangostudio-runtime',
+      'cursor-sidecar',
+      'README.md',
+    ]);
+    expect(manifest.targets.find((target) => target.id === 'linux-arm64')?.archiveMembers).toEqual([
+      'mangostudio',
+      'mangostudio-runtime',
+      'README.md',
+    ]);
   });
 
   test('rejects duplicate target and file identities', () => {

@@ -73,7 +73,7 @@ function prepareContextDir(contextDir: string): void {
 }
 
 function stageFromBuildOutput(target: DockerStageTarget): void {
-  copyTarget(target, target.binaryPath);
+  copyTarget(target, target.binaryPath, target.runtimeBinaryPath);
 }
 
 async function stageFromReleaseAsset(
@@ -92,19 +92,30 @@ async function stageFromReleaseAsset(
   );
   try {
     await runCommand(['tar', '-xzf', archivePath, '-C', extractDir]);
-    copyTarget(target, join(extractDir, target.platform.name));
+    copyTarget(
+      target,
+      join(extractDir, target.platform.name),
+      join(extractDir, target.runtimeBinaryName)
+    );
   } finally {
     rmSync(extractDir, { force: true, recursive: true });
   }
 }
 
-function copyTarget(target: DockerStageTarget, binaryPath: string): void {
+function copyTarget(
+  target: DockerStageTarget,
+  binaryPath: string,
+  runtimeBinaryPath: string
+): void {
   assertFile(binaryPath, `${target.platform.arch} binary`);
+  assertFile(runtimeBinaryPath, `${target.platform.arch} runtime binary`);
 
   rmSync(target.contextArchDir, { force: true, recursive: true });
   mkdirSync(target.contextArchDir, { recursive: true });
   cpSync(binaryPath, target.stagedBinaryPath);
   chmodSync(target.stagedBinaryPath, 0o755);
+  cpSync(runtimeBinaryPath, target.stagedRuntimeBinaryPath);
+  chmodSync(target.stagedRuntimeBinaryPath, 0o755);
 }
 
 async function runCommand(cmd: string[]): Promise<void> {

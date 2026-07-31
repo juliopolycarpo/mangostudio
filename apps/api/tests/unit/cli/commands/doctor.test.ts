@@ -85,6 +85,8 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
         ok: true,
         detail: 'validate_api_key reached SDK (auth rejected probe key)',
       }),
+    probeRuntimeBinary: () =>
+      Promise.resolve({ path: null, present: false, version: null, error: null }),
     listChatGptConnectors: () => [],
     collectChatGptChecks: () =>
       Promise.resolve([
@@ -127,6 +129,31 @@ describe('runDoctor', () => {
     expect(text).toContain('0 failure(s)');
     expect(text).not.toContain('Cursor Node');
     expect(exited).toBe(-1);
+  });
+
+  it('surfaces a runtime binary that drifted from the hub release', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          probeRuntimeBinary: () =>
+            Promise.resolve({
+              path: '/app/mangostudio-runtime',
+              present: true,
+              version: '0.0.1',
+              error: null,
+            }),
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    const text = lines.join('\n');
+    expect(text).toContain('Runtime binary');
+    expect(text).toContain('v0.0.1 does not match hub');
+    expect(text).toContain('1 warning(s), 0 failure(s).');
   });
 
   it('exits 1 when a required directory check fails', async () => {

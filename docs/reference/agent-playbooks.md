@@ -460,6 +460,28 @@ Open these first:
 - `scripts/build.ts`
 - `scripts/test-build.ts` (binary smoke)
 
+The build produces two binaries per platform: `mangostudio` and the
+`mangostudio-runtime` execution host, compiled from `apps/runtime/src/cli.ts`. They
+carry the same build stamp and ship together in every channel — archives, npm
+platform packages, and the Docker images — because the hub resolves the runtime as a
+sibling of its own executable and the protocol handshake refuses a version mismatch.
+
+## Out-Of-Process Environments (stdio)
+
+Open these first:
+
+- `apps/runtime/src/cli.ts` (binary entry), `apps/runtime/src/transports/stdio.ts` (NDJSON port)
+- `apps/api/src/services/runtime-client/spawn-runtime-child.ts` (spawn, handshake, teardown)
+- `apps/api/src/services/runtime-client/runtime-connection-manager.ts` (state machine, backoff)
+- `apps/api/src/lib/runtime-paths.ts` (`resolveRuntimeLaunchCommand`)
+- `apps/frontend/src/features/environments/components/AddEnvironmentDialog.tsx`
+- Reference: `docs/architecture/hub-runtime.md`
+
+Reconnection is a backoff deadline checked on the next use, not a scheduled timer;
+`#markUnavailable` is where a dead runtime becomes `disconnected`. The stdio child's
+stdout is protocol-only — anything written to it there desynchronises the stream and
+tears the connection down.
+
 ## CLI And Server Lifecycle
 
 Covers `serve`, `status`, `stop`, `killserver`, and `doctor`.

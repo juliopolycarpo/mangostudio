@@ -98,6 +98,14 @@ describe('executeGlob', () => {
     }
   });
 
+  it('refuses to search when nothing anchors the pattern', async () => {
+    // The hub's own working directory is not a legal answer: the search runs on
+    // the environment, whose filesystem need not contain it.
+    await expect(executeGlob({ pattern: '**/*.ts' }, makeContext())).rejects.toThrow(
+      'no working directory bound'
+    );
+  });
+
   it('matches files by pattern from the given cwd', async () => {
     await seedTree();
     const result = await executeGlob({ pattern: '**/*.ts', cwd: tempDir }, makeContext());

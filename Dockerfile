@@ -30,6 +30,7 @@ LABEL org.opencontainers.image.source=$SOURCE_URL \
       org.opencontainers.image.description="AI-powered image generation and chat studio"
 
 COPY --chmod=0755 docker-ctx/bookworm/${TARGETARCH}/mangostudio /usr/local/bin/mangostudio
+COPY --chmod=0755 docker-ctx/bookworm/${TARGETARCH}/mangostudio-runtime /usr/local/bin/mangostudio-runtime
 
 ENV HOME=/data
 ENV TMPDIR=/tmp

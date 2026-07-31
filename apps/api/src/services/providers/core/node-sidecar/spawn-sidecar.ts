@@ -1,17 +1,12 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
+import { appendBoundedTail } from '../../../../lib/bounded-tail';
 import { sanitizeShellEnv } from '../../../tools/builtin/_shell-env';
 
 /** Keep only the stderr tail so a chatty crashing sidecar cannot grow memory unbounded. */
 const MAX_STDERR_CHARS = 16_384;
 const STDERR_EXCERPT_MAX_CHARS = 2_000;
-
-/** Appends a chunk to a rolling buffer, keeping at most maxChars of the tail. */
-export function appendBoundedTail(existing: string, chunk: string, maxChars: number): string {
-  const combined = existing + chunk;
-  return combined.length > maxChars ? combined.slice(-maxChars) : combined;
-}
 
 export interface ChildExitStatus {
   code: number | null;

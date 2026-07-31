@@ -104,3 +104,7 @@ export {
   connectInProcessRuntime,
   type InProcessRuntimeConnection,
 } from './transports/in-process';
+export {
+  createStdioFramePort,
+  type StdioFramePortClosure,
+} from './transports/stdio';

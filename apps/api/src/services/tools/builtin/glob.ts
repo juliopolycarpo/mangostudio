@@ -10,6 +10,7 @@ import type { ToolContext } from '../types';
 import {
   createRuntimePathFilter,
   normalizePathValidationSettings,
+  PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
@@ -100,14 +101,25 @@ export async function executeGlob(
   return { ...result, matches: [...result.matches] };
 }
 
+/**
+ * The hub's own working directory is not a legal answer here: the search runs
+ * on the environment, whose filesystem need not contain it at all. With no cwd
+ * argument and no workdir bound to the chat there is nothing to search, which
+ * is the same conclusion every other filesystem tool reaches for a relative
+ * path it cannot anchor.
+ */
 function resolveCwd(
   input: string | undefined,
   settings: PathValidationSettings,
   context: ToolContext
 ): string {
   const policy = context.workdirPolicy;
-  const base =
-    input?.trim() || (policy?.restricted ? policy.root : context.workdir) || process.cwd();
+  const base = input?.trim() || (policy?.restricted ? policy.root : context.workdir);
+  if (!base) {
+    throw new PathAccessError(
+      'No directory to search: this chat has no working directory bound. Pass an absolute cwd.'
+    );
+  }
   return resolveAndValidatePath(base, {
     settings,
     workdir: context.workdir,

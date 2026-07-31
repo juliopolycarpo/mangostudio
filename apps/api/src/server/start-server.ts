@@ -24,6 +24,7 @@ import {
   flushObservabilitySnapshot,
   loadObservabilitySnapshot,
 } from '../services/providers/core/provider-observability';
+import { closeAllRuntimeConnections } from '../services/runtime-client/runtime-connection-manager';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
@@ -121,12 +122,16 @@ function logRunning(host: string, port: number): void {
   console.warn(`[api] Scalar UI available at http://${shown}:${port}/scalar`);
 }
 
-/** Flush observability, close MCP sessions, drop the state file, and close the database. */
+/**
+ * Flush observability, close MCP sessions and runtime children, drop the state
+ * file, and close the database.
+ */
 async function gracefulStop(): Promise<void> {
   await staleTurnReconcileSweep?.stop();
   staleTurnReconcileSweep = null;
   await flushObservabilitySnapshot();
   await closeAllMcpClients();
+  await closeAllRuntimeConnections();
   await removeState();
   await closeDb();
 }

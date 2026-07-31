@@ -140,6 +140,11 @@ export function createEnvironmentService(
       // the write lands means a rejected update leaves the connection intact.
       if (input.enabled === false || input.config !== undefined) {
         manager.disconnect(userId, id);
+      } else if (input.enabled === true) {
+        // Calls that reached it while it was disabled each recorded a failure,
+        // which can already have latched the backoff. Re-enabling is the answer
+        // to that, so clear it here rather than making the user press Connect.
+        manager.clearBackoff(userId, id);
       }
       publish(userId);
       return toEnvironment(updated, manager);
@@ -166,7 +171,9 @@ export function createEnvironmentService(
     async connect(userId, id) {
       await requireRecord(userId, id);
       try {
-        await manager.connect(userId, id);
+        // A deliberate connect clears any backoff: the user is telling us the
+        // cause was fixed, so waiting out a retry window would be theatre.
+        await manager.connect(userId, id, { force: true });
       } catch (error) {
         // The row can be removed between the guard above and the manager's own
         // lookup, which reports it as an unavailable runtime. That is a missing

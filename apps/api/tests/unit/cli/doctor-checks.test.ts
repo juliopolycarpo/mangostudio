@@ -7,6 +7,7 @@ import {
   checkFrontend,
   checkInstance,
   checkRuntime,
+  checkRuntimeBinary,
   collectCursorDoctorChecks,
   cursorRuntimeChainReady,
   type FsProbe,
@@ -179,6 +180,57 @@ describe('checkRuntime', () => {
     expect(result.status).toBe('ok');
     expect(result.detail).toContain('v1.2.3');
     expect(result.detail).toContain('standalone');
+  });
+});
+
+describe('checkRuntimeBinary', () => {
+  const at = '/opt/mangostudio/mangostudio-runtime';
+
+  it('treats a source checkout as fine: the launcher runs the workspace entry', () => {
+    const result = checkRuntimeBinary(
+      { path: null, present: false, version: null, error: null },
+      '1.2.3'
+    );
+    expect(result.status).toBe('ok');
+    expect(result.detail).toContain('source checkout');
+  });
+
+  it('warns rather than fails when the binary is missing, since Local still works', () => {
+    const result = checkRuntimeBinary(
+      { path: at, present: false, version: null, error: null },
+      '1.2.3'
+    );
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain(at);
+    expect(result.detail).toContain('stdio environments');
+  });
+
+  it('warns when the binary and the hub come from different releases', () => {
+    const result = checkRuntimeBinary(
+      { path: at, present: true, version: '1.2.2', error: null },
+      '1.2.3'
+    );
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('v1.2.2');
+    expect(result.detail).toContain('v1.2.3');
+  });
+
+  it('warns when the binary cannot report a version at all', () => {
+    const result = checkRuntimeBinary(
+      { path: at, present: true, version: null, error: 'exited with code 126' },
+      '1.2.3'
+    );
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('exited with code 126');
+  });
+
+  it('passes when the versions are locked together', () => {
+    const result = checkRuntimeBinary(
+      { path: at, present: true, version: '1.2.3', error: null },
+      '1.2.3'
+    );
+    expect(result.status).toBe('ok');
+    expect(result.detail).toContain('v1.2.3');
   });
 });
 

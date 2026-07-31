@@ -20,6 +20,7 @@ import {
 import { type FsProbe, nearestExistingWritable } from '../lib/fs-probe';
 import type { ServerState } from '../lib/server-state';
 import type { CursorRuntimeChainStep } from '../services/providers/cursor/runtime-availability';
+import type { RuntimeBinaryProbe } from './runtime-binary-probe';
 
 export type { FsProbe } from '../lib/fs-probe';
 
@@ -114,6 +115,33 @@ export function checkRuntime(version: string, standalone: boolean): CheckResult 
     'Runtime',
     `v${version} ${process.platform}-${process.arch} ${standalone ? 'standalone' : 'dev'}`
   );
+}
+
+/**
+ * Reports the runtime binary as a warning rather than a failure: a hub without
+ * it still serves chats through the embedded Local runtime, it just cannot
+ * spawn stdio environments.
+ */
+export function checkRuntimeBinary(probe: RuntimeBinaryProbe, hubVersion: string): CheckResult {
+  if (!probe.path) {
+    return ok('Runtime binary', 'workspace entry (source checkout)');
+  }
+  if (!probe.present) {
+    return warn('Runtime binary', `missing at ${probe.path}; stdio environments cannot start`);
+  }
+  if (probe.error || !probe.version) {
+    return warn(
+      'Runtime binary',
+      `${probe.path} did not report a version (${probe.error ?? 'unknown reason'})`
+    );
+  }
+  if (probe.version !== hubVersion) {
+    return warn(
+      'Runtime binary',
+      `v${probe.version} does not match hub v${hubVersion}; reinstall so both come from one release`
+    );
+  }
+  return ok('Runtime binary', `v${probe.version} at ${probe.path}`);
 }
 
 export function collectBuildIdentityChecks(input: BuildIdentityInput): CheckResult[] {

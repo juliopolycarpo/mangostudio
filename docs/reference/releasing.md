@@ -67,9 +67,16 @@ updating every template and installer in the same release.
 | `mangostudio-<version>-frontend-dist.tar.gz` | Frontend bundle only (`apps/frontend/dist`)                                                                                |
 | `SHA256SUMS`                                 | Checksums for every asset above                                                                                            |
 
-Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`)
-and `README.md` — no nested platform directory. The binary embeds the frontend
-UI; no sibling asset directory is required at runtime.
+Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`),
+`mangostudio-runtime` (or `mangostudio-runtime.exe`), and `README.md` — no nested
+platform directory. The main binary embeds the frontend UI; no sibling asset
+directory is required at runtime.
+
+The two binaries are one unit. MangoStudio resolves `mangostudio-runtime` as a
+sibling of its own executable to run environments out of process, and the protocol
+handshake refuses a version mismatch, so every channel — archives, npm platform
+packages, and the Docker images — ships both from the same build. A channel that
+carries only the main binary silently loses out-of-process environments.
 
 `scripts/release/archive-assets.ts` assembles the full set; `scripts/lib/release-assets.ts`
 defines the naming contract and is covered by unit tests.

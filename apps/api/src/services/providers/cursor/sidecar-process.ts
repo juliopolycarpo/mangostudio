@@ -1,5 +1,6 @@
+import { appendBoundedTail } from '../../../lib/bounded-tail';
 import { getCursorSidecarScriptPath } from '../../../lib/runtime-paths';
-import { appendBoundedTail, buildNodeSidecarEnv } from '../core/node-sidecar/spawn-sidecar';
+import { buildNodeSidecarEnv } from '../core/node-sidecar/spawn-sidecar';
 import { formatCursorRuntimeUnavailableReason } from './runtime-reason';
 
 /**
