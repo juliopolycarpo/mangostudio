@@ -1,5 +1,5 @@
-import type { InteractionMode } from '@mangostudio/shared';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Kysely, Selectable, Updateable } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
