@@ -133,6 +133,46 @@ export function coverageCells(resource: LibraryResource): CoverageCell[] {
   return resource.coverage.map((coverage) => coverageCell(resource, coverage));
 }
 
+export interface TargetCoverageSummary {
+  readonly targetId: LibraryTargetId;
+  /** Resources this target reads at least one copy of. */
+  readonly present: number;
+  /** Of those, the ones it reads at a version the rest do not agree on. */
+  readonly divergent: number;
+}
+
+/**
+ * The matrix collapsed to one line per target, for surfaces with no room for a
+ * grid. Divergent rows are counted inside `present` rather than beside it: a
+ * divergent copy is a copy the target reads, and splitting the two would make
+ * the numbers stop adding up to what the matrix shows.
+ */
+export function summarizeCoverageByTarget(
+  resources: readonly LibraryResource[],
+  targetIds: readonly LibraryTargetId[]
+): TargetCoverageSummary[] {
+  const present = new Map<LibraryTargetId, number>();
+  const divergent = new Map<LibraryTargetId, number>();
+
+  for (const resource of resources) {
+    for (const cell of coverageCells(resource)) {
+      if (cell.state === 'absent') continue;
+      present.set(cell.targetId, (present.get(cell.targetId) ?? 0) + 1);
+      if (cell.state === 'divergent') {
+        divergent.set(cell.targetId, (divergent.get(cell.targetId) ?? 0) + 1);
+      }
+    }
+  }
+
+  // Driven by the target registry, not by the rows: a target that reads nothing
+  // is a real answer, and dropping its line would read as "not supported".
+  return targetIds.map((targetId) => ({
+    targetId,
+    present: present.get(targetId) ?? 0,
+    divergent: divergent.get(targetId) ?? 0,
+  }));
+}
+
 /** Newest modification across every copy, or 0 when the resource has none. */
 function newestModifiedAtMs(resource: LibraryResource): number {
   return resource.instances.reduce(

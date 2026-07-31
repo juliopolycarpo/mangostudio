@@ -1946,6 +1946,7 @@ export const messages: Messages = {
     nav: 'Environments',
     subtitle: 'What is installed, what is wrong, and what actually runs when you type.',
     tabs: {
+      overview: 'Overview',
       // Label only: the tab still lives at /environments/runtimes and every
       // runtime id on the wire is unchanged.
       runtimes: 'Toolchains',
@@ -2027,6 +2028,20 @@ export const messages: Messages = {
     },
     loadError: 'The environment state could not be loaded.',
     checkedAt: 'Checked at {time}',
+    overview: {
+      description: 'What this machine can run agents with, and what needs attention.',
+      // Each section is a summary of a tab, so its link says which one it opens.
+      open: 'Open {section}',
+      agentDetails: 'Details',
+      agentsEmpty: 'No agent CLI was found on this machine.',
+      agentsEmptyHint: 'MangoStudio can install one for you from the Agents tab.',
+      toolchainsEmpty: 'No toolchain was found on this machine.',
+      healthClear: 'Nothing needs attention.',
+      libraryEmpty: 'No library resources were found yet.',
+      libraryPresent: '{count} present',
+      libraryDivergent: '{count} divergent',
+      libraryNone: 'Reads nothing yet',
+    },
     runtimes: {
       description: 'Once two binaries share a name, only one runs. Here is which one.',
       effectiveLabel: 'Effective',

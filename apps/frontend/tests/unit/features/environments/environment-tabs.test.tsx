@@ -27,4 +27,24 @@ describe('EnvironmentTabs', () => {
       '/environments/agents'
     );
   });
+
+  it('opens the umbrella root as its own tab, leaving the deeper ones alone', async () => {
+    const { EnvironmentTabs } = await import(
+      '../../../../src/features/environments/components/EnvironmentTabs'
+    );
+
+    render(<EnvironmentTabs />);
+
+    expect(screen.getByRole('link', { name: 'Overview' })).toHaveAttribute('href', '/environments');
+    // Every pre-existing tab keeps the URL it had: the overview is a new landing
+    // page, not a reshuffle of the ones people already bookmarked.
+    expect(screen.getByRole('link', { name: 'Toolchains' })).toHaveAttribute(
+      'href',
+      '/environments/runtimes'
+    );
+    expect(screen.getByRole('link', { name: 'Health' })).toHaveAttribute(
+      'href',
+      '/environments/health'
+    );
+  });
 });

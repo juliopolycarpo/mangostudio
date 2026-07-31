@@ -31,7 +31,7 @@ import {
   versionManagerStatusesQueryOptions,
 } from '../queries';
 
-function useRuntimeStatuses() {
+export function useRuntimeStatuses() {
   return useQuery(runtimeStatusesQueryOptions());
 }
 

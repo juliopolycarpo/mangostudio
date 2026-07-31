@@ -13,7 +13,13 @@ import type { ReactNode } from 'react';
 import type { ToolAvatarSize } from '@/components/ui/ToolAvatar';
 import { ToolIdentityHeader } from '../identity/ToolIdentityHeader';
 
-const TOOL_CARD_SURFACE = 'rounded-2xl border border-outline-variant/15 bg-surface-container-high';
+/**
+ * The card surface itself. Exported so panels that are card-shaped without
+ * being a tool — the health rollup, the library snapshot — cannot drift away
+ * from the cards they sit beside.
+ */
+export const TOOL_CARD_SURFACE =
+  'rounded-2xl border border-outline-variant/15 bg-surface-container-high';
 
 const DENSITY_CLASS = {
   comfortable: 'space-y-4 p-5 sm:p-6',
