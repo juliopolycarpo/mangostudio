@@ -10,11 +10,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { ToolIdentityUpdateResponse } from '@mangostudio/shared/tool-identity';
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
 import { updateToolIdentity } from '../../../src/modules/tool-identity/application/tool-identity-service';
+import { storeUploadedToolImage } from '../../../src/modules/tool-identity/application/tool-image-service';
 import { toolIdentityRoutes } from '../../../src/modules/tool-identity/http/tool-identity-routes';
+import { getToolIdentityRow } from '../../../src/modules/tool-identity/infrastructure/tool-identity-repository';
 import { errorHandler } from '../../../src/plugins/error-handler';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
@@ -270,6 +273,51 @@ describe('tool identity image reset', () => {
 
     expect(((await cleared.json()) as ToolIdentityUpdateResponse).identity).toBeNull();
     expect(storedFiles()).toEqual([]);
+  });
+});
+
+describe('tool identity image cleanup ordering', () => {
+  /** The row as the service would read it before resolving an image change. */
+  function storedRow() {
+    return getToolIdentityRow(getDb(), testUser.id, DEFAULT_PROFILE_ID, 'agent:claude');
+  }
+
+  it('keeps the file an update replaces until the row write has succeeded', async () => {
+    const app = mountApp();
+    await app.handle(uploadRequest('agent:claude', PNG_BYTES, 'logo.png', 'image/png'));
+    const [original] = storedFiles();
+
+    const resolved = await storeUploadedToolImage(
+      new File([PNG_BYTES], 'next.png', { type: 'image/png' }),
+      await storedRow(),
+      testUser.id
+    );
+
+    // The replacement is on disk, but the row still names the original — so
+    // until that row is rewritten, the original is still the identity's image.
+    expect(storedFiles()).toHaveLength(2);
+    expect(storedFiles()).toContain(original);
+
+    // A busy database is enough to lose the write. When that happens the
+    // identity has to be exactly what it was, not pointing at a deleted file.
+    await resolved.rollback();
+    expect(storedFiles()).toEqual([original]);
+  });
+
+  it('drops the replaced file once the row has stopped naming it', async () => {
+    const app = mountApp();
+    await app.handle(uploadRequest('agent:claude', PNG_BYTES, 'logo.png', 'image/png'));
+    const [original] = storedFiles();
+
+    const resolved = await storeUploadedToolImage(
+      new File([PNG_BYTES], 'next.png', { type: 'image/png' }),
+      await storedRow(),
+      testUser.id
+    );
+    await resolved.commit();
+
+    expect(storedFiles()).toHaveLength(1);
+    expect(storedFiles()).not.toContain(original);
   });
 });
 

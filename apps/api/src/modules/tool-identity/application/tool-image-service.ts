@@ -62,39 +62,74 @@ export function patchKeepsImage(
 }
 
 /**
+ * The image half of an update, with the disk work it implies still pending.
+ *
+ * The file a change replaces cannot be deleted while resolving it, because the
+ * row that stops pointing at that file has not been written yet — and if the
+ * write then fails, the identity is left naming bytes that are gone. So the two
+ * deletions an update can owe are handed back as the two ways it can end:
+ * `commit` drops what was replaced, `rollback` drops what was written.
+ */
+export interface ResolvedToolImage {
+  readonly fields: ToolImageFields;
+  /** Call once the row is written: drops the file the update replaced. */
+  commit(): Promise<void>;
+  /** Call when the row write failed: drops the file the update wrote. */
+  rollback(): Promise<void>;
+}
+
+const NOTHING_TO_CLEAN = (): Promise<void> => Promise.resolve();
+
+/** No file changed hands, so neither ending has anything to clean up. */
+function unchanged(fields: ToolImageFields): ResolvedToolImage {
+  return { fields, commit: NOTHING_TO_CLEAN, rollback: NOTHING_TO_CLEAN };
+}
+
+function replacing(
+  fields: ToolImageFields,
+  existing: ToolIdentitySelect | undefined
+): ResolvedToolImage {
+  const replaced = existing?.imagePath ?? null;
+  // Keeping the new file would strand it: nothing else records its name.
+  const written = fields.imagePath !== replaced ? fields.imagePath : null;
+  return {
+    fields,
+    commit: () => deleteToolImage(replaced),
+    rollback: () => deleteToolImage(written),
+  };
+}
+
+/**
  * Resolves the image half of an update, performing the one-time fetch when the
- * user asked for a cached URL. Any file the update replaces is deleted here, so
- * the caller never has to reason about what is left on disk.
+ * user asked for a cached URL.
  */
 export async function resolveToolImageFields(
   patch: ToolImageUpdate | null | undefined,
   existing: ToolIdentitySelect | undefined,
   userId: string,
   fetchDeps: Partial<SafeFetchDeps> = {}
-): Promise<ToolImageFields> {
-  if (patch === undefined) return toImageFields(existing);
+): Promise<ResolvedToolImage> {
+  if (patch === undefined) return unchanged(toImageFields(existing));
 
-  if (patch === null) {
-    await deleteToolImage(existing?.imagePath ?? null);
-    return NO_IMAGE;
-  }
+  if (patch === null) return replacing(NO_IMAGE, existing);
 
   if (!patch.cache) {
     // Hotlinked: the browser loads it, so we keep the address and nothing else.
-    await deleteToolImage(existing?.imagePath ?? null);
-    return { imageSource: 'url', imageUrl: patch.url, imagePath: null, imageMimeType: null };
+    return replacing(
+      { imageSource: 'url', imageUrl: patch.url, imagePath: null, imageMimeType: null },
+      existing
+    );
   }
 
   // Saving an unrelated field — a rename — re-sends the image the dialog is
   // showing. Re-downloading it every time would turn every keystroke's worth of
   // editing into a request to someone else's server.
   if (existing?.imagePath && existing.imageUrl === patch.url) {
-    return toImageFields(existing);
+    return unchanged(toImageFields(existing));
   }
 
   const stored = await cacheRemoteImage(patch.url, userId, fetchDeps);
-  await deleteToolImage(existing?.imagePath ?? null);
-  return { imageSource: 'url', imageUrl: patch.url, ...stored };
+  return replacing({ imageSource: 'url', imageUrl: patch.url, ...stored }, existing);
 }
 
 /** Stores an uploaded file, replacing whatever the identity had before. */
@@ -102,15 +137,17 @@ export async function storeUploadedToolImage(
   file: File,
   existing: ToolIdentitySelect | undefined,
   userId: string
-): Promise<ToolImageFields> {
+): Promise<ResolvedToolImage> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const validated = await validateToolImage(bytes);
 
   const imagePath = buildToolImagePath(userId, validated.extension);
   await writeToolImage(imagePath, validated.bytes);
-  await deleteToolImage(existing?.imagePath ?? null);
 
-  return { imageSource: 'upload', imageUrl: null, imagePath, imageMimeType: validated.mimeType };
+  return replacing(
+    { imageSource: 'upload', imageUrl: null, imagePath, imageMimeType: validated.mimeType },
+    existing
+  );
 }
 
 async function cacheRemoteImage(

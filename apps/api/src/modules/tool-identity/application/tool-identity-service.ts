@@ -29,6 +29,7 @@ import {
 import { deleteToolImage, readToolImage } from '../infrastructure/tool-image-storage';
 import {
   patchKeepsImage,
+  type ResolvedToolImage,
   resolveToolImageFields,
   storeUploadedToolImage,
 } from './tool-image-service';
@@ -81,7 +82,9 @@ export async function updateToolIdentity(
   await assertOwnedMcpSubject(db, userId, subject);
 
   const image = await resolveToolImageFields(patch.image, existing, userId, fetchDeps);
-  return writeIdentity(db, userId, subjectKey, { displayName, monogram, ...image });
+  return writeIdentityWithImage(image, () =>
+    writeIdentity(db, userId, subjectKey, { displayName, monogram, ...image.fields })
+  );
 }
 
 /**
@@ -100,11 +103,37 @@ export async function uploadToolIdentityImage(
   const existing = await getToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey);
   const image = await storeUploadedToolImage(file, existing, userId);
 
-  return writeIdentity(db, userId, subjectKey, {
-    displayName: existing?.displayName ?? null,
-    monogram: existing?.monogram ?? null,
-    ...image,
-  });
+  return writeIdentityWithImage(image, () =>
+    writeIdentity(db, userId, subjectKey, {
+      displayName: existing?.displayName ?? null,
+      monogram: existing?.monogram ?? null,
+      ...image.fields,
+    })
+  );
+}
+
+/**
+ * Writes the row, then settles what the change owes the filesystem.
+ *
+ * The row is the record of which file an identity owns, so it is what decides
+ * which file is now garbage. Deleting first would mean a failed write — a busy
+ * database is enough — leaves the identity pointing at an avatar that no longer
+ * exists, and that loss is not recoverable.
+ */
+async function writeIdentityWithImage<T>(
+  image: ResolvedToolImage,
+  write: () => Promise<T>
+): Promise<T> {
+  let written: T;
+  try {
+    written = await write();
+  } catch (error) {
+    await image.rollback();
+    throw error;
+  }
+
+  await image.commit();
+  return written;
 }
 
 export interface StoredToolImage {
