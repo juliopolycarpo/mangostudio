@@ -16,7 +16,11 @@ import {
   createRealtimeBus,
   setRealtimeBusForTests,
 } from '../../../src/services/realtime/realtime-bus';
-import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
+import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
+import {
+  RuntimeConnectionManager,
+  type RuntimeConnectionManagerOptions,
+} from '../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestUser } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
@@ -37,14 +41,14 @@ afterEach(async () => {
   setRealtimeBusForTests(undefined);
 });
 
-function createTestApp() {
+function createTestApp(connectors: RuntimeConnectionManagerOptions['connectors'] = {}) {
   const repository = createEnvironmentRepository(getDb());
   const manager = new RuntimeConnectionManager({
     resolveEnvironment: async (userId, environmentId) => {
       const row = await repository.find(userId, environmentId);
       return row;
     },
-    connectors: {},
+    connectors,
   });
   const service = createEnvironmentService(repository, manager);
   const { app, restore } = createAuthenticatedApiTestApp(
@@ -52,7 +56,7 @@ function createTestApp() {
     createEnvironmentEntityRoutes(service)
   );
   restoreAuth = restore;
-  return { app, repository };
+  return { app, repository, manager };
 }
 
 function jsonRequest(method: string, body?: unknown): RequestInit {
@@ -231,6 +235,119 @@ describe('environment entity routes', () => {
     expect(await repository.find(TEST_USER.id, 'active-box')).not.toBeNull();
   });
 
+  it('drops a live connection when the transport it was opened from changes', async () => {
+    let closeCalls = 0;
+    const { app, manager } = createTestApp({
+      stdio: () =>
+        Promise.resolve({
+          client: {
+            manifest: {
+              platform: process.platform,
+              arch: process.arch,
+              pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
+              homeDir: '/home/test',
+              shells: ['bash'],
+              git: { available: true },
+              features: {
+                tools: true,
+                git: true,
+                probing: false,
+                mcp: false,
+                library: false,
+                checkpoints: true,
+              },
+            },
+          } as RuntimeClient,
+          close: () => closeCalls++,
+        }),
+    });
+
+    const createBody: CreateEnvironmentBody = {
+      id: 'repoint-box',
+      name: 'Repoint box',
+      transportKind: 'stdio',
+      config: { binaryPath: '/opt/mango-runtime' },
+    };
+    await app.handle(new Request('http://localhost/environments', jsonRequest('POST', createBody)));
+    const connected = await app.handle(
+      new Request('http://localhost/environments/repoint-box/connect', jsonRequest('POST'))
+    );
+    expect(connected.status).toBe(200);
+    expect(manager.getStatus(TEST_USER.id, 'repoint-box').state).toBe('connected');
+
+    const repointed = await app.handle(
+      new Request(
+        'http://localhost/environments/repoint-box',
+        jsonRequest('PUT', {
+          config: { binaryPath: '/opt/other-runtime' },
+        } satisfies UpdateEnvironmentBody)
+      )
+    );
+
+    // Otherwise the response advertises the new binary while every tool call
+    // keeps reaching the process opened from the old one.
+    expect(repointed.status).toBe(200);
+    expect((await repointed.json()) as Environment).toMatchObject({
+      config: { binaryPath: '/opt/other-runtime' },
+      status: { state: 'disconnected' },
+    });
+    expect(closeCalls).toBe(1);
+  });
+
+  it('keeps a live connection when a rejected update persists nothing', async () => {
+    let closeCalls = 0;
+    const { app, manager } = createTestApp({
+      stdio: () =>
+        Promise.resolve({
+          client: {
+            manifest: {
+              platform: process.platform,
+              arch: process.arch,
+              pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
+              homeDir: '/home/test',
+              shells: ['bash'],
+              git: { available: true },
+              features: {
+                tools: true,
+                git: true,
+                probing: false,
+                mcp: false,
+                library: false,
+                checkpoints: true,
+              },
+            },
+          } as RuntimeClient,
+          close: () => closeCalls++,
+        }),
+    });
+
+    await app.handle(
+      new Request(
+        'http://localhost/environments',
+        jsonRequest('POST', {
+          id: 'stable-box',
+          name: 'Stable box',
+          transportKind: 'stdio',
+          config: { binaryPath: '/opt/mango-runtime' },
+        } satisfies CreateEnvironmentBody)
+      )
+    );
+    await app.handle(
+      new Request('http://localhost/environments/stable-box/connect', jsonRequest('POST'))
+    );
+
+    const rejected = await app.handle(
+      new Request(
+        'http://localhost/environments/stable-box',
+        jsonRequest('PUT', { config: { binaryPath: 42 } })
+      )
+    );
+
+    expect(rejected.status).toBe(400);
+    expect(closeCalls).toBe(0);
+    expect(manager.getStatus(TEST_USER.id, 'stable-box').state).toBe('connected');
+  });
+
   it('surfaces unavailable transport connections as a stable conflict', async () => {
     const { app, repository } = createTestApp();
     await repository.create({
@@ -250,6 +367,32 @@ describe('environment entity routes', () => {
       code: 'CONFLICT',
       error: 'The stdio environment transport is not available yet.',
     });
+  });
+
+  it('reports a connect against a vanished environment as missing, not conflicting', async () => {
+    const { app, repository } = createTestApp({
+      stdio: async (definition) => {
+        // Stands in for the window between the route's existence check and the
+        // manager's own lookup: the row is gone by the time the transport opens.
+        await repository.remove(TEST_USER.id, definition.id);
+        throw new Error('runtime exited');
+      },
+    });
+    await repository.create({
+      id: 'vanishing',
+      userId: TEST_USER.id,
+      name: 'Vanishing',
+      transportKind: 'stdio',
+      config: {},
+      enabled: true,
+    });
+
+    const response = await app.handle(
+      new Request('http://localhost/environments/vanishing/connect', jsonRequest('POST'))
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: 'NOT_FOUND' });
   });
 
   it('publishes user-scoped invalidations after persisted entity changes', async () => {

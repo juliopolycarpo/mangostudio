@@ -68,9 +68,13 @@ export function createEnvironmentService(
   manager: RuntimeConnectionManager = getRuntimeConnectionManager(),
   publish: (userId: string) => void = publishEnvironmentInvalidation
 ): EnvironmentService {
-  async function requireRecord(userId: string, id: string): Promise<EnvironmentRecord> {
+  async function findRecord(userId: string, id: string): Promise<EnvironmentRecord | null> {
     if (id === LOCAL_ENVIRONMENT_ID) return localRecord(userId);
-    const record = await repository.find(userId, id);
+    return await repository.find(userId, id);
+  }
+
+  async function requireRecord(userId: string, id: string): Promise<EnvironmentRecord> {
+    const record = await findRecord(userId, id);
     if (!record) throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
     return record;
   }
@@ -82,8 +86,7 @@ export function createEnvironmentService(
     },
 
     async find(userId, id) {
-      if (id === LOCAL_ENVIRONMENT_ID) return toEnvironment(localRecord(userId), manager);
-      const record = await repository.find(userId, id);
+      const record = await findRecord(userId, id);
       return record ? toEnvironment(record, manager) : null;
     },
 
@@ -126,10 +129,17 @@ export function createEnvironmentService(
           );
         }
       }
-      if (input.enabled === false) manager.disconnect(userId, id);
       const updated = await repository.update(userId, id, input);
       if (!updated) {
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
+      }
+      // A live connection was opened from the definition as it stood before this
+      // write. Disabling the environment or repointing its transport must drop
+      // it, or the reported status keeps describing the persisted config while
+      // every tool call keeps reaching the old endpoint. Dropping it only after
+      // the write lands means a rejected update leaves the connection intact.
+      if (input.enabled === false || input.config !== undefined) {
+        manager.disconnect(userId, id);
       }
       publish(userId);
       return toEnvironment(updated, manager);
@@ -158,6 +168,12 @@ export function createEnvironmentService(
       try {
         await manager.connect(userId, id);
       } catch (error) {
+        // The row can be removed between the guard above and the manager's own
+        // lookup, which reports it as an unavailable runtime. That is a missing
+        // resource, not a connect conflict, so re-read before choosing a status.
+        if (!(await findRecord(userId, id))) {
+          throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
+        }
         throw new EnvironmentServiceError(
           error instanceof Error ? error.message : String(error),
           409
