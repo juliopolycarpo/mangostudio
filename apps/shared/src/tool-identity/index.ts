@@ -2,6 +2,8 @@ export {
   type SubjectKey,
   SubjectKeySchema,
   TOOL_IDENTITY_DISPLAY_NAME_MAX_LENGTH,
+  TOOL_IMAGE_MAX_BYTES,
+  TOOL_IMAGE_MIME_TYPES,
   type ToolIdentity,
   type ToolIdentityKind,
   type ToolIdentityListResponse,
@@ -12,6 +14,10 @@ export {
   type ToolIdentityUpdateResponse,
   ToolIdentityUpdateResponseSchema,
   ToolIdentityUpdateSchema,
+  type ToolImage,
+  type ToolImageMimeType,
+  type ToolImageSource,
+  type ToolImageUpdate,
 } from './schemas';
 export {
   normalizeMonogram,

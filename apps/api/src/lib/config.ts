@@ -50,6 +50,10 @@ export interface MangoConfig {
   images: {
     dir: string;
   };
+  /** Avatar images the user uploaded or asked us to cache, one dir per user. */
+  toolImages: {
+    dir: string;
+  };
   agents: {
     dir: string;
   };
@@ -128,6 +132,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   database: { path: '' },
   uploads: { dir: '' },
   images: { dir: '' },
+  toolImages: { dir: '' },
   agents: { dir: '' },
   skills: { dir: '' },
   library: { backupDir: '', backupRetentionCount: 10, backupRetentionBytes: 512 * 1024 * 1024 },
@@ -173,6 +178,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   IMAGES_DIR: (cfg, v) => {
     cfg.images.dir = v;
+  },
+  TOOL_IMAGES_DIR: (cfg, v) => {
+    cfg.toolImages.dir = v;
   },
   AGENTS_DIR: (cfg, v) => {
     cfg.agents.dir = v;
@@ -359,6 +367,7 @@ function cloneDefaults(): MangoConfig {
     database: { ...DEFAULT_CONFIG.database },
     uploads: { ...DEFAULT_CONFIG.uploads },
     images: { ...DEFAULT_CONFIG.images },
+    toolImages: { ...DEFAULT_CONFIG.toolImages },
     agents: { ...DEFAULT_CONFIG.agents },
     skills: { ...DEFAULT_CONFIG.skills },
     library: { ...DEFAULT_CONFIG.library },
@@ -401,6 +410,11 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   const images = parsed.images as Record<string, unknown> | undefined;
   if (images) {
     if (typeof images.dir === 'string') cfg.images.dir = images.dir;
+  }
+
+  const toolImages = parsed.tool_images as Record<string, unknown> | undefined;
+  if (toolImages) {
+    if (typeof toolImages.dir === 'string') cfg.toolImages.dir = toolImages.dir;
   }
 
   const agents = parsed.agents as Record<string, unknown> | undefined;
@@ -532,6 +546,12 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.images.dir = join(getHomeMangoDir(), 'images');
   } else {
     cfg.images.dir = resolveUserPath(cfg.images.dir);
+  }
+
+  if (!cfg.toolImages.dir) {
+    cfg.toolImages.dir = join(getHomeMangoDir(), 'tool-images');
+  } else {
+    cfg.toolImages.dir = resolveUserPath(cfg.toolImages.dir);
   }
 
   if (!cfg.agents.dir) {
@@ -744,6 +764,7 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.database) Object.assign(cfg.database, partial.database);
   if (partial.uploads) Object.assign(cfg.uploads, partial.uploads);
   if (partial.images) Object.assign(cfg.images, partial.images);
+  if (partial.toolImages) Object.assign(cfg.toolImages, partial.toolImages);
   if (partial.agents) Object.assign(cfg.agents, partial.agents);
   if (partial.skills) Object.assign(cfg.skills, partial.skills);
   if (partial.library) Object.assign(cfg.library, partial.library);
@@ -763,6 +784,11 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (!cfg.database.path) cfg.database.path = ':memory:';
   if (!cfg.library.backupDir) {
     cfg.library.backupDir = join(TEST_MANAGED_CONFIG_DIR, 'library-backups');
+  }
+  // Kept out of the developer's real ~/.mango for the same reason: a test that
+  // stores a tool image must not write into the machine it runs on.
+  if (!cfg.toolImages.dir) {
+    cfg.toolImages.dir = join(TEST_MANAGED_CONFIG_DIR, 'tool-images');
   }
   const configFilePath = partial.configFilePath ?? TEST_MANAGED_CONFIG_PATH;
 

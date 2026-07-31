@@ -28,6 +28,10 @@ dir = ""
 # Empty = auto-detect: ~/.mango/images in all runtimes
 dir = ""
 
+[tool_images]
+# Custom tool avatars (uploaded or cached). Empty = auto-detect: ~/.mango/tool-images
+dir = ""
+
 [agents]
 # Empty = auto-detect: ~/.mango/agents in all runtimes
 dir = ""

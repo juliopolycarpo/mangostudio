@@ -13,6 +13,7 @@ function makeConfig(configFilePath: string): MangoConfig {
     database: { path: ':memory:' },
     uploads: { dir: '/data/uploads' },
     images: { dir: '/data/images' },
+    toolImages: { dir: '/data/tool-images' },
     agents: { dir: '/data/agents' },
     skills: { dir: '/data/skills' },
     library: {

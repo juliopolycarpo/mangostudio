@@ -51,6 +51,7 @@ function makeConfig(): MangoConfig {
     database: { path: '/data/db.sqlite' },
     uploads: { dir: '/data/uploads' },
     images: { dir: '/data/images' },
+    toolImages: { dir: '/data/tool-images' },
     agents: { dir: '/data/agents' },
     skills: { dir: '/data/skills' },
     library: {
