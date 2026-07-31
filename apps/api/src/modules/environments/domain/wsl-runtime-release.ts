@@ -21,6 +21,8 @@ const REPOSITORY = 'juliopolycarpo/mangostudio';
 /** Where the runtime lands inside a distribution. */
 const DISTRO_RUNTIME_DIR = '.mango/bin';
 const RUNTIME_ARCHIVE_MEMBER = 'mangostudio-runtime';
+/** Where an incoming runtime is assembled before it takes over the name above. */
+const STAGED_ARCHIVE_MEMBER = `${RUNTIME_ARCHIVE_MEMBER}.incoming`;
 
 export type LinuxPlatformId = 'linux-x64' | 'linux-arm64' | 'linux-x64-musl' | 'linux-arm64-musl';
 
@@ -39,15 +41,27 @@ export interface DistroPlatformProbe {
 export const PLATFORM_PROBE_SCRIPT = 'uname -m; (ldd --version 2>&1 || true) | head -n 1';
 
 /**
- * Unpacks one member of the archive from stdin and marks it executable. `$HOME`
- * is expanded by the distribution's own shell: the hub does not know where a
- * distribution's home directory is, and `wsl.exe --exec` performs no expansion.
+ * Unpacks one member of the archive from stdin and publishes it with a rename.
+ *
+ * `$HOME` is expanded by the distribution's own shell: the hub does not know
+ * where a distribution's home directory is, and `wsl.exe --exec` performs no
+ * expansion.
+ *
+ * The rename is the point. A distribution can already be running a runtime when
+ * it is provisioned again — a hub update drifts the version of every
+ * distribution at once, and the second environment to reconnect reinstalls
+ * while the first is still connected. Unpacking straight onto the live path
+ * would open the file that process is executing from, which Linux refuses with
+ * `ETXTBSY`, failing the install over something the user cannot act on.
+ * Replacing the directory entry instead leaves the running process on the inode
+ * it started with and gives the next launch the new binary.
  */
 export const INSTALL_SCRIPT =
   'set -e; ' +
   `mkdir -p "$HOME/${DISTRO_RUNTIME_DIR}"; ` +
-  `tar -xzf - -C "$HOME/${DISTRO_RUNTIME_DIR}" ${RUNTIME_ARCHIVE_MEMBER}; ` +
-  `chmod +x "$HOME/${DISTRO_RUNTIME_DIR}/${RUNTIME_ARCHIVE_MEMBER}"`;
+  `tar -xzf - -O ${RUNTIME_ARCHIVE_MEMBER} > "$HOME/${DISTRO_RUNTIME_DIR}/${STAGED_ARCHIVE_MEMBER}"; ` +
+  `chmod +x "$HOME/${DISTRO_RUNTIME_DIR}/${STAGED_ARCHIVE_MEMBER}"; ` +
+  `mv -f "$HOME/${DISTRO_RUNTIME_DIR}/${STAGED_ARCHIVE_MEMBER}" "$HOME/${DISTRO_RUNTIME_DIR}/${RUNTIME_ARCHIVE_MEMBER}"`;
 
 /**
  * Runs the installed runtime with whatever arguments follow. `"$@"` is what

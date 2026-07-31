@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import {
   findReleaseChecksum,
+  INSTALL_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
   resolveLinuxPlatformId,
   wslLaunchCommand,
 } from '../../../../src/modules/environments/domain/wsl-runtime-release';
+
+const RUNTIME_PATH = '"$HOME/.mango/bin/mangostudio-runtime"';
+const STAGED_PATH = '"$HOME/.mango/bin/mangostudio-runtime.incoming"';
 
 const GLIBC = 'ldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35';
 const MUSL = 'musl libc (x86_64)';
@@ -36,6 +40,24 @@ describe('release asset naming', () => {
     expect(releaseAssetUrl('1.2.3', 'mangostudio-1.2.3-linux-x64.tar.gz')).toBe(
       'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3/mangostudio-1.2.3-linux-x64.tar.gz'
     );
+  });
+});
+
+describe('INSTALL_SCRIPT', () => {
+  it('publishes the runtime with a rename rather than writing over it', () => {
+    // A distribution can be running a runtime while it is provisioned again, and
+    // Linux refuses to open a busy executable for writing.
+    expect(INSTALL_SCRIPT).toContain(`tar -xzf - -O mangostudio-runtime > ${STAGED_PATH}`);
+    expect(INSTALL_SCRIPT).toContain(`mv -f ${STAGED_PATH} ${RUNTIME_PATH}`);
+    expect(INSTALL_SCRIPT).not.toContain(`> ${RUNTIME_PATH}`);
+  });
+
+  it('marks the runtime executable before it takes the live name', () => {
+    const chmod = INSTALL_SCRIPT.indexOf(`chmod +x ${STAGED_PATH}`);
+    const rename = INSTALL_SCRIPT.indexOf('mv -f ');
+
+    expect(chmod).toBeGreaterThan(-1);
+    expect(chmod).toBeLessThan(rename);
   });
 });
 
