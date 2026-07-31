@@ -528,6 +528,24 @@ describe('PUT /chats/:id', () => {
       error: 'Chat not found',
       code: 'NOT_FOUND',
     });
+
+    // The environment check shares the write's transaction, so a rejected
+    // selection must not leave the rest of the same request persisted.
+    const rejected = await app.handle(
+      new Request(`http://localhost/chats/${chat.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ environmentId: `missing-${suffix}`, title: 'Should not persist' }),
+      })
+    );
+    expect(rejected.status).toBe(422);
+    expect(
+      await db
+        .selectFrom('chats')
+        .select(['environmentId', 'title'])
+        .where('id', '=', chat.id)
+        .executeTakeFirst()
+    ).toEqual({ environmentId, title: 'Environment Target' });
   });
 
   it('returns 422 when body is missing required schema fields', async () => {

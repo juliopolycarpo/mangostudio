@@ -27,6 +27,9 @@ export async function updateChatUseCase(
   const updates = { ...input.updates };
   const environmentId = updates.environmentId ?? current.environmentId;
 
+  // Reject an unknown target before workdir validation, which would otherwise
+  // try to reach it and report an unavailable runtime instead. The write below
+  // re-checks; this one is only here for the error the caller sees.
   if (
     environmentId !== LOCAL_ENVIRONMENT_ID &&
     !(await createEnvironmentRepository(db).find(input.userId, environmentId))
@@ -48,5 +51,19 @@ export async function updateChatUseCase(
       environmentId,
     });
   }
-  await updateChat(input.chatId, input.userId, updates, db);
+
+  // Workdir validation talks to the runtime, so it cannot run inside the write
+  // transaction. Re-check the environment inside it instead: deletion refuses
+  // an environment any chat references, from its own transaction, so pairing
+  // the two makes "selectable" and "deletable" mutually exclusive rather than
+  // letting a delete land between the check above and this write.
+  await db.transaction().execute(async (transaction) => {
+    if (
+      environmentId !== LOCAL_ENVIRONMENT_ID &&
+      !(await createEnvironmentRepository(transaction).find(input.userId, environmentId))
+    ) {
+      throw new EnvironmentSelectionError(environmentId);
+    }
+    await updateChat(input.chatId, input.userId, updates, transaction);
+  });
 }
