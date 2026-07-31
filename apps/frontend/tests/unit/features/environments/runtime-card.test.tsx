@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RuntimeCard } from '../../../../src/features/environments/components/RuntimeCard';
 import { render, screen, within } from '../../../support/harness/render';
-import { installation, runtimeStatus } from './fixtures';
+import { installation, installRecipe, runtimeStatus } from './fixtures';
 
 describe('RuntimeCard', () => {
   afterEach(() => {
@@ -119,6 +119,32 @@ describe('RuntimeCard', () => {
     render(<RuntimeCard status={status} recipes={[]} />);
 
     expect(screen.getByText('Bun is not installed yet.')).toBeInTheDocument();
+  });
+
+  it('closes on an action or on nothing, never on an empty footer', () => {
+    // Only some runtimes have an update recipe, so an installed one that has
+    // none is the common case, not an edge: the card must not end on an empty
+    // row and the gap above it.
+    // Node is installed and the registry has no update recipe for it.
+    const node = runtimeStatus({
+      id: 'node',
+      installations: [installation({ path: '/usr/local/bin/node', version: '22.13.0' })],
+    });
+
+    const { container, rerender } = render(<RuntimeCard status={node} recipes={[]} />);
+    expect(container.querySelector('footer')).toBeNull();
+
+    // Bun is installed and does have one, so that card still closes on it.
+    rerender(
+      <RuntimeCard
+        status={runtimeStatus({
+          id: 'bun',
+          installations: [installation({ path: '/home/dev/.bun/bin/bun', version: '1.3.14' })],
+        })}
+        recipes={[installRecipe({ id: 'bun.update', runtimeId: 'bun', action: 'update' })]}
+      />
+    );
+    expect(container.querySelector('footer')).not.toBeNull();
   });
 
   it('says a failed re-check failed instead of leaving the card silently stale', async () => {

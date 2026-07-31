@@ -64,25 +64,27 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
           />
         </>
       }
+      // Install or update, never both — and nothing at all when the registry
+      // has no recipe for this runtime. A fragment would always be truthy, so
+      // the card would close on an empty footer and the gap above it.
       footer={
-        <>
-          {status.installations.length === 0 && installRecipe && (
-            <InstallAction
-              recipe={installRecipe}
-              input={{ kind: 'none' }}
-              label={formatMessage(e.runtimes.install, { runtime: name })}
-              variant="primary"
-              icon={<Download size={14} />}
-            />
-          )}
-          {status.installations.length > 0 && updateRecipe && (
-            <InstallAction
-              recipe={updateRecipe}
-              input={{ kind: 'none' }}
-              label={formatMessage(e.runtimes.update, { runtime: name })}
-            />
-          )}
-        </>
+        status.installations.length === 0
+          ? installRecipe && (
+              <InstallAction
+                recipe={installRecipe}
+                input={{ kind: 'none' }}
+                label={formatMessage(e.runtimes.install, { runtime: name })}
+                variant="primary"
+                icon={<Download size={14} />}
+              />
+            )
+          : updateRecipe && (
+              <InstallAction
+                recipe={updateRecipe}
+                input={{ kind: 'none' }}
+                label={formatMessage(e.runtimes.update, { runtime: name })}
+              />
+            )
       }
     >
       {effective ? (
