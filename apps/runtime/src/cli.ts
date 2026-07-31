@@ -8,7 +8,7 @@
  * goes to stderr, which the hub forwards into its own logs.
  */
 
-import { loadRuntimeConfig } from './config';
+import { getRuntimeVersion } from './config';
 import { createLocalRuntimeHost } from './runtime';
 import { createStdioFramePort, type StdioFramePortClosure } from './transports/stdio';
 
@@ -60,7 +60,7 @@ export function parseRuntimeCliArgs(args: readonly string[]): RuntimeCliInvocati
 /** Runs one CLI invocation and resolves with its process exit code. */
 export async function runRuntimeCli(args: readonly string[]): Promise<number> {
   const invocation = parseRuntimeCliArgs(args);
-  const { runtimeVersion } = loadRuntimeConfig();
+  const runtimeVersion = getRuntimeVersion();
 
   switch (invocation.command) {
     case 'stdio':

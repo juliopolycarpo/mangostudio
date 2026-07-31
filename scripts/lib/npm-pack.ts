@@ -3,7 +3,7 @@
 // scripts/release/pack-npm.ts wires these to the filesystem.
 
 import { cursorNativePackageForArch } from './cursor-sidecar';
-import type { ReleasePlatformId } from './release-targets';
+import { type ReleasePlatformId, runtimeBinaryName } from './release-targets';
 
 const CLI_SCOPE = '@mangostudio';
 export const MAIN_PACKAGE = 'mangostudio';
@@ -24,17 +24,21 @@ export interface NpmPlatform {
   readonly cpu: 'x64' | 'arm64';
   /** Binary filename inside the platform directory. */
   readonly binary: 'mangostudio' | 'mangostudio.exe';
+  /** Execution host the hub spawns for stdio environments; ships as a sibling. */
+  readonly runtimeBinary: 'mangostudio-runtime' | 'mangostudio-runtime.exe';
 }
 
 // The npm-distributable subset of build.ts targets (musl is download-only).
-export const NPM_PLATFORMS: readonly NpmPlatform[] = [
-  { arch: 'linux-x64', os: 'linux', cpu: 'x64', binary: 'mangostudio' },
-  { arch: 'linux-arm64', os: 'linux', cpu: 'arm64', binary: 'mangostudio' },
-  { arch: 'darwin-x64', os: 'darwin', cpu: 'x64', binary: 'mangostudio' },
-  { arch: 'darwin-arm64', os: 'darwin', cpu: 'arm64', binary: 'mangostudio' },
-  { arch: 'windows-x64', os: 'win32', cpu: 'x64', binary: 'mangostudio.exe' },
-  { arch: 'windows-arm64', os: 'win32', cpu: 'arm64', binary: 'mangostudio.exe' },
-];
+export const NPM_PLATFORMS: readonly NpmPlatform[] = (
+  [
+    { arch: 'linux-x64', os: 'linux', cpu: 'x64', binary: 'mangostudio' },
+    { arch: 'linux-arm64', os: 'linux', cpu: 'arm64', binary: 'mangostudio' },
+    { arch: 'darwin-x64', os: 'darwin', cpu: 'x64', binary: 'mangostudio' },
+    { arch: 'darwin-arm64', os: 'darwin', cpu: 'arm64', binary: 'mangostudio' },
+    { arch: 'windows-x64', os: 'win32', cpu: 'x64', binary: 'mangostudio.exe' },
+    { arch: 'windows-arm64', os: 'win32', cpu: 'arm64', binary: 'mangostudio.exe' },
+  ] as const
+).map((platform) => ({ ...platform, runtimeBinary: runtimeBinaryName(platform.binary) }));
 
 /** Select npm-distributable platform packages, optionally limited by build target id. */
 export function filterNpmPlatforms(onlyPlatform?: string): readonly NpmPlatform[] {
@@ -66,7 +70,7 @@ export function buildPlatformManifest(
   platform: NpmPlatform,
   version: string
 ): Record<string, unknown> {
-  const files = [platform.binary];
+  const files = [platform.binary, platform.runtimeBinary];
   if (platformShipsCursorSidecar(platform)) {
     files.push('cursor-sidecar');
   }

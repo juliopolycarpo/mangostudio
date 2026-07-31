@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
@@ -12,7 +12,12 @@ import {
   prepareCursorSidecarStaging,
 } from './lib/cursor-sidecar';
 import { writeEmbedModules } from './lib/embed-frontend';
-import { ALL_BINARY_TARGETS, type BinaryTarget, filterBinaryTargets } from './lib/release-targets';
+import {
+  ALL_BINARY_TARGETS,
+  type BinaryTarget,
+  filterBinaryTargets,
+  runtimeBinaryName,
+} from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -23,6 +28,9 @@ import {
   runCommand,
   warn,
 } from './lib/runner';
+
+/** Runtime binary entrypoint; the hub embeds the same host for Local. */
+const RUNTIME_ENTRY = join(ROOT_DIR, 'apps/runtime/src/cli.ts');
 
 interface BinaryBuildOptions {
   buildType: 'production' | 'development';
@@ -78,6 +86,60 @@ async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
   }
 }
 
+/**
+ * Compiles one entrypoint for one Bun target. The build stamp is applied to
+ * both binaries so the hub and the runtime it spawns report the same release —
+ * the protocol handshake refuses a mismatch.
+ */
+async function compileBinary(
+  entry: string,
+  target: BinaryTarget,
+  outfile: string,
+  options: BinaryBuildOptions,
+  context: { buildTime: string; buildInfo: BuildStamp }
+): Promise<boolean> {
+  const args = [
+    'build',
+    entry,
+    '--compile',
+    '--target',
+    target.target,
+    '--outfile',
+    outfile,
+    '--define',
+    `process.env.BUILD_TIME=${JSON.stringify(context.buildTime)}`,
+    '--define',
+    `process.env.BUILD_BUILT_AT=${JSON.stringify(context.buildInfo.builtAt)}`,
+    '--define',
+    `process.env.BUILD_GIT_SHA=${JSON.stringify(context.buildInfo.gitSha)}`,
+    '--define',
+    `process.env.BUILD_GIT_DIRTY=${JSON.stringify(String(context.buildInfo.gitDirty))}`,
+    '--define',
+    `process.env.BUILD_TYPE=${JSON.stringify(options.buildType)}`,
+    '--define',
+    `process.env.VERSION=${JSON.stringify(options.version)}`,
+    '--define',
+    'process.env.NODE_ENV="production"',
+    '--sourcemap=external',
+  ];
+
+  if (options.buildType === 'production') {
+    args.push('--minify');
+  }
+
+  const { stdout, stderr, exitCode } = await captureCommand(['bun', ...args], { cwd: ROOT_DIR });
+
+  if (exitCode !== 0) {
+    console.error(`❌ Failed to build ${basename(outfile)} for ${target.arch}:`);
+    if (stderr.trim()) console.error(stderr.trim());
+    return false;
+  }
+
+  console.log(`✅ Successfully built ${basename(outfile)} for ${target.arch}`);
+  if (stdout.trim()) console.log(stdout.trim());
+  return true;
+}
+
 async function buildStandaloneTarget(
   target: BinaryTarget,
   options: BinaryBuildOptions,
@@ -93,12 +155,15 @@ async function buildStandaloneTarget(
   mkdirSync(platformOutDir, { recursive: true });
 
   const binaryPath = join(platformOutDir, target.name);
+  const runtimeName = runtimeBinaryName(target.name);
+  const runtimePath = join(platformOutDir, runtimeName);
 
   console.log(`🔨 Building for ${target.arch} (${target.target}) → ${binaryPath}`);
 
   if (options.dryRun) {
     console.log(`   (dry run) Would compile for ${target.target}`);
     console.log(`✅ Successfully built ${target.name} for ${target.arch} (dry run)`);
+    console.log(`✅ Successfully built ${runtimeName} for ${target.arch} (dry run)`);
     if (cursorNativePackageFor(target)) {
       console.log(`📁 Would vendor Cursor sidecar to ${join(platformOutDir, 'cursor-sidecar')}`);
     } else {
@@ -108,45 +173,13 @@ async function buildStandaloneTarget(
   }
 
   try {
-    const args = [
-      'build',
-      context.apiSource,
-      '--compile',
-      '--target',
-      target.target,
-      '--outfile',
-      binaryPath,
-      '--define',
-      `process.env.BUILD_TIME=${JSON.stringify(context.buildTime)}`,
-      '--define',
-      `process.env.BUILD_BUILT_AT=${JSON.stringify(context.buildInfo.builtAt)}`,
-      '--define',
-      `process.env.BUILD_GIT_SHA=${JSON.stringify(context.buildInfo.gitSha)}`,
-      '--define',
-      `process.env.BUILD_GIT_DIRTY=${JSON.stringify(String(context.buildInfo.gitDirty))}`,
-      '--define',
-      `process.env.BUILD_TYPE=${JSON.stringify(options.buildType)}`,
-      '--define',
-      `process.env.VERSION=${JSON.stringify(options.version)}`,
-      '--define',
-      'process.env.NODE_ENV="production"',
-      '--sourcemap=external',
-    ];
-
-    if (options.buildType === 'production') {
-      args.push('--minify');
-    }
-
-    const { stdout, stderr, exitCode } = await captureCommand(['bun', ...args], { cwd: ROOT_DIR });
-
-    if (exitCode !== 0) {
-      console.error(`❌ Failed to build ${target.arch}:`);
-      if (stderr.trim()) console.error(stderr.trim());
+    const compiled = await Promise.all([
+      compileBinary(context.apiSource, target, binaryPath, options, context),
+      compileBinary(RUNTIME_ENTRY, target, runtimePath, options, context),
+    ]);
+    if (compiled.some((succeeded) => !succeeded)) {
       return false;
     }
-
-    console.log(`✅ Successfully built ${target.name} for ${target.arch}`);
-    if (stdout.trim()) console.log(stdout.trim());
 
     if (context.cursorSidecar) {
       const cursorSidecarDestination = join(platformOutDir, 'cursor-sidecar');
@@ -221,11 +254,17 @@ Each platform has its own directory under \`.mango/out/\`:
 \`\`\`
 .mango/out/
 ├── linux-x64/
-│   └── mangostudio           # Executable (frontend embedded)
+│   ├── mangostudio           # Executable (frontend embedded)
+│   └── mangostudio-runtime   # Execution host for stdio environments
 ├── windows-x64/
-│   └── mangostudio.exe       # Executable (frontend embedded)
+│   ├── mangostudio.exe       # Executable (frontend embedded)
+│   └── mangostudio-runtime.exe
 └── ... (other platforms)
 \`\`\`
+
+The runtime binary must stay beside the main executable: MangoStudio resolves it
+as a sibling when an environment is configured to run out of process. It is not
+meant to be launched by hand.
 
 ## Usage
 

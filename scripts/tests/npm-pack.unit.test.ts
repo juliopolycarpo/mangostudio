@@ -15,12 +15,14 @@ const LINUX_X64: NpmPlatform = {
   os: 'linux',
   cpu: 'x64',
   binary: 'mangostudio',
+  runtimeBinary: 'mangostudio-runtime',
 };
 const WIN_ARM64: NpmPlatform = {
   arch: 'windows-arm64',
   os: 'win32',
   cpu: 'arm64',
   binary: 'mangostudio.exe',
+  runtimeBinary: 'mangostudio-runtime.exe',
 };
 
 describe('platformPackageName', () => {
@@ -37,6 +39,9 @@ describe('NPM_PLATFORMS', () => {
       expect(['linux', 'darwin', 'win32']).toContain(platform.os);
       expect(['x64', 'arm64']).toContain(platform.cpu);
       expect(platform.binary).toBe(platform.os === 'win32' ? 'mangostudio.exe' : 'mangostudio');
+      expect(platform.runtimeBinary).toBe(
+        platform.os === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime'
+      );
     }
   });
 });
@@ -62,12 +67,12 @@ describe('buildPlatformManifest', () => {
     expect(manifest.version).toBe('1.2.3');
     expect(manifest.os).toEqual(['linux']);
     expect(manifest.cpu).toEqual(['x64']);
-    expect(manifest.files).toEqual(['mangostudio', 'cursor-sidecar']);
+    expect(manifest.files).toEqual(['mangostudio', 'mangostudio-runtime', 'cursor-sidecar']);
   });
 
   test('omits the cursor sidecar on platforms without a native package', () => {
     const manifest = buildPlatformManifest(WIN_ARM64, '1.2.3');
-    expect(manifest.files).toEqual(['mangostudio.exe']);
+    expect(manifest.files).toEqual(['mangostudio.exe', 'mangostudio-runtime.exe']);
   });
 
   test('includes public npm metadata', () => {

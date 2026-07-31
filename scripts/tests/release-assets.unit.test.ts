@@ -94,9 +94,13 @@ describe('platformArchiveMembers', () => {
       onlyPlatform: 'linux-x64',
     }).platformArchives;
 
-    expect(platformArchiveMembers(linux, { includeCursorSidecar: false })).toEqual(['mangostudio']);
+    expect(platformArchiveMembers(linux, { includeCursorSidecar: false })).toEqual([
+      'mangostudio',
+      'mangostudio-runtime',
+    ]);
     expect(platformArchiveMembers(linux, { includeCursorSidecar: true })).toEqual([
       'mangostudio',
+      'mangostudio-runtime',
       'cursor-sidecar',
     ]);
   });

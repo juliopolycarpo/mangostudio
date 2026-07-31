@@ -17,6 +17,7 @@ const LINUX_X64: NpmPlatform = {
   os: 'linux',
   cpu: 'x64',
   binary: 'mangostudio',
+  runtimeBinary: 'mangostudio-runtime',
 };
 
 const WINDOWS_ARM64: NpmPlatform = {
@@ -24,6 +25,7 @@ const WINDOWS_ARM64: NpmPlatform = {
   os: 'win32',
   cpu: 'arm64',
   binary: 'mangostudio.exe',
+  runtimeBinary: 'mangostudio-runtime.exe',
 };
 
 let tempDirs: string[] = [];
@@ -41,6 +43,7 @@ const writeJson = (filePath: string, value: Record<string, unknown>): void => {
 const writePlatformPackage = (packageDir: string, platform: NpmPlatform): void => {
   mkdirSync(packageDir, { recursive: true });
   writeFileSync(join(packageDir, platform.binary), 'binary');
+  writeFileSync(join(packageDir, platform.runtimeBinary), 'runtime binary');
   writeCursorSidecar(packageDir, platform);
   writeJson(join(packageDir, 'package.json'), buildPlatformManifest(platform, '1.2.3'));
 };
@@ -101,6 +104,7 @@ describe('assertPlatformBuildAssets', () => {
   test('rejects build output with a missing Cursor sidecar', () => {
     const sourceDir = makeTempDir();
     writeFileSync(join(sourceDir, LINUX_X64.binary), 'binary');
+    writeFileSync(join(sourceDir, LINUX_X64.runtimeBinary), 'runtime binary');
 
     expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).toThrow(
       /Missing Cursor sidecar script/
@@ -143,7 +147,7 @@ describe('assertPlatformPackageAssets', () => {
     writePlatformPackage(packageDir, LINUX_X64);
     writeJson(join(packageDir, 'package.json'), {
       ...buildPlatformManifest(LINUX_X64, '1.2.3'),
-      files: [LINUX_X64.binary],
+      files: [LINUX_X64.binary, LINUX_X64.runtimeBinary],
     });
 
     expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(

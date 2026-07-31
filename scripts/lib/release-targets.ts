@@ -12,7 +12,8 @@ export type ReleasePlatformId =
   | 'linux-arm64-musl';
 
 type ReleaseArchiveFormat = 'tar.gz' | 'zip';
-type ReleaseBinaryName = 'mangostudio' | 'mangostudio.exe';
+export type ReleaseBinaryName = 'mangostudio' | 'mangostudio.exe';
+export type ReleaseRuntimeBinaryName = 'mangostudio-runtime' | 'mangostudio-runtime.exe';
 
 export interface BinaryTarget {
   readonly target: string;
@@ -66,6 +67,15 @@ export const ALL_BINARY_TARGETS: readonly BinaryTarget[] = [
     archiveFormat: 'tar.gz',
   },
 ];
+
+/**
+ * Name of the runtime binary that ships beside the hub binary. The hub resolves
+ * it as a sibling of its own executable, so the two always travel together.
+ * // Usage: runtimeBinaryName(target.name) // → 'mangostudio-runtime'
+ */
+export function runtimeBinaryName(binaryName: ReleaseBinaryName): ReleaseRuntimeBinaryName {
+  return binaryName === 'mangostudio.exe' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
+}
 
 /** Return all release targets, or the one matching a platform/Bun target filter. // Usage: filterBinaryTargets('linux-x64') */
 export function filterBinaryTargets(onlyPlatform?: string): BinaryTarget[] {

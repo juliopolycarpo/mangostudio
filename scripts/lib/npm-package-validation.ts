@@ -104,6 +104,7 @@ const platformManifestErrors = (packageDir: string, platform: NpmPlatform): stri
     ...expectedArrayItemError(manifest, 'os', platform.os),
     ...expectedArrayItemError(manifest, 'cpu', platform.cpu),
     ...expectedArrayItemError(manifest, 'files', platform.binary),
+    ...expectedArrayItemError(manifest, 'files', platform.runtimeBinary),
   ];
   if (platformShipsCursorSidecar(platform)) {
     errors.push(...expectedArrayItemError(manifest, 'files', 'cursor-sidecar'));
@@ -113,6 +114,7 @@ const platformManifestErrors = (packageDir: string, platform: NpmPlatform): stri
 
 const platformPackageErrors = (packageDir: string, platform: NpmPlatform): string[] => [
   ...fileError(join(packageDir, platform.binary), 'binary'),
+  ...fileError(join(packageDir, platform.runtimeBinary), 'runtime binary'),
   ...cursorSidecarErrors(packageDir, platform),
   ...platformManifestErrors(packageDir, platform),
 ];
@@ -172,6 +174,7 @@ const mainPackageErrors = (packageDir: string, platforms: readonly NpmPlatform[]
 export function assertPlatformBuildAssets(sourceDir: string, platform: NpmPlatform): void {
   assertNoErrors(`Invalid build output for ${platform.arch}`, [
     ...fileError(join(sourceDir, platform.binary), 'binary'),
+    ...fileError(join(sourceDir, platform.runtimeBinary), 'runtime binary'),
     ...cursorSidecarErrors(sourceDir, platform),
   ]);
 }

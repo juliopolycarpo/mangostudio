@@ -4,7 +4,9 @@ import {
   type BinaryTarget,
   filterBinaryTargets,
   type ReleasePlatformId,
+  type ReleaseRuntimeBinaryName,
   releaseArchiveFileName,
+  runtimeBinaryName,
 } from './release-targets';
 
 export type DockerArch = 'amd64' | 'arm64';
@@ -38,8 +40,11 @@ export interface DockerStageTarget {
   readonly platform: BinaryTarget;
   readonly sourceDir: string;
   readonly binaryPath: string;
+  readonly runtimeBinaryName: ReleaseRuntimeBinaryName;
+  readonly runtimeBinaryPath: string;
   readonly contextArchDir: string;
   readonly stagedBinaryPath: string;
+  readonly stagedRuntimeBinaryPath: string;
 }
 
 export interface DockerStagePlan {
@@ -102,6 +107,7 @@ function createDockerStageTarget(
   const platform = resolveDockerBinaryTarget(dockerVariant, dockerArch);
   const sourceDir = join(outDir, platform.arch);
   const contextArchDir = join(contextDir, dockerVariant, dockerArch);
+  const runtimeName = runtimeBinaryName(platform.name);
 
   return {
     dockerVariant,
@@ -109,8 +115,11 @@ function createDockerStageTarget(
     platform,
     sourceDir,
     binaryPath: join(sourceDir, platform.name),
+    runtimeBinaryName: runtimeName,
+    runtimeBinaryPath: join(sourceDir, runtimeName),
     contextArchDir,
     stagedBinaryPath: join(contextArchDir, platform.name),
+    stagedRuntimeBinaryPath: join(contextArchDir, runtimeName),
   };
 }
 

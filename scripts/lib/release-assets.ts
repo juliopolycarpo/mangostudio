@@ -4,7 +4,12 @@
 import { join } from 'node:path';
 
 import { ROOT_DIR } from './config';
-import { type BinaryTarget, filterBinaryTargets, releaseArchiveFileName } from './release-targets';
+import {
+  type BinaryTarget,
+  filterBinaryTargets,
+  releaseArchiveFileName,
+  runtimeBinaryName,
+} from './release-targets';
 
 export interface ReleaseAssetPlanOptions {
   readonly version: string;
@@ -18,6 +23,8 @@ export interface PlatformArchivePlan {
   readonly platform: BinaryTarget;
   readonly sourceDir: string;
   readonly binaryPath: string;
+  /** Execution host spawned for stdio environments; ships beside the hub binary. */
+  readonly runtimeBinaryPath: string;
   /** Vendored Cursor SDK sidecar dir; only present for platforms with a native package. */
   readonly cursorSidecarDir: string;
   readonly readmePath: string;
@@ -84,6 +91,7 @@ function createPlatformArchivePlan(
     platform: target,
     sourceDir,
     binaryPath: join(sourceDir, target.name),
+    runtimeBinaryPath: join(sourceDir, runtimeBinaryName(target.name)),
     cursorSidecarDir: join(sourceDir, 'cursor-sidecar'),
     readmePath: join(outDir, 'README.md'),
     assetName,
@@ -101,7 +109,7 @@ export function platformArchiveMembers(
   plan: PlatformArchivePlan,
   options: { readonly includeCursorSidecar: boolean }
 ): string[] {
-  const members = [plan.platform.name];
+  const members = [plan.platform.name, runtimeBinaryName(plan.platform.name)];
   if (options.includeCursorSidecar) {
     members.push('cursor-sidecar');
   }

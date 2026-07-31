@@ -180,6 +180,13 @@ install_archive() {
   [ -f "${tmp_install}/mangostudio" ] || fail 'archive is missing mangostudio'
   chmod +x "${tmp_install}/mangostudio"
 
+  # The execution host for out-of-process environments. MangoStudio resolves it
+  # as a sibling of its own executable, so it stays in the install directory and
+  # is never linked onto PATH.
+  if [ -f "${tmp_install}/mangostudio-runtime" ]; then
+    chmod +x "${tmp_install}/mangostudio-runtime"
+  fi
+
   rm -rf "$install_dir"
   mv "$tmp_install" "$install_dir"
   printf '%s\n' "$install_dir"

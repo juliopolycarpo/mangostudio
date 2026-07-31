@@ -36,6 +36,7 @@ import {
   type BinaryTarget,
   filterBinaryTargets,
   releaseArchiveFileName,
+  runtimeBinaryName,
 } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 import { waitForServerReady } from './lib/wait-for-health';
@@ -54,6 +55,7 @@ const DISTRIBUTION_MANIFEST_PATH =
   process.env.DISTRIBUTION_MANIFEST_PATH?.trim() || join(ROOT_DIR, DISTRIBUTION_MANIFEST_FILE);
 const NPM_PLATFORM = NPM_PLATFORMS.find((platform) => platform.arch === REQUESTED_PLATFORM);
 const CHATGPT_CALLBACK_PORT = 1455;
+const RUNTIME_HANDSHAKE_TIMEOUT_MS = 10_000;
 // Resolve via the canonical helper so the archive name we expect matches the one
 // archive-assets.ts produces (same VERSION override + semver validation).
 const VERSION = resolveReleaseVersion({ rootDir: ROOT_DIR });
@@ -72,9 +74,11 @@ const hostRuntimeByPlatform: Partial<
 const PLATFORM = resolvePlatform(REQUESTED_PLATFORM);
 
 const BINARY_NAME = PLATFORM.name;
+const RUNTIME_BINARY_NAME = runtimeBinaryName(PLATFORM.name);
 const CAN_EXECUTE = canExecutePlatform(PLATFORM);
 const PLATFORM_DIR = join(OUT_DIR, PLATFORM.arch);
 const BINARY_PATH = join(PLATFORM_DIR, BINARY_NAME);
+const RUNTIME_BINARY_PATH = join(PLATFORM_DIR, RUNTIME_BINARY_NAME);
 const ARCHIVE_PATH = join(RELEASE_ASSETS_DIR, releaseArchiveFileName(VERSION, PLATFORM));
 
 // ---------------------------------------------------------------------------
@@ -160,6 +164,11 @@ function validateLayout(): void {
   if (!existsSync(BINARY_PATH)) fail(`Missing binary: ${BINARY_PATH}`);
   pass(`Binary exists: ${BINARY_NAME}`);
 
+  // The hub resolves the runtime as a sibling of its own executable, so a
+  // release that ships one without the other cannot start stdio environments.
+  if (!existsSync(RUNTIME_BINARY_PATH)) fail(`Missing runtime binary: ${RUNTIME_BINARY_PATH}`);
+  pass(`Runtime binary exists: ${RUNTIME_BINARY_NAME}`);
+
   if (NPM_PLATFORM && platformShipsCursorSidecar(NPM_PLATFORM)) {
     const layoutErrors = collectCursorSidecarLayoutErrors(PLATFORM_DIR, NPM_PLATFORM);
     if (layoutErrors.length > 0) {
@@ -223,11 +232,15 @@ function validateExtractedArchive(extractDir: string): void {
   if (existsSync(join(extractDir, PLATFORM.arch)))
     fail('Archive contains nested platform directory');
   if (!existsSync(join(extractDir, BINARY_NAME))) fail(`Archive is missing ${BINARY_NAME}`);
+  if (!existsSync(join(extractDir, RUNTIME_BINARY_NAME)))
+    fail(`Archive is missing ${RUNTIME_BINARY_NAME}`);
   if (!existsSync(join(extractDir, 'README.md'))) fail('Archive is missing README.md');
 
-  const mode = statSync(join(extractDir, BINARY_NAME)).mode;
-  if ((mode & 0o111) === 0) fail(`${BINARY_NAME} is not executable in archive`);
-  pass('Archive has flat root with executable binary and README.md');
+  for (const name of [BINARY_NAME, RUNTIME_BINARY_NAME]) {
+    const mode = statSync(join(extractDir, name)).mode;
+    if ((mode & 0o111) === 0) fail(`${name} is not executable in archive`);
+  }
+  pass('Archive has flat root with executable binaries and README.md');
 }
 
 async function smokeLocalInstaller(): Promise<void> {
@@ -255,6 +268,80 @@ async function validateInstalledBinary(tempHome: string): Promise<void> {
   if (!existsSync(installed)) fail(`Installer did not create ${installed}`);
   await run([installed, '--version'], ROOT_DIR, { HOME: tempHome });
   pass('install.sh --local created a runnable user binary');
+
+  const installedRuntime = join(tempHome, '.mango', 'dist', VERSION, RUNTIME_BINARY_NAME);
+  if (!existsSync(installedRuntime)) fail(`Installer did not place ${installedRuntime}`);
+  pass('install.sh --local placed the runtime binary beside the hub binary');
+}
+
+/**
+ * Runs the runtime binary the way the hub does: one NDJSON handshake over its
+ * pipes. A binary that only answers `--version` can still be unable to serve.
+ */
+async function smokeRuntimeBinary(): Promise<void> {
+  console.log('\n🔌 Running runtime binary smoke...');
+
+  const { stdout: versionOut, exitCode: versionExit } = await captureCommand([
+    RUNTIME_BINARY_PATH,
+    '--version',
+  ]);
+  if (versionExit !== 0) fail(`${RUNTIME_BINARY_NAME} --version exited ${versionExit}`);
+  if (versionOut.trim() !== VERSION) {
+    fail(`${RUNTIME_BINARY_NAME} reported ${versionOut.trim()}, expected ${VERSION}`);
+  }
+  pass(`${RUNTIME_BINARY_NAME} --version → ${VERSION}`);
+
+  const child = Bun.spawn({
+    cmd: [RUNTIME_BINARY_PATH, '--stdio'],
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  try {
+    const hello = await readFirstLine(child.stdout, RUNTIME_HANDSHAKE_TIMEOUT_MS);
+    if (!hello) fail(`${RUNTIME_BINARY_NAME} --stdio sent no handshake frame`);
+
+    let frame: { type?: string; runtimeVersion?: string; manifest?: { platform?: string } };
+    try {
+      frame = JSON.parse(hello) as typeof frame;
+    } catch {
+      fail(`${RUNTIME_BINARY_NAME} --stdio wrote a non-JSON line to stdout: ${hello}`);
+    }
+    if (frame.type !== 'hello') fail(`Expected a hello frame, got: ${hello}`);
+    if (frame.runtimeVersion !== VERSION) {
+      fail(`Handshake reported runtime ${frame.runtimeVersion}, expected ${VERSION}`);
+    }
+    if (!frame.manifest?.platform) fail('Handshake carried no capability manifest');
+    pass(`${RUNTIME_BINARY_NAME} --stdio handshakes with a v${VERSION} manifest`);
+  } finally {
+    child.stdin.end();
+    child.kill();
+    await child.exited.catch(() => undefined as undefined);
+  }
+}
+
+/** Reads one newline-terminated record, or null if the deadline passes first. */
+async function readFirstLine(
+  stream: ReadableStream<Uint8Array>,
+  timeoutMs: number
+): Promise<string | null> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  const deadline = Bun.sleep(timeoutMs).then(() => null);
+  let buffered = '';
+
+  try {
+    while (true) {
+      const chunk = await Promise.race([reader.read(), deadline]);
+      if (!chunk || chunk.done) return null;
+      buffered += decoder.decode(chunk.value, { stream: true });
+      const newline = buffered.indexOf('\n');
+      if (newline !== -1) return buffered.slice(0, newline);
+    }
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -642,6 +729,7 @@ await validateReleaseArchive();
 await smokeLocalInstaller();
 
 if (CAN_EXECUTE) {
+  await smokeRuntimeBinary();
   await smokeTest();
   console.log('\n✅ All runtime assertions passed.');
 } else {

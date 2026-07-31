@@ -19,6 +19,7 @@ import {
   platformArchiveMembers,
   type ReleaseAssetPlan,
 } from '../lib/release-assets';
+import { runtimeBinaryName } from '../lib/release-targets';
 import { resolveReleaseVersion } from '../lib/release-version';
 import { assertNoUnexpectedArguments, error, header, parseArgs, success } from '../lib/runner';
 
@@ -86,6 +87,7 @@ async function archivePlatformZip(plan: PlatformArchivePlan, assetsDir: string):
   mkdirSync(stagingDir, { recursive: true });
 
   cpSync(plan.binaryPath, join(stagingDir, plan.platform.name));
+  cpSync(plan.runtimeBinaryPath, join(stagingDir, runtimeBinaryName(plan.platform.name)));
   cpSync(plan.readmePath, join(stagingDir, 'README.md'));
 
   const includeCursorSidecar = platformRequiresCursorSidecar(plan);
@@ -107,6 +109,7 @@ async function archiveFrontend(plan: FrontendArchivePlan): Promise<void> {
 
 function assertPlatformInputs(plan: PlatformArchivePlan): void {
   assertFile(plan.binaryPath, `${plan.platform.arch} binary`);
+  assertFile(plan.runtimeBinaryPath, `${plan.platform.arch} runtime binary`);
   const npmPlatform = NPM_PLATFORMS.find((platform) => platform.arch === plan.platform.arch);
   if (npmPlatform && cursorNativePackageFor(plan.platform)) {
     const layoutErrors = collectCursorSidecarLayoutErrors(plan.sourceDir, npmPlatform);

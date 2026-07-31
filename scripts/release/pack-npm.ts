@@ -99,6 +99,9 @@ const stagePlatform = (platform: NpmPlatform, version: string): NpmPlatform => {
   mkdirSync(packageDir, { recursive: true });
   writeManifest(packageDir, buildPlatformManifest(platform, version));
   cpSync(binarySource, join(packageDir, platform.binary));
+  // The hub resolves the runtime as a sibling of its own executable, so the two
+  // have to land in the same package directory.
+  cpSync(join(sourceDir, platform.runtimeBinary), join(packageDir, platform.runtimeBinary));
 
   // Ship the vendored Cursor SDK sidecar when the binary build produced it, so
   // installs on hosts with Node.js can run the Cursor connector.
