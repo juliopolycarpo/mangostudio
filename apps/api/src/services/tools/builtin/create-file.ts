@@ -3,22 +3,14 @@
  * Creates a new text file without overwriting an existing path.
  */
 
-import { lstat } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
+import { getRuntimeClient } from '../../runtime-client';
 import { getRequiredTextArg } from '../arg-parsing';
-import { recordFileRead, withPathLocks } from '../file-freshness';
-import {
-  ensureFileMutationCheckpoint,
-  recordFileMutationAfterHash,
-} from '../file-mutation-snapshot';
+import { persistRuntimeMutations } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
-  isErrnoException,
   normalizePathValidationSettings,
-  PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
@@ -79,47 +71,19 @@ export async function executeCreateFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  return await withPathLocks([resolvedPath], async () => {
-    const captured = await ensureFileMutationCheckpoint(context, resolvedPath, 'create');
-    let committed: { bytesWritten: number; mtimeMs: number };
-    try {
-      committed = await writeRegularFileAtomic(resolvedPath, args.content, { exclusive: true });
-    } catch (error) {
-      // The destination policy is the tool's own remediation advice, not a
-      // filesystem failure, so it reaches the model as a path error.
-      if (error instanceof RegularFileWriteError) throw new PathAccessError(error.message);
-      if (isErrnoException(error, 'EEXIST')) {
-        throw await describeBlockedCreate(resolvedPath, args.path);
-      }
-      throw error;
-    }
-
-    const sha256 = recordFileRead(context.chatId, resolvedPath, args.content, committed.mtimeMs);
-    await recordFileMutationAfterHash(context, captured, sha256);
-    return { path: args.path, bytesWritten: committed.bytesWritten, sha256 };
-  });
-}
-
-/**
- * EEXIST reaches this tool from two places: the destination itself is taken, or
- * a parent component of it is a regular file, which fails the recursive mkdir.
- * Naming the wrong one sends the model to write_file for a path that does not
- * exist and can never be created under that parent.
- */
-async function describeBlockedCreate(resolvedPath: string, inputPath: string): Promise<Error> {
-  const exists = await lstat(resolvedPath).then(
-    () => true,
-    () => false
+  const runtime = await getRuntimeClient();
+  const { result, mutations } = await runtime.fs.createFile(
+    {
+      chatId: context.chatId,
+      inputPath: args.path,
+      resolvedPath,
+      content: args.content,
+      captureSnapshot: Boolean(context.assistantMessageId),
+    },
+    context.signal ? { signal: context.signal } : undefined
   );
-  if (exists) {
-    return new PathAccessError(
-      `"${inputPath}" already exists. Read it with read_file, then use edit_file for an exact ` +
-        'text change, replace_range for a line change, or write_file to replace all content.'
-    );
-  }
-  return new PathAccessError(
-    `Cannot create "${inputPath}": "${dirname(resolvedPath)}" is not a directory.`
-  );
+  await persistRuntimeMutations(context, mutations);
+  return result;
 }
 
 function execute(

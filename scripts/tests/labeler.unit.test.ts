@@ -148,6 +148,16 @@ describe('labeler coverage', () => {
     expect(mcpSection).toContain('- "apps/shared/src/mcp/**"');
   });
 
+  test('classifies the runtime boundary and its protocol client', () => {
+    const labeler = readText('.github/labeler.yml');
+
+    expect(labeler).toContain('"area: runtime":');
+    const runtimeSection = extractLabelSection(labeler, '"area: runtime":', '"area: git":');
+    expect(runtimeSection).toContain('- "apps/runtime/**"');
+    expect(runtimeSection).toContain('- "apps/shared/src/runtime-protocol/**"');
+    expect(runtimeSection).toContain('- "apps/api/src/services/runtime-client/**"');
+  });
+
   test('classifies the repository status feature as area: git', () => {
     const labeler = readText('.github/labeler.yml');
 

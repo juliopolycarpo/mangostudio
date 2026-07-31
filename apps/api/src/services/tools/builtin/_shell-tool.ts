@@ -4,6 +4,7 @@
  * interpreter and copy differ, so they are built from this single source.
  */
 
+import { getRuntimeClient } from '../../runtime-client';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import {
   buildToolExecutionTimeoutDescriptor,
@@ -18,7 +19,7 @@ import {
   normalizeStringList,
   resolveWorkdirRelativePath,
 } from './_fs-utils';
-import { runShellCommand, type ShellCommandResult, type ShellKind } from './_shell-exec';
+import type { ShellCommandResult, ShellKind } from './_shell-exec';
 
 export const SHELL_DEFAULT_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT;
 export const SHELL_MIN_TIMEOUT_SECONDS = TOOL_EXECUTION_TIMEOUT_SECONDS_MIN;
@@ -96,15 +97,18 @@ async function execute(
     assertWorkdirContainment(cwd, context.workdirPolicy);
   }
   const settings = normalizeShellToolSettings(context.parameters);
-  const result = await runShellCommand({
-    kind,
-    command,
-    ...(cwd ? { cwd } : {}),
-    timeoutMs: settings.timeoutSeconds * 1000,
-    maxOutputBytes: settings.maxOutputBytes,
-    envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
-    ...(context.signal ? { signal: context.signal } : {}),
-  });
+  const runtime = await getRuntimeClient();
+  const result = await runtime.shell.run(
+    {
+      kind,
+      command,
+      ...(cwd ? { cwd } : {}),
+      timeoutMs: settings.timeoutSeconds * 1000,
+      maxOutputBytes: settings.maxOutputBytes,
+      envPolicy: { allow: settings.allowedEnvVars, deny: settings.deniedEnvVars },
+    },
+    context.signal ? { signal: context.signal } : undefined
+  );
   if (result.termination.kind === 'timed_out') {
     throw new ToolExecutionTimedOutError(
       `Command timed out after ${settings.timeoutSeconds} seconds.`

@@ -21,6 +21,7 @@ export const LOCKSTEP_PACKAGES: readonly string[] = [
   'apps/api/package.json',
   'apps/frontend/package.json',
   'apps/shared/package.json',
+  'apps/runtime/package.json',
   'packages/cli/package.json',
 ];
 

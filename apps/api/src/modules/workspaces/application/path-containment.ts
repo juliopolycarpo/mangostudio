@@ -26,7 +26,7 @@ export function resolveContainmentRoot(root: string): string {
 }
 
 /** Containment check against an already-canonical root, for hot loops. */
-export function isInsideResolvedRoot(resolvedRoot: string, candidate: string): boolean {
+function isInsideResolvedRoot(resolvedRoot: string, candidate: string): boolean {
   return isPathPrefix(resolvedRoot, resolvePathForContainment(candidate));
 }
 

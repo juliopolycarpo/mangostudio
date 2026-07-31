@@ -16,6 +16,13 @@
   - changed-files:
       - any-glob-to-any-file: "apps/shared/**"
 
+"area: runtime":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/runtime/**"
+          - "apps/shared/src/runtime-protocol/**"
+          - "apps/api/src/services/runtime-client/**"
+
 "area: git":
   - changed-files:
       - any-glob-to-any-file:

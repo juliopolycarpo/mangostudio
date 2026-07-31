@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import {
   isSecretEnvKey,
+  isSecretEnvValue,
   sanitizeShellEnv,
-} from '../../../../src/services/tools/builtin/_shell-env';
+} from '../../../src/services/shell-env';
 
 describe('isSecretEnvKey', () => {
   it('flags connector API keys in every shape', () => {
@@ -24,6 +25,22 @@ describe('isSecretEnvKey', () => {
     for (const key of ['PATH', 'HOME', 'NODE_ENV', 'LANG', 'TMPDIR', 'HTTPS_PROXY']) {
       expect(isSecretEnvKey(key)).toBe(false);
     }
+  });
+});
+
+describe('isSecretEnvValue', () => {
+  it('detects credentials embedded in a connection URL', () => {
+    expect(isSecretEnvValue('postgres://app:hunter2@db.internal:5432/main')).toBe(true);
+    expect(isSecretEnvValue('redis://:hunter2@cache:6379')).toBe(true);
+    expect(isSecretEnvValue('mongodb+srv://user:pw@cluster.example.com/db')).toBe(true);
+  });
+
+  it('leaves credential-free URLs alone', () => {
+    expect(isSecretEnvValue('https://api.example.com/v1')).toBe(false);
+    expect(isSecretEnvValue('http://localhost:3000')).toBe(false);
+    expect(isSecretEnvValue('file:///srv/data')).toBe(false);
+    // A path, not a URL, even though it contains a colon and an at sign.
+    expect(isSecretEnvValue('/usr/bin:/opt/a@b/bin')).toBe(false);
   });
 });
 
@@ -52,6 +69,28 @@ describe('sanitizeShellEnv', () => {
     expect(env.GITHUB_TOKEN).toBe('ghp-token');
     // Other secrets are still withheld.
     expect(env.OPENAI_API_KEY_MAIN).toBeUndefined();
+  });
+
+  it('withholds credential-bearing URLs whose names look ordinary', () => {
+    const env = sanitizeShellEnv(
+      {},
+      {
+        DATABASE_URL: 'postgres://app:hunter2@db.internal:5432/main',
+        BASE_URL: 'https://app.example.com',
+      }
+    );
+
+    expect(env.DATABASE_URL).toBeUndefined();
+    expect(env.BASE_URL).toBe('https://app.example.com');
+  });
+
+  it('lets an allowlist override value-based credential detection', () => {
+    const env = sanitizeShellEnv(
+      { allow: ['DATABASE_URL'] },
+      { DATABASE_URL: 'postgres://app:hunter2@db.internal:5432/main' }
+    );
+
+    expect(env.DATABASE_URL).toBe('postgres://app:hunter2@db.internal:5432/main');
   });
 
   it('withholds an extra denylisted variable that is not secret-shaped', () => {

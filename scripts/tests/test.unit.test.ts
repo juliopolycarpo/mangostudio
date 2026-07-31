@@ -67,4 +67,13 @@ describe('test script', () => {
       expect(turboConfig.tasks[task]?.dependsOn ?? []).not.toContain('^build');
     }
   });
+
+  test('keeps Bun coverage output machine-readable without duplicate console tables', () => {
+    for (const workspace of ['api', 'frontend', 'runtime', 'shared']) {
+      const bunfig = readText(`apps/${workspace}/bunfig.toml`);
+
+      expect(bunfig).toContain('coverageReporter = ["lcov"]');
+      expect(bunfig).not.toContain('"text"');
+    }
+  });
 });

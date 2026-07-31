@@ -3,21 +3,12 @@
  * Moves or renames a regular file without overwriting the destination.
  */
 
-import { constants as fsConstants } from 'node:fs';
-import { chmod, copyFile, link, mkdir, unlink } from 'node:fs/promises';
-import { dirname } from 'node:path';
-import { rekeyFile, withPathLocks } from '../file-freshness';
-import {
-  ensureFileMutationCheckpoint,
-  hashFileAtPath,
-  recordFileMutationAfterHash,
-} from '../file-mutation-snapshot';
+import { getRuntimeClient } from '../../runtime-client';
+import { persistRuntimeMutations } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  assertRegularFilePath,
   getRequiredPathArg,
-  isErrnoException,
   normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
@@ -26,21 +17,6 @@ import {
 } from './_fs-utils';
 
 const MOVE_FILE_TOOL_NAME = 'move_file';
-
-/**
- * `link` failures that mean "this filesystem pair cannot hold a hard link",
- * not "the move is invalid". EXDEV is the cross-device case; the rest are what
- * exFAT/FAT, many FUSE and network mounts, and non-NTFS Windows volumes report
- * for an unsupported or exhausted link. All of them fall back to copy+unlink.
- */
-const LINK_UNSUPPORTED_CODES = new Set([
-  'EXDEV',
-  'EPERM',
-  'EMLINK',
-  'ENOSYS',
-  'ENOTSUP',
-  'EOPNOTSUPP',
-]);
 
 export interface MoveFileToolArgs {
   from: string;
@@ -103,62 +79,20 @@ export async function executeMoveFile(
     throw new PathAccessError('Source and destination must be different paths.');
   }
 
-  return await withPathLocks([from, to], async () => {
-    const source = await assertRegularFilePath(from, 'move');
-    const captured = await ensureFileMutationCheckpoint(context, from, 'move', { movedTo: to });
-    await moveRegularFileWithoutOverwrite(from, to, source.mode & 0o7777);
-    rekeyFile(context.chatId, from, to);
-    const afterHash = await hashFileAtPath(to);
-    await recordFileMutationAfterHash(context, captured, afterHash);
-    return { from: args.from, to: args.to, moved: true };
-  });
-}
-
-/**
- * A hard link plus unlink gives regular files atomic no-overwrite semantics on
- * one filesystem. copyFile with COPYFILE_EXCL provides the same destination
- * guarantee wherever a hard link cannot be created.
- */
-export async function moveRegularFileWithoutOverwrite(
-  from: string,
-  to: string,
-  mode: number
-): Promise<void> {
-  await mkdir(dirname(to), { recursive: true });
-  let destinationCreated = false;
-  try {
-    try {
-      await link(from, to);
-      destinationCreated = true;
-    } catch (error) {
-      if (!isLinkUnsupported(error)) throw error;
-      await copyFile(from, to, fsConstants.COPYFILE_EXCL);
-      destinationCreated = true;
-      await chmod(to, mode);
-    }
-    await unlink(from);
-  } catch (error) {
-    if (destinationCreated) {
-      const cleanupError = await unlink(to).catch((thrown: unknown) => thrown);
-      if (cleanupError) {
-        throw new PathAccessError(
-          `Could not complete the move from "${from}" to "${to}", and cleanup also failed. Both paths may exist.`
-        );
-      }
-    }
-    if (isErrnoException(error, 'EEXIST')) {
-      throw new PathAccessError(`"${to}" already exists. Choose a different destination.`);
-    }
-    if (isErrnoException(error, 'ENOENT')) {
-      throw new PathAccessError(`File not found: "${from}"`);
-    }
-    throw error;
-  }
-}
-
-function isLinkUnsupported(error: unknown): boolean {
-  if (!(error instanceof Error) || !('code' in error)) return false;
-  return typeof error.code === 'string' && LINK_UNSUPPORTED_CODES.has(error.code);
+  const runtime = await getRuntimeClient();
+  const { result, mutations } = await runtime.fs.moveFile(
+    {
+      chatId: context.chatId,
+      inputFrom: args.from,
+      inputTo: args.to,
+      resolvedFrom: from,
+      resolvedTo: to,
+      captureSnapshot: Boolean(context.assistantMessageId),
+    },
+    context.signal ? { signal: context.signal } : undefined
+  );
+  await persistRuntimeMutations(context, mutations);
+  return result;
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<MoveFileToolResult> {

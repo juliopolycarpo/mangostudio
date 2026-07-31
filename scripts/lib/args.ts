@@ -40,6 +40,7 @@ export function parseArgs(options: ParseArgsOptions = {}): ParsedArgs {
     if (arg === '--frontend') workspaces.push('frontend');
     else if (arg === '--api') workspaces.push('api');
     else if (arg === '--shared') workspaces.push('shared');
+    else if (arg === '--runtime') workspaces.push('runtime');
     else if (arg === '--root') includeRoot = true;
     else if (arg === '--all') allExplicit = true;
     else if (booleanFlags.has(arg)) flags[arg] = true;

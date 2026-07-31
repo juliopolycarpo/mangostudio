@@ -9,7 +9,7 @@ import { Value } from '@sinclair/typebox/value';
 import type { Metrics } from './collect/types';
 
 /** Bump when the envelope or Metrics shape changes incompatibly. */
-export const QA_METRICS_SCHEMA_VERSION = 1;
+export const QA_METRICS_SCHEMA_VERSION = 2;
 /** Artifact name used for both PR-head and main-baseline uploads. */
 export const QA_METRICS_ARTIFACT_NAME = 'qa-metrics';
 /** File name inside the artifact archive. */
@@ -63,6 +63,7 @@ const metricsSchema = Type.Object(
         frontend: failable(locBucket),
         api: failable(locBucket),
         shared: failable(locBucket),
+        runtime: failable(locBucket),
         total: failable(locBucket),
       },
       { additionalProperties: false }
@@ -72,6 +73,7 @@ const metricsSchema = Type.Object(
         frontend: failable(coverageSummary),
         api: failable(coverageSummary),
         shared: failable(coverageSummary),
+        runtime: failable(coverageSummary),
       },
       { additionalProperties: false }
     ),
@@ -80,6 +82,7 @@ const metricsSchema = Type.Object(
         frontend: failable(Type.Number()),
         api: failable(Type.Number()),
         shared: failable(Type.Number()),
+        runtime: failable(Type.Number()),
       },
       { additionalProperties: false }
     ),
@@ -128,6 +131,7 @@ const metricsSchema = Type.Object(
           frontend: Type.Number(),
           api: Type.Number(),
           shared: Type.Number(),
+          runtime: Type.Number(),
         },
         { additionalProperties: false }
       )

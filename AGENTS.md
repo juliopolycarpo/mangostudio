@@ -19,6 +19,7 @@ Workspace-level `AGENTS.md` files must stay short and contain only workspace-spe
 Useful docs:
 
 - `docs/architecture/overview.md` — workspace map and API module layering
+- `docs/architecture/hub-runtime.md` — hub/runtime ownership and protocol boundary
 - `docs/reference/testing.md` — test taxonomy and harness rules
 - `docs/reference/agent-playbooks.md` — detailed file maps by feature area
 - `docs/reference/releasing.md` — changelog (`bun run changelog`) and release pipeline
@@ -34,7 +35,8 @@ Useful docs:
 - Public API shape changes must update the API code, shared contract, frontend consumer, and relevant tests in the same task.
 - Shared contracts are schema-first: the TypeBox schema in `apps/shared/src/<module>/schemas.ts` is the single source of truth, and public types are derived with `Static<>`. Never hand-write a duplicate interface for a shape that already has a schema. `apps/shared/src/contracts/index.ts` is a compatibility barrel only — import from the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`) in new code.
 - API error responses must use `ApiErrorResponse` from `@mangostudio/shared/errors` or `SSEErrorEvent` from `@mangostudio/shared/streaming`.
-- Add new environment parsing only in `apps/api/src/lib/config.ts`.
+- Add hub environment parsing only in `apps/api/src/lib/config.ts`, and runtime-host
+  environment parsing only in `apps/runtime/src/config.ts`.
 - Shared code must remain framework-agnostic.
 - Cross-workspace imports must use package names, never relative paths.
 - Do not edit `apps/frontend/src/routeTree.gen.ts`; it is generated.

@@ -15,11 +15,12 @@ describe('collectAttentionItems', () => {
       tests: {
         exitCode: 1,
         durationSeconds: 250,
-        passed: 1_090,
+        passed: 1_147,
         root: 4,
         frontend: 230,
         api: 760,
         shared: 96,
+        runtime: 57,
       },
       tooling: { checkExitCode: 1, failedTasks: ['typecheck'] },
     });
@@ -32,7 +33,7 @@ describe('collectAttentionItems', () => {
 
   it('flags TypeScript errors and circular dependencies with counts', () => {
     const head = makeMetrics('head-sha', {
-      tsErrors: { frontend: 2, api: 1, shared: 0 },
+      tsErrors: { frontend: 2, api: 1, shared: 0, runtime: 0 },
       circularDeps: 1,
     });
 
@@ -48,6 +49,7 @@ describe('collectAttentionItems', () => {
         frontend: makeCoverageSummary(70),
         api: makeCoverageSummary(),
         shared: makeCoverageSummary(),
+        runtime: makeCoverageSummary(),
       },
       duplication: { clones: 4, duplicatedLines: 40, percentage: 1.5 },
       frontendBundle: {
@@ -62,7 +64,7 @@ describe('collectAttentionItems', () => {
 
     const items = collectAttentionItems(base, head);
 
-    expect(items).toContain('line coverage −3.33pp');
+    expect(items).toContain('line coverage −2.50pp');
     expect(items).toContain('duplication +1.50pp');
     expect(items).toContain('bundle gzip +29.3 KiB');
   });

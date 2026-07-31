@@ -1,6 +1,6 @@
 import { WORKSPACES, type WorkspaceName } from './config';
 
-const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
+const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api', 'runtime'];
 
 export interface BuildSelection {
   runnableWorkspaces: WorkspaceName[];

@@ -3,15 +3,13 @@
  * Lists files and directories at a given path.
  */
 
-import type { Dirent } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { getRuntimeClient } from '../../runtime-client';
 import { getOptionalString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
   getRequiredPathArg,
   normalizePathValidationSettings,
-  PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
@@ -70,21 +68,12 @@ export async function executeListDirectory(
     workdirPolicy: context.workdirPolicy,
   });
 
-  let dirents: Dirent[];
-  try {
-    dirents = await readdir(resolvedPath, { withFileTypes: true });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to list directory';
-    throw new PathAccessError(`Cannot list "${path}": ${message}`);
-  }
-
-  return {
-    path,
-    entries: dirents.map((entry) => ({
-      name: String(entry.name),
-      type: entry.isDirectory() ? 'directory' : 'file',
-    })),
-  };
+  const runtime = await getRuntimeClient();
+  const result = await runtime.fs.listDirectory(
+    { inputPath: path, resolvedPath },
+    context.signal ? { signal: context.signal } : undefined
+  );
+  return { ...result, entries: [...result.entries] };
 }
 
 // biome-ignore lint/suspicious/useAwait: Migrated from ESLint

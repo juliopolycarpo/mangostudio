@@ -3,23 +3,14 @@
  * Writes text content to a file on disk, creating parent directories as needed.
  */
 
-import { lstat } from 'node:fs/promises';
-import { RegularFileWriteError, writeRegularFileAtomic } from '../../../lib/safe-file';
+import { getRuntimeClient } from '../../runtime-client';
 import { getRequiredTextArg } from '../arg-parsing';
-import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
-import {
-  attachBeforeFields,
-  ensureFileMutationCheckpoint,
-  recordFileMutationAfterHash,
-} from '../file-mutation-snapshot';
+import { attachBeforeFields, persistRuntimeMutations } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
-  explainUnreadableMutationTarget,
   getRequiredPathArg,
-  isErrnoException,
   normalizePathValidationSettings,
-  PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
@@ -84,65 +75,19 @@ export async function executeWriteFile(
     workdirPolicy: context.workdirPolicy,
   });
 
-  return await withPathLocks([resolvedPath], async () => {
-    const created = !(await Bun.file(resolvedPath).exists());
-    const captured = await ensureFileMutationCheckpoint(
-      context,
+  const runtime = await getRuntimeClient();
+  const { result, mutations } = await runtime.fs.writeFile(
+    {
+      chatId: context.chatId,
+      inputPath: args.path,
       resolvedPath,
-      created ? 'create' : 'edit'
-    );
-    if (!created) {
-      try {
-        await assertFresh(context.chatId, resolvedPath);
-      } catch (error) {
-        if (error instanceof FileNotReadError) {
-          throw await explainUnreadableMutationTarget(resolvedPath, 'overwrite', error);
-        }
-        throw error;
-      }
-    }
-
-    let committed: { bytesWritten: number; mtimeMs: number };
-    try {
-      committed = await writeRegularFileAtomic(resolvedPath, args.content, { exclusive: created });
-    } catch (error) {
-      if (created && isErrnoException(error, 'EEXIST'))
-        throw await describeOccupiedPath(resolvedPath);
-      // The destination policy is the tool's own remediation advice, not a
-      // filesystem failure, so it reaches the model as a path error.
-      if (error instanceof RegularFileWriteError) throw new PathAccessError(error.message);
-      throw error;
-    }
-
-    // Recording the committed bytes makes a later sequential write fresh; the
-    // surrounding path lock gives parallel calls the same deterministic order.
-    const sha256 = recordFileRead(context.chatId, resolvedPath, args.content, committed.mtimeMs);
-    await recordFileMutationAfterHash(context, captured, sha256);
-    return attachBeforeFields(
-      { path: args.path, bytesWritten: committed.bytesWritten, created, sha256 },
-      captured
-    );
-  });
-}
-
-/**
- * Explains a destination that appeared after the existence check. A regular
- * file is an unread file, so it gets the same remediation as any guarded
- * overwrite; a directory or dangling symlink cannot be read at all, so saying
- * "read it first" would send the model into an unrecoverable retry loop.
- */
-async function describeOccupiedPath(resolvedPath: string): Promise<Error> {
-  const entry = await lstat(resolvedPath).catch(() => null);
-  if (entry?.isFile()) {
-    return await explainUnreadableMutationTarget(
-      resolvedPath,
-      'overwrite',
-      new FileNotReadError(resolvedPath)
-    );
-  }
-  return new PathAccessError(
-    `Cannot write "${resolvedPath}": the path exists and is not a regular file.`
+      content: args.content,
+      captureSnapshot: Boolean(context.assistantMessageId),
+    },
+    context.signal ? { signal: context.signal } : undefined
   );
+  const [captured] = await persistRuntimeMutations(context, mutations);
+  return attachBeforeFields(result, captured);
 }
 
 function execute(

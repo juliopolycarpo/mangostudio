@@ -3,17 +3,13 @@
  * Returns filesystem paths matching a glob pattern, evaluated by Bun.Glob.
  */
 
-import { resolve as resolvePath } from 'node:path';
-import {
-  isInsideResolvedRoot,
-  resolveContainmentRoot,
-} from '../../../modules/workspaces/application/path-containment';
+import { getRuntimeClient } from '../../runtime-client';
 import { clampIntegerSetting, getOptionalString, getRequiredString } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  createRuntimePathFilter,
   normalizePathValidationSettings,
-  PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
@@ -89,44 +85,19 @@ export async function executeGlob(
   const settings = normalizeGlobToolSettings(context.parameters);
   const cwd = resolveCwd(args.cwd, settings, context);
 
-  const matches: string[] = [];
-  let truncated = false;
-
-  // The pattern itself can traverse upward (e.g. "../*"), so validating cwd is
-  // not enough — every match is checked against the workdir policy.
-  const policy = context.workdirPolicy;
-  const containmentRoot = policy?.restricted ? resolveContainmentRoot(policy.root) : undefined;
-
-  const glob = new Bun.Glob(args.pattern);
-  try {
-    for await (const match of glob.scan({
+  const runtime = await getRuntimeClient();
+  const result = await runtime.fs.glob(
+    {
+      pattern: args.pattern,
       cwd,
-      dot: settings.includeDotfiles,
+      maxResults: settings.maxResults,
+      includeDotfiles: settings.includeDotfiles,
       absolute: settings.absolute,
-      onlyFiles: false,
-    })) {
-      if (containmentRoot && !isInsideResolvedRoot(containmentRoot, resolvePath(cwd, match))) {
-        continue;
-      }
-      if (matches.length >= settings.maxResults) {
-        truncated = true;
-        break;
-      }
-      matches.push(match);
-    }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to evaluate glob pattern';
-    throw new PathAccessError(`Cannot evaluate pattern "${args.pattern}" in "${cwd}": ${message}`);
-  }
-
-  return {
-    pattern: args.pattern,
-    // Always absolute: a `cwd` relative to the API process directory would be
-    // re-resolved against the chat workdir if the model fed it back in.
-    cwd,
-    matches,
-    truncated,
-  };
+      ...createRuntimePathFilter(settings, context.workdirPolicy),
+    },
+    context.signal ? { signal: context.signal } : undefined
+  );
+  return { ...result, matches: [...result.matches] };
 }
 
 function resolveCwd(

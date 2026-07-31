@@ -35,6 +35,7 @@
         "@elysiajs/openapi": "^1.4.15",
         "@elysiajs/static": "^1.4.10",
         "@google/genai": "^1.52.0",
+        "@mangostudio/runtime": "workspace:*",
         "@mangostudio/shared": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
         "ai": "^7.0.19",
@@ -102,6 +103,17 @@
       "dependencies": {
         "@faker-js/faker": "^10.4.0",
         "@sinclair/typebox": "^0.34.49",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "typescript": "7.0.2",
+      },
+    },
+    "apps/runtime": {
+      "name": "@mangostudio/runtime",
+      "version": "0.1.1",
+      "dependencies": {
+        "@mangostudio/shared": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -366,6 +378,8 @@
     "@mangostudio/api": ["@mangostudio/api@workspace:apps/api"],
 
     "@mangostudio/frontend": ["@mangostudio/frontend@workspace:apps/frontend"],
+
+    "@mangostudio/runtime": ["@mangostudio/runtime@workspace:apps/runtime"],
 
     "@mangostudio/shared": ["@mangostudio/shared@workspace:apps/shared"],
 

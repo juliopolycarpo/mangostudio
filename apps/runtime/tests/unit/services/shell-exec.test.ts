@@ -8,7 +8,7 @@ import {
   runShellCommand,
   runShellCommandWithDeps,
   ShellExecutionError,
-} from '../../../../src/services/tools/builtin/_shell-exec';
+} from '../../../src/services/shell';
 import {
   createFakeClock,
   createFakeShellDeps,

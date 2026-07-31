@@ -10,6 +10,7 @@ const makeMetricsWithFrontendLines = (sha: string, lineCoverage: number): Metric
       frontend: makeCoverageSummary(lineCoverage),
       api: makeCoverageSummary(),
       shared: makeCoverageSummary(),
+      runtime: makeCoverageSummary(),
     },
   });
 
@@ -29,10 +30,10 @@ describe('QA gate document renderer', () => {
     expect(comment).toContain('Dependencies');
     expect(comment).toContain('### Tests');
     expect(comment).toContain('Repo Tooling');
-    expect(comment).toContain('API/shared branches and statements are source-derived');
+    expect(comment).toContain('API/shared/runtime branches and statements are source-derived');
     expect(comment).toContain('Full repo check');
     expect(comment).not.toContain('ESLint');
-    expect(comment).toContain('+2pp');
+    expect(comment).toContain('+0.50pp');
   });
 
   it('renders a legitimate zero denominator as n/a (0/0) without a delta', () => {
@@ -43,6 +44,7 @@ describe('QA gate document renderer', () => {
           frontend: makeCoverageSummary(),
           api: { ...makeCoverageSummary(), branches: naBucket },
           shared: makeCoverageSummary(),
+          runtime: makeCoverageSummary(),
         },
       });
 

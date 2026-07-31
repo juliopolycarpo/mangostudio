@@ -1,14 +1,15 @@
 # Architecture Overview
 
-MangoStudio follows a modular DDD-inspired architecture across three workspaces. This document explains the design decisions, layer responsibilities, and data flow.
+MangoStudio follows a modular DDD-inspired architecture across four workspaces. This document explains the design decisions, layer responsibilities, and data flow.
 
 ## Workspace Map
 
-| Workspace       | Role                         | Stack                                                    |
-| --------------- | ---------------------------- | -------------------------------------------------------- |
-| `apps/api`      | Backend API server           | Elysia, Better Auth, Kysely + SQLite                     |
-| `apps/frontend` | Browser SPA                  | React 19, Vite 8, TanStack Router/Query, Tailwind CSS v4 |
-| `apps/shared`   | Framework-agnostic contracts | TypeScript types, TypeBox schemas, i18n dictionaries     |
+| Workspace       | Role                           | Stack                                                    |
+| --------------- | ------------------------------ | -------------------------------------------------------- |
+| `apps/api`      | Backend API hub                | Elysia, Better Auth, Kysely + SQLite                     |
+| `apps/frontend` | Browser SPA                    | React 19, Vite 8, TanStack Router/Query, Tailwind CSS v4 |
+| `apps/runtime`  | Host-machine execution runtime | TypeScript, Bun, shared runtime protocol                 |
+| `apps/shared`   | Framework-agnostic contracts   | TypeScript types, TypeBox schemas, i18n dictionaries     |
 
 ## API Module Architecture
 
@@ -108,6 +109,13 @@ stream-text-turn.ts (orchestrator)
   ├─ Feed tool results back to provider
   └─ Persist turn → yield SSE events
 ```
+
+### Hub/Runtime Execution
+
+Filesystem tools, shell commands, freshness tracking, and checkpoint effects execute through
+the versioned runtime protocol. The API remains the hub for workdir policy, orchestration,
+and durable checkpoint state. See [`hub-runtime.md`](./hub-runtime.md) for the ownership
+table, protocol lifecycle, and transport roadmap.
 
 ### Realtime Invalidation
 
@@ -241,6 +249,7 @@ shared/src/
   contracts/           → Barrel export of all contract types
   <module>/            → Per-module contracts + TypeBox schemas
   realtime/            → WebSocket invalidation messages, topics, and close codes
+  runtime-protocol/     → Hub/runtime frame schemas, compatibility, and NDJSON codec
   streaming/           → SSE event types + schemas
   types/               → Domain types (provider, agent-events, gallery)
   i18n/                → Portuguese/English dictionaries + type system
