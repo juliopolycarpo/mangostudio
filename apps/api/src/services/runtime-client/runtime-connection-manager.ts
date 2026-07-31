@@ -14,6 +14,7 @@ import type {
   RuntimeErrorCode,
 } from '@mangostudio/shared/runtime-protocol';
 import { getVersion } from '../../lib/config';
+import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
   assertEnvironmentConfig,
   environmentConfigFor,
@@ -22,7 +23,7 @@ import {
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { RuntimeClient } from './runtime-client';
-import { launchStdioRuntime } from './stdio-runtime-launcher';
+import { spawnRuntimeChild } from './spawn-runtime-child';
 
 export interface RuntimeEnvironmentDefinition {
   readonly id: string;
@@ -242,19 +243,10 @@ export class RuntimeConnectionManager {
   }
 
   disconnect(userId: string, environmentId: string): void {
-    const key = connectionKey(userId, environmentId);
-    const entry = this.#entries.get(key);
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (!entry) return;
 
-    entry.revision += 1;
-    entry.connection?.close();
-    entry.connection = undefined;
-    entry.connecting = undefined;
-    // Taking an environment down deliberately clears its failure history: the
-    // next connect is a fresh decision, not a continuation of the old one.
-    entry.failureCount = 0;
-    entry.retryAfterMs = 0;
-    entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
+    this.#release(entry);
     this.#publish(userId);
   }
 
@@ -263,13 +255,22 @@ export class RuntimeConnectionManager {
    * responsibility, so shutdown closes them rather than leaving orphans behind.
    */
   closeAll(): void {
-    for (const entry of this.#entries.values()) {
-      entry.revision += 1;
-      entry.connection?.close();
-      entry.connection = undefined;
-      entry.connecting = undefined;
-      entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
-    }
+    for (const entry of this.#entries.values()) this.#release(entry);
+  }
+
+  /**
+   * Takes an environment down deliberately, which also clears its failure
+   * history: the next connect is a fresh decision, not a continuation of the
+   * one that was just abandoned.
+   */
+  #release(entry: RuntimeConnectionEntry): void {
+    entry.revision += 1;
+    entry.connection?.close();
+    entry.connection = undefined;
+    entry.connecting = undefined;
+    entry.failureCount = 0;
+    entry.retryAfterMs = 0;
+    entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
   }
 
   async #openConnection(
@@ -316,7 +317,9 @@ export class RuntimeConnectionManager {
     entry.failureCount += 1;
     entry.retryAfterMs = retryDeadline(entry.failureCount, 'RUNTIME_UNAVAILABLE');
     entry.status = {
-      state: entry.failureCount >= MAX_RECONNECT_ATTEMPTS ? 'error' : 'disconnected',
+      // A latched deadline is what `error` means here, so read it rather than
+      // re-deriving the cap and drifting from whatever else latches.
+      state: entry.retryAfterMs === Number.POSITIVE_INFINITY ? 'error' : 'disconnected',
       errorCode: 'RUNTIME_UNAVAILABLE',
       ...this.#cachedManifest(entry),
     };
@@ -366,9 +369,11 @@ async function connectStdioRuntime(
   definition: RuntimeEnvironmentDefinition,
   onUnavailable: () => void
 ): Promise<ManagedRuntimeConnection> {
-  const connection = await launchStdioRuntime({
+  const config = environmentConfigFor('stdio', definition.config);
+  const connection = await spawnRuntimeChild({
     environmentId: definition.id,
-    config: environmentConfigFor('stdio', definition.config),
+    launch: resolveRuntimeLaunchCommand(config.binaryPath),
+    ...(config.cwd ? { cwd: config.cwd } : {}),
     hubVersion: getVersion(),
     onClosed: onUnavailable,
   });

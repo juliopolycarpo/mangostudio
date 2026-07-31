@@ -321,7 +321,14 @@ async function smokeRuntimeBinary(): Promise<void> {
   }
 }
 
-/** Reads one newline-terminated record, or null if the deadline passes first. */
+/**
+ * Reads one newline-terminated record, or null if the deadline passes first.
+ *
+ * Deliberately hand-rolled rather than reusing `RuntimeFrameDecoder`: this
+ * script runs in the smoke matrix with `--no-install`, so it must have no
+ * external runtime imports — `scripts/tests/smoke-dependencies.unit.test.ts`
+ * enforces that. The shape assertions above stand in for schema validation.
+ */
 async function readFirstLine(
   stream: ReadableStream<Uint8Array>,
   timeoutMs: number

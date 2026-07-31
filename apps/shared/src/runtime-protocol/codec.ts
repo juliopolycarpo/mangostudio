@@ -83,7 +83,7 @@ export class RuntimeFrameDecoder {
       newline = this.#buffer.indexOf('\n');
     }
 
-    assertLineSize(this.#buffer, this.#maxFrameBytes);
+    assertPendingSize(this.#buffer, this.#maxFrameBytes);
     return frames;
   }
 
@@ -105,5 +105,20 @@ function assertLineSize(line: string, maxFrameBytes: number): void {
   if (size <= maxFrameBytes) return;
   throw new RuntimeFrameCodecError(
     `Runtime frame exceeds the ${maxFrameBytes}-byte line limit (${size} bytes).`
+  );
+}
+
+/**
+ * Bounds a record still arriving, without measuring it exactly. UTF-8 never
+ * encodes a string in fewer bytes than its UTF-16 length, so this catches one
+ * that has already blown the limit while costing nothing per chunk — where an
+ * exact measurement would re-encode the whole pending buffer on every push,
+ * turning one large frame split across many reads into quadratic work. The
+ * exact check still runs the moment the record completes.
+ */
+function assertPendingSize(pending: string, maxFrameBytes: number): void {
+  if (pending.length <= maxFrameBytes) return;
+  throw new RuntimeFrameCodecError(
+    `Runtime frame exceeds the ${maxFrameBytes}-byte line limit before its terminator.`
   );
 }

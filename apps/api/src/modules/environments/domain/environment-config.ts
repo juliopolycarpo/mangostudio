@@ -53,8 +53,8 @@ export function environmentConfigFor<K extends EnvironmentTransportKind>(
   transportKind: K,
   config: unknown
 ): EnvironmentConfigByKind[K] {
-  if (!isEnvironmentConfigValid(transportKind, config)) {
-    throw new Error(`Invalid ${transportKind} environment configuration.`);
-  }
+  assertEnvironmentConfig(transportKind, config);
+  // The assertion narrows to the union of every kind's config; only the caller's
+  // `transportKind` says which arm that is.
   return config as EnvironmentConfigByKind[K];
 }

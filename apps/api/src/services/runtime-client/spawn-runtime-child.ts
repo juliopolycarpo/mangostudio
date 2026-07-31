@@ -1,9 +1,12 @@
 /**
- * Spawns a `mangostudio-runtime` child and speaks the protocol over its pipes.
+ * Spawns a runtime child and speaks the protocol over its pipes.
  *
- * The child is an execution target, not a trusted peer of the hub process: it
- * gets a sanitized environment with no connector keys or auth secret, and an
- * argv assembled from discrete arguments rather than a command string.
+ * The command to run is resolved by the caller, so a launcher that reaches its
+ * target through a wrapper — a WSL distro, an SSH host — supplies its own argv
+ * and reuses everything here. The child is an execution target, not a trusted
+ * peer of the hub process: it gets a sanitized environment with no connector
+ * keys or auth secret, and an argv assembled from discrete arguments rather
+ * than a command string.
  */
 
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
@@ -13,41 +16,41 @@ import {
   RuntimeRemoteError,
   sanitizeShellEnv,
 } from '@mangostudio/runtime';
-import type { StdioEnvironmentConfig } from '@mangostudio/shared/environments';
 import { RuntimeProtocolError } from '@mangostudio/shared/runtime-protocol';
 import { appendBoundedTail } from '../../lib/bounded-tail';
 import { createDiagnosticLogger } from '../../lib/logger';
-import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
+import type { RuntimeLaunchCommand } from '../../lib/runtime-paths';
 
 const HANDSHAKE_TIMEOUT_MS = 5_000;
 /** Grace between SIGTERM and SIGKILL when a runtime does not unwind on its own. */
 const KILL_GRACE_MS = 2_000;
 const MAX_STDERR_CHARS = 16_384;
-const STDERR_EXCERPT_MAX_CHARS = 1_000;
+const STDERR_EXCERPT_MAX_CHARS = 2_000;
 
 const logger = createDiagnosticLogger('runtime-stdio');
 
-export interface StdioRuntimeConnection {
+export interface SpawnedRuntimeConnection {
   readonly client: RuntimeProtocolClient;
   close(): void;
 }
 
-export interface StdioRuntimeLaunchOptions {
+export interface SpawnRuntimeChildOptions {
   readonly environmentId: string;
-  readonly config: StdioEnvironmentConfig;
+  readonly launch: RuntimeLaunchCommand;
+  readonly cwd?: string;
   readonly hubVersion: string;
   readonly handshakeTimeoutMs?: number;
   /** Fires once when the child or its pipes die after a successful handshake. */
   readonly onClosed: () => void;
 }
 
-/** Starts a runtime child and resolves once its handshake completes. */
-export async function launchStdioRuntime(
-  options: StdioRuntimeLaunchOptions
-): Promise<StdioRuntimeConnection> {
-  const launch = resolveRuntimeLaunchCommand(options.config.binaryPath);
+/** Starts a runtime child over stdio and resolves once its handshake completes. */
+export async function spawnRuntimeChild(
+  options: SpawnRuntimeChildOptions
+): Promise<SpawnedRuntimeConnection> {
+  const { launch } = options;
   const child = spawn(launch.command, [...launch.args, '--stdio'], {
-    ...(options.config.cwd ? { cwd: options.config.cwd } : {}),
+    ...(options.cwd ? { cwd: options.cwd } : {}),
     env: sanitizeShellEnv({}, process.env),
     stdio: 'pipe',
     windowsHide: true,

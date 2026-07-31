@@ -471,7 +471,7 @@ sibling of its own executable and the protocol handshake refuses a version misma
 Open these first:
 
 - `apps/runtime/src/cli.ts` (binary entry), `apps/runtime/src/transports/stdio.ts` (NDJSON port)
-- `apps/api/src/services/runtime-client/stdio-runtime-launcher.ts` (spawn, handshake, teardown)
+- `apps/api/src/services/runtime-client/spawn-runtime-child.ts` (spawn, handshake, teardown)
 - `apps/api/src/services/runtime-client/runtime-connection-manager.ts` (state machine, backoff)
 - `apps/api/src/lib/runtime-paths.ts` (`resolveRuntimeLaunchCommand`)
 - `apps/frontend/src/features/environments/components/AddEnvironmentDialog.tsx`

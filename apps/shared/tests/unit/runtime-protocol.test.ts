@@ -56,6 +56,16 @@ describe('runtime protocol frames', () => {
 
     expect(() => decoder.push('123456789')).toThrow('8-byte line limit');
   });
+
+  it('measures a record exactly once it is complete, not while it accumulates', () => {
+    const decoder = new RuntimeFrameDecoder({ maxFrameBytes: 8 });
+
+    // Four characters, twelve UTF-8 bytes. The pending guard is a cheap
+    // code-unit bound, so this accumulates; the exact check on the terminated
+    // record is what rejects it, and it can say how far over the limit it is.
+    expect(() => decoder.push('日本語文')).not.toThrow();
+    expect(() => decoder.push('\n')).toThrow('(12 bytes)');
+  });
 });
 
 describe('runtime protocol compatibility', () => {

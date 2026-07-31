@@ -89,6 +89,10 @@ assembled from discrete arguments, never a command string to interpolate, and th
 environment is sanitized like any other spawned process so connector keys and the auth secret
 do not reach it.
 
+`spawnRuntimeChild` takes an already-resolved command rather than a transport config, so a
+launcher that reaches its target through a wrapper — a WSL distro, an SSH host — supplies its
+own argv and reuses the spawn, handshake, and teardown path unchanged.
+
 Lifecycle:
 
 - **Connect** spawns the child and waits up to five seconds for its `hello`. A missing binary,

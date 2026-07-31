@@ -11,7 +11,8 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { launchStdioRuntime } from '../../../src/services/runtime-client/stdio-runtime-launcher';
+import { resolveRuntimeLaunchCommand } from '../../../src/lib/runtime-paths';
+import { spawnRuntimeChild } from '../../../src/services/runtime-client/spawn-runtime-child';
 
 const RUNTIME_ENTRY = join(import.meta.dir, '../../../../runtime/src/cli.ts');
 const hasRuntimeEntry = existsSync(RUNTIME_ENTRY);
@@ -30,13 +31,13 @@ afterAll(async () => {
   if (workdir) await rm(workdir, { force: true, recursive: true });
 });
 
-describe('stdio runtime launcher', () => {
+describe('spawnRuntimeChild', () => {
   it.skipIf(!hasRuntimeEntry)(
     'handshakes with a spawned runtime and runs a method',
     async () => {
-      const connection = await launchStdioRuntime({
+      const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        config: {},
+        launch: resolveRuntimeLaunchCommand(),
         hubVersion: 'hub-test',
         onClosed: () => undefined,
       });
@@ -65,9 +66,10 @@ describe('stdio runtime launcher', () => {
   it.skipIf(!canSpawnRuntime)(
     'runs the child in the configured working directory',
     async () => {
-      const connection = await launchStdioRuntime({
+      const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        config: { cwd: workdir },
+        launch: resolveRuntimeLaunchCommand(),
+        cwd: workdir,
         hubVersion: 'hub-test',
         onClosed: () => undefined,
       });
@@ -88,9 +90,9 @@ describe('stdio runtime launcher', () => {
   it.skipIf(!canSpawnRuntime)(
     'withholds hub secrets from the child environment',
     async () => {
-      const connection = await launchStdioRuntime({
+      const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        config: {},
+        launch: resolveRuntimeLaunchCommand(),
         hubVersion: 'hub-test',
         onClosed: () => undefined,
       });
@@ -112,9 +114,9 @@ describe('stdio runtime launcher', () => {
     'reports a lost runtime once, with in-flight calls failing cleanly',
     async () => {
       let closedCount = 0;
-      const connection = await launchStdioRuntime({
+      const connection = await spawnRuntimeChild({
         environmentId: 'devbox',
-        config: {},
+        launch: resolveRuntimeLaunchCommand(),
         hubVersion: 'hub-test',
         onClosed: () => {
           closedCount += 1;
@@ -142,9 +144,9 @@ describe('stdio runtime launcher', () => {
 
   it('fails with an actionable message when the binary is missing', async () => {
     const missing = join(workdir, 'no-such-runtime');
-    const error = await launchStdioRuntime({
+    const error = await spawnRuntimeChild({
       environmentId: 'devbox',
-      config: { binaryPath: missing },
+      launch: resolveRuntimeLaunchCommand(missing),
       hubVersion: 'hub-test',
       handshakeTimeoutMs: 5_000,
       onClosed: () => undefined,
@@ -157,9 +159,9 @@ describe('stdio runtime launcher', () => {
 
   it('fails on handshake when the spawned child does not speak the protocol', async () => {
     // Bun rejects `--stdio`, so the child starts and exits without a hello.
-    const error = await launchStdioRuntime({
+    const error = await spawnRuntimeChild({
       environmentId: 'devbox',
-      config: { binaryPath: process.execPath },
+      launch: resolveRuntimeLaunchCommand(process.execPath),
       hubVersion: 'hub-test',
       handshakeTimeoutMs: 2_000,
       onClosed: () => undefined,
