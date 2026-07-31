@@ -33,7 +33,10 @@ export function OverviewHealthRollup() {
 
   const counts = healthRollup([runtimes.data ?? [], agents.data ?? []]);
   const total = HEALTH_ORDER.reduce((sum, health) => sum + counts[health], 0);
-  const hasData = runtimes.data !== undefined || agents.data !== undefined;
+  // Both sources or none: a count drawn from one of them is not a smaller
+  // truth, it is the wrong number. Half a rollup reading "nothing needs
+  // attention" is exactly the lie this section exists not to tell.
+  const hasData = runtimes.data !== undefined && agents.data !== undefined;
 
   return (
     <OverviewSection

@@ -165,6 +165,35 @@ describe('OverviewPage', () => {
     );
   });
 
+  it('refuses to publish a health count drawn from only one of its two sources', async () => {
+    // Every request but the agent probe, which is left unhandled. The rollup
+    // spans runtimes and agents, so half of it is not a smaller truth — a
+    // rollup that answered from runtimes alone would report every agent as
+    // fine by never having asked.
+    scenario
+      .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
+      .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+      .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+      .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+      .install();
+
+    await renderWithRouter(<OverviewPage />);
+
+    const health = await screen.findByTestId('overview-health');
+    await waitFor(() => {
+      expect(within(health).getByTestId('environments-error')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('health-rollup')).not.toBeInTheDocument();
+    expect(screen.queryByText(en.environments.overview.healthClear)).not.toBeInTheDocument();
+
+    // The library numbers do not depend on an agent probe, so they still land.
+    const library = screen.getByTestId('overview-library');
+    await waitFor(() => {
+      expect(within(library).getAllByTestId('library-coverage-row')).toHaveLength(4);
+    });
+  });
+
   it('costs one section, not the page, when a query fails', async () => {
     // Every request but the library's resource scan, which is left unhandled.
     scenario
