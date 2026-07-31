@@ -218,6 +218,57 @@ describe('tool identity image serving', () => {
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG_BYTES);
   });
 
+  it('lets the browser keep the bytes, since the address carries the version', async () => {
+    const app = mountApp();
+    await app.handle(uploadRequest('agent:claude', PNG_BYTES, 'logo.png', 'image/png'));
+
+    const response = await app.handle(
+      new Request('http://localhost/tool-identities/agent:claude/image?v=1')
+    );
+
+    // The client asks for `?v=<updatedAt>`, so these bytes are what this address
+    // means for good — revalidating on every page that draws the tool would
+    // re-transfer up to 512 KiB to be told nothing changed.
+    const cacheControl = response.headers.get('cache-control');
+    expect(cacheControl).toContain('private');
+    expect(cacheControl).toContain('immutable');
+    expect(cacheControl).not.toContain('max-age=0');
+    expect(response.headers.get('etag')).toBeTruthy();
+  });
+
+  it('answers a matching If-None-Match with 304 and no body', async () => {
+    const app = mountApp();
+    await app.handle(uploadRequest('agent:claude', PNG_BYTES, 'logo.png', 'image/png'));
+
+    const first = await app.handle(
+      new Request('http://localhost/tool-identities/agent:claude/image')
+    );
+    const etag = first.headers.get('etag') ?? '';
+
+    const revalidated = await app.handle(
+      new Request('http://localhost/tool-identities/agent:claude/image', {
+        headers: { 'If-None-Match': etag },
+      })
+    );
+
+    expect(revalidated.status).toBe(304);
+    expect(await revalidated.arrayBuffer()).toHaveLength(0);
+  });
+
+  it('serves the image again when the tag a client holds is stale', async () => {
+    const app = mountApp();
+    await app.handle(uploadRequest('agent:claude', PNG_BYTES, 'logo.png', 'image/png'));
+
+    const response = await app.handle(
+      new Request('http://localhost/tool-identities/agent:claude/image', {
+        headers: { 'If-None-Match': '"0"' },
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(PNG_BYTES);
+  });
+
   it('answers 404 for a tool with no stored bytes', async () => {
     const app = mountApp();
 
