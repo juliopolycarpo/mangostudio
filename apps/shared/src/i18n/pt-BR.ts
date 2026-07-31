@@ -1209,6 +1209,8 @@ export const messages = {
     close: 'Fechar',
     loading: 'Carregando pastas...',
     empty: 'Nenhuma subpasta encontrada.',
+    truncatedNotice:
+      'Esta pasta tem subpastas demais para listar. Mostrando as primeiras {count}; digite um caminho completo acima para abrir uma que não aparece.',
     loadError: 'Não foi possível abrir esta pasta.',
     selectionError: 'Não foi possível definir o diretório de trabalho.',
     validationError: 'Este caminho não pode ser usado como diretório de trabalho.',

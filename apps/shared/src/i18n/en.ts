@@ -1188,6 +1188,8 @@ export const messages: Messages = {
     close: 'Close',
     loading: 'Loading folders...',
     empty: 'No subfolders found.',
+    truncatedNotice:
+      'This folder has too many subfolders to list. Showing the first {count}; type a full path above to open one that is not shown.',
     loadError: 'This folder could not be opened.',
     selectionError: 'The working directory could not be set.',
     validationError: 'This path cannot be used as a working directory.',

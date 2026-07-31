@@ -299,7 +299,17 @@ export function WorkdirPickerDialog({
               </button>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3 sm:p-4">
+              {/* Hoisted above the list branches: hidden entries can consume the whole
+                  cap, leaving a visibly empty folder that is nonetheless truncated. */}
+              {listing.data?.truncated ? (
+                <p
+                  role="status"
+                  className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-xs text-on-surface-variant"
+                >
+                  {s.truncatedNotice.replace('{count}', String(listing.data.entries.length))}
+                </p>
+              ) : null}
               {listing.isLoading ? (
                 <div className="flex h-full min-h-48 items-center justify-center gap-2 text-sm text-on-surface-variant">
                   <LoaderCircle size={18} className="animate-spin text-primary" />
