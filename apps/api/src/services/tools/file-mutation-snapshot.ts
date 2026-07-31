@@ -116,10 +116,10 @@ function decodeRuntimeSnapshot(snapshot: RuntimeBeforeSnapshot): {
     throw new Error('Runtime returned an incomplete file mutation snapshot.');
   }
 
+  // The hash below is the integrity check. Re-encoding and comparing strings
+  // would additionally demand canonical base64, which a non-Bun runtime behind a
+  // byte transport is free not to emit (padding, line wrapping).
   const bytes = Buffer.from(snapshot.contentBase64, 'base64');
-  if (bytes.toString('base64') !== snapshot.contentBase64) {
-    throw new Error('Runtime returned an invalid base64 file mutation snapshot.');
-  }
   const beforeHash = hashCheckpointBytes(bytes);
   if (beforeHash !== snapshot.hash) {
     throw new Error('Runtime file mutation snapshot hash did not match its bytes.');
