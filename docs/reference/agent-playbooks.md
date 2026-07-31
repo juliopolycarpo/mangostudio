@@ -210,8 +210,8 @@ surface above. "Toolchains" is an i18n label: the route is still
 ### Tool identity (names and avatars)
 
 - `apps/shared/src/tool-identity/` (subject-key grammar and the stored shape)
-- `apps/api/src/modules/tool-identity/` (list, upsert, reset; publishes the
-  `tool-identity` settings invalidation scope)
+- `apps/api/src/modules/tool-identity/` (list, upsert, reset, image upload and
+  serve; publishes the `tool-identity` settings invalidation scope)
 - `apps/frontend/src/features/environments/identity/` (`resolve.ts` is the
   fallback chain; `use-tool-identities.ts` is what every surface calls)
 - `apps/frontend/src/components/ui/ToolAvatar.tsx` and
@@ -224,6 +224,28 @@ registry is **display-only**: an override changes what a human reads and
 nothing else, so no wire id, provider-facing tool name, or API path may be
 derived from it. Consumers live in environments cards, `library/CoverageMatrix`,
 `settings/mcp`, and the chat capability inspector.
+
+#### Avatar images
+
+- `application/tool-image-validation.ts` decides the type from the bytes for
+  both an upload and a cached remote image. PNG, JPEG, and WebP only; **SVG is
+  refused by name and must stay refused** — it is markup that can carry script,
+  and these bytes are served back from our own origin.
+- `infrastructure/tool-image-storage.ts` owns the files, under
+  `toolImages.dir` (`~/.mango/tool-images/<userId>/`, parsed only in
+  `lib/config.ts`). A file is keyed by its identity row and deleted with it, so
+  there is no orphan sweep.
+- Serving pins the type recorded at write time and sends `nosniff`. Never infer
+  the type from the file at serve time.
+- Caching a URL fetches it through `lib/safe-fetch.ts`; that path, not the
+  storage layer, is where the SSRF guard lives.
+- The frontend never renders a stored image without a fallback:
+  `ToolAvatar` drops back to the monogram on a load error, and an uncached
+  address is loaded with no referrer and no cookies.
+
+There is no CSP on the app today, so a hotlinked `https:` image loads without
+one. If a policy is ever added, `img-src` has to permit `https:` or every
+uncached avatar silently becomes a monogram.
 
 ## MCP Servers
 
