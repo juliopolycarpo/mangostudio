@@ -16,6 +16,7 @@ import {
   type QueryCacheNotifyEvent,
   type QueryClient,
 } from '@tanstack/react-query';
+import { environmentKeys } from '@/features/environments/queries';
 import { agentSettingsKeys } from '@/features/settings/agents/queries';
 import { appSettingsKeys } from '@/features/settings/app/queries';
 import { mcpServerKeys } from '@/features/settings/mcp/queries';
@@ -33,6 +34,11 @@ const CAPABILITY_SOURCE_KEYS: readonly (readonly unknown[])[] = [
   agentSettingsKeys.all,
   mcpServerKeys.all,
   catalogKeys.all,
+  // Only the entity region: shell and tool eligibility are read from the
+  // selected runtime's manifest, so a connect, disconnect, or config change
+  // moves them. The sibling probe regions under `environments` describe the
+  // host's installed toolchains and feed nothing the resolver reads.
+  environmentKeys.entities(),
 ];
 
 /** Root segments of every source region, for a constant-time reject. */

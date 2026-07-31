@@ -205,6 +205,103 @@ describe('useUpdateChatMutation', () => {
     );
   });
 
+  it('keeps a workdir the same request supplied alongside a new environment', async () => {
+    const chatWithWorkdir: Chat = {
+      ...EXISTING_CHAT,
+      environmentId: 'local',
+      workdir: '/srv/local-project',
+    };
+
+    const { result } = renderHook(() => {
+      const mutation = useUpdateChatMutation();
+      const queryClient = useQueryClient();
+      return { mutation, queryClient };
+    });
+
+    act(() => {
+      result.current.queryClient.setQueryData(chatKeys.lists(), [chatWithWorkdir]);
+      result.current.queryClient.setQueryData(chatKeys.detail(chatWithWorkdir.id), chatWithWorkdir);
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        id: chatWithWorkdir.id,
+        updates: { environmentId: 'remote-dev', workdir: '/srv/remote-project' },
+      });
+    });
+
+    // The server only clears the workdir when the request omitted one, and its
+    // PUT answers `{ success }` rather than the chat, so nothing would repair a
+    // cache that blanked a workdir the server just accepted.
+    const expected = {
+      ...chatWithWorkdir,
+      environmentId: 'remote-dev',
+      workdir: '/srv/remote-project',
+    };
+    expect(result.current.queryClient.getQueryData(chatKeys.lists())).toEqual([expected]);
+    expect(result.current.queryClient.getQueryData(chatKeys.detail(chatWithWorkdir.id))).toEqual(
+      expected
+    );
+  });
+
+  it('marks capability projections stale when the environment changes', async () => {
+    const chatWithEnvironment: Chat = { ...EXISTING_CHAT, environmentId: 'local' };
+    const capabilitiesKey = ['chat-capabilities', chatWithEnvironment.id, null, 'chat', null];
+
+    const { result } = renderHook(() => {
+      const mutation = useUpdateChatMutation();
+      const queryClient = useQueryClient();
+      return { mutation, queryClient };
+    });
+
+    act(() => {
+      result.current.queryClient.setQueryData(
+        chatKeys.detail(chatWithEnvironment.id),
+        chatWithEnvironment
+      );
+      result.current.queryClient.setQueryData(capabilitiesKey, { tools: [] });
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        id: chatWithEnvironment.id,
+        updates: { environmentId: 'remote-dev' },
+      });
+    });
+
+    // Shell eligibility comes from the selected runtime's manifest, but the
+    // capability key holds no environment, so nothing else marks it stale.
+    expect(result.current.queryClient.getQueryState(capabilitiesKey)?.isInvalidated).toBe(true);
+  });
+
+  it('leaves capability projections alone when the environment is unchanged', async () => {
+    const chatWithEnvironment: Chat = { ...EXISTING_CHAT, environmentId: 'local' };
+    const capabilitiesKey = ['chat-capabilities', chatWithEnvironment.id, null, 'chat', null];
+
+    const { result } = renderHook(() => {
+      const mutation = useUpdateChatMutation();
+      const queryClient = useQueryClient();
+      return { mutation, queryClient };
+    });
+
+    act(() => {
+      result.current.queryClient.setQueryData(
+        chatKeys.detail(chatWithEnvironment.id),
+        chatWithEnvironment
+      );
+      result.current.queryClient.setQueryData(capabilitiesKey, { tools: [] });
+    });
+
+    await act(async () => {
+      await result.current.mutation.mutateAsync({
+        id: chatWithEnvironment.id,
+        updates: { title: 'Renamed' },
+      });
+    });
+
+    expect(result.current.queryClient.getQueryState(capabilitiesKey)?.isInvalidated).toBe(false);
+  });
+
   it('throws when the API returns an error', async () => {
     mockPut.mockResolvedValue(fail('Not found'));
 
