@@ -18,6 +18,16 @@
 const SECRET_ENV_KEY =
   /(?:API[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|CREDENTIALS?|PRIVATE[_-]?KEY|ACCESS[_-]?KEY)/i;
 
+/**
+ * Matches values that embed credentials in a URL or DSN, such as
+ * `postgres://user:pw@host/db` or `redis://:pw@host:6379`. Name-shaped detection
+ * cannot see these: `DATABASE_URL` and `REDIS_URL` read as ordinary settings.
+ * Matching on the value rather than adding a `_URL` clause to SECRET_ENV_KEY
+ * keeps credential-free URLs (`BASE_URL`, `HTTP_PROXY`, `npm_config_registry`)
+ * forwarded, which ordinary commands need.
+ */
+const CREDENTIALED_URL_VALUE = /^[a-z][a-z0-9+.-]*:\/\/[^/?#\s@]*:[^/?#\s@]*@/i;
+
 /** Operator overrides for the built-in secret denylist, configured per shell tool. */
 export interface ShellEnvPolicy {
   /** Exact env var names forwarded to commands even when they look like secrets. */
@@ -36,13 +46,21 @@ export function isSecretEnvKey(key: string): boolean {
 }
 
 /**
+ * Reports whether a value carries credentials regardless of its variable name.
+ * // Usage: isSecretEnvValue('postgres://app:pw@db/main') // → true
+ */
+export function isSecretEnvValue(value: string): boolean {
+  return CREDENTIALED_URL_VALUE.test(value);
+}
+
+/**
  * Decides if a variable is kept from a child process. Explicit deny wins over an
  * explicit allow, which in turn overrides the built-in secret detection.
  */
-function isWithheld(key: string, policy: ShellEnvPolicy): boolean {
+function isWithheld(key: string, value: string, policy: ShellEnvPolicy): boolean {
   if (policy.deny?.includes(key)) return true;
   if (policy.allow?.includes(key)) return false;
-  return isSecretEnvKey(key);
+  return isSecretEnvKey(key) || isSecretEnvValue(value);
 }
 
 /**
@@ -58,7 +76,7 @@ export function sanitizeShellEnv(
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(source)) {
-    if (value === undefined || isWithheld(key, policy)) continue;
+    if (value === undefined || isWithheld(key, value, policy)) continue;
     env[key] = value;
   }
   return env;
