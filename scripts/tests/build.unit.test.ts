@@ -6,8 +6,8 @@ import { readText } from './support/read-text';
 
 describe('build script', () => {
   test('keeps only build-capable workspaces', () => {
-    expect(selectBuildWorkspaces(['frontend', 'shared', 'api'])).toEqual({
-      runnableWorkspaces: ['frontend', 'api'],
+    expect(selectBuildWorkspaces(['frontend', 'shared', 'api', 'runtime'])).toEqual({
+      runnableWorkspaces: ['frontend', 'api', 'runtime'],
       skippedWorkspaces: ['shared'],
     });
   });
@@ -56,6 +56,7 @@ describe('build script', () => {
     expect(rootConfig).toContain("'turbo.jsonc'");
     expect(rootConfig).toContain("'apps/api/turbo.json'");
     expect(rootConfig).toContain("'apps/frontend/turbo.json'");
+    expect(rootConfig).toContain("'apps/runtime/turbo.json'");
   });
 
   test('uses the binary alias for standalone smoke builds', () => {

@@ -31,6 +31,7 @@
     "@elysiajs/openapi": "^1.4.15",
     "@elysiajs/static": "^1.4.10",
     "@google/genai": "^1.52.0",
+    "@mangostudio/runtime": "workspace:*",
     "@mangostudio/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "ai": "^7.0.19",

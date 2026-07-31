@@ -17,7 +17,7 @@ import {
   StaleFileError,
   StaleLineNumbersError,
   withPathLocks,
-} from '../../../../src/services/tools/file-freshness';
+} from '../../../src/services/file-freshness';
 
 let tempDir: string;
 

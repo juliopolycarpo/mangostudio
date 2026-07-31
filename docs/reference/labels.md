@@ -30,6 +30,7 @@ zero or multiple `type:` labels. Closed issues are left alone so label cleanup d
 - `area: frontend` — `apps/frontend/**`
 - `area: api` — `apps/api/**`
 - `area: shared` — `apps/shared/**`
+- `area: runtime` — `apps/runtime/**`, `apps/shared/src/runtime-protocol/**`, `apps/api/src/services/runtime-client/**`
 - `area: git` — `apps/api/src/modules/{git,github}/**`, `apps/frontend/src/features/workspace/**`, `apps/shared/src/{git,github}/**`
 - `area: auth` — auth entry points + `apps/shared/src/auth/**` + `tests/browser-smoke/auth-flow.spec.ts`
 - `area: chat` — `apps/api/src/modules/{chats,messages}/**`, `apps/frontend/src/features/chat/**`, `apps/shared/src/chat/**`

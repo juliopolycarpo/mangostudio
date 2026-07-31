@@ -37,6 +37,7 @@ Workspace flags:
   --frontend
   --api
   --shared
+  --runtime
   --root     Run root-level checks only (tooling lint + docs)
   --all
 

@@ -36,6 +36,10 @@
       "entry": ["tests/**/*.test.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
+    "apps/runtime": {
+      "entry": ["tests/**/*.test.ts"],
+      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    },
     "packages/cli": {
       "project": ["bin/**/*.js"]
     }

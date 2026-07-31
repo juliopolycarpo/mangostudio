@@ -39,6 +39,7 @@ export function mapFilesToWorkspaces(files: string[]): {
     if (f.startsWith('apps/frontend/')) set.add('frontend');
     else if (f.startsWith('apps/api/')) set.add('api');
     else if (f.startsWith('apps/shared/')) set.add('shared');
+    else if (f.startsWith('apps/runtime/')) set.add('runtime');
     else includeRoot = true;
   }
   return { workspaces: [...set], includeRoot };

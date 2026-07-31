@@ -48,6 +48,7 @@ Default:
 Workspace flags:
   --frontend   Build the frontend workspace
   --api        Build the API workspace
+  --runtime    Build the runtime library workspace
   --all        Build every build-capable workspace
 
 Binary flags:
@@ -537,7 +538,9 @@ if (skippedWorkspaces.length > 0) {
 }
 
 if (buildTargets.length === 0) {
-  fatal('No build-capable workspace selected. Use `--frontend`, `--api`, or `--binary`.');
+  fatal(
+    'No build-capable workspace selected. Use `--frontend`, `--api`, `--runtime`, or `--binary`.'
+  );
 }
 
 header('Build');

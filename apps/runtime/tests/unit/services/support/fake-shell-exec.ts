@@ -1,4 +1,4 @@
-import type { ShellExecDependencies } from '../../../../../src/services/tools/builtin/_shell-exec';
+import type { ShellExecDependencies } from '../../../../src/services/shell';
 
 function createTextStream(text: string): ReadableStream<Uint8Array> {
   return new ReadableStream({
