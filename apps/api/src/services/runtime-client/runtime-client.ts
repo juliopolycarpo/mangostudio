@@ -13,6 +13,8 @@ import {
   type RuntimeDeleteFileResult,
   type RuntimeEditFileParams,
   type RuntimeEditFileResult,
+  type RuntimeGitExecParams,
+  type RuntimeGitExecResult,
   type RuntimeGlobParams,
   type RuntimeGlobResult,
   type RuntimeGrepParams,
@@ -39,6 +41,12 @@ import {
   type RuntimeSnapshotHashResult,
   type RuntimeSnapshotRevertParams,
   type RuntimeSnapshotRevertResult,
+  type RuntimeWorkspaceBrowseParams,
+  type RuntimeWorkspaceBrowseResult,
+  type RuntimeWorkspaceResolveContainedParams,
+  type RuntimeWorkspaceResolveContainedResult,
+  type RuntimeWorkspaceValidateParams,
+  type RuntimeWorkspaceValidateResult,
   type RuntimeWriteFileParams,
   type RuntimeWriteFileResult,
   ShellExecutionError,
@@ -93,6 +101,13 @@ interface RuntimeShellClient {
   run(params: RuntimeShellRunParams, options?: RuntimeRequestOptions): Promise<RuntimeShellResult>;
 }
 
+interface RuntimeGitClient {
+  exec(
+    params: RuntimeGitExecParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeGitExecResult>;
+}
+
 interface RuntimeSnapshotClient {
   capture(
     params: RuntimeSnapshotCaptureParams,
@@ -108,11 +123,28 @@ interface RuntimeSnapshotClient {
   ): Promise<RuntimeSnapshotRevertResult>;
 }
 
+interface RuntimeWorkspaceClient {
+  browse(
+    params?: RuntimeWorkspaceBrowseParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeWorkspaceBrowseResult>;
+  validate(
+    params: RuntimeWorkspaceValidateParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeWorkspaceValidateResult>;
+  resolveContained(
+    params: RuntimeWorkspaceResolveContainedParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeWorkspaceResolveContainedResult>;
+}
+
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
 export class RuntimeClient {
   readonly fs: RuntimeFsClient;
   readonly shell: RuntimeShellClient;
+  readonly git: RuntimeGitClient;
   readonly snapshot: RuntimeSnapshotClient;
+  readonly workspace: RuntimeWorkspaceClient;
 
   constructor(private readonly protocol: RuntimeProtocolClient) {
     this.fs = {
@@ -131,10 +163,19 @@ export class RuntimeClient {
     this.shell = {
       run: (params, options) => this.request('shell.run', params, options),
     };
+    this.git = {
+      exec: (params, options) => this.request('git.exec', params, options),
+    };
     this.snapshot = {
       capture: (params, options) => this.request('snapshot.capture', params, options),
       hash: (params, options) => this.request('snapshot.hash', params, options),
       revert: (params, options) => this.request('snapshot.revert', params, options),
+    };
+    this.workspace = {
+      browse: (params = {}, options) => this.request('workspace.browse', params, options),
+      validate: (params, options) => this.request('workspace.validate', params, options),
+      resolveContained: (params, options) =>
+        this.request('workspace.resolve-contained', params, options),
     };
   }
 

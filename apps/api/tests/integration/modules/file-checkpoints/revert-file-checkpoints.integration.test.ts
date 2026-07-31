@@ -9,6 +9,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { faker } from '@faker-js/faker';
+import { PathAccessError } from '@mangostudio/runtime';
 import { getDb } from '../../../../src/db/database';
 import { deleteChatUseCase } from '../../../../src/modules/chats/application/delete-chat';
 import { listChatFileCheckpointSummaries } from '../../../../src/modules/file-checkpoints/application/list-chat-checkpoints';
@@ -29,12 +30,14 @@ import type { ToolContext } from '../../../../src/services/tools/types';
 import { type ChatFixture, insertTestChat, insertTestUser } from '../../../support/factories';
 
 let tempDir: string;
+let outsideDir: string;
 let chat: ChatFixture;
 let messageId: string;
 
 beforeEach(async () => {
   clearFileFreshness();
   tempDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-test-'));
+  outsideDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-outside-'));
   const user = await insertTestUser();
   chat = await insertTestChat(user.id);
   messageId = faker.string.uuid();
@@ -62,6 +65,7 @@ beforeEach(async () => {
 afterEach(() => {
   clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
+  rmSync(outsideDir, { recursive: true, force: true });
 });
 
 /** Turn context as the generation layer builds it: message-scoped, db-backed. */
@@ -227,6 +231,53 @@ describe('revertMessageFileCheckpoints', () => {
     expect(await revert()).toEqual({ revertedFiles: 1 });
     expect(await revert()).toEqual({ revertedFiles: 0 });
     expect(await listChatFileCheckpointSummaries(getDb(), chat.id)).toEqual([]);
+  });
+});
+
+/**
+ * Restriction is evaluated at revert time, not capture time, so a turn that ran
+ * unrestricted can be reverted after the setting is switched on. That is the
+ * whole point of re-checking containment here.
+ */
+describe('revert containment against the chat workdir', () => {
+  async function bindWorkdir(restricted: boolean): Promise<void> {
+    await getDb()
+      .updateTable('chats')
+      .set({ workdir: tempDir, restrictToolsToWorkdir: restricted ? 1 : 0 })
+      .where('id', '=', chat.id)
+      .execute();
+  }
+
+  async function checkpointOutsideWorkdir(): Promise<string> {
+    const path = join(outsideDir, 'planted.txt');
+    await executeCreateFile({ path, content: 'outside\n' }, turnContext());
+    return path;
+  }
+
+  it('reverts a path outside the workdir when the chat is unrestricted', async () => {
+    await bindWorkdir(false);
+    const path = await checkpointOutsideWorkdir();
+
+    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('refuses a path outside the workdir when the chat is restricted', async () => {
+    await bindWorkdir(true);
+    const path = await checkpointOutsideWorkdir();
+
+    await expect(revert()).rejects.toBeInstanceOf(PathAccessError);
+    // The whole revert is refused, so the file the turn created still stands.
+    expect(await readText(path)).toBe('outside\n');
+  });
+
+  it('still reverts paths inside the workdir when the chat is restricted', async () => {
+    await bindWorkdir(true);
+    const path = join(tempDir, 'inside.txt');
+    await executeCreateFile({ path, content: 'inside\n' }, turnContext());
+
+    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(existsSync(path)).toBe(false);
   });
 });
 

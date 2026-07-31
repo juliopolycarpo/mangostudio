@@ -1,5 +1,5 @@
 import { unlink } from 'node:fs/promises';
-import { RuntimeServiceError } from '../errors';
+import { PathAccessError, RuntimeServiceError } from '../errors';
 import {
   RUNTIME_ABSENT_HASH,
   type RuntimeBeforeSnapshot,
@@ -14,6 +14,7 @@ import {
   moveRegularFileWithoutOverwrite,
   writeRegularFileAtomic,
 } from './fs-utils';
+import { assertInsideWorkdir, WorkdirContainmentError } from './path-containment';
 
 export class RuntimeSnapshotConflictError extends RuntimeServiceError {
   constructor(readonly resolvedPath: string) {
@@ -105,6 +106,19 @@ export async function revertRuntimeSnapshots(
       operation.type === 'move' ? [operation.path, operation.movedTo] : [operation.path]
     ),
   ];
+
+  if (params.containmentRoot) {
+    for (const path of paths) {
+      try {
+        assertInsideWorkdir(params.containmentRoot, path);
+      } catch (error) {
+        if (error instanceof WorkdirContainmentError) {
+          throw new PathAccessError(error.message);
+        }
+        throw error;
+      }
+    }
+  }
 
   return await withPathLocks(paths, async () => {
     for (const entry of params.expected) {

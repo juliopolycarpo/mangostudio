@@ -1,5 +1,6 @@
-import { realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep, win32 } from 'node:path';
+import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { getRuntimeClient } from '../../../services/runtime-client';
 
 export class GitPathValidationError extends Error {
   constructor(path: string) {
@@ -50,26 +51,23 @@ export function validateRepoPaths(root: string, paths: readonly string[]): strin
  * do follow them, so a `link -> /etc` directory symlink inside the repository
  * would otherwise expose files outside the root. Returns the contained
  * repository-relative path, or null when the path does not exist.
+ *
+ * The lexical pre-check stays hub-side because it is a rejection policy, but the
+ * symlink resolution runs in the runtime: `realpath` is a fact about the machine
+ * that owns the repository, and resolving it here would consult the hub's
+ * filesystem once the runtime is remote.
  */
 export async function resolveContainedPath(root: string, path: string): Promise<string | null> {
   validateRepoPaths(root, [path]);
 
-  const realRoot = await realpath(resolve(root));
-  let realPath: string;
+  const runtime = await getRuntimeClient();
   try {
-    realPath = await realpath(resolve(realRoot, path.replaceAll('\\', '/')));
-  } catch {
-    return null;
+    const { relativePath } = await runtime.workspace.resolveContained({ root, path });
+    return relativePath;
+  } catch (error) {
+    if (error instanceof RuntimeRemoteError && error.details?.kind === 'workspace_containment') {
+      throw new GitPathValidationError(path);
+    }
+    throw error;
   }
-
-  const relativePath = relative(realRoot, realPath);
-  if (
-    relativePath.length === 0 ||
-    relativePath === '..' ||
-    relativePath.startsWith(`..${sep}`) ||
-    isAbsolute(relativePath)
-  ) {
-    throw new GitPathValidationError(path);
-  }
-  return relativePath;
 }

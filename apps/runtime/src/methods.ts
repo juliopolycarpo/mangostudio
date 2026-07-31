@@ -1,4 +1,8 @@
 import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
+import type {
+  ListDirectoryResponse,
+  WorkdirValidationReason,
+} from '@mangostudio/shared/workspaces';
 
 export const RUNTIME_ABSENT_HASH = 'absent';
 
@@ -255,6 +259,19 @@ export interface RuntimeShellResult {
   readonly durationMs: number;
 }
 
+export interface RuntimeGitExecParams {
+  readonly args: readonly string[];
+  readonly cwd: string;
+  readonly timeoutMs?: number;
+  readonly acceptedExitCodes?: readonly number[];
+}
+
+export interface RuntimeGitExecResult {
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly exitCode: number;
+}
+
 export interface RuntimeSnapshotCaptureParams {
   readonly path: string;
 }
@@ -269,6 +286,8 @@ export interface RuntimeSnapshotHashResult {
 
 export interface RuntimeSnapshotRevertParams {
   readonly chatId: string;
+  /** When set, every revert path must stay inside this root after symlink resolution. */
+  readonly containmentRoot?: string;
   readonly expected: readonly {
     readonly path: string;
     readonly afterHash: string;
@@ -287,6 +306,32 @@ export interface RuntimeSnapshotRevertParams {
         readonly contentBase64: string;
       }
   )[];
+}
+
+export interface RuntimeWorkspaceBrowseParams {
+  readonly path?: string;
+}
+
+export type RuntimeWorkspaceBrowseResult = ListDirectoryResponse;
+
+export type RuntimeWorkspaceValidateResult =
+  | { readonly ok: true; readonly resolvedPath: string }
+  | { readonly ok: false; readonly reason: WorkdirValidationReason };
+
+export interface RuntimeWorkspaceValidateParams {
+  readonly path: string;
+  readonly requireAbsolute?: boolean;
+}
+
+export interface RuntimeWorkspaceResolveContainedParams {
+  readonly root: string;
+  /** Root-relative path, in either separator style; the runtime applies its own. */
+  readonly path: string;
+}
+
+export interface RuntimeWorkspaceResolveContainedResult {
+  /** Root-relative canonical path, or null when nothing exists at that location. */
+  readonly relativePath: string | null;
 }
 
 export interface RuntimeSnapshotRevertResult {
@@ -342,6 +387,10 @@ export interface RuntimeMethodMap {
     readonly params: RuntimeShellRunParams;
     readonly result: RuntimeShellResult;
   };
+  'git.exec': {
+    readonly params: RuntimeGitExecParams;
+    readonly result: RuntimeGitExecResult;
+  };
   'snapshot.capture': {
     readonly params: RuntimeSnapshotCaptureParams;
     readonly result: RuntimeBeforeSnapshot;
@@ -353,6 +402,18 @@ export interface RuntimeMethodMap {
   'snapshot.revert': {
     readonly params: RuntimeSnapshotRevertParams;
     readonly result: RuntimeSnapshotRevertResult;
+  };
+  'workspace.browse': {
+    readonly params: RuntimeWorkspaceBrowseParams;
+    readonly result: RuntimeWorkspaceBrowseResult;
+  };
+  'workspace.validate': {
+    readonly params: RuntimeWorkspaceValidateParams;
+    readonly result: RuntimeWorkspaceValidateResult;
+  };
+  'workspace.resolve-contained': {
+    readonly params: RuntimeWorkspaceResolveContainedParams;
+    readonly result: RuntimeWorkspaceResolveContainedResult;
   };
 }
 

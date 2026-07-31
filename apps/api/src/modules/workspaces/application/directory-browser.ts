@@ -1,17 +1,14 @@
-import type { Dirent } from 'node:fs';
-import { access, readdir, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, parse, resolve, sep } from 'node:path';
+/**
+ * Hub facade for workspace directory browsing. Host I/O runs in the runtime via
+ * `workspace.browse`; this module preserves the HTTP error types routes expect.
+ */
+
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
-  DirectoryEntry,
   ListDirectoryResponse,
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
-import { resolveWorkspacePath, WorkspacePathError } from './workspace-path';
-
-/** Reused across comparisons; constructing a collator per compare dominates large listings. */
-const INSENSITIVE_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
-const CASE_COLLATOR = new Intl.Collator();
+import { getRuntimeClient } from '../../../services/runtime-client';
 
 const REASON_MESSAGES: Record<WorkdirValidationReason | 'invalid-path', string> = {
   'invalid-path': 'Directory browsing requires an absolute path.',
@@ -30,124 +27,37 @@ export class DirectoryBrowserError extends Error {
   }
 }
 
-function filesystemReason(error: unknown): WorkdirValidationReason | undefined {
-  if (!(error instanceof Error) || !('code' in error)) {
-    return undefined;
-  }
-
-  switch (error.code) {
-    case 'ENOENT':
-      return 'not-found';
-    case 'ENOTDIR':
-      return 'not-a-directory';
-    case 'EACCES':
-    case 'EPERM':
-      return 'permission-denied';
-    default:
-      return undefined;
-  }
-}
-
-async function isDirectoryEntry(
-  path: string,
-  directoryEntry: { isDirectory(): boolean; isSymbolicLink(): boolean }
-): Promise<boolean> {
-  if (directoryEntry.isDirectory()) {
-    return true;
-  }
-  if (!directoryEntry.isSymbolicLink()) {
-    return false;
-  }
-
+export async function listDirectory(path?: string): Promise<ListDirectoryResponse> {
   try {
-    return (await stat(path)).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
-let cachedRoots: Promise<string[]> | undefined;
-
-async function probeWindowsDrives(): Promise<string[]> {
-  const candidates = Array.from(
-    { length: 26 },
-    (_, index) => `${String.fromCharCode(65 + index)}:\\`
-  );
-  const roots = await Promise.all(
-    candidates.map(async (candidate) => {
-      try {
-        await access(candidate);
-        return candidate;
-      } catch {
-        return undefined;
-      }
-    })
-  );
-  return roots.filter((root): root is string => root !== undefined);
-}
-
-/**
- * Mounted roots change rarely but probing them costs 26 syscalls on Windows,
- * so the result is resolved once and shared by every listing.
- */
-function listFilesystemRoots(): Promise<string[]> {
-  if (process.platform !== 'win32') {
-    return Promise.resolve(['/']);
-  }
-  cachedRoots ??= probeWindowsDrives();
-  return cachedRoots;
-}
-
-export async function listDirectory(path = homedir()): Promise<ListDirectoryResponse> {
-  let resolvedPath: string;
-  try {
-    resolvedPath = resolveWorkspacePath(path, { requireAbsolute: true });
+    const runtime = await getRuntimeClient();
+    return await runtime.workspace.browse(path === undefined ? {} : { path });
   } catch (error) {
-    if (error instanceof WorkspacePathError) {
-      throw new DirectoryBrowserError('VALIDATION', 'invalid-path');
-    }
-    throw error;
+    throw mapBrowseFailure(error);
   }
+}
 
-  let rawEntries: Dirent[];
-  try {
-    rawEntries = await readdir(resolvedPath, { withFileTypes: true });
-  } catch (error) {
-    const reason = filesystemReason(error);
-    if (reason) {
-      throw new DirectoryBrowserError('FILESYSTEM', reason);
+function mapBrowseFailure(error: unknown): Error {
+  if (error instanceof RuntimeRemoteError && detailString(error, 'kind') === 'workspace_browser') {
+    const code = detailString(error, 'code');
+    const reason = detailString(error, 'reason');
+    if ((code === 'VALIDATION' || code === 'FILESYSTEM') && isBrowserReason(reason)) {
+      return new DirectoryBrowserError(code, reason);
     }
-    throw error;
   }
+  if (error instanceof Error) return error;
+  return new Error(String(error));
+}
 
-  const entries = (
-    await Promise.all(
-      rawEntries.map(async (entry): Promise<DirectoryEntry | undefined> => {
-        const entryPath = resolve(resolvedPath, entry.name);
-        if (!(await isDirectoryEntry(entryPath, entry))) {
-          return undefined;
-        }
-        return {
-          name: entry.name,
-          path: entryPath,
-          hidden: entry.name.startsWith('.'),
-        };
-      })
-    )
-  )
-    .filter((entry): entry is DirectoryEntry => entry !== undefined)
-    .sort((left, right) => {
-      const insensitiveOrder = INSENSITIVE_COLLATOR.compare(left.name, right.name);
-      return insensitiveOrder || CASE_COLLATOR.compare(left.name, right.name);
-    });
+function isBrowserReason(value: unknown): value is WorkdirValidationReason | 'invalid-path' {
+  return (
+    value === 'invalid-path' ||
+    value === 'not-found' ||
+    value === 'not-a-directory' ||
+    value === 'permission-denied'
+  );
+}
 
-  const root = parse(resolvedPath).root;
-  return {
-    path: resolvedPath,
-    parent: resolvedPath === root ? null : dirname(resolvedPath),
-    entries,
-    home: homedir(),
-    roots: await listFilesystemRoots(),
-    separator: sep,
-  };
+function detailString(error: RuntimeRemoteError, key: string): string | undefined {
+  const value = error.details?.[key];
+  return typeof value === 'string' ? value : undefined;
 }

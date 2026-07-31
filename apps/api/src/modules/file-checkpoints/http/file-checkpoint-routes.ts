@@ -1,3 +1,4 @@
+import { PathAccessError } from '@mangostudio/runtime';
 import {
   type ApiErrorResponse,
   ApiErrorResponseSchema,
@@ -71,6 +72,10 @@ export const fileCheckpointRoutes = (app: Elysia) =>
               set.status = 409;
               return { error: error.message, code: ERROR_CODES.CONFLICT };
             }
+            if (error instanceof PathAccessError) {
+              set.status = 403;
+              return { error: error.message, code: ERROR_CODES.PERMISSION_DENIED };
+            }
             throw error;
           }
         },
@@ -78,6 +83,7 @@ export const fileCheckpointRoutes = (app: Elysia) =>
           params: t.Object({ id: t.String(), messageId: t.String() }),
           response: {
             200: RevertChatFileCheckpointsResponseSchema,
+            403: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
           },

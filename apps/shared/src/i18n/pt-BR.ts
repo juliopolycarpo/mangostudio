@@ -276,6 +276,8 @@ export const messages = {
       reverted: '{count} arquivo(s) revertido(s).',
       conflict:
         'Não foi possível reverter: um ou mais arquivos mudaram no disco desde que esta mensagem foi concluída.',
+      outsideWorkdir:
+        'Não foi possível reverter: esta mensagem alterou arquivos fora do diretório de trabalho, e as ferramentas estão restritas a ele.',
       failed: 'Não foi possível reverter as alterações em arquivos.',
     },
     scrollToBottom: 'Ir para o final',
@@ -1209,6 +1211,8 @@ export const messages = {
     close: 'Fechar',
     loading: 'Carregando pastas...',
     empty: 'Nenhuma subpasta encontrada.',
+    truncatedNotice:
+      'Esta pasta tem subpastas demais para listar. Mostrando as primeiras {count}; digite um caminho completo acima para abrir uma que não aparece.',
     loadError: 'Não foi possível abrir esta pasta.',
     selectionError: 'Não foi possível definir o diretório de trabalho.',
     validationError: 'Este caminho não pode ser usado como diretório de trabalho.',

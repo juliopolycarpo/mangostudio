@@ -2,8 +2,14 @@ import { RuntimeToolArgumentError } from './errors';
 import type { RuntimeHandlerContext, RuntimeMethodHandler } from './host';
 import type { RuntimeMethod, RuntimeMethodMap } from './methods';
 import { runtimeFsService } from './services/fs';
+import { execGit } from './services/git';
 import { runShellCommand } from './services/shell';
 import { captureFileSnapshot, hashFileAtPath, revertRuntimeSnapshots } from './services/snapshot';
+import {
+  browseWorkspace,
+  resolveContainedWorkspacePath,
+  validateWorkdir,
+} from './services/workspace';
 
 /** Registers the protocol methods owned by the runtime in this release. */
 export function createRuntimeMethodHandlers(): ReadonlyMap<string, RuntimeMethodHandler> {
@@ -22,11 +28,17 @@ export function createRuntimeMethodHandlers(): ReadonlyMap<string, RuntimeMethod
     handler('shell.run', (params, context) =>
       runShellCommand({ ...params, signal: context.signal })
     ),
+    handler('git.exec', (params, context) => execGit(params, context.signal)),
     handler('snapshot.capture', (params) => captureFileSnapshot(params.path)),
     handler('snapshot.hash', async (params) => ({
       hash: await hashFileAtPath(params.path),
     })),
     handler('snapshot.revert', (params) => revertRuntimeSnapshots(params)),
+    handler('workspace.browse', (params) => browseWorkspace(params)),
+    handler('workspace.validate', (params) =>
+      validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })
+    ),
+    handler('workspace.resolve-contained', (params) => resolveContainedWorkspacePath(params)),
   ]);
 }
 

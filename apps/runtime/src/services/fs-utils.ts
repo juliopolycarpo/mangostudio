@@ -1,11 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import {
-  constants as fsConstants,
-  lstatSync,
-  readlinkSync,
-  realpathSync,
-  type Stats,
-} from 'node:fs';
+import { constants as fsConstants, realpathSync, type Stats } from 'node:fs';
 import {
   access,
   chmod,
@@ -18,9 +12,10 @@ import {
   rename,
   unlink,
 } from 'node:fs/promises';
-import { basename, dirname, parse, resolve, sep } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { PathAccessError, RuntimeServiceError } from '../errors';
 import type { RuntimePathFilter } from '../methods';
+import { isPathPrefix, resolvePathThroughExistingAncestor } from './path-containment';
 
 export interface ObservedFileRead {
   readonly bytes: Uint8Array;
@@ -324,67 +319,4 @@ function compilePathRoot(root: string): CompiledPathRoot {
     // prefix; falling back keeps the policy usable instead of throwing.
     return { lexical, canonical: lexical };
   }
-}
-
-function isPathPrefix(root: string, candidate: string): boolean {
-  return candidate === root || candidate.startsWith(`${root}${sep}`);
-}
-
-const MAX_SYMLINK_HOPS = 32;
-
-function resolvePathThroughExistingAncestor(inputPath: string): string {
-  const absolutePath = resolve(inputPath);
-  const root = parse(absolutePath).root;
-  let resolvedPath = root;
-  let pending = absolutePath
-    .slice(root.length)
-    .split(sep)
-    .filter((segment) => segment.length > 0);
-  let hops = 0;
-
-  while (pending.length > 0) {
-    const segment = pending.shift();
-    if (segment === undefined) break;
-    const candidate = resolve(resolvedPath, segment);
-    const stat = lstatSyncOrNull(candidate);
-    if (!stat) {
-      return resolve(realpathSyncSafe(resolvedPath), segment, ...pending);
-    }
-    if (!stat.isSymbolicLink()) {
-      resolvedPath = candidate;
-      continue;
-    }
-    if (hops >= MAX_SYMLINK_HOPS) {
-      throw new PathAccessError(`Too many symbolic links while resolving "${inputPath}".`);
-    }
-    hops++;
-    const targetPath = resolve(dirname(candidate), readlinkSyncSafe(candidate));
-    const targetRoot = parse(targetPath).root;
-    resolvedPath = targetRoot;
-    pending = [
-      ...targetPath
-        .slice(targetRoot.length)
-        .split(sep)
-        .filter((part) => part.length > 0),
-      ...pending,
-    ];
-  }
-  return realpathSyncSafe(resolvedPath);
-}
-
-function lstatSyncOrNull(path: string): Stats | null {
-  try {
-    return lstatSync(path);
-  } catch (error) {
-    if (isErrnoException(error, 'ENOENT')) return null;
-    throw error;
-  }
-}
-
-function realpathSyncSafe(path: string): string {
-  return realpathSync(path);
-}
-
-function readlinkSyncSafe(path: string): string {
-  return readlinkSync(path);
 }

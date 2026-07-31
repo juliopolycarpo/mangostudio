@@ -1,25 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { clearFileFreshness } from '../../../src';
+import { clearFileFreshness, PathAccessError } from '../../../src';
 import { runtimeFsService } from '../../../src/services/fs';
 import {
   captureFileSnapshot,
   RUNTIME_SNAPSHOT_MAX_BYTES,
   RuntimeSnapshotTooLargeError,
+  revertRuntimeSnapshots,
 } from '../../../src/services/snapshot';
 
 let tempDir: string;
+let outsideDir: string;
 
 beforeEach(() => {
   clearFileFreshness();
   tempDir = mkdtempSync(join(tmpdir(), 'runtime-snapshot-test-'));
+  outsideDir = mkdtempSync(join(tmpdir(), 'runtime-snapshot-out-'));
 });
 
 afterEach(() => {
   clearFileFreshness();
   rmSync(tempDir, { recursive: true, force: true });
+  rmSync(outsideDir, { recursive: true, force: true });
 });
 
 async function writeOversizedFile(path: string): Promise<void> {
@@ -53,4 +57,40 @@ describe('runtime snapshot capture', () => {
     expect(await Bun.file(from).exists()).toBe(true);
     expect(await Bun.file(to).exists()).toBe(false);
   });
+});
+
+describe('runtime snapshot revert containment', () => {
+  it('rejects ../ escape paths when containmentRoot is set', async () => {
+    const inside = join(tempDir, 'kept.txt');
+    writeFileSync(inside, 'inside');
+    const escaped = join(tempDir, '..', 'escape.txt');
+
+    await expect(
+      revertRuntimeSnapshots({
+        chatId: 'chat-1',
+        containmentRoot: tempDir,
+        expected: [{ path: escaped, afterHash: 'deadbeef' }],
+        operations: [{ type: 'create', path: escaped }],
+      })
+    ).rejects.toBeInstanceOf(PathAccessError);
+  });
+
+  // Directory symlinks need elevation or developer mode on Windows.
+  it.skipIf(process.platform === 'win32')(
+    'rejects symlink escapes that leave the containment root',
+    async () => {
+      const linkPath = join(tempDir, 'escape-link');
+      symlinkSync(outsideDir, linkPath);
+      const escaped = join(linkPath, 'planted.txt');
+
+      await expect(
+        revertRuntimeSnapshots({
+          chatId: 'chat-1',
+          containmentRoot: tempDir,
+          expected: [{ path: escaped, afterHash: 'deadbeef' }],
+          operations: [{ type: 'create', path: escaped }],
+        })
+      ).rejects.toBeInstanceOf(PathAccessError);
+    }
+  );
 });

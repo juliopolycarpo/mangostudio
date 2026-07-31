@@ -1,6 +1,12 @@
-import { access, constants, stat } from 'node:fs/promises';
+/**
+ * Hub facade for working-directory validation. Host checks run in the runtime via
+ * `workspace.validate`; this module preserves the typed errors callers expect.
+ */
+
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type { WorkdirValidationReason } from '@mangostudio/shared/workspaces';
-import { resolveWorkspacePath } from './workspace-path';
+import { getRuntimeClient } from '../../../services/runtime-client';
+import { WorkspacePathError } from './workspace-path';
 
 export class WorkdirValidationError extends Error {
   readonly code = 'VALIDATION';
@@ -15,44 +21,18 @@ export type WorkdirValidationResult =
   | { ok: true; resolvedPath: string }
   | { ok: false; reason: WorkdirValidationReason };
 
-function filesystemReason(error: unknown): WorkdirValidationReason | undefined {
-  if (!(error instanceof Error) || !('code' in error)) {
-    return undefined;
-  }
-
-  switch (error.code) {
-    case 'ENOENT':
-      return 'not-found';
-    case 'ENOTDIR':
-      return 'not-a-directory';
-    case 'EACCES':
-    case 'EPERM':
-      return 'permission-denied';
-    default:
-      return undefined;
-  }
-}
-
 export async function validateWorkdir(
   path: string,
   options?: { requireAbsolute?: boolean }
 ): Promise<WorkdirValidationResult> {
-  const resolvedPath = resolveWorkspacePath(path, options);
-
   try {
-    const metadata = await stat(resolvedPath);
-    if (!metadata.isDirectory()) {
-      return { ok: false, reason: 'not-a-directory' };
-    }
-
-    await access(resolvedPath, constants.R_OK | constants.X_OK);
-    return { ok: true, resolvedPath };
+    const runtime = await getRuntimeClient();
+    return await runtime.workspace.validate({
+      path,
+      requireAbsolute: options?.requireAbsolute,
+    });
   } catch (error) {
-    const reason = filesystemReason(error);
-    if (reason) {
-      return { ok: false, reason };
-    }
-    throw error;
+    throw mapValidateFailure(error);
   }
 }
 
@@ -62,4 +42,18 @@ export async function requireValidWorkdir(path: string): Promise<string> {
     throw new WorkdirValidationError(validation.reason);
   }
   return validation.resolvedPath;
+}
+
+function mapValidateFailure(error: unknown): Error {
+  if (error instanceof RuntimeRemoteError && detailString(error, 'kind') === 'workdir_validation') {
+    return new WorkspacePathError(error.message);
+  }
+  if (error instanceof WorkspacePathError) return error;
+  if (error instanceof Error) return error;
+  return new Error(String(error));
+}
+
+function detailString(error: RuntimeRemoteError, key: string): string | undefined {
+  const value = error.details?.[key];
+  return typeof value === 'string' ? value : undefined;
 }

@@ -320,6 +320,13 @@ Open these first:
 
 ### API layering
 
+Workspace filesystem browsing and workdir validation run in the runtime via
+`workspace.browse` / `workspace.validate`. Hub modules under
+`application/directory-browser.ts` and `application/workdir-validation.ts` are
+thin RuntimeClient facades that preserve HTTP error types. Path-containment
+helpers re-export from `@mangostudio/runtime`; workdir-policy decisions stay in
+the hub.
+
 Every git route lives in `http/git-routes.ts` behind `routeWorkdir()` (chat ownership
 plus workdir resolution) and `gitWriteError()` (typed failures), and declares the same
 `403/404/409/422/500: ApiErrorResponseSchema` set.
@@ -327,9 +334,14 @@ plus workdir resolution) and `gitWriteError()` (typed failures), and declares th
 - Reads: `application/git-status-service.ts` and `application/git-navigation-service.ts`
   (history, commit details, diffs, `getHeadMessage` for the amend prefill).
 - Writes: `application/git-write-service.ts`. Every mutation runs inside
-  `runRepoMutation` — which resolves the repo root, takes `withMutationLock(root)`, and
-  funnels failures through `mapWriteFailure` — so two chats rooted in the same repository
-  never touch one `.git/index` concurrently.
+  `runRepoMutation` — which resolves the repo root, takes `withMutationLock` keyed by
+  `(environmentId, repoRoot)` (Local uses `local`), and funnels failures through
+  `mapWriteFailure` — so two chats rooted in the same repository never touch one
+  `.git/index` concurrently.
+- Git spawn is owned by the runtime via argv-array-only `git.exec`; the hub
+  `infrastructure/git-cli.ts` is a thin RuntimeClient facade that maps
+  `git_execution` failures to `GitCliError`. Parsers, mutation locks, and routes stay
+  in the hub.
 - Failure mapping is per operation: `mapCommitFailure`, `mapBranchSwitchFailure`,
   `mapBranchDeleteFailure` (`not fully merged` → `BRANCH_NOT_MERGED`) and
   `mapRemoteFailure` (auth, non-fast-forward, diverged history).
