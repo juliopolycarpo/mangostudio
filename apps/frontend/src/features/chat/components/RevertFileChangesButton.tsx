@@ -11,6 +11,23 @@ interface RevertFileChangesButtonProps {
   messageId: string;
 }
 
+type RevertErrorMessages = { conflict: string; outsideWorkdir: string; failed: string };
+
+export function revertErrorMessage(error: unknown, labels: RevertErrorMessages): string {
+  if (!(error instanceof ApiError)) return labels.failed;
+
+  switch (error.code) {
+    case ERROR_CODES.CONFLICT:
+      return labels.conflict;
+    // Revert re-checks containment against the chat workdir, so a turn that ran
+    // before the restriction was enabled can fail here.
+    case ERROR_CODES.PERMISSION_DENIED:
+      return labels.outsideWorkdir;
+    default:
+      return labels.failed;
+  }
+}
+
 /** Reverts filesystem mutations recorded for one assistant message. */
 export function RevertFileChangesButton({ chatId, messageId }: RevertFileChangesButtonProps) {
   const { t } = useI18n();
@@ -29,8 +46,7 @@ export function RevertFileChangesButton({ chatId, messageId }: RevertFileChanges
         setIsConfirming(false);
         // The code is the contract; the server's own message is English-only and
         // must not reach the UI.
-        const isConflict = error instanceof ApiError && error.code === ERROR_CODES.CONFLICT;
-        toast(isConflict ? labels.conflict : labels.failed, 'error');
+        toast(revertErrorMessage(error, labels), 'error');
       },
     });
   };

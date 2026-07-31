@@ -273,6 +273,8 @@ export const messages: Messages = {
       cancel: 'Keep files',
       reverted: 'Reverted {count} file(s).',
       conflict: 'Could not revert: one or more files changed on disk since this message completed.',
+      outsideWorkdir:
+        'Could not revert: this message touched files outside the working directory, and tools are restricted to it.',
       failed: 'Could not revert file changes.',
     },
     scrollToBottom: 'Scroll to bottom',

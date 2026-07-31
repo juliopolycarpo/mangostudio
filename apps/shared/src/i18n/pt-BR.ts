@@ -276,6 +276,8 @@ export const messages = {
       reverted: '{count} arquivo(s) revertido(s).',
       conflict:
         'Não foi possível reverter: um ou mais arquivos mudaram no disco desde que esta mensagem foi concluída.',
+      outsideWorkdir:
+        'Não foi possível reverter: esta mensagem alterou arquivos fora do diretório de trabalho, e as ferramentas estão restritas a ele.',
       failed: 'Não foi possível reverter as alterações em arquivos.',
     },
     scrollToBottom: 'Ir para o final',
