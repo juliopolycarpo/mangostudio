@@ -69,6 +69,7 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
               subjectKey={identity.subjectKey}
               monogram={identity.monogram}
               name={identity.name}
+              image={identity.image}
               size="sm"
             />
             <h4 className="text-sm font-bold text-on-surface">{identity.name}</h4>

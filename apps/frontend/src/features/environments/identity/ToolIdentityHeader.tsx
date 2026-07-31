@@ -47,6 +47,7 @@ export function ToolIdentityHeader({
           subjectKey={identity.subjectKey}
           monogram={identity.monogram}
           name={identity.name}
+          image={identity.image}
           size={avatarSize}
         />
         <div className="min-w-0 space-y-1">

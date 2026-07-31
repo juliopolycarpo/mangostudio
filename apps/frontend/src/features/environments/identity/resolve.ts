@@ -7,7 +7,9 @@
  * key it carries is the id everything else keeps using.
  */
 
-import type { ToolIdentity, ToolIdentityMap } from '@mangostudio/shared/tool-identity';
+import type { ToolIdentity, ToolIdentityMap, ToolImage } from '@mangostudio/shared/tool-identity';
+import type { ToolImageDisplay } from '@/components/ui/ToolAvatar';
+import { toolImageDisplay } from './image';
 
 export interface ResolvedToolIdentity {
   readonly subjectKey: string;
@@ -15,6 +17,8 @@ export interface ResolvedToolIdentity {
   readonly name: string;
   /** One or two characters, uppercased; derived from `name` unless overridden. */
   readonly monogram: string;
+  /** Where the avatar's pixels come from, or null to draw the monogram. */
+  readonly image: ToolImageDisplay | null;
   /**
    * The stored overrides themselves, per field.
    *
@@ -24,7 +28,9 @@ export interface ResolvedToolIdentity {
    */
   readonly storedName: string | null;
   readonly storedMonogram: string | null;
-  /** Whether either field is a stored override — drives the Reset affordance. */
+  /** The stored image itself, so the editor can seed its own fields from it. */
+  readonly storedImage: ToolImage | null;
+  /** Whether any field is a stored override — drives the Reset affordance. */
   readonly customized: boolean;
 }
 
@@ -80,8 +86,10 @@ export function resolveToolIdentity(
     // A monogram override survives a rename; without one the monogram tracks
     // whatever the tool is currently called.
     monogram: stored?.monogram ?? deriveMonogram(name),
+    image: toolImageDisplay(subjectKey, stored?.image ?? null, stored?.updatedAt ?? 0),
     storedName: stored?.displayName ?? null,
     storedMonogram: stored?.monogram ?? null,
+    storedImage: stored?.image ?? null,
     customized: Boolean(stored),
   };
 }

@@ -262,6 +262,7 @@ function McpServerRows({
             subjectKey={identity.subjectKey}
             monogram={identity.monogram}
             name={identity.name}
+            image={identity.image}
             size="xs"
           />
         }

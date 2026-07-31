@@ -18,3 +18,16 @@ export async function resetToolIdentity(subjectKey: string): Promise<void> {
   const { error } = await client.api['tool-identities']({ subjectKey }).delete();
   if (error) throwApiError(error);
 }
+
+/**
+ * Uploads an avatar image. Multipart, so it cannot ride on the update route —
+ * the two are separate calls even when the dialog saves both at once.
+ */
+export async function uploadToolIdentityImage(
+  subjectKey: string,
+  image: File
+): Promise<ToolIdentityUpdateResponse> {
+  const { data, error } = await client.api['tool-identities']({ subjectKey }).image.post({ image });
+  if (error) throwApiError(error);
+  return data as ToolIdentityUpdateResponse;
+}
