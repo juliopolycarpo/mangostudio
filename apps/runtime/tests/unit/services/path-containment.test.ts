@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import {
   assertInsideWorkdir,
   isInside,
@@ -14,8 +14,10 @@ let rootDir: string;
 let outsideDir: string;
 
 beforeEach(() => {
-  rootDir = mkdtempSync(join(tmpdir(), 'contain-root-'));
-  outsideDir = mkdtempSync(join(tmpdir(), 'contain-out-'));
+  // realpath up front: tmpdir() is a symlink on macOS, and containment
+  // canonicalizes, so the identity assertions need canonical roots.
+  rootDir = realpathSync(mkdtempSync(join(tmpdir(), 'contain-root-')));
+  outsideDir = realpathSync(mkdtempSync(join(tmpdir(), 'contain-out-')));
   mkdirSync(join(rootDir, 'nested'));
   writeFileSync(join(rootDir, 'nested', 'file.txt'), 'hello');
 });
@@ -71,6 +73,13 @@ describe('isInside', () => {
     const linkPath = join(rootDir, 'nested', 'pending.txt');
     symlinkSync(join(rootDir, 'nested', 'not-yet.txt'), linkPath);
     expect(isInside(rootDir, linkPath)).toBe(true);
+  });
+
+  it('does not expand ~, so the checked path is the one the filesystem opens', () => {
+    // Expanding here would approve `~/escape.txt` as `$HOME/escape.txt` while the
+    // write landed in a directory literally named `~`.
+    expect(resolvePathForContainment('~/escape.txt')).toBe(resolve('~/escape.txt'));
+    expect(isInside(rootDir, '~/escape.txt')).toBe(false);
   });
 
   it('checks planned write paths that do not exist yet', () => {

@@ -83,9 +83,16 @@ export function resolvePathThroughExistingAncestor(inputPath: string): string {
  * Resolves a path for containment checks. Existing paths are canonicalized with
  * realpath; missing leaf paths walk up to the nearest existing ancestor so
  * planned writes are checked against the intended location.
+ *
+ * Deliberately lexical about `~`: candidates are checked exactly as the
+ * filesystem will interpret them. Expanding here would approve `~/x` as
+ * `$HOME/x` while the write landed in a directory literally named `~`. Callers
+ * that accept user input expand it before asking (see the hub's
+ * `resolveWorkdirRelativePath`); roots still expand via `resolveContainmentRoot`
+ * because those are configured values, not paths anyone opens.
  */
 export function resolvePathForContainment(inputPath: string): string {
-  return resolvePathThroughExistingAncestor(resolveWorkspacePath(inputPath));
+  return resolvePathThroughExistingAncestor(inputPath);
 }
 
 /** Canonicalizes a containment root once so per-candidate checks can reuse it. */

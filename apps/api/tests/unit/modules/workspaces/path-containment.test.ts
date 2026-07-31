@@ -4,7 +4,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -20,8 +20,10 @@ let rootDir: string;
 let outsideDir: string;
 
 beforeEach(() => {
-  rootDir = mkdtempSync(join(tmpdir(), 'contain-root-'));
-  outsideDir = mkdtempSync(join(tmpdir(), 'contain-out-'));
+  // realpath up front: tmpdir() is a symlink on macOS, and containment
+  // canonicalizes, so the identity assertions need canonical roots.
+  rootDir = realpathSync(mkdtempSync(join(tmpdir(), 'contain-root-')));
+  outsideDir = realpathSync(mkdtempSync(join(tmpdir(), 'contain-out-')));
   mkdirSync(join(rootDir, 'nested'));
   writeFileSync(join(rootDir, 'nested', 'file.txt'), 'hello');
 });
