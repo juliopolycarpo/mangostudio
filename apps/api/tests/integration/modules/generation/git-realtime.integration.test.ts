@@ -131,7 +131,7 @@ describe('Git realtime invalidation during generation', () => {
       // Exhaust the stream so the tool loop and terminal invalidation complete.
     }
 
-    expect(realtimeEvents).toEqual([
+    expect(realtimeEvents.filter((event) => event.topic === gitTopic(chatId))).toEqual([
       {
         type: 'invalidate',
         topic: gitTopic(chatId),

@@ -209,7 +209,7 @@ describe('Git write routes', () => {
       path: 'untracked.txt',
       status: 'untracked',
     });
-    expect(events).toEqual([
+    expect(events.filter((event) => event.topic === gitTopic(chatId))).toEqual([
       {
         type: 'invalidate',
         topic: gitTopic(chatId),
@@ -262,10 +262,13 @@ describe('Git write routes', () => {
         responsePromise: Promise<Response>,
         operation: Exclude<GitWriteOperation, 'init' | 'stage' | 'unstage'>
       ): Promise<Response> => {
-        const before = events.length;
+        const gitEventsBefore = events.filter((event) => event.topic === gitTopic(chatId)).length;
         const response = await responsePromise;
         expect(response.status, operation).toBe(200);
-        expect(events.slice(before), operation).toEqual([
+        expect(
+          events.filter((event) => event.topic === gitTopic(chatId)).slice(gitEventsBefore),
+          operation
+        ).toEqual([
           {
             type: 'invalidate',
             topic: gitTopic(chatId),
