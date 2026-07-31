@@ -206,4 +206,32 @@ describe('safeFetchBytes', () => {
       )
     ).rejects.toThrow('timed out');
   });
+
+  it("calls a caller's own abort a cancellation rather than a timeout", async () => {
+    // Both arrive as one combined signal, and a caller that stopped the request
+    // itself should not be told the far end was slow.
+    const controller = new AbortController();
+    const stub = {
+      // Aborts before the call and aborts during it both have to reject, the
+      // way a real `fetch` does — the address policy is awaited first, so which
+      // of the two happens here is a matter of scheduling.
+      fetch: ((_input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          if (init?.signal?.aborted) {
+            reject(new Error('aborted'));
+            return;
+          }
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        })) as unknown as typeof fetch,
+    };
+
+    const pending = safeFetchBytes(
+      'https://example.test/file',
+      { ...limits, timeoutMs: 60_000, signal: controller.signal },
+      { fetch: stub.fetch, resolveHostname: publicResolver }
+    );
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('cancelled');
+  });
 });

@@ -148,7 +148,7 @@ async function followRedirects(
   for (let hop = 0; ; hop += 1) {
     await assertAllowedAddress(deps, currentUrl);
 
-    const response = await requestOnce(deps, currentUrl, signal);
+    const response = await requestOnce(deps, currentUrl, options, signal);
     if (!REDIRECT_STATUSES.has(response.status)) {
       const resolvedUrl = response.url ? new URL(response.url) : currentUrl;
       if (resolvedUrl.protocol !== 'https:') {
@@ -168,14 +168,21 @@ async function followRedirects(
   }
 }
 
+/**
+ * The combined signal cannot say which half fired, so the caller's own signal is
+ * consulted first. A caller that cancelled deliberately should not be told its
+ * request timed out — that reads as a fault in the remote host.
+ */
 async function requestOnce(
   deps: SafeFetchDeps,
   url: URL,
+  options: SafeFetchOptions,
   signal: AbortSignal | undefined
 ): Promise<Response> {
   try {
     return await deps.fetch(url, { redirect: 'manual', ...(signal && { signal }) });
   } catch (error) {
+    if (options.signal?.aborted) throw new SafeFetchError('Request was cancelled.');
     if (signal?.aborted) throw new SafeFetchError('Request timed out.');
     const detail = error instanceof Error ? error.message : 'Unknown network error.';
     throw new SafeFetchError(`Request failed: ${detail}`);

@@ -83,11 +83,14 @@ async function fetchInstallerBytes(
     );
     return { bytes: result.bytes, url: result.url };
   } catch (error) {
-    if (error instanceof SafeFetchError) {
-      throw new InstallerDownloadError(`Installer download refused: ${error.message}`);
-    }
+    // Cancellation is checked before the refusal branch: an abort surfaces as a
+    // `SafeFetchError` like any other failure, so testing that first would
+    // report a caller's own cancellation as the host having refused us.
     if (signal?.aborted) {
       throw new InstallerDownloadError('Installer download was cancelled.');
+    }
+    if (error instanceof SafeFetchError) {
+      throw new InstallerDownloadError(`Installer download refused: ${error.message}`);
     }
     throw error;
   }
