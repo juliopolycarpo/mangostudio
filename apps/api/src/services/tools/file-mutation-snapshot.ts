@@ -95,6 +95,7 @@ async function persistRuntimeMutation(
   const rowId = await insertCheckpointRow(db, {
     chatId: context.chatId,
     messageId,
+    environmentId: context.environmentId ?? LOCAL_ENVIRONMENT_ID,
     path: mutation.path,
     op: mutation.op satisfies FileCheckpointOp,
     beforeHash,

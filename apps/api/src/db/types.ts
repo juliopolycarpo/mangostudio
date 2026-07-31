@@ -261,6 +261,8 @@ interface FileCheckpointsTable {
   id: Generated<number>;
   chatId: string;
   messageId: string;
+  /** The environment whose filesystem these paths and hashes describe. */
+  environmentId: string;
   path: string;
   op: string;
   beforeHash: string | null;

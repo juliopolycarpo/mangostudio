@@ -4,6 +4,7 @@ import {
   type RuntimeSnapshotRevertParams,
 } from '@mangostudio/runtime';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
 import type { Database, FileCheckpointSelect } from '../../../db/types';
 import { getRuntimeClient } from '../../../services/runtime-client';
@@ -40,7 +41,11 @@ export async function revertMessageFileCheckpoints(
     path,
     afterHash,
   }));
-  const runtimeContext = await resolveRevertRuntimeContext(db, chatId);
+  const runtimeContext = await resolveRevertRuntimeContext(
+    db,
+    chatId,
+    checkpointEnvironmentId(rows)
+  );
   const runtime = await getRuntimeClient(runtimeContext.userId, runtimeContext.environmentId);
   let result: { revertedFiles: number };
   try {
@@ -64,12 +69,28 @@ export async function revertMessageFileCheckpoints(
 }
 
 /**
+ * Every row a message wrote was captured against one environment. Reverting
+ * elsewhere would replay that host's absolute paths on another, so a mixed set
+ * is a corrupt manifest rather than something to pick a winner from.
+ */
+function checkpointEnvironmentId(rows: readonly FileCheckpointSelect[]): string {
+  const environmentIds = new Set(rows.map((row) => row.environmentId));
+  if (environmentIds.size > 1) {
+    throw new Error(
+      `Checkpoints for this message span multiple environments: ${[...environmentIds].join(', ')}.`
+    );
+  }
+  return rows[0]?.environmentId ?? LOCAL_ENVIRONMENT_ID;
+}
+
+/**
  * When tools are restricted to the chat workdir, revert uses the same runtime
  * containment root so checkpoint paths cannot escape after the fact.
  */
 async function resolveRevertRuntimeContext(
   db: Kysely<Database>,
-  chatId: string
+  chatId: string,
+  environmentId: string
 ): Promise<{
   userId: string;
   environmentId: string;
@@ -84,11 +105,11 @@ async function resolveRevertRuntimeContext(
     throw new Error(`Cannot resolve runtime for missing chat "${chatId}".`);
   }
 
-  const base = {
-    userId: chat.userId,
-    environmentId: chat.environmentId,
-  };
-  if (!chat.workdir) return base;
+  const base = { userId: chat.userId, environmentId };
+  // The workdir policy describes wherever the chat points now. Once that is a
+  // different environment it says nothing about the host these paths came from,
+  // so it is not a boundary those checkpoints can be checked against.
+  if (chat.environmentId !== environmentId || !chat.workdir) return base;
 
   const appSettings = await getAppSettings(db, chat.userId);
   const chatOverride =

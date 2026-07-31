@@ -9,7 +9,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { faker } from '@faker-js/faker';
-import { PathAccessError } from '@mangostudio/runtime';
+import { PathAccessError, RuntimeRemoteError } from '@mangostudio/runtime';
 import { getDb } from '../../../../src/db/database';
 import { deleteChatUseCase } from '../../../../src/modules/chats/application/delete-chat';
 import { listChatFileCheckpointSummaries } from '../../../../src/modules/file-checkpoints/application/list-chat-checkpoints';
@@ -248,6 +248,10 @@ describe('revert containment against the chat workdir', () => {
       .execute();
   }
 
+  async function pointChatAt(environmentId: string): Promise<void> {
+    await getDb().updateTable('chats').set({ environmentId }).where('id', '=', chat.id).execute();
+  }
+
   async function checkpointOutsideWorkdir(): Promise<string> {
     const path = join(outsideDir, 'planted.txt');
     await executeCreateFile({ path, content: 'outside\n' }, turnContext());
@@ -278,6 +282,33 @@ describe('revert containment against the chat workdir', () => {
 
     expect(await revert()).toEqual({ revertedFiles: 1 });
     expect(existsSync(path)).toBe(false);
+  });
+
+  it('reverts on the environment that recorded the rows, not the one the chat moved to', async () => {
+    const path = await seedAndRead('recorded-here.txt', 'original\n');
+    await executeWriteFile({ path, content: 'rewritten\n' }, turnContext());
+    await pointChatAt('remote-box');
+
+    // Paths and hashes describe the host the turn ran on. Following the chat's
+    // new pointer would replay them somewhere they never applied.
+    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await readText(path)).toBe('original\n');
+  });
+
+  it('refuses to replay another environment’s checkpoints on the chat’s current one', async () => {
+    const path = await seedAndRead('recorded-elsewhere.txt', 'original\n');
+    await executeWriteFile({ path, content: 'rewritten\n' }, turnContext());
+    await getDb()
+      .updateTable('file_checkpoints')
+      .set({ environmentId: 'remote-box' })
+      .where('chatId', '=', chat.id)
+      .execute();
+
+    // 'remote-box' is not a row this user owns, so it cannot be reached — the
+    // point is that the local file is left alone rather than restored by a
+    // matching hash that belongs to a different host.
+    await expect(revert()).rejects.toBeInstanceOf(RuntimeRemoteError);
+    expect(await readText(path)).toBe('rewritten\n');
   });
 });
 
