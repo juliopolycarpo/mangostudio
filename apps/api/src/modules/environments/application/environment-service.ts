@@ -135,11 +135,17 @@ export function createEnvironmentService(
       if (id === LOCAL_ENVIRONMENT_ID) {
         throw new EnvironmentServiceError('The Local environment cannot be removed.', 409);
       }
-      manager.disconnect(userId, id);
-      const removed = await repository.remove(userId, id);
-      if (!removed) {
+      const result = await repository.remove(userId, id);
+      if (result === 'referenced') {
+        throw new EnvironmentServiceError(
+          `Environment "${id}" is still used by one or more chats.`,
+          409
+        );
+      }
+      if (result === 'missing') {
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
+      manager.disconnect(userId, id);
     },
 
     async connect(userId, id) {

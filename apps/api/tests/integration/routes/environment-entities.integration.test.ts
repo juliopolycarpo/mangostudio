@@ -13,6 +13,7 @@ import {
   type UpdateEnvironmentRecord,
 } from '../../../src/modules/environments/infrastructure/environment-repository';
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { insertTestUser } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -26,7 +27,9 @@ let restoreAuth: (() => void) | null = null;
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
+  await getDb().deleteFrom('chats').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
+  await getDb().deleteFrom('user').where('id', '=', TEST_USER.id).execute();
 });
 
 function createTestApp() {
@@ -185,6 +188,42 @@ describe('environment entity routes', () => {
     expect(create.status).toBe(409);
     expect(disable.status).toBe(409);
     expect(remove.status).toBe(409);
+  });
+
+  it('rejects removal while a chat still references the environment', async () => {
+    const { app, repository } = createTestApp();
+    await repository.create({
+      id: 'active-box',
+      userId: TEST_USER.id,
+      name: 'Active box',
+      transportKind: 'stdio',
+      config: {},
+      enabled: true,
+    });
+    await insertTestUser(TEST_USER);
+    await getDb()
+      .insertInto('chats')
+      .values({
+        id: 'environment-chat',
+        title: 'Environment chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+        environmentId: 'active-box',
+      })
+      .execute();
+
+    const response = await app.handle(
+      new Request('http://localhost/environments/active-box', jsonRequest('DELETE'))
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: 'CONFLICT',
+      error: 'Environment "active-box" is still used by one or more chats.',
+    });
+    expect(await repository.find(TEST_USER.id, 'active-box')).not.toBeNull();
   });
 
   it('surfaces unavailable transport connections as a stable conflict', async () => {

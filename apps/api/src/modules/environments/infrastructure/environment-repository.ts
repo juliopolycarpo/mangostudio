@@ -37,6 +37,8 @@ export interface UpdateEnvironmentRecord {
   readonly enabled?: boolean;
 }
 
+type RemoveEnvironmentResult = 'removed' | 'referenced' | 'missing';
+
 export interface EnvironmentRepository {
   list(userId: string): Promise<EnvironmentRecord[]>;
   find(userId: string, id: string): Promise<EnvironmentRecord | null>;
@@ -46,7 +48,7 @@ export interface EnvironmentRepository {
     id: string,
     input: UpdateEnvironmentRecord
   ): Promise<EnvironmentRecord | null>;
-  remove(userId: string, id: string): Promise<boolean>;
+  remove(userId: string, id: string): Promise<RemoveEnvironmentResult>;
 }
 
 function toEnvironmentRecord(row: EnvironmentSelect): EnvironmentRecord {
@@ -136,12 +138,30 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
     },
 
     async remove(userId, id) {
-      const result = await db
-        .deleteFrom('environments')
-        .where('userId', '=', userId)
-        .where('id', '=', id)
-        .executeTakeFirst();
-      return result.numDeletedRows > 0n;
+      return await db.transaction().execute(async (transaction) => {
+        const environment = await transaction
+          .selectFrom('environments')
+          .select('id')
+          .where('userId', '=', userId)
+          .where('id', '=', id)
+          .executeTakeFirst();
+        if (!environment) return 'missing';
+
+        const chat = await transaction
+          .selectFrom('chats')
+          .select('id')
+          .where('userId', '=', userId)
+          .where('environmentId', '=', id)
+          .executeTakeFirst();
+        if (chat) return 'referenced';
+
+        await transaction
+          .deleteFrom('environments')
+          .where('userId', '=', userId)
+          .where('id', '=', id)
+          .executeTakeFirst();
+        return 'removed';
+      });
     },
   };
 }
