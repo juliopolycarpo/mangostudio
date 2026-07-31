@@ -17,11 +17,23 @@ interface ChatsTable {
   lastUsedMode: string | null;
   selectedAgentId: string | null;
   workdir: string | null;
+  environmentId: Generated<string>;
   /** null = inherit workspace default; 0/1 stored as boolean override */
   restrictToolsToWorkdir: number | null;
   userId: string | null;
   lastProviderState: string | null;
   lastContextState: string | null;
+}
+
+interface EnvironmentsTable {
+  id: string;
+  userId: string;
+  name: string;
+  transportKind: string;
+  configJson: string;
+  enabled: number;
+  createdAt: number;
+  updatedAt: number;
 }
 
 interface MessagesTable {
@@ -329,6 +341,7 @@ interface ObservabilitySnapshotTable {
 /** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
+  environments: EnvironmentsTable;
   messages: MessagesTable;
   generated_images: GeneratedImagesTable;
   chat_attachments: ChatAttachmentsTable;
@@ -357,6 +370,10 @@ export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
 
 export type ChatAttachmentSelect = Selectable<ChatAttachmentsTable>;
 export type ChatAttachmentInsert = Insertable<ChatAttachmentsTable>;
+
+export type EnvironmentSelect = Selectable<EnvironmentsTable>;
+export type EnvironmentInsert = Insertable<EnvironmentsTable>;
+export type EnvironmentUpdate = Updateable<EnvironmentsTable>;
 
 export type UserProviderSettingsSelect = Selectable<UserProviderSettingsTable>;
 

@@ -2,6 +2,235 @@ import { type Static, Type } from '@sinclair/typebox';
 import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
 import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
 import { ProfileIdSchema } from '../profiles';
+import {
+  RuntimeCapabilityManifestSchema,
+  RuntimeErrorCodeSchema,
+} from '../runtime-protocol/schemas';
+
+export const LOCAL_ENVIRONMENT_ID = 'local' as const;
+
+export const EnvironmentIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 63,
+  pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+});
+
+export const EnvironmentTransportKindSchema = Type.Union([
+  Type.Literal('in-process'),
+  Type.Literal('stdio'),
+  Type.Literal('wsl'),
+  Type.Literal('websocket'),
+  Type.Literal('http'),
+  Type.Literal('ssh'),
+]);
+
+export const InProcessEnvironmentConfigSchema = Type.Object(
+  {},
+  { additionalProperties: Type.Never() }
+);
+
+export const StdioEnvironmentConfigSchema = Type.Object(
+  {
+    binaryPath: Type.Optional(Type.String({ minLength: 1 })),
+    cwd: Type.Optional(Type.String({ minLength: 1 })),
+  },
+  { additionalProperties: Type.Never() }
+);
+
+export const WslEnvironmentConfigSchema = Type.Object(
+  {
+    distro: Type.String({ minLength: 1, maxLength: 128 }),
+  },
+  { additionalProperties: Type.Never() }
+);
+
+export const WebSocketEnvironmentConfigSchema = Type.Object(
+  {},
+  { additionalProperties: Type.Never() }
+);
+
+export const HttpEnvironmentConfigSchema = Type.Object(
+  {
+    baseUrl: Type.String({
+      minLength: 1,
+      maxLength: 2_048,
+      pattern: '^https?://',
+    }),
+  },
+  { additionalProperties: Type.Never() }
+);
+
+const SshArgumentValueSchema = Type.String({
+  minLength: 1,
+  maxLength: 1_024,
+  pattern: '^[^-].*$',
+});
+
+export const SshEnvironmentConfigSchema = Type.Object(
+  {
+    host: SshArgumentValueSchema,
+    user: Type.Optional(SshArgumentValueSchema),
+    port: Type.Optional(Type.Integer({ minimum: 1, maximum: 65_535 })),
+    identityFile: Type.Optional(SshArgumentValueSchema),
+    remoteRuntimePath: Type.Optional(SshArgumentValueSchema),
+  },
+  { additionalProperties: Type.Never() }
+);
+
+export const EnvironmentTransportConfigSchema = Type.Union([
+  Type.Object(
+    {
+      transportKind: Type.Literal('in-process'),
+      config: InProcessEnvironmentConfigSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      transportKind: Type.Literal('stdio'),
+      config: StdioEnvironmentConfigSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      transportKind: Type.Literal('wsl'),
+      config: WslEnvironmentConfigSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      transportKind: Type.Literal('websocket'),
+      config: WebSocketEnvironmentConfigSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      transportKind: Type.Literal('http'),
+      config: HttpEnvironmentConfigSchema,
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      transportKind: Type.Literal('ssh'),
+      config: SshEnvironmentConfigSchema,
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+export const CreateEnvironmentBodySchema = Type.Union([
+  Type.Object(
+    {
+      id: EnvironmentIdSchema,
+      name: Type.String({ minLength: 1, maxLength: 80 }),
+      transportKind: Type.Literal('stdio'),
+      config: StdioEnvironmentConfigSchema,
+      enabled: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      id: EnvironmentIdSchema,
+      name: Type.String({ minLength: 1, maxLength: 80 }),
+      transportKind: Type.Literal('wsl'),
+      config: WslEnvironmentConfigSchema,
+      enabled: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      id: EnvironmentIdSchema,
+      name: Type.String({ minLength: 1, maxLength: 80 }),
+      transportKind: Type.Literal('websocket'),
+      config: WebSocketEnvironmentConfigSchema,
+      enabled: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      id: EnvironmentIdSchema,
+      name: Type.String({ minLength: 1, maxLength: 80 }),
+      transportKind: Type.Literal('http'),
+      config: HttpEnvironmentConfigSchema,
+      enabled: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      id: EnvironmentIdSchema,
+      name: Type.String({ minLength: 1, maxLength: 80 }),
+      transportKind: Type.Literal('ssh'),
+      config: SshEnvironmentConfigSchema,
+      enabled: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+export const UpdateEnvironmentBodySchema = Type.Object(
+  {
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
+    config: Type.Optional(Type.Unknown()),
+    enabled: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false, minProperties: 1 }
+);
+
+export const EnvironmentConnectionStateSchema = Type.Union([
+  Type.Literal('disconnected'),
+  Type.Literal('connecting'),
+  Type.Literal('connected'),
+  Type.Literal('error'),
+]);
+
+export const EnvironmentConnectionStatusSchema = Type.Object(
+  {
+    state: EnvironmentConnectionStateSchema,
+    manifest: Type.Optional(RuntimeCapabilityManifestSchema),
+    errorCode: Type.Optional(RuntimeErrorCodeSchema),
+  },
+  { additionalProperties: false }
+);
+
+export const EnvironmentSchema = Type.Object(
+  {
+    id: EnvironmentIdSchema,
+    name: Type.String({ minLength: 1, maxLength: 80 }),
+    transportKind: EnvironmentTransportKindSchema,
+    config: Type.Unknown(),
+    enabled: Type.Boolean(),
+    virtual: Type.Boolean(),
+    createdAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    updatedAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+    status: EnvironmentConnectionStatusSchema,
+  },
+  { additionalProperties: false }
+);
+
+export const EnvironmentListSchema = Type.Array(EnvironmentSchema);
+
+export type EnvironmentId = Static<typeof EnvironmentIdSchema>;
+export type EnvironmentTransportKind = Static<typeof EnvironmentTransportKindSchema>;
+export type InProcessEnvironmentConfig = Static<typeof InProcessEnvironmentConfigSchema>;
+export type StdioEnvironmentConfig = Static<typeof StdioEnvironmentConfigSchema>;
+export type WslEnvironmentConfig = Static<typeof WslEnvironmentConfigSchema>;
+export type WebSocketEnvironmentConfig = Static<typeof WebSocketEnvironmentConfigSchema>;
+export type HttpEnvironmentConfig = Static<typeof HttpEnvironmentConfigSchema>;
+export type SshEnvironmentConfig = Static<typeof SshEnvironmentConfigSchema>;
+export type EnvironmentTransportConfig = Static<typeof EnvironmentTransportConfigSchema>;
+export type CreateEnvironmentBody = Static<typeof CreateEnvironmentBodySchema>;
+export type UpdateEnvironmentBody = Static<typeof UpdateEnvironmentBodySchema>;
+export type EnvironmentConnectionState = Static<typeof EnvironmentConnectionStateSchema>;
+export type EnvironmentConnectionStatus = Static<typeof EnvironmentConnectionStatusSchema>;
+export type Environment = Static<typeof EnvironmentSchema>;
 
 export const RuntimeIdSchema = Type.Union([
   Type.Literal('bun'),

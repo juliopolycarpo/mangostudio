@@ -35,6 +35,7 @@ import { scopedLibraryLocationSettings } from './034_scoped_library_location_set
 import { apiKeys } from './035_api_keys';
 import { userToolIdentities } from './036_user_tool_identities';
 import { toolIdentityImages } from './037_tool_identity_images';
+import { environmentEntities } from './038_environment_entities';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -74,4 +75,5 @@ export const allMigrations = {
   '035_api_keys': apiKeys,
   '036_user_tool_identities': userToolIdentities,
   '037_tool_identity_images': toolIdentityImages,
+  '038_environment_entities': environmentEntities,
 };

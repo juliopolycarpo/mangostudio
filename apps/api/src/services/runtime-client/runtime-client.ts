@@ -146,7 +146,10 @@ export class RuntimeClient {
   readonly snapshot: RuntimeSnapshotClient;
   readonly workspace: RuntimeWorkspaceClient;
 
-  constructor(private readonly protocol: RuntimeProtocolClient) {
+  constructor(
+    private readonly protocol: RuntimeProtocolClient,
+    private readonly onUnavailable?: () => void
+  ) {
     this.fs = {
       readFile: (params, options) => this.request('fs.read-file', params, options),
       writeFile: (params, options) => this.request('fs.write-file', params, options),
@@ -195,6 +198,9 @@ export class RuntimeClient {
     try {
       return await this.protocol.request(method, params, options);
     } catch (error) {
+      if (error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE') {
+        this.onUnavailable?.();
+      }
       throw translateRuntimeError(error);
     }
   }
