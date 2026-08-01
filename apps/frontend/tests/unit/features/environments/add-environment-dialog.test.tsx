@@ -234,8 +234,10 @@ describe('AddEnvironmentDialog', () => {
     );
 
     // The command has to be the one that can prompt: accepting a host key is
-    // exactly what MangoStudio refuses to do on the user's behalf.
-    const command = within(dialog).getByText("ssh 'build-01.internal' true");
+    // exactly what MangoStudio refuses to do on the user's behalf. Ambient
+    // RemoteCommand is still cleared so a pasted probe is not swallowed by
+    // ssh_config the way a hub launch would be.
+    const command = within(dialog).getByText("ssh -o RemoteCommand=none 'build-01.internal' true");
     expect(command).toBeInTheDocument();
   });
 

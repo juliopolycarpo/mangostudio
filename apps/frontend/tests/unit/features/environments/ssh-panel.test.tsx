@@ -74,11 +74,15 @@ describe('SshPanel', () => {
     const panel = await screen.findByTestId('ssh-panel');
 
     // Without the forced batch-mode options the hub uses: this is the command
-    // that is allowed to prompt, which is how a host key gets trusted.
-    expect(within(panel).getByText("ssh 'deploy@build-01.internal' true")).toBeInTheDocument();
+    // that is allowed to prompt, which is how a host key gets trusted. Ambient
+    // RemoteCommand is still cleared so a pasted probe reaches `true` /
+    // `--version` instead of whatever ssh_config would otherwise run.
+    expect(
+      within(panel).getByText("ssh -o RemoteCommand=none 'deploy@build-01.internal' true")
+    ).toBeInTheDocument();
     expect(
       within(panel).getByText(
-        "ssh 'deploy@build-01.internal' \\~/'.mango/runtime/remote/current/mangostudio-runtime' --version"
+        "ssh -o RemoteCommand=none 'deploy@build-01.internal' \\~/'.mango/runtime/remote/current/mangostudio-runtime' --version"
       )
     ).toBeInTheDocument();
   });
