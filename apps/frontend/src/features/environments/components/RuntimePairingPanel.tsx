@@ -123,9 +123,14 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
 }
 
 /**
- * The commands, in the order they are run on the target machine. The token goes
- * in on stdin rather than as an argument: a command line is readable by every
- * process on that machine, and this one is shown once.
+ * The command to run on the target machine. The token goes in on stdin rather
+ * than as an argument: a command line is readable by every process on that
+ * machine, and this one is shown once.
+ *
+ * One line, not three. The install one-liner needs a published raw asset and
+ * `setup` needs the consent gate — neither exists yet, and a card that prints a
+ * command the binary answers with `Unknown argument` is worse than a card that
+ * stays quiet about a step until there is one.
  */
 function SetupSteps({
   endpoint,
@@ -143,7 +148,6 @@ function SetupSteps({
     <div className="space-y-2 rounded-lg border border-primary/35 bg-primary/5 p-2.5">
       <p className="font-semibold text-[11px] text-on-surface">{labels.tokenIssued}</p>
       <p className="text-[11px] text-on-surface-variant/70">{labels.tokenOnce}</p>
-      <CopyLine label={labels.stepInstall} value="mangostudio-runtime setup" />
       <CopyLine label={labels.stepConnect} value={command} />
       <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
     </div>

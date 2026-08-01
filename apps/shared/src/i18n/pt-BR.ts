@@ -2122,11 +2122,10 @@ export const messages = {
           'Revogar este token de pareamento? O runtime que o usa desconecta imediatamente e não consegue reconectar até você emitir um novo.',
         issueFailed: 'Não foi possível emitir o token de pareamento.',
         revokeFailed: 'Não foi possível revogar o token de pareamento.',
-        tokenIssued: 'Rode estes comandos naquela máquina.',
+        tokenIssued: 'Rode este comando naquela máquina.',
         tokenOnce:
           'O token é mostrado uma única vez. Emita um novo se perdê-lo — isso também aposenta este.',
-        stepInstall: '1 · Configure o runtime lá',
-        stepConnect: '2 · Conecte ao MangoStudio',
+        stepConnect: 'Conecte ao MangoStudio',
         serviceHint:
           'Mantenha o comando connect rodando; uma unidade de serviço para ele chega separadamente.',
       },

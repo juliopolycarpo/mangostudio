@@ -2102,11 +2102,10 @@ export const messages: Messages = {
           'Revoke this pairing token? The runtime using it disconnects immediately and cannot reconnect until you issue a new one.',
         issueFailed: 'The pairing token could not be issued.',
         revokeFailed: 'The pairing token could not be revoked.',
-        tokenIssued: 'Run these on that machine.',
+        tokenIssued: 'Run this on that machine.',
         tokenOnce:
           'The token is shown once. Issue a new one if you lose it — that also retires this one.',
-        stepInstall: '1 · Configure the runtime there',
-        stepConnect: '2 · Connect it to MangoStudio',
+        stepConnect: 'Connect it to MangoStudio',
         serviceHint: 'Keep the connect command running; a service unit for it lands separately.',
       },
       add: {
