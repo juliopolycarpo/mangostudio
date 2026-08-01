@@ -19,10 +19,17 @@ import {
   type WebSocketFramePort,
 } from '@mangostudio/runtime';
 import { REALTIME_IDLE_TIMEOUT_SECONDS } from '@mangostudio/shared/realtime';
-import { RUNTIME_CLOSE_CODES, RUNTIME_HEARTBEAT_TOPIC } from '@mangostudio/shared/runtime-protocol';
+import {
+  RUNTIME_CLOSE_CODES,
+  RUNTIME_HEARTBEAT_TOPIC,
+  RuntimeProtocolError,
+} from '@mangostudio/shared/runtime-protocol';
 import { Elysia } from 'elysia';
-import { getVersion } from '../../../lib/config';
+import { getConfig, getVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { extractClientIp } from '../../../plugins/rate-limit';
+import { RATE_LIMIT_BUCKETS } from '../../../plugins/rate-limit-policy';
+import { RateLimitStore } from '../../../plugins/rate-limit-store';
 import { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import {
   getRuntimeConnectionManager,
@@ -50,7 +57,7 @@ interface VerifiedPeer {
 interface RuntimeSocketState {
   peer: VerifiedPeer | null;
   /** Why the upgrade will be refused in `open`, if it will be. */
-  rejection: 'unauthorized' | 'internal' | null;
+  rejection: 'unauthorized' | 'internal' | 'rate-limited' | null;
   port: WebSocketFramePort | null;
   stopLiveness: (() => void) | null;
   detachEvents: (() => void) | null;
@@ -58,6 +65,27 @@ interface RuntimeSocketState {
   adopted: boolean;
   /** Set by the close handler, which can run while adoption is still in flight. */
   socketClosed: boolean;
+  /**
+   * Set when the handshake failed on protocol version rather than on the
+   * environment. The manager reports both as "unavailable", and the two need
+   * different close codes: one is fixed by enabling an environment, the other
+   * only by updating the binary on that machine.
+   */
+  protocolMismatch: boolean;
+}
+
+/** True for the one handshake failure a different close code has to name. */
+function isProtocolMismatch(error: unknown): boolean {
+  return error instanceof RuntimeProtocolError && error.code === 'PROTOCOL_MISMATCH';
+}
+
+/**
+ * Peer address for the upgrade, resolved the same way the HTTP limiter does.
+ * Mirrored rather than shared because the limiter reads it off an Elysia
+ * context this route never builds.
+ */
+interface RuntimeUpgradeServer {
+  requestIP(request: Request): { address: string } | null;
 }
 
 /** Minimal shape of the socket, mirroring how realtime-routes narrows its own. */
@@ -80,6 +108,8 @@ export interface RuntimeSocketRouteDependencies {
   readonly manager?: RuntimeConnectionManager;
   readonly hubVersion?: () => string;
   readonly idleTimeoutSeconds?: number;
+  /** Upgrades one address may open per window; the shared bucket by default. */
+  readonly upgradeLimit?: { readonly max: number; readonly windowMs: number };
 }
 
 export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDependencies = {}) {
@@ -90,6 +120,28 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
   const livenessMs = livenessIntervalFor(
     dependencies.idleTimeoutSeconds ?? REALTIME_IDLE_TIMEOUT_SECONDS
   );
+  const upgradeLimit = dependencies.upgradeLimit ?? RATE_LIMIT_BUCKETS.runtimeSocket;
+  // Counted here rather than in the global HTTP hook so the refusal can be a
+  // close code. One store per route instance, sized like the shared one: the
+  // keys are client addresses, and the same flood bound applies.
+  const upgrades = new RateLimitStore(10_000);
+
+  /** False once this address has opened more upgrades than its window allows. */
+  function admitUpgrade(request: Request, server: RuntimeUpgradeServer | null): boolean {
+    const clientIp = extractClientIp(
+      request.headers,
+      server?.requestIP(request)?.address,
+      getConfig().security.trustProxy
+    );
+    // Same rule the limiter applies: a caller it cannot identify is a caller it
+    // cannot fairly limit.
+    if (clientIp === 'unknown') return true;
+    const now = Date.now();
+    upgrades.removeExpired(now);
+    const entry = upgrades.touch(`runtime-upgrade:${clientIp}`, upgradeLimit.windowMs, now);
+    upgrades.evictOverflow();
+    return entry.count <= upgradeLimit.max;
+  }
 
   function teardown(state: RuntimeSocketState): void {
     state.stopLiveness?.();
@@ -99,7 +151,7 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
   }
 
   return new Elysia({ name: 'runtime-socket-routes' })
-    .derive(async ({ request }) => {
+    .derive(async ({ request, server }) => {
       // Verified before the upgrade so an unknown credential never reaches the
       // manager, and rejected in `open` so the peer gets a typed close code
       // rather than a bare HTTP status it has no framing to read.
@@ -107,7 +159,9 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       let peer: VerifiedPeer | null = null;
       let rejection: RuntimeSocketState['rejection'] = null;
 
-      if (!token) {
+      if (!admitUpgrade(request, (server as RuntimeUpgradeServer | null) ?? null)) {
+        rejection = 'rate-limited';
+      } else if (!token) {
         rejection = 'unauthorized';
       } else {
         try {
@@ -132,6 +186,7 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
           detachEvents: null,
           adopted: false,
           socketClosed: false,
+          protocolMismatch: false,
         } satisfies RuntimeSocketState,
       };
     })
@@ -142,6 +197,10 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
 
         if (state.rejection === 'internal') {
           socket.close(RUNTIME_CLOSE_CODES.INTERNAL, 'Internal error');
+          return;
+        }
+        if (state.rejection === 'rate-limited') {
+          socket.close(RUNTIME_CLOSE_CODES.RATE_LIMITED, 'Too many upgrades');
           return;
         }
         if (state.rejection || !state.peer) {
@@ -198,6 +257,17 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
     peer: VerifiedPeer,
     port: WebSocketFramePort
   ): Promise<void> {
+    // Before adoption, not after, and awaited: adoption is what publishes the
+    // environments topic, and a UI that refetches on that signal must not read
+    // `lastSeenAt` back one write too early. A failure here is a stale
+    // timestamp, never a reason to refuse a connection, so it is swallowed.
+    await pairing.markSeen(peer.tokenId).catch((error: unknown) => {
+      logger.warn('mark_seen_failed', {
+        environmentId: peer.environmentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+
     try {
       await resolveManager().adopt(peer.userId, peer.environmentId, (onUnavailable) =>
         openConnection(socket, state, peer, port, onUnavailable)
@@ -209,7 +279,15 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
         error: error instanceof Error ? error.message : String(error),
       });
       teardown(state);
-      socket.close(RUNTIME_CLOSE_CODES.FORBIDDEN, 'Environment unavailable');
+      // The manager reports every adoption failure as an unavailable runtime,
+      // so the distinction the peer needs is carried out of `openConnection`
+      // rather than read back off the error: "enable this environment" and
+      // "update this binary" are different jobs for different people.
+      if (state.protocolMismatch) {
+        socket.close(RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH, 'Protocol version unsupported');
+      } else {
+        socket.close(RUNTIME_CLOSE_CODES.FORBIDDEN, 'Environment unavailable');
+      }
       return;
     }
 
@@ -222,15 +300,24 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       return;
     }
 
-    // Bookkeeping, and deliberately not awaited into the catch above: a
-    // `lastSeenAt` write that fails is a stale timestamp, not a reason to close
-    // a connection that has already been adopted and is serving.
-    void pairing.markSeen(peer.tokenId).catch((error: unknown) => {
-      logger.warn('mark_seen_failed', {
-        environmentId: peer.environmentId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    // The credential was checked before the upgrade, and a handshake takes
+    // long enough for a rotation or a revocation to land in between. Revoking
+    // drops whatever the manager holds — but if it ran while this adoption was
+    // still in flight there was nothing to drop, and the socket would serve on
+    // a credential that no longer exists. Re-reading after the entry is
+    // installed closes that order: either revocation sees this connection, or
+    // this connection sees the revocation.
+    if (!(await pairing.isActive(peer.tokenId))) {
+      logger.warn('credential_retired_during_adoption', { environmentId: peer.environmentId });
+      state.adopted = false;
+      teardown(state);
+      // Closed before the manager is told, and that order is the point: the
+      // manager's own release closes with `RELEASED`, which reads as "the hub
+      // let you go, come back". A retired credential must say `UNAUTHORIZED`
+      // or the runtime redials forever against a token that no longer exists.
+      socket.close(RUNTIME_CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
+      resolveManager().disconnect(peer.userId, peer.environmentId);
+    }
   }
 
   async function openConnection(
@@ -248,7 +335,12 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       hubVersion: hubVersion(),
       handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
     });
-    await client.waitUntilReady();
+    try {
+      await client.waitUntilReady();
+    } catch (error) {
+      state.protocolMismatch = isProtocolMismatch(error);
+      throw error;
+    }
 
     state.detachEvents = client.onEvent((event) => {
       if (event.topic !== RUNTIME_HEARTBEAT_TOPIC) return;

@@ -57,6 +57,12 @@ export interface RuntimePairingService {
   revoke(userId: string, environmentId: string): Promise<void>;
   /** Resolves a presented token, or null for anything the hub will not accept. */
   verify(presented: string): Promise<VerifiedRuntimePairing | null>;
+  /**
+   * Whether an already-verified token is still one the hub accepts. Cheaper
+   * than `verify` and takes no secret, so a long-lived connection can re-check
+   * its own credential without holding the string that opened it.
+   */
+  isActive(tokenId: string): Promise<boolean>;
   /** Records that a verified token was used, throttled to minutes. */
   markSeen(tokenId: string): Promise<void>;
 }
@@ -162,6 +168,13 @@ export function createRuntimePairingService(
         userId: record.userId,
         environmentId: record.environmentId,
       };
+    },
+
+    async isActive(tokenId) {
+      // A deleted environment cascades its tokens away (migration 040), so a
+      // missing row covers revocation, rotation, and removal in one read.
+      const record = await repository.findById(tokenId);
+      return record !== null && record.revokedAt === null;
     },
 
     async markSeen(tokenId) {

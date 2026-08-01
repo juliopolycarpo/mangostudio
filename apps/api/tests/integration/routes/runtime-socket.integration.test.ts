@@ -11,6 +11,7 @@ import {
   RUNTIME_CLOSE_CODES,
   RUNTIME_HEARTBEAT_TOPIC,
   type RuntimeCapabilityManifest,
+  type RuntimeProtocolVersion,
 } from '@mangostudio/shared/runtime-protocol';
 import { Elysia } from 'elysia';
 import { getDb } from '../../../src/db/database';
@@ -73,6 +74,13 @@ interface StartHubOptions {
   readonly failMarkSeen?: boolean;
   /** Holds `adopt` open so a test can close the socket mid-adoption. */
   readonly gateAdopt?: Promise<void>;
+  /**
+   * Holds `adopt` open *before* it installs an entry, which is the window a
+   * revocation can slip through: `disconnect` finds nothing to drop.
+   */
+  readonly gateAdoptStart?: Promise<void>;
+  /** Shrinks the upgrade budget so one extra dial reaches the wall. */
+  readonly upgradeLimit?: { readonly max: number; readonly windowMs: number };
 }
 
 async function startHub(options: StartHubOptions = {}) {
@@ -110,6 +118,15 @@ async function startHub(options: StartHubOptions = {}) {
     };
   }
 
+  const startGate = options.gateAdoptStart;
+  if (startGate) {
+    const adopt = manager.adopt.bind(manager);
+    manager.adopt = async (userId, environmentId, open) => {
+      await startGate;
+      return await adopt(userId, environmentId, open);
+    };
+  }
+
   const app = new Elysia({ websocket: REALTIME_WEBSOCKET_OPTIONS }).group('/api', (group) =>
     group.use(
       createRuntimeSocketRoutes({
@@ -119,6 +136,7 @@ async function startHub(options: StartHubOptions = {}) {
         manager,
         hubVersion: () => 'hub-test',
         idleTimeoutSeconds: REALTIME_IDLE_TIMEOUT_SECONDS,
+        ...(options.upgradeLimit ? { upgradeLimit: options.upgradeLimit } : {}),
       })
     )
   );
@@ -153,7 +171,8 @@ interface DialedRuntime {
 async function dialRuntime(
   url: string,
   token: string,
-  handlers: ReadonlyMap<string, RuntimeMethodHandler> = new Map()
+  handlers: ReadonlyMap<string, RuntimeMethodHandler> = new Map(),
+  hostOptions: { readonly protocolVersion?: RuntimeProtocolVersion } = {}
 ): Promise<DialedRuntime> {
   const socket = new WebSocket(url, { headers: { Authorization: `Bearer ${token}` } });
   socket.binaryType = 'arraybuffer';
@@ -169,7 +188,12 @@ async function dialRuntime(
     socket.addEventListener('close', () => resolve(false), { once: true });
   });
 
-  const host = new RuntimeHost({ runtimeVersion: 'runtime-test', manifest: MANIFEST, handlers });
+  const host = new RuntimeHost({
+    runtimeVersion: 'runtime-test',
+    manifest: MANIFEST,
+    handlers,
+    ...hostOptions,
+  });
   const runtime: DialedRuntime = {
     host,
     socket,
@@ -223,7 +247,7 @@ describe('runtime dial-in socket', () => {
 
     const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
     expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'first' } as never);
-    expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID)).toEqual({
+    expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID)).toMatchObject({
       state: 'connected',
       manifest: MANIFEST,
     });
@@ -342,6 +366,63 @@ describe('runtime dial-in socket', () => {
       code: 'RUNTIME_UNAVAILABLE',
     });
     expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('disconnected');
+  });
+
+  it('refuses an upgrade past the budget with a code the dialer can read', async () => {
+    // Counted in the route rather than in the global HTTP hook: a 429 before
+    // the upgrade reaches a dialing runtime as a socket that simply failed to
+    // open, which it cannot tell from a hub that is down, so it would come back
+    // on the wrong cadence.
+    const hub = await startHub({ upgradeLimit: { max: 1, windowMs: 60_000 } });
+
+    const first = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
+    await first.host.waitUntilReady();
+    const second = await dialRuntime(hub.url, hub.issued.token);
+
+    expect((await second.closed).code).toBe(RUNTIME_CLOSE_CODES.RATE_LIMITED);
+  });
+
+  it('names an unsupported protocol rather than blaming the environment', async () => {
+    // Both refusals reach the route as "unavailable" from the manager, and the
+    // remediation is not the same: enabling an environment cannot fix a binary
+    // that speaks a protocol this hub does not.
+    const hub = await startHub();
+    const stale = await dialRuntime(hub.url, hub.issued.token, new Map(), {
+      protocolVersion: '0.9',
+    });
+
+    expect((await stale.closed).code).toBe(RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH);
+  });
+
+  it('refuses a credential revoked while its adoption was in flight', async () => {
+    // `verify` runs before the upgrade and a handshake takes long enough for a
+    // revocation to land behind it. Revoking drops what the manager holds — but
+    // in this window it holds nothing yet, so the disconnect it issues finds no
+    // entry and, without a re-read after adoption, the socket goes on serving a
+    // credential that no longer exists.
+    const released = Promise.withResolvers<void>();
+    const hub = await startHub({ gateAdoptStart: released.promise });
+    const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
+
+    await hub.pairing.revoke(TEST_USER.id, ENVIRONMENT_ID);
+    released.resolve();
+
+    expect((await runtime.closed).code).toBe(RUNTIME_CLOSE_CODES.UNAUTHORIZED);
+    expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).not.toBe('connected');
+  });
+
+  it('reports the release a remote runtime is on, and that it is not the hub', async () => {
+    // Remote transports connect across a release boundary on purpose. Drift
+    // that is allowed and invisible is drift nobody ever fixes, so it has to
+    // reach the card.
+    const hub = await startHub();
+    const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
+    await runtime.host.waitUntilReady();
+    await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
+
+    const status = hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID);
+    expect(status.runtimeVersion).toBe('runtime-test');
+    expect(status.runtimeVersionDrift).toBe(true);
   });
 
   it('records a heartbeat without writing the credential to the logs', async () => {
