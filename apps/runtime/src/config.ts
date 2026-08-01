@@ -1,14 +1,21 @@
 export interface RuntimeConfig {
   /** Exercise the byte codec in-process so development catches wire drift. */
   readonly validateInProcessFrames: boolean;
+  /**
+   * Pairing token for `connect`, for setups that cannot pipe one in. Never a
+   * command-line argument: argv is readable by every process on the machine.
+   */
+  readonly pairingToken: string | null;
 }
 
 /** Runtime-owned environment parsing for the embedded and binary hosts. */
 export function loadRuntimeConfig(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): RuntimeConfig {
+  const token = env.MANGOSTUDIO_RUNTIME_TOKEN?.trim();
   return {
     validateInProcessFrames: env.NODE_ENV !== 'production',
+    pairingToken: token && token.length > 0 ? token : null,
   };
 }
 

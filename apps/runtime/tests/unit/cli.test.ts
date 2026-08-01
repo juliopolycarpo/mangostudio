@@ -55,6 +55,38 @@ describe('parseRuntimeCliArgs', () => {
       argument: '--extra',
     });
   });
+
+  it('parses connect with a hub and a piped token', () => {
+    expect(
+      parseRuntimeCliArgs(['connect', '--hub', 'wss://hub.test/api/runtime', '--token', '-'])
+    ).toEqual({
+      command: 'connect',
+      args: { hubUrl: 'wss://hub.test/api/runtime', tokenSource: 'stdin' },
+    });
+  });
+
+  it('lets connect fall back to whatever a previous run stored', () => {
+    expect(parseRuntimeCliArgs(['connect'])).toEqual({
+      command: 'connect',
+      args: { tokenSource: 'stored' },
+    });
+  });
+
+  it('refuses a token passed as an argument', () => {
+    // argv is readable by every process on the machine, so there is deliberately
+    // no spelling of `--token <secret>` that works.
+    expect(parseRuntimeCliArgs(['connect', '--token', 'mrt_abc.def'])).toEqual({
+      command: 'unknown',
+      argument: '--token',
+    });
+  });
+
+  it('refuses a hub flag with nothing after it', () => {
+    expect(parseRuntimeCliArgs(['connect', '--hub'])).toEqual({
+      command: 'unknown',
+      argument: '--hub',
+    });
+  });
 });
 
 describe('mangostudio-runtime binary', () => {
