@@ -39,6 +39,22 @@ describe('rate-limit policy classification', () => {
     expect(classifyRateLimit('/api/ws')).toBe(RATE_LIMIT_BUCKETS.general);
   });
 
+  it('routes runtime dial-in upgrades to their own bucket', () => {
+    expect(classifyRateLimit('/api/runtime')).toBe(RATE_LIMIT_BUCKETS.runtimeSocket);
+    expect(classifyRateLimit('/runtime')).toBe(RATE_LIMIT_BUCKETS.runtimeSocket);
+    // Only the endpoint itself: the bucket exists so a reconnecting runtime
+    // cannot starve the general bucket, not to shelter everything below it.
+    expect(classifyRateLimit('/api/runtimes')).toBe(RATE_LIMIT_BUCKETS.general);
+    expect(classifyRateLimit('/api/runtime/anything')).toBe(RATE_LIMIT_BUCKETS.general);
+  });
+
+  it('sizes the runtime bucket above a single reconnect cadence', () => {
+    // Buckets key on client IP, so several runtimes behind one NAT share this
+    // counter. A budget tuned to a single backoff curve would let one broken
+    // runtime rate-limit every healthy one beside it.
+    expect(RATE_LIMIT_BUCKETS.runtimeSocket.max).toBeGreaterThanOrEqual(60);
+  });
+
   it('routes key-authenticated traffic to the api-key bucket', () => {
     const headers = headersWithApiKey('mango_test_secret_value');
     expect(classifyRateLimit('/api/chats', headers)).toBe(RATE_LIMIT_BUCKETS.apiKey);

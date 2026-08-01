@@ -78,12 +78,20 @@ export class RuntimeHost {
 
   start(): void {
     if (!this.#port) throw new Error('Runtime host is not attached to a transport.');
-    this.#send({
-      type: 'hello',
-      protocolVersion: this.#protocolVersion,
-      runtimeVersion: this.#runtimeVersion,
-      manifest: this.#manifest,
-    });
+    try {
+      this.#send({
+        type: 'hello',
+        protocolVersion: this.#protocolVersion,
+        runtimeVersion: this.#runtimeVersion,
+        manifest: this.#manifest,
+      });
+    } catch (error) {
+      // The transport can go away between attach and start — a hub that
+      // refuses the credential closes the socket the moment it opens. That is
+      // a handshake that will not happen, not a programming error, so it
+      // settles the promise callers are already waiting on.
+      this.#handshake.reject(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   /**

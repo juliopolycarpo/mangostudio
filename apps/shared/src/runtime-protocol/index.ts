@@ -5,6 +5,11 @@ export {
   RuntimeChunkReassembler,
 } from './chunk';
 export {
+  isFatalRuntimeCloseCode,
+  RUNTIME_CLOSE_CODES,
+  type RuntimeCloseCode,
+} from './close-codes';
+export {
   assertRuntimeFrame,
   decodeRuntimeFrameLine,
   encodeRuntimeFrame,

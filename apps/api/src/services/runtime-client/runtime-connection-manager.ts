@@ -33,10 +33,17 @@ export interface RuntimeEnvironmentDefinition {
   readonly enabled: boolean;
 }
 
+/**
+ * Why a connection is being closed. Transports that can say so on the wire —
+ * a WebSocket close code, say — turn this into something the peer can act on:
+ * a superseded runtime must not redial into a loop, and a released one should.
+ */
+type RuntimeConnectionCloseReason = 'released' | 'superseded';
+
 export interface ManagedRuntimeConnection {
   readonly client: RuntimeClient;
   /** May resolve when an out-of-process runtime is gone; in-process is immediate. */
-  close(): void | Promise<void>;
+  close(reason?: RuntimeConnectionCloseReason): void | Promise<void>;
 }
 
 export type RuntimeEnvironmentResolver = (
@@ -58,6 +65,8 @@ export interface RuntimeConnectionManagerOptions {
 interface RuntimeConnectionEntry {
   revision: number;
   status: EnvironmentConnectionStatus;
+  /** Known once a definition resolved; decides whether a backoff applies. */
+  transportKind?: EnvironmentTransportKind;
   connection?: ManagedRuntimeConnection;
   connecting?: Promise<RuntimeClient>;
   /** Consecutive failures since the last connection that proved itself. */
@@ -88,6 +97,17 @@ const MAX_RECONNECT_ATTEMPTS = 5;
  */
 const HEALTHY_CONNECTION_MS = 10_000;
 
+/**
+ * Transports where the hub cannot open the connection at all — the runtime
+ * dials in when it is ready. Nothing here is retryable by the hub, so a backoff
+ * would only be a timer counting down against an event it cannot cause.
+ */
+const DIAL_IN_TRANSPORT_KINDS = new Set<EnvironmentTransportKind>(['websocket']);
+
+function isDialIn(transportKind: EnvironmentTransportKind | undefined): boolean {
+  return transportKind !== undefined && DIAL_IN_TRANSPORT_KINDS.has(transportKind);
+}
+
 function connectionKey(userId: string, environmentId: string): string {
   return `${userId}:${environmentId}`;
 }
@@ -98,7 +118,12 @@ function connectionKey(userId: string, environmentId: string): string {
  * and there is no pending callback for shutdown to forget to cancel. The next
  * caller that actually needs the runtime pays for the retry.
  */
-function retryDeadline(failureCount: number, errorCode: RuntimeErrorCode): number {
+function retryDeadline(failureCount: number, errorCode: RuntimeErrorCode, dialIn: boolean): number {
+  // Latching a dial-in transport would be a dead state no button can clear:
+  // the hub never dials, so nothing it does can produce the connection the
+  // deadline is holding back. That includes a protocol mismatch — a runtime
+  // that was upgraded and redials has to be able to take over.
+  if (dialIn) return 0;
   // A stale binary cannot fix itself by being asked again; require a reinstall
   // and an explicit reconnect rather than burning attempts on it.
   if (errorCode === 'PROTOCOL_MISMATCH' || failureCount >= MAX_RECONNECT_ATTEMPTS) {
@@ -204,6 +229,7 @@ export class RuntimeConnectionManager {
         if (!definition) {
           throw unavailable(`Environment "${environmentId}" was not found.`);
         }
+        entry.transportKind = definition.transportKind;
         return this.#openConnection(definition, () => {
           this.#markUnavailable(key, userId, revision);
         });
@@ -230,11 +256,15 @@ export class RuntimeConnectionManager {
       .catch((error: unknown) => {
         if (entry.revision === revision) {
           const errorCode = statusErrorCode(error);
+          const dialIn = isDialIn(entry.transportKind);
           entry.connection = undefined;
-          entry.failureCount += 1;
-          entry.retryAfterMs = retryDeadline(entry.failureCount, errorCode);
+          entry.failureCount = dialIn ? 0 : entry.failureCount + 1;
+          entry.retryAfterMs = retryDeadline(entry.failureCount, errorCode, dialIn);
           entry.status = {
-            state: 'error',
+            // A dial-in environment nobody has dialed into yet is not broken,
+            // it is waiting. `error` would put a red rail on a card whose only
+            // problem is that the runtime has not been started on that machine.
+            state: dialIn ? 'disconnected' : 'error',
             errorCode,
             ...this.#cachedManifest(entry),
           };
@@ -247,6 +277,73 @@ export class RuntimeConnectionManager {
       });
     entry.connecting = connecting;
     return await connecting;
+  }
+
+  /**
+   * Takes over a connection the hub did not open.
+   *
+   * `connect()` cannot express this: it resolves an environment, dials it, and
+   * hands back a client. For a dial-in transport the socket already exists and
+   * the definition still has to be honoured — a disabled environment must be
+   * refused here too, or disabling one would only stop the connections the hub
+   * initiates. The revision bump both supersedes an incumbent connection and
+   * invalidates any `connect()` still in flight, and the failure history goes
+   * with it: a runtime that dialed in has proved the environment reachable,
+   * whatever the hub's own attempts recorded while it was not.
+   */
+  async adopt(
+    userId: string,
+    environmentId: string,
+    open: (onUnavailable: () => void) => Promise<ManagedRuntimeConnection>
+  ): Promise<RuntimeClient> {
+    const definition = await this.#resolveEnvironment(userId, environmentId);
+    if (!definition) {
+      throw unavailable(`Environment "${environmentId}" was not found.`);
+    }
+    if (!definition.enabled) {
+      throw unavailable(`Environment "${definition.id}" is disabled.`);
+    }
+
+    const key = connectionKey(userId, environmentId);
+    const entry = this.#entries.get(key) ?? {
+      revision: 0,
+      status: { state: 'disconnected' as const },
+      failureCount: 0,
+      retryAfterMs: 0,
+    };
+    this.#entries.set(key, entry);
+    entry.transportKind = definition.transportKind;
+
+    const revision = ++entry.revision;
+    const superseded = entry.connection;
+    entry.connection = undefined;
+    entry.connecting = undefined;
+    void superseded?.close('superseded');
+    entry.status = { state: 'connecting', ...this.#cachedManifest(entry) };
+    this.#publish(userId);
+
+    let connection: ManagedRuntimeConnection;
+    try {
+      connection = await open(() => this.#markUnavailable(key, userId, revision));
+    } catch (error) {
+      if (entry.revision === revision) {
+        entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
+        this.#publish(userId);
+      }
+      throw normalizeUnavailable(error);
+    }
+    if (entry.revision !== revision) {
+      void connection.close('superseded');
+      throw unavailable('Runtime connection was superseded while it was handshaking.');
+    }
+
+    entry.connection = connection;
+    entry.connectedAtMs = Date.now();
+    entry.failureCount = 0;
+    entry.retryAfterMs = 0;
+    entry.status = { state: 'connected', manifest: connection.client.manifest };
+    this.#publish(userId);
+    return connection.client;
   }
 
   disconnect(userId: string, environmentId: string): void {
@@ -274,7 +371,7 @@ export class RuntimeConnectionManager {
    */
   #release(entry: RuntimeConnectionEntry): void | Promise<void> {
     entry.revision += 1;
-    const closed = entry.connection?.close();
+    const closed = entry.connection?.close('released');
     entry.connection = undefined;
     entry.connecting = undefined;
     entry.connectedAtMs = undefined;
@@ -342,9 +439,10 @@ export class RuntimeConnectionManager {
     // A connection that ran for a while and then died starts a fresh count; one
     // that died on arrival continues the old one toward the cap.
     const healthy = Date.now() - (entry.connectedAtMs ?? 0) >= HEALTHY_CONNECTION_MS;
+    const dialIn = isDialIn(entry.transportKind);
     entry.connectedAtMs = undefined;
-    entry.failureCount = healthy ? 1 : entry.failureCount + 1;
-    entry.retryAfterMs = retryDeadline(entry.failureCount, 'RUNTIME_UNAVAILABLE');
+    entry.failureCount = dialIn ? 0 : healthy ? 1 : entry.failureCount + 1;
+    entry.retryAfterMs = retryDeadline(entry.failureCount, 'RUNTIME_UNAVAILABLE', dialIn);
     entry.status = {
       // A latched deadline is what `error` means here, so read it rather than
       // re-deriving the cap and drifting from whatever else latches.
@@ -447,6 +545,22 @@ async function connectWslRuntime(
   };
 }
 
+/**
+ * The connector for transports the hub never dials. It is registered rather
+ * than omitted so `connect()` keeps its meaning: asking for a connection the
+ * hub cannot open fails with a message naming what will open it, instead of
+ * "the websocket transport is not available yet", which is not true.
+ */
+function refuseDialInRuntime(
+  definition: RuntimeEnvironmentDefinition
+): Promise<ManagedRuntimeConnection> {
+  return Promise.reject(
+    unavailable(
+      `Environment "${definition.id}" connects when its runtime dials in. Install the runtime on that machine and run "mangostudio-runtime connect".`
+    )
+  );
+}
+
 let managerInstance: RuntimeConnectionManager | undefined;
 
 export function getRuntimeConnectionManager(): RuntimeConnectionManager {
@@ -456,6 +570,7 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
       'in-process': connectLocalRuntime,
       stdio: connectStdioRuntime,
       wsl: connectWslRuntime,
+      websocket: refuseDialInRuntime,
     },
     publish: publishEnvironmentInvalidation,
   });

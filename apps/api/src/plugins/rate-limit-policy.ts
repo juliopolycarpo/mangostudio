@@ -46,6 +46,13 @@ export const RATE_LIMIT_BUCKETS = {
    * is the caller IP until verified key ids can key the bucket (#737).
    */
   apiKey: { name: 'api-key', max: 120, windowMs: ONE_MINUTE_MS },
+  /**
+   * Runtime dial-in upgrades. Sized well above the documented reconnect
+   * cadence on purpose: buckets key on client IP, so a bucket tuned to one
+   * runtime's backoff would let a single revoked-token runtime behind a NAT
+   * 429 every healthy runtime sharing its address.
+   */
+  runtimeSocket: { name: 'runtime-socket', max: 60, windowMs: ONE_MINUTE_MS },
 } as const satisfies Record<string, RateLimitBucket>;
 
 /** True when `path` equals `base` or sits directly under it (`base/...`). */
@@ -61,6 +68,11 @@ export function isHealthPath(path: string): boolean {
 /** Matches `/auth`, `/auth/*` and their `/api`-prefixed forms. */
 export function isAuthPath(path: string): boolean {
   return matchesSegment(path, '/auth') || matchesSegment(path, '/api/auth');
+}
+
+/** Matches the runtime dial-in endpoint and its `/api`-prefixed form. */
+export function isRuntimeSocketPath(path: string): boolean {
+  return path === '/runtime' || path === '/api/runtime';
 }
 
 function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined): string | null {
@@ -94,6 +106,7 @@ export function classifyRateLimit(
 ): RateLimitBucket {
   if (isHealthPath(path)) return RATE_LIMIT_BUCKETS.health;
   if (isAuthPath(path)) return RATE_LIMIT_BUCKETS.auth;
+  if (isRuntimeSocketPath(path)) return RATE_LIMIT_BUCKETS.runtimeSocket;
   if (trimmedApiKeyHeader(headers)) return RATE_LIMIT_BUCKETS.apiKey;
   return RATE_LIMIT_BUCKETS.general;
 }
