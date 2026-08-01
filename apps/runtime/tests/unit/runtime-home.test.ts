@@ -140,3 +140,26 @@ describe('runtime home', () => {
     });
   });
 });
+
+describe('stdio pending setup gate', () => {
+  it('refuses only when the executable lives under the pending remote slot', async () => {
+    const { shouldRefuseStdioForPendingSetup } = await import('../../src/cli');
+    const { runtimeSlotDir } = await import('../../src/runtime-home');
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig('remote', { setupState: 'pending' }, env);
+
+    const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
+    expect(await shouldRefuseStdioForPendingSetup(env, [remoteBinary])).toBe(true);
+    expect(
+      await shouldRefuseStdioForPendingSetup(env, ['/usr/local/bin/mangostudio-runtime'])
+    ).toBe(false);
+  });
+
+  it('stays open when setupState was never written', async () => {
+    const { shouldRefuseStdioForPendingSetup } = await import('../../src/cli');
+    const { runtimeSlotDir } = await import('../../src/runtime-home');
+    const env = await isolatedEnv();
+    const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
+    expect(await shouldRefuseStdioForPendingSetup(env, [remoteBinary])).toBe(false);
+  });
+});

@@ -2219,6 +2219,7 @@ export const messages = {
         sshRuntimePathHint:
           'Onde o mangostudio-runtime fica naquela máquina. Deixe vazio para o caminho de instalação padrão.',
         sshDashInvalid: 'Um valor começando com hífen seria lido como uma opção do ssh.',
+        sshPortInvalid: 'Use uma porta entre 1 e 65535.',
         sshPreflight:
           'Rode isto uma vez a partir de um terminal. Ele prova que a máquina é alcançável e, na primeira conexão, é o que coloca a chave do host no known_hosts — um passo que o MangoStudio deliberadamente não dá por você.',
         sshPreflightReach: 'Alcançar a máquina',

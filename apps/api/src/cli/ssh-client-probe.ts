@@ -34,8 +34,15 @@ export async function probeSshClient(
     // stdout here would report a client that answered as one that said nothing.
     const [stderr, exitCode] = await Promise.all([new Response(child.stderr).text(), child.exited]);
     const version = stderr.trim().split(/\r?\n/)[0]?.trim() ?? '';
-    if (exitCode !== 0 && !version) {
-      return { path, version: null, error: `exited with code ${exitCode}` };
+    // OpenSSH prints the banner on stderr and exits 0. A nonzero status with
+    // leftover text is still a broken client (unsupported option, wrong binary
+    // on PATH) — do not treat that text as a version string.
+    if (exitCode !== 0) {
+      return {
+        path,
+        version: null,
+        error: version || `exited with code ${exitCode}`,
+      };
     }
     return version
       ? { path, version, error: null }

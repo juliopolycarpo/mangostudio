@@ -14,9 +14,10 @@
  */
 
 import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type { SshFailureReason } from '@mangostudio/shared/environments';
-import { sshLaunchCommand } from '@mangostudio/shared/environments';
+import { expandUserPath, sshLaunchCommand } from '@mangostudio/shared/environments';
 import { getVersion } from '../../lib/config';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
 import {
@@ -49,11 +50,18 @@ export async function connectSshRuntime(
   onUnavailable: () => void
 ): Promise<SshRuntimeConnection> {
   const config = environmentConfigFor('ssh', definition.config);
+  // OpenSSH expands `~/…` for `-i`; `existsSync` does not. Resolve the same
+  // home-relative form before the precheck and pass the expanded path through
+  // so the check and the argv agree.
+  const identityFile = config.identityFile
+    ? expandUserPath(config.identityFile, homedir())
+    : undefined;
+  const launchConfig = identityFile ? { ...config, identityFile } : config;
 
   // ssh only warns about an identity file it cannot read and then carries on to
   // fail authentication, which reads back as "the host refused your key" —
   // true, and useless. Checking first names the file instead.
-  if (config.identityFile && !existsSync(config.identityFile)) {
+  if (identityFile && !existsSync(identityFile)) {
     throw new RuntimeRemoteError(
       'RUNTIME_UNAVAILABLE',
       `The identity file ${config.identityFile} configured on environment "${definition.id}" does not exist.`,
@@ -69,7 +77,7 @@ export async function connectSshRuntime(
   try {
     const connection = await spawnRuntimeChild({
       environmentId: definition.id,
-      launch: sshLaunchCommand(config),
+      launch: sshLaunchCommand(launchConfig),
       hubVersion: getVersion(),
       handshakeTimeoutMs: HANDSHAKE_TIMEOUT_MS,
       requireMatchingRelease: false,

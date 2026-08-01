@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
   DEFAULT_SSH_RUNTIME_PATH,
+  expandUserPath,
   quoteForRemoteShell,
   SSH_FORCED_OPTIONS,
   type SshEnvironmentConfig,
@@ -30,6 +31,7 @@ describe('ssh launch command', () => {
     expect(args).toContain('StrictHostKeyChecking=yes');
     expect(args).toContain('ControlMaster=no');
     expect(args).toContain('ControlPath=none');
+    expect(args).toContain('RemoteCommand=none');
   });
 
   it('ends option parsing before the destination and the remote command', () => {
@@ -100,13 +102,20 @@ describe('remote shell quoting', () => {
   it('quotes a ~user prefix rather than guessing at another shell', () => {
     expect(quoteForRemoteShell('~deploy/bin/runtime')).toBe("'~deploy/bin/runtime'");
   });
+
+  it('expands only the current-user tilde form for hub-side path checks', () => {
+    expect(expandUserPath('~/.ssh/id_ed25519', '/home/j')).toBe('/home/j/.ssh/id_ed25519');
+    expect(expandUserPath('~', '/home/j')).toBe('/home/j');
+    expect(expandUserPath('~other/.ssh/key', '/home/j')).toBe('~other/.ssh/key');
+    expect(expandUserPath('/abs/key', '/home/j')).toBe('/abs/key');
+  });
 });
 
 describe('ssh preflight commands', () => {
   it('omits the forced options, because running it by hand is how a key is trusted', () => {
     const { reach, runtime } = sshPreflightCommands(config({ user: 'deploy', port: 2222 }));
 
-    expect(reach).toBe('ssh -p 2222 deploy@build-01.internal true');
+    expect(reach).toBe("ssh -p 2222 'deploy@build-01.internal' true");
     expect(reach).not.toContain('BatchMode');
     expect(reach).not.toContain('StrictHostKeyChecking');
     expect(runtime).toContain('--version');
@@ -115,7 +124,20 @@ describe('ssh preflight commands', () => {
   it('quotes an identity file that contains a space', () => {
     const { reach } = sshPreflightCommands(config({ identityFile: '/home/j/my keys/id_ed25519' }));
 
-    expect(reach).toBe("ssh -i '/home/j/my keys/id_ed25519' build-01.internal true");
+    expect(reach).toBe("ssh -i '/home/j/my keys/id_ed25519' 'build-01.internal' true");
+  });
+
+  it('quotes a destination that carries shell metacharacters', () => {
+    const { reach } = sshPreflightCommands(config({ host: 'box; touch /tmp/x' }));
+
+    expect(reach).toBe("ssh 'box; touch /tmp/x' true");
+    expect(reach).not.toMatch(/^ssh box;/);
+  });
+
+  it('keeps a remote tilde from expanding in the local shell', () => {
+    const { runtime } = sshPreflightCommands(config());
+
+    expect(runtime).toContain("\\~/'.mango/runtime/remote/current/mangostudio-runtime'");
   });
 });
 

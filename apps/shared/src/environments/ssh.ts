@@ -53,6 +53,11 @@ export const SSH_FORCED_OPTIONS: readonly string[] = [
   'ControlMaster=no',
   '-o',
   'ControlPath=none',
+  // Ambient `RemoteCommand` would collide with the runtime argv we always
+  // supply after the destination (`Cannot execute command-line and remote
+  // command.`). Force it off the same way multiplexing is forced off.
+  '-o',
+  'RemoteCommand=none',
 ];
 
 export interface SshLaunchCommand {
@@ -114,15 +119,17 @@ export function sshPreflightCommands(config: SshEnvironmentConfig): {
   readonly reach: string;
   readonly runtime: string;
 } {
+  // These strings are pasted into a local interactive shell. Quote every value
+  // the way that shell will parse it; the hub argv path never interpolates.
   const prefix = [
     'ssh',
     ...(config.port ? ['-p', String(config.port)] : []),
-    ...(config.identityFile ? ['-i', quoteForRemoteShell(config.identityFile)] : []),
-    sshDestination(config),
+    ...(config.identityFile ? ['-i', quoteForLocalShell(config.identityFile)] : []),
+    quoteForLocalShell(sshDestination(config)),
   ].join(' ');
   return {
     reach: `${prefix} true`,
-    runtime: `${prefix} ${quoteForRemoteShell(sshRuntimePath(config))} --version`,
+    runtime: `${prefix} ${quoteRemoteCommandForLocalPaste(sshRuntimePath(config))} --version`,
   };
 }
 
@@ -141,6 +148,51 @@ export function sshPreflightCommands(config: SshEnvironmentConfig): {
 export function quoteForRemoteShell(value: string): string {
   if (value.startsWith('~/')) return `~/${singleQuote(value.slice(2))}`;
   return singleQuote(value);
+}
+
+/**
+ * Quotes a value for a command the user pastes into their own shell.
+ *
+ * Unlike {@link quoteForRemoteShell}, a leading `~/` stays inside the quotes:
+ * identity files and destinations are expanded (or not) on the hub side, and
+ * an unquoted tilde in a copied command would expand before `ssh` starts.
+ */
+export function quoteForLocalShell(value: string): string {
+  return singleQuote(value);
+}
+
+/**
+ * Remote command fragment for a copyable preflight line.
+ *
+ * The path still uses remote-shell quoting so the target expands `~/`, but a
+ * leading tilde is escaped so the *local* shell does not rewrite it to the
+ * hub user's home before `ssh` sees the argument.
+ */
+export function quoteRemoteCommandForLocalPaste(value: string): string {
+  const remote = quoteForRemoteShell(value);
+  return remote.startsWith('~/') ? `\\${remote}` : remote;
+}
+
+/**
+ * Expands a leading `~/` the way OpenSSH does for `-i`, so a hub-side
+ * existence check sees the same path the client will open.
+ *
+ * Only the current-user form is handled: `~other/` stays literal, matching
+ * the remote-path quoting policy that refuses to guess another account's home.
+ */
+/**
+ * Expands a leading `~/` the way OpenSSH does for `-i`, so a hub-side
+ * existence check sees the same path the client will open.
+ *
+ * Only the current-user form is handled: `~other/` stays literal, matching
+ * the remote-path quoting policy that refuses to guess another account's home.
+ * `home` is injected so this helper stays free of `node:os` (the frontend
+ * imports the rest of this module).
+ */
+export function expandUserPath(value: string, home: string): string {
+  if (value === '~') return home;
+  if (value.startsWith('~/')) return `${home}/${value.slice(2)}`;
+  return value;
 }
 
 function singleQuote(value: string): string {

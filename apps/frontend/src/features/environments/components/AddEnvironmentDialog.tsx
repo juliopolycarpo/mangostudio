@@ -9,11 +9,7 @@
  * that can never do anything is worse than a missing one.
  */
 
-import type {
-  CreateEnvironmentBody,
-  SshEnvironmentConfig,
-  WslDistribution,
-} from '@mangostudio/shared/environments';
+import type { CreateEnvironmentBody, WslDistribution } from '@mangostudio/shared/environments';
 import {
   DEFAULT_SSH_RUNTIME_PATH,
   shouldWarnPlaintextHttpRuntime,
@@ -25,6 +21,7 @@ import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useCreateEnvironmentMutation, useWslDetectionQuery } from '../queries';
+import { isSshFormUsable, SSH_LEADING_DASH, sshFormToConfig, validateSshForm } from '../ssh-form';
 import { CopyLine } from './CopyLine';
 import { WslDistributionPicker } from './WslDistributionPicker';
 
@@ -35,9 +32,6 @@ const ENVIRONMENT_NAME_MAX_LENGTH = 80;
 
 /** One answer to "how do you reach it", and the transport that answer implies. */
 type ReachabilityChoice = 'stdio' | 'wsl' | 'websocket' | 'http' | 'ssh';
-
-/** Mirrors `SshArgumentValueSchema`; the server is still the authority. */
-const LEADING_DASH = /^-/;
 
 interface AddEnvironmentDialogProps {
   readonly onClose: () => void;
@@ -55,47 +49,6 @@ function suggestId(name: string): string {
       // the pattern — leaving submit disabled over an id the user never typed.
       .replace(/-+$/, '')
   );
-}
-
-/**
- * The typed fields as the transport sees them: an omitted optional means "let
- * ssh decide", where an empty string would become an argv entry that decides
- * wrongly.
- */
-function buildSshConfig(fields: {
-  readonly host: string;
-  readonly user: string;
-  readonly port: string;
-  readonly identityFile: string;
-  readonly remoteRuntimePath: string;
-}): SshEnvironmentConfig {
-  // Only a wholly numeric value becomes a port: `Number.parseInt` would
-  // silently accept `22abc` as 22 and store something nobody typed.
-  const rawPort = fields.port.trim();
-  const port = /^\d+$/.test(rawPort) ? Number(rawPort) : Number.NaN;
-  return {
-    host: fields.host.trim(),
-    ...(fields.user.trim() ? { user: fields.user.trim() } : {}),
-    ...(Number.isFinite(port) ? { port } : {}),
-    ...(fields.identityFile.trim() ? { identityFile: fields.identityFile.trim() } : {}),
-    ...(fields.remoteRuntimePath.trim()
-      ? { remoteRuntimePath: fields.remoteRuntimePath.trim() }
-      : {}),
-  };
-}
-
-/**
- * Mirrors what the server will accept. A value starting with a dash would read
- * as an ssh option rather than an argument, which the schema refuses — catching
- * it here turns a rejected save into a field that says so.
- */
-function isSshConfigUsable(config: SshEnvironmentConfig, rawPort: string): boolean {
-  if (config.host.length === 0) return false;
-  const values = [config.host, config.user, config.identityFile, config.remoteRuntimePath];
-  if (values.some((value) => value !== undefined && LEADING_DASH.test(value))) return false;
-  const port = rawPort.trim();
-  if (port.length === 0) return true;
-  return config.port !== undefined && config.port >= 1 && config.port <= 65_535;
 }
 
 /** The one to offer first: the host's default, else whatever is configurable. */
@@ -152,14 +105,16 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const idInvalid = effectiveId.length > 0 && !ENVIRONMENT_ID_PATTERN.test(effectiveId);
   const httpIncomplete =
     kind === 'http' && (trimmedBaseUrl.length === 0 || trimmedToken.length === 0);
-  const sshConfig = buildSshConfig({
+  const sshForm = {
     host: sshHost,
     user: sshUser,
     port: sshPort,
     identityFile: sshIdentityFile,
     remoteRuntimePath: sshRuntimePath,
-  });
-  const sshInvalid = kind === 'ssh' && !isSshConfigUsable(sshConfig, sshPort);
+  };
+  const sshConfig = sshFormToConfig(sshForm);
+  const sshFieldInvalid = validateSshForm(sshForm);
+  const sshInvalid = kind === 'ssh' && !isSshFormUsable(sshForm);
   const blocked =
     trimmedName.length === 0 ||
     effectiveId.length === 0 ||
@@ -386,7 +341,7 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                   label={labels.sshHostLabel}
                   value={sshHost}
                   error={
-                    sshHost.trim().length > 0 && LEADING_DASH.test(sshHost.trim())
+                    sshHost.trim().length > 0 && SSH_LEADING_DASH.test(sshHost.trim())
                       ? labels.sshDashInvalid
                       : undefined
                   }
@@ -396,6 +351,11 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                   id="add-environment-ssh-user"
                   label={`${labels.sshUserLabel} · ${labels.optional}`}
                   value={sshUser}
+                  error={
+                    sshUser.trim().length > 0 && SSH_LEADING_DASH.test(sshUser.trim())
+                      ? labels.sshDashInvalid
+                      : undefined
+                  }
                   onChange={(event) => setSshUser(event.target.value)}
                 />
                 <Input
@@ -404,12 +364,23 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                   inputMode="numeric"
                   placeholder="22"
                   value={sshPort}
+                  error={
+                    sshPort.trim().length > 0 && sshFieldInvalid === 'port'
+                      ? labels.sshPortInvalid
+                      : undefined
+                  }
                   onChange={(event) => setSshPort(event.target.value)}
                 />
                 <Input
                   id="add-environment-ssh-identity"
                   label={`${labels.sshIdentityFileLabel} · ${labels.optional}`}
                   value={sshIdentityFile}
+                  error={
+                    sshIdentityFile.trim().length > 0 &&
+                    SSH_LEADING_DASH.test(sshIdentityFile.trim())
+                      ? labels.sshDashInvalid
+                      : undefined
+                  }
                   onChange={(event) => setSshIdentityFile(event.target.value)}
                 />
               </div>
@@ -420,6 +391,11 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                   label={`${labels.sshRuntimePathLabel} · ${labels.optional}`}
                   placeholder={DEFAULT_SSH_RUNTIME_PATH}
                   value={sshRuntimePath}
+                  error={
+                    sshRuntimePath.trim().length > 0 && SSH_LEADING_DASH.test(sshRuntimePath.trim())
+                      ? labels.sshDashInvalid
+                      : undefined
+                  }
                   onChange={(event) => setSshRuntimePath(event.target.value)}
                 />
                 <p className="text-on-surface-variant/60 text-xs">{labels.sshRuntimePathHint}</p>

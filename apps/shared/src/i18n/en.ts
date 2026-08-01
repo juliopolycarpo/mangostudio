@@ -2197,6 +2197,7 @@ export const messages: Messages = {
         sshRuntimePathHint:
           'Where mangostudio-runtime lives on that machine. Leave empty for the default install path.',
         sshDashInvalid: 'A value starting with a dash would be read as an ssh option.',
+        sshPortInvalid: 'Use a port between 1 and 65535.',
         sshPreflight:
           'Run this once from a terminal first. It proves the machine is reachable and, on a first connection, is what puts its host key in known_hosts — a step MangoStudio deliberately will not take for you.',
         sshPreflightReach: 'Reach the machine',

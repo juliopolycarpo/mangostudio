@@ -19,24 +19,14 @@ import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useUpdateEnvironmentMutation } from '../queries';
+import { type SshFormFields, sshFormToConfig, validateSshForm } from '../ssh-form';
 import { CopyLine } from './CopyLine';
-
-/** Mirrors `SshArgumentValueSchema`; the server is still the authority. */
-const LEADING_DASH = /^-/;
 
 interface SshPanelProps {
   readonly environment: Environment;
 }
 
-interface SshFormState {
-  readonly host: string;
-  readonly user: string;
-  readonly port: string;
-  readonly identityFile: string;
-  readonly remoteRuntimePath: string;
-}
-
-function formStateOf(environment: Environment): SshFormState {
+function formStateOf(environment: Environment): SshFormFields {
   const config = environment.config as Partial<SshEnvironmentConfig>;
   return {
     host: typeof config.host === 'string' ? config.host : '',
@@ -47,27 +37,12 @@ function formStateOf(environment: Environment): SshFormState {
   };
 }
 
-/** The form as the transport sees it: empty means "not set", never an empty argv entry. */
-function toConfig(form: SshFormState): SshEnvironmentConfig {
-  // Only a wholly numeric value becomes a port: `Number.parseInt` would
-  // silently accept `22abc` as 22 and store something nobody typed.
-  const rawPort = form.port.trim();
-  const port = /^\d+$/.test(rawPort) ? Number(rawPort) : Number.NaN;
-  return {
-    host: form.host.trim(),
-    ...(form.user.trim() ? { user: form.user.trim() } : {}),
-    ...(Number.isFinite(port) ? { port } : {}),
-    ...(form.identityFile.trim() ? { identityFile: form.identityFile.trim() } : {}),
-    ...(form.remoteRuntimePath.trim() ? { remoteRuntimePath: form.remoteRuntimePath.trim() } : {}),
-  };
-}
-
 export function SshPanel({ environment }: SshPanelProps) {
   const { t } = useI18n();
   const labels = t.environments.entities.ssh;
   const update = useUpdateEnvironmentMutation();
   const stored = formStateOf(environment);
-  const [form, setForm] = useState<SshFormState>(stored);
+  const [form, setForm] = useState<SshFormFields>(stored);
   const [edited, setEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,14 +50,14 @@ export function SshPanel({ environment }: SshPanelProps) {
   // one someone is typing into does not get overwritten mid-edit.
   const storedKey = JSON.stringify(stored);
   useEffect(() => {
-    if (!edited) setForm(JSON.parse(storedKey) as SshFormState);
+    if (!edited) setForm(JSON.parse(storedKey) as SshFormFields);
   }, [edited, storedKey]);
 
-  const config = toConfig(form);
-  const invalid = validate(form);
-  const changed = JSON.stringify(config) !== JSON.stringify(toConfig(stored));
+  const config = sshFormToConfig(form);
+  const invalid = validateSshForm(form);
+  const changed = JSON.stringify(config) !== JSON.stringify(sshFormToConfig(stored));
 
-  const set = (patch: Partial<SshFormState>): void => {
+  const set = (patch: Partial<SshFormFields>): void => {
     setEdited(true);
     setForm((current) => ({ ...current, ...patch }));
   };
@@ -201,25 +176,4 @@ function SshPreflight({ config }: { readonly config: SshEnvironmentConfig }) {
       <CopyLine label={labels.preflightRuntime} value={preflight.runtime} />
     </div>
   );
-}
-
-type SshFormField = keyof SshFormState;
-
-/**
- * The one field that must be there, the range a port has, and the shape the
- * transport refuses outright everywhere. A leading dash is caught here rather
- * than only server-side because the value it would become — an ssh option
- * instead of an argument — deserves a message beside the field that produced
- * it.
- */
-function validate(form: SshFormState): SshFormField | null {
-  const host = form.host.trim();
-  if (host.length === 0 || LEADING_DASH.test(host)) return 'host';
-  for (const field of ['user', 'identityFile', 'remoteRuntimePath'] as const) {
-    if (LEADING_DASH.test(form[field].trim())) return field;
-  }
-  const port = form.port.trim();
-  if (port.length === 0) return null;
-  const parsed = Number(port);
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 65_535 ? null : 'port';
 }

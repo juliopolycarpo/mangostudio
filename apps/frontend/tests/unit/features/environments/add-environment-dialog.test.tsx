@@ -235,7 +235,7 @@ describe('AddEnvironmentDialog', () => {
 
     // The command has to be the one that can prompt: accepting a host key is
     // exactly what MangoStudio refuses to do on the user's behalf.
-    const command = within(dialog).getByText('ssh build-01.internal true');
+    const command = within(dialog).getByText("ssh 'build-01.internal' true");
     expect(command).toBeInTheDocument();
   });
 

@@ -158,6 +158,14 @@ describe('classifySshFailure', () => {
     expect(classify('ssh: Verbindung zu Host fehlgeschlagen')).toBe('unknown');
     expect(classify('', null)).toBe('unknown');
   });
+
+  it('does not treat a host-key algorithm mismatch as an unverified key', () => {
+    // Interactive connect cannot accept a fingerprint either — the remediations
+    // for host-key-unverified would send the user in a circle.
+    expect(
+      classify('Unable to negotiate with 10.0.0.9 port 22: no matching host key type found.')
+    ).toBe('unknown');
+  });
 });
 
 describe('describeSshFailure', () => {
@@ -168,7 +176,7 @@ describe('describeSshFailure', () => {
       'Host key verification failed.'
     );
 
-    expect(message).toContain('ssh deploy@build-01.internal true');
+    expect(message).toContain("ssh 'deploy@build-01.internal' true");
     expect(message).toContain('known_hosts');
   });
 

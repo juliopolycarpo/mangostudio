@@ -75,10 +75,10 @@ describe('SshPanel', () => {
 
     // Without the forced batch-mode options the hub uses: this is the command
     // that is allowed to prompt, which is how a host key gets trusted.
-    expect(within(panel).getByText('ssh deploy@build-01.internal true')).toBeInTheDocument();
+    expect(within(panel).getByText("ssh 'deploy@build-01.internal' true")).toBeInTheDocument();
     expect(
       within(panel).getByText(
-        "ssh deploy@build-01.internal ~/'.mango/runtime/remote/current/mangostudio-runtime' --version"
+        "ssh 'deploy@build-01.internal' \\~/'.mango/runtime/remote/current/mangostudio-runtime' --version"
       )
     ).toBeInTheDocument();
   });

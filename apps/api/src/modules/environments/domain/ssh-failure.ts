@@ -38,7 +38,6 @@ const SHELL_NOT_EXECUTABLE_EXIT = 126;
 const HOST_KEY_SIGNATURES = [
   /host key verification failed/i,
   /remote host identification has changed/i,
-  /no matching host key type found/i,
   /host key for .* has changed/i,
 ];
 

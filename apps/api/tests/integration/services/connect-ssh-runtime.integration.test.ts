@@ -64,7 +64,10 @@ beforeAll(async () => {
   // are absolute on purpose: a non-interactive ssh session gets a minimal PATH
   // and need not have `bun` on it.
   runtimePath = join(workdir, 'mangostudio-runtime');
-  await writeFile(runtimePath, `#!/bin/sh\nexec ${process.execPath} ${RUNTIME_ENTRY} "$@"\n`);
+  await writeFile(
+    runtimePath,
+    `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' '${RUNTIME_ENTRY.replaceAll("'", "'\\''")}' "$@"\n`
+  );
   await chmod(runtimePath, 0o755);
 });
 
@@ -138,7 +141,10 @@ describe('connectSshRuntime over a real sshd', () => {
       // The remote command is joined and handed to a login shell, so an
       // unquoted path would arrive as two words and start nothing.
       const spaced = join(workdir, 'mango studio runtime');
-      await writeFile(spaced, `#!/bin/sh\nexec ${process.execPath} ${RUNTIME_ENTRY} "$@"\n`);
+      await writeFile(
+        spaced,
+        `#!/bin/sh\nexec '${process.execPath.replaceAll("'", "'\\''")}' '${RUNTIME_ENTRY.replaceAll("'", "'\\''")}' "$@"\n`
+      );
       await chmod(spaced, 0o755);
 
       const connection = await connectSshRuntime(

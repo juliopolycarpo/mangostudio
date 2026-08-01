@@ -50,8 +50,9 @@ export interface RuntimeSlotConfig {
   /** The hub address `connect` dials, remembered so later runs need no flags. */
   readonly hubUrl?: string;
   /**
-   * When `pending`, `serve` refuses before listening. Absent means the setup
-   * CLI has not written a gate yet, so serving is allowed.
+   * When `pending`, `serve` and a remote-slot `--stdio` launch refuse before
+   * attaching. Absent means the setup CLI has not written a gate yet, so
+   * serving is allowed.
    */
   readonly setupState?: RuntimeSetupState;
 }
