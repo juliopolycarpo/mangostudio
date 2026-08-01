@@ -841,6 +841,11 @@ export const messages = {
         stdio: 'stdio',
         http: 'HTTP',
       },
+      environmentLabel: 'Ambiente',
+      environmentHint:
+        'Onde este servidor roda. Um comando stdio é iniciado lá, e uma URL HTTP é acessada de lá — então um endereço que só resolve naquela máquina funciona.',
+      environmentsLoading: 'Carregando ambientes…',
+      environmentMissing: 'Ambiente desconhecido',
       status: {
         connected: 'Conectado',
         connecting: 'Conectando',

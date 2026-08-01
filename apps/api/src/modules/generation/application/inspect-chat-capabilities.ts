@@ -83,6 +83,7 @@ export async function inspectChatCapabilities(
       provider: provider.providerType,
       profile,
       runtimeManifest: runtimeClient.manifest,
+      environmentId: ownedChat.environmentId,
     }),
     getAppSettings(input.db, input.userId),
     listMcpServerRows(input.db, input.userId),

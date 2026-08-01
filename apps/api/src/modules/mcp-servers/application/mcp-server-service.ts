@@ -1,3 +1,4 @@
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   AddMcpServerBody,
@@ -31,6 +32,7 @@ import {
   removeMcpSecretEnv,
 } from '../../../services/mcp/stdio-env-secrets';
 import { generateId } from '../../../utils/id';
+import { environmentRepository } from '../../environments/infrastructure/environment-repository';
 import { assertTransportInvariants, McpServerError } from '../domain/mcp-server';
 import {
   deleteMcpServerRow,
@@ -60,6 +62,7 @@ export async function createMcpServer(
   const command = stdio ? body.command : null;
   const url = stdio ? null : body.url;
   assertTransportInvariants({ transport: body.transport, command, url });
+  const environmentId = await requireOwnedEnvironment(userId, body.environmentId);
 
   const now = Date.now();
   const id = generateId();
@@ -72,6 +75,7 @@ export async function createMcpServer(
       name: body.name,
       slug: body.slug,
       transport: body.transport,
+      environmentId,
       command,
       argsJson: JSON.stringify(stdio ? (body.args ?? []) : []),
       envJson: JSON.stringify(stdio ? (body.env ?? {}) : {}),
@@ -103,11 +107,16 @@ export async function updateMcpServer(
     url: body.url ?? row.url,
   };
   assertTransportInvariants(merged);
+  const environmentId =
+    body.environmentId === undefined
+      ? undefined
+      : await requireOwnedEnvironment(userId, body.environmentId);
 
   await updateMcpServerRow(db, userId, id, {
     ...(body.name !== undefined && { name: body.name }),
     ...(body.slug !== undefined && { slug: body.slug }),
     ...(body.transport !== undefined && { transport: body.transport }),
+    ...(environmentId !== undefined && { environmentId }),
     ...(body.command !== undefined && { command: body.command }),
     ...(body.args !== undefined && { argsJson: JSON.stringify(body.args) }),
     ...(body.env !== undefined && { envJson: JSON.stringify(body.env) }),
@@ -215,6 +224,7 @@ async function toPublicServer(userId: string, row: McpServerSelect): Promise<Mcp
     name: row.name,
     slug: row.slug,
     transport: row.transport,
+    environmentId: row.environmentId,
     command: row.command,
     args: parseJsonStringArray(row.argsJson),
     env: parseJsonStringRecord(row.envJson),
@@ -228,6 +238,29 @@ async function toPublicServer(userId: string, row: McpServerSelect): Promise<Mcp
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * Resolves the environment a server will be hosted on, defaulting to Local.
+ *
+ * A server bound to an environment the user does not own would be a session
+ * opened on someone else's machine, so this is authorization, not validation.
+ */
+async function requireOwnedEnvironment(
+  userId: string,
+  environmentId: string | undefined
+): Promise<string> {
+  const requested = environmentId ?? LOCAL_ENVIRONMENT_ID;
+  if (requested === LOCAL_ENVIRONMENT_ID) return requested;
+  const environment = await environmentRepository.find(userId, requested);
+  if (!environment) {
+    throw new McpServerError(
+      `Environment "${requested}" was not found.`,
+      404,
+      ERROR_CODES.NOT_FOUND
+    );
+  }
+  return environment.id;
 }
 
 async function withHardTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

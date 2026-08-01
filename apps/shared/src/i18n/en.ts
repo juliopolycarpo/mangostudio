@@ -829,6 +829,12 @@ export const messages: Messages = {
         stdio: 'stdio',
         http: 'HTTP',
       },
+      environmentLabel: 'Environment',
+      environmentHint:
+        'Where this server runs. A stdio command is spawned there, and an HTTP URL is dialed from there — so an address that only resolves on that machine works.',
+      environmentsLoading: 'Loading environments…',
+      environmentMissing: 'Unknown environment',
+
       status: {
         connected: 'Connected',
         connecting: 'Connecting',

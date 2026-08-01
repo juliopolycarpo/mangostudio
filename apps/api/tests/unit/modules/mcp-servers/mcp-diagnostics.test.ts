@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpToolDescriptor } from '@mangostudio/shared/mcp';
 import type { McpServerSelect } from '../../../../src/db/types';
 import {
@@ -15,6 +16,7 @@ function makeRow(overrides: Partial<McpServerSelect> = {}): McpServerSelect {
     name: 'GitHub',
     slug: 'github',
     transport: 'stdio',
+    environmentId: LOCAL_ENVIRONMENT_ID,
     command: 'uvx',
     argsJson: '[]',
     envJson: '{}',

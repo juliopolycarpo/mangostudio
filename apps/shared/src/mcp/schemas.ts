@@ -28,6 +28,8 @@ export const McpServerSchema = Type.Object({
   name: Type.String({ minLength: 1 }),
   slug: Type.String({ minLength: 1 }),
   transport: McpTransportSchema,
+  /** Environment whose runtime hosts the session; `local` is the hub itself. */
+  environmentId: Type.String({ minLength: 1 }),
   /** stdio transport: executable to spawn. */
   command: Type.Union([Type.String(), Type.Null()]),
   args: Type.Array(Type.String()),
@@ -58,6 +60,8 @@ const addCommonFields = {
   }),
   enabled: Type.Optional(Type.Boolean()),
   timeoutMs: Type.Optional(Type.Union([Type.Number({ minimum: 1 }), Type.Null()])),
+  /** Owned environment id; omitted means Local. */
+  environmentId: Type.Optional(Type.String({ minLength: 1 })),
 };
 
 export const AddStdioMcpServerBodySchema = Type.Object({
@@ -97,6 +101,7 @@ export const UpdateMcpServerBodySchema = Type.Partial(
       pattern: MCP_SERVER_SLUG_PATTERN,
     }),
     transport: McpTransportSchema,
+    environmentId: Type.String({ minLength: 1 }),
     command: Type.String({ minLength: 1 }),
     args: Type.Array(Type.String()),
     env: Type.Record(Type.String(), Type.String()),

@@ -119,6 +119,7 @@ export async function resolveTurnContext(
       requestRuntimeSettings: getRequestRuntimeSettings(provider.providerType, input),
       profile: resolvedAgentProfile,
       runtimeManifest: runtimeClient.manifest,
+      environmentId: chat.environmentId,
     }),
     getAppSettings(db, input.userId),
   ]);

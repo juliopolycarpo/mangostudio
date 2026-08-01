@@ -52,6 +52,8 @@ export interface ResolveAgentRuntimeInput {
   readonly requestRuntimeSettings?: Partial<ProviderRuntimeSettings>;
   readonly profile?: AgentProfile;
   readonly runtimeManifest: RuntimeCapabilityManifest;
+  /** The turn's environment; scopes which MCP servers can be offered. */
+  readonly environmentId: string;
 }
 
 export function resolveRuntimeAgentId(
@@ -71,7 +73,9 @@ export async function resolveAgentRuntime(
   const [savedProviderSettings, toolSettings, mcpServerSnapshots] = await Promise.all([
     getProviderSettings(input.db, input.userId, input.provider),
     listSavedToolSettings(input.db, input.userId),
-    profile.toolsEnabled ? listMcpBridgeServers(input.db, input.userId) : [],
+    profile.toolsEnabled
+      ? listMcpBridgeServers(input.db, input.userId, { environmentId: input.environmentId })
+      : [],
   ]);
   const runtimeSettings = mergeProviderRuntimeSettings(input.provider, savedProviderSettings, {
     ...input.requestRuntimeSettings,

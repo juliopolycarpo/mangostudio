@@ -38,6 +38,7 @@ import { toolIdentityImages } from './037_tool_identity_images';
 import { environmentEntities } from './038_environment_entities';
 import { fileCheckpointEnvironment } from './039_file_checkpoint_environment';
 import { runtimePairingTokens } from './040_runtime_pairing_tokens';
+import { mcpServerEnvironment } from './041_mcp_server_environment';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -80,4 +81,5 @@ export const allMigrations = {
   '038_environment_entities': environmentEntities,
   '039_file_checkpoint_environment': fileCheckpointEnvironment,
   '040_runtime_pairing_tokens': runtimePairingTokens,
+  '041_mcp_server_environment': mcpServerEnvironment,
 };

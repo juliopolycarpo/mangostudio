@@ -3,6 +3,7 @@
  * transport-specific body building, and write-only header semantics.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { describe, expect, it } from 'vitest';
@@ -19,6 +20,7 @@ const HTTP_SERVER: McpServer = {
   name: 'GitHub',
   slug: 'github',
   transport: 'http',
+  environmentId: LOCAL_ENVIRONMENT_ID,
   command: null,
   args: [],
   env: {},
@@ -37,6 +39,7 @@ const STDIO_SERVER: McpServer = {
   name: 'Everything',
   slug: 'everything',
   transport: 'stdio',
+  environmentId: LOCAL_ENVIRONMENT_ID,
   command: 'bunx',
   args: ['@modelcontextprotocol/server-everything'],
   env: { LOG_LEVEL: 'debug' },
@@ -116,6 +119,7 @@ describe('buildAddBody', () => {
       enabled: true,
       timeoutMs: null,
       transport: 'stdio',
+      environmentId: LOCAL_ENVIRONMENT_ID,
       command: 'bunx server',
       args: ['--verbose'],
       env: { KEY: 'v' },
@@ -143,6 +147,7 @@ describe('buildAddBody', () => {
       enabled: true,
       timeoutMs: 2500,
       transport: 'http',
+      environmentId: LOCAL_ENVIRONMENT_ID,
       url: 'https://example.com/mcp',
       headers: { Authorization: 'Bearer x' },
     });

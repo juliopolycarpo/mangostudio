@@ -4,6 +4,7 @@
  * and the shared tool-settings listing.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import { useQueryClient } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -24,6 +25,7 @@ const SERVER: McpServer = {
   name: 'Everything',
   slug: 'everything',
   transport: 'stdio',
+  environmentId: LOCAL_ENVIRONMENT_ID,
   command: 'bunx',
   args: [],
   env: {},
@@ -86,6 +88,7 @@ describe('MCP server hooks', () => {
         enabled: true,
         timeoutMs: null,
         transport: 'stdio',
+        environmentId: LOCAL_ENVIRONMENT_ID,
         command: 'bunx',
         args: [],
         env: {},

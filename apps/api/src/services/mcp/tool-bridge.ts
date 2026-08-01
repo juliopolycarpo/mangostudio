@@ -60,24 +60,41 @@ export interface McpBridgeServerSnapshot {
 }
 
 /**
- * Resolves the tools of every enabled MCP server, one snapshot per server. A
- * server that fails to connect or list within the budget is reported with
+ * Which environments a bridge listing covers. Spelled out at every call site
+ * rather than defaulted: a turn that forgot to scope itself would silently
+ * offer the model tools that run on a machine it is not talking to.
+ */
+export type McpBridgeScope =
+  | { readonly environmentId: string }
+  | { readonly allEnvironments: true };
+
+/**
+ * Resolves the tools of the user's enabled MCP servers in scope, one snapshot
+ * per server. A server bound to another environment is not a rejected turn
+ * candidate but an absent one: its session would open on a machine the turn is
+ * not talking to, and the model has no use for a tool whose side effects land
+ * somewhere else.
+ *
+ * A server that fails to connect or list within the budget is reported with
  * `listed: false` and logged — it never fails the turn or hides other
  * servers' tools.
  *
- * // Usage: const servers = await listMcpBridgeServers(db, userId)
+ * // Usage: const servers = await listMcpBridgeServers(db, userId, { environmentId })
  */
 export async function listMcpBridgeServers(
   db: Kysely<Database>,
-  userId: string
+  userId: string,
+  scope: McpBridgeScope
 ): Promise<McpBridgeServerSnapshot[]> {
-  const rows = await db
+  let query = db
     .selectFrom('mcp_servers')
     .selectAll()
     .where('userId', '=', userId)
-    .where('enabled', '=', 1)
-    .orderBy('createdAt', 'asc')
-    .execute();
+    .where('enabled', '=', 1);
+  if ('environmentId' in scope) {
+    query = query.where('environmentId', '=', scope.environmentId);
+  }
+  const rows = await query.orderBy('createdAt', 'asc').execute();
 
   return Promise.all(
     rows.map(async (row) => {
@@ -108,14 +125,16 @@ export async function listMcpBridgeServers(
 }
 
 /**
- * Resolves every tool of the user's enabled MCP servers, flattened across
- * servers. // Usage: const tools = await listMcpBridgeTools(db, userId)
+ * Resolves every tool of the user's enabled MCP servers in scope, flattened
+ * across servers.
+ * // Usage: const tools = await listMcpBridgeTools(db, userId, { environmentId })
  */
 export async function listMcpBridgeTools(
   db: Kysely<Database>,
-  userId: string
+  userId: string,
+  scope: McpBridgeScope
 ): Promise<McpBridgeTool[]> {
-  const servers = await listMcpBridgeServers(db, userId);
+  const servers = await listMcpBridgeServers(db, userId, scope);
   return servers.flatMap((server) => server.tools);
 }
 
@@ -131,17 +150,23 @@ export async function executeMcpTool(
   userId: string,
   name: string,
   args: Record<string, unknown>,
-  options: { signal?: AbortSignal; toolCallId?: string } = {}
+  options: { signal?: AbortSignal; toolCallId?: string; environmentId?: string } = {}
 ): Promise<McpCallResult> {
-  const target = await resolveMcpToolExecution(db, userId, name);
+  const target = await resolveMcpToolExecution(db, userId, name, options.environmentId);
   return executeResolvedMcpTool(userId, target, args, options);
 }
 
-/** Resolves and authorizes one namespaced tool against its full owned server row. */
+/**
+ * Resolves and authorizes one namespaced tool against its full owned server
+ * row. `environmentId`, when given, is the turn's: a model still holding a
+ * definition from a turn on another environment must not be able to reach that
+ * machine through it.
+ */
 export async function resolveMcpToolExecution(
   db: Kysely<Database>,
   userId: string,
-  name: string
+  name: string,
+  environmentId?: string
 ): Promise<ResolvedMcpToolExecution> {
   const parsed = parseMcpToolName(name);
   if (!parsed) throw new Error(`Unknown tool: "${name}"`);
@@ -149,6 +174,11 @@ export async function resolveMcpToolExecution(
   const row = await getMcpServerRowBySlug(db, userId, parsed.serverSlug);
   if (!row) throw new Error(`MCP server "${parsed.serverSlug}" is not configured.`);
   if (row.enabled === 0) throw new Error(`MCP server "${parsed.serverSlug}" is disabled.`);
+  if (environmentId !== undefined && row.environmentId !== environmentId) {
+    throw new Error(
+      `MCP server "${parsed.serverSlug}" is not available on this chat's environment.`
+    );
+  }
 
   return { parsed, server: row };
 }

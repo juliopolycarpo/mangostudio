@@ -155,6 +155,17 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
           .executeTakeFirst();
         if (chat) return 'referenced';
 
+        // An MCP server row addresses one machine: its command or its URL only
+        // means something there. Deleting the environment out from under it
+        // would leave a server that can never connect and cannot say why.
+        const mcpServer = await transaction
+          .selectFrom('mcp_servers')
+          .select('id')
+          .where('userId', '=', userId)
+          .where('environmentId', '=', id)
+          .executeTakeFirst();
+        if (mcpServer) return 'referenced';
+
         await transaction
           .deleteFrom('environments')
           .where('userId', '=', userId)

@@ -405,7 +405,12 @@ async function prepareStandardToolCall(
       return {
         kind: 'mcp',
         db: context.db,
-        target: await resolveMcpToolExecution(context.db, context.userId, name),
+        target: await resolveMcpToolExecution(
+          context.db,
+          context.userId,
+          name,
+          context.environmentId
+        ),
       };
     } catch (error) {
       throw new ToolPolicyError(errorToToolMessage(error), 'unknown_tool');

@@ -259,6 +259,7 @@ describe('MCP call serialization', () => {
         name: 'Query Count Server',
         slug: 'query-count',
         transport: 'stdio',
+        environmentId: LOCAL_ENVIRONMENT_ID,
         command: 'bun',
         argsJson: '[]',
         envJson: '{}',

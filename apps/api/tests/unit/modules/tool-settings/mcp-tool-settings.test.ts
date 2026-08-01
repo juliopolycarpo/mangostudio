@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getDb } from '../../../../src/db/database';
 import {
   listToolSettingsDescriptors,
@@ -30,6 +31,7 @@ async function insertServer(userId: string, slug: string, name: string): Promise
       name,
       slug,
       transport: 'stdio',
+      environmentId: LOCAL_ENVIRONMENT_ID,
       command: 'bun',
       argsJson: '[]',
       envJson: '{}',

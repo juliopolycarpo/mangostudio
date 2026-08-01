@@ -10,6 +10,7 @@ import {
   TestMcpServerResponseSchema,
 } from '@mangostudio/shared/mcp';
 import { Value } from '@sinclair/typebox/value';
+import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import { mcpServerRoutes } from '../../../src/modules/mcp-servers/http/mcp-server-routes';
 import { closeAllMcpClients } from '../../../src/services/mcp/connection-manager';
@@ -125,6 +126,53 @@ describe('mcp server routes', () => {
     const listPayload = (await list.json()) as McpServerListResponse;
     expect(listPayload.servers).toHaveLength(1);
     expect(listPayload.servers[0]?.id).toBe(payload.id);
+  });
+
+  it('binds a server to an owned environment and refuses one that is not', async () => {
+    const app = authedApp();
+    const stamp = Date.now();
+    const environmentId = `mcp-env-${userSeq}-${stamp}`;
+    await getDb()
+      .insertInto('environments')
+      .values({
+        id: environmentId,
+        userId: testUser.id,
+        name: 'WSL Ubuntu',
+        transportKind: 'wsl',
+        configJson: '{"distro":"Ubuntu"}',
+        enabled: 1,
+        createdAt: stamp,
+        updatedAt: stamp,
+      })
+      .execute();
+
+    const created = await app.handle(
+      jsonRequest('/mcp/servers', 'POST', stdioBody('scoped', { environmentId }))
+    );
+    const payload = (await created.json()) as McpServer;
+    expect(created.status).toBe(201);
+    expect(payload.environmentId).toBe(environmentId);
+
+    // Moving the server is an ordinary field update — no restart, no re-add.
+    const moved = await app.handle(
+      jsonRequest(`/mcp/servers/${payload.id}`, 'PUT', { environmentId: 'local' })
+    );
+    expect(moved.status).toBe(200);
+    expect(((await moved.json()) as McpServer).environmentId).toBe('local');
+
+    // Someone else's environment is not addressable, even by exact id.
+    const foreign = await app.handle(
+      jsonRequest('/mcp/servers', 'POST', stdioBody('foreign', { environmentId: 'not-mine' }))
+    );
+    expect(foreign.status).toBe(404);
+  });
+
+  it('defaults a server with no environment to Local', async () => {
+    const app = authedApp();
+
+    const created = await app.handle(jsonRequest('/mcp/servers', 'POST', stdioBody('defaulted')));
+
+    expect(((await created.json()) as McpServer).environmentId).toBe('local');
   });
 
   it('rejects malformed slugs and invalid transport configs', async () => {

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { StreamChunkSchema } from '@mangostudio/shared/streaming';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import { Value } from '@sinclair/typebox/value';
@@ -119,6 +120,7 @@ beforeEach(async () => {
       name: 'Interactive Server',
       slug: SERVER_SLUG,
       transport: 'stdio',
+      environmentId: LOCAL_ENVIRONMENT_ID,
       command: 'bun',
       argsJson: '[]',
       envJson: '{}',

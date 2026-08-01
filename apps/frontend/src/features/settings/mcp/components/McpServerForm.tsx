@@ -10,6 +10,7 @@ import { type FormEvent, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Toggle } from '@/components/ui/Toggle';
+import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import {
   createEmptyFormState,
@@ -41,6 +42,7 @@ export function McpServerForm({
 }: McpServerFormProps) {
   const { t } = useI18n();
   const s = t.settings.mcp;
+  const environments = useEnvironmentEntitiesQuery();
 
   const [state, setState] = useState<McpServerFormState>(() =>
     server ? formStateFromServer(server) : createEmptyFormState()
@@ -117,6 +119,40 @@ export function McpServerForm({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* ── Hosting environment ── */}
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="mcp-server-environment"
+              className="text-sm font-medium text-on-surface-variant"
+            >
+              {s.environmentLabel}
+            </label>
+            <select
+              id="mcp-server-environment"
+              value={state.environmentId}
+              onChange={(event) => patch({ environmentId: event.target.value })}
+              disabled={environments.isPending && !environments.data}
+              className="rounded-xl border border-outline-variant/20 bg-surface-container-high px-3 py-2 text-sm text-on-surface outline-none transition-colors hover:border-primary/30 focus:border-primary/60 disabled:opacity-60"
+            >
+              {environments.isPending && !environments.data ? (
+                <option value={state.environmentId}>{s.environmentsLoading}</option>
+              ) : null}
+              {/* An environment that vanished (or is not readable) still has to
+                  render, or editing an unrelated field would silently rehome
+                  the server to whichever option the browser picked first. */}
+              {environments.data?.some((environment) => environment.id === state.environmentId) ===
+              false ? (
+                <option value={state.environmentId}>{state.environmentId}</option>
+              ) : null}
+              {environments.data?.map((environment) => (
+                <option key={environment.id} value={environment.id} disabled={!environment.enabled}>
+                  {environment.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-on-surface-variant/60">{s.environmentHint}</p>
           </div>
 
           {state.transport === 'stdio' ? (

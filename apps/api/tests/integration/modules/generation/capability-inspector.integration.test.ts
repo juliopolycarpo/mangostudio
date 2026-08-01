@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ChatCapabilitiesResponseSchema } from '@mangostudio/shared/capabilities';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../../src/db/database';
@@ -96,6 +97,7 @@ async function insertServer(slug: string, enabled: number): Promise<string> {
       name: `Server ${slug}`,
       slug,
       transport: 'stdio',
+      environmentId: LOCAL_ENVIRONMENT_ID,
       command: SECRET_COMMAND,
       argsJson: '[]',
       envJson: JSON.stringify({ SECRET_TOKEN: SECRET_ENV_VALUE }),

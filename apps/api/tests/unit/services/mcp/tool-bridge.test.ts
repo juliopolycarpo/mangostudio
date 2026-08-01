@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpToolDescriptor } from '@mangostudio/shared/mcp';
 import { getDb } from '../../../../src/db/database';
 import {
@@ -25,7 +26,12 @@ function nextUserId(): string {
 async function insertServer(
   userId: string,
   slug: string,
-  overrides: Partial<{ name: string; enabled: number; timeoutMs: number | null }> = {}
+  overrides: Partial<{
+    name: string;
+    enabled: number;
+    timeoutMs: number | null;
+    environmentId: string;
+  }> = {}
 ): Promise<void> {
   seq += 1;
   const now = Date.now();
@@ -37,6 +43,7 @@ async function insertServer(
       name: overrides.name ?? `Server ${slug}`,
       slug,
       transport: 'stdio',
+      environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
       command: 'bun',
       argsJson: '[]',
       envJson: '{}',
@@ -62,6 +69,54 @@ afterEach(async () => {
   await closeAllMcpClients();
 });
 
+describe('MCP servers are scoped to the environment that hosts them', () => {
+  it('offers a turn only the servers bound to its own environment', async () => {
+    const userId = nextUserId();
+    await insertServer(userId, 'here');
+    await insertServer(userId, 'there', { environmentId: 'wsl-ubuntu' });
+    setMcpClientConnectorForTest(() =>
+      Promise.resolve(echoTools([{ name: 'ping', description: '', inputSchema: {} }]))
+    );
+
+    const local = await listMcpBridgeTools(getDb(), userId, {
+      environmentId: LOCAL_ENVIRONMENT_ID,
+    });
+    const remote = await listMcpBridgeTools(getDb(), userId, { environmentId: 'wsl-ubuntu' });
+
+    expect(local.map((tool) => tool.serverSlug)).toEqual(['here']);
+    expect(remote.map((tool) => tool.serverSlug)).toEqual(['there']);
+  });
+
+  it('lists every environment when the caller asks for settings scope', async () => {
+    const userId = nextUserId();
+    await insertServer(userId, 'here');
+    await insertServer(userId, 'there', { environmentId: 'wsl-ubuntu' });
+    setMcpClientConnectorForTest(() =>
+      Promise.resolve(echoTools([{ name: 'ping', description: '', inputSchema: {} }]))
+    );
+
+    const all = await listMcpBridgeTools(getDb(), userId, { allEnvironments: true });
+
+    expect(all.map((tool) => tool.serverSlug).sort()).toEqual(['here', 'there']);
+  });
+
+  it('refuses a call the model aims at a server on another environment', async () => {
+    const userId = nextUserId();
+    await insertServer(userId, 'there', { environmentId: 'wsl-ubuntu' });
+    setMcpClientConnectorForTest(() => Promise.resolve(makeHandle()));
+
+    const attempt = executeMcpTool(
+      getDb(),
+      userId,
+      'mcp__there__ping',
+      {},
+      { environmentId: LOCAL_ENVIRONMENT_ID }
+    );
+
+    await expect(attempt).rejects.toThrow(/not available on this chat's environment/);
+  });
+});
+
 describe('listMcpBridgeTools', () => {
   it('namespaces tools and passes schemas through with provenance', async () => {
     const userId = nextUserId();
@@ -73,7 +128,9 @@ describe('listMcpBridgeTools', () => {
       )
     );
 
-    const tools = await listMcpBridgeTools(getDb(), userId);
+    const tools = await listMcpBridgeTools(getDb(), userId, {
+      environmentId: LOCAL_ENVIRONMENT_ID,
+    });
 
     expect(tools).toHaveLength(1);
     expect(tools[0]).toMatchObject({
@@ -101,7 +158,9 @@ describe('listMcpBridgeTools', () => {
       )
     );
 
-    const tools = await listMcpBridgeTools(getDb(), userId);
+    const tools = await listMcpBridgeTools(getDb(), userId, {
+      environmentId: LOCAL_ENVIRONMENT_ID,
+    });
 
     expect(tools.map((tool) => tool.definition.parameters)).toEqual([
       { type: 'object', properties: {} },
@@ -121,7 +180,9 @@ describe('listMcpBridgeTools', () => {
       )
     );
 
-    const tools = await listMcpBridgeTools(getDb(), userId);
+    const tools = await listMcpBridgeTools(getDb(), userId, {
+      environmentId: LOCAL_ENVIRONMENT_ID,
+    });
 
     expect(tools.map((tool) => tool.definition.name)).toEqual(['mcp__srv__ok']);
   });
@@ -139,7 +200,9 @@ describe('listMcpBridgeTools', () => {
       );
     });
 
-    const tools = await listMcpBridgeTools(getDb(), userId);
+    const tools = await listMcpBridgeTools(getDb(), userId, {
+      environmentId: LOCAL_ENVIRONMENT_ID,
+    });
 
     expect(tools.map((tool) => tool.definition.name)).toEqual(['mcp__healthy__ping']);
   });
@@ -152,7 +215,9 @@ describe('listMcpBridgeTools', () => {
       Promise.resolve(echoTools([{ name: 'ping', description: '', inputSchema: {} }]))
     );
 
-    expect(await listMcpBridgeTools(getDb(), userId)).toEqual([]);
+    expect(
+      await listMcpBridgeTools(getDb(), userId, { environmentId: LOCAL_ENVIRONMENT_ID })
+    ).toEqual([]);
   });
 });
 
