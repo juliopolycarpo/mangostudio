@@ -252,7 +252,18 @@ failed, because that is what it is.
 
 `requireMatchingRelease` is not set for this transport. A remote runtime is not part of the
 hub's own distribution, so release equality cannot be a connection gate; the protocol
-major/minor pair still is. Release drift is visible state rather than a refused socket.
+major/minor pair still is.
+
+That leaves a runtime a release or two behind connecting and working, which is the
+intent — but the hub does not yet show it. The handshake carries `runtimeVersion` and the
+hub keeps it on the connection, and nothing surfaces it on the card, so drift is currently
+tolerated rather than visible. Surfacing it needs the hub's own version at the frontend,
+which the runtime lifecycle card wants anyway.
+
+The window that tolerance implies is also narrower than it sounds. Every frame schema sets
+`additionalProperties: false`, so two peers on the same major/minor still refuse each
+other's frames the moment one of them adds a field. Until the protocol adopts tolerant
+decoding, "compatible" means the same build of the schema, not the same version of it.
 
 ### TLS
 
