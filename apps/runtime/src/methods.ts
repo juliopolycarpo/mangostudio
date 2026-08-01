@@ -25,7 +25,25 @@ export interface RuntimeMutationResult<T> {
   readonly mutations: readonly RuntimeMutationSnapshot[];
 }
 
-export interface RuntimeReadFileParams {
+export interface RuntimePathFilter {
+  readonly allowedRoots: readonly string[];
+  readonly deniedRoots: readonly string[];
+  readonly containmentRoot?: string;
+}
+
+/**
+ * Path policy the hub decided for a call, carried by every filesystem method.
+ *
+ * The hub owns the decision — which roots a tool may touch, whether the chat is
+ * pinned to its working directory — but only this host can tell where a path
+ * actually lands, because only this host can follow the symlinks on the way.
+ * Omitted when nothing is configured and nothing is restricted.
+ */
+export interface RuntimePathPolicyParams {
+  readonly pathPolicy?: RuntimePathFilter;
+}
+
+export interface RuntimeReadFileParams extends RuntimePathPolicyParams {
   readonly chatId: string;
   readonly inputPath: string;
   readonly resolvedPath: string;
@@ -44,7 +62,7 @@ export interface RuntimeReadFileResult {
   readonly truncated: boolean;
 }
 
-interface RuntimeMutationParams {
+interface RuntimeMutationParams extends RuntimePathPolicyParams {
   readonly chatId: string;
   readonly captureSnapshot: boolean;
 }
@@ -127,7 +145,7 @@ export interface RuntimeMoveFileResult {
   readonly moved: true;
 }
 
-export interface RuntimeListDirectoryParams {
+export interface RuntimeListDirectoryParams extends RuntimePathPolicyParams {
   readonly inputPath: string;
   readonly resolvedPath: string;
 }
@@ -140,13 +158,7 @@ export interface RuntimeListDirectoryResult {
   }>;
 }
 
-export interface RuntimePathFilter {
-  readonly allowedRoots: readonly string[];
-  readonly deniedRoots: readonly string[];
-  readonly containmentRoot?: string;
-}
-
-export interface RuntimeGlobParams extends RuntimePathFilter {
+export interface RuntimeGlobParams extends RuntimePathPolicyParams {
   readonly pattern: string;
   readonly cwd: string;
   readonly maxResults: number;
@@ -161,7 +173,7 @@ export interface RuntimeGlobResult {
   readonly truncated: boolean;
 }
 
-export interface RuntimeGrepParams extends RuntimePathFilter {
+export interface RuntimeGrepParams extends RuntimePathPolicyParams {
   readonly pattern: string;
   readonly inputPath: string;
   readonly resolvedPath: string;

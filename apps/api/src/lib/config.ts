@@ -263,13 +263,25 @@ export function getHomeMangoDir(): string {
   return join(homedir(), '.mango');
 }
 
+/** What a build reports when no release stamped a version into it. */
+const DEVELOPMENT_VERSION = 'dev';
+
 /**
  * Build version embedded at compile time via process.env.VERSION, or "dev" when
  * running from source. Centralized here so the server state file and `doctor`
  * report the same value. // Usage: getVersion() // → "1.2.3"
  */
 export function getVersion(): string {
-  return process.env.VERSION || 'dev';
+  return process.env.VERSION || DEVELOPMENT_VERSION;
+}
+
+/**
+ * True for a build that no release produced. Anything that would go looking for
+ * this version's release assets has to ask first: there is no `vdev` tag and
+ * there never will be. // Usage: isDevelopmentVersion(getVersion())
+ */
+export function isDevelopmentVersion(version: string): boolean {
+  return version === DEVELOPMENT_VERSION;
 }
 
 /**

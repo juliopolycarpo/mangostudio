@@ -1,24 +1,28 @@
 /**
  * Creates an execution environment.
  *
- * Only the transports that actually exist are offered, so today this is a
- * single kind rather than a picker over a list of stubs. The transport row is
- * still rendered as a choice because the remaining kinds land behind it, and a
- * form that grows a selector later would reshuffle every field around it.
+ * Only the transports that actually exist are offered, and the WSL tab appears
+ * only on a Windows hub that has distributions to offer — on anything else it
+ * would be a tab that can never do anything. The remaining kinds land behind
+ * these, so the transport row stays a picker rather than becoming one later and
+ * reshuffling every field around it.
  */
 
-import type { CreateEnvironmentBody } from '@mangostudio/shared/environments';
-import { useId, useState } from 'react';
+import type { CreateEnvironmentBody, WslDistribution } from '@mangostudio/shared/environments';
+import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
-import { useCreateEnvironmentMutation } from '../queries';
+import { useCreateEnvironmentMutation, useWslDetectionQuery } from '../queries';
+import { WslDistributionPicker } from './WslDistributionPicker';
 
 /** Mirrors `EnvironmentIdSchema`; the server is still the authority. */
 const ENVIRONMENT_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ENVIRONMENT_ID_MAX_LENGTH = 63;
 const ENVIRONMENT_NAME_MAX_LENGTH = 80;
+
+type TransportChoice = 'stdio' | 'wsl';
 
 interface AddEnvironmentDialogProps {
   readonly onClose: () => void;
@@ -38,24 +42,54 @@ function suggestId(name: string): string {
   );
 }
 
+/** The one to offer first: the host's default, else whatever is configurable. */
+function preferredDistro(offered: readonly WslDistribution[]): string {
+  return (offered.find((distribution) => distribution.default) ?? offered[0])?.name ?? '';
+}
+
 export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const { t } = useI18n();
   const labels = t.environments.entities.add;
   const create = useCreateEnvironmentMutation();
   const titleId = useId();
 
+  const [kind, setKind] = useState<TransportChoice>('stdio');
   const [name, setName] = useState('');
   // Tracked separately so typing an id once stops the name from overwriting it.
   const [id, setId] = useState('');
   const [idEdited, setIdEdited] = useState(false);
+  const [nameEdited, setNameEdited] = useState(false);
   const [binaryPath, setBinaryPath] = useState('');
   const [cwd, setCwd] = useState('');
+  const [distro, setDistro] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const wsl = useWslDetectionQuery(true);
+  const distributions = wsl.data?.distributions ?? [];
+  const wslOffered = wsl.data?.available === true;
+  const offered = distributions.filter((distribution) => !distribution.environmentId);
+
+  // The host picks the distribution, not the user typing its name. Until one is
+  // touched, the tab tracks whatever the host calls default.
+  const selectedDistro = distro || preferredDistro(offered);
+  // A name chosen from one listing is not a choice against the next one: the
+  // detection refetches while the dialog is open, and a distribution can be
+  // claimed by another environment or removed from the host between them.
+  const selectionOffered = offered.some((distribution) => distribution.name === selectedDistro);
+
+  useEffect(() => {
+    if (kind !== 'wsl' || nameEdited || !selectedDistro) return;
+    setName(selectedDistro);
+  }, [kind, nameEdited, selectedDistro]);
 
   const trimmedName = name.trim();
   const effectiveId = idEdited ? id.trim() : suggestId(trimmedName);
   const idInvalid = effectiveId.length > 0 && !ENVIRONMENT_ID_PATTERN.test(effectiveId);
-  const blocked = trimmedName.length === 0 || effectiveId.length === 0 || idInvalid;
+  const blocked =
+    trimmedName.length === 0 ||
+    effectiveId.length === 0 ||
+    idInvalid ||
+    (kind === 'wsl' && !selectionOffered);
 
   const handleSubmit = async () => {
     if (blocked) return;
@@ -63,17 +97,25 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
 
     const trimmedBinaryPath = binaryPath.trim();
     const trimmedCwd = cwd.trim();
-    const body: CreateEnvironmentBody = {
-      id: effectiveId,
-      name: trimmedName,
-      transportKind: 'stdio',
-      // An omitted field means "use the default"; an empty string would be a
-      // path the launcher then tries to spawn.
-      config: {
-        ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
-        ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
-      },
-    };
+    const body: CreateEnvironmentBody =
+      kind === 'wsl'
+        ? {
+            id: effectiveId,
+            name: trimmedName,
+            transportKind: 'wsl',
+            config: { distro: selectedDistro },
+          }
+        : {
+            id: effectiveId,
+            name: trimmedName,
+            transportKind: 'stdio',
+            // An omitted field means "use the default"; an empty string would be
+            // a path the launcher then tries to spawn.
+            config: {
+              ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
+              ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
+            },
+          };
 
     try {
       await create.mutateAsync(body);
@@ -110,11 +152,40 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
         <div className="space-y-4">
           <div className="space-y-1">
             <p className="font-medium text-on-surface-variant text-sm">{labels.kindLabel}</p>
+            {wslOffered ? (
+              <div className="grid grid-cols-2 gap-2" role="tablist">
+                <TransportTab
+                  active={kind === 'stdio'}
+                  label={labels.stdioSummary}
+                  onSelect={() => setKind('stdio')}
+                />
+                <TransportTab
+                  active={kind === 'wsl'}
+                  label={labels.wslSummary}
+                  onSelect={() => setKind('wsl')}
+                />
+              </div>
+            ) : null}
             <div className="rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-              <p className="font-semibold text-on-surface text-sm">{labels.stdioSummary}</p>
-              <p className="mt-0.5 text-on-surface-variant/70 text-xs">{labels.stdioHint}</p>
+              {wslOffered ? null : (
+                <p className="font-semibold text-on-surface text-sm">{labels.stdioSummary}</p>
+              )}
+              <p className={`text-on-surface-variant/70 text-xs ${wslOffered ? '' : 'mt-0.5'}`}>
+                {kind === 'wsl' ? labels.wslHint : labels.stdioHint}
+              </p>
             </div>
           </div>
+
+          {kind === 'wsl' ? (
+            <div className="space-y-1">
+              <p className="font-medium text-on-surface-variant text-sm">{labels.wslDistroLabel}</p>
+              <WslDistributionPicker
+                distributions={distributions}
+                selected={selectedDistro}
+                onSelect={setDistro}
+              />
+            </div>
+          ) : null}
 
           <Input
             id="add-environment-name"
@@ -125,7 +196,10 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
             // Only once something was typed: a blank untouched field is the
             // starting state, not a mistake worth flagging.
             error={name.length > 0 && trimmedName.length === 0 ? labels.nameRequired : undefined}
-            onChange={(event) => setName(event.target.value)}
+            onChange={(event) => {
+              setNameEdited(true);
+              setName(event.target.value);
+            }}
           />
 
           <div className="space-y-1">
@@ -143,25 +217,29 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
             {!idInvalid && <p className="text-on-surface-variant/60 text-xs">{labels.idHint}</p>}
           </div>
 
-          <div className="space-y-1">
-            <Input
-              id="add-environment-binary-path"
-              label={`${labels.binaryPathLabel} · ${labels.optional}`}
-              value={binaryPath}
-              onChange={(event) => setBinaryPath(event.target.value)}
-            />
-            <p className="text-on-surface-variant/60 text-xs">{labels.binaryPathHint}</p>
-          </div>
+          {kind === 'stdio' ? (
+            <>
+              <div className="space-y-1">
+                <Input
+                  id="add-environment-binary-path"
+                  label={`${labels.binaryPathLabel} · ${labels.optional}`}
+                  value={binaryPath}
+                  onChange={(event) => setBinaryPath(event.target.value)}
+                />
+                <p className="text-on-surface-variant/60 text-xs">{labels.binaryPathHint}</p>
+              </div>
 
-          <div className="space-y-1">
-            <Input
-              id="add-environment-cwd"
-              label={`${labels.cwdLabel} · ${labels.optional}`}
-              value={cwd}
-              onChange={(event) => setCwd(event.target.value)}
-            />
-            <p className="text-on-surface-variant/60 text-xs">{labels.cwdHint}</p>
-          </div>
+              <div className="space-y-1">
+                <Input
+                  id="add-environment-cwd"
+                  label={`${labels.cwdLabel} · ${labels.optional}`}
+                  value={cwd}
+                  onChange={(event) => setCwd(event.target.value)}
+                />
+                <p className="text-on-surface-variant/60 text-xs">{labels.cwdHint}</p>
+              </div>
+            </>
+          ) : null}
         </div>
 
         {error ? (
@@ -186,5 +264,31 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+function TransportTab({
+  active,
+  label,
+  onSelect,
+}: {
+  readonly active: boolean;
+  readonly label: string;
+  readonly onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onSelect}
+      className={`rounded-xl border px-3 py-2 font-semibold text-sm transition-colors ${
+        active
+          ? 'border-primary/45 bg-primary/10 text-on-surface'
+          : 'border-outline-variant/20 text-on-surface-variant/70 hover:bg-surface-container-highest'
+      }`}
+    >
+      {label}
+    </button>
   );
 }

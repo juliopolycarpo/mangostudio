@@ -2,7 +2,8 @@ import { stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PathAccessError, RuntimeServiceError } from '../../errors';
 import type { RuntimeGrepParams, RuntimeGrepResult } from '../../methods';
-import { compileRuntimePathGuard, containsNulByte } from '../fs-utils';
+import { compilePolicyGuard } from '../fs-path-policy';
+import { containsNulByte } from '../fs-utils';
 
 const BINARY_PROBE_BYTES = 1024;
 const DEFAULT_FILE_GLOB = '**/*';
@@ -19,7 +20,7 @@ export async function grepRuntimeFiles(
   signal?: AbortSignal
 ): Promise<RuntimeGrepResult> {
   const regex = buildRegex(params.pattern, params.caseInsensitive);
-  const allows = compileRuntimePathGuard(params);
+  const allows = compilePolicyGuard(params.pathPolicy);
   const rootStats = await statSafe(params.resolvedPath, params.inputPath);
   const matches: Array<{ file: string; line: number; text: string }> = [];
   let filesScanned = 0;

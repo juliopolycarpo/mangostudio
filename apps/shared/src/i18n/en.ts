@@ -2103,6 +2103,13 @@ export const messages: Messages = {
         binaryPathHint: 'Leave empty to use the runtime installed beside MangoStudio.',
         cwdLabel: 'Working directory',
         cwdHint: 'Leave empty to inherit the directory MangoStudio was started in.',
+        wslSummary: 'WSL',
+        wslHint:
+          'Runs tools, workspaces, and Git inside a Linux distribution on this machine. The first connection installs the runtime there and starts the distribution, so it takes a while.',
+        wslDistroLabel: 'Distribution',
+        wslDefault: 'Default',
+        wslConfigured: 'Already used by {id}',
+        wslEmpty: 'No WSL distributions are installed on this machine.',
         optional: 'Optional',
         submit: 'Add environment',
         cancel: 'Cancel',

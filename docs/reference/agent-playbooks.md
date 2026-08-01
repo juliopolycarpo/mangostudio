@@ -466,13 +466,14 @@ carry the same build stamp and ship together in every channel — archives, npm
 platform packages, and the Docker images — because the hub resolves the runtime as a
 sibling of its own executable and the protocol handshake refuses a version mismatch.
 
-## Out-Of-Process Environments (stdio)
+## Out-Of-Process Environments (stdio, WSL)
 
 Open these first:
 
 - `apps/runtime/src/cli.ts` (binary entry), `apps/runtime/src/transports/stdio.ts` (NDJSON port)
 - `apps/api/src/services/runtime-client/spawn-runtime-child.ts` (spawn, handshake, teardown)
 - `apps/api/src/services/runtime-client/runtime-connection-manager.ts` (state machine, backoff)
+- `apps/api/src/services/runtime-client/target-paths.ts` (target path style, from the manifest)
 - `apps/api/src/lib/runtime-paths.ts` (`resolveRuntimeLaunchCommand`)
 - `apps/frontend/src/features/environments/components/AddEnvironmentDialog.tsx`
 - Reference: `docs/architecture/hub-runtime.md`
@@ -481,6 +482,19 @@ Reconnection is a backoff deadline checked on the next use, not a scheduled time
 `#markUnavailable` is where a dead runtime becomes `disconnected`. The stdio child's
 stdout is protocol-only — anything written to it there desynchronises the stream and
 tears the connection down.
+
+WSL is a launcher over that same transport, not a protocol of its own:
+
+- `apps/api/src/modules/environments/domain/wsl-output.ts` (UTF-16LE + localized listing)
+- `apps/api/src/modules/environments/application/wsl-detection.ts` (detection service, win32 gate)
+- `apps/api/src/modules/environments/http/environment-routes.ts` (`GET /environments/wsl`)
+- `apps/api/src/modules/environments/domain/wsl-runtime-release.ts` (argv, scripts, asset names)
+- `apps/api/src/modules/environments/infrastructure/wsl-provisioner.ts` (download, verify, install)
+
+Paths inside a distribution are native Linux paths end to end — there is no
+translation layer and none is wanted. What the hub does is *resolve* in the
+target's style, from the manifest; see the Paths Across Hosts section of
+`hub-runtime.md` before adding anything that touches `~` or a relative path.
 
 ## CLI And Server Lifecycle
 

@@ -379,29 +379,28 @@ describe('RuntimeConnectionManager', () => {
     });
   });
 
-  it('refuses a runtime whose path style the hub cannot address', async () => {
-    let closeCalls = 0;
+  it('connects a runtime whose path style differs from the hub', async () => {
+    const foreignStyle = process.platform === 'win32' ? 'posix' : 'win32';
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
       connectors: {
         stdio: () =>
           Promise.resolve(
-            fakeConnection(() => closeCalls++, {
-              ...TEST_MANIFEST,
-              pathStyle: process.platform === 'win32' ? 'posix' : 'win32',
-            })
+            fakeConnection(() => undefined, { ...TEST_MANIFEST, pathStyle: foreignStyle })
           ),
       },
     });
 
-    const error = await manager.connect('user-1', 'devbox').catch((caught) => caught);
-    expect(error).toBeInstanceOf(RuntimeRemoteError);
-    expect(error.code).toBe('RUNTIME_UNAVAILABLE');
-    expect(error.message).toContain('paths');
-    // The transport was opened before the manifest could be read, so refusing it
-    // has to hand the connection back rather than leak the process or socket.
-    expect(closeCalls).toBe(1);
-    expect(manager.getStatus('user-1', 'devbox').state).toBe('error');
+    const client = await manager.connect('user-1', 'devbox');
+
+    // A WSL distro under a Windows hub is the case this exists for. Paths are
+    // resolved through the connection's own manifest, so the hub addresses the
+    // target on its terms instead of refusing to speak to it.
+    expect(client.manifest.pathStyle).toBe(foreignStyle);
+    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+      state: 'connected',
+      manifest: { pathStyle: foreignStyle },
+    });
   });
 
   it('revalidates stored config before invoking a connector', async () => {

@@ -1,0 +1,89 @@
+import { describe, expect, it } from 'bun:test';
+import {
+  createWslDetectionService,
+  markConfiguredDistributions,
+} from '../../../../src/modules/environments/application/wsl-detection';
+
+const LISTING = [
+  '  NAME      STATE      VERSION',
+  '* Ubuntu    Running    2',
+  '  Debian    Stopped    2',
+  '',
+].join('\r\n');
+
+function probeReturning(text: string, failed = false) {
+  return () => Promise.resolve({ stdout: new TextEncoder().encode(text), failed });
+}
+
+describe('WslDetectionService', () => {
+  it('reports the distributions a Windows host lists', async () => {
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: probeReturning(LISTING),
+    });
+
+    expect(await service.detect()).toEqual({
+      available: true,
+      distributions: [
+        { name: 'Ubuntu', state: 'Running', wslVersion: 2, default: true },
+        { name: 'Debian', state: 'Stopped', wslVersion: 2, default: false },
+      ],
+    });
+  });
+
+  it('answers non-Windows hosts without spawning anything', async () => {
+    let probed = false;
+    const service = createWslDetectionService({
+      platform: 'linux',
+      probe: () => {
+        probed = true;
+        return Promise.resolve({ stdout: new Uint8Array(), failed: false });
+      },
+    });
+
+    expect(await service.detect()).toEqual({
+      available: false,
+      distributions: [],
+      reason: 'not-windows',
+    });
+    expect(probed).toBe(false);
+  });
+
+  it('treats an unusable wsl.exe as WSL not being installed', async () => {
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: probeReturning('', true),
+    });
+
+    expect(await service.detect()).toEqual({
+      available: false,
+      distributions: [],
+      reason: 'wsl-not-installed',
+    });
+  });
+
+  it('separates an installed WSL with nothing in it from a broken one', async () => {
+    // `wsl.exe --list --verbose` exits non-zero when no distribution is
+    // installed, so the exit code alone cannot tell these apart.
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: probeReturning('Windows Subsystem for Linux has no installed distributions.'),
+    });
+
+    expect(await service.detect()).toEqual({ available: true, distributions: [] });
+  });
+});
+
+describe('markConfiguredDistributions', () => {
+  it('names the environment already pointing at a distribution', () => {
+    const distributions = [
+      { name: 'Ubuntu', state: 'Running', wslVersion: 2, default: true },
+      { name: 'Debian', state: 'Stopped', wslVersion: 2, default: false },
+    ];
+
+    expect(markConfiguredDistributions(distributions, new Map([['Ubuntu', 'work']]))).toEqual([
+      { name: 'Ubuntu', state: 'Running', wslVersion: 2, default: true, environmentId: 'work' },
+      { name: 'Debian', state: 'Stopped', wslVersion: 2, default: false },
+    ]);
+  });
+});

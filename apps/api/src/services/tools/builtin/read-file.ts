@@ -23,6 +23,7 @@ import {
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   resolveAndValidatePath,
+  runtimePathPolicy,
 } from './_fs-utils';
 
 const READ_FILE_TOOL_NAME = 'read_file';
@@ -102,16 +103,20 @@ export async function executeReadFile(
   context: ToolContext
 ): Promise<ReadFileToolResult> {
   const settings = normalizeReadFileToolSettings(context.parameters);
-  const resolvedPath = resolveAndValidatePath(args.path, {
+  // The runtime comes first because its manifest says how paths resolve on the
+  // target: `~` is its home directory, and its separator joins relative input.
+  const runtime = await getRuntimeClient(context.userId, context.environmentId);
+  const options = {
     settings,
     workdir: context.workdir,
     workdirPolicy: context.workdirPolicy,
-  });
+    paths: runtime.paths,
+  };
+  const resolvedPath = resolveAndValidatePath(args.path, options);
 
   const startLine = args.startLine ?? READ_FILE_DEFAULT_START_LINE;
   const maxLines = args.maxLines ?? READ_FILE_DEFAULT_MAX_LINES;
 
-  const runtime = await getRuntimeClient(context.userId, context.environmentId);
   return await runtime.fs.readFile(
     {
       chatId: context.chatId,
@@ -119,6 +124,7 @@ export async function executeReadFile(
       resolvedPath,
       startLine,
       maxLines,
+      ...runtimePathPolicy(options),
     },
     { signal: context.signal }
   );

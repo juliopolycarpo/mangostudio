@@ -27,6 +27,7 @@ import {
 } from '../../../../src/services/tools/file-freshness';
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { withTargetHome } from './support/target-home';
 import {
   EMPTY_STRING_ARGUMENTS,
   NON_STRING_ARGUMENTS,
@@ -338,22 +339,12 @@ describe('executeWriteFile', () => {
     expect(result.bytesWritten).toBeGreaterThan(0);
   });
 
-  it('expands ~ to home directory', async () => {
-    const home = Bun.env.HOME ?? '';
-    if (!home) return;
-
-    const originalHome = Bun.env.HOME;
-    Bun.env.HOME = tempDir;
-    try {
-      const result = await executeWriteFile(
-        { path: '~/home-write.txt', content: 'home content' },
-        makeContext()
-      );
-      expect(result.created).toBe(true);
-      expect(await readBack(join(tempDir, 'home-write.txt'))).toBe('home content');
-    } finally {
-      Bun.env.HOME = originalHome;
-    }
+  it('expands ~ to the home directory the runtime reports', async () => {
+    const result = await withTargetHome(tempDir, () =>
+      executeWriteFile({ path: '~/home-write.txt', content: 'home content' }, makeContext())
+    );
+    expect(result.created).toBe(true);
+    expect(await readBack(join(tempDir, 'home-write.txt'))).toBe('home content');
   });
 
   it('throws when path is outside allowed paths', async () => {

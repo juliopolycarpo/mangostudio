@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';
 import {
   expandHome,
   getRequiredPathArg,
@@ -11,6 +12,27 @@ import {
   readFileWithObservedMtime,
   resolveAndValidatePath,
 } from '../../../../src/services/tools/builtin/_fs-utils';
+
+const targetPaths = (pathStyle: 'posix' | 'win32', homeDir: string) =>
+  createTargetPaths({
+    platform: pathStyle === 'win32' ? 'win32' : 'linux',
+    arch: 'x64',
+    pathStyle,
+    homeDir,
+    shells: [],
+    git: { available: false },
+    features: {
+      tools: true,
+      git: true,
+      probing: false,
+      mcp: false,
+      library: false,
+      checkpoints: true,
+    },
+  });
+
+const paths = targetPaths('posix', '/home/tester');
+const windowsPaths = targetPaths('win32', 'C:\\Users\\tester');
 
 let tempDir: string;
 
@@ -74,30 +96,36 @@ describe('getRequiredPathArg', () => {
 });
 
 describe('expandHome', () => {
-  it('expands ~ to the home directory', () => {
-    const home = Bun.env.HOME ?? '';
-    if (!home) return;
-    expect(expandHome('~/test')).toBe(`${home}/test`);
+  it('expands ~ to the home directory the target reported', () => {
+    expect(expandHome('~/test', paths)).toBe('/home/tester/test');
   });
 
   it('leaves absolute paths unchanged', () => {
-    expect(expandHome('/usr/bin')).toBe('/usr/bin');
+    expect(expandHome('/usr/bin', paths)).toBe('/usr/bin');
   });
 
   it('leaves relative paths unchanged', () => {
-    expect(expandHome('foo/bar')).toBe('foo/bar');
+    expect(expandHome('foo/bar', paths)).toBe('foo/bar');
   });
 
   it('expands bare ~ to home directory', () => {
-    const home = Bun.env.HOME ?? '';
-    if (!home) return;
-    expect(expandHome('~')).toBe(home);
+    expect(expandHome('~', paths)).toBe('/home/tester');
+  });
+
+  it('expands ~ on a Windows target with its own separator', () => {
+    expect(expandHome('~/test', windowsPaths)).toBe('C:\\Users\\tester\\test');
+    expect(expandHome('~\\test', windowsPaths)).toBe('C:\\Users\\tester\\test');
+  });
+
+  it('leaves ~ alone when the target reports no home directory', () => {
+    expect(expandHome('~/test', targetPaths('posix', ''))).toBe('~/test');
   });
 });
 
 describe('resolveAndValidatePath', () => {
   it('resolves and returns a valid path when no restrictions are set', () => {
     const resolved = resolveAndValidatePath(tempDir, {
+      paths,
       settings: { allowedPaths: [], deniedPaths: [] },
     });
     expect(resolved).toBe(tempDir);
@@ -105,6 +133,7 @@ describe('resolveAndValidatePath', () => {
 
   it('resolves a relative path from the chat workdir', () => {
     const resolved = resolveAndValidatePath('src/index.ts', {
+      paths,
       settings: { allowedPaths: [], deniedPaths: [] },
       workdir: tempDir,
     });
@@ -115,6 +144,7 @@ describe('resolveAndValidatePath', () => {
   it('uses the workdir policy root for relative paths when available', () => {
     const policyRoot = join(tempDir, 'policy-root');
     const resolved = resolveAndValidatePath('src/index.ts', {
+      paths,
       settings: { allowedPaths: [], deniedPaths: [] },
       workdir: join(tempDir, 'context-workdir'),
       workdirPolicy: { root: policyRoot, restricted: false },
@@ -126,6 +156,7 @@ describe('resolveAndValidatePath', () => {
   it('rejects a relative path when no chat workdir is available', () => {
     expect(() =>
       resolveAndValidatePath('src/index.ts', {
+        paths,
         settings: { allowedPaths: [], deniedPaths: [] },
       })
     ).toThrow(
@@ -133,9 +164,24 @@ describe('resolveAndValidatePath', () => {
     );
   });
 
+  it('rejects a relative path when the workdir is not absolute on the target', () => {
+    // A Windows workdir paired with a Linux target: `resolve` would answer with
+    // the hub's own working directory rather than refusing.
+    expect(() =>
+      resolveAndValidatePath('src/index.ts', {
+        paths,
+        settings: { allowedPaths: [], deniedPaths: [] },
+        workdirPolicy: { root: 'C:\\Users\\tester\\project', restricted: false },
+      })
+    ).toThrow(
+      'the working directory "C:\\Users\\tester\\project" is not an absolute path on this environment'
+    );
+  });
+
   it('rejects a relative path that escapes a restricted workdir', () => {
     expect(() =>
       resolveAndValidatePath('../../etc/passwd', {
+        paths,
         settings: { allowedPaths: [], deniedPaths: [] },
         workdirPolicy: { root: tempDir, restricted: true },
       })
@@ -146,6 +192,7 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'sub');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
+      paths,
       settings: {
         allowedPaths: [{ path: tempDir, enabled: true }],
         deniedPaths: [],
@@ -157,6 +204,7 @@ describe('resolveAndValidatePath', () => {
   it('rejects paths outside the allowed list', () => {
     expect(() =>
       resolveAndValidatePath('/etc', {
+        paths,
         settings: {
           allowedPaths: [{ path: tempDir, enabled: true }],
           deniedPaths: [],
@@ -168,6 +216,7 @@ describe('resolveAndValidatePath', () => {
   it('rejects denied paths', () => {
     expect(() =>
       resolveAndValidatePath('/etc/passwd', {
+        paths,
         settings: {
           allowedPaths: [],
           deniedPaths: [{ path: '/etc/passwd', enabled: true }],
@@ -179,6 +228,7 @@ describe('resolveAndValidatePath', () => {
   it('rejects paths inside a denied directory', () => {
     expect(() =>
       resolveAndValidatePath('/etc/ssh', {
+        paths,
         settings: {
           allowedPaths: [],
           deniedPaths: [{ path: '/etc', enabled: true }],
@@ -191,6 +241,7 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'nested');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
+      paths,
       settings: {
         allowedPaths: [{ path: tempDir, enabled: true }],
         deniedPaths: [{ path: '/unrelated', enabled: true }],
@@ -204,6 +255,7 @@ describe('resolveAndValidatePath', () => {
     mkdirSync(deniedSub);
     expect(() =>
       resolveAndValidatePath(deniedSub, {
+        paths,
         settings: {
           allowedPaths: [{ path: tempDir, enabled: true }],
           deniedPaths: [{ path: deniedSub, enabled: true }],
@@ -212,22 +264,22 @@ describe('resolveAndValidatePath', () => {
     ).toThrow(PathAccessError);
   });
 
-  it('expands ~ in settings paths', () => {
-    const home = Bun.env.HOME ?? '';
-    if (!home) return;
-    expect(() =>
-      resolveAndValidatePath('~', {
+  it('expands ~ in settings paths against the target home', () => {
+    expect(
+      resolveAndValidatePath('~/notes', {
+        paths,
         settings: {
           allowedPaths: [{ path: '~', enabled: true }],
           deniedPaths: [],
         },
       })
-    ).not.toThrow();
+    ).toBe('/home/tester/notes');
   });
 
   it('ignores disabled allowed paths', () => {
     expect(() =>
       resolveAndValidatePath('/etc', {
+        paths,
         settings: {
           allowedPaths: [
             { path: tempDir, enabled: true },
@@ -243,6 +295,7 @@ describe('resolveAndValidatePath', () => {
     const subDir = join(tempDir, 'allowed');
     mkdirSync(subDir);
     const resolved = resolveAndValidatePath(subDir, {
+      paths,
       settings: {
         allowedPaths: [],
         deniedPaths: [
