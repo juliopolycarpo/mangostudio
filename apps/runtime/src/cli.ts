@@ -9,14 +9,18 @@
  */
 
 import { Console } from 'node:console';
+import { resolve } from 'node:path';
 import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
 import { createLocalRuntimeHost } from './runtime';
 import {
   bootstrapServeToken,
+  RUNTIME_SETUP_PENDING_MESSAGE,
+  type RuntimeSlot,
   readPairingToken,
   readRuntimeSlotConfig,
   readServeToken,
+  runtimeSlotDir,
   writePairingToken,
   writeRuntimeSlotConfig,
 } from './runtime-home';
@@ -259,7 +263,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
 
   const stored = await readRuntimeSlotConfig('remote');
   if (stored.setupState === 'pending') {
-    log('This runtime slot is still pending setup. Complete setup on this machine before serve.');
+    log(RUNTIME_SETUP_PENDING_MESSAGE);
     return 1;
   }
 
@@ -343,6 +347,16 @@ async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promi
 async function serveStdio(runtimeVersion: string): Promise<number> {
   redirectConsoleToStderr();
 
+  // SSH (and any other launch of a remote-slot binary) speaks stdio, not serve.
+  // The consent gate has to live here too or a pending remote slot still starts
+  // a fully functional host and the hub's setup-pending classifier never sees
+  // its signature. Host/WSL binaries are unaffected: they do not live under the
+  // remote slot directory, and those slots are consented by installation.
+  if (await shouldRefuseStdioForPendingSetup()) {
+    process.stderr.write(`mangostudio-runtime: ${RUNTIME_SETUP_PENDING_MESSAGE}\n`);
+    return 1;
+  }
+
   const host = createLocalRuntimeHost({ runtimeVersion });
   let stop: (closure: StdioFramePortClosure) => void = () => undefined;
   const finished = new Promise<StdioFramePortClosure>((resolve) => {
@@ -370,6 +384,29 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
     return 1;
   }
   return 0;
+}
+
+/**
+ * True when this process is the remote-slot binary and that slot is still
+ * awaiting `setup`. Custom `remoteRuntimePath` values outside the slot tree are
+ * not detected here — those stay a follow-up once launches can pass a slot.
+ */
+export async function shouldRefuseStdioForPendingSetup(
+  env: NodeJS.ProcessEnv = process.env,
+  executablePaths: readonly string[] = [process.argv[1] ?? '', process.execPath]
+): Promise<boolean> {
+  if (!executablePaths.some((path) => pathIsUnderSlot(path, 'remote', env))) {
+    return false;
+  }
+  const stored = await readRuntimeSlotConfig('remote', env);
+  return stored.setupState === 'pending';
+}
+
+function pathIsUnderSlot(path: string, slot: RuntimeSlot, env: NodeJS.ProcessEnv): boolean {
+  if (!path) return false;
+  const root = resolve(runtimeSlotDir(slot, env));
+  const resolved = resolve(path);
+  return resolved === root || resolved.startsWith(`${root}/`) || resolved.startsWith(`${root}\\`);
 }
 
 /**

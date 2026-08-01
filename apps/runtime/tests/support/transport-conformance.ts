@@ -5,8 +5,15 @@
  * easy to get subtly wrong in ways only the slowest tool call reveals. Rather
  * than write a bespoke test per transport and discover later that only one of
  * them covers cancellation, the behaviour lives here once and each transport
- * supplies a fixture. Direct URL (`serve`) and SSH plug in the same way; SSH
- * is still pending.
+ * supplies a fixture.
+ *
+ * What can plug in is bounded by the fixture's shape: the cases drive a
+ * `RuntimeHost` living in this process, emitting events and answering pings
+ * from the far side. A *launcher* — WSL, SSH — cannot supply that, because its
+ * runtime is a real process somewhere else. Both are the stdio framing this
+ * suite already covers, reached through a wrapper, so what is left to prove
+ * about them is the wrapper: their own integration suites do that against a
+ * real distribution or a real sshd.
  *
  * One case is deliberately absent: a peer on the same protocol version carrying
  * fields this build does not know. Remote transports are what make that pair

@@ -19,9 +19,11 @@ import {
 } from '../../support/transport-conformance';
 
 /**
- * The transports that exist today, driven through one suite. A new transport
- * plugs in the same way: supply a connection, a way to sever it, and a way to
- * close it. SSH still pending.
+ * The framings that exist today, driven through one suite. A new one plugs in
+ * the same way: supply a connection, a way to sever it, and a way to close it.
+ * WSL and SSH are absent on purpose — they are launchers over the stdio framing
+ * below, so their own integration suites test the launcher rather than a
+ * framing this file already covers.
  */
 
 describe('in-process transport conformance', () => {

@@ -22,6 +22,20 @@ export type RuntimeSlot = 'host' | 'wsl' | 'remote';
 /** Operator consent for serving this slot; absent means the gate is not armed. */
 export type RuntimeSetupState = 'pending' | 'ready';
 
+/**
+ * The phrase a runtime prints when it refuses a slot its owner has not
+ * consented to yet, and the sentence built around it.
+ *
+ * It is a constant because a second party reads it. A hub launching a runtime
+ * over SSH sees only the remote side's exit code and stderr — ssh reports its
+ * own failures as 255 and passes everything else through — so "not set up yet"
+ * and "no binary there" are told apart by signature. Two spellings of the same
+ * refusal would make the hub classify a consent gate as a missing install and
+ * send the user to reinstall something that is already present.
+ */
+export const RUNTIME_SETUP_PENDING_SIGNATURE = 'runtime setup is pending on this machine';
+export const RUNTIME_SETUP_PENDING_MESSAGE = `${RUNTIME_SETUP_PENDING_SIGNATURE}. Run "mangostudio-runtime setup" there before connecting it.`;
+
 const CONFIG_FILE = 'runtime.json';
 const CREDENTIALS_FILE = 'credentials.json';
 const CREDENTIALS_LOCK_FILE = 'credentials.lock';
@@ -36,8 +50,9 @@ export interface RuntimeSlotConfig {
   /** The hub address `connect` dials, remembered so later runs need no flags. */
   readonly hubUrl?: string;
   /**
-   * When `pending`, `serve` refuses before listening. Absent means the setup
-   * CLI has not written a gate yet, so serving is allowed.
+   * When `pending`, `serve` and a remote-slot `--stdio` launch refuse before
+   * attaching. Absent means the setup CLI has not written a gate yet, so
+   * serving is allowed.
    */
   readonly setupState?: RuntimeSetupState;
 }

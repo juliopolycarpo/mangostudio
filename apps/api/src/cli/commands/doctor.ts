@@ -61,6 +61,7 @@ import {
   checkInstance,
   checkRuntime,
   checkRuntimeBinary,
+  checkSshClient,
   collectBuildIdentityChecks,
   collectCursorDoctorChecks,
   cursorRuntimeChainReady,
@@ -74,6 +75,7 @@ import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
 import { probeRuntimeBinary, type RuntimeBinaryProbe } from '../runtime-binary-probe';
 import { collectSkillsDoctorChecks } from '../skills-doctor-checks';
+import { probeSshClient, type SshClientProbe } from '../ssh-client-probe';
 
 export interface DoctorDeps {
   loadConfig: () => MangoConfig;
@@ -85,6 +87,7 @@ export interface DoctorDeps {
   isCursorConfigured: (config: MangoConfig) => boolean;
   probeCursorRuntime: typeof probeCursorDoctorRuntime;
   probeRuntimeBinary: () => Promise<RuntimeBinaryProbe>;
+  probeSshClient: () => Promise<SshClientProbe>;
   listChatGptConnectors: (config: MangoConfig) => SecretMetadataRow[];
   collectChatGptChecks: (
     config: MangoConfig,
@@ -152,6 +155,7 @@ async function collectResults(
     checkInstance(instance.state, instance.alive),
     checkRuntime(getVersion(), isStandaloneExecutable()),
     checkRuntimeBinary(await d.probeRuntimeBinary(), getVersion()),
+    checkSshClient(await d.probeSshClient()),
     ...collectBuildIdentityChecks({
       serverBuild,
       checkoutBuild: d.getCheckoutBuildInfo(),
@@ -306,6 +310,7 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,
     probeCursorRuntime: deps.probeCursorRuntime ?? probeCursorDoctorRuntime,
     probeRuntimeBinary: deps.probeRuntimeBinary ?? probeRuntimeBinary,
+    probeSshClient: deps.probeSshClient ?? (() => probeSshClient()),
     listChatGptConnectors: deps.listChatGptConnectors ?? listChatGptConnectorRows,
     collectChatGptChecks:
       deps.collectChatGptChecks ??

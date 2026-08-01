@@ -8,6 +8,7 @@ import {
   checkInstance,
   checkRuntime,
   checkRuntimeBinary,
+  checkSshClient,
   collectCursorDoctorChecks,
   cursorRuntimeChainReady,
   type FsProbe,
@@ -231,6 +232,38 @@ describe('checkRuntimeBinary', () => {
     );
     expect(result.status).toBe('ok');
     expect(result.detail).toContain('v1.2.3');
+  });
+});
+
+describe('checkSshClient', () => {
+  it('warns rather than fails when there is no ssh, since only SSH environments need it', () => {
+    const result = checkSshClient({ path: null, version: null, error: null });
+
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('SSH environments');
+  });
+
+  it('warns when ssh is on PATH but answered nothing usable', () => {
+    const result = checkSshClient({
+      path: '/usr/bin/ssh',
+      version: null,
+      error: 'exited with code 1',
+    });
+
+    expect(result.status).toBe('warn');
+    expect(result.detail).toContain('exited with code 1');
+  });
+
+  it('reports the client banner and where it came from', () => {
+    const result = checkSshClient({
+      path: '/usr/bin/ssh',
+      version: 'OpenSSH_9.6p1, OpenSSL 3.0.13',
+      error: null,
+    });
+
+    expect(result.status).toBe('ok');
+    expect(result.detail).toContain('OpenSSH_9.6p1');
+    expect(result.detail).toContain('/usr/bin/ssh');
   });
 });
 
