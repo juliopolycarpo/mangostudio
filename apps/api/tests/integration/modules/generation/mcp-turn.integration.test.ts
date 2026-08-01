@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { MCP_RESULT_TRUNCATION_MARKER } from '@mangostudio/runtime';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import { resolveTurnContext } from '../../../../src/modules/generation/application/resolve-turn-context';
@@ -26,7 +27,6 @@ import {
   closeAllMcpClients,
   setMcpClientConnectorForTest,
 } from '../../../../src/services/mcp/connection-manager';
-import { MCP_RESULT_TRUNCATION_MARKER } from '../../../../src/services/mcp/content-mapping';
 import {
   getProvider,
   registerProvider,

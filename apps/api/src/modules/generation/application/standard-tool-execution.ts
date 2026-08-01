@@ -12,7 +12,7 @@ import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/sha
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { classifyMcpCallFailure } from '../../../services/mcp/client-factory';
+import { classifyMcpCallFailure } from '../../../services/mcp/call-failure';
 import {
   bindElicitationSink,
   cancelPendingElicitations,

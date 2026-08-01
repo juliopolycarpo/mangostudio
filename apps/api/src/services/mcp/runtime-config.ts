@@ -4,6 +4,7 @@
  * tool bridge so the JSON column parsing lives in one place.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServerSelect } from '../../db/types';
 import type { McpServerRuntimeConfig } from './types';
 
@@ -17,6 +18,7 @@ export function toMcpRuntimeConfig(row: McpServerSelect): McpServerRuntimeConfig
     env: parseJsonStringRecord(row.envJson),
     url: row.url,
     timeoutMs: row.timeoutMs,
+    environmentId: LOCAL_ENVIRONMENT_ID,
   };
 }
 

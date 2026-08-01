@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import { SubagentDelegationError } from '../../../../src/modules/generation/application/subagent-turn-types';
 import {
   classifyToolExecutionFailure,
@@ -12,6 +12,15 @@ import {
 import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../../../../src/services/tools/execution-timeout';
 
+/** The shape an MCP failure reaches the hub in: classified by the runtime. */
+function mcpFailure(failure: 'timeout' | 'server_closed', message: string): RuntimeRemoteError {
+  return new RuntimeRemoteError('INTERNAL', message, {
+    kind: 'mcp_call',
+    serverSlug: 'fixture',
+    mcpFailure: failure,
+  });
+}
+
 describe('classifyToolExecutionFailure', () => {
   it('maps timeouts from the shared wrapper and self-timing tools to timed_out', () => {
     expect(classifyToolExecutionFailure(new ToolExecutionTimedOutError('boom'))).toEqual({
@@ -20,12 +29,22 @@ describe('classifyToolExecutionFailure', () => {
     });
   });
 
-  it('maps MCP SDK timeout and connection-closed failures', () => {
+  it('maps MCP timeout and connection-closed failures the runtime reported', () => {
+    expect(classifyToolExecutionFailure(mcpFailure('timeout', 'timed out'))).toEqual({
+      status: 'timed_out',
+      reasonCode: 'timeout',
+    });
+    expect(classifyToolExecutionFailure(mcpFailure('server_closed', 'closed'))).toEqual({
+      status: 'failed',
+      reasonCode: 'server_closed',
+    });
+  });
+
+  it('maps a runtime that went away mid-call to a closed session', () => {
     expect(
-      classifyToolExecutionFailure(new McpError(ErrorCode.RequestTimeout, 'timed out'))
-    ).toEqual({ status: 'timed_out', reasonCode: 'timeout' });
-    expect(
-      classifyToolExecutionFailure(new McpError(ErrorCode.ConnectionClosed, 'closed'))
+      classifyToolExecutionFailure(
+        new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.')
+      )
     ).toEqual({ status: 'failed', reasonCode: 'server_closed' });
   });
 
@@ -41,10 +60,7 @@ describe('classifyToolExecutionFailure', () => {
       reasonCode: 'user_cancelled',
     });
     expect(
-      classifyToolExecutionFailure(
-        new McpError(ErrorCode.RequestTimeout, 'user_cancelled'),
-        controller.signal
-      )
+      classifyToolExecutionFailure(mcpFailure('timeout', 'user_cancelled'), controller.signal)
     ).toEqual({
       status: 'cancelled',
       reasonCode: 'user_cancelled',

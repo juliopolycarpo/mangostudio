@@ -1,32 +1,25 @@
 /**
- * Hub-side MCP boundary types. The SDK lives in `@mangostudio/runtime` now —
- * a server runs on the environment its row is bound to — so everything here
- * describes the hub's half: which server, on which environment, and the handle
- * shape the turn pipeline and the settings module call through.
+ * Runtime-owned MCP boundary types. Only `services/mcp/**` may import
+ * `@modelcontextprotocol/sdk`; the rest of this workspace — and the hub across
+ * the protocol — consumes these wrapper shapes, so an SDK bump stays contained
+ * to this directory.
  */
 
 import type {
-  RuntimeMcpCallResult,
-  RuntimeMcpContentBlock,
-  RuntimeMcpPromptResult,
-  RuntimeMcpResourceContents,
-  RuntimeMcpServerCapabilities,
-  RuntimeMcpServerConfig,
-} from '@mangostudio/runtime';
-import type {
+  McpElicitationAction,
+  McpElicitationField,
   McpPromptDescriptor,
   McpResourceDescriptor,
   McpToolDescriptor,
 } from '@mangostudio/shared/mcp';
+import type {
+  RuntimeMcpCallResult,
+  RuntimeMcpPromptResult,
+  RuntimeMcpResourceContents,
+  RuntimeMcpServerCapabilities,
+} from '../../methods';
 
-/**
- * Runtime connection config derived from an `mcp_servers` row (no secrets),
- * plus the environment that hosts the session. `environmentId` never crosses
- * the protocol: it selects which runtime the rest of this is sent to.
- */
-export interface McpServerRuntimeConfig extends RuntimeMcpServerConfig {
-  readonly environmentId: string;
-}
+export type McpServerCapabilities = RuntimeMcpServerCapabilities;
 
 export interface McpRequestOptions {
   /** Per-request cap; falls back to the server row's timeout, then the default. */
@@ -36,12 +29,23 @@ export interface McpRequestOptions {
   toolCallId?: string;
 }
 
-export type McpContentBlock = RuntimeMcpContentBlock;
-export type McpCallResult = RuntimeMcpCallResult;
-export type McpServerCapabilities = RuntimeMcpServerCapabilities;
-export type McpResourceContents = RuntimeMcpResourceContents;
+/** One mid-tool-call form request, on its way up to the hub. */
+export interface McpElicitationRequest {
+  readonly serverId: string;
+  readonly serverSlug: string;
+  readonly toolCallId: string;
+  readonly message: string;
+  readonly fields: readonly McpElicitationField[];
+  /** The tool call's signal: a cancelled call cancels the question with it. */
+  readonly signal?: AbortSignal;
+}
 
-/** Live session with one MCP server, hosted by that server's environment. */
+export interface McpElicitationResult {
+  readonly action: McpElicitationAction;
+  readonly content?: Readonly<Record<string, string | number | boolean | string[]>>;
+}
+
+/** Live session with one MCP server, produced by the client factory. */
 export interface McpClientHandle {
   /** Capabilities from the initialize handshake; available without a request. */
   getCapabilities(): McpServerCapabilities;
@@ -51,9 +55,9 @@ export interface McpClientHandle {
     name: string,
     args: Record<string, unknown>,
     options?: McpRequestOptions
-  ): Promise<McpCallResult>;
+  ): Promise<RuntimeMcpCallResult>;
   listResources(options?: McpRequestOptions): Promise<McpResourceDescriptor[]>;
-  readResource(uri: string, options?: McpRequestOptions): Promise<McpResourceContents[]>;
+  readResource(uri: string, options?: McpRequestOptions): Promise<RuntimeMcpResourceContents[]>;
   listPrompts(options?: McpRequestOptions): Promise<McpPromptDescriptor[]>;
   getPrompt(
     name: string,

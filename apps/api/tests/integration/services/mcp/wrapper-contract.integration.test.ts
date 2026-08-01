@@ -1,14 +1,15 @@
 /**
- * Pins the SDK behavior the wrapper relies on (initialize → listTools →
- * callTool, content mapping, close propagation) over the SDK's in-memory
- * transport pair, so an SDK bump that shifts semantics fails loudly here.
+ * Pins the SDK behavior the runtime's wrapper relies on (initialize →
+ * listTools → callTool, content mapping, close propagation) over the SDK's
+ * in-memory transport pair, so an SDK bump that shifts semantics fails loudly
+ * here rather than at a user's MCP server.
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { wrapMcpClient } from '@mangostudio/runtime';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { wrapMcpClient } from '../../../../src/services/mcp/client-factory';
 import { createEchoMcpServer } from '../../../support/fixtures/mcp/create-echo-mcp-server';
 
 let server: Server | undefined;
@@ -21,7 +22,6 @@ function wrapOptions(
   }> = {}
 ) {
   return {
-    userId: 'wrapper-contract-user',
     serverId: 'wrapper-server',
     serverSlug: 'wrapper-server',
     ...overrides,

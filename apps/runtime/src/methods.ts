@@ -1,3 +1,11 @@
+import type {
+  McpElicitationAction,
+  McpElicitationField,
+  McpPromptDescriptor,
+  McpResourceDescriptor,
+  McpToolDescriptor,
+  McpTransport,
+} from '@mangostudio/shared/mcp';
 import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
 import type {
   ListDirectoryResponse,
@@ -350,6 +358,168 @@ export interface RuntimeSnapshotRevertResult {
   readonly revertedFiles: number;
 }
 
+/**
+ * Connection config for one MCP server, derived hub-side from its row. Secrets
+ * travel separately in {@link RuntimeMcpSecrets} so nothing here is sensitive —
+ * this half is what may be logged, echoed, or persisted for diagnostics.
+ */
+export interface RuntimeMcpServerConfig {
+  readonly id: string;
+  readonly slug: string;
+  readonly transport: McpTransport;
+  readonly command: string | null;
+  readonly args: readonly string[];
+  readonly env: Readonly<Record<string, string>>;
+  readonly url: string | null;
+  readonly timeoutMs: number | null;
+}
+
+/**
+ * Credentials the hub's secret store holds for a server, delivered on connect
+ * and kept in memory by the session for as long as it lives. The runtime never
+ * writes them anywhere: not to disk, not to a log line, not to an audit record.
+ */
+export interface RuntimeMcpSecrets {
+  /** stdio: secret child environment variables, merged over the row's `env`. */
+  readonly env?: Readonly<Record<string, string>>;
+  /** http: auth headers sent with every request on the session. */
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+/** Feature areas a server advertised during the MCP initialize handshake. */
+export interface RuntimeMcpServerCapabilities {
+  readonly tools: boolean;
+  readonly resources: boolean;
+  readonly prompts: boolean;
+}
+
+/**
+ * Structural, SDK-free view of one tool-result content block. `image`/`audio`
+ * data and `resource` blobs stay base64-encoded exactly as the server returned
+ * them; consumers decide what to persist or inline.
+ */
+export type RuntimeMcpContentBlock =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image'; readonly data: string; readonly mimeType: string }
+  | { readonly type: 'audio'; readonly data: string; readonly mimeType: string }
+  | {
+      readonly type: 'resource';
+      readonly uri: string;
+      readonly mimeType?: string;
+      readonly text?: string;
+      readonly blob?: string;
+    }
+  | { readonly type: 'unknown'; readonly blockType: string; readonly mimeType?: string };
+
+/** Tool call outcome: flattened text for the model plus the structured blocks. */
+export interface RuntimeMcpCallResult {
+  /** Text and text-resource blocks joined with blank lines, capped. */
+  readonly contentText: string;
+  readonly isError: boolean;
+  /** Content block types the server returned (`text`, `image`, `resource`, …). */
+  readonly rawContentKinds: readonly string[];
+  readonly content: readonly RuntimeMcpContentBlock[];
+}
+
+/** One `resources/read` content entry; binary payloads stay base64 in `blob`. */
+export interface RuntimeMcpResourceContents {
+  readonly uri: string;
+  readonly mimeType?: string;
+  readonly text?: string;
+  readonly blob?: string;
+}
+
+/** A resolved prompt, with each message's content flattened to plain text. */
+export interface RuntimeMcpPromptResult {
+  readonly description?: string;
+  readonly messages: ReadonlyArray<{
+    readonly role: 'user' | 'assistant';
+    readonly text: string;
+  }>;
+}
+
+export interface RuntimeMcpConnectParams {
+  readonly config: RuntimeMcpServerConfig;
+  readonly secrets?: RuntimeMcpSecrets;
+}
+
+export interface RuntimeMcpConnectResult {
+  readonly capabilities: RuntimeMcpServerCapabilities;
+}
+
+export interface RuntimeMcpServerParams {
+  readonly serverId: string;
+}
+
+export interface RuntimeMcpListToolsResult {
+  readonly tools: readonly McpToolDescriptor[];
+}
+
+export interface RuntimeMcpCallToolParams extends RuntimeMcpServerParams {
+  readonly toolName: string;
+  readonly args: Readonly<Record<string, unknown>>;
+  /**
+   * Hub-minted correlation id for the call. Elicitation events echo it back so
+   * the hub can route a server's mid-call question to the tool call that
+   * caused it — the key is part of this method's contract, not a detail.
+   */
+  readonly toolCallId?: string;
+  readonly timeoutMs?: number;
+}
+
+export interface RuntimeMcpListResourcesResult {
+  readonly resources: readonly McpResourceDescriptor[];
+}
+
+export interface RuntimeMcpReadResourceParams extends RuntimeMcpServerParams {
+  readonly uri: string;
+}
+
+export interface RuntimeMcpReadResourceResult {
+  readonly contents: readonly RuntimeMcpResourceContents[];
+}
+
+export interface RuntimeMcpListPromptsResult {
+  readonly prompts: readonly McpPromptDescriptor[];
+}
+
+export interface RuntimeMcpGetPromptParams extends RuntimeMcpServerParams {
+  readonly promptName: string;
+  readonly args?: Readonly<Record<string, string>>;
+}
+
+/** The hub's answer to one `mcp.elicitation` event, keyed by its request id. */
+export interface RuntimeMcpElicitResponseParams {
+  readonly requestId: string;
+  readonly action: McpElicitationAction;
+  readonly content?: Readonly<Record<string, string | number | boolean | string[]>>;
+}
+
+export interface RuntimeMcpAckResult {
+  readonly ok: true;
+}
+
+/** Topic carrying a server's mid-tool-call form request up to the hub. */
+export const RUNTIME_MCP_ELICITATION_TOPIC = 'mcp.elicitation' as const;
+
+/** Topic carrying out-of-band session state (drops, tool-list invalidations). */
+export const RUNTIME_MCP_SESSION_TOPIC = 'mcp.session' as const;
+
+export interface RuntimeMcpElicitationEvent {
+  readonly requestId: string;
+  readonly serverId: string;
+  readonly serverSlug: string;
+  readonly toolCallId: string;
+  readonly message: string;
+  readonly fields: readonly McpElicitationField[];
+}
+
+export interface RuntimeMcpSessionEvent {
+  readonly serverId: string;
+  /** `closed`: the session dropped. `tool-list-changed`: caches are stale. */
+  readonly change: 'closed' | 'tool-list-changed';
+}
+
 export interface RuntimeMethodMap {
   'fs.read-file': {
     readonly params: RuntimeReadFileParams;
@@ -426,6 +596,42 @@ export interface RuntimeMethodMap {
   'workspace.resolve-contained': {
     readonly params: RuntimeWorkspaceResolveContainedParams;
     readonly result: RuntimeWorkspaceResolveContainedResult;
+  };
+  'mcp.connect': {
+    readonly params: RuntimeMcpConnectParams;
+    readonly result: RuntimeMcpConnectResult;
+  };
+  'mcp.list-tools': {
+    readonly params: RuntimeMcpServerParams;
+    readonly result: RuntimeMcpListToolsResult;
+  };
+  'mcp.call-tool': {
+    readonly params: RuntimeMcpCallToolParams;
+    readonly result: RuntimeMcpCallResult;
+  };
+  'mcp.list-resources': {
+    readonly params: RuntimeMcpServerParams;
+    readonly result: RuntimeMcpListResourcesResult;
+  };
+  'mcp.read-resource': {
+    readonly params: RuntimeMcpReadResourceParams;
+    readonly result: RuntimeMcpReadResourceResult;
+  };
+  'mcp.list-prompts': {
+    readonly params: RuntimeMcpServerParams;
+    readonly result: RuntimeMcpListPromptsResult;
+  };
+  'mcp.get-prompt': {
+    readonly params: RuntimeMcpGetPromptParams;
+    readonly result: RuntimeMcpPromptResult;
+  };
+  'mcp.elicit-response': {
+    readonly params: RuntimeMcpElicitResponseParams;
+    readonly result: RuntimeMcpAckResult;
+  };
+  'mcp.disconnect': {
+    readonly params: RuntimeMcpServerParams;
+    readonly result: RuntimeMcpAckResult;
   };
 }
 

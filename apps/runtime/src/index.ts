@@ -15,8 +15,16 @@ export {
 export { livenessIntervalFor, startProtocolLiveness } from './liveness';
 export { createLocalRuntimeManifest } from './manifest';
 export type * from './methods';
-export { RUNTIME_ABSENT_HASH } from './methods';
-export { createRuntimeMethodHandlers } from './registry';
+export {
+  RUNTIME_ABSENT_HASH,
+  RUNTIME_MCP_ELICITATION_TOPIC,
+  RUNTIME_MCP_SESSION_TOPIC,
+} from './methods';
+export {
+  createRuntimeMethodHandlers,
+  type RuntimeMethodRegistry,
+  type RuntimeMethodRegistryOptions,
+} from './registry';
 export { createLocalRuntimeHost } from './runtime';
 export {
   RUNTIME_SETUP_PENDING_MESSAGE,
@@ -73,6 +81,34 @@ export {
   execGit,
   GitExecutionError,
 } from './services/git';
+export {
+  classifyMcpCallFailure,
+  connectMcpClient,
+  DEFAULT_MCP_TIMEOUT_MS,
+  shouldFallBackToSse,
+  wrapMcpClient,
+} from './services/mcp/client-factory';
+export {
+  capMcpResultText,
+  flattenMcpContent,
+  MCP_RESULT_MAX_BYTES,
+  MCP_RESULT_TRUNCATION_MARKER,
+  normalizeMcpContent,
+} from './services/mcp/content-mapping';
+export {
+  type McpService,
+  type McpTransportFactory,
+  setMcpTransportFactoryForTest,
+} from './services/mcp/service';
+export { buildStdioEnv } from './services/mcp/stdio-env';
+export {
+  type McpClientHandle,
+  McpConnectionError,
+  type McpElicitationRequest,
+  type McpElicitationResult,
+  type McpRequestOptions,
+  type McpServerCapabilities,
+} from './services/mcp/types';
 export {
   assertInsideWorkdir,
   isInside,

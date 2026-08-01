@@ -1,11 +1,13 @@
 /**
  * Pure mapping from MCP tool-call content blocks to the shapes the turn
  * pipeline records: an SDK-free normalized block list, and the flattened text
- * result the model sees. Persistence of rich blocks (images, binary
- * resources) lives in `rich-content.ts`.
+ * result the model sees. Both cross the protocol boundary, so the capping
+ * happens here rather than hub-side: a server that dumps a megabyte of text
+ * must not put a megabyte on the wire. Persistence of rich blocks (images,
+ * binary resources) stays hub-side in `rich-content.ts`.
  */
 
-import type { McpContentBlock } from './types';
+import type { RuntimeMcpContentBlock } from '../../methods';
 
 /** Structural view of an SDK content block; kept SDK-free on purpose. */
 export interface McpContentBlockLike {
@@ -22,7 +24,7 @@ export const MCP_RESULT_MAX_BYTES = 64 * 1024;
 export const MCP_RESULT_TRUNCATION_MARKER = '\n\n[MCP tool result truncated at 64 KiB]';
 
 /**
- * Converts raw SDK content blocks into the project-owned {@link McpContentBlock}
+ * Converts raw SDK content blocks into the project-owned {@link RuntimeMcpContentBlock}
  * union. Malformed entries degrade to `unknown` instead of throwing so one bad
  * block never poisons the whole result.
  *
@@ -30,7 +32,7 @@ export const MCP_RESULT_TRUNCATION_MARKER = '\n\n[MCP tool result truncated at 6
  */
 export function normalizeMcpContent(
   rawBlocks: ReadonlyArray<McpContentBlockLike>
-): McpContentBlock[] {
+): RuntimeMcpContentBlock[] {
   return rawBlocks.map((block) => {
     if (block.type === 'text' && typeof block.text === 'string') {
       return { type: 'text', text: block.text };
@@ -82,11 +84,11 @@ function isResourcePayload(value: unknown): value is ResourcePayloadLike {
  *
  * // Usage: const text = flattenMcpContent(normalizeMcpContent(result.content))
  */
-export function flattenMcpContent(blocks: ReadonlyArray<McpContentBlock>): string {
+export function flattenMcpContent(blocks: ReadonlyArray<RuntimeMcpContentBlock>): string {
   return capMcpResultText(blocks.map(blockToFlatText).join('\n\n'));
 }
 
-function blockToFlatText(block: McpContentBlock): string {
+function blockToFlatText(block: RuntimeMcpContentBlock): string {
   if (block.type === 'text') return block.text;
   if (block.type === 'image' || block.type === 'audio') {
     return `[${block.type} content, ${block.mimeType}]`;

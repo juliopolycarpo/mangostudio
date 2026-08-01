@@ -1,16 +1,19 @@
 /**
- * Drives the client factory against real HTTP servers: a Streamable HTTP
- * fixture on Bun.serve (asserting stored auth headers reach the wire) and a
- * legacy SSE-only fixture on node:http proving the 4xx fallback recipe.
+ * Drives real HTTP servers through the Local environment's runtime: a
+ * Streamable HTTP fixture on Bun.serve (asserting hub-stored auth headers are
+ * delivered at connect and reach the wire) and a legacy SSE-only fixture on
+ * node:http proving the 4xx fallback recipe.
  */
 
 import { describe, expect, it } from 'bun:test';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { shouldFallBackToSse } from '@mangostudio/runtime';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { StreamableHTTPError } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { connectMcpClient, shouldFallBackToSse } from '../../../../src/services/mcp/client-factory';
+import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 import {
   McpConnectionError,
   type McpServerRuntimeConfig,
@@ -27,6 +30,7 @@ function httpConfig(url: string): McpServerRuntimeConfig {
     env: {},
     url,
     timeoutMs: 5_000,
+    environmentId: LOCAL_ENVIRONMENT_ID,
   };
 }
 

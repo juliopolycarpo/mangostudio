@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { ConnectMcpClientOptions } from '../../../../src/services/mcp/client-factory';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   closeAllMcpClients,
   disposeMcpServer,
@@ -8,6 +8,7 @@ import {
   listMcpToolsCached,
   setMcpClientConnectorForTest,
 } from '../../../../src/services/mcp/connection-manager';
+import type { ConnectMcpClientOptions } from '../../../../src/services/mcp/runtime-session';
 import type { McpClientHandle, McpServerRuntimeConfig } from '../../../../src/services/mcp/types';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
 
@@ -21,6 +22,7 @@ function makeConfig(id: string): McpServerRuntimeConfig {
     env: {},
     url: null,
     timeoutMs: null,
+    environmentId: LOCAL_ENVIRONMENT_ID,
   };
 }
 
