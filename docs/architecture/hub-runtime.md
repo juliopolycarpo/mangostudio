@@ -62,12 +62,21 @@ checkpoint errors.
 
 ## Transports
 
-| Transport                 | Status  | Framing                                                                                      |
-| ------------------------- | ------- | -------------------------------------------------------------------------------------------- |
-| Embedded in-process ports | Current | FIFO structured frames; development and tests round-trip every frame through the byte codec. |
-| Local runtime process     | Current | Bounded NDJSON over the child's pipes, using the same handshake and request ids.             |
-| WSL distribution          | Current | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.       |
-| Other runtime placements  | Future  | Implement `RuntimeFramePort` without changing method handlers or API tool executors.         |
+| Transport                 | Status  | Direction        | Framing                                                                                      |
+| ------------------------- | ------- | ---------------- | -------------------------------------------------------------------------------------------- |
+| Embedded in-process ports | Current | —                | FIFO structured frames; development and tests round-trip every frame through the byte codec. |
+| Local runtime process     | Current | Hub spawns       | Bounded NDJSON over the child's pipes, using the same handshake and request ids.             |
+| WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.       |
+| Paired WebSocket          | Current | Runtime dials in | Chunked binary frames over one socket to `/api/runtime`, authenticated by a pairing token.   |
+| Other runtime placements  | Future  | —                | Implement `RuntimeFramePort` without changing method handlers or API tool executors.         |
+
+Which one to reach for:
+
+- **This machine** — Local, or a local process for an isolated one.
+- **A Linux distribution on this Windows machine** — WSL.
+- **A machine somewhere else, especially behind NAT or a firewall** — a paired WebSocket.
+  It needs no inbound port on the target and no route from the hub to it; it needs the
+  target to be able to reach the hub, and the hub to know its own public address.
 
 The shared NDJSON codec validates every frame, buffers partial lines, and rejects records
 larger than 16 MiB. Production in-process delivery uses structured cloning while retaining
@@ -163,6 +172,103 @@ that way is refused with a message saying so.
 A stopped distribution boots when the runtime starts, so the first connection to one is
 slow — the Add Environment copy says so. Distributions on musl (Alpine) get the musl build:
 the target is probed for architecture and C library together.
+
+## Paired WebSocket Transport
+
+`transportKind: 'websocket'` is the transport for a machine the hub cannot reach: the
+runtime dials `/api/runtime` and the hub adopts the socket it arrives on. There is nothing
+to configure hub-side — the config object is empty — because the machine identifies itself
+with a credential rather than an address.
+
+### Pairing
+
+Creating the environment issues a **pairing token** from its card. It is a selector and a
+verifier, `mrt_<id>.<secret>`: the hub stores the id in the clear and only the SHA-256 of
+the secret, so verifying is one indexed lookup followed by a constant-time digest
+comparison rather than a scan across every stored hash. The secret is readable exactly
+once, in the issue response. Rotating retires the previous token and drops whatever it had
+connected; revoking closes the live socket. Deleting the environment cascades the token
+away with it — a credential must never outlive what it authorizes.
+
+This is deliberately not Better Auth's apiKey plugin. With `enableSessionForAPIKeys` a
+verified key resolves into a user session, and a machine credential that mints a user
+session is a different security object from one that authorizes a single environment's
+socket.
+
+The card prints the commands to run on the target machine. The token goes in on stdin, or
+in `MANGOSTUDIO_RUNTIME_TOKEN`; there is no argv spelling, because a command line is
+readable by every process on that machine.
+
+**The hub has to be told its own public address.** `server.publicUrl` (or `PUBLIC_URL`)
+answers "how does a peer reach me", which is a different question from `server.host` and
+`server.port` — those say how it binds, and a hub behind a proxy binds `0.0.0.0` while
+peers use a public name. Unset, the card prints a placeholder and says what to configure.
+Nothing derives it from a request header: that is a value the caller controls.
+
+### Framing
+
+WebSocket payload limits are a property of the server, not of a route. Bun takes one
+`websocket` option object per `Bun.serve`, and the browser bus pins `maxPayloadLength` to
+16 KiB. Raising that to fit a 16 MiB protocol frame would apply to every browser socket
+too, and Bun buffers a whole message before anything validates it — a denial-of-service
+regression on the bus, not a simplification. So frames are **chunked** above the socket:
+each message carries a nine-byte header (format version, chunk index, chunk count), and
+reassembly is bounded by the same 16 MiB limit the codec enforces on a whole frame.
+
+Every chunk leaves through **one queue per connection**. The host resolves requests
+concurrently, so without it two oversized responses would interleave their chunks into a
+stream neither peer can reassemble. The queue also carries the backpressure discipline the
+hub's `closeOnBackpressureLimit: true` demands: it pauses when a send is buffered and
+resumes on drain.
+
+### Liveness and reconnection
+
+Liveness is protocol `ping`/`pong` in both directions on a twenty-second cadence, well
+under the server-wide sixty-second idle timeout. WebSocket control frames are not used:
+Bun's `sendPings` with `idleTimeout: 0` has an open defect (oven-sh/bun#26554), and the
+idle timeout is a shared setting the browser bus owns. The runtime also publishes a
+`runtime.heartbeat` event, which is what the hub records `lastSeenAt` from without writing
+on every ping.
+
+The runtime owns the reconnect, because the hub cannot dial it:
+
+- Close codes say why. A refused credential or a disabled environment ends the process with
+  the command that fixes it — retrying those is a machine hammering an endpoint that will
+  never say yes. A rate-limited close waits out the window rather than returning on the
+  cadence that caused it. Everything else backs off exponentially with full jitter, so a
+  rack of runtimes does not reconnect in step.
+- A connection that served resets the curve.
+- A second dial for the same environment **supersedes** the first, with a close code saying
+  so. In-flight calls on the loser fail `RUNTIME_UNAVAILABLE`; the next call routes to the
+  survivor.
+
+Hub-side, a dial-in environment never latches. Five failed attempts, or a protocol
+mismatch, latch a transport the hub dials; here nothing the hub does could produce the
+connection a latch would be holding back — not the Connect button, not a fixed runtime
+redialing. A paired environment nobody has dialed into reads as disconnected rather than
+failed, because that is what it is.
+
+### Version drift
+
+`requireMatchingRelease` is not set for this transport. A remote runtime is not part of the
+hub's own distribution, so release equality cannot be a connection gate; the protocol
+major/minor pair still is. Release drift is visible state rather than a refused socket.
+
+### TLS
+
+`wss://` through a reverse proxy is the documented path. Bun's client cannot disable
+certificate verification per connection (oven-sh/bun#22870) — only the process-wide
+`NODE_TLS_REJECT_UNAUTHORIZED=0` works, which turns verification off for every outbound
+connection that process makes. Use it for a self-signed lab and nothing else; a real
+certificate is less work than the blast radius. TLS termination does not belong in the
+runtime.
+
+### Rate limiting
+
+`/api/runtime` upgrades get their own bucket, sized well above one machine's reconnect
+cadence. Buckets key on client IP, so several runtimes behind one NAT share a counter, and
+a budget tuned to a single backoff curve would let one broken runtime rate-limit every
+healthy one beside it.
 
 ## Paths Across Hosts
 

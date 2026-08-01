@@ -49,24 +49,53 @@ order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
 ## `mangostudio-runtime`
 
 Every channel installs a second binary beside `mangostudio`. It is the execution
-host for environments configured to run out of process: MangoStudio spawns it and
-speaks its protocol over the child's pipes. It is not meant to be run by hand, and
-it must stay in the same directory as the main binary — that is how MangoStudio
-finds it.
+host for out-of-process environments. On this machine MangoStudio spawns it and
+speaks its protocol over the child's pipes, so it must stay in the same directory
+as the main binary — that is how MangoStudio finds it. On another machine you run
+`connect` yourself and it reaches back.
 
 | Command                       | Description                                                   |
 | ----------------------------- | ------------------------------------------------------------- |
 | `mangostudio-runtime --stdio` | Serve the runtime protocol over stdin/stdout (NDJSON frames). |
+| `mangostudio-runtime connect` | Dial a MangoStudio hub over WebSocket and serve it.           |
 | `mangostudio-runtime --help`  | Print usage. Bare invocation does the same.                   |
-| `--version`, `-v`             | Print the runtime version, which matches the MangoStudio one. |
+| `--version`, `-v`             | Print the runtime version.                                    |
 
-`stdio` also works as a bare word for each mode (`mangostudio-runtime stdio`).
+`stdio` also works as a bare word (`mangostudio-runtime stdio`).
 
 In `--stdio` mode stdout carries protocol frames and nothing else; every diagnostic
 goes to stderr, which MangoStudio collects into its own logs. `mangostudio doctor`
 reports whether this binary is present and whether its version matches the hub's —
 a mismatch is refused at the protocol handshake, so reinstall rather than mixing
 releases.
+
+### `connect`
+
+| Flag          | Description                                                               |
+| ------------- | ------------------------------------------------------------------------- |
+| `--hub <url>` | Hub endpoint, e.g. `wss://hub.example.com/api/runtime`. Remembered after. |
+| `--token -`   | Read the pairing token from stdin.                                        |
+
+Both come from the environment's card in MangoStudio, which issues the token and
+prints the exact command. The token has no argv spelling on purpose — a command
+line is readable by every process on the machine — so pass it on stdin or set
+`MANGOSTUDIO_RUNTIME_TOKEN`. It is stored owner-only in
+`~/.mango/runtime/remote/credentials.json`, and the hub URL in `runtime.json`
+beside it, so later runs need no flags at all.
+
+`connect` stays in the foreground and reconnects on its own, backing off after
+each failure. It exits non-zero only when redialing cannot help: a revoked token
+or a disabled environment. Keep it running under whatever supervises long-lived
+processes on that machine.
+
+```bash
+printf %s "$TOKEN" | mangostudio-runtime connect --hub wss://hub.example.com/api/runtime --token -
+mangostudio-runtime connect   # afterwards: reuses the stored hub URL and token
+```
+
+Release drift is not a connection gate here: a remote runtime is not part of the
+hub's own distribution, so only the protocol version has to match. Version
+differences show up as state on the environment card.
 
 Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
 `127.0.0.1`.
