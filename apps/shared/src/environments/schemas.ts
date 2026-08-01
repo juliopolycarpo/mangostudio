@@ -249,6 +249,49 @@ export const EnvironmentSchema = Type.Object(
 
 export const EnvironmentListSchema = Type.Array(EnvironmentSchema);
 
+/**
+ * A machine credential for one dial-in environment. The secret half is never
+ * part of this shape: it exists once, in the issue response, and is stored
+ * hashed from then on.
+ */
+export const RuntimePairingTokenSchema = Type.Object(
+  {
+    environmentId: EnvironmentIdSchema,
+    createdAt: Type.Integer({ minimum: 0 }),
+    /** Last time the runtime authenticated with it; throttled to minutes. */
+    lastSeenAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  },
+  { additionalProperties: false }
+);
+
+export const RuntimePairingIssueSchema = Type.Composite([
+  RuntimePairingTokenSchema,
+  Type.Object(
+    {
+      /** Readable exactly once. Regenerating is the only way to see one again. */
+      token: Type.String({ minLength: 1 }),
+    },
+    { additionalProperties: false }
+  ),
+]);
+
+export const RuntimePairingStatusSchema = Type.Object(
+  {
+    /**
+     * The `wss://…/api/runtime` address a runtime dials, derived from
+     * `server.publicUrl`. Null when the hub has not been told how peers reach
+     * it — a request header would be a guess, and a spoofable one.
+     */
+    endpoint: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
+    token: Type.Union([RuntimePairingTokenSchema, Type.Null()]),
+  },
+  { additionalProperties: false }
+);
+
+export type RuntimePairingToken = Static<typeof RuntimePairingTokenSchema>;
+export type RuntimePairingIssue = Static<typeof RuntimePairingIssueSchema>;
+export type RuntimePairingStatus = Static<typeof RuntimePairingStatusSchema>;
+
 export type EnvironmentId = Static<typeof EnvironmentIdSchema>;
 export type EnvironmentTransportKind = Static<typeof EnvironmentTransportKindSchema>;
 export type InProcessEnvironmentConfig = Static<typeof InProcessEnvironmentConfigSchema>;

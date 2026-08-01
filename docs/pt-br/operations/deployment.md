@@ -80,6 +80,11 @@ A configuração de produção usa `~/.mango/config.toml` e `~/.mango/.env` para
 [server]
 host = "0.0.0.0"
 port = 3001
+# Como pares fora deste processo alcançam o hub, o que é uma pergunta diferente
+# de como ele faz o bind. Obrigatório para runtimes WebSocket pareados: o cartão
+# de pareamento não tem outra forma de imprimir o endereço que eles discam, e um
+# cabeçalho de requisição seria um palpite falsificável. Env: PUBLIC_URL.
+publicUrl = "https://seu-dominio.com"
 
 [database]
 path = "/var/lib/mangostudio/database.sqlite"

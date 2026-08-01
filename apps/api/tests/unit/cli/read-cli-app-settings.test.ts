@@ -13,7 +13,7 @@ import type { MangoConfig } from '../../../src/lib/config';
 
 function makeConfig(dbPath: string): MangoConfig {
   return {
-    server: { host: 'localhost', port: 3001 },
+    server: { host: 'localhost', port: 3001, publicUrl: '' },
     frontend: { host: 'localhost', port: 5173 },
     database: { path: dbPath },
     uploads: { dir: '/data/uploads' },

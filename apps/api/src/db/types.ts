@@ -36,6 +36,18 @@ interface EnvironmentsTable {
   updatedAt: number;
 }
 
+interface RuntimePairingTokensTable {
+  /** Public selector half of the token; the secret half is only ever hashed. */
+  id: string;
+  userId: string;
+  environmentId: string;
+  /** SHA-256 hex digest of the secret half. */
+  tokenHash: string;
+  createdAt: number;
+  lastSeenAt: number | null;
+  revokedAt: number | null;
+}
+
 interface MessagesTable {
   id: string;
   chatId: string;
@@ -344,6 +356,7 @@ interface ObservabilitySnapshotTable {
 export interface Database {
   chats: ChatsTable;
   environments: EnvironmentsTable;
+  runtime_pairing_tokens: RuntimePairingTokensTable;
   messages: MessagesTable;
   generated_images: GeneratedImagesTable;
   chat_attachments: ChatAttachmentsTable;
@@ -376,6 +389,10 @@ export type ChatAttachmentInsert = Insertable<ChatAttachmentsTable>;
 export type EnvironmentSelect = Selectable<EnvironmentsTable>;
 export type EnvironmentInsert = Insertable<EnvironmentsTable>;
 export type EnvironmentUpdate = Updateable<EnvironmentsTable>;
+
+export type RuntimePairingTokenSelect = Selectable<RuntimePairingTokensTable>;
+export type RuntimePairingTokenInsert = Insertable<RuntimePairingTokensTable>;
+export type RuntimePairingTokenUpdate = Updateable<RuntimePairingTokensTable>;
 
 export type UserProviderSettingsSelect = Selectable<UserProviderSettingsTable>;
 
