@@ -4,6 +4,7 @@
  * the source of truth — API validation errors surface through the caller.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer, McpTransport } from '@mangostudio/shared/mcp';
 import { AlertTriangle, Plus, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
@@ -51,6 +52,20 @@ export function McpServerForm({
 
   const patch = (updates: Partial<McpServerFormState>) =>
     setState((prev) => ({ ...prev, ...updates }));
+
+  const selectedEnvironmentName =
+    environments.data?.find((environment) => environment.id === state.environmentId)?.name ??
+    state.environmentId;
+  /**
+   * Stored secrets count as much as newly typed ones: moving an existing
+   * server is exactly the moment its saved credentials start travelling.
+   */
+  const carriesSecrets =
+    state.environmentId !== LOCAL_ENVIRONMENT_ID &&
+    (state.secretEnv.some((entry) => entry.key.trim().length > 0) ||
+      state.headers.some((entry) => entry.key.trim().length > 0) ||
+      (server?.secretEnvNames.length ?? 0) > 0 ||
+      (server?.headerNames.length ?? 0) > 0);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -153,6 +168,17 @@ export function McpServerForm({
               ))}
             </select>
             <p className="text-xs text-on-surface-variant/60">{s.environmentHint}</p>
+            {carriesSecrets ? (
+              <div className="flex items-start gap-2 rounded-xl border border-warning/25 bg-warning/5 p-3 text-xs text-on-surface-variant">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" />
+                <span>
+                  <strong className="font-semibold text-on-surface">
+                    {s.remoteSecretNoticeTitle}
+                  </strong>{' '}
+                  {s.remoteSecretNotice.replace('{environment}', selectedEnvironmentName)}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           {state.transport === 'stdio' ? (

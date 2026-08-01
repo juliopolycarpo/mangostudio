@@ -4,19 +4,46 @@ MangoStudio can connect to [Model Context Protocol](https://modelcontextprotocol
 and expose their tools to the agent. Servers are managed per user; their tools are composed
 onto the built-in tools for each turn and never enter the global tool registry.
 
+## Where a server runs
+
+Every server row carries an `environmentId` (default `local`). The session is opened by that
+environment's **runtime**, not by the hub: a stdio server is spawned there, and an HTTP server
+is dialed from there. That is the point of the field — `http://localhost:8081` configured on a
+WSL environment resolves inside WSL, and a `uvx` command installed on a remote host runs on
+that host.
+
+The hub keeps what only it can own: the server rows, the secret store, tool naming, the
+pending-elicitation registry, and the settings UI. See
+[hub-runtime.md](../architecture/hub-runtime.md) for the boundary itself.
+
+Consequences worth knowing:
+
+- A chat only sees the servers bound to **its** environment. A server on another environment is
+  absent from the turn, not offered-and-rejected — a tool whose side effects land on the wrong
+  machine is worse than a missing tool. The tool-settings page still lists every server, because
+  a per-tool toggle has to be reachable wherever the server lives.
+- Moving a server between environments is an ordinary field edit. The old session is dropped and
+  the next use connects on the new machine; no restart.
+- An environment with MCP servers bound to it cannot be deleted until they are moved or removed.
+- Sessions live in the runtime process. If a runtime restarts (crash, WSL reboot, remote
+  reconnect) its sessions are gone; the hub rebuilds them lazily on next use, exactly like a
+  server that dropped its own connection.
+
 ## Transports
 
-Two transports are supported (`apps/api/src/services/mcp/client-factory.ts`):
+Two MCP transports are supported (`apps/runtime/src/services/mcp/client-factory.ts`). They are
+independent of the environment transport that connects the hub to the runtime.
 
-- **stdio** — MangoStudio spawns a local process (`command` + `args`) and speaks MCP over its
-  stdin/stdout. The server runs as a local child process with the API's privileges.
-- **http** — MangoStudio connects to a Streamable HTTP endpoint (`url`). A modern Streamable
+- **stdio** — the runtime spawns a process (`command` + `args`) and speaks MCP over its
+  stdin/stdout. The server runs as a child of the runtime, with the runtime's privileges, on the
+  runtime's machine.
+- **http** — the runtime connects to a Streamable HTTP endpoint (`url`). A modern Streamable
   HTTP client is tried first; on a 4xx from the initialize POST it falls back to the legacy
   SSE transport, per the MCP spec-compat recipe.
 
-Only `apps/api/src/services/mcp/**` may import `@modelcontextprotocol/sdk`; the rest of the
-codebase consumes the project-owned `McpClientHandle` wrapper, so an SDK bump stays contained
-to that directory.
+Only `apps/runtime/src/services/mcp/**` may import `@modelcontextprotocol/sdk`; the hub and the
+rest of the codebase consume the project-owned `McpClientHandle` wrapper, so an SDK bump stays
+contained to that directory.
 
 ## Configuration
 
@@ -25,19 +52,20 @@ Servers are stored in the database and managed through the API
 (`apps/frontend/src/features/settings/mcp/`). Fields
 (`apps/shared/src/mcp/schemas.ts`):
 
-| Field       | Applies to | Notes                                                                                      |
-| ----------- | ---------- | ------------------------------------------------------------------------------------------ |
-| `name`      | both       | Display name (≤ 100 chars).                                                                |
-| `slug`      | both       | Per-user unique id, `^[a-z0-9]+(?:-[a-z0-9]+)*$` (≤ 64 chars). Becomes the tool namespace. |
-| `transport` | both       | `stdio` or `http`.                                                                         |
-| `command`   | stdio      | Executable to spawn.                                                                       |
-| `args`      | stdio      | Argument vector.                                                                           |
-| `env`       | stdio      | **Non-secret** child environment variables.                                                |
-| `secretEnv` | stdio      | Secret child environment values — write-only, stored in the secret store.                  |
-| `url`       | http       | Streamable HTTP endpoint.                                                                  |
-| `headers`   | http       | Auth headers — write-only, stored in the secret store.                                     |
-| `enabled`   | both       | Disabled servers contribute no tools.                                                      |
-| `timeoutMs` | both       | Per-request cap; `null` uses the built-in default.                                         |
+| Field           | Applies to | Notes                                                                                      |
+| --------------- | ---------- | ------------------------------------------------------------------------------------------ |
+| `name`          | both       | Display name (≤ 100 chars).                                                                |
+| `slug`          | both       | Per-user unique id, `^[a-z0-9]+(?:-[a-z0-9]+)*$` (≤ 64 chars). Becomes the tool namespace. |
+| `transport`     | both       | `stdio` or `http`.                                                                         |
+| `environmentId` | both       | Environment whose runtime hosts the session; defaults to `local`.                          |
+| `command`       | stdio      | Executable to spawn.                                                                       |
+| `args`          | stdio      | Argument vector.                                                                           |
+| `env`           | stdio      | **Non-secret** child environment variables.                                                |
+| `secretEnv`     | stdio      | Secret child environment values — write-only, stored in the secret store.                  |
+| `url`           | http       | Streamable HTTP endpoint.                                                                  |
+| `headers`       | http       | Auth headers — write-only, stored in the secret store.                                     |
+| `enabled`       | both       | Disabled servers contribute no tools.                                                      |
+| `timeoutMs`     | both       | Per-request cap; `null` uses the built-in default.                                         |
 
 ### Portable export and conflict-aware import
 
@@ -87,11 +115,30 @@ header **names** (`headerNames`). Stdio servers use `env` for non-secret variabl
 `secretEnv` for write-only values; responses expose only `secretEnvNames`. At spawn time the
 two maps are merged, with secret values winning on a duplicate key.
 
-The spawned child does **not** inherit the API process environment wholesale. Only a small
-allowlist (`PATH`, `HOME`, `TERM`, … — see `apps/api/src/services/mcp/stdio-env.ts`) plus the
-managed public and secret environment maps is forwarded, so connector API keys and the app's
-auth secret never leak accidentally. Exported shell functions are stripped to avoid a
+The spawned child does **not** inherit the runtime process environment wholesale. Only a small
+allowlist (`PATH`, `HOME`, `TERM`, … — see `apps/runtime/src/services/mcp/stdio-env.ts`) plus
+the managed public and secret environment maps is forwarded, so connector API keys and the
+app's auth secret never leak accidentally. Exported shell functions are stripped to avoid a
 Shellshock-style injection vector.
+
+### Secrets and remote environments
+
+The secret store stays hub-side — one source of truth. When a session opens on a non-local
+environment, the values are delivered **at connect time** and held in that runtime's memory for
+as long as the session lives. They are never written to disk there and never appear in a log
+line. The settings form says so before you save: assigning a secret-bearing server to a
+non-local environment shows the machine those credentials will travel to.
+
+Delivery is **refused**, not warned about, over a plaintext transport that leaves the local
+network: a Direct URL environment on `http://` whose host is neither loopback nor an RFC1918 /
+RFC4193 address gets a typed error naming TLS
+(`apps/api/src/services/mcp/secret-transport-guard.ts`). A hostname that is not a literal
+address cannot be proven local, so it is treated as public. Put the runtime behind a TLS
+reverse proxy, or keep the secret-bearing server on an environment the hub reaches privately.
+
+stdio, WSL and in-process environments never put the credential on a wire at all; ssh is
+encrypted by construction; a dial-in WebSocket runtime chose its own hub URL, and the hub sees
+a socket a reverse proxy may already have terminated — so those are not judged here.
 
 ## Tool namespacing and per-agent allowlists
 
@@ -113,9 +160,10 @@ disabling, or reconfiguring a server invalidates any cached continuation for the
 
 ## Timeouts and connection lifecycle
 
-Connections are lazy and per `(user, server)`: the first use connects, concurrent callers
-share the in-flight connect, and idle sessions are kept alive until the server row changes or
-the app shuts down (`apps/api/src/services/mcp/connection-manager.ts`). There is no background
+Connections are lazy and per `(user, server)` — a server row belongs to exactly one
+environment, so that pair stays unique: the first use connects, concurrent callers share the
+in-flight connect, and idle sessions are kept alive until the server row changes or the app
+shuts down (`apps/api/src/services/mcp/connection-manager.ts`). There is no background
 retry loop — a dropped or crashed session (status falls to `disconnected`) simply reconnects on
 next use. During turn resolution, each server gets a 3s budget to connect and list its tools; a
 server that misses the budget is skipped and logged, and never fails the turn or hides other
@@ -124,7 +172,13 @@ SDK so a timed-out request is actually cancelled.
 
 Failures degrade instead of aborting the turn: a server tool error, an unreachable server, or a
 timeout is recorded as a typed error tool result and the turn continues. Oversized results are
-capped at 64 KiB with a truncation marker (`apps/api/src/services/mcp/content-mapping.ts`).
+capped at 64 KiB with a truncation marker, runtime-side
+(`apps/runtime/src/services/mcp/content-mapping.ts`) so the cap applies before the wire.
+
+Two deadlines compose. The runtime applies the server's `timeoutMs` to the MCP request; the hub
+applies a slightly later deadline to the protocol request carrying it. The runtime's always
+fires first, so the error a user sees is the one that can name the server that stopped
+answering.
 
 ### Capability inspection and lazy connections
 
@@ -193,10 +247,14 @@ prompts are ordinary composer text with no new message semantics.
 
 ## Trust model
 
-An **stdio** server is a local process spawned with the API's privileges and file access — treat
-it exactly like software you install and run yourself, and only configure commands you trust. An
-**http** server runs remotely; its tools can still act on whatever the endpoint exposes, so
-review a server before enabling it and scope agents with per-server allowlists.
+An **stdio** server is a process spawned with the privileges and file access of the runtime
+hosting it — treat it exactly like software you install and run on that machine, and only
+configure commands you trust. An **http** server runs behind an endpoint; its tools can still
+act on whatever that endpoint exposes, so review a server before enabling it and scope agents
+with per-server allowlists.
+
+Binding a server to a non-local environment extends both statements to that machine: the
+command runs there, with that machine's access, and any stored credentials are delivered there.
 
 ## Troubleshooting
 
@@ -206,7 +264,13 @@ review a server before enabling it and scope agents with per-server allowlists.
 - **`status: error` after Test.** The `statusError` detail carries the connection or handshake
   failure (bad command, unreachable URL, rejected headers).
 - **stdio server can't find a binary or config.** The child env is allowlisted; pass public
-  values through `env` and credentials through write-only `secretEnv`.
+  values through `env` and credentials through write-only `secretEnv`. Check the binary exists
+  on the server's **environment**, not on the hub — they can be different machines.
+- **A server's tools vanished after switching a chat's environment.** They are scoped to the
+  environment they are bound to. Move the server in **Settings → MCP**, or switch the chat back.
+- **`statusError` mentions TLS.** The server stores secrets and its environment is reached over
+  plaintext `http://` to a public host; delivery is refused. Use `https://`, or a loopback or
+  private-network address.
 - **A tool call returns a timeout error.** Raise the server's `timeoutMs`, or check whether the
   server hangs; the turn still completes with the error result recorded.
 - **A long tool result looks cut off.** Results over 64 KiB are truncated with a marker by

@@ -110,6 +110,7 @@
       - any-glob-to-any-file:
           - "apps/api/src/services/mcp/**"
           - "apps/api/src/modules/mcp-servers/**"
+          - "apps/runtime/src/services/mcp/**"
           - "apps/frontend/src/features/settings/mcp/**"
           - "apps/shared/src/mcp/**"
 

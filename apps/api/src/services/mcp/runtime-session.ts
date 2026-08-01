@@ -20,10 +20,16 @@ import {
   type RuntimeMcpSessionEvent,
   RuntimeRemoteError,
 } from '@mangostudio/runtime';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
 import type { RuntimeClient } from '../runtime-client/runtime-client';
 import { getRuntimeClient } from '../runtime-client/runtime-connection-manager';
 import { createPendingElicitation } from './elicitation-registry';
 import { readMcpHeaders } from './header-secrets';
+import {
+  assertSecretsMayReachEnvironment,
+  type McpSecretTransportTarget,
+} from './secret-transport-guard';
 import { readMcpSecretEnv } from './stdio-env-secrets';
 import {
   type McpClientHandle,
@@ -51,6 +57,8 @@ export interface ConnectMcpClientOptions {
   resolveHeaders?: (serverId: string) => Promise<Record<string, string>>;
   /** stdio environment-secret lookup override for tests. */
   resolveSecretEnv?: (serverId: string) => Promise<Record<string, string>>;
+  /** Environment lookup override for tests; defaults to the owned-row read. */
+  resolveTransport?: (environmentId: string) => Promise<McpSecretTransportTarget | null>;
   /** Fires once when the session drops out from under us (crash, socket close). */
   onSessionClosed?: () => void;
   /** Fires when the server announces `notifications/tools/list_changed`. */
@@ -67,6 +75,11 @@ export async function connectMcpClient(
 ): Promise<McpClientHandle> {
   const runtime = await resolveRuntime(config, options.userId);
   const secrets = await readSecrets(config, options);
+  // Ordered deliberately: refuse before the connect, so a plaintext target
+  // never sees the credential even in a request it goes on to reject.
+  if (hasSecrets(secrets)) {
+    assertSecretsMayReachEnvironment(config.slug, await resolveTransport(config, options));
+  }
   const { environmentId, ...wireConfig } = config;
 
   const capabilities = await connectSession(runtime, wireConfig, secrets, config);
@@ -97,6 +110,19 @@ async function readSecrets(
   }
   const headers = await (options.resolveHeaders ?? readMcpHeaders)(config.id);
   return Object.keys(headers).length > 0 ? { headers } : {};
+}
+
+/**
+ * The environment record behind a server, for the secret-transport check. Local
+ * has no row: it is this process, which is the one place secrets already are.
+ */
+async function resolveTransport(
+  config: McpServerRuntimeConfig,
+  options: ConnectMcpClientOptions
+): Promise<McpSecretTransportTarget | null> {
+  if (options.resolveTransport) return await options.resolveTransport(config.environmentId);
+  if (config.environmentId === LOCAL_ENVIRONMENT_ID) return null;
+  return await environmentRepository.find(options.userId, config.environmentId);
 }
 
 async function connectSession(
