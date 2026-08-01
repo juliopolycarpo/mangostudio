@@ -312,7 +312,9 @@ Bun.serve could raise its payload limit.
 Config is `{ baseUrl }` (`http://` or `https://`). The serve token is write-only: it is
 never returned by the API, only whether one is stored (`hasRuntimeToken`). Private and
 loopback hosts are allowed — LAN reachability is the point — and the UI warns when the URL
-is plaintext HTTP to a public host.
+is plaintext HTTP to a public host. On the runtime side, inject a per-run serve secret with
+`MANGOSTUDIO_RUNTIME_SERVE_TOKEN` (or stdin); that path does not write the credential to
+disk. `MANGOSTUDIO_RUNTIME_TOKEN` stays the pairing credential for `connect`.
 
 **One serve process maps to one user environment.** A second hub (or a second connection
 from the same hub) that upgrades successfully supersedes the previous socket with close

@@ -35,7 +35,9 @@ function environmentError(error: unknown, set: { status?: number | string }): Ap
           ? ERROR_CODES.NOT_FOUND
           : error.status === 409
             ? ERROR_CODES.CONFLICT
-            : ERROR_CODES.VALIDATION,
+            : error.status === 503
+              ? ERROR_CODES.PROVIDER_ERROR
+              : ERROR_CODES.VALIDATION,
     };
   }
   throw error;
@@ -67,6 +69,7 @@ export function createEnvironmentEntityRoutes(
             201: EnvironmentSchema,
             400: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )
@@ -106,6 +109,7 @@ export function createEnvironmentEntityRoutes(
             400: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )

@@ -6,7 +6,7 @@
 import type { Environment, HttpEnvironmentConfig } from '@mangostudio/shared/environments';
 import { shouldWarnPlaintextHttpRuntime } from '@mangostudio/shared/environments';
 import { KeyRound } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
@@ -28,12 +28,17 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
   const update = useUpdateEnvironmentMutation();
   const initial = httpConfig(environment);
   const [baseUrl, setBaseUrl] = useState(initial.baseUrl);
+  const [baseUrlEdited, setBaseUrlEdited] = useState(false);
   const [token, setToken] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!baseUrlEdited) setBaseUrl(initial.baseUrl);
+  }, [baseUrlEdited, initial.baseUrl]);
+
   const trimmedBaseUrl = baseUrl.trim();
   const trimmedToken = token.trim();
-  const baseChanged = trimmedBaseUrl !== initial.baseUrl;
+  const baseChanged = baseUrlEdited && trimmedBaseUrl !== initial.baseUrl;
   const canSave = (baseChanged && trimmedBaseUrl.length > 0) || trimmedToken.length > 0;
   const warnPlaintext = shouldWarnPlaintextHttpRuntime(trimmedBaseUrl);
 
@@ -49,6 +54,7 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
         },
       });
       setToken('');
+      setBaseUrlEdited(false);
     } catch (caught) {
       setError(resolveApiErrorMessage(caught, labels.saveFailed));
     }
@@ -72,7 +78,10 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
           id={`direct-url-base-${environment.id}`}
           label={labels.baseUrlLabel}
           value={baseUrl}
-          onChange={(event) => setBaseUrl(event.target.value)}
+          onChange={(event) => {
+            setBaseUrlEdited(true);
+            setBaseUrl(event.target.value);
+          }}
         />
         <p className="text-[11px] text-on-surface-variant/60">{labels.baseUrlHint}</p>
       </div>

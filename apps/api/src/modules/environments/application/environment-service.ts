@@ -1,3 +1,4 @@
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
   CreateEnvironmentBody,
   Environment,
@@ -26,11 +27,16 @@ import {
 export class EnvironmentServiceError extends Error {
   constructor(
     message: string,
-    readonly status: 400 | 404 | 409
+    readonly status: 400 | 404 | 409 | 503
   ) {
     super(message);
     this.name = 'EnvironmentServiceError';
   }
+}
+
+function statusForTokenPersistFailure(error: unknown): 400 | 503 {
+  // Secret-store outages are server conditions; a malformed request stays 400.
+  return error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE' ? 503 : 400;
 }
 
 export interface EnvironmentService {
@@ -72,7 +78,7 @@ async function toEnvironment(
     updatedAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.updatedAt,
     status: manager.getStatus(record.userId, record.id),
     ...(record.transportKind === 'http'
-      ? { hasRuntimeToken: await hasRuntimeToken(record.id, secretStore) }
+      ? { hasRuntimeToken: await hasRuntimeToken(record.userId, record.id, secretStore) }
       : {}),
   };
 }
@@ -142,12 +148,12 @@ export function createEnvironmentService(
 
       if (token) {
         try {
-          await persistRuntimeToken(record.id, token, secretStore);
+          await persistRuntimeToken(userId, record.id, token, secretStore);
         } catch (error) {
           await repository.remove(userId, record.id);
           throw new EnvironmentServiceError(
             error instanceof Error ? error.message : String(error),
-            400
+            statusForTokenPersistFailure(error)
           );
         }
       }
@@ -191,11 +197,20 @@ export function createEnvironmentService(
 
       if (token !== undefined) {
         try {
-          await persistRuntimeToken(id, token, secretStore);
+          await persistRuntimeToken(userId, id, token, secretStore);
         } catch (error) {
+          // Row fields already moved; put them back so a keychain outage does
+          // not leave the environment pointing at a half-applied edit.
+          if (Object.keys(rowUpdate).length > 0) {
+            await repository.update(userId, id, {
+              name: current.name,
+              config: current.config,
+              enabled: current.enabled,
+            });
+          }
           throw new EnvironmentServiceError(
             error instanceof Error ? error.message : String(error),
-            400
+            statusForTokenPersistFailure(error)
           );
         }
       }
@@ -231,7 +246,7 @@ export function createEnvironmentService(
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
       manager.disconnect(userId, id);
-      await removeRuntimeToken(id, secretStore);
+      await removeRuntimeToken(userId, id, secretStore);
       publish(userId);
     },
 

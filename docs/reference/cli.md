@@ -119,15 +119,17 @@ fallen behind is visible rather than merely tolerated.
 
 ### `serve`
 
-| Flag                   | Description                                                                |
-| ---------------------- | -------------------------------------------------------------------------- |
-| `--listen <host:port>` | Bind address. A bare port binds `127.0.0.1`. Required.                     |
-| `--token -`            | Read the serve token from stdin (`env` reads `MANGOSTUDIO_RUNTIME_TOKEN`). |
+| Flag                   | Description                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------- |
+| `--listen <host:port>` | Bind address. A bare port binds `127.0.0.1`. Required.                           |
+| `--token -`            | Read the serve token from stdin (`env` reads `MANGOSTUDIO_RUNTIME_SERVE_TOKEN`). |
 
 `serve` is the Direct URL half of a remote runtime: the hub dials this process instead of
-the runtime dialing the hub. When neither `--token` nor the environment variable is set, a
-previous run's token is reused, or one is generated, stored owner-only beside the pairing
-token in `~/.mango/runtime/remote/credentials.json`, and printed once to stderr.
+the runtime dialing the hub. When neither `--token` nor `MANGOSTUDIO_RUNTIME_SERVE_TOKEN`
+is set, a previous run's token is reused, or one is generated, stored owner-only beside the
+pairing token in `~/.mango/runtime/remote/credentials.json`, and printed once to stderr.
+Tokens supplied on stdin or via the environment are not written to disk.
+`MANGOSTUDIO_RUNTIME_TOKEN` remains the pairing credential for `connect` only.
 
 Binding anything other than loopback prints a warning: whoever holds the serve token gets
 shell access on that machine. Put TLS in front with a reverse proxy when the dial leaves

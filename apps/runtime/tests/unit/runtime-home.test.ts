@@ -118,6 +118,17 @@ describe('runtime home', () => {
     expect(await readPairingToken('remote', env)).toBe('pairing.rotated');
   });
 
+  it('serializes concurrent pairing and serve credential writes', async () => {
+    const env = await isolatedEnv();
+    await Promise.all([
+      writePairingToken('remote', 'pairing.concurrent', env),
+      writeServeToken('remote', 'serve.concurrent', env),
+    ]);
+
+    expect(await readPairingToken('remote', env)).toBe('pairing.concurrent');
+    expect(await readServeToken('remote', env)).toBe('serve.concurrent');
+  });
+
   it('persists an optional setupState on the pasteable config', async () => {
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('remote', { setupState: 'pending' }, env);

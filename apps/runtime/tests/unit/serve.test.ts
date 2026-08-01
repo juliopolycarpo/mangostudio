@@ -100,17 +100,36 @@ describe('loopback and bearer helpers', () => {
 
 describe('serveRuntime', () => {
   it('exposes only status and version on /health', async () => {
+    const previousVersion = process.env.VERSION;
     process.env.VERSION = '1.2.3-serve';
+    try {
+      const handle = serveRuntime({
+        listen: { hostname: '127.0.0.1', port: 0 },
+        token: 'serve-secret',
+        createHost: createTestHost,
+      });
+      handles.push(handle);
+
+      const response = await fetch(`http://127.0.0.1:${handle.port}/health`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ status: 'ok', version: '1.2.3-serve' });
+    } finally {
+      if (previousVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = previousVersion;
+    }
+  });
+
+  it('stops immediately when the abort signal is already fired', async () => {
+    const controller = new AbortController();
+    controller.abort();
     const handle = serveRuntime({
       listen: { hostname: '127.0.0.1', port: 0 },
       token: 'serve-secret',
       createHost: createTestHost,
+      signal: controller.signal,
     });
     handles.push(handle);
-
-    const response = await fetch(`http://127.0.0.1:${handle.port}/health`);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ status: 'ok', version: '1.2.3-serve' });
+    await handle.stopped;
   });
 
   it('refuses upgrades without a matching bearer token', async () => {

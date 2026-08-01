@@ -19,7 +19,6 @@ import {
   readServeToken,
   writePairingToken,
   writeRuntimeSlotConfig,
-  writeServeToken,
 } from './runtime-home';
 import { parseListenAddress, serveRuntime } from './serve';
 import { createStdioFramePort, type StdioFramePortClosure } from './transports/stdio';
@@ -66,9 +65,10 @@ serve options:
   --listen <host:port>
                Bind address. A bare port binds 127.0.0.1. Required.
   --token -    Read the serve token from stdin
-               Or set MANGOSTUDIO_RUNTIME_TOKEN / --token env. When neither is
-               given, a stored token is reused, or one is generated and printed
-               once. Never pass the secret as an argument.
+               Or set MANGOSTUDIO_RUNTIME_SERVE_TOKEN / --token env. When
+               neither is given, a stored token is reused, or one is generated
+               and printed once. Never pass the secret as an argument.
+               MANGOSTUDIO_RUNTIME_TOKEN is for connect only.
 
 MangoStudio spawns this binary for stdio environments; it is not meant to be
 run interactively there. stdout carries protocol frames only — diagnostics go
@@ -259,27 +259,26 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
 
   const stored = await readRuntimeSlotConfig('remote');
   if (stored.setupState === 'pending') {
-    log('This runtime slot is still pending setup. Run "mangostudio-runtime setup" before serve.');
+    log('This runtime slot is still pending setup. Complete setup on this machine before serve.');
     return 1;
   }
 
   const resolved = await resolveServeToken(args.tokenSource);
   if (!resolved) {
     log(
-      'No serve token. Pipe one in with --token -, set MANGOSTUDIO_RUNTIME_TOKEN, or omit --token to generate one.'
+      'No serve token. Pipe one in with --token -, set MANGOSTUDIO_RUNTIME_SERVE_TOKEN, or omit --token to generate one.'
     );
     return 1;
   }
 
-  const { restricted } = await writeServeToken('remote', resolved.token);
-  if (!restricted) {
-    log(
-      process.platform === 'win32'
-        ? 'Warning: the serve token file is not restricted to this account. Windows needs an ACL this runtime does not set; restrict it yourself if other accounts use this machine.'
-        : 'Warning: the serve token file could not be restricted to this user.'
-    );
-  }
   if (resolved.generated) {
+    if (!resolved.restricted) {
+      log(
+        process.platform === 'win32'
+          ? 'Warning: the serve token file is not restricted to this account. Windows needs an ACL this runtime does not set; restrict it yourself if other accounts use this machine.'
+          : 'Warning: the serve token file could not be restricted to this user.'
+      );
+    }
     log(`Serve token (shown once): ${resolved.token}`);
   }
 
@@ -316,14 +315,17 @@ async function resolveToken(source: RuntimeConnectArgs['tokenSource']): Promise<
   return source === 'env' ? null : await readPairingToken('remote');
 }
 
-async function resolveServeToken(
-  source: RuntimeServeArgs['tokenSource']
-): Promise<{ readonly token: string; readonly generated: boolean } | null> {
+async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promise<{
+  readonly token: string;
+  readonly generated: boolean;
+  readonly restricted?: boolean;
+} | null> {
   if (source === 'stdin') {
     const piped = (await Bun.stdin.text()).trim();
+    // Operator-supplied secrets stay out of credentials.json on purpose.
     return piped.length > 0 ? { token: piped, generated: false } : null;
   }
-  const fromEnv = loadRuntimeConfig().pairingToken;
+  const fromEnv = loadRuntimeConfig().serveToken;
   if (source === 'env') {
     return fromEnv ? { token: fromEnv, generated: false } : null;
   }
@@ -331,7 +333,11 @@ async function resolveServeToken(
   const stored = await readServeToken('remote');
   if (stored) return { token: stored, generated: false };
   const bootstrapped = await bootstrapServeToken('remote');
-  return { token: bootstrapped.token, generated: true };
+  return {
+    token: bootstrapped.token,
+    generated: true,
+    restricted: bootstrapped.restricted,
+  };
 }
 
 async function serveStdio(runtimeVersion: string): Promise<number> {

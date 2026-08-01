@@ -12,6 +12,7 @@ import { timingSafeEqual } from 'node:crypto';
 import {
   RUNTIME_CLOSE_CODES,
   RUNTIME_HEARTBEAT_TOPIC,
+  RUNTIME_MAX_FRAME_BYTES,
   RUNTIME_MAX_TRANSPORT_MESSAGE_BYTES,
 } from '@mangostudio/shared/runtime-protocol';
 import { getRuntimeVersion } from './config';
@@ -171,7 +172,9 @@ export function serveRuntime(options: RuntimeServeOptions): RuntimeServeHandle {
     },
     websocket: {
       maxPayloadLength: RUNTIME_MAX_TRANSPORT_MESSAGE_BYTES,
-      backpressureLimit: 64 * 1024,
+      // Match the frame port's queue budget so a slow hub drains through
+      // backpressure instead of Bun closing the socket at 64 KiB.
+      backpressureLimit: RUNTIME_MAX_FRAME_BYTES,
       closeOnBackpressureLimit: true,
       idleTimeout: 0,
       open(socket) {
@@ -272,12 +275,17 @@ export function serveRuntime(options: RuntimeServeOptions): RuntimeServeHandle {
     stopped.resolve();
   };
 
-  options.signal?.addEventListener('abort', stop, { once: true });
-
   const port = server.port;
   if (port === undefined) {
     server.stop(true);
     throw new Error('The runtime serve socket did not bind a port.');
+  }
+
+  // Honor a signal that fired before we subscribed — otherwise a caller that
+  // aborts during construction leaves a listening socket behind.
+  options.signal?.addEventListener('abort', stop, { once: true });
+  if (options.signal?.aborted) {
+    stop();
   }
 
   const bind = `${options.listen.hostname}:${port}`;

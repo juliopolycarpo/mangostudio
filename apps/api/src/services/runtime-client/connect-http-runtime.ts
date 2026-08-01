@@ -10,10 +10,13 @@
 import {
   clientWebSocketSink,
   createWebSocketFramePort,
+  livenessIntervalFor,
   RuntimeProtocolClient,
   RuntimeRemoteError,
+  startProtocolLiveness,
 } from '@mangostudio/runtime';
-import { RUNTIME_CLOSE_CODES } from '@mangostudio/shared/runtime-protocol';
+import { REALTIME_IDLE_TIMEOUT_SECONDS } from '@mangostudio/shared/realtime';
+import { RUNTIME_CLOSE_CODES, RuntimeProtocolError } from '@mangostudio/shared/runtime-protocol';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { environmentConfigFor } from '../../modules/environments/domain/environment-config';
@@ -28,6 +31,7 @@ const logger = createDiagnosticLogger('runtime-http');
 /** Minimal definition shape — kept local to avoid a cycle with the manager. */
 export interface HttpRuntimeDefinition {
   readonly id: string;
+  readonly userId: string;
   readonly config: unknown;
 }
 
@@ -42,7 +46,7 @@ export async function connectHttpRuntime(
 ): Promise<HttpRuntimeConnection> {
   const { baseUrl } = environmentConfigFor('http', definition.config);
   const wsUrl = httpRuntimeBaseUrlToWebSocketUrl(baseUrl);
-  const token = await readRuntimeToken(definition.id);
+  const token = await readRuntimeToken(definition.userId, definition.id);
 
   // Bun accepts an options object with headers; the DOM `WebSocket` typings in
   // this workspace only list the protocol-array overload, so the cast is local.
@@ -120,18 +124,30 @@ export async function connectHttpRuntime(
     notified = true;
     socket.close(1000, 'Handshake failed');
     client.close();
-    throw error instanceof RuntimeRemoteError
-      ? error
-      : new RuntimeRemoteError(
-          'RUNTIME_UNAVAILABLE',
-          error instanceof Error ? error.message : String(error)
-        );
+    throw asConnectError(error);
   }
+
+  // The listening runtime disables Bun's idle timeout; hub-side protocol
+  // pings are what notice a frozen peer and drop the cached connection.
+  const stopLiveness = startProtocolLiveness({
+    ping: () => client.ping(),
+    onPong: (listener) => client.onPong(listener),
+    intervalMs: livenessIntervalFor(REALTIME_IDLE_TIMEOUT_SECONDS),
+    onTimeout: () => {
+      logger.warn('liveness_timeout', { environmentId: definition.id });
+      try {
+        socket.close(RUNTIME_CLOSE_CODES.RELEASED, 'Liveness timeout');
+      } catch {
+        // Already closed.
+      }
+    },
+  });
 
   return {
     client: new RuntimeClient(client, notifyGone),
     close(reason) {
       notified = true;
+      stopLiveness();
       client.close();
       try {
         socket.close(
@@ -143,6 +159,17 @@ export async function connectHttpRuntime(
       }
     },
   };
+}
+
+function asConnectError(error: unknown): RuntimeRemoteError {
+  if (error instanceof RuntimeRemoteError) return error;
+  if (error instanceof RuntimeProtocolError) {
+    return new RuntimeRemoteError(error.code, error.message, error.details);
+  }
+  return new RuntimeRemoteError(
+    'RUNTIME_UNAVAILABLE',
+    error instanceof Error ? error.message : String(error)
+  );
 }
 
 function sleepMs(ms: number): Promise<void> {

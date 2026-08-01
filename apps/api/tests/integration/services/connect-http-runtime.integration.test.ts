@@ -126,7 +126,7 @@ describe('Direct URL http runtime', () => {
       config: { baseUrl: 'http://127.0.0.1:1' },
       token: 'initial',
     });
-    await persistRuntimeToken('token-only', 'initial', store);
+    await persistRuntimeToken(TEST_USER.id, 'token-only', 'initial', store);
 
     const updated = await service.update(TEST_USER.id, 'token-only', { token: 'rotated' });
     expect(updated.hasRuntimeToken).toBe(true);
