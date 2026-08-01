@@ -3,11 +3,14 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  bootstrapServeToken,
   readPairingToken,
   readRuntimeSlotConfig,
+  readServeToken,
   runtimeSlotDir,
   writePairingToken,
   writeRuntimeSlotConfig,
+  writeServeToken,
 } from '../../src/runtime-home';
 
 const homes: string[] = [];
@@ -99,5 +102,30 @@ describe('runtime home', () => {
     await writePairingToken('remote', 'mrt_second.secret', env);
 
     expect(await readPairingToken('remote', env)).toBe('mrt_second.secret');
+  });
+
+  it('keeps pairing and serve tokens in the same credentials file', async () => {
+    const env = await isolatedEnv();
+    await writePairingToken('remote', 'pairing.secret', env);
+    await writeServeToken('remote', 'serve.secret', env);
+    await writePairingToken('remote', 'pairing.rotated', env);
+
+    expect(await readPairingToken('remote', env)).toBe('pairing.rotated');
+    expect(await readServeToken('remote', env)).toBe('serve.secret');
+
+    const { token } = await bootstrapServeToken('remote', env);
+    expect(await readServeToken('remote', env)).toBe(token);
+    expect(await readPairingToken('remote', env)).toBe('pairing.rotated');
+  });
+
+  it('persists an optional setupState on the pasteable config', async () => {
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig('remote', { setupState: 'pending' }, env);
+
+    expect(await readRuntimeSlotConfig('remote', env)).toEqual({
+      schemaVersion: 1,
+      slot: 'remote',
+      setupState: 'pending',
+    });
   });
 });
