@@ -112,25 +112,28 @@ describe('remote shell quoting', () => {
 });
 
 describe('ssh preflight commands', () => {
-  it('omits the forced options, because running it by hand is how a key is trusted', () => {
+  it('omits batch and host-key forcing but disables ambient RemoteCommand', () => {
     const { reach, runtime } = sshPreflightCommands(config({ user: 'deploy', port: 2222 }));
 
-    expect(reach).toBe("ssh -p 2222 'deploy@build-01.internal' true");
+    expect(reach).toBe("ssh -o RemoteCommand=none -p 2222 'deploy@build-01.internal' true");
     expect(reach).not.toContain('BatchMode');
     expect(reach).not.toContain('StrictHostKeyChecking');
     expect(runtime).toContain('--version');
+    expect(runtime).toContain('RemoteCommand=none');
   });
 
   it('quotes an identity file that contains a space', () => {
     const { reach } = sshPreflightCommands(config({ identityFile: '/home/j/my keys/id_ed25519' }));
 
-    expect(reach).toBe("ssh -i '/home/j/my keys/id_ed25519' 'build-01.internal' true");
+    expect(reach).toBe(
+      "ssh -o RemoteCommand=none -i '/home/j/my keys/id_ed25519' 'build-01.internal' true"
+    );
   });
 
   it('quotes a destination that carries shell metacharacters', () => {
     const { reach } = sshPreflightCommands(config({ host: 'box; touch /tmp/x' }));
 
-    expect(reach).toBe("ssh 'box; touch /tmp/x' true");
+    expect(reach).toBe("ssh -o RemoteCommand=none 'box; touch /tmp/x' true");
     expect(reach).not.toMatch(/^ssh box;/);
   });
 

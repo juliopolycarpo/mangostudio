@@ -123,6 +123,10 @@ export function sshPreflightCommands(config: SshEnvironmentConfig): {
   // the way that shell will parse it; the hub argv path never interpolates.
   const prefix = [
     'ssh',
+    // Same collision as the hub launch path: ambient `RemoteCommand` plus a
+    // trailing command argument fails before reach/runtime probes can run.
+    '-o',
+    'RemoteCommand=none',
     ...(config.port ? ['-p', String(config.port)] : []),
     ...(config.identityFile ? ['-i', quoteForLocalShell(config.identityFile)] : []),
     quoteForLocalShell(sshDestination(config)),
