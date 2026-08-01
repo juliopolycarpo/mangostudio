@@ -154,7 +154,11 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
   await writeRuntimeSlotConfig('remote', { hubUrl });
   const { restricted } = await writePairingToken('remote', token);
   if (!restricted) {
-    log('Warning: the pairing token file could not be restricted to this user.');
+    log(
+      process.platform === 'win32'
+        ? 'Warning: the pairing token file is not restricted to this account. Windows needs an ACL this runtime does not set; restrict it yourself if other accounts use this machine.'
+        : 'Warning: the pairing token file could not be restricted to this user.'
+    );
   }
 
   const controller = new AbortController();

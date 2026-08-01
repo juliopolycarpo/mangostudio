@@ -87,13 +87,23 @@ describe('RuntimePairingPanel', () => {
     render(<EnvironmentEntitiesOverview />);
     await user.click(within(await panel()).getByRole('button', { name: labels.issue }));
 
-    const command = await within(await panel()).findByText(/mangostudio-runtime connect/);
-    expect(command.textContent).toContain(`printf %s '${TOKEN}'`);
-    expect(command.textContent).toContain(`--hub ${ENDPOINT}`);
-    expect(command.textContent).toContain('--token -');
+    const [posix, powershell] = await within(await panel()).findAllByText(
+      /mangostudio-runtime connect/
+    );
+    expect(posix?.textContent).toContain(`printf %s '${TOKEN}'`);
+    expect(posix?.textContent).toContain(`--hub ${ENDPOINT}`);
+    expect(posix?.textContent).toContain('--token -');
+    // `printf` and single quotes are neither `cmd.exe` nor PowerShell, so a
+    // Windows operator following the POSIX line gets a parse error rather than
+    // a paired machine. The environment variable is the documented second way
+    // in, and it keeps the secret out of argv the same way.
+    expect(powershell?.textContent).toContain(`$env:MANGOSTUDIO_RUNTIME_TOKEN='${TOKEN}'`);
+    expect(powershell?.textContent).toContain(`--hub ${ENDPOINT}`);
     // `--token <secret>` would put the credential in a command line every
     // process on that machine can read.
-    expect(command.textContent).not.toContain(`--token ${TOKEN}`);
+    for (const line of [posix, powershell]) {
+      expect(line?.textContent).not.toContain(`--token ${TOKEN}`);
+    }
   });
 
   it('warns when the hub has not been told its own public address', async () => {
@@ -106,9 +116,11 @@ describe('RuntimePairingPanel', () => {
     expect(within(await panel()).getByText(labels.endpointUnset)).toBeInTheDocument();
 
     await user.click(within(await panel()).getByRole('button', { name: labels.issue }));
-    const command = await within(await panel()).findByText(/mangostudio-runtime connect/);
+    const commands = await within(await panel()).findAllByText(/mangostudio-runtime connect/);
     // A placeholder, not a guess: the request's own Host header is spoofable.
-    expect(command.textContent).toContain(labels.endpointPlaceholder);
+    for (const command of commands) {
+      expect(command.textContent).toContain(labels.endpointPlaceholder);
+    }
   });
 
   it('offers rotation and revocation once a token exists', async () => {

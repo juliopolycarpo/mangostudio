@@ -123,11 +123,17 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
 }
 
 /**
- * The command to run on the target machine. The token goes in on stdin rather
- * than as an argument: a command line is readable by every process on that
- * machine, and this one is shown once.
+ * The command to run on the target machine, in both shells a target machine
+ * plausibly has. The token never becomes an argument: a command line is
+ * readable by every process on that machine, and this one is shown once.
  *
- * One line, not three. The install one-liner needs a published raw asset and
+ * Two forms rather than one, because `printf %s '…' |` is not a command
+ * `cmd.exe` or PowerShell has — a Windows operator following the POSIX line
+ * gets a parse error, not a paired machine. PowerShell sets the documented
+ * environment variable instead of piping, which keeps the secret out of argv
+ * the same way and off the pipeline's newline handling.
+ *
+ * One step, not three. The install one-liner needs a published raw asset and
  * `setup` needs the consent gate — neither exists yet, and a card that prints a
  * command the binary answers with `Unknown argument` is worse than a card that
  * stays quiet about a step until there is one.
@@ -142,13 +148,15 @@ function SetupSteps({
   const { t } = useI18n();
   const labels = t.environments.entities.pairing;
   const target = endpoint ?? labels.endpointPlaceholder;
-  const command = `printf %s '${token}' | mangostudio-runtime connect --hub ${target} --token -`;
+  const posix = `printf %s '${token}' | mangostudio-runtime connect --hub ${target} --token -`;
+  const powershell = `$env:MANGOSTUDIO_RUNTIME_TOKEN='${token}'; mangostudio-runtime connect --hub ${target}`;
 
   return (
     <div className="space-y-2 rounded-lg border border-primary/35 bg-primary/5 p-2.5">
       <p className="font-semibold text-[11px] text-on-surface">{labels.tokenIssued}</p>
       <p className="text-[11px] text-on-surface-variant/70">{labels.tokenOnce}</p>
-      <CopyLine label={labels.stepConnect} value={command} />
+      <CopyLine label={labels.stepConnect} value={posix} />
+      <CopyLine label={labels.stepConnectPowerShell} value={powershell} />
       <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
     </div>
   );

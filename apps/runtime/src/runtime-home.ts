@@ -83,15 +83,24 @@ export async function readPairingToken(
  * Persists the credential owner-only. On a filesystem that cannot express that
  * — a Windows volume, a mounted share — the write still happens and the caller
  * is told, rather than the runtime pretending the file is protected.
+ *
+ * Windows is reported as unrestricted unconditionally, and that is not
+ * pessimism. `chmod` there resolves after setting the read-only attribute and
+ * reports success, so a `restricted: true` on Windows would mean "the call did
+ * not throw", not "no other account can read this" — and the whole point of
+ * the flag is the second sentence. Owner-only access needs an ACL this
+ * runtime does not set yet, so it says so instead.
  */
 export async function writePairingToken(
   slot: RuntimeSlot,
   token: string,
-  env?: NodeJS.ProcessEnv
+  env?: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform
 ): Promise<{ readonly restricted: boolean }> {
   const path = join(runtimeSlotDir(slot, env), CREDENTIALS_FILE);
   const credentials: RuntimeSlotCredentials = { schemaVersion: 1, pairingToken: token };
   await writeFileAtomically(path, credentials, OWNER_ONLY);
+  if (platform === 'win32') return { restricted: false };
   try {
     await chmod(path, OWNER_ONLY);
     return { restricted: true };

@@ -40,7 +40,8 @@ export const environmentKeys = {
   agents: () => [...environmentKeys.all, 'agents'] as const,
   installRecipes: () => [...environmentKeys.all, 'install-recipes'] as const,
   wsl: () => [...environmentKeys.all, 'wsl'] as const,
-  pairing: (id: string) => [...environmentKeys.all, 'pairing', id] as const,
+  pairings: () => [...environmentKeys.all, 'pairing'] as const,
+  pairing: (id: string) => [...environmentKeys.pairings(), id] as const,
 };
 
 function environmentEntitiesQueryOptions() {
@@ -56,9 +57,14 @@ function environmentEntitiesQueryOptions() {
 
 export function useEnvironmentEntitiesQuery() {
   const queryClient = useQueryClient();
-  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, () =>
-    queryClient.invalidateQueries({ queryKey: environmentKeys.entities() })
-  );
+  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, async () => {
+    await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+    // Pairing state moves on the same events: a runtime dialing in stamps its
+    // credential as seen, and rotating or revoking one drops what it had
+    // connected. Without this the panel keeps saying "never seen" about a
+    // machine the card beside it already shows as connected.
+    await queryClient.invalidateQueries({ queryKey: environmentKeys.pairings() });
+  });
   return useQuery(environmentEntitiesQueryOptions());
 }
 

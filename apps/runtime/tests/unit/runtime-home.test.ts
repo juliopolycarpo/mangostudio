@@ -76,6 +76,23 @@ describe('runtime home', () => {
     }
   });
 
+  it('does not claim owner-only access on Windows, where chmod cannot grant it', async () => {
+    const env = await isolatedEnv();
+    // `chmod(0o600)` resolves on Windows after setting the read-only attribute,
+    // so a `restricted: true` there would mean "the call did not throw" rather
+    // than "no other account can read this" — and the flag exists to answer the
+    // second question, which is the one that suppresses the warning.
+    const { restricted } = await writePairingToken(
+      'remote',
+      'mrt_selector.secret',
+      env,
+      'win32' as NodeJS.Platform
+    );
+
+    expect(restricted).toBe(false);
+    expect(await readPairingToken('remote', env)).toBe('mrt_selector.secret');
+  });
+
   it('replaces a rotated credential rather than appending to it', async () => {
     const env = await isolatedEnv();
     await writePairingToken('remote', 'mrt_first.secret', env);
