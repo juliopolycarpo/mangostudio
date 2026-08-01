@@ -250,8 +250,13 @@ describe('runtime connect loop', () => {
     });
 
     await loop;
+    // Assert the tier each delay was drawn from, not a strict ordering between
+    // them: full jitter makes the windows [500,1000], [1000,2000], [2000,4000],
+    // which touch at their boundaries, so two adjacent delays can legitimately
+    // come out equal.
     expect(delays).toHaveLength(3);
-    expect(delays[1]).toBeGreaterThan(delays[0] as number);
-    expect(delays[2]).toBeGreaterThan(delays[1] as number);
+    expect(delays[0]).toBeWithin(500, 1_000 + 1);
+    expect(delays[1]).toBeWithin(1_000, 2_000 + 1);
+    expect(delays[2]).toBeWithin(2_000, 4_000 + 1);
   });
 });
