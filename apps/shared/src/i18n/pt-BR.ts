@@ -2106,14 +2106,44 @@ export const messages = {
       shells: 'Shells: {shells}',
       checkpoints: 'Checkpoints',
       platform: '{platform} · {arch}',
+      pairing: {
+        title: 'Pareamento',
+        description: 'O runtime naquela máquina disca para o MangoStudio com esta credencial.',
+        endpointUnset:
+          'O MangoStudio não conhece o próprio endereço público. Defina `publicUrl` em `[server]` no config.toml (ou PUBLIC_URL) para que o comando abaixo aponte para algo alcançável.',
+        endpointPlaceholder: '<URL do seu MangoStudio>/api/runtime',
+        noToken: 'Nenhum token de pareamento ainda.',
+        neverSeen: 'Emitido. Nenhum runtime o usou ainda.',
+        lastSeen: 'Usado pela última vez em {when}.',
+        issue: 'Emitir token',
+        rotate: 'Emitir um novo token',
+        revoke: 'Revogar',
+        revokeConfirm:
+          'Revogar este token de pareamento? O runtime que o usa desconecta imediatamente e não consegue reconectar até você emitir um novo.',
+        issueFailed: 'Não foi possível emitir o token de pareamento.',
+        revokeFailed: 'Não foi possível revogar o token de pareamento.',
+        tokenIssued: 'Rode estes comandos naquela máquina.',
+        tokenOnce:
+          'O token é mostrado uma única vez. Emita um novo se perdê-lo — isso também aposenta este.',
+        stepInstall: '1 · Configure o runtime lá',
+        stepConnect: '2 · Conecte ao MangoStudio',
+        serviceHint:
+          'Mantenha o comando connect rodando; uma unidade de serviço para ele chega separadamente.',
+      },
       add: {
         trigger: 'Adicionar ambiente',
         title: 'Adicionar um ambiente',
         description: 'Rode as ferramentas do chat, os workspaces e o Git em um processo separado.',
-        kindLabel: 'Transporte',
-        stdioSummary: 'Processo local (avançado)',
+        reachLabel: 'Como você alcança esta máquina?',
+        reachLocal: 'É esta máquina',
+        reachWsl: 'Uma distribuição Linux nesta máquina',
+        reachPaired: 'Outra máquina que consegue alcançar o MangoStudio',
         stdioHint:
           'Inicia o runtime que acompanha o MangoStudio como um processo filho nesta máquina.',
+        pairedHint:
+          'O runtime naquela máquina disca para o MangoStudio, então funciona atrás de um roteador ou firewall sem nenhuma porta de entrada aberta.',
+        pairedNext:
+          'Depois de adicionar, o cartão emite um token de pareamento e imprime os dois comandos para rodar naquela máquina.',
         idLabel: 'Identificador',
         idHint: 'Letras minúsculas, dígitos e hifens simples. Não pode ser alterado depois.',
         idInvalid: 'Use letras minúsculas, dígitos e hifens simples.',
@@ -2123,7 +2153,6 @@ export const messages = {
         binaryPathHint: 'Deixe vazio para usar o runtime instalado junto ao MangoStudio.',
         cwdLabel: 'Diretório de trabalho',
         cwdHint: 'Deixe vazio para herdar o diretório em que o MangoStudio foi iniciado.',
-        wslSummary: 'WSL',
         wslHint:
           'Executa ferramentas, workspaces e Git dentro de uma distribuição Linux nesta máquina. A primeira conexão instala o runtime nela e inicia a distribuição, então demora um pouco.',
         wslDistroLabel: 'Distribuição',

@@ -95,9 +95,9 @@ describe('AddEnvironmentDialog', () => {
   it('hides the WSL tab on a host that has no WSL', async () => {
     const dialog = await openDialog();
 
-    expect(within(dialog).getByText(labels.stdioSummary)).toBeInTheDocument();
-    expect(within(dialog).queryByRole('tab', { name: labels.wslSummary })).toBeNull();
-    // The kinds later plans add must not appear before they can connect.
+    expect(within(dialog).getByRole('tab', { name: labels.reachLocal })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('tab', { name: labels.reachWsl })).toBeNull();
+    // The answers later plans add must not appear before they can connect.
     expect(within(dialog).queryByText(en.environments.entities.transport.ssh)).toBeNull();
   });
 
@@ -192,7 +192,7 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.wslSummary }));
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
 
     const list = await within(dialog).findByTestId('wsl-distribution-list');
     // The host says which distribution is default; nothing here is hardcoded.
@@ -212,7 +212,7 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.wslSummary }));
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
     await user.click(within(list).getByRole('button', { name: /Debian/ }));
     await user.click(within(dialog).getByRole('button', { name: labels.submit }));
@@ -230,7 +230,7 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.wslSummary }));
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
 
     const configured = within(list).getByRole('button', { name: /docker-desktop/ });
@@ -243,7 +243,7 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const dialog = await openDialog();
     await waitFor(() => expect(wslRequestCount()).toBe(1));
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.wslSummary }));
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
     const list = await within(dialog).findByTestId('wsl-distribution-list');
     await user.click(within(list).getByRole('button', { name: /Debian/ }));
     await user.click(within(dialog).getByRole('button', { name: labels.submit }));
@@ -259,7 +259,7 @@ describe('AddEnvironmentDialog WSL tab', () => {
     const user = userEvent.setup();
     const dialog = await openDialog();
 
-    await user.click(within(dialog).getByRole('tab', { name: labels.wslSummary }));
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachWsl }));
 
     expect(
       within(dialog).queryByRole('textbox', {

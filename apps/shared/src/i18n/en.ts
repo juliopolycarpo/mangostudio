@@ -2086,14 +2086,43 @@ export const messages: Messages = {
       shells: 'Shells: {shells}',
       checkpoints: 'Checkpoints',
       platform: '{platform} · {arch}',
+      pairing: {
+        title: 'Pairing',
+        description: 'The runtime on that machine dials MangoStudio with this credential.',
+        endpointUnset:
+          'MangoStudio does not know its own public address. Set `publicUrl` under `[server]` in config.toml (or PUBLIC_URL) so the command below points somewhere reachable.',
+        endpointPlaceholder: '<your MangoStudio URL>/api/runtime',
+        noToken: 'No pairing token yet.',
+        neverSeen: 'Issued. No runtime has used it yet.',
+        lastSeen: 'Last used {when}.',
+        issue: 'Issue token',
+        rotate: 'Issue a new token',
+        revoke: 'Revoke',
+        revokeConfirm:
+          'Revoke this pairing token? The runtime using it disconnects immediately and cannot reconnect until you issue a new one.',
+        issueFailed: 'The pairing token could not be issued.',
+        revokeFailed: 'The pairing token could not be revoked.',
+        tokenIssued: 'Run these on that machine.',
+        tokenOnce:
+          'The token is shown once. Issue a new one if you lose it — that also retires this one.',
+        stepInstall: '1 · Configure the runtime there',
+        stepConnect: '2 · Connect it to MangoStudio',
+        serviceHint: 'Keep the connect command running; a service unit for it lands separately.',
+      },
       add: {
         trigger: 'Add environment',
         title: 'Add an environment',
         description: 'Run chat tools, workspaces, and Git in a process of their own.',
-        kindLabel: 'Transport',
-        stdioSummary: 'Local process (advanced)',
+        reachLabel: 'How do you reach this machine?',
+        reachLocal: 'It is this machine',
+        reachWsl: 'A Linux distribution on this machine',
+        reachPaired: 'Another machine that can reach MangoStudio',
         stdioHint:
           'Starts the runtime that ships with MangoStudio as a child process on this machine.',
+        pairedHint:
+          'The runtime on that machine dials MangoStudio, so it works from behind a router or a firewall with no inbound port open.',
+        pairedNext:
+          'After you add it, the card issues a pairing token and prints the two commands to run on that machine.',
         idLabel: 'Identifier',
         idHint: 'Lowercase letters, digits, and single dashes. Cannot be changed later.',
         idInvalid: 'Use lowercase letters, digits, and single dashes.',
@@ -2103,7 +2132,6 @@ export const messages: Messages = {
         binaryPathHint: 'Leave empty to use the runtime installed beside MangoStudio.',
         cwdLabel: 'Working directory',
         cwdHint: 'Leave empty to inherit the directory MangoStudio was started in.',
-        wslSummary: 'WSL',
         wslHint:
           'Runs tools, workspaces, and Git inside a Linux distribution on this machine. The first connection installs the runtime there and starts the distribution, so it takes a while.',
         wslDistroLabel: 'Distribution',

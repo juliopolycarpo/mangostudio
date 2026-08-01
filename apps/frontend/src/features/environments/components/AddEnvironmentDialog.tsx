@@ -1,11 +1,13 @@
 /**
  * Creates an execution environment.
  *
- * Only the transports that actually exist are offered, and the WSL tab appears
- * only on a Windows hub that has distributions to offer — on anything else it
- * would be a tab that can never do anything. The remaining kinds land behind
- * these, so the transport row stays a picker rather than becoming one later and
- * reshuffling every field around it.
+ * The first question is "how do you reach that machine", not "which protocol":
+ * a user knows whether the target is this box, a distribution on it, or a
+ * machine somewhere else, and knows nothing useful about the difference between
+ * a spawned child and a dialed-in socket. Each answer picks the transport that
+ * fits it. Answers whose transport does not exist yet are not offered — a row
+ * that can never do anything is worse than a missing one — and the later
+ * transports (012, 013) add their row here.
  */
 
 import type { CreateEnvironmentBody, WslDistribution } from '@mangostudio/shared/environments';
@@ -22,7 +24,8 @@ const ENVIRONMENT_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const ENVIRONMENT_ID_MAX_LENGTH = 63;
 const ENVIRONMENT_NAME_MAX_LENGTH = 80;
 
-type TransportChoice = 'stdio' | 'wsl';
+/** One answer to "how do you reach it", and the transport that answer implies. */
+type ReachabilityChoice = 'stdio' | 'wsl' | 'websocket';
 
 interface AddEnvironmentDialogProps {
   readonly onClose: () => void;
@@ -53,7 +56,7 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const create = useCreateEnvironmentMutation();
   const titleId = useId();
 
-  const [kind, setKind] = useState<TransportChoice>('stdio');
+  const [kind, setKind] = useState<ReachabilityChoice>('stdio');
   const [name, setName] = useState('');
   // Tracked separately so typing an id once stops the name from overwriting it.
   const [id, setId] = useState('');
@@ -91,6 +94,17 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
     idInvalid ||
     (kind === 'wsl' && !selectionOffered);
 
+  const choices: { readonly value: ReachabilityChoice; readonly label: string }[] = [
+    { value: 'stdio', label: labels.reachLocal },
+    ...(wslOffered ? [{ value: 'wsl' as const, label: labels.reachWsl }] : []),
+    { value: 'websocket', label: labels.reachPaired },
+  ];
+  const hints: Record<ReachabilityChoice, string> = {
+    stdio: labels.stdioHint,
+    wsl: labels.wslHint,
+    websocket: labels.pairedHint,
+  };
+
   const handleSubmit = async () => {
     if (blocked) return;
     setError(null);
@@ -105,17 +119,26 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
             transportKind: 'wsl',
             config: { distro: selectedDistro },
           }
-        : {
-            id: effectiveId,
-            name: trimmedName,
-            transportKind: 'stdio',
-            // An omitted field means "use the default"; an empty string would be
-            // a path the launcher then tries to spawn.
-            config: {
-              ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
-              ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
-            },
-          };
+        : kind === 'websocket'
+          ? {
+              id: effectiveId,
+              name: trimmedName,
+              transportKind: 'websocket',
+              // Nothing to configure hub-side: the machine identifies itself
+              // with the pairing token the card issues after this.
+              config: {},
+            }
+          : {
+              id: effectiveId,
+              name: trimmedName,
+              transportKind: 'stdio',
+              // An omitted field means "use the default"; an empty string would
+              // be a path the launcher then tries to spawn.
+              config: {
+                ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
+                ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
+              },
+            };
 
     try {
       await create.mutateAsync(body);
@@ -151,28 +174,19 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
 
         <div className="space-y-4">
           <div className="space-y-1">
-            <p className="font-medium text-on-surface-variant text-sm">{labels.kindLabel}</p>
-            {wslOffered ? (
-              <div className="grid grid-cols-2 gap-2" role="tablist">
-                <TransportTab
-                  active={kind === 'stdio'}
-                  label={labels.stdioSummary}
-                  onSelect={() => setKind('stdio')}
+            <p className="font-medium text-on-surface-variant text-sm">{labels.reachLabel}</p>
+            <div className="grid gap-2" role="tablist">
+              {choices.map((choice) => (
+                <ReachabilityOption
+                  key={choice.value}
+                  active={kind === choice.value}
+                  label={choice.label}
+                  onSelect={() => setKind(choice.value)}
                 />
-                <TransportTab
-                  active={kind === 'wsl'}
-                  label={labels.wslSummary}
-                  onSelect={() => setKind('wsl')}
-                />
-              </div>
-            ) : null}
+              ))}
+            </div>
             <div className="rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
-              {wslOffered ? null : (
-                <p className="font-semibold text-on-surface text-sm">{labels.stdioSummary}</p>
-              )}
-              <p className={`text-on-surface-variant/70 text-xs ${wslOffered ? '' : 'mt-0.5'}`}>
-                {kind === 'wsl' ? labels.wslHint : labels.stdioHint}
-              </p>
+              <p className="text-on-surface-variant/70 text-xs">{hints[kind]}</p>
             </div>
           </div>
 
@@ -240,6 +254,12 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
               </div>
             </>
           ) : null}
+
+          {kind === 'websocket' ? (
+            <p className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5 text-on-surface-variant/70 text-xs">
+              {labels.pairedNext}
+            </p>
+          ) : null}
         </div>
 
         {error ? (
@@ -267,7 +287,7 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   );
 }
 
-function TransportTab({
+function ReachabilityOption({
   active,
   label,
   onSelect,
@@ -282,7 +302,7 @@ function TransportTab({
       role="tab"
       aria-selected={active}
       onClick={onSelect}
-      className={`rounded-xl border px-3 py-2 font-semibold text-sm transition-colors ${
+      className={`rounded-xl border px-3 py-2 text-left font-semibold text-sm transition-colors ${
         active
           ? 'border-primary/45 bg-primary/10 text-on-surface'
           : 'border-outline-variant/20 text-on-surface-variant/70 hover:bg-surface-container-highest'

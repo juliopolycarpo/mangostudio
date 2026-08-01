@@ -13,6 +13,7 @@ import {
 } from '../queries';
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
 import { EnvironmentPageState } from './EnvironmentPageState';
+import { RuntimePairingPanel } from './RuntimePairingPanel';
 
 const STATUS_RAIL: Record<EnvironmentConnectionState, string> = {
   connected: 'bg-primary',
@@ -179,6 +180,10 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
         </div>
 
         <CapabilityChips environment={environment} />
+
+        {environment.transportKind === 'websocket' ? (
+          <RuntimePairingPanel environmentId={environment.id} />
+        ) : null}
 
         {actionError ? (
           <p className="text-xs text-error" role="alert">
