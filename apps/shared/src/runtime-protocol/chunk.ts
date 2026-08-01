@@ -77,19 +77,30 @@ export function encodeRuntimeFrameChunks(
 }
 
 /**
- * Rebuilds frames from the messages `encodeRuntimeFrameChunks` produced. The
- * accumulated size is bounded by the same limit the codec enforces on a whole
- * frame, so a peer cannot spend the hub's memory by never sending a last chunk.
+ * Rebuilds frames from the messages `encodeRuntimeFrameChunks` produced.
+ *
+ * Two bounds, because a byte cap alone is not one. The accumulated size is
+ * bounded by the limit the codec enforces on a whole frame, so a peer cannot
+ * spend the hub's memory by never sending a last chunk — but a peer that
+ * declares a huge chunk count and then dribbles one byte per message stays
+ * under that cap while making the reassembler retain one `Uint8Array` per
+ * message, which is memory the byte total never sees. The declared count is
+ * therefore checked against the most chunks this framing could ever need for a
+ * whole frame, and a header claiming more is refused on arrival.
  */
 export class RuntimeChunkReassembler {
+  readonly #maxChunks: number;
   readonly #maxFrameBytes: number;
   #expectedIndex = 0;
   #expectedCount = 0;
   #parts: Uint8Array[] = [];
   #pendingBytes = 0;
 
-  constructor(options: { readonly maxFrameBytes?: number } = {}) {
+  constructor(options: RuntimeChunkOptions = {}) {
     this.#maxFrameBytes = options.maxFrameBytes ?? RUNTIME_MAX_FRAME_BYTES;
+    const capacity =
+      (options.maxMessageBytes ?? RUNTIME_MAX_TRANSPORT_MESSAGE_BYTES) - RUNTIME_CHUNK_HEADER_BYTES;
+    this.#maxChunks = capacity > 0 ? Math.ceil(this.#maxFrameBytes / capacity) : 1;
   }
 
   /** Returns the completed frame, or null while one is still arriving. */
@@ -105,6 +116,11 @@ export class RuntimeChunkReassembler {
     const index = header.getUint32(1);
     const count = header.getUint32(5);
     if (count === 0) this.#fail('Runtime chunk claims a frame of zero chunks.');
+    if (count > this.#maxChunks) {
+      this.#fail(
+        `Runtime chunk claims ${count} chunks; at most ${this.#maxChunks} can be a frame.`
+      );
+    }
     if (index >= count) this.#fail(`Runtime chunk ${index} is outside a ${count}-chunk frame.`);
 
     if (this.#parts.length === 0) {

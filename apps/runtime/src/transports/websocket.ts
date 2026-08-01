@@ -31,6 +31,12 @@ export interface WebSocketFramePortOptions {
   readonly sink: WebSocketFrameSink;
   readonly maxMessageBytes?: number;
   readonly maxFrameBytes?: number;
+  /**
+   * Ceiling on chunks waiting for a peer that has stopped reading. Defaults to
+   * one whole frame, which is the smallest bound that never refuses a legal
+   * send.
+   */
+  readonly maxQueuedBytes?: number;
   /** Fires at most once, and never for an owner-initiated `close()`. */
   readonly onClosed?: (closure: WebSocketFramePortClosure) => void;
 }
@@ -61,19 +67,25 @@ class WebSocketFramePortImpl implements WebSocketFramePort {
   readonly #listeners = new Set<(frame: RuntimeFrame) => void>();
   readonly #maxFrameBytes: number;
   readonly #maxMessageBytes: number;
+  readonly #maxQueuedBytes: number;
   readonly #onClosed: ((closure: WebSocketFramePortClosure) => void) | undefined;
   readonly #queue: Uint8Array[] = [];
   readonly #reassembler: RuntimeChunkReassembler;
   readonly #sink: WebSocketFrameSink;
   #closed = false;
   #paused = false;
+  #queuedBytes = 0;
 
   constructor(options: WebSocketFramePortOptions) {
     this.#sink = options.sink;
     this.#maxMessageBytes = options.maxMessageBytes ?? RUNTIME_MAX_TRANSPORT_MESSAGE_BYTES;
     this.#maxFrameBytes = options.maxFrameBytes ?? RUNTIME_MAX_FRAME_BYTES;
+    this.#maxQueuedBytes = options.maxQueuedBytes ?? this.#maxFrameBytes;
     this.#onClosed = options.onClosed;
-    this.#reassembler = new RuntimeChunkReassembler({ maxFrameBytes: this.#maxFrameBytes });
+    this.#reassembler = new RuntimeChunkReassembler({
+      maxFrameBytes: this.#maxFrameBytes,
+      maxMessageBytes: this.#maxMessageBytes,
+    });
   }
 
   send(frame: RuntimeFrame): void {
@@ -85,7 +97,25 @@ class WebSocketFramePortImpl implements WebSocketFramePort {
       maxMessageBytes: this.#maxMessageBytes,
       maxFrameBytes: this.#maxFrameBytes,
     });
+
+    // A paused queue is a peer that is not reading, and the host answers
+    // requests concurrently — so without a ceiling the sender holds every
+    // pending response for a socket that may never drain. An empty queue
+    // always accepts, so a single maximum frame is never refused for being
+    // large; what is refused is piling more on top of one that is not moving.
+    const bytes = chunks.reduce((total, chunk) => total + chunk.byteLength, 0);
+    if (this.#queuedBytes > 0 && this.#queuedBytes + bytes > this.#maxQueuedBytes) {
+      this.#tearDown({
+        kind: 'protocol-error',
+        error: new RuntimeFrameCodecError(
+          `Runtime websocket has ${this.#queuedBytes} bytes queued for a peer that is not reading; the connection cannot keep up.`
+        ),
+      });
+      return;
+    }
+
     this.#queue.push(...chunks);
+    this.#queuedBytes += bytes;
     this.#pump();
   }
 
@@ -155,6 +185,7 @@ class WebSocketFramePortImpl implements WebSocketFramePort {
         return;
       }
       this.#queue.shift();
+      this.#queuedBytes -= chunk.byteLength;
       if (result === 'backpressure') {
         this.#paused = true;
         return;
@@ -172,6 +203,7 @@ class WebSocketFramePortImpl implements WebSocketFramePort {
     if (this.#closed) return;
     this.#closed = true;
     this.#queue.length = 0;
+    this.#queuedBytes = 0;
     this.#listeners.clear();
     this.#reassembler.reset();
   }

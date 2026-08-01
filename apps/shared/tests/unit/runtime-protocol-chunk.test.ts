@@ -120,6 +120,34 @@ describe('runtime chunk reassembly', () => {
     }).toThrow(RuntimeFrameCodecError);
   });
 
+  it('refuses a chunk count no frame this size could need', () => {
+    // The byte cap alone is not a bound on memory. A peer that declares four
+    // billion chunks and then dribbles one byte per message stays far under
+    // 16 MiB while making the reassembler retain one array per message, so the
+    // count is checked against what this framing could ever produce.
+    const reassembler = new RuntimeChunkReassembler();
+    const message = new Uint8Array(RUNTIME_CHUNK_HEADER_BYTES + 1);
+    const header = new DataView(message.buffer);
+    header.setUint8(0, 1);
+    header.setUint32(1, 0);
+    header.setUint32(5, 0xff_ff_ff_ff);
+
+    expect(() => reassembler.push(message)).toThrow(RuntimeFrameCodecError);
+  });
+
+  it('still accepts the most chunks a legal frame can take', () => {
+    // The bound has to sit above the real worst case, or a maximum-size frame
+    // would be refused as an attack.
+    const maxFrameBytes = 128 * 1024;
+    const reassembler = new RuntimeChunkReassembler({ maxFrameBytes });
+    const chunks = encodeRuntimeFrameChunks(responseOf(maxFrameBytes - 1_000), { maxFrameBytes });
+
+    let frame: RuntimeFrame | null = null;
+    for (const chunk of chunks) frame = reassembler.push(chunk);
+    expect(chunks.length).toBeGreaterThan(1);
+    expect(frame).not.toBeNull();
+  });
+
   it('recovers for the next frame after refusing one', () => {
     const reassembler = new RuntimeChunkReassembler();
     const partial = encodeRuntimeFrameChunks(responseOf(100_000));

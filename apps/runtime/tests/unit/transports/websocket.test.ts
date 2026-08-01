@@ -131,6 +131,46 @@ describe('websocket sinks', () => {
     expect(sink.send(new Uint8Array(1))).toBe('dropped');
   });
 
+  it('ends the connection rather than queueing without bound for a stalled peer', () => {
+    const { sent, sink } = scriptedSink(['backpressure']);
+    const closures: WebSocketFramePortClosure[] = [];
+    const port = createWebSocketFramePort({
+      sink,
+      maxMessageBytes: SMALL_CHUNK_BYTES,
+      maxQueuedBytes: 512,
+      onClosed: (closure) => closures.push(closure),
+    });
+
+    // The peer stops reading on the first chunk, and the host keeps answering
+    // requests it already accepted. Without a ceiling every one of those
+    // responses stays in memory for a socket that may never drain.
+    port.send(responseOf(200));
+    const stalled = sent.length;
+    port.send(responseOf(200));
+
+    expect(sent.length).toBe(stalled);
+    expect(closures).toHaveLength(1);
+    expect(closures[0]?.kind).toBe('protocol-error');
+    // And the port is gone, not merely full: half a frame reached the peer, so
+    // there is no point in the stream a later send could resume from.
+    expect(() => port.send({ type: 'pong' })).toThrow();
+  });
+
+  it('accepts one whole frame however large, since a legal send is not a flood', () => {
+    const { sent, sink } = scriptedSink([]);
+    const closures: WebSocketFramePortClosure[] = [];
+    const port = createWebSocketFramePort({
+      sink,
+      maxMessageBytes: SMALL_CHUNK_BYTES,
+      maxQueuedBytes: 64,
+      onClosed: (closure) => closures.push(closure),
+    });
+
+    port.send(responseOf(2_000));
+    expect(closures).toHaveLength(0);
+    expect(reassembleAll(sent)).toEqual(responseOf(2_000));
+  });
+
   it('reports a client socket write as sent, since the API says nothing else', () => {
     const written: Uint8Array[] = [];
     const sink = clientWebSocketSink({
