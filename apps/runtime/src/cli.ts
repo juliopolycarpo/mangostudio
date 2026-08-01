@@ -43,7 +43,8 @@ Commands:
 
 connect options:
   --hub <url>  Hub endpoint, e.g. wss://hub.example.com/api/runtime
-               Remembered after the first successful run.
+               Stored when given, so later runs need no flags. Pass it again
+               to change it.
   --token -    Read the pairing token from stdin
                Or set MANGOSTUDIO_RUNTIME_TOKEN. Never pass it as an argument:
                command lines are readable by every process on the machine.
