@@ -31,17 +31,29 @@ function harness(
     readonly archive?: Uint8Array;
     /** Version the distribution already reports, if any, before provisioning. */
     readonly installed?: string;
+    /** What this hub reports, which decides whether a release exists to install from. */
+    readonly version?: string;
+    /** Bytes at the local build path, standing in for a checkout that built one. */
+    readonly localBuild?: Uint8Array | null;
   } = {}
 ) {
+  const version = options.version ?? VERSION;
   const calls: DistroCall[] = [];
   const requested: string[] = [];
+  const read: string[] = [];
   const written = new Map<string, Uint8Array>();
   let installed = options.installed;
 
   const provisioner = createWslProvisioner({
-    version: () => VERSION,
-    cacheDir: (version) => `/cache/${version}`,
-    readCache: () => Promise.resolve(options.cached ?? null),
+    version: () => version,
+    cacheDir: (cacheVersion) => `/cache/${cacheVersion}`,
+    localBuildPath: (platformId) => `/repo/.mango/out/${platformId}/mangostudio-runtime`,
+    readBytes: (path) => {
+      read.push(path);
+      return Promise.resolve(
+        path.startsWith('/repo/') ? (options.localBuild ?? null) : (options.cached ?? null)
+      );
+    },
     writeCache: (path, bytes) => {
       written.set(path, bytes);
       return Promise.resolve();
@@ -51,8 +63,8 @@ function harness(
       const override = options.respond?.(script);
       if (override) return Promise.resolve(override);
       if (script.includes('uname -m')) return Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'));
-      if (script.includes('tar -xzf -')) {
-        installed = VERSION;
+      if (script.includes('mv -f ')) {
+        installed = version;
         return Promise.resolve(ok());
       }
       return Promise.resolve(
@@ -71,7 +83,7 @@ function harness(
     }) as typeof fetch,
   });
 
-  return { provisioner, calls, requested, written };
+  return { provisioner, calls, read, requested, written };
 }
 
 describe('WslProvisioner', () => {
@@ -157,7 +169,7 @@ describe('WslProvisioner', () => {
     const provisioner = createWslProvisioner({
       version: () => VERSION,
       cacheDir: (version) => `/cache/${version}`,
-      readCache: () => Promise.resolve(null),
+      readBytes: () => Promise.resolve(null),
       runInDistro: (_distro, script) =>
         script.includes('uname -m')
           ? Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'))
@@ -219,6 +231,48 @@ describe('WslProvisioner', () => {
     });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(/does not run there: Exec format/);
+  });
+
+  it('installs the checkout own build instead of asking for a release that cannot exist', async () => {
+    const build = new TextEncoder().encode('a runtime this checkout compiled');
+    const { provisioner, calls, read, requested } = harness({ version: 'dev', localBuild: build });
+
+    await provisioner.ensure('Ubuntu');
+
+    // There is no `vdev` tag and never will be, so nothing is downloaded and the
+    // binary goes in whole rather than being unpacked from an archive.
+    expect(requested).toEqual([]);
+    expect(read).toEqual(['/repo/.mango/out/linux-x64/mangostudio-runtime']);
+    expect(calls[2]?.script).toContain('cat > ');
+    expect(calls[2]?.script).not.toContain('tar');
+    expect(calls[2]?.stdinBytes).toBe(build.byteLength);
+  });
+
+  it('tells a checkout how to build the runtime it does not have', async () => {
+    const { provisioner, requested } = harness({ version: 'dev', localBuild: null });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
+      /source checkout.*bun build apps\/runtime\/src\/cli\.ts --compile --target=bun-linux-x64 --outfile \/repo\/\.mango\/out\/linux-x64\/mangostudio-runtime/s
+    );
+    // A release URL or a cache path would be a dead end here; neither is offered.
+    expect(requested).toEqual([]);
+  });
+
+  it('names the version stamp when a checkout built a release runtime by mistake', async () => {
+    // What `bun run build:binary` leaves at that path: a runtime carrying the
+    // package version, which the handshake would refuse against a `dev` hub.
+    const { provisioner } = harness({
+      version: 'dev',
+      localBuild: new TextEncoder().encode('a version-stamped build'),
+      respond: (script) =>
+        script.includes('--version') && !script.includes('uname')
+          ? { stdout: '0.1.1\n', stderr: '', exitCode: 0 }
+          : undefined,
+    });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
+      /reports version 0\.1\.1 rather than dev\. .*without a version stamp/s
+    );
   });
 
   it('passes the distribution name through as data, never as script', async () => {

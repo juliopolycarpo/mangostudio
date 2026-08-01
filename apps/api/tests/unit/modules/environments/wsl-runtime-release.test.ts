@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 import {
   findReleaseChecksum,
-  INSTALL_SCRIPT,
+  INSTALL_ARCHIVE_SCRIPT,
+  INSTALL_BINARY_SCRIPT,
+  localRuntimeBuildCommand,
+  localRuntimeBuildPath,
   releaseArchiveName,
   releaseAssetUrl,
   resolveLinuxPlatformId,
@@ -43,21 +47,49 @@ describe('release asset naming', () => {
   });
 });
 
-describe('INSTALL_SCRIPT', () => {
+describe('install scripts', () => {
   it('publishes the runtime with a rename rather than writing over it', () => {
     // A distribution can be running a runtime while it is provisioned again, and
     // Linux refuses to open a busy executable for writing.
-    expect(INSTALL_SCRIPT).toContain(`tar -xzf - -O mangostudio-runtime > ${STAGED_PATH}`);
-    expect(INSTALL_SCRIPT).toContain(`mv -f ${STAGED_PATH} ${RUNTIME_PATH}`);
-    expect(INSTALL_SCRIPT).not.toContain(`> ${RUNTIME_PATH}`);
+    for (const script of [INSTALL_ARCHIVE_SCRIPT, INSTALL_BINARY_SCRIPT]) {
+      expect(script).toContain(`mv -f ${STAGED_PATH} ${RUNTIME_PATH}`);
+      expect(script).not.toContain(`> ${RUNTIME_PATH}`);
+    }
+  });
+
+  it('unpacks one member from a release archive and takes a local build whole', () => {
+    expect(INSTALL_ARCHIVE_SCRIPT).toContain(`tar -xzf - -O mangostudio-runtime > ${STAGED_PATH}`);
+    expect(INSTALL_BINARY_SCRIPT).toContain(`cat > ${STAGED_PATH}`);
+    expect(INSTALL_BINARY_SCRIPT).not.toContain('tar');
   });
 
   it('marks the runtime executable before it takes the live name', () => {
-    const chmod = INSTALL_SCRIPT.indexOf(`chmod +x ${STAGED_PATH}`);
-    const rename = INSTALL_SCRIPT.indexOf('mv -f ');
+    for (const script of [INSTALL_ARCHIVE_SCRIPT, INSTALL_BINARY_SCRIPT]) {
+      const chmod = script.indexOf(`chmod +x ${STAGED_PATH}`);
+      const rename = script.indexOf('mv -f ');
 
-    expect(chmod).toBeGreaterThan(-1);
-    expect(chmod).toBeLessThan(rename);
+      expect(chmod).toBeGreaterThan(-1);
+      expect(chmod).toBeLessThan(rename);
+    }
+  });
+});
+
+describe('local runtime build', () => {
+  it('looks where this repository writes its own Linux builds', () => {
+    expect(localRuntimeBuildPath('/repo', 'linux-x64')).toBe(
+      join('/repo', '.mango', 'out', 'linux-x64', 'mangostudio-runtime')
+    );
+    expect(localRuntimeBuildPath('/repo', 'linux-arm64-musl')).toBe(
+      join('/repo', '.mango', 'out', 'linux-arm64-musl', 'mangostudio-runtime')
+    );
+  });
+
+  it('names a build with no version stamp, so the runtime reports dev like its hub', () => {
+    const command = localRuntimeBuildCommand('linux-x64-musl', '/repo/out/mangostudio-runtime');
+
+    expect(command).toContain('--target=bun-linux-x64-musl');
+    expect(command).toContain('--outfile /repo/out/mangostudio-runtime');
+    expect(command).not.toContain('VERSION');
   });
 });
 

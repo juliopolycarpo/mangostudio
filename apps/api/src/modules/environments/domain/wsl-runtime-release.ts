@@ -14,6 +14,7 @@
  * as argv entries, never inside one of these strings.
  */
 
+import { join } from 'node:path';
 import type { RuntimeLaunchCommand } from '../../../lib/runtime-paths';
 
 const REPOSITORY = 'juliopolycarpo/mangostudio';
@@ -43,8 +44,10 @@ export interface DistroPlatformProbe {
  */
 export const PLATFORM_PROBE_SCRIPT = 'uname -m; (ldd --version 2>&1 || true) | head -n 1';
 
+const STAGED_PATH = `"$HOME/${DISTRO_RUNTIME_DIR}/${STAGED_ARCHIVE_MEMBER}"`;
+
 /**
- * Unpacks one member of the archive from stdin and publishes it with a rename.
+ * Stages whatever `stage` writes from stdin, then publishes it with a rename.
  *
  * `$HOME` is expanded by the distribution's own shell: the hub does not know
  * where a distribution's home directory is, and `wsl.exe --exec` performs no
@@ -53,18 +56,32 @@ export const PLATFORM_PROBE_SCRIPT = 'uname -m; (ldd --version 2>&1 || true) | h
  * The rename is the point. A distribution can already be running a runtime when
  * it is provisioned again — a hub update drifts the version of every
  * distribution at once, and the second environment to reconnect reinstalls
- * while the first is still connected. Unpacking straight onto the live path
- * would open the file that process is executing from, which Linux refuses with
+ * while the first is still connected. Writing straight onto the live path would
+ * open the file that process is executing from, which Linux refuses with
  * `ETXTBSY`, failing the install over something the user cannot act on.
  * Replacing the directory entry instead leaves the running process on the inode
  * it started with and gives the next launch the new binary.
  */
-export const INSTALL_SCRIPT =
-  'set -e; ' +
-  `mkdir -p "$HOME/${DISTRO_RUNTIME_DIR}"; ` +
-  `tar -xzf - -O ${RUNTIME_ARCHIVE_MEMBER} > "$HOME/${DISTRO_RUNTIME_DIR}/${STAGED_ARCHIVE_MEMBER}"; ` +
-  `chmod +x "$HOME/${DISTRO_RUNTIME_DIR}/${STAGED_ARCHIVE_MEMBER}"; ` +
-  `mv -f "$HOME/${DISTRO_RUNTIME_DIR}/${STAGED_ARCHIVE_MEMBER}" "$HOME/${DISTRO_RUNTIME_DIR}/${RUNTIME_ARCHIVE_MEMBER}"`;
+function installScript(stage: string): string {
+  return (
+    'set -e; ' +
+    `mkdir -p "$HOME/${DISTRO_RUNTIME_DIR}"; ` +
+    `${stage}; ` +
+    `chmod +x ${STAGED_PATH}; ` +
+    `mv -f ${STAGED_PATH} "$HOME/${DISTRO_RUNTIME_DIR}/${RUNTIME_ARCHIVE_MEMBER}"`
+  );
+}
+
+/** Unpacks the one member that matters out of a release's platform archive. */
+export const INSTALL_ARCHIVE_SCRIPT = installScript(
+  `tar -xzf - -O ${RUNTIME_ARCHIVE_MEMBER} > ${STAGED_PATH}`
+);
+
+/**
+ * Takes the binary whole, which is what a source checkout has to offer: it
+ * builds a runtime, not a release archive.
+ */
+export const INSTALL_BINARY_SCRIPT = installScript(`cat > ${STAGED_PATH}`);
 
 /**
  * Runs the installed runtime with whatever arguments follow. `"$@"` is what
@@ -110,6 +127,25 @@ export function releaseArchiveName(version: string, platformId: LinuxPlatformId)
 
 export function releaseAssetUrl(version: string, assetName: string): string {
   return `https://github.com/${REPOSITORY}/releases/download/v${version}/${assetName}`;
+}
+
+/**
+ * Where a source checkout keeps the Linux runtime it built for itself — the
+ * same layout `bun run build:binary --platform <id>` writes into. A checkout's
+ * version names no release, so this is the only place left to look.
+ */
+export function localRuntimeBuildPath(baseDir: string, platformId: LinuxPlatformId): string {
+  return join(baseDir, '.mango', 'out', platformId, RUNTIME_ARCHIVE_MEMBER);
+}
+
+/**
+ * The command that produces the file above. Compiling without a version stamp
+ * is deliberate: the runtime then reports `dev` the same way a checkout's hub
+ * does, and the handshake only accepts a runtime whose release matches.
+ * // Usage: localRuntimeBuildCommand('linux-x64', 'C:\\repo\\.mango\\out\\...')
+ */
+export function localRuntimeBuildCommand(platformId: LinuxPlatformId, outfile: string): string {
+  return `bun build apps/runtime/src/cli.ts --compile --target=bun-${platformId} --outfile ${outfile}`;
 }
 
 /**

@@ -150,6 +150,16 @@ hub update is therefore absorbed by reinstalling rather than by a handshake fail
 user cannot act on. There is no standalone runtime asset in a release yet, so the platform
 archive is fetched and one member is extracted from it.
 
+A hub running from a source checkout reports version `dev`, which names no release — there
+is no `vdev` tag and there never will be — so it installs the Linux runtime the checkout
+built for itself, at `.mango/out/<platform>/mangostudio-runtime`, piped in whole with no
+checksum to check it against. Build it with
+`bun build apps/runtime/src/cli.ts --compile --target=bun-linux-x64 --outfile
+.mango/out/linux-x64/mangostudio-runtime`. The absent `--define process.env.VERSION` is the
+point: the runtime then reports `dev` like the hub beside it, which is what the handshake
+insists on. `bun run build:binary` stamps the package version instead, and a runtime built
+that way is refused with a message saying so.
+
 A stopped distribution boots when the runtime starts, so the first connection to one is
 slow — the Add Environment copy says so. Distributions on musl (Alpine) get the musl build:
 the target is probed for architecture and C library together.

@@ -11,20 +11,29 @@
  * The bytes never touch the distribution's filesystem as an archive: they are
  * piped into `tar` on stdin, which avoids writing through the 9P share and
  * leaves nothing to clean up if the transfer dies halfway.
+ *
+ * A hub running from a source checkout reports `dev`, which names no release
+ * and never will, so it installs the Linux runtime the checkout built for
+ * itself instead of asking GitHub for a tag that cannot exist.
  */
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { getHomeMangoDir, getVersion } from '../../../lib/config';
+import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
 import {
   DISTRO_RUNTIME_PATH,
   type DistroPlatformProbe,
   findReleaseChecksum,
-  INSTALL_SCRIPT,
+  INSTALL_ARCHIVE_SCRIPT,
+  INSTALL_BINARY_SCRIPT,
+  type LinuxPlatformId,
+  localRuntimeBuildCommand,
+  localRuntimeBuildPath,
   PLATFORM_PROBE_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
@@ -71,9 +80,12 @@ export interface WslProvisionerDeps extends SafeFetchDeps {
     script: string,
     options?: { readonly stdin?: Uint8Array }
   ): Promise<DistroCommandResult>;
-  readCache(path: string): Promise<Uint8Array | null>;
+  /** Reads a file the hub only hopes is there, hence the null rather than a throw. */
+  readBytes(path: string): Promise<Uint8Array | null>;
   writeCache(path: string, bytes: Uint8Array): Promise<void>;
   cacheDir(version: string): string;
+  /** Where this checkout's own Linux runtime build would be. */
+  localBuildPath(platformId: LinuxPlatformId): string;
   version(): string;
 }
 
@@ -98,7 +110,7 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       const present = await deps.runInDistro(distro, VERSION_SCRIPT);
       if (present.exitCode === 0 && present.stdout.trim() === version) return;
 
-      await install(deps, distro, version);
+      const platformId = await install(deps, distro, version);
 
       const installed = await deps.runInDistro(distro, VERSION_SCRIPT);
       if (installed.exitCode !== 0) {
@@ -107,8 +119,14 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
         );
       }
       if (installed.stdout.trim() !== version) {
+        const mismatch = `The runtime installed in "${distro}" reports version ${installed.stdout.trim()} rather than ${version}.`;
+        // The likely cause in a checkout is a runtime compiled by
+        // `bun run build:binary`, which stamps the package version into what it
+        // builds — right for a release, wrong for a hub that reports `dev`.
         throw new WslProvisioningError(
-          `The runtime installed in "${distro}" reports version ${installed.stdout.trim()} rather than ${version}.`
+          isDevelopmentVersion(version)
+            ? `${mismatch} A checkout's runtime has to be compiled without a version stamp: \`${localRuntimeBuildCommand(platformId, deps.localBuildPath(platformId))}\`.`
+            : mismatch
         );
       }
       logger.info('provisioned', { distro, version });
@@ -116,7 +134,12 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
   };
 }
 
-async function install(deps: WslProvisionerDeps, distro: string, version: string): Promise<void> {
+/** Returns the target the distribution was provisioned for, which the caller reports against. */
+async function install(
+  deps: WslProvisionerDeps,
+  distro: string,
+  version: string
+): Promise<LinuxPlatformId> {
   const platformId = resolveLinuxPlatformId(await probePlatform(deps, distro));
   if (!platformId) {
     throw new WslProvisioningError(
@@ -124,11 +147,36 @@ async function install(deps: WslProvisionerDeps, distro: string, version: string
     );
   }
 
+  // A checkout's version names no release, so asking one for assets can only
+  // 404: the answer there is the build the developer already has, taken whole
+  // rather than out of an archive nobody published.
+  const source = isDevelopmentVersion(version)
+    ? { script: INSTALL_BINARY_SCRIPT, bytes: await loadLocalBuild(deps, distro, platformId) }
+    : {
+        script: INSTALL_ARCHIVE_SCRIPT,
+        bytes: await loadRelease(deps, distro, version, platformId),
+      };
+
+  const result = await deps.runInDistro(distro, source.script, { stdin: source.bytes });
+  if (result.exitCode !== 0) {
+    throw new WslProvisioningError(
+      `Could not unpack the runtime inside "${distro}": ${describe(result)}`
+    );
+  }
+  return platformId;
+}
+
+async function loadRelease(
+  deps: WslProvisionerDeps,
+  distro: string,
+  version: string,
+  platformId: LinuxPlatformId
+): Promise<Uint8Array> {
   const assetName = releaseArchiveName(version, platformId);
   // Getting the bytes is the step that needs the network, so it is the step
   // with an offline answer. A hub that cannot reach the release should say what
   // to do about it rather than only what went wrong.
-  const archive = await loadArchive(deps, version, assetName).catch((error: unknown) => {
+  return await loadArchive(deps, version, assetName).catch((error: unknown) => {
     if (error instanceof WslDownloadError) {
       throw new WslProvisioningError(
         `${error.message} ${manualInstallHint(deps, distro, version, assetName)}`
@@ -136,13 +184,31 @@ async function install(deps: WslProvisionerDeps, distro: string, version: string
     }
     throw error;
   });
+}
 
-  const result = await deps.runInDistro(distro, INSTALL_SCRIPT, { stdin: archive });
-  if (result.exitCode !== 0) {
-    throw new WslProvisioningError(
-      `Could not unpack the runtime inside "${distro}": ${describe(result)}`
-    );
-  }
+/**
+ * The runtime a source checkout provides for itself. Compiling it is left to
+ * the developer rather than done here: it is a one-line `bun build` they can
+ * see the output of, and it is the same command whether or not WSL is involved.
+ *
+ * Nothing is verified against a checksum because there is nothing to verify
+ * against — the file came from this machine, not from a release.
+ */
+async function loadLocalBuild(
+  deps: WslProvisionerDeps,
+  distro: string,
+  platformId: LinuxPlatformId
+): Promise<Uint8Array> {
+  const path = deps.localBuildPath(platformId);
+  const bytes = await deps.readBytes(path);
+  if (bytes) return bytes;
+
+  throw new WslProvisioningError(
+    'This MangoStudio runs from a source checkout, so no release carries a Linux runtime ' +
+      `to install. Build one from the repository root with \`${localRuntimeBuildCommand(platformId, path)}\` ` +
+      `and connect again, or put a runtime that reports version dev at ${DISTRO_RUNTIME_PATH} ` +
+      `inside "${distro}" yourself.`
+  );
 }
 
 /**
@@ -190,7 +256,7 @@ async function loadArchive(
   const cachePath = join(deps.cacheDir(version), assetName);
   const expected = await fetchExpectedChecksum(deps, version, assetName);
 
-  const cached = await deps.readCache(cachePath);
+  const cached = await deps.readBytes(cachePath);
   if (cached && sha256(cached) === expected) return cached;
 
   const bytes = await download(deps, releaseAssetUrl(version, assetName), MAX_ARCHIVE_BYTES);
@@ -322,7 +388,7 @@ function appendBounded(current: string, chunk: Buffer): string {
 const defaultDeps: WslProvisionerDeps = {
   fetch,
   runInDistro: runInDistroWithWsl,
-  readCache: (path) => readFile(path).catch(() => null),
+  readBytes: (path) => readFile(path).catch(() => null),
   writeCache: async (path, bytes) => {
     await mkdir(join(path, '..'), { recursive: true });
     // A reader that opens the cache while it is being written would see a
@@ -332,6 +398,7 @@ const defaultDeps: WslProvisionerDeps = {
     await rename(staging, path);
   },
   cacheDir: (version) => join(getHomeMangoDir(), 'runtime-cache', version),
+  localBuildPath: (platformId) => localRuntimeBuildPath(getRuntimeBaseDir(), platformId),
   version: getVersion,
 };
 
