@@ -176,7 +176,7 @@ describe('describeSshFailure', () => {
       'Host key verification failed.'
     );
 
-    expect(message).toContain("ssh 'deploy@build-01.internal' true");
+    expect(message).toContain("ssh -o RemoteCommand=none 'deploy@build-01.internal' true");
     expect(message).toContain('known_hosts');
   });
 
