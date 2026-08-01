@@ -70,9 +70,22 @@ export async function connectToHub(options: RuntimeConnectOptions): Promise<Runt
         ? RATE_LIMITED_DELAY_MS
         : backoffDelay(failures);
     log(`${attempt.message} Reconnecting in ${Math.round(delay / 1_000)}s.`);
-    await sleep(delay);
+    // Raced against the signal, not merely started under it: a service manager
+    // that sends SIGTERM during a 60-second backoff gives the process seconds
+    // to stop, and a sleep that ignores the abort spends that budget waiting
+    // for a reconnect nobody wants any more.
+    await Promise.race([sleep(delay), aborted(options.signal)]);
   }
   return { reason: 'stopped' };
+}
+
+/** Resolves when the signal aborts, and never otherwise. */
+function aborted(signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return new Promise<void>(() => undefined);
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    signal.addEventListener('abort', () => resolve(), { once: true });
+  });
 }
 
 interface ConnectionAttempt {
@@ -133,6 +146,12 @@ async function runOneConnection(
         () => null,
         (error: unknown) => asError(error)
       ),
+      // A hub that refuses mid-handshake — a disabled environment discovered
+      // after the upgrade, a protocol version it will not serve — says so by
+      // closing. The frame port does not turn that into a handshake rejection,
+      // so without this the CLI sits out the full timeout before reporting a
+      // refusal it already has in hand.
+      closed.then(() => new Error('The hub closed the connection during the handshake.')),
       sleepMs(HANDSHAKE_TIMEOUT_MS).then(
         () => new Error('The hub did not acknowledge the protocol handshake in time.')
       ),
@@ -186,21 +205,7 @@ function classifyClosure(
       retry: false,
       served,
       closeCode: closure.code,
-      message:
-        closure.code === RUNTIME_CLOSE_CODES.UNAUTHORIZED
-          ? `The hub refused this runtime's pairing token${detail}. Issue a new one from the environment card and run "connect" again with it.`
-          : `The hub refused this environment${detail}. Enable it in MangoStudio, then run "connect" again.`,
-    };
-  }
-  if (closure.code === RUNTIME_CLOSE_CODES.SUPERSEDED) {
-    return {
-      retry: true,
-      served,
-      closeCode: closure.code,
-      // Not fatal: the runtime that took over may be gone in a moment, and two
-      // processes sharing one credential is a misconfiguration somebody has to
-      // see in the log rather than a reason to exit quietly.
-      message: 'Another runtime took over this environment.',
+      message: fatalClosureMessage(closure.code, detail),
     };
   }
   if (closure.code === RUNTIME_CLOSE_CODES.RATE_LIMITED) {
@@ -217,6 +222,29 @@ function classifyClosure(
     closeCode: closure.code,
     message: `Connection to the hub ended (${closure.code}${closure.reason ? `: ${closure.reason}` : ''}).`,
   };
+}
+
+/**
+ * What to tell the operator about a close that redialing cannot fix. Each of
+ * these names the one thing that would change the answer, because "connection
+ * refused, retrying" on a loop is how a broken pairing goes unnoticed for a
+ * week.
+ */
+function fatalClosureMessage(code: number, detail: string): string {
+  switch (code) {
+    case RUNTIME_CLOSE_CODES.UNAUTHORIZED:
+      return `The hub refused this runtime's pairing token${detail}. Issue a new one from the environment card and run "connect" again with it.`;
+    case RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH:
+      return `The hub speaks a runtime protocol this binary does not${detail}. Update the runtime on this machine, then run "connect" again.`;
+    case RUNTIME_CLOSE_CODES.SUPERSEDED:
+      // Stopping rather than redialing: another process holds this credential,
+      // and a runtime that takes it back on every reconnect just trades the
+      // environment back and forth, dropping in-flight calls each time. Which
+      // of the two should be running is a decision only an operator has.
+      return `Another runtime took over this environment${detail}. Two machines are sharing one pairing token — stop the one that should not have it, or issue a separate token, then run "connect" again.`;
+    default:
+      return `The hub refused this environment${detail}. Enable it in MangoStudio, then run "connect" again.`;
+  }
 }
 
 /** Full jitter: uniform over the upper half of each doubled window. */

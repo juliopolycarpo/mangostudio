@@ -18,6 +18,8 @@ export const RUNTIME_CLOSE_CODES = {
   FORBIDDEN: 4403,
   /** Another connection for this environment took over. */
   SUPERSEDED: 4409,
+  /** The peer speaks a protocol version this hub cannot serve. Upgrade it. */
+  PROTOCOL_MISMATCH: 4426,
   /** Too many upgrades from this address. Back off further than usual. */
   RATE_LIMITED: 4429,
   /** A frame or chunk the codec refused; the stream cannot be resynchronised. */
@@ -32,9 +34,20 @@ export type RuntimeCloseCode = (typeof RUNTIME_CLOSE_CODES)[keyof typeof RUNTIME
 
 /**
  * True when redialing cannot change the outcome. The runtime stops and says
- * what to fix instead of retrying into a wall — the failure is a credential or
- * a configuration decision, and only a person can move either.
+ * what to fix instead of retrying into a wall — the failure is a credential, a
+ * binary, or a configuration decision, and only a person can move any of them.
+ *
+ * `SUPERSEDED` belongs here for a reason worth stating: two processes holding
+ * one pairing token would otherwise take the environment from each other on
+ * every redial, dropping whatever calls were in flight each time. Alternating
+ * ownership forever is worse than one process stopping and saying which two
+ * are fighting, so the loser leaves the field.
  */
 export function isFatalRuntimeCloseCode(code: number): boolean {
-  return code === RUNTIME_CLOSE_CODES.UNAUTHORIZED || code === RUNTIME_CLOSE_CODES.FORBIDDEN;
+  return (
+    code === RUNTIME_CLOSE_CODES.UNAUTHORIZED ||
+    code === RUNTIME_CLOSE_CODES.FORBIDDEN ||
+    code === RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH ||
+    code === RUNTIME_CLOSE_CODES.SUPERSEDED
+  );
 }

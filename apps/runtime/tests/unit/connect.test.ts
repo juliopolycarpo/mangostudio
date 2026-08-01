@@ -196,7 +196,7 @@ describe('runtime connect loop', () => {
 
     await waitFor(() => hub.clients.length === 1, 'the first connection');
     await hub.clients[0]?.waitUntilReady();
-    hub.closeCurrent(RUNTIME_CLOSE_CODES.SUPERSEDED, 'Superseded');
+    hub.closeCurrent(RUNTIME_CLOSE_CODES.RELEASED, 'Released');
 
     await waitFor(() => hub.clients.length === 2, 'the redial');
     await hub.clients[1]?.waitUntilReady();
@@ -258,5 +258,67 @@ describe('runtime connect loop', () => {
     expect(delays[0]).toBeWithin(500, 1_000 + 1);
     expect(delays[1]).toBeWithin(1_000, 2_000 + 1);
     expect(delays[2]).toBeWithin(2_000, 4_000 + 1);
+  });
+
+  it('stops when superseded rather than taking the environment back', async () => {
+    const hub = startFakeHub();
+    const delays: number[] = [];
+    const loop = connectToHub({
+      hubUrl: hub.url,
+      token: VALID_TOKEN,
+      createHost,
+      sleep: (ms) => {
+        delays.push(ms);
+        return Promise.resolve();
+      },
+    });
+
+    await waitFor(() => hub.clients.length === 1, 'the first connection');
+    await hub.clients[0]?.waitUntilReady();
+    hub.closeCurrent(RUNTIME_CLOSE_CODES.SUPERSEDED, 'Superseded');
+
+    const outcome = await loop;
+    // Redialing here is what makes two processes trade the environment back and
+    // forth forever, dropping in-flight calls on every handover.
+    expect(outcome.reason).toBe('refused');
+    expect(outcome.message).toContain('pairing token');
+    expect(delays).toEqual([]);
+    expect(hub.clients).toHaveLength(1);
+  });
+
+  it('names the binary, not the environment, when the protocol is refused', async () => {
+    const hub = startFakeHub();
+    const loop = connectToHub({ hubUrl: hub.url, token: VALID_TOKEN, createHost });
+
+    await waitFor(() => hub.clients.length === 1, 'the first connection');
+    await hub.clients[0]?.waitUntilReady();
+    hub.closeCurrent(RUNTIME_CLOSE_CODES.PROTOCOL_MISMATCH, 'Protocol version unsupported');
+
+    const outcome = await loop;
+    expect(outcome.reason).toBe('refused');
+    expect(outcome.message).toContain('Update the runtime');
+  });
+
+  it('gives up the backoff as soon as the signal aborts', async () => {
+    const controller = new AbortController();
+    let sleeping = false;
+    const loop = connectToHub({
+      // Nothing listening, so the loop reaches its backoff immediately.
+      hubUrl: 'ws://127.0.0.1:1/api/runtime',
+      token: VALID_TOKEN,
+      createHost,
+      signal: controller.signal,
+      // A sleep that never resolves on its own: only the abort can end it, so
+      // a loop that does not race the signal hangs this test rather than
+      // quietly taking a minute longer than a shutdown deadline allows.
+      sleep: () => {
+        sleeping = true;
+        return new Promise<void>(() => undefined);
+      },
+    });
+
+    await waitFor(() => sleeping, 'the loop to reach its backoff');
+    controller.abort();
+    expect(await loop).toEqual({ reason: 'stopped' });
   });
 });
