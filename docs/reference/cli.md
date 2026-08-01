@@ -46,6 +46,9 @@ copy-paste commands, or:
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
 
+Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
+`127.0.0.1`.
+
 ## `mangostudio-runtime`
 
 Every channel installs a second binary beside `mangostudio`. It is the execution
