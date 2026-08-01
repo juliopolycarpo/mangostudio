@@ -466,7 +466,7 @@ carry the same build stamp and ship together in every channel — archives, npm
 platform packages, and the Docker images — because the hub resolves the runtime as a
 sibling of its own executable and the protocol handshake refuses a version mismatch.
 
-## Out-Of-Process Environments (stdio, WSL, paired WebSocket)
+## Out-Of-Process Environments (stdio, WSL, paired WebSocket, Direct URL)
 
 Open these first:
 
@@ -505,6 +505,15 @@ in the spawn path applies and the manager is entered through `adopt()` rather th
 - `apps/frontend/src/features/environments/components/RuntimePairingPanel.tsx`
 - Conformance: `apps/runtime/tests/support/transport-conformance.ts` — a new transport
   supplies a fixture there rather than a suite of its own.
+
+Direct URL inverts it again — the hub dials a listening runtime — so it is a connector
+on `connect()`, not `adopt()`, and is not in the dial-in transport set:
+
+- `apps/runtime/src/serve.ts` (`Bun.serve`, bearer upgrade, supersede, `/health`)
+- `apps/api/src/services/runtime-client/connect-http-runtime.ts` (hub dial-out)
+- `apps/api/src/services/runtime-client/runtime-token-secrets.ts` (OS secret store, hard-fail)
+- `apps/api/src/services/runtime-client/http-runtime-url.ts` (http→ws, allow private hosts)
+- `apps/frontend/src/features/environments/components/DirectUrlPanel.tsx`
 
 Paths inside a distribution are native Linux paths end to end — there is no
 translation layer and none is wanted. What the hub does is *resolve* in the
