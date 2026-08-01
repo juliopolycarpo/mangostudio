@@ -131,6 +131,17 @@ export async function runRuntimeCli(args: readonly string[]): Promise<number> {
   }
 }
 
+/**
+ * Dials, and serves whatever the hub asks for.
+ *
+ * Note what is *not* checked here yet: whether the machine's owner has agreed
+ * to any of it. The consent gate belongs before the dial — a runtime whose slot
+ * is still `pending` should refuse and name `setup` rather than connect and
+ * then decide per call — but the setup CLI that writes that state does not
+ * exist, and a gate reading a field nothing writes is a gate that is always
+ * open while looking closed. Until it lands, connecting is the consent: the
+ * operator ran this command on this machine with a token they were handed.
+ */
 async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Promise<number> {
   const log = (message: string): void => {
     process.stderr.write(`mangostudio-runtime: ${message}\n`);

@@ -3,6 +3,7 @@ import {
   assertRuntimeProtocolCompatible,
   decodeRuntimeFrameLine,
   encodeRuntimeFrame,
+  RUNTIME_PROTOCOL_VERSION,
   RuntimeFrameCodecError,
   RuntimeFrameDecoder,
   RuntimeFrameSchema,
@@ -69,6 +70,16 @@ describe('runtime protocol frames', () => {
 });
 
 describe('runtime protocol compatibility', () => {
+  it('holds the protocol at 1.0, so a bump is a decision and not a side effect', () => {
+    // `assertRuntimeProtocolCompatible` is strict major+minor equality, and
+    // remote transports are the first place two peers can be on different
+    // releases at all. Every schema change that keeps them talking is therefore
+    // additive-and-optional rather than a version bump: bumping this string
+    // disconnects every runtime nobody has updated yet, which is a migration to
+    // plan, not a line to change in passing.
+    expect(RUNTIME_PROTOCOL_VERSION).toBe('1.0');
+  });
+
   it('accepts equal major/minor versions with different patches', () => {
     expect(() => assertRuntimeProtocolCompatible('1.2.0', '1.2.9')).not.toThrow();
   });

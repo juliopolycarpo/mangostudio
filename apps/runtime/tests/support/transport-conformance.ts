@@ -6,6 +6,16 @@
  * than write a bespoke test per transport and discover later that only one of
  * them covers cancellation, the behaviour lives here once and each transport
  * supplies a fixture. 012 and 013 add their transport as one more fixture.
+ *
+ * One case is deliberately absent: a peer on the same protocol version carrying
+ * fields this build does not know. Remote transports are what make that pair
+ * reachable, so the case belongs here — but every frame schema is
+ * `additionalProperties: false`, so today the answer is "the connection is torn
+ * down", and a conformance case asserting that would read as the intended
+ * behaviour rather than as the thing still to fix. It is pinned instead as a
+ * characterization test in `apps/shared/tests/unit/runtime-protocol.test.ts`,
+ * so tolerant decoding arrives as a deliberate edit to that assertion and this
+ * case can be written against a wire that can pass it.
  */
 
 import { expect, it } from 'bun:test';
