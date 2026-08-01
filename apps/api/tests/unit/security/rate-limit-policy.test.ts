@@ -39,11 +39,13 @@ describe('rate-limit policy classification', () => {
     expect(classifyRateLimit('/api/ws')).toBe(RATE_LIMIT_BUCKETS.general);
   });
 
-  it('routes runtime dial-in upgrades to their own bucket', () => {
-    expect(classifyRateLimit('/api/runtime')).toBe(RATE_LIMIT_BUCKETS.runtimeSocket);
-    expect(classifyRateLimit('/runtime')).toBe(RATE_LIMIT_BUCKETS.runtimeSocket);
-    // Only the endpoint itself: the bucket exists so a reconnecting runtime
-    // cannot starve the general bucket, not to shelter everything below it.
+  it('leaves runtime dial-in upgrades to the route that can answer them', () => {
+    // Exempt from the HTTP hook, not unlimited: the same bucket is counted in
+    // `runtime-socket-routes`, which refuses with a close code instead of a 429
+    // a dialing peer has no framing to read.
+    expect(classifyRateLimit('/api/runtime')).toBeNull();
+    expect(classifyRateLimit('/runtime')).toBeNull();
+    // Only the endpoint itself: everything below it is ordinary API traffic.
     expect(classifyRateLimit('/api/runtimes')).toBe(RATE_LIMIT_BUCKETS.general);
     expect(classifyRateLimit('/api/runtime/anything')).toBe(RATE_LIMIT_BUCKETS.general);
   });

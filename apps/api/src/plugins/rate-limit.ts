@@ -109,7 +109,11 @@ function sanitizeClientIp(value: string | undefined | null): string | null {
  * (`ERR_BODY_ALREADY_USED`) — and also drops the `set` mutations made later in
  * the request. Referencing only the `headers` sub-object sidesteps both.
  */
-function extractClientIp(headers: Headers, ip: string | undefined, trustProxy: boolean): string {
+export function extractClientIp(
+  headers: Headers,
+  ip: string | undefined,
+  trustProxy: boolean
+): string {
   if (!trustProxy) return sanitizeClientIp(ip) ?? 'unknown';
 
   const forwarded = sanitizeClientIp(headers.get('x-forwarded-for')?.split(',')[0]);

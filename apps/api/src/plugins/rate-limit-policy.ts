@@ -96,17 +96,24 @@ export function resolveRateLimitClientId(
 }
 
 /**
- * Classify a request path (and optional headers) into its rate-limit bucket.
+ * Classify a request path (and optional headers) into its rate-limit bucket,
+ * or `null` for a path that enforces its own.
  *
  * Usage: classifyRateLimit('/api/auth/session') // → RATE_LIMIT_BUCKETS.auth
  */
 export function classifyRateLimit(
   path: string,
   headers?: RateLimitHeaderLookup | null
-): RateLimitBucket {
+): RateLimitBucket | null {
   if (isHealthPath(path)) return RATE_LIMIT_BUCKETS.health;
   if (isAuthPath(path)) return RATE_LIMIT_BUCKETS.auth;
-  if (isRuntimeSocketPath(path)) return RATE_LIMIT_BUCKETS.runtimeSocket;
+  // Exempt here and enforced in the route, on the same bucket. A dialing
+  // runtime has no response body to read: an HTTP 429 before the upgrade is a
+  // refusal it can only see as a socket that failed to open, so it would back
+  // off on the generic curve rather than the longer one this wall deserves.
+  // Refusing after the upgrade costs one socket and buys a close code the peer
+  // can act on.
+  if (isRuntimeSocketPath(path)) return null;
   if (trimmedApiKeyHeader(headers)) return RATE_LIMIT_BUCKETS.apiKey;
   return RATE_LIMIT_BUCKETS.general;
 }

@@ -96,7 +96,7 @@ describe('rate-limit buckets under the /api prefix', () => {
     const tinyApiKey = { name: 'api-key', max: 3, windowMs: 60_000 };
     const classify = (path: string, headers?: Headers) => {
       const bucket = classifyRateLimit(path, headers);
-      if (bucket.name === RATE_LIMIT_BUCKETS.apiKey.name) return tinyApiKey;
+      if (bucket?.name === RATE_LIMIT_BUCKETS.apiKey.name) return tinyApiKey;
       return bucket;
     };
     const limiter = rateLimit({ classify, trustProxy: true });
@@ -133,7 +133,7 @@ describe('rate-limit buckets under the /api prefix', () => {
     const tinyApiKey = { name: 'api-key', max: 3, windowMs: 60_000 };
     const classify = (path: string, headers?: Headers) => {
       const bucket = classifyRateLimit(path, headers);
-      if (bucket.name === RATE_LIMIT_BUCKETS.apiKey.name) return tinyApiKey;
+      if (bucket?.name === RATE_LIMIT_BUCKETS.apiKey.name) return tinyApiKey;
       return bucket;
     };
     const limiter = rateLimit({ classify, trustProxy: true });
