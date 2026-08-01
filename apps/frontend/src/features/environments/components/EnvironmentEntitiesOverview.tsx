@@ -13,6 +13,7 @@ import {
 } from '../queries';
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
 import { EnvironmentPageState } from './EnvironmentPageState';
+import { RuntimePairingPanel } from './RuntimePairingPanel';
 
 const STATUS_RAIL: Record<EnvironmentConnectionState, string> = {
   connected: 'bg-primary',
@@ -180,6 +181,12 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
 
         <CapabilityChips environment={environment} />
 
+        <RuntimeRelease environment={environment} />
+
+        {environment.transportKind === 'websocket' ? (
+          <RuntimePairingPanel environmentId={environment.id} />
+        ) : null}
+
         {actionError ? (
           <p className="text-xs text-error" role="alert">
             {actionError}
@@ -248,6 +255,27 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
         </div>
       </div>
     </article>
+  );
+}
+
+/**
+ * Which release answered on the other end.
+ *
+ * Only shown once it drifts from the hub's. A runtime the hub spawns is always
+ * its own release, so printing a version on every card would be noise; a
+ * runtime that dials in is installed on someone else's machine and may sit a
+ * release behind, which the hub allows on purpose — and something allowed
+ * silently is something nobody fixes.
+ */
+function RuntimeRelease({ environment }: { environment: Environment }) {
+  const { t } = useI18n();
+  const { runtimeVersion, runtimeVersionDrift } = environment.status;
+  if (!runtimeVersion || !runtimeVersionDrift) return null;
+
+  return (
+    <p className="rounded-lg border border-warning/35 bg-warning/5 px-2.5 py-2 text-[11px] text-on-surface-variant">
+      {formatMessage(t.environments.entities.runtimeVersionDrift, { version: runtimeVersion })}
+    </p>
   );
 }
 

@@ -11,6 +11,8 @@ import type {
   CreateEnvironmentBody,
   Environment,
   InstallRecipePreview,
+  RuntimePairingIssue,
+  RuntimePairingStatus,
   RuntimeStatusList,
   UpdateEnvironmentBody,
   VersionManagerStatusList,
@@ -38,6 +40,8 @@ export const environmentKeys = {
   agents: () => [...environmentKeys.all, 'agents'] as const,
   installRecipes: () => [...environmentKeys.all, 'install-recipes'] as const,
   wsl: () => [...environmentKeys.all, 'wsl'] as const,
+  pairings: () => [...environmentKeys.all, 'pairing'] as const,
+  pairing: (id: string) => [...environmentKeys.pairings(), id] as const,
 };
 
 function environmentEntitiesQueryOptions() {
@@ -53,9 +57,14 @@ function environmentEntitiesQueryOptions() {
 
 export function useEnvironmentEntitiesQuery() {
   const queryClient = useQueryClient();
-  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, () =>
-    queryClient.invalidateQueries({ queryKey: environmentKeys.entities() })
-  );
+  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, async () => {
+    await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+    // Pairing state moves on the same events: a runtime dialing in stamps its
+    // credential as seen, and rotating or revoking one drops what it had
+    // connected. Without this the panel keeps saying "never seen" about a
+    // machine the card beside it already shows as connected.
+    await queryClient.invalidateQueries({ queryKey: environmentKeys.pairings() });
+  });
   return useQuery(environmentEntitiesQueryOptions());
 }
 
@@ -148,6 +157,57 @@ export function useRemoveEnvironmentMutation() {
       );
       // Removing an environment is what frees the distribution it claimed.
       return invalidateWslDetection(queryClient);
+    },
+  });
+}
+
+/**
+ * Pairing state for one dial-in environment. The secret half of a token is
+ * never in this payload — only whether one exists — so the response is safe to
+ * cache like any other list entry.
+ */
+export function useRuntimePairingQuery(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: environmentKeys.pairing(id),
+    enabled,
+    queryFn: async () => {
+      const { data, error } = await client.api.environments({ id }).pairing.get();
+      if (error) throw new ApiError(error.value);
+      return data as RuntimePairingStatus;
+    },
+  });
+}
+
+/**
+ * Issues or rotates the credential. The response is the one and only time the
+ * token is readable, so it is returned to the caller rather than written into
+ * the cache the pairing query reads.
+ */
+export function useIssueRuntimePairingMutation(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await client.api.environments({ id }).pairing.post();
+      if (error) throw new ApiError(error.value);
+      return data as RuntimePairingIssue;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: environmentKeys.pairing(id) }),
+  });
+}
+
+export function useRevokeRuntimePairingMutation(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await client.api.environments({ id }).pairing.delete();
+      if (error) throw new ApiError(error.value);
+      return data;
+    },
+    // Revoking drops whatever the credential had connected, so the card's own
+    // status is stale too, not just the pairing panel's.
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.pairing(id) });
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
     },
   });
 }

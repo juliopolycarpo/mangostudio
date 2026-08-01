@@ -466,7 +466,7 @@ carry the same build stamp and ship together in every channel — archives, npm
 platform packages, and the Docker images — because the hub resolves the runtime as a
 sibling of its own executable and the protocol handshake refuses a version mismatch.
 
-## Out-Of-Process Environments (stdio, WSL)
+## Out-Of-Process Environments (stdio, WSL, paired WebSocket)
 
 Open these first:
 
@@ -490,6 +490,21 @@ WSL is a launcher over that same transport, not a protocol of its own:
 - `apps/api/src/modules/environments/http/environment-routes.ts` (`GET /environments/wsl`)
 - `apps/api/src/modules/environments/domain/wsl-runtime-release.ts` (argv, scripts, asset names)
 - `apps/api/src/modules/environments/infrastructure/wsl-provisioner.ts` (download, verify, install)
+
+A paired WebSocket inverts the direction — the runtime dials the hub — so nothing
+in the spawn path applies and the manager is entered through `adopt()` rather than
+`connect()`:
+
+- `apps/shared/src/runtime-protocol/chunk.ts` (frames split across 16 KiB messages)
+- `apps/shared/src/runtime-protocol/close-codes.ts` (why a socket ended, and whether to redial)
+- `apps/runtime/src/transports/websocket.ts` (frame port, send queue, backpressure)
+- `apps/runtime/src/connect.ts` (dial loop, backoff, liveness), `apps/runtime/src/runtime-home.ts`
+- `apps/api/src/modules/environments/http/runtime-socket-routes.ts` (`/api/runtime`)
+- `apps/api/src/modules/environments/domain/pairing-token.ts` (selector + verifier, dial endpoint)
+- `apps/api/src/modules/environments/application/runtime-pairing-service.ts`
+- `apps/frontend/src/features/environments/components/RuntimePairingPanel.tsx`
+- Conformance: `apps/runtime/tests/support/transport-conformance.ts` — a new transport
+  supplies a fixture there rather than a suite of its own.
 
 Paths inside a distribution are native Linux paths end to end — there is no
 translation layer and none is wanted. What the hub does is *resolve* in the

@@ -8,7 +8,7 @@ const TMP_DIR = join('/tmp', `mango-doctor-cursor-config-${process.pid}`);
 
 function makeConfig(configFilePath: string): MangoConfig {
   return {
-    server: { host: 'localhost', port: 3001 },
+    server: { host: 'localhost', port: 3001, publicUrl: '' },
     frontend: { host: 'localhost', port: 5173 },
     database: { path: ':memory:' },
     uploads: { dir: '/data/uploads' },

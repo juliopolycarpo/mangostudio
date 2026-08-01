@@ -132,6 +132,11 @@ Production configuration uses `~/.mango/config.toml` and `~/.mango/.env` for the
 [server]
 host = "0.0.0.0"
 port = 3001
+# How peers outside this process reach the hub, which is a different question
+# from how it binds. Required for paired WebSocket runtimes: the pairing card
+# has no other way to print the address they dial, and a request header would
+# be a spoofable guess. Env override: PUBLIC_URL.
+publicUrl = "https://your-domain.com"
 
 [database]
 path = "/var/lib/mangostudio/database.sqlite"

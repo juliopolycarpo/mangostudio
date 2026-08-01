@@ -32,7 +32,7 @@ import { getApiKeyApi, resolveApiKeyScope } from '../auth';
 import { getDb } from '../db/database';
 import { getSavedAppSettings } from '../modules/app-settings/infrastructure/app-settings-repository';
 import { resolvePath } from './rate-limit';
-import { isAuthPath } from './rate-limit-policy';
+import { isAuthPath, isRuntimeSocketPath } from './rate-limit-policy';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -47,12 +47,18 @@ function isApiKeyManagementPath(path: string): boolean {
 }
 
 /**
- * Cookie-session WebSocket upgrade. The realtime route rejects `x-api-key` with
- * its stable WS error + `4401` close; short-circuiting here with HTTP 401/403
- * would prevent that handshake path from running.
+ * WebSocket upgrades that own their own credential policy. The realtime route
+ * rejects `x-api-key` with its stable WS error + `4401` close, and `/api/runtime`
+ * authenticates a pairing token over `Authorization: Bearer`; short-circuiting
+ * either here with HTTP 401/403 would prevent that handshake path from running.
+ *
+ * Hardening rather than a prerequisite: a Bearer-only upgrade never reaches
+ * this guard, which returns immediately without `x-api-key`. What this adds is
+ * that an upgrade carrying a key header is refused by the route, with a close
+ * code the peer can read, instead of by a guard it has no framing to hear.
  */
-function isRealtimeWebSocketPath(path: string): boolean {
-  return path === '/ws' || path === '/api/ws';
+function isProtocolWebSocketPath(path: string): boolean {
+  return path === '/ws' || path === '/api/ws' || isRuntimeSocketPath(path);
 }
 
 /** Mutable response controls Elysia exposes on the context. */
@@ -93,8 +99,8 @@ export function apiKeyGuard(app: Elysia) {
     // even while the account's external API toggle is disabled.
     if (isApiKeyManagementPath(path)) return;
 
-    // Realtime WS owns cookie-vs-key policy after the upgrade completes.
-    if (isRealtimeWebSocketPath(path)) return;
+    // These sockets own their credential policy after the upgrade completes.
+    if (isProtocolWebSocketPath(path)) return;
 
     const result = await getApiKeyApi().verifyApiKey({ body: { key } });
     if (!result.valid || !result.key) {

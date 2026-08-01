@@ -36,6 +36,13 @@ export interface MangoConfig {
   server: {
     host: string;
     port: number;
+    /**
+     * How a peer outside this process reaches the hub, which is a different
+     * question from how the hub binds: `host`/`port` can be `0.0.0.0:3001`
+     * behind a proxy terminating TLS on a public name. Empty means unset —
+     * nothing derives it from a request header, which the caller controls.
+     */
+    publicUrl: string;
   };
   frontend: {
     host: string;
@@ -127,7 +134,7 @@ export interface MangoConfig {
 }
 
 const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
-  server: { host: '0.0.0.0', port: 3001 },
+  server: { host: '0.0.0.0', port: 3001, publicUrl: '' },
   frontend: { host: 'localhost', port: 5173 },
   database: { path: '' },
   uploads: { dir: '' },
@@ -166,6 +173,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   API_HOST: (cfg, v) => {
     cfg.server.host = v;
+  },
+  PUBLIC_URL: (cfg, v) => {
+    cfg.server.publicUrl = v;
   },
   FRONTEND_PORT: (cfg, v) => {
     cfg.frontend.port = Number(v) || cfg.frontend.port;
@@ -401,6 +411,7 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
   if (server) {
     if (typeof server.host === 'string') cfg.server.host = server.host;
     if (typeof server.port === 'number') cfg.server.port = server.port;
+    if (typeof server.publicUrl === 'string') cfg.server.publicUrl = server.publicUrl;
   }
 
   const frontend = parsed.frontend as Record<string, unknown> | undefined;

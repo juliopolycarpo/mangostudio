@@ -10,7 +10,6 @@
  * best-effort is worse than no removal feature.
  */
 
-import { timingSafeEqual } from 'node:crypto';
 import { resolve as resolvePath } from 'node:path';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
@@ -24,6 +23,7 @@ import type {
   RemovalRemoved,
 } from '@mangostudio/shared/library';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
+import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { assertExpectedResourceEntry } from '../domain/path-safety';
 import { getLibraryLocation, type LocationDefinition, type PathEnv } from '../domain/registry';
@@ -580,10 +580,4 @@ function validationError(message: string): LibraryRequestError {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function constantTimeEquals(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left, 'utf8');
-  const rightBytes = Buffer.from(right, 'utf8');
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
 }

@@ -3,6 +3,7 @@ import {
   assertRuntimeProtocolCompatible,
   decodeRuntimeFrameLine,
   encodeRuntimeFrame,
+  RUNTIME_PROTOCOL_VERSION,
   RuntimeFrameCodecError,
   RuntimeFrameDecoder,
   RuntimeFrameSchema,
@@ -69,8 +70,34 @@ describe('runtime protocol frames', () => {
 });
 
 describe('runtime protocol compatibility', () => {
+  it('holds the protocol at 1.0, so a bump is a decision and not a side effect', () => {
+    // `assertRuntimeProtocolCompatible` is strict major+minor equality, and
+    // remote transports are the first place two peers can be on different
+    // releases at all. Every schema change that keeps them talking is therefore
+    // additive-and-optional rather than a version bump: bumping this string
+    // disconnects every runtime nobody has updated yet, which is a migration to
+    // plan, not a line to change in passing.
+    expect(RUNTIME_PROTOCOL_VERSION).toBe('1.0');
+  });
+
   it('accepts equal major/minor versions with different patches', () => {
     expect(() => assertRuntimeProtocolCompatible('1.2.0', '1.2.9')).not.toThrow();
+  });
+
+  it('refuses a same-version peer that carries a field this build does not know', () => {
+    // The compat window a remote transport is supposed to have — same
+    // major/minor, one side newer, additive fields ignored — does not exist
+    // yet. Every frame schema is `additionalProperties: false`, so a peer at
+    // 1.0 that adds an optional field has its frame refused and its connection
+    // torn down. That is the safe direction to be wrong in, and it is fine
+    // while hub and runtime ship together; it stops being fine the moment a
+    // remote runtime can be a release behind. Pinned here so the protocol
+    // evolution rules land as a deliberate change to this line rather than as
+    // an assumption nobody checked.
+    const skewed = { ...request, deadlineMs: 30_000 };
+
+    expect(Value.Check(RuntimeFrameSchema, skewed)).toBe(false);
+    expect(() => decodeRuntimeFrameLine(JSON.stringify(skewed))).toThrow(RuntimeFrameCodecError);
   });
 
   it('rejects a stale runtime with an actionable typed error', () => {

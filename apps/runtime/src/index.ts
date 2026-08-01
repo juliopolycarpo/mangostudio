@@ -7,10 +7,12 @@ export {
   RuntimeToolArgumentError,
 } from './errors';
 export {
+  type RuntimeEventInput,
   type RuntimeHandlerContext,
   RuntimeHost,
   type RuntimeMethodHandler,
 } from './host';
+export { livenessIntervalFor, startProtocolLiveness } from './liveness';
 export { createLocalRuntimeManifest } from './manifest';
 export type * from './methods';
 export { RUNTIME_ABSENT_HASH } from './methods';
@@ -108,3 +110,14 @@ export {
   createStdioFramePort,
   type StdioFramePortClosure,
 } from './transports/stdio';
+export {
+  type ClientWebSocketLike,
+  clientWebSocketSink,
+  createWebSocketFramePort,
+  type ServerWebSocketLike,
+  serverWebSocketSink,
+  type WebSocketFramePort,
+  type WebSocketFramePortClosure,
+  type WebSocketFrameSink,
+  type WebSocketSendResult,
+} from './transports/websocket';

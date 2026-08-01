@@ -37,6 +37,7 @@ import { userToolIdentities } from './036_user_tool_identities';
 import { toolIdentityImages } from './037_tool_identity_images';
 import { environmentEntities } from './038_environment_entities';
 import { fileCheckpointEnvironment } from './039_file_checkpoint_environment';
+import { runtimePairingTokens } from './040_runtime_pairing_tokens';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -78,4 +79,5 @@ export const allMigrations = {
   '037_tool_identity_images': toolIdentityImages,
   '038_environment_entities': environmentEntities,
   '039_file_checkpoint_environment': fileCheckpointEnvironment,
+  '040_runtime_pairing_tokens': runtimePairingTokens,
 };

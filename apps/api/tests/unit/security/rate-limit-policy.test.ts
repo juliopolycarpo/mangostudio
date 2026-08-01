@@ -39,6 +39,24 @@ describe('rate-limit policy classification', () => {
     expect(classifyRateLimit('/api/ws')).toBe(RATE_LIMIT_BUCKETS.general);
   });
 
+  it('leaves runtime dial-in upgrades to the route that can answer them', () => {
+    // Exempt from the HTTP hook, not unlimited: the same bucket is counted in
+    // `runtime-socket-routes`, which refuses with a close code instead of a 429
+    // a dialing peer has no framing to read.
+    expect(classifyRateLimit('/api/runtime')).toBeNull();
+    expect(classifyRateLimit('/runtime')).toBeNull();
+    // Only the endpoint itself: everything below it is ordinary API traffic.
+    expect(classifyRateLimit('/api/runtimes')).toBe(RATE_LIMIT_BUCKETS.general);
+    expect(classifyRateLimit('/api/runtime/anything')).toBe(RATE_LIMIT_BUCKETS.general);
+  });
+
+  it('sizes the runtime bucket above a single reconnect cadence', () => {
+    // Buckets key on client IP, so several runtimes behind one NAT share this
+    // counter. A budget tuned to a single backoff curve would let one broken
+    // runtime rate-limit every healthy one beside it.
+    expect(RATE_LIMIT_BUCKETS.runtimeSocket.max).toBeGreaterThanOrEqual(60);
+  });
+
   it('routes key-authenticated traffic to the api-key bucket', () => {
     const headers = headersWithApiKey('mango_test_secret_value');
     expect(classifyRateLimit('/api/chats', headers)).toBe(RATE_LIMIT_BUCKETS.apiKey);

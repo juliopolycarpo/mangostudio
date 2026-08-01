@@ -102,6 +102,30 @@ describe('in-process runtime transport', () => {
     }
   });
 
+  it('fails the runtime handshake when the hub acknowledges another protocol version', async () => {
+    // The mismatch arrives inside the transport's frame listener, which on a
+    // websocket is the socket's `message` event — a throw there escapes into
+    // the event loop and leaves `waitUntilReady()` hanging until its caller
+    // times out and blames the hub for saying nothing.
+    const ports = createInProcessPortPair({ validateFrames: true });
+    const host = createHost(new Map());
+    host.attach(ports.runtime);
+    host.start();
+
+    try {
+      ports.hub.send({
+        type: 'hello_ack',
+        protocolVersion: '2.0',
+        hubVersion: 'hub-test',
+      });
+      await expect(host.waitUntilReady()).rejects.toMatchObject({
+        code: 'PROTOCOL_MISMATCH',
+      });
+    } finally {
+      host.close();
+    }
+  });
+
   it('translates AbortSignal into a cancel frame without serializing it', async () => {
     let receivedParams: unknown;
     const host = createHost(

@@ -13,6 +13,7 @@ import { createDiagnosticLogger } from './lib/logger';
 import { apiKeyRoutes } from './modules/api-keys/http/api-key-routes';
 import { chatRoutes } from './modules/chats/http/chat-routes';
 import { environmentRoutes } from './modules/environments/http/environment-routes';
+import { runtimeSocketRoutes } from './modules/environments/http/runtime-socket-routes';
 import { fileCheckpointRoutes } from './modules/file-checkpoints/http/file-checkpoint-routes';
 import { capabilityRoutes } from './modules/generation/http/capability-routes';
 import { generateRoutes } from './modules/generation/http/generate-routes';
@@ -76,6 +77,9 @@ const api = new Elysia({ prefix: '/api' })
   .use(authRoutes)
   .use(apiKeyRoutes)
   .use(realtimeRoutes)
+  // A peer endpoint rather than a bus topic: paired runtimes dial in here with
+  // a machine credential, not a session cookie.
+  .use(runtimeSocketRoutes)
   .use(chatRoutes)
   .use(environmentRoutes)
   .use(capabilityRoutes)
