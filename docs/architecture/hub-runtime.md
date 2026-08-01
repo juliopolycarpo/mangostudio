@@ -240,7 +240,13 @@ The runtime owns the reconnect, because the hub cannot dial it:
 - A connection that served resets the curve.
 - A second dial for the same environment **supersedes** the first, with a close code saying
   so. In-flight calls on the loser fail `RUNTIME_UNAVAILABLE`; the next call routes to the
-  survivor.
+  survivor. The loser then **stops**, rather than redialing: two processes holding one
+  pairing token would otherwise take the environment from each other on every reconnect,
+  dropping in-flight calls at each handover. Which of the two should be running is a
+  decision only an operator has, so the runtime says which two are fighting and exits.
+- A protocol version the hub will not serve closes with its own code, separate from a
+  disabled environment. Both reach the route as "unavailable" from the connection manager,
+  and the remediation is not the same: enabling an environment cannot fix a stale binary.
 
 Hub-side, a dial-in environment never latches. Five failed attempts, or a protocol
 mismatch, latch a transport the hub dials; here nothing the hub does could produce the
@@ -254,11 +260,12 @@ failed, because that is what it is.
 hub's own distribution, so release equality cannot be a connection gate; the protocol
 major/minor pair still is.
 
-That leaves a runtime a release or two behind connecting and working, which is the
-intent — but the hub does not yet show it. The handshake carries `runtimeVersion` and the
-hub keeps it on the connection, and nothing surfaces it on the card, so drift is currently
-tolerated rather than visible. Surfacing it needs the hub's own version at the frontend,
-which the runtime lifecycle card wants anyway.
+That leaves a runtime a release or two behind connecting and working, which is the intent.
+Drift that is allowed and invisible is drift nobody fixes, so the handshake's
+`runtimeVersion` reaches the connection status along with whether it differs from the hub's,
+and the card says so. The comparison happens hub-side because the hub is the only party
+holding both strings; shipping its own version on every environment row so the browser could
+compare would repeat one constant to answer one question.
 
 The window that tolerance implies is also narrower than it sounds. Every frame schema sets
 `additionalProperties: false`, so two peers on the same major/minor still refuse each
@@ -280,6 +287,12 @@ runtime.
 cadence. Buckets key on client IP, so several runtimes behind one NAT share a counter, and
 a budget tuned to a single backoff curve would let one broken runtime rate-limit every
 healthy one beside it.
+
+The bucket is counted in the route rather than in the global HTTP hook, which exempts this
+path. A dialing runtime has no response body to read: an HTTP 429 before the upgrade reaches
+it as a socket that simply failed to open, indistinguishable from a hub that is down, so it
+would come back on the generic backoff instead of waiting out the window. Refusing after the
+upgrade costs one socket and buys a close code the peer can act on.
 
 ## Paths Across Hosts
 

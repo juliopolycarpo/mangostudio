@@ -84,8 +84,11 @@ line is readable by every process on the machine — so pass it on stdin or set
 beside it, so later runs need no flags at all.
 
 `connect` stays in the foreground and reconnects on its own, backing off after
-each failure. It exits non-zero only when redialing cannot help: a revoked token
-or a disabled environment. Keep it running under whatever supervises long-lived
+each failure. It exits non-zero only when redialing cannot help: a revoked token,
+a disabled environment, a protocol version the hub will not serve, or another
+runtime that took the same environment over — two processes sharing one pairing
+token would otherwise trade it back and forth forever, so the loser stops and
+names the conflict. Keep it running under whatever supervises long-lived
 processes on that machine.
 
 ```bash
@@ -93,9 +96,22 @@ printf %s "$TOKEN" | mangostudio-runtime connect --hub wss://hub.example.com/api
 mangostudio-runtime connect   # afterwards: reuses the stored hub URL and token
 ```
 
+`printf` and single quotes are neither `cmd.exe` nor PowerShell. On Windows, use
+the environment variable, which keeps the secret out of argv the same way:
+
+```powershell
+$env:MANGOSTUDIO_RUNTIME_TOKEN='<token>'; mangostudio-runtime connect --hub wss://hub.example.com/api/runtime
+```
+
+The stored credential is owner-only on POSIX. On Windows `chmod` can only set the
+read-only attribute, so `connect` reports that owner-only access was **not**
+established rather than claiming a restriction it did not apply — restrict the
+file yourself if other accounts use that machine.
+
 Release drift is not a connection gate here: a remote runtime is not part of the
-hub's own distribution, so only the protocol version has to match. Version
-differences show up as state on the environment card.
+hub's own distribution, so only the protocol version has to match. A release that
+differs from the hub's is reported on the environment card, so a binary that has
+fallen behind is visible rather than merely tolerated.
 
 Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
 `127.0.0.1`.
