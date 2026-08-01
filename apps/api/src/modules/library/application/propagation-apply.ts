@@ -9,7 +9,6 @@
  * None of them is optional, and none of them should be relaxed for speed.
  */
 
-import { timingSafeEqual } from 'node:crypto';
 import {
   type AdapterStrategy,
   hashLibraryFile,
@@ -31,6 +30,7 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
+import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { getLibraryLocation, type LocationDefinition, type PathEnv } from '../domain/registry';
 import {
@@ -845,12 +845,6 @@ function describeFailure(operation: PlannedOperation, error: unknown): Propagati
 
 function validationError(message: string): LibraryRequestError {
   return new LibraryRequestError(422, message);
-}
-
-function constantTimeEquals(left: string, right: string): boolean {
-  const leftBytes = Buffer.from(left, 'utf8');
-  const rightBytes = Buffer.from(right, 'utf8');
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
 }
 
 function compareText(left: string, right: string): number {
