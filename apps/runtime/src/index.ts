@@ -19,6 +19,10 @@ export { RUNTIME_ABSENT_HASH } from './methods';
 export { createRuntimeMethodHandlers } from './registry';
 export { createLocalRuntimeHost } from './runtime';
 export {
+  RUNTIME_SETUP_PENDING_MESSAGE,
+  RUNTIME_SETUP_PENDING_SIGNATURE,
+} from './runtime-home';
+export {
   bearerToken,
   isLoopbackHostname,
   parseListenAddress,

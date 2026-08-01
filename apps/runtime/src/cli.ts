@@ -14,6 +14,7 @@ import { connectToHub } from './connect';
 import { createLocalRuntimeHost } from './runtime';
 import {
   bootstrapServeToken,
+  RUNTIME_SETUP_PENDING_MESSAGE,
   readPairingToken,
   readRuntimeSlotConfig,
   readServeToken,
@@ -259,7 +260,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
 
   const stored = await readRuntimeSlotConfig('remote');
   if (stored.setupState === 'pending') {
-    log('This runtime slot is still pending setup. Complete setup on this machine before serve.');
+    log(RUNTIME_SETUP_PENDING_MESSAGE);
     return 1;
   }
 

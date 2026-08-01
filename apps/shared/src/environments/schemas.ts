@@ -78,6 +78,29 @@ export const SshEnvironmentConfigSchema = Type.Object(
 );
 
 /**
+ * Why an SSH launch failed, as far as the client's own output allows.
+ *
+ * `ssh` reports every failure of its own — auth, host key, timeout, DNS — as
+ * exit 255 and passes a remote command's code through otherwise, so the reason
+ * lives in stderr rather than in the exit status. It reaches the card because
+ * the fixes are unrelated to each other: a refused host key is answered by
+ * connecting once by hand, a missing binary by installing one there.
+ */
+export const SshFailureReasonSchema = Type.Union([
+  /** No `ssh` on the hub's PATH. */
+  Type.Literal('client-missing'),
+  Type.Literal('auth-refused'),
+  Type.Literal('host-key-unverified'),
+  /** DNS, timeout, refused, unroutable — the host never answered. */
+  Type.Literal('unreachable'),
+  Type.Literal('runtime-missing'),
+  Type.Literal('runtime-not-executable'),
+  /** The runtime is there and refuses to serve until its owner runs `setup`. */
+  Type.Literal('setup-pending'),
+  Type.Literal('unknown'),
+]);
+
+/**
  * A distribution `wsl.exe -l -v` reported. `state` is passed through as the
  * Windows shell printed it: that column is localized, so mapping it to an enum
  * would either lie on a non-English host or drop the information entirely.
@@ -247,6 +270,12 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
      * times to answer one question.
      */
     runtimeVersionDrift: Type.Optional(Type.Boolean()),
+    /**
+     * Set when an SSH launch failed and the client's output named a cause.
+     * `errorCode` cannot carry it: every one of these arrives as
+     * `RUNTIME_UNAVAILABLE`, and they have nothing to do with each other.
+     */
+    sshFailureReason: Type.Optional(SshFailureReasonSchema),
   },
   { additionalProperties: false }
 );
@@ -321,6 +350,7 @@ export type WslEnvironmentConfig = Static<typeof WslEnvironmentConfigSchema>;
 export type WebSocketEnvironmentConfig = Static<typeof WebSocketEnvironmentConfigSchema>;
 export type HttpEnvironmentConfig = Static<typeof HttpEnvironmentConfigSchema>;
 export type SshEnvironmentConfig = Static<typeof SshEnvironmentConfigSchema>;
+export type SshFailureReason = Static<typeof SshFailureReasonSchema>;
 export type WslDistribution = Static<typeof WslDistributionSchema>;
 export type WslUnavailableReason = Static<typeof WslUnavailableReasonSchema>;
 export type WslDetection = Static<typeof WslDetectionSchema>;
