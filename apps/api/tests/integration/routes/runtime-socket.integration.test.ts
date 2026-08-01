@@ -67,7 +67,15 @@ afterEach(async () => {
   await getDb().deleteFrom('user').where('id', '=', TEST_USER.id).execute();
 });
 
-async function startHub(options: { readonly enabled?: boolean } = {}) {
+interface StartHubOptions {
+  readonly enabled?: boolean;
+  /** Makes the `lastSeenAt` write fail, the way a transient DB error would. */
+  readonly failMarkSeen?: boolean;
+  /** Holds `adopt` open so a test can close the socket mid-adoption. */
+  readonly gateAdopt?: Promise<void>;
+}
+
+async function startHub(options: StartHubOptions = {}) {
   await insertTestUser(TEST_USER);
   const environments = createEnvironmentRepository(getDb());
   await environments.create({
@@ -92,10 +100,22 @@ async function startHub(options: { readonly enabled?: boolean } = {}) {
   });
   const issued = await pairing.issue(TEST_USER.id, ENVIRONMENT_ID);
 
+  const gate = options.gateAdopt;
+  if (gate) {
+    const adopt = manager.adopt.bind(manager);
+    manager.adopt = async (userId, environmentId, open) => {
+      const client = await adopt(userId, environmentId, open);
+      await gate;
+      return client;
+    };
+  }
+
   const app = new Elysia({ websocket: REALTIME_WEBSOCKET_OPTIONS }).group('/api', (group) =>
     group.use(
       createRuntimeSocketRoutes({
-        pairing,
+        pairing: options.failMarkSeen
+          ? { ...pairing, markSeen: () => Promise.reject(new Error('lastSeenAt write failed')) }
+          : pairing,
         manager,
         hubVersion: () => 'hub-test',
         idleTimeoutSeconds: REALTIME_IDLE_TIMEOUT_SECONDS,
@@ -284,6 +304,44 @@ describe('runtime dial-in socket', () => {
     expect(await reconnected.shell.run(SHELL_CALL)).toEqual({
       marker: 'second',
     } as never);
+  });
+
+  it('keeps an adopted connection when the lastSeenAt write fails', async () => {
+    // `markSeen` is bookkeeping. Letting it share the adoption catch turned a
+    // stale timestamp into a closed socket for a runtime that had already
+    // handshaked and was ready to serve.
+    const hub = await startHub({ failMarkSeen: true });
+    const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
+    await runtime.host.waitUntilReady();
+
+    const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
+    expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'first' } as never);
+    expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('connected');
+  });
+
+  it('releases a socket that closed while its adoption was still in flight', async () => {
+    // The close handler runs before adoption finishes, so it sees a connection
+    // the manager does not own yet and leaves it alone. Whoever finishes last
+    // has to notice, or the card keeps advertising a runtime that hung up.
+    const released = Promise.withResolvers<void>();
+    const hub = await startHub({ gateAdopt: released.promise });
+    const runtime = await dialRuntime(hub.url, hub.issued.token, echoHandlers('first'));
+    await runtime.host.waitUntilReady();
+
+    runtime.close();
+    await runtime.closed;
+    // The close has to reach the server's handler before adoption resolves —
+    // that ordering is the whole bug, and releasing the gate the moment the
+    // client sees its own close event would sometimes test the other one.
+    await Bun.sleep(50);
+    released.resolve();
+    // And the route has to finish adopting before the entry can be judged.
+    await Bun.sleep(10);
+
+    await expect(hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID)).rejects.toMatchObject({
+      code: 'RUNTIME_UNAVAILABLE',
+    });
+    expect(hub.manager.getStatus(TEST_USER.id, ENVIRONMENT_ID).state).toBe('disconnected');
   });
 
   it('records a heartbeat without writing the credential to the logs', async () => {

@@ -56,6 +56,8 @@ interface RuntimeSocketState {
   detachEvents: (() => void) | null;
   /** Set once the manager owns this connection, so close can release it. */
   adopted: boolean;
+  /** Set by the close handler, which can run while adoption is still in flight. */
+  socketClosed: boolean;
 }
 
 /** Minimal shape of the socket, mirroring how realtime-routes narrows its own. */
@@ -129,6 +131,7 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
           stopLiveness: null,
           detachEvents: null,
           adopted: false,
+          socketClosed: false,
         } satisfies RuntimeSocketState,
       };
     })
@@ -175,6 +178,7 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       close(rawSocket) {
         const socket = rawSocket as unknown as RuntimeSocket;
         const state = socket.data.runtimeSocket;
+        state.socketClosed = true;
         teardown(state);
         state.port?.handleSocketClosed();
         state.port = null;
@@ -199,7 +203,6 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
         openConnection(socket, state, peer, port, onUnavailable)
       );
       state.adopted = true;
-      await pairing.markSeen(peer.tokenId);
     } catch (error) {
       logger.warn('adoption_refused', {
         environmentId: peer.environmentId,
@@ -207,7 +210,27 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       });
       teardown(state);
       socket.close(RUNTIME_CLOSE_CODES.FORBIDDEN, 'Environment unavailable');
+      return;
     }
+
+    // The peer can vanish while the handshake is in flight. `close` ran with
+    // `adopted` still false, so it left the manager holding an entry for a
+    // socket that is gone — and the card claiming a connection nobody has.
+    if (state.socketClosed) {
+      state.adopted = false;
+      resolveManager().disconnect(peer.userId, peer.environmentId);
+      return;
+    }
+
+    // Bookkeeping, and deliberately not awaited into the catch above: a
+    // `lastSeenAt` write that fails is a stale timestamp, not a reason to close
+    // a connection that has already been adopted and is serving.
+    void pairing.markSeen(peer.tokenId).catch((error: unknown) => {
+      logger.warn('mark_seen_failed', {
+        environmentId: peer.environmentId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   async function openConnection(
