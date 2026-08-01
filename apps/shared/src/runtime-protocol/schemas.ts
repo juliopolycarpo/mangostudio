@@ -65,6 +65,13 @@ const RuntimeMethodSchema = Type.String({
 });
 const RuntimeTopicSchema = Type.String({ minLength: 1, maxLength: 256 });
 
+/**
+ * Topic a runtime publishes on while it is connected. It is a keep-alive with
+ * a payload, not a metric: the hub uses it to record that a credential is in
+ * use without writing on every protocol ping.
+ */
+export const RUNTIME_HEARTBEAT_TOPIC = 'runtime.heartbeat' as const;
+
 export const RuntimeHelloFrameSchema = Type.Object(
   {
     type: Type.Literal('hello'),

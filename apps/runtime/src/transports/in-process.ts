@@ -29,7 +29,7 @@ export async function connectInProcessRuntime(
   });
   host.start();
   try {
-    await client.waitUntilReady();
+    await Promise.all([client.waitUntilReady(), host.waitUntilReady()]);
   } catch (error) {
     // The caller only ever sees the rejection, so it cannot reach the handle to
     // release these; a failed handshake would otherwise leak a host and a port.

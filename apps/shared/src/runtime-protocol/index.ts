@@ -1,4 +1,10 @@
 export {
+  encodeRuntimeFrameChunks,
+  RUNTIME_CHUNK_HEADER_BYTES,
+  RUNTIME_MAX_TRANSPORT_MESSAGE_BYTES,
+  RuntimeChunkReassembler,
+} from './chunk';
+export {
   assertRuntimeFrame,
   decodeRuntimeFrameLine,
   encodeRuntimeFrame,
@@ -7,6 +13,7 @@ export {
   RuntimeFrameDecoder,
 } from './codec';
 export {
+  RUNTIME_HEARTBEAT_TOPIC,
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeCancelFrame,
   RuntimeCancelFrameSchema,

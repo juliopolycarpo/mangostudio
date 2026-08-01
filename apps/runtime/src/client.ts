@@ -41,6 +41,7 @@ export interface RuntimeProtocolClientOptions {
 /** Hub-side request multiplexer for any runtime frame transport. */
 export class RuntimeProtocolClient {
   readonly #eventListeners = new Set<(event: RuntimeEventFrame) => void>();
+  readonly #pongListeners = new Set<() => void>();
   readonly #hubVersion: string;
   readonly #pending = new Map<string, PendingRequest>();
   readonly #port: RuntimeFramePort;
@@ -143,6 +144,16 @@ export class RuntimeProtocolClient {
     return () => this.#eventListeners.delete(listener);
   }
 
+  /** Sends a protocol ping. The runtime answers with `pong`. */
+  ping(): void {
+    this.#port.send({ type: 'ping' });
+  }
+
+  onPong(listener: () => void): () => void {
+    this.#pongListeners.add(listener);
+    return () => this.#pongListeners.delete(listener);
+  }
+
   close(): void {
     this.#closed = true;
     clearTimeout(this.#handshakeTimer);
@@ -160,6 +171,8 @@ export class RuntimeProtocolClient {
       );
     }
     this.#pending.clear();
+    this.#eventListeners.clear();
+    this.#pongListeners.clear();
     this.#port.close();
   }
 
@@ -172,7 +185,16 @@ export class RuntimeProtocolClient {
         this.#completeRequest(frame);
         break;
       case 'evt':
-        for (const listener of this.#eventListeners) listener(frame);
+        for (const listener of [...this.#eventListeners]) listener(frame);
+        break;
+      // Liveness is symmetric: each side pings on its own cadence and answers
+      // the other's, so a quiet-but-healthy socket proves itself in both
+      // directions rather than only where traffic happens to flow.
+      case 'ping':
+        this.#port.send({ type: 'pong' });
+        break;
+      case 'pong':
+        for (const listener of [...this.#pongListeners]) listener();
         break;
       default:
         break;
