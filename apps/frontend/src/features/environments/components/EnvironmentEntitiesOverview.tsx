@@ -12,6 +12,7 @@ import {
   useUpdateEnvironmentMutation,
 } from '../queries';
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
+import { DirectUrlPanel } from './DirectUrlPanel';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { RuntimePairingPanel } from './RuntimePairingPanel';
 
@@ -186,6 +187,8 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
         {environment.transportKind === 'websocket' ? (
           <RuntimePairingPanel environmentId={environment.id} />
         ) : null}
+
+        {environment.transportKind === 'http' ? <DirectUrlPanel environment={environment} /> : null}
 
         {actionError ? (
           <p className="text-xs text-error" role="alert">

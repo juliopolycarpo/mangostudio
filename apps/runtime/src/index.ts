@@ -19,6 +19,16 @@ export { RUNTIME_ABSENT_HASH } from './methods';
 export { createRuntimeMethodHandlers } from './registry';
 export { createLocalRuntimeHost } from './runtime';
 export {
+  bearerToken,
+  isLoopbackHostname,
+  parseListenAddress,
+  type RuntimeServeHandle,
+  type RuntimeServeListen,
+  type RuntimeServeOptions,
+  serveRuntime,
+  tokensEqual,
+} from './serve';
+export {
   assertFresh,
   assertFreshContent,
   assertLineNumbersCurrent,

@@ -97,8 +97,9 @@ describe('AddEnvironmentDialog', () => {
 
     expect(within(dialog).getByRole('tab', { name: labels.reachLocal })).toBeInTheDocument();
     expect(within(dialog).queryByRole('tab', { name: labels.reachWsl })).toBeNull();
-    // The answers later plans add must not appear before they can connect.
+    // The answers whose transport is not ready yet must not appear.
     expect(within(dialog).queryByText(en.environments.entities.transport.ssh)).toBeNull();
+    expect(within(dialog).getByRole('tab', { name: labels.reachDirect })).toBeInTheDocument();
   });
 
   it('derives an identifier from the name and creates the environment', async () => {
@@ -141,6 +142,29 @@ describe('AddEnvironmentDialog', () => {
 
     expect(within(dialog).getByText(labels.idInvalid)).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: labels.submit })).toBeDisabled();
+  });
+
+  it('creates a Direct URL environment with base URL and token', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachDirect }));
+    await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'LAN box');
+    await user.type(
+      within(dialog).getByRole('textbox', { name: labels.directBaseUrlLabel }),
+      'http://192.168.1.10:8787'
+    );
+    await user.type(within(dialog).getByLabelText(labels.directTokenLabel), 'serve-secret-token');
+    await user.click(within(dialog).getByRole('button', { name: labels.submit }));
+
+    await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());
+    expect(createdRequestBody()).toEqual({
+      id: 'lan-box',
+      name: 'LAN box',
+      transportKind: 'http',
+      config: { baseUrl: 'http://192.168.1.10:8787' },
+      token: 'serve-secret-token',
+    });
   });
 
   it('sends the advanced overrides when they are filled in', async () => {

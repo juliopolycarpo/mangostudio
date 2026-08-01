@@ -9,6 +9,13 @@ import {
   getRuntimeConnectionManager,
   type RuntimeConnectionManager,
 } from '../../../services/runtime-client/runtime-connection-manager';
+import {
+  hasRuntimeToken,
+  persistRuntimeToken,
+  removeRuntimeToken,
+} from '../../../services/runtime-client/runtime-token-secrets';
+import type { SecretStore } from '../../../services/secret-store/store';
+import { bunSecretStore } from '../../../services/secret-store/store';
 import { assertEnvironmentConfig } from '../domain/environment-config';
 import {
   type EnvironmentRecord,
@@ -49,7 +56,11 @@ function localRecord(userId: string): EnvironmentRecord {
   };
 }
 
-function toEnvironment(record: EnvironmentRecord, manager: RuntimeConnectionManager): Environment {
+async function toEnvironment(
+  record: EnvironmentRecord,
+  manager: RuntimeConnectionManager,
+  secretStore: SecretStore
+): Promise<Environment> {
   return {
     id: record.id,
     name: record.name,
@@ -60,13 +71,17 @@ function toEnvironment(record: EnvironmentRecord, manager: RuntimeConnectionMana
     createdAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.createdAt,
     updatedAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.updatedAt,
     status: manager.getStatus(record.userId, record.id),
+    ...(record.transportKind === 'http'
+      ? { hasRuntimeToken: await hasRuntimeToken(record.id, secretStore) }
+      : {}),
   };
 }
 
 export function createEnvironmentService(
   repository: EnvironmentRepository = environmentRepository,
   manager: RuntimeConnectionManager = getRuntimeConnectionManager(),
-  publish: (userId: string) => void = publishEnvironmentInvalidation
+  publish: (userId: string) => void = publishEnvironmentInvalidation,
+  secretStore: SecretStore = bunSecretStore
 ): EnvironmentService {
   async function findRecord(userId: string, id: string): Promise<EnvironmentRecord | null> {
     if (id === LOCAL_ENVIRONMENT_ID) return localRecord(userId);
@@ -82,12 +97,14 @@ export function createEnvironmentService(
   return {
     async list(userId) {
       const rows = await repository.list(userId);
-      return [localRecord(userId), ...rows].map((record) => toEnvironment(record, manager));
+      return await Promise.all(
+        [localRecord(userId), ...rows].map((record) => toEnvironment(record, manager, secretStore))
+      );
     },
 
     async find(userId, id) {
       const record = await findRecord(userId, id);
-      return record ? toEnvironment(record, manager) : null;
+      return record ? await toEnvironment(record, manager, secretStore) : null;
     },
 
     async create(userId, input) {
@@ -102,16 +119,41 @@ export function createEnvironmentService(
           400
         );
       }
+
+      const token = input.transportKind === 'http' ? input.token : undefined;
+      if (input.transportKind !== 'http' && 'token' in input && input.token !== undefined) {
+        throw new EnvironmentServiceError(
+          'A runtime token can only be set on a Direct URL (http) environment.',
+          400
+        );
+      }
+
       const record = await repository.create({
-        ...input,
+        id: input.id,
+        name: input.name,
+        transportKind: input.transportKind,
+        config: input.config,
         userId,
         enabled: input.enabled ?? true,
       });
       if (!record) {
         throw new EnvironmentServiceError(`Environment "${input.id}" already exists.`, 409);
       }
+
+      if (token) {
+        try {
+          await persistRuntimeToken(record.id, token, secretStore);
+        } catch (error) {
+          await repository.remove(userId, record.id);
+          throw new EnvironmentServiceError(
+            error instanceof Error ? error.message : String(error),
+            400
+          );
+        }
+      }
+
       publish(userId);
-      return toEnvironment(record, manager);
+      return await toEnvironment(record, manager, secretStore);
     },
 
     async update(userId, id, input) {
@@ -119,6 +161,14 @@ export function createEnvironmentService(
         throw new EnvironmentServiceError('The Local environment cannot be changed.', 409);
       }
       const current = await requireRecord(userId, id);
+
+      if (input.token !== undefined && current.transportKind !== 'http') {
+        throw new EnvironmentServiceError(
+          'A runtime token can only be set on a Direct URL (http) environment.',
+          400
+        );
+      }
+
       if (input.config !== undefined) {
         try {
           assertEnvironmentConfig(current.transportKind, input.config);
@@ -129,16 +179,32 @@ export function createEnvironmentService(
           );
         }
       }
-      const updated = await repository.update(userId, id, input);
+
+      const { token, ...rowUpdate } = input;
+      const updated =
+        Object.keys(rowUpdate).length > 0
+          ? await repository.update(userId, id, rowUpdate)
+          : current;
       if (!updated) {
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
+
+      if (token !== undefined) {
+        try {
+          await persistRuntimeToken(id, token, secretStore);
+        } catch (error) {
+          throw new EnvironmentServiceError(
+            error instanceof Error ? error.message : String(error),
+            400
+          );
+        }
+      }
+
       // A live connection was opened from the definition as it stood before this
-      // write. Disabling the environment or repointing its transport must drop
-      // it, or the reported status keeps describing the persisted config while
-      // every tool call keeps reaching the old endpoint. Dropping it only after
-      // the write lands means a rejected update leaves the connection intact.
-      if (input.enabled === false || input.config !== undefined) {
+      // write. Disabling the environment, repointing its transport, or rotating
+      // the token must drop it, or the reported status keeps describing the
+      // persisted config while every tool call keeps reaching the old endpoint.
+      if (input.enabled === false || input.config !== undefined || token !== undefined) {
         manager.disconnect(userId, id);
       } else if (input.enabled === true) {
         // Calls that reached it while it was disabled each recorded a failure,
@@ -147,7 +213,7 @@ export function createEnvironmentService(
         manager.clearBackoff(userId, id);
       }
       publish(userId);
-      return toEnvironment(updated, manager);
+      return await toEnvironment(updated, manager, secretStore);
     },
 
     async remove(userId, id) {
@@ -165,6 +231,7 @@ export function createEnvironmentService(
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
       manager.disconnect(userId, id);
+      await removeRuntimeToken(id, secretStore);
       publish(userId);
     },
 
@@ -187,13 +254,13 @@ export function createEnvironmentService(
         );
       }
       const record = await requireRecord(userId, id);
-      return toEnvironment(record, manager);
+      return await toEnvironment(record, manager, secretStore);
     },
 
     async disconnect(userId, id) {
       const record = await requireRecord(userId, id);
       manager.disconnect(userId, id);
-      return toEnvironment(record, manager);
+      return await toEnvironment(record, manager, secretStore);
     },
   };
 }
