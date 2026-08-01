@@ -157,6 +157,19 @@ function normalizeUnavailable(error: unknown): RuntimeRemoteError {
     : unavailable(error instanceof Error ? error.message : String(error));
 }
 
+/**
+ * What the card says about the peer's release. Remote transports connect
+ * across a release boundary on purpose — `requireMatchingRelease` is off for
+ * them — so the drift has to be reported rather than refused, and the compare
+ * happens here because the hub is the only side that holds both strings.
+ */
+function peerRelease(
+  runtimeVersion: string | undefined
+): Pick<EnvironmentConnectionStatus, 'runtimeVersion' | 'runtimeVersionDrift'> {
+  if (!runtimeVersion) return {};
+  return { runtimeVersion, runtimeVersionDrift: runtimeVersion !== getVersion() };
+}
+
 function statusErrorCode(error: unknown): RuntimeErrorCode {
   return error instanceof RuntimeRemoteError ? error.code : 'RUNTIME_UNAVAILABLE';
 }
@@ -221,7 +234,7 @@ export class RuntimeConnectionManager {
       throw unavailable(describeBackoff(environmentId, entry));
     }
     const revision = ++entry.revision;
-    entry.status = { state: 'connecting', ...this.#cachedManifest(entry) };
+    entry.status = { state: 'connecting', ...this.#cachedPeer(entry) };
     this.#publish(userId);
 
     const connecting = this.#resolveEnvironment(userId, environmentId)
@@ -249,6 +262,7 @@ export class RuntimeConnectionManager {
         entry.status = {
           state: 'connected',
           manifest: connection.client.manifest,
+          ...peerRelease(connection.client.runtimeVersion),
         };
         this.#publish(userId);
         return connection.client;
@@ -266,7 +280,7 @@ export class RuntimeConnectionManager {
             // problem is that the runtime has not been started on that machine.
             state: dialIn ? 'disconnected' : 'error',
             errorCode,
-            ...this.#cachedManifest(entry),
+            ...this.#cachedPeer(entry),
           };
           this.#publish(userId);
         }
@@ -319,7 +333,7 @@ export class RuntimeConnectionManager {
     entry.connection = undefined;
     entry.connecting = undefined;
     void superseded?.close('superseded');
-    entry.status = { state: 'connecting', ...this.#cachedManifest(entry) };
+    entry.status = { state: 'connecting', ...this.#cachedPeer(entry) };
     this.#publish(userId);
 
     let connection: ManagedRuntimeConnection;
@@ -327,7 +341,7 @@ export class RuntimeConnectionManager {
       connection = await open(() => this.#markUnavailable(key, userId, revision));
     } catch (error) {
       if (entry.revision === revision) {
-        entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
+        entry.status = { state: 'disconnected', ...this.#cachedPeer(entry) };
         this.#publish(userId);
       }
       throw normalizeUnavailable(error);
@@ -341,7 +355,11 @@ export class RuntimeConnectionManager {
     entry.connectedAtMs = Date.now();
     entry.failureCount = 0;
     entry.retryAfterMs = 0;
-    entry.status = { state: 'connected', manifest: connection.client.manifest };
+    entry.status = {
+      state: 'connected',
+      manifest: connection.client.manifest,
+      ...peerRelease(connection.client.runtimeVersion),
+    };
     this.#publish(userId);
     return connection.client;
   }
@@ -377,7 +395,7 @@ export class RuntimeConnectionManager {
     entry.connectedAtMs = undefined;
     entry.failureCount = 0;
     entry.retryAfterMs = 0;
-    entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
+    entry.status = { state: 'disconnected', ...this.#cachedPeer(entry) };
     return closed;
   }
 
@@ -394,7 +412,7 @@ export class RuntimeConnectionManager {
     entry.failureCount = 0;
     entry.retryAfterMs = 0;
     if (entry.status.state === 'error') {
-      entry.status = { state: 'disconnected', ...this.#cachedManifest(entry) };
+      entry.status = { state: 'disconnected', ...this.#cachedPeer(entry) };
     }
     this.#publish(userId);
   }
@@ -448,15 +466,29 @@ export class RuntimeConnectionManager {
       // re-deriving the cap and drifting from whatever else latches.
       state: entry.retryAfterMs === Number.POSITIVE_INFINITY ? 'error' : 'disconnected',
       errorCode: 'RUNTIME_UNAVAILABLE',
-      ...this.#cachedManifest(entry),
+      ...this.#cachedPeer(entry),
     };
     this.#publish(userId);
   }
 
-  #cachedManifest(
+  /**
+   * What is still true about the peer once the connection to it is gone: what
+   * it could do, and which release said so. Carried across states so a card
+   * that just lost its runtime still describes the machine it lost, rather
+   * than blanking every field the moment the socket drops.
+   */
+  #cachedPeer(
     entry: RuntimeConnectionEntry
-  ): Pick<EnvironmentConnectionStatus, 'manifest'> | Record<string, never> {
-    return entry.status.manifest ? { manifest: entry.status.manifest } : {};
+  ): Pick<EnvironmentConnectionStatus, 'manifest' | 'runtimeVersion'> {
+    return {
+      ...(entry.status.manifest ? { manifest: entry.status.manifest } : {}),
+      ...(entry.status.runtimeVersion
+        ? {
+            runtimeVersion: entry.status.runtimeVersion,
+            runtimeVersionDrift: entry.status.runtimeVersionDrift ?? false,
+          }
+        : {}),
+    };
   }
 }
 

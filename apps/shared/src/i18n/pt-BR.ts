@@ -2106,6 +2106,8 @@ export const messages = {
       shells: 'Shells: {shells}',
       checkpoints: 'Checkpoints',
       platform: '{platform} · {arch}',
+      runtimeVersionDrift:
+        'Esta máquina roda o runtime {version}, que não é a versão distribuída por este MangoStudio. A conexão continua funcionando; atualize o runtime lá quando possível.',
       pairing: {
         title: 'Pareamento',
         description: 'O runtime naquela máquina disca para o MangoStudio com esta credencial.',
@@ -2126,6 +2128,7 @@ export const messages = {
         tokenOnce:
           'O token é mostrado uma única vez. Emita um novo se perdê-lo — isso também aposenta este.',
         stepConnect: 'Conecte ao MangoStudio',
+        stepConnectPowerShell: 'No Windows, no PowerShell',
         serviceHint:
           'Mantenha o comando connect rodando; uma unidade de serviço para ele chega separadamente.',
       },

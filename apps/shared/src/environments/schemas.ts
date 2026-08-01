@@ -228,6 +228,21 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
     state: EnvironmentConnectionStateSchema,
     manifest: Type.Optional(RuntimeCapabilityManifestSchema),
     errorCode: Type.Optional(RuntimeErrorCodeSchema),
+    /**
+     * Release the connected runtime reported in its handshake, absent until
+     * one has. It matters because remote transports deliberately do not gate
+     * on release equality: a runtime installed on someone else's machine can
+     * lag the hub, and drift that is allowed has to be readable somewhere or
+     * an operator has no way to tell an outdated binary from a healthy one.
+     */
+    runtimeVersion: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    /**
+     * Whether that release differs from the hub's. Decided here rather than in
+     * the client because only the hub knows both strings, and shipping its own
+     * version on every row to let the UI compare would repeat one constant N
+     * times to answer one question.
+     */
+    runtimeVersionDrift: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false }
 );
