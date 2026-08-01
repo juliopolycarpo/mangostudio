@@ -3,6 +3,10 @@ import type { RuntimePairingIssue, RuntimePairingStatus } from '@mangostudio/sha
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import { createRuntimePairingService } from '../../../src/modules/environments/application/runtime-pairing-service';
+import {
+  hashPairingSecret,
+  parsePairingToken,
+} from '../../../src/modules/environments/domain/pairing-token';
 import { createEnvironmentEntityRoutes } from '../../../src/modules/environments/http/environment-entity-routes';
 import { createEnvironmentRepository } from '../../../src/modules/environments/infrastructure/environment-repository';
 import { createRuntimePairingRepository } from '../../../src/modules/environments/infrastructure/runtime-pairing-repository';
@@ -81,8 +85,15 @@ describe('runtime pairing routes', () => {
     expect(issuedPayload.environmentId).toBe('laptop');
     expect(issuedPayload.lastSeenAt).toBeNull();
 
+    // Assert the digest, not the absence of a substring: a 64-char hex hash can
+    // never contain an `mrt_`-prefixed token, so `not.toContain` would pass
+    // just as happily against a column holding the secret in the clear.
     const stored = await repository.findActiveForEnvironment(TEST_USER.id, 'laptop');
-    expect(stored?.tokenHash).not.toContain(issuedPayload.token);
+    const parsed = parsePairingToken(issuedPayload.token);
+    expect(parsed).not.toBeNull();
+    expect(stored?.id).toBe(parsed?.id as string);
+    expect(stored?.tokenHash).toBe(hashPairingSecret(parsed?.secret as string));
+    expect(stored?.tokenHash).not.toBe(parsed?.secret);
 
     const status = await app.handle(new Request('http://localhost/environments/laptop/pairing'));
     const statusPayload = (await status.json()) as RuntimePairingStatus;
