@@ -46,6 +46,9 @@ copy-paste commands, or:
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
 
+Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
+`127.0.0.1`.
+
 ## `mangostudio-runtime`
 
 Every channel installs a second binary beside `mangostudio`. It is the execution
@@ -58,6 +61,7 @@ as the main binary — that is how MangoStudio finds it. On another machine you 
 | ----------------------------- | ------------------------------------------------------------- |
 | `mangostudio-runtime --stdio` | Serve the runtime protocol over stdin/stdout (NDJSON frames). |
 | `mangostudio-runtime connect` | Dial a MangoStudio hub over WebSocket and serve it.           |
+| `mangostudio-runtime serve`   | Listen for a hub over WebSocket (Direct URL).                 |
 | `mangostudio-runtime --help`  | Print usage. Bare invocation does the same.                   |
 | `--version`, `-v`             | Print the runtime version.                                    |
 
@@ -113,8 +117,29 @@ hub's own distribution, so only the protocol version has to match. A release tha
 differs from the hub's is reported on the environment card, so a binary that has
 fallen behind is visible rather than merely tolerated.
 
-Host aliases: `lan`, `all`, `any`, and `public` bind `0.0.0.0`; `local` binds
-`127.0.0.1`.
+### `serve`
+
+| Flag                   | Description                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------- |
+| `--listen <host:port>` | Bind address. A bare port binds `127.0.0.1`. Required.                           |
+| `--token -`            | Read the serve token from stdin (`env` reads `MANGOSTUDIO_RUNTIME_SERVE_TOKEN`). |
+
+`serve` is the Direct URL half of a remote runtime: the hub dials this process instead of
+the runtime dialing the hub. When neither `--token` nor `MANGOSTUDIO_RUNTIME_SERVE_TOKEN`
+is set, a previous run's token is reused, or one is generated, stored owner-only beside the
+pairing token in `~/.mango/runtime/remote/credentials.json`, and printed once to stderr.
+Tokens supplied on stdin or via the environment are not written to disk.
+`MANGOSTUDIO_RUNTIME_TOKEN` remains the pairing credential for `connect` only.
+
+Binding anything other than loopback prints a warning: whoever holds the serve token gets
+shell access on that machine. Put TLS in front with a reverse proxy when the dial leaves
+a trusted network — the runtime itself does not terminate TLS. A second hub connection
+supersedes the first.
+
+```bash
+mangostudio-runtime serve --listen 8787
+printf %s "$TOKEN" | mangostudio-runtime serve --listen 0.0.0.0:8787 --token -
+```
 
 ## Examples
 

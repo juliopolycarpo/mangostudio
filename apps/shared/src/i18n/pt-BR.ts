@@ -2086,7 +2086,7 @@ export const messages = {
         stdio: 'Processo local',
         wsl: 'WSL',
         websocket: 'WebSocket',
-        http: 'HTTP',
+        http: 'URL direta',
         ssh: 'SSH',
       },
       connect: 'Conectar',
@@ -2132,6 +2132,22 @@ export const messages = {
         serviceHint:
           'Mantenha o comando connect rodando; uma unidade de serviço para ele chega separadamente.',
       },
+      directUrl: {
+        title: 'URL direta',
+        description:
+          'O MangoStudio disca este endereço. Rode mangostudio-runtime serve naquela máquina primeiro.',
+        baseUrlLabel: 'URL base',
+        baseUrlHint: 'http://host:porta ou https://… — o runtime serve WebSocket em /.',
+        tokenLabel: 'Token do serve',
+        tokenHint: 'Somente escrita. Cole o token impresso pelo serve, ou rotacione aqui.',
+        tokenSet: 'Há um token guardado no cofre de segredos.',
+        tokenMissing: 'Nenhum token guardado ainda. Cole um para conectar.',
+        tokenSave: 'Salvar token',
+        tokenRotate: 'Rotacionar token',
+        plaintextWarning:
+          'Esta URL é HTTP sem TLS para um host público. Prefira https:// ou um endereço privado/LAN.',
+        saveFailed: 'Não foi possível salvar as configurações de URL direta.',
+      },
       add: {
         trigger: 'Adicionar ambiente',
         title: 'Adicionar um ambiente',
@@ -2140,12 +2156,19 @@ export const messages = {
         reachLocal: 'É esta máquina',
         reachWsl: 'Uma distribuição Linux nesta máquina',
         reachPaired: 'Outra máquina que consegue alcançar o MangoStudio',
+        reachDirect: 'Eu alcanço por URL',
         stdioHint:
           'Inicia o runtime que acompanha o MangoStudio como um processo filho nesta máquina.',
         pairedHint:
           'O runtime naquela máquina disca para o MangoStudio, então funciona atrás de um roteador ou firewall sem nenhuma porta de entrada aberta.',
         pairedNext:
           'Depois de adicionar, o cartão emite um token de pareamento e imprime os dois comandos para rodar naquela máquina.',
+        directHint:
+          'O MangoStudio disca um runtime que já está escutando. Use isto em uma LAN ou quando você termina TLS na frente do serve.',
+        directBaseUrlLabel: 'URL base',
+        directTokenLabel: 'Token do serve',
+        directPlaintextWarning:
+          'Esta URL é HTTP sem TLS para um host público. Prefira https:// ou um endereço privado/LAN.',
         idLabel: 'Identificador',
         idHint: 'Letras minúsculas, dígitos e hifens simples. Não pode ser alterado depois.',
         idInvalid: 'Use letras minúsculas, dígitos e hifens simples.',

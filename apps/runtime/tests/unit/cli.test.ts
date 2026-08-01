@@ -87,6 +87,27 @@ describe('parseRuntimeCliArgs', () => {
       argument: '--hub',
     });
   });
+
+  it('parses serve with a listen address and a piped token', () => {
+    expect(parseRuntimeCliArgs(['serve', '--listen', '0.0.0.0:8787', '--token', '-'])).toEqual({
+      command: 'serve',
+      args: { listen: '0.0.0.0:8787', tokenSource: 'stdin' },
+    });
+  });
+
+  it('requires --listen for serve', () => {
+    expect(parseRuntimeCliArgs(['serve'])).toEqual({
+      command: 'unknown',
+      argument: '--listen',
+    });
+  });
+
+  it('refuses a serve token passed as an argument', () => {
+    expect(parseRuntimeCliArgs(['serve', '--listen', '8787', '--token', 'secret'])).toEqual({
+      command: 'unknown',
+      argument: '--token',
+    });
+  });
 });
 
 describe('mangostudio-runtime binary', () => {

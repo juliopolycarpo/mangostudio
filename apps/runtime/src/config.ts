@@ -6,16 +6,24 @@ export interface RuntimeConfig {
    * command-line argument: argv is readable by every process on the machine.
    */
   readonly pairingToken: string | null;
+  /**
+   * Serve token for `serve`, for setups that inject it per run. Distinct from
+   * `pairingToken` so a machine that both dials and listens does not reuse one
+   * credential for two trust decisions.
+   */
+  readonly serveToken: string | null;
 }
 
 /** Runtime-owned environment parsing for the embedded and binary hosts. */
 export function loadRuntimeConfig(
   env: Readonly<Record<string, string | undefined>> = process.env
 ): RuntimeConfig {
-  const token = env.MANGOSTUDIO_RUNTIME_TOKEN?.trim();
+  const pairing = env.MANGOSTUDIO_RUNTIME_TOKEN?.trim();
+  const serve = env.MANGOSTUDIO_RUNTIME_SERVE_TOKEN?.trim();
   return {
     validateInProcessFrames: env.NODE_ENV !== 'production',
-    pairingToken: token && token.length > 0 ? token : null,
+    pairingToken: pairing && pairing.length > 0 ? pairing : null,
+    serveToken: serve && serve.length > 0 ? serve : null,
   };
 }
 

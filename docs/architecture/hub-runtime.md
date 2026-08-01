@@ -68,7 +68,8 @@ checkpoint errors.
 | Local runtime process     | Current | Hub spawns       | Bounded NDJSON over the child's pipes, using the same handshake and request ids.             |
 | WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.       |
 | Paired WebSocket          | Current | Runtime dials in | Chunked binary frames over one socket to `/api/runtime`, authenticated by a pairing token.   |
-| Other runtime placements  | Future  | —                | Implement `RuntimeFramePort` without changing method handlers or API tool executors.         |
+| Direct URL                | Current | Hub dials out    | Same chunked WebSocket framing; the runtime listens and the hub presents a serve token.      |
+| SSH                       | Future  | Hub spawns       | A launcher over stdio through an SSH session — not shipped yet.                              |
 
 Which one to reach for:
 
@@ -77,6 +78,12 @@ Which one to reach for:
 - **A machine somewhere else, especially behind NAT or a firewall** — a paired WebSocket.
   It needs no inbound port on the target and no route from the hub to it; it needs the
   target to be able to reach the hub, and the hub to know its own public address.
+- **A machine the hub can already reach by URL** — Direct URL. The runtime listens
+  (`mangostudio-runtime serve`); the hub dials it. Prefer this on a LAN, or when TLS
+  terminates in front of the runtime. Prefer paired WebSocket when the target cannot accept
+  inbound connections.
+- **SSH** — still future; when it lands it will be another launcher over stdio, not a new
+  framing.
 
 The shared NDJSON codec validates every frame, buffers partial lines, and rejects records
 larger than 16 MiB. Production in-process delivery uses structured cloning while retaining
@@ -293,6 +300,31 @@ path. A dialing runtime has no response body to read: an HTTP 429 before the upg
 it as a socket that simply failed to open, indistinguishable from a hub that is down, so it
 would come back on the generic backoff instead of waiting out the window. Refusing after the
 upgrade costs one socket and buys a close code the peer can act on.
+
+## Direct URL Transport
+
+`transportKind: 'http'` is the transport for a machine the hub can already reach. The
+runtime listens with `mangostudio-runtime serve`; the hub dials the configured `baseUrl`
+over WebSocket with a bearer token from the OS secret store. Framing is the same chunked
+binary protocol as paired WebSocket — the 16 KiB message ceiling is mandatory even though
+Bun.serve could raise its payload limit.
+
+Config is `{ baseUrl }` (`http://` or `https://`). The serve token is write-only: it is
+never returned by the API, only whether one is stored (`hasRuntimeToken`). Private and
+loopback hosts are allowed — LAN reachability is the point — and the UI warns when the URL
+is plaintext HTTP to a public host. On the runtime side, inject a per-run serve secret with
+`MANGOSTUDIO_RUNTIME_SERVE_TOKEN` (or stdin); that path does not write the credential to
+disk. `MANGOSTUDIO_RUNTIME_TOKEN` stays the pairing credential for `connect`.
+
+**One serve process maps to one user environment.** A second hub (or a second connection
+from the same hub) that upgrades successfully supersedes the previous socket with close
+code `4409`. Multi-user sharing of one listening runtime is therefore a supersede race,
+not a multiplexed session; give each environment its own listen address or its own token
+and process if more than one hub should use that machine.
+
+The runtime does not terminate TLS. Put a reverse proxy in front when the dial crosses an
+untrusted network. The same Bun self-signed client caveat as paired WebSocket applies when
+the hub dials `wss://` against a certificate it does not trust.
 
 ## Paths Across Hosts
 

@@ -21,6 +21,7 @@ import { wslLaunchCommand } from '../../modules/environments/domain/wsl-runtime-
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
 import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-provisioner';
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
+import { connectHttpRuntime } from './connect-http-runtime';
 import { RuntimeClient } from './runtime-client';
 import { spawnRuntimeChild } from './spawn-runtime-child';
 
@@ -603,6 +604,7 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
       stdio: connectStdioRuntime,
       wsl: connectWslRuntime,
       websocket: refuseDialInRuntime,
+      http: connectHttpRuntime,
     },
     publish: publishEnvironmentInvalidation,
   });

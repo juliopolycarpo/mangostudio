@@ -2066,7 +2066,7 @@ export const messages: Messages = {
         stdio: 'Local process',
         wsl: 'WSL',
         websocket: 'WebSocket',
-        http: 'HTTP',
+        http: 'Direct URL',
         ssh: 'SSH',
       },
       connect: 'Connect',
@@ -2111,6 +2111,22 @@ export const messages: Messages = {
         stepConnectPowerShell: 'On Windows, in PowerShell',
         serviceHint: 'Keep the connect command running; a service unit for it lands separately.',
       },
+      directUrl: {
+        title: 'Direct URL',
+        description:
+          'MangoStudio dials this address. Run mangostudio-runtime serve on that machine first.',
+        baseUrlLabel: 'Base URL',
+        baseUrlHint: 'http://host:port or https://… — the runtime serves WebSocket on /.',
+        tokenLabel: 'Serve token',
+        tokenHint: 'Write-only. Paste the token printed by serve, or rotate it here.',
+        tokenSet: 'A token is stored in the secret store.',
+        tokenMissing: 'No token stored yet. Paste one to connect.',
+        tokenSave: 'Save token',
+        tokenRotate: 'Rotate token',
+        plaintextWarning:
+          'This URL is plaintext HTTP to a public host. Prefer https:// or a private/LAN address.',
+        saveFailed: 'The Direct URL settings could not be saved.',
+      },
       add: {
         trigger: 'Add environment',
         title: 'Add an environment',
@@ -2119,12 +2135,19 @@ export const messages: Messages = {
         reachLocal: 'It is this machine',
         reachWsl: 'A Linux distribution on this machine',
         reachPaired: 'Another machine that can reach MangoStudio',
+        reachDirect: 'I can reach it by URL',
         stdioHint:
           'Starts the runtime that ships with MangoStudio as a child process on this machine.',
         pairedHint:
           'The runtime on that machine dials MangoStudio, so it works from behind a router or a firewall with no inbound port open.',
         pairedNext:
           'After you add it, the card issues a pairing token and prints the two commands to run on that machine.',
+        directHint:
+          'MangoStudio dials a runtime that is already listening. Use this on a LAN or when you terminate TLS in front of serve.',
+        directBaseUrlLabel: 'Base URL',
+        directTokenLabel: 'Serve token',
+        directPlaintextWarning:
+          'This URL is plaintext HTTP to a public host. Prefer https:// or a private/LAN address.',
         idLabel: 'Identifier',
         idHint: 'Lowercase letters, digits, and single dashes. Cannot be changed later.',
         idInvalid: 'Use lowercase letters, digits, and single dashes.',

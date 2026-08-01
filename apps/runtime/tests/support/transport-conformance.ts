@@ -5,7 +5,8 @@
  * easy to get subtly wrong in ways only the slowest tool call reveals. Rather
  * than write a bespoke test per transport and discover later that only one of
  * them covers cancellation, the behaviour lives here once and each transport
- * supplies a fixture. 012 and 013 add their transport as one more fixture.
+ * supplies a fixture. Direct URL (`serve`) and SSH plug in the same way; SSH
+ * is still pending.
  *
  * One case is deliberately absent: a peer on the same protocol version carrying
  * fields this build does not know. Remote transports are what make that pair

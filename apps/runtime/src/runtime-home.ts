@@ -12,27 +12,40 @@
  * leave the machine. Merging them would make the safe half unpasteable.
  */
 
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 /** Who placed the runtime in this directory. */
 export type RuntimeSlot = 'host' | 'wsl' | 'remote';
 
+/** Operator consent for serving this slot; absent means the gate is not armed. */
+export type RuntimeSetupState = 'pending' | 'ready';
+
 const CONFIG_FILE = 'runtime.json';
 const CREDENTIALS_FILE = 'credentials.json';
+const CREDENTIALS_LOCK_FILE = 'credentials.lock';
 const OWNER_ONLY = 0o600;
+/** How long a writer waits for another process before failing the lock. */
+const CREDENTIALS_LOCK_TIMEOUT_MS = 5_000;
+const CREDENTIALS_LOCK_POLL_MS = 25;
 
 export interface RuntimeSlotConfig {
   readonly schemaVersion: 1;
   readonly slot: RuntimeSlot;
   /** The hub address `connect` dials, remembered so later runs need no flags. */
   readonly hubUrl?: string;
+  /**
+   * When `pending`, `serve` refuses before listening. Absent means the setup
+   * CLI has not written a gate yet, so serving is allowed.
+   */
+  readonly setupState?: RuntimeSetupState;
 }
 
 interface RuntimeSlotCredentials {
   readonly schemaVersion: 1;
   readonly pairingToken?: string;
+  readonly serveToken?: string;
 }
 
 /** Root of the runtime home. `MANGO_HOME` moves it, which is what tests use. */
@@ -52,12 +65,19 @@ export async function readRuntimeSlotConfig(
   const stored = await readJsonFile<RuntimeSlotConfig>(
     join(runtimeSlotDir(slot, env), CONFIG_FILE)
   );
-  return { schemaVersion: 1, slot, ...(stored?.hubUrl ? { hubUrl: stored.hubUrl } : {}) };
+  return {
+    schemaVersion: 1,
+    slot,
+    ...(stored?.hubUrl ? { hubUrl: stored.hubUrl } : {}),
+    ...(stored?.setupState === 'pending' || stored?.setupState === 'ready'
+      ? { setupState: stored.setupState }
+      : {}),
+  };
 }
 
 export async function writeRuntimeSlotConfig(
   slot: RuntimeSlot,
-  update: { readonly hubUrl?: string },
+  update: { readonly hubUrl?: string; readonly setupState?: RuntimeSetupState },
   env?: NodeJS.ProcessEnv
 ): Promise<void> {
   const current = await readRuntimeSlotConfig(slot, env);
@@ -65,6 +85,9 @@ export async function writeRuntimeSlotConfig(
     schemaVersion: 1,
     slot,
     ...((update.hubUrl ?? current.hubUrl) ? { hubUrl: update.hubUrl ?? current.hubUrl } : {}),
+    ...((update.setupState ?? current.setupState)
+      ? { setupState: update.setupState ?? current.setupState }
+      : {}),
   };
   await writeFileAtomically(join(runtimeSlotDir(slot, env), CONFIG_FILE), next);
 }
@@ -73,10 +96,8 @@ export async function readPairingToken(
   slot: RuntimeSlot,
   env?: NodeJS.ProcessEnv
 ): Promise<string | null> {
-  const stored = await readJsonFile<RuntimeSlotCredentials>(
-    join(runtimeSlotDir(slot, env), CREDENTIALS_FILE)
-  );
-  return stored?.pairingToken ?? null;
+  const stored = await readCredentials(slot, env);
+  return stored.pairingToken ?? null;
 }
 
 /**
@@ -97,8 +118,121 @@ export async function writePairingToken(
   env?: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform
 ): Promise<{ readonly restricted: boolean }> {
+  return await withCredentialsLock(slot, env, async () => {
+    const current = await readCredentials(slot, env);
+    return await writeCredentials(
+      slot,
+      {
+        schemaVersion: 1,
+        pairingToken: token,
+        ...(current.serveToken ? { serveToken: current.serveToken } : {}),
+      },
+      env,
+      platform
+    );
+  });
+}
+
+export async function readServeToken(
+  slot: RuntimeSlot,
+  env?: NodeJS.ProcessEnv
+): Promise<string | null> {
+  const stored = await readCredentials(slot, env);
+  return stored.serveToken ?? null;
+}
+
+/**
+ * Persists the serve credential the same way as the pairing token: owner-only
+ * when the filesystem allows it, and never in the pasteable config file.
+ */
+export async function writeServeToken(
+  slot: RuntimeSlot,
+  token: string,
+  env?: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform
+): Promise<{ readonly restricted: boolean }> {
+  return await withCredentialsLock(slot, env, async () => {
+    const current = await readCredentials(slot, env);
+    return await writeCredentials(
+      slot,
+      {
+        schemaVersion: 1,
+        serveToken: token,
+        ...(current.pairingToken ? { pairingToken: current.pairingToken } : {}),
+      },
+      env,
+      platform
+    );
+  });
+}
+
+/**
+ * Generates a serve token, stores it, and returns it. Callers that show it
+ * once to the operator should print it immediately — nothing re-reads it for
+ * display after this.
+ */
+export async function bootstrapServeToken(
+  slot: RuntimeSlot,
+  env?: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform
+): Promise<{ readonly token: string; readonly restricted: boolean }> {
+  const token = Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+  const { restricted } = await writeServeToken(slot, token, env, platform);
+  return { token, restricted };
+}
+
+async function readCredentials(
+  slot: RuntimeSlot,
+  env?: NodeJS.ProcessEnv
+): Promise<RuntimeSlotCredentials> {
+  const stored = await readJsonFile<RuntimeSlotCredentials>(
+    join(runtimeSlotDir(slot, env), CREDENTIALS_FILE)
+  );
+  return { schemaVersion: 1, ...(stored ?? {}) };
+}
+
+/**
+ * Serializes credential writers across processes. `connect` and `serve` share
+ * one credentials.json; without a lock each can read, merge one field, and
+ * overwrite the other's token on rename.
+ */
+async function withCredentialsLock<T>(
+  slot: RuntimeSlot,
+  env: NodeJS.ProcessEnv | undefined,
+  run: () => Promise<T>
+): Promise<T> {
+  const directory = runtimeSlotDir(slot, env);
+  await mkdir(directory, { recursive: true });
+  const lockPath = join(directory, CREDENTIALS_LOCK_FILE);
+  const deadline = Date.now() + CREDENTIALS_LOCK_TIMEOUT_MS;
+
+  while (true) {
+    try {
+      const handle = await open(lockPath, 'wx');
+      try {
+        return await run();
+      } finally {
+        await handle.close().catch(() => undefined);
+        await unlink(lockPath).catch(() => undefined);
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') throw error;
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for the runtime credentials lock at ${lockPath}.`);
+      }
+      await sleepMs(CREDENTIALS_LOCK_POLL_MS);
+    }
+  }
+}
+
+async function writeCredentials(
+  slot: RuntimeSlot,
+  credentials: RuntimeSlotCredentials,
+  env: NodeJS.ProcessEnv | undefined,
+  platform: NodeJS.Platform
+): Promise<{ readonly restricted: boolean }> {
   const path = join(runtimeSlotDir(slot, env), CREDENTIALS_FILE);
-  const credentials: RuntimeSlotCredentials = { schemaVersion: 1, pairingToken: token };
   await writeFileAtomically(path, credentials, OWNER_ONLY);
   if (platform === 'win32') return { restricted: false };
   try {
@@ -131,4 +265,11 @@ async function writeFileAtomically(path: string, value: unknown, mode?: number):
     ...(mode === undefined ? {} : { mode }),
   });
   await rename(temporary, path);
+}
+
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    (timer as { unref?: () => void }).unref?.();
+  });
 }

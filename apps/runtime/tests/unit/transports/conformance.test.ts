@@ -11,6 +11,7 @@ import {
   serverWebSocketSink,
   type WebSocketFramePort,
 } from '../../../src';
+import { serveRuntime } from '../../../src/serve';
 import {
   CONFORMANCE_HUB_VERSION,
   type ConformanceConnection,
@@ -18,9 +19,9 @@ import {
 } from '../../support/transport-conformance';
 
 /**
- * The three transports that exist today, driven through one suite. A fourth
- * (`serve`, 012) and a fifth (ssh, 013) plug in the same way: supply a
- * connection, a way to sever it, and a way to close it.
+ * The transports that exist today, driven through one suite. A new transport
+ * plugs in the same way: supply a connection, a way to sever it, and a way to
+ * close it. SSH still pending.
  */
 
 describe('in-process transport conformance', () => {
@@ -88,6 +89,13 @@ describe('websocket transport conformance', () => {
   itBehavesLikeARuntimeTransport({
     chunked: true,
     connect: connectOverLoopbackWebSocket,
+  });
+});
+
+describe('serve transport conformance', () => {
+  itBehavesLikeARuntimeTransport({
+    chunked: true,
+    connect: connectOverServe,
   });
 });
 
@@ -165,6 +173,56 @@ async function connectOverLoopbackWebSocket(host: RuntimeHost): Promise<Conforma
       host.close();
       socket.close();
       server.stop(true);
+    },
+  };
+}
+
+/**
+ * Real `serve` fixture: the runtime listens, the hub dials with a Bearer token,
+ * and both sides speak the same chunked WebSocket framing.
+ */
+async function connectOverServe(host: RuntimeHost): Promise<ConformanceConnection> {
+  const token = 'conformance-serve-token';
+  const handle = serveRuntime({
+    listen: { hostname: '127.0.0.1', port: 0 },
+    token,
+    // The conformance suite supplies the host; serve would otherwise create one.
+    createHost: () => host,
+  });
+
+  const socket = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  socket.binaryType = 'arraybuffer';
+  let client: RuntimeProtocolClient | undefined;
+  const hubPort = createWebSocketFramePort({
+    sink: clientWebSocketSink(socket),
+    onClosed: () => client?.close(),
+  });
+  // Subscribe before the upgrade completes: the runtime starts its host in
+  // `open` and the hello can race a listener attached only after `open` fires.
+  client = new RuntimeProtocolClient(hubPort, { hubVersion: CONFORMANCE_HUB_VERSION });
+  socket.addEventListener('message', (event) => hubPort.receive(event.data as ArrayBuffer));
+  socket.addEventListener('close', () => hubPort.handleSocketClosed());
+
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve(), { once: true });
+    socket.addEventListener('error', () => reject(new Error('serve websocket failed to open')), {
+      once: true,
+    });
+  });
+
+  await Promise.all([client.waitUntilReady(), host.waitUntilReady()]);
+
+  return {
+    client,
+    host,
+    drop: () => socket.close(),
+    close() {
+      client?.close();
+      host.close();
+      socket.close();
+      handle.close();
     },
   };
 }

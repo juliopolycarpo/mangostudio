@@ -6,11 +6,12 @@
  * machine somewhere else, and knows nothing useful about the difference between
  * a spawned child and a dialed-in socket. Each answer picks the transport that
  * fits it. Answers whose transport does not exist yet are not offered — a row
- * that can never do anything is worse than a missing one — and the later
- * transports (012, 013) add their row here.
+ * that can never do anything is worse than a missing one — and SSH is still
+ * pending.
  */
 
 import type { CreateEnvironmentBody, WslDistribution } from '@mangostudio/shared/environments';
+import { shouldWarnPlaintextHttpRuntime } from '@mangostudio/shared/environments';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
@@ -25,7 +26,7 @@ const ENVIRONMENT_ID_MAX_LENGTH = 63;
 const ENVIRONMENT_NAME_MAX_LENGTH = 80;
 
 /** One answer to "how do you reach it", and the transport that answer implies. */
-type ReachabilityChoice = 'stdio' | 'wsl' | 'websocket';
+type ReachabilityChoice = 'stdio' | 'wsl' | 'websocket' | 'http';
 
 interface AddEnvironmentDialogProps {
   readonly onClose: () => void;
@@ -65,6 +66,8 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const [binaryPath, setBinaryPath] = useState('');
   const [cwd, setCwd] = useState('');
   const [distro, setDistro] = useState('');
+  const [baseUrl, setBaseUrl] = useState('');
+  const [token, setToken] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const wsl = useWslDetectionQuery(true);
@@ -86,23 +89,30 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   }, [kind, nameEdited, selectedDistro]);
 
   const trimmedName = name.trim();
+  const trimmedBaseUrl = baseUrl.trim();
+  const trimmedToken = token.trim();
   const effectiveId = idEdited ? id.trim() : suggestId(trimmedName);
   const idInvalid = effectiveId.length > 0 && !ENVIRONMENT_ID_PATTERN.test(effectiveId);
+  const httpIncomplete =
+    kind === 'http' && (trimmedBaseUrl.length === 0 || trimmedToken.length === 0);
   const blocked =
     trimmedName.length === 0 ||
     effectiveId.length === 0 ||
     idInvalid ||
+    httpIncomplete ||
     (kind === 'wsl' && !selectionOffered);
 
   const choices: { readonly value: ReachabilityChoice; readonly label: string }[] = [
     { value: 'stdio', label: labels.reachLocal },
     ...(wslOffered ? [{ value: 'wsl' as const, label: labels.reachWsl }] : []),
     { value: 'websocket', label: labels.reachPaired },
+    { value: 'http', label: labels.reachDirect },
   ];
   const hints: Record<ReachabilityChoice, string> = {
     stdio: labels.stdioHint,
     wsl: labels.wslHint,
     websocket: labels.pairedHint,
+    http: labels.directHint,
   };
 
   const handleSubmit = async () => {
@@ -128,17 +138,25 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
               // with the pairing token the card issues after this.
               config: {},
             }
-          : {
-              id: effectiveId,
-              name: trimmedName,
-              transportKind: 'stdio',
-              // An omitted field means "use the default"; an empty string would
-              // be a path the launcher then tries to spawn.
-              config: {
-                ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
-                ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
-              },
-            };
+          : kind === 'http'
+            ? {
+                id: effectiveId,
+                name: trimmedName,
+                transportKind: 'http',
+                config: { baseUrl: trimmedBaseUrl },
+                token: trimmedToken,
+              }
+            : {
+                id: effectiveId,
+                name: trimmedName,
+                transportKind: 'stdio',
+                // An omitted field means "use the default"; an empty string would
+                // be a path the launcher then tries to spawn.
+                config: {
+                  ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
+                  ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
+                },
+              };
 
     try {
       await create.mutateAsync(body);
@@ -259,6 +277,30 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
             <p className="rounded-xl border border-outline-variant/20 bg-surface-container-lowest/60 px-3 py-2.5 text-on-surface-variant/70 text-xs">
               {labels.pairedNext}
             </p>
+          ) : null}
+
+          {kind === 'http' ? (
+            <>
+              <Input
+                id="add-environment-base-url"
+                label={labels.directBaseUrlLabel}
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.target.value)}
+              />
+              {shouldWarnPlaintextHttpRuntime(trimmedBaseUrl) ? (
+                <p className="rounded-xl border border-warning/35 bg-warning/5 px-3 py-2.5 text-on-surface-variant text-xs">
+                  {labels.directPlaintextWarning}
+                </p>
+              ) : null}
+              <Input
+                id="add-environment-token"
+                label={labels.directTokenLabel}
+                type="password"
+                autoComplete="off"
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+              />
+            </>
           ) : null}
         </div>
 

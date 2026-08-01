@@ -13,11 +13,14 @@ import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
 import { createLocalRuntimeHost } from './runtime';
 import {
+  bootstrapServeToken,
   readPairingToken,
   readRuntimeSlotConfig,
+  readServeToken,
   writePairingToken,
   writeRuntimeSlotConfig,
 } from './runtime-home';
+import { parseListenAddress, serveRuntime } from './serve';
 import { createStdioFramePort, type StdioFramePortClosure } from './transports/stdio';
 
 export interface RuntimeConnectArgs {
@@ -26,9 +29,17 @@ export interface RuntimeConnectArgs {
   readonly tokenSource: 'stdin' | 'env' | 'stored';
 }
 
+export interface RuntimeServeArgs {
+  /** Raw `--listen` value; required, and must include a port. */
+  readonly listen: string;
+  /** `stdin` / `env` override the stored serve token; otherwise stored or generated. */
+  readonly tokenSource: 'stdin' | 'env' | 'stored';
+}
+
 export type RuntimeCliInvocation =
   | { readonly command: 'stdio' }
   | { readonly command: 'connect'; readonly args: RuntimeConnectArgs }
+  | { readonly command: 'serve'; readonly args: RuntimeServeArgs }
   | { readonly command: 'version' }
   | { readonly command: 'help' }
   | { readonly command: 'unknown'; readonly argument: string };
@@ -38,6 +49,7 @@ export const RUNTIME_CLI_USAGE = `Usage: mangostudio-runtime <command>
 Commands:
   --stdio      Serve the runtime protocol over stdin/stdout (NDJSON frames)
   connect      Dial a hub over WebSocket and serve it until stopped
+  serve        Listen for a hub over WebSocket (Direct URL)
   --version    Print the runtime version
   --help       Show this message
 
@@ -48,6 +60,15 @@ connect options:
   --token -    Read the pairing token from stdin
                Or set MANGOSTUDIO_RUNTIME_TOKEN. Never pass it as an argument:
                command lines are readable by every process on the machine.
+
+serve options:
+  --listen <host:port>
+               Bind address. A bare port binds 127.0.0.1. Required.
+  --token -    Read the serve token from stdin
+               Or set MANGOSTUDIO_RUNTIME_SERVE_TOKEN / --token env. When
+               neither is given, a stored token is reused, or one is generated
+               and printed once. Never pass the secret as an argument.
+               MANGOSTUDIO_RUNTIME_TOKEN is for connect only.
 
 MangoStudio spawns this binary for stdio environments; it is not meant to be
 run interactively there. stdout carries protocol frames only — diagnostics go
@@ -61,6 +82,7 @@ export function parseRuntimeCliArgs(args: readonly string[]): RuntimeCliInvocati
   const [first, ...rest] = args;
 
   if (first === 'connect') return parseConnectArgs(rest);
+  if (first === 'serve') return parseServeArgs(rest);
 
   const extra = rest[0];
   if (extra !== undefined) return { command: 'unknown', argument: extra };
@@ -109,6 +131,32 @@ function parseConnectArgs(args: readonly string[]): RuntimeCliInvocation {
   return { command: 'connect', args: { ...(hubUrl ? { hubUrl } : {}), tokenSource } };
 }
 
+function parseServeArgs(args: readonly string[]): RuntimeCliInvocation {
+  let listen: string | undefined;
+  let tokenSource: RuntimeServeArgs['tokenSource'] = 'stored';
+
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag === '--listen') {
+      const value = args[++index];
+      if (!value) return { command: 'unknown', argument: '--listen' };
+      listen = value;
+      continue;
+    }
+    if (flag === '--token') {
+      const value = args[++index];
+      if (value === '-') tokenSource = 'stdin';
+      else if (value === 'env') tokenSource = 'env';
+      else return { command: 'unknown', argument: '--token' };
+      continue;
+    }
+    return { command: 'unknown', argument: flag ?? '--' };
+  }
+
+  if (!listen) return { command: 'unknown', argument: '--listen' };
+  return { command: 'serve', args: { listen, tokenSource } };
+}
+
 /** Runs one CLI invocation and resolves with its process exit code. */
 export async function runRuntimeCli(args: readonly string[]): Promise<number> {
   const invocation = parseRuntimeCliArgs(args);
@@ -119,6 +167,8 @@ export async function runRuntimeCli(args: readonly string[]): Promise<number> {
       return await serveStdio(runtimeVersion);
     case 'connect':
       return await runConnect(invocation.args, runtimeVersion);
+    case 'serve':
+      return await runServe(invocation.args, runtimeVersion);
     case 'version':
       process.stdout.write(`${runtimeVersion}\n`);
       return 0;
@@ -196,6 +246,63 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
   }
 }
 
+async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise<number> {
+  const log = (message: string): void => {
+    process.stderr.write(`mangostudio-runtime: ${message}\n`);
+  };
+
+  const listen = parseListenAddress(args.listen);
+  if (!listen) {
+    log('Invalid --listen value. Pass a port, or host:port.');
+    return 1;
+  }
+
+  const stored = await readRuntimeSlotConfig('remote');
+  if (stored.setupState === 'pending') {
+    log('This runtime slot is still pending setup. Complete setup on this machine before serve.');
+    return 1;
+  }
+
+  const resolved = await resolveServeToken(args.tokenSource);
+  if (!resolved) {
+    log(
+      'No serve token. Pipe one in with --token -, set MANGOSTUDIO_RUNTIME_SERVE_TOKEN, or omit --token to generate one.'
+    );
+    return 1;
+  }
+
+  if (resolved.generated) {
+    if (!resolved.restricted) {
+      log(
+        process.platform === 'win32'
+          ? 'Warning: the serve token file is not restricted to this account. Windows needs an ACL this runtime does not set; restrict it yourself if other accounts use this machine.'
+          : 'Warning: the serve token file could not be restricted to this user.'
+      );
+    }
+    log(`Serve token (shown once): ${resolved.token}`);
+  }
+
+  const controller = new AbortController();
+  const stop = (): void => controller.abort();
+  process.once('SIGINT', stop);
+  process.once('SIGTERM', stop);
+
+  try {
+    const handle = serveRuntime({
+      listen,
+      token: resolved.token,
+      createHost: () => createLocalRuntimeHost({ runtimeVersion }),
+      log,
+      signal: controller.signal,
+    });
+    await handle.stopped;
+    return 0;
+  } finally {
+    process.off('SIGINT', stop);
+    process.off('SIGTERM', stop);
+  }
+}
+
 async function resolveToken(source: RuntimeConnectArgs['tokenSource']): Promise<string | null> {
   if (source === 'stdin') {
     const piped = (await Bun.stdin.text()).trim();
@@ -206,6 +313,31 @@ async function resolveToken(source: RuntimeConnectArgs['tokenSource']): Promise<
   // `--token` was not given and the environment is empty: fall back to whatever
   // a previous run stored, which is what makes an unattended restart work.
   return source === 'env' ? null : await readPairingToken('remote');
+}
+
+async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promise<{
+  readonly token: string;
+  readonly generated: boolean;
+  readonly restricted?: boolean;
+} | null> {
+  if (source === 'stdin') {
+    const piped = (await Bun.stdin.text()).trim();
+    // Operator-supplied secrets stay out of credentials.json on purpose.
+    return piped.length > 0 ? { token: piped, generated: false } : null;
+  }
+  const fromEnv = loadRuntimeConfig().serveToken;
+  if (source === 'env') {
+    return fromEnv ? { token: fromEnv, generated: false } : null;
+  }
+  if (fromEnv) return { token: fromEnv, generated: false };
+  const stored = await readServeToken('remote');
+  if (stored) return { token: stored, generated: false };
+  const bootstrapped = await bootstrapServeToken('remote');
+  return {
+    token: bootstrapped.token,
+    generated: true,
+    restricted: bootstrapped.restricted,
+  };
 }
 
 async function serveStdio(runtimeVersion: string): Promise<number> {

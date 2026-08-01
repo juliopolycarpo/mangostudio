@@ -191,6 +191,8 @@ export const CreateEnvironmentBodySchema = Type.Union([
       name: Type.String({ minLength: 1, maxLength: 80 }),
       transportKind: Type.Literal('http'),
       config: HttpEnvironmentConfigSchema,
+      /** Write-only; stored in the OS secret store, never returned. */
+      token: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
       enabled: Type.Optional(Type.Boolean()),
     },
     { additionalProperties: false }
@@ -212,6 +214,8 @@ export const UpdateEnvironmentBodySchema = Type.Object(
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
     config: Type.Optional(Type.Unknown()),
     enabled: Type.Optional(Type.Boolean()),
+    /** Write-only Direct URL token; rejected on non-http transports. */
+    token: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
   },
   { additionalProperties: false, minProperties: 1 }
 );
@@ -258,6 +262,8 @@ export const EnvironmentSchema = Type.Object(
     createdAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
     updatedAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
     status: EnvironmentConnectionStatusSchema,
+    /** Present for Direct URL environments; true when a token is in the secret store. */
+    hasRuntimeToken: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false }
 );
