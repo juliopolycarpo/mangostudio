@@ -97,9 +97,10 @@ describe('AddEnvironmentDialog', () => {
 
     expect(within(dialog).getByRole('tab', { name: labels.reachLocal })).toBeInTheDocument();
     expect(within(dialog).queryByRole('tab', { name: labels.reachWsl })).toBeNull();
-    // The answers whose transport is not ready yet must not appear.
-    expect(within(dialog).queryByText(en.environments.entities.transport.ssh)).toBeNull();
+    // Every other answer is host-independent: only WSL depends on what this
+    // machine has.
     expect(within(dialog).getByRole('tab', { name: labels.reachDirect })).toBeInTheDocument();
+    expect(within(dialog).getByRole('tab', { name: labels.reachSsh })).toBeInTheDocument();
   });
 
   it('derives an identifier from the name and creates the environment', async () => {
@@ -189,6 +190,86 @@ describe('AddEnvironmentDialog', () => {
       binaryPath: '/opt/mango/mangostudio-runtime',
       cwd: '/srv/build',
     });
+  });
+
+  it('creates an SSH environment and sends only the fields that were filled in', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachSsh }));
+    await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'Build host');
+    await user.type(
+      within(dialog).getByRole('textbox', { name: labels.sshHostLabel }),
+      'build-01.internal'
+    );
+    await user.type(
+      within(dialog).getByRole('textbox', {
+        name: `${labels.sshUserLabel} · ${labels.optional}`,
+      }),
+      'deploy'
+    );
+    await user.click(within(dialog).getByRole('button', { name: labels.submit }));
+
+    await waitFor(() => expect(screen.queryByTestId('add-environment-dialog')).toBeNull());
+    expect(createdRequestBody()).toEqual({
+      id: 'build-host',
+      name: 'Build host',
+      transportKind: 'ssh',
+      // Port, identity file and runtime path were blank, so ssh and the
+      // launcher pick their own defaults rather than being handed empty argv.
+      config: { host: 'build-01.internal', user: 'deploy' },
+    });
+  });
+
+  it('offers the manual reachability check once a host is named', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachSsh }));
+    expect(within(dialog).queryByText(labels.sshPreflightReach)).toBeNull();
+
+    await user.type(
+      within(dialog).getByRole('textbox', { name: labels.sshHostLabel }),
+      'build-01.internal'
+    );
+
+    // The command has to be the one that can prompt: accepting a host key is
+    // exactly what MangoStudio refuses to do on the user's behalf.
+    const command = within(dialog).getByText('ssh build-01.internal true');
+    expect(command).toBeInTheDocument();
+  });
+
+  it('refuses a host that would read as an ssh option', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachSsh }));
+    await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'Build host');
+    await user.type(
+      within(dialog).getByRole('textbox', { name: labels.sshHostLabel }),
+      '-oProxyCommand=id'
+    );
+
+    expect(within(dialog).getByText(labels.sshDashInvalid)).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: labels.submit })).toBeDisabled();
+  });
+
+  it('refuses a port that is not a port', async () => {
+    const user = userEvent.setup();
+    const dialog = await openDialog();
+
+    await user.click(within(dialog).getByRole('tab', { name: labels.reachSsh }));
+    await user.type(within(dialog).getByRole('textbox', { name: labels.nameLabel }), 'Build host');
+    await user.type(
+      within(dialog).getByRole('textbox', { name: labels.sshHostLabel }),
+      'build-01.internal'
+    );
+    await user.type(
+      within(dialog).getByRole('textbox', { name: `${labels.sshPortLabel} · ${labels.optional}` }),
+      '22abc'
+    );
+
+    expect(within(dialog).getByRole('button', { name: labels.submit })).toBeDisabled();
   });
 
   it('keeps the form open and explains a rejected creation', async () => {

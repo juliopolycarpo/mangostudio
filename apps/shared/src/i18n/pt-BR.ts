@@ -2148,6 +2148,45 @@ export const messages = {
           'Esta URL é HTTP sem TLS para um host público. Prefira https:// ou um endereço privado/LAN.',
         saveFailed: 'Não foi possível salvar as configurações de URL direta.',
       },
+      ssh: {
+        title: 'SSH',
+        description:
+          'O MangoStudio inicia o runtime naquela máquina com o seu próprio cliente ssh, em uma conexão que ele abre a cada sessão.',
+        hostLabel: 'Host',
+        hostInvalid: 'Informe um host ou endereço que não comece com hífen.',
+        userLabel: 'Usuário',
+        portLabel: 'Porta',
+        portInvalid: 'Use uma porta entre 1 e 65535.',
+        identityFileLabel: 'Arquivo de identidade',
+        runtimePathLabel: 'Caminho do runtime',
+        runtimePathHint: 'Onde o mangostudio-runtime fica naquela máquina. Vazio significa {path}.',
+        dashInvalid: 'Um valor começando com hífen seria lido como uma opção do ssh.',
+        save: 'Salvar',
+        saveFailed: 'Não foi possível salvar as configurações de SSH.',
+        preflightTitle: 'Teste a partir de um terminal',
+        preflightHint:
+          'O MangoStudio roda o ssh em modo batch e não consegue responder a nenhuma pergunta, então a chave do host precisa ser aceita por você conectando uma vez.',
+        preflightReach: 'Alcançar a máquina',
+        preflightRuntime: 'Encontrar o runtime',
+        reason: {
+          'client-missing':
+            'Esta máquina não tem cliente ssh no PATH. Instale o OpenSSH aqui — no Windows ele é um recurso opcional — e conecte de novo.',
+          'auth-refused':
+            'Aquela máquina recusou as credenciais oferecidas por esta. O MangoStudio nunca digita senha: adicione uma chave que o host aceite, ou aponte este ambiente para uma.',
+          'host-key-unverified':
+            'A chave do host é desconhecida, ou não é mais a que está no known_hosts. Conecte manualmente uma vez e confirme a impressão digital; o MangoStudio não aceita uma chave desconhecida por você.',
+          unreachable:
+            'Aquela máquina não respondeu. Verifique o endereço, a porta e se esta máquina consegue alcançá-la.',
+          'runtime-missing':
+            'Não há runtime no caminho abaixo naquela máquina. Instale um lá, ou aponte este ambiente para o binário que você já tem.',
+          'runtime-not-executable':
+            'O runtime está lá, mas não é executável. Rode chmod +x nele naquela máquina.',
+          'setup-pending':
+            'O runtime está instalado, mas ainda não foi configurado. Rode mangostudio-runtime setup naquela máquina para dizer o que ele pode fazer.',
+          unknown:
+            'O ssh não conseguiu iniciar o runtime. Clique em Conectar para ver o que ele relatou.',
+        },
+      },
       add: {
         trigger: 'Adicionar ambiente',
         title: 'Adicionar um ambiente',
@@ -2169,6 +2208,20 @@ export const messages = {
         directTokenLabel: 'Token do serve',
         directPlaintextWarning:
           'Esta URL é HTTP sem TLS para um host público. Prefira https:// ou um endereço privado/LAN.',
+        reachSsh: 'Uma máquina que eu alcanço por SSH',
+        sshHint:
+          'O MangoStudio inicia o runtime lá com o seu próprio cliente ssh, então chaves, seu agente, o ~/.ssh/config e o known_hosts valem normalmente. O runtime já precisa estar instalado naquela máquina — nada é enviado para lá automaticamente ainda.',
+        sshHostLabel: 'Host',
+        sshUserLabel: 'Usuário',
+        sshPortLabel: 'Porta',
+        sshIdentityFileLabel: 'Arquivo de identidade',
+        sshRuntimePathLabel: 'Caminho do runtime',
+        sshRuntimePathHint:
+          'Onde o mangostudio-runtime fica naquela máquina. Deixe vazio para o caminho de instalação padrão.',
+        sshDashInvalid: 'Um valor começando com hífen seria lido como uma opção do ssh.',
+        sshPreflight:
+          'Rode isto uma vez a partir de um terminal. Ele prova que a máquina é alcançável e, na primeira conexão, é o que coloca a chave do host no known_hosts — um passo que o MangoStudio deliberadamente não dá por você.',
+        sshPreflightReach: 'Alcançar a máquina',
         idLabel: 'Identificador',
         idHint: 'Letras minúsculas, dígitos e hifens simples. Não pode ser alterado depois.',
         idInvalid: 'Use letras minúsculas, dígitos e hifens simples.',

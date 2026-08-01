@@ -15,6 +15,7 @@ import { AddEnvironmentDialog } from './AddEnvironmentDialog';
 import { DirectUrlPanel } from './DirectUrlPanel';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { RuntimePairingPanel } from './RuntimePairingPanel';
+import { SshPanel } from './SshPanel';
 
 const STATUS_RAIL: Record<EnvironmentConnectionState, string> = {
   connected: 'bg-primary',
@@ -189,6 +190,8 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
         ) : null}
 
         {environment.transportKind === 'http' ? <DirectUrlPanel environment={environment} /> : null}
+
+        {environment.transportKind === 'ssh' ? <SshPanel environment={environment} /> : null}
 
         {actionError ? (
           <p className="text-xs text-error" role="alert">

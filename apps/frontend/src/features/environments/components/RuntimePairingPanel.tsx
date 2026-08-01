@@ -8,10 +8,8 @@
  */
 
 import type { RuntimePairingStatus } from '@mangostudio/shared/environments';
-import { Check, Copy, KeyRound, RefreshCw, Trash2 } from 'lucide-react';
+import { KeyRound, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import { Button } from '@/components/ui/Button';
-import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -20,6 +18,7 @@ import {
   useRevokeRuntimePairingMutation,
   useRuntimePairingQuery,
 } from '../queries';
+import { CopyLine } from './CopyLine';
 
 interface RuntimePairingPanelProps {
   readonly environmentId: string;
@@ -158,31 +157,6 @@ function SetupSteps({
       <CopyLine label={labels.stepConnect} value={posix} />
       <CopyLine label={labels.stepConnectPowerShell} value={powershell} />
       <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
-    </div>
-  );
-}
-
-function CopyLine({ label, value }: { readonly label: string; readonly value: string }) {
-  const { t } = useI18n();
-  const { copy, copied, failed } = useClipboard();
-
-  return (
-    <div className="space-y-1">
-      <p className="font-label text-[10px] uppercase tracking-widest text-on-surface-variant/70">
-        {label}
-      </p>
-      <div className="flex items-start gap-2">
-        <code className="min-w-0 flex-1 break-all rounded-lg bg-surface-container-highest px-2 py-1.5 font-mono text-[11px] text-on-surface">
-          {value}
-        </code>
-        <Button variant="secondary" size="sm" onClick={() => void copy(value)}>
-          {copied ? <Check size={13} /> : <Copy size={13} />}
-          {copied ? t.environments.actions.copied : t.environments.actions.copy}
-        </Button>
-      </div>
-      {failed ? (
-        <p className="text-[11px] text-error">{t.environments.actions.copyFailed}</p>
-      ) : null}
     </div>
   );
 }

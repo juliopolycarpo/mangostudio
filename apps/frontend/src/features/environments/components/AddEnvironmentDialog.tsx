@@ -6,18 +6,26 @@
  * machine somewhere else, and knows nothing useful about the difference between
  * a spawned child and a dialed-in socket. Each answer picks the transport that
  * fits it. Answers whose transport does not exist yet are not offered — a row
- * that can never do anything is worse than a missing one — and SSH is still
- * pending.
+ * that can never do anything is worse than a missing one.
  */
 
-import type { CreateEnvironmentBody, WslDistribution } from '@mangostudio/shared/environments';
-import { shouldWarnPlaintextHttpRuntime } from '@mangostudio/shared/environments';
+import type {
+  CreateEnvironmentBody,
+  SshEnvironmentConfig,
+  WslDistribution,
+} from '@mangostudio/shared/environments';
+import {
+  DEFAULT_SSH_RUNTIME_PATH,
+  shouldWarnPlaintextHttpRuntime,
+  sshPreflightCommands,
+} from '@mangostudio/shared/environments';
 import { useEffect, useId, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useCreateEnvironmentMutation, useWslDetectionQuery } from '../queries';
+import { CopyLine } from './CopyLine';
 import { WslDistributionPicker } from './WslDistributionPicker';
 
 /** Mirrors `EnvironmentIdSchema`; the server is still the authority. */
@@ -26,7 +34,10 @@ const ENVIRONMENT_ID_MAX_LENGTH = 63;
 const ENVIRONMENT_NAME_MAX_LENGTH = 80;
 
 /** One answer to "how do you reach it", and the transport that answer implies. */
-type ReachabilityChoice = 'stdio' | 'wsl' | 'websocket' | 'http';
+type ReachabilityChoice = 'stdio' | 'wsl' | 'websocket' | 'http' | 'ssh';
+
+/** Mirrors `SshArgumentValueSchema`; the server is still the authority. */
+const LEADING_DASH = /^-/;
 
 interface AddEnvironmentDialogProps {
   readonly onClose: () => void;
@@ -44,6 +55,47 @@ function suggestId(name: string): string {
       // the pattern — leaving submit disabled over an id the user never typed.
       .replace(/-+$/, '')
   );
+}
+
+/**
+ * The typed fields as the transport sees them: an omitted optional means "let
+ * ssh decide", where an empty string would become an argv entry that decides
+ * wrongly.
+ */
+function buildSshConfig(fields: {
+  readonly host: string;
+  readonly user: string;
+  readonly port: string;
+  readonly identityFile: string;
+  readonly remoteRuntimePath: string;
+}): SshEnvironmentConfig {
+  // Only a wholly numeric value becomes a port: `Number.parseInt` would
+  // silently accept `22abc` as 22 and store something nobody typed.
+  const rawPort = fields.port.trim();
+  const port = /^\d+$/.test(rawPort) ? Number(rawPort) : Number.NaN;
+  return {
+    host: fields.host.trim(),
+    ...(fields.user.trim() ? { user: fields.user.trim() } : {}),
+    ...(Number.isFinite(port) ? { port } : {}),
+    ...(fields.identityFile.trim() ? { identityFile: fields.identityFile.trim() } : {}),
+    ...(fields.remoteRuntimePath.trim()
+      ? { remoteRuntimePath: fields.remoteRuntimePath.trim() }
+      : {}),
+  };
+}
+
+/**
+ * Mirrors what the server will accept. A value starting with a dash would read
+ * as an ssh option rather than an argument, which the schema refuses — catching
+ * it here turns a rejected save into a field that says so.
+ */
+function isSshConfigUsable(config: SshEnvironmentConfig, rawPort: string): boolean {
+  if (config.host.length === 0) return false;
+  const values = [config.host, config.user, config.identityFile, config.remoteRuntimePath];
+  if (values.some((value) => value !== undefined && LEADING_DASH.test(value))) return false;
+  const port = rawPort.trim();
+  if (port.length === 0) return true;
+  return config.port !== undefined && config.port >= 1 && config.port <= 65_535;
 }
 
 /** The one to offer first: the host's default, else whatever is configurable. */
@@ -68,6 +120,11 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const [distro, setDistro] = useState('');
   const [baseUrl, setBaseUrl] = useState('');
   const [token, setToken] = useState('');
+  const [sshHost, setSshHost] = useState('');
+  const [sshUser, setSshUser] = useState('');
+  const [sshPort, setSshPort] = useState('');
+  const [sshIdentityFile, setSshIdentityFile] = useState('');
+  const [sshRuntimePath, setSshRuntimePath] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const wsl = useWslDetectionQuery(true);
@@ -95,11 +152,20 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const idInvalid = effectiveId.length > 0 && !ENVIRONMENT_ID_PATTERN.test(effectiveId);
   const httpIncomplete =
     kind === 'http' && (trimmedBaseUrl.length === 0 || trimmedToken.length === 0);
+  const sshConfig = buildSshConfig({
+    host: sshHost,
+    user: sshUser,
+    port: sshPort,
+    identityFile: sshIdentityFile,
+    remoteRuntimePath: sshRuntimePath,
+  });
+  const sshInvalid = kind === 'ssh' && !isSshConfigUsable(sshConfig, sshPort);
   const blocked =
     trimmedName.length === 0 ||
     effectiveId.length === 0 ||
     idInvalid ||
     httpIncomplete ||
+    sshInvalid ||
     (kind === 'wsl' && !selectionOffered);
 
   const choices: { readonly value: ReachabilityChoice; readonly label: string }[] = [
@@ -107,12 +173,14 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
     ...(wslOffered ? [{ value: 'wsl' as const, label: labels.reachWsl }] : []),
     { value: 'websocket', label: labels.reachPaired },
     { value: 'http', label: labels.reachDirect },
+    { value: 'ssh', label: labels.reachSsh },
   ];
   const hints: Record<ReachabilityChoice, string> = {
     stdio: labels.stdioHint,
     wsl: labels.wslHint,
     websocket: labels.pairedHint,
     http: labels.directHint,
+    ssh: labels.sshHint,
   };
 
   const handleSubmit = async () => {
@@ -146,17 +214,24 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                 config: { baseUrl: trimmedBaseUrl },
                 token: trimmedToken,
               }
-            : {
-                id: effectiveId,
-                name: trimmedName,
-                transportKind: 'stdio',
-                // An omitted field means "use the default"; an empty string would
-                // be a path the launcher then tries to spawn.
-                config: {
-                  ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
-                  ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
-                },
-              };
+            : kind === 'ssh'
+              ? {
+                  id: effectiveId,
+                  name: trimmedName,
+                  transportKind: 'ssh',
+                  config: sshConfig,
+                }
+              : {
+                  id: effectiveId,
+                  name: trimmedName,
+                  transportKind: 'stdio',
+                  // An omitted field means "use the default"; an empty string would
+                  // be a path the launcher then tries to spawn.
+                  config: {
+                    ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
+                    ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
+                  },
+                };
 
     try {
       await create.mutateAsync(body);
@@ -300,6 +375,65 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                 value={token}
                 onChange={(event) => setToken(event.target.value)}
               />
+            </>
+          ) : null}
+
+          {kind === 'ssh' ? (
+            <>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Input
+                  id="add-environment-ssh-host"
+                  label={labels.sshHostLabel}
+                  value={sshHost}
+                  error={
+                    sshHost.trim().length > 0 && LEADING_DASH.test(sshHost.trim())
+                      ? labels.sshDashInvalid
+                      : undefined
+                  }
+                  onChange={(event) => setSshHost(event.target.value)}
+                />
+                <Input
+                  id="add-environment-ssh-user"
+                  label={`${labels.sshUserLabel} · ${labels.optional}`}
+                  value={sshUser}
+                  onChange={(event) => setSshUser(event.target.value)}
+                />
+                <Input
+                  id="add-environment-ssh-port"
+                  label={`${labels.sshPortLabel} · ${labels.optional}`}
+                  inputMode="numeric"
+                  placeholder="22"
+                  value={sshPort}
+                  onChange={(event) => setSshPort(event.target.value)}
+                />
+                <Input
+                  id="add-environment-ssh-identity"
+                  label={`${labels.sshIdentityFileLabel} · ${labels.optional}`}
+                  value={sshIdentityFile}
+                  onChange={(event) => setSshIdentityFile(event.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Input
+                  id="add-environment-ssh-runtime-path"
+                  label={`${labels.sshRuntimePathLabel} · ${labels.optional}`}
+                  placeholder={DEFAULT_SSH_RUNTIME_PATH}
+                  value={sshRuntimePath}
+                  onChange={(event) => setSshRuntimePath(event.target.value)}
+                />
+                <p className="text-on-surface-variant/60 text-xs">{labels.sshRuntimePathHint}</p>
+              </div>
+
+              {sshConfig.host ? (
+                <div className="space-y-2 rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
+                  <p className="text-on-surface-variant/70 text-xs">{labels.sshPreflight}</p>
+                  <CopyLine
+                    label={labels.sshPreflightReach}
+                    value={sshPreflightCommands(sshConfig).reach}
+                  />
+                </div>
+              ) : null}
             </>
           ) : null}
         </div>

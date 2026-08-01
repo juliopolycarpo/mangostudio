@@ -2127,6 +2127,44 @@ export const messages: Messages = {
           'This URL is plaintext HTTP to a public host. Prefer https:// or a private/LAN address.',
         saveFailed: 'The Direct URL settings could not be saved.',
       },
+      ssh: {
+        title: 'SSH',
+        description:
+          'MangoStudio starts the runtime on that machine with your own ssh client, over a connection it opens for each session.',
+        hostLabel: 'Host',
+        hostInvalid: 'Give a host name or address that does not start with a dash.',
+        userLabel: 'User',
+        portLabel: 'Port',
+        portInvalid: 'Use a port between 1 and 65535.',
+        identityFileLabel: 'Identity file',
+        runtimePathLabel: 'Runtime path',
+        runtimePathHint: 'Where mangostudio-runtime lives on that machine. Empty means {path}.',
+        dashInvalid: 'A value starting with a dash would be read as an ssh option.',
+        save: 'Save',
+        saveFailed: 'The SSH settings could not be saved.',
+        preflightTitle: 'Check it from a terminal',
+        preflightHint:
+          'MangoStudio runs ssh in batch mode and cannot answer a prompt, so a host key has to be accepted by connecting once yourself.',
+        preflightReach: 'Reach the machine',
+        preflightRuntime: 'Find the runtime',
+        reason: {
+          'client-missing':
+            'This machine has no ssh client on PATH. Install OpenSSH here — on Windows it is an optional feature — and connect again.',
+          'auth-refused':
+            'That machine refused the credentials this one offered. MangoStudio never types a password: add a key the host accepts, or point this environment at one.',
+          'host-key-unverified':
+            'The host key is unknown, or no longer the one in known_hosts. Connect by hand once and confirm the fingerprint; MangoStudio will not accept an unknown key for you.',
+          unreachable:
+            'That machine did not answer. Check the address, the port, and that this machine can route to it.',
+          'runtime-missing':
+            'There is no runtime at the path below on that machine. Install one there, or point this environment at the binary you already have.',
+          'runtime-not-executable':
+            'The runtime is there but is not executable. Run chmod +x on it on that machine.',
+          'setup-pending':
+            'The runtime is installed but has not been set up. Run mangostudio-runtime setup on that machine to say what it may do.',
+          unknown: 'ssh could not start the runtime. Press Connect to see what it reported.',
+        },
+      },
       add: {
         trigger: 'Add environment',
         title: 'Add an environment',
@@ -2148,6 +2186,20 @@ export const messages: Messages = {
         directTokenLabel: 'Serve token',
         directPlaintextWarning:
           'This URL is plaintext HTTP to a public host. Prefer https:// or a private/LAN address.',
+        reachSsh: 'A machine I reach over SSH',
+        sshHint:
+          'MangoStudio starts the runtime there with your own ssh client, so keys, your agent, ~/.ssh/config and known_hosts all apply. The runtime has to be installed on that machine already — nothing is pushed there for you yet.',
+        sshHostLabel: 'Host',
+        sshUserLabel: 'User',
+        sshPortLabel: 'Port',
+        sshIdentityFileLabel: 'Identity file',
+        sshRuntimePathLabel: 'Runtime path',
+        sshRuntimePathHint:
+          'Where mangostudio-runtime lives on that machine. Leave empty for the default install path.',
+        sshDashInvalid: 'A value starting with a dash would be read as an ssh option.',
+        sshPreflight:
+          'Run this once from a terminal first. It proves the machine is reachable and, on a first connection, is what puts its host key in known_hosts — a step MangoStudio deliberately will not take for you.',
+        sshPreflightReach: 'Reach the machine',
         idLabel: 'Identifier',
         idHint: 'Lowercase letters, digits, and single dashes. Cannot be changed later.',
         idInvalid: 'Use lowercase letters, digits, and single dashes.',

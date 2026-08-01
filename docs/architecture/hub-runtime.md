@@ -69,7 +69,7 @@ checkpoint errors.
 | WSL distribution          | Current | Hub spawns       | The stdio transport, launched through `wsl.exe`. A launcher, not a framing of its own.       |
 | Paired WebSocket          | Current | Runtime dials in | Chunked binary frames over one socket to `/api/runtime`, authenticated by a pairing token.   |
 | Direct URL                | Current | Hub dials out    | Same chunked WebSocket framing; the runtime listens and the hub presents a serve token.      |
-| SSH                       | Future  | Hub spawns       | A launcher over stdio through an SSH session — not shipped yet.                              |
+| SSH                       | Current | Hub spawns       | A launcher over stdio: the system `ssh` client, with the runtime on the far end of its pipe. |
 
 Which one to reach for:
 
@@ -82,8 +82,10 @@ Which one to reach for:
   (`mangostudio-runtime serve`); the hub dials it. Prefer this on a LAN, or when TLS
   terminates in front of the runtime. Prefer paired WebSocket when the target cannot accept
   inbound connections.
-- **SSH** — still future; when it lands it will be another launcher over stdio, not a new
-  framing.
+- **A machine you already reach with `ssh`** — SSH. It reuses the keys, agent, `~/.ssh/config`
+  and `known_hosts` that are already set up, needs nothing on the hub beyond an ssh client, and
+  needs no credential of MangoStudio's own. The runtime has to be installed on that machine
+  already; nothing is pushed there yet.
 
 The shared NDJSON codec validates every frame, buffers partial lines, and rejects records
 larger than 16 MiB. Production in-process delivery uses structured cloning while retaining
@@ -325,6 +327,89 @@ and process if more than one hub should use that machine.
 The runtime does not terminate TLS. Put a reverse proxy in front when the dial crosses an
 untrusted network. The same Bun self-signed client caveat as paired WebSocket applies when
 the hub dials `wss://` against a certificate it does not trust.
+
+## SSH Transport
+
+`transportKind: 'ssh'` carries `{ host, user?, port?, identityFile?, remoteRuntimePath? }` and
+is a launcher over the stdio transport, not a protocol of its own. The hub spawns the system
+`ssh` client and the runtime runs on the far end of the pipe it opens. Nothing about the
+framing, handshake, or teardown differs from a local child.
+
+Reusing OpenSSH is the point: keys, agents, `~/.ssh/config`, `ProxyJump`, and `known_hosts` all
+apply because it is the same client the user already runs, and MangoStudio holds no credential
+of its own for that machine.
+
+### Argv
+
+```text
+ssh -o BatchMode=yes -o ConnectTimeout=10 -o ServerAliveInterval=15
+    -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes
+    -o ControlMaster=no -o ControlPath=none
+    [-o IdentitiesOnly=yes -i <identityFile>] [-p <port>]
+    -T -- <[user@]host> <quoted remoteRuntimePath>
+```
+
+The stdio spawn appends its own `--stdio`, exactly as it does for WSL. Every forced option is
+load-bearing:
+
+- `BatchMode=yes` — nothing on the hub can answer a prompt, so a connection that would ask must
+  fail rather than hang until the handshake times out.
+- `StrictHostKeyChecking=yes` is set explicitly rather than left at the default `ask`, which
+  fails under batch mode anyway and which ambient config could relax to `no`. An unknown host
+  key is refused, not accepted: the first trust decision belongs to a human at a terminal. The
+  card prints the `ssh <host> true` that makes it, and says why.
+- `ControlMaster=no ControlPath=none` — multiplexing is unsupported by Windows OpenSSH and a
+  user's config could otherwise enable it under a long-lived pipe. Reusing a master connection
+  would speed reconnects; it is deliberately out of scope.
+- `-T` — no pseudo-terminal, because stdout carries protocol frames a tty would translate.
+
+**A host named `-oProxyCommand=...` would be remote code execution on the hub.** Three layers
+stop it and all three are load-bearing: the schema refuses any value starting with a dash, `--`
+ends option parsing before the destination, and argv is an array rather than a command string.
+
+The remote side plays by OpenSSH's rules, not ours. `ssh` joins everything after the
+destination with spaces and hands the result to the target's **login shell** — which is why `~`
+expands at all — so `remoteRuntimePath` is single-quoted by the argv builder: a path with a
+space would otherwise arrive as two words, and one holding `;` or a backtick as a second
+command. A leading `~/` is left outside the quotes, because no shell expands a tilde inside
+them.
+
+`remoteRuntimePath` defaults to `~/.mango/runtime/remote/current/mangostudio-runtime`, whose
+last directory is a symlink an installer swaps, so the default never embeds a version. Targets
+are Linux and macOS: a Windows ssh *target* is not supported, since path style, quoting, and
+`.exe` resolution all differ. A Windows *hub* is — `ssh` resolves from PATH, and `mango doctor`
+reports whether it is there, because OpenSSH is an optional feature on Windows.
+
+### Failures are read out of stderr
+
+`ssh` reports every failure of its own — refused authentication, an unverified host key, a
+timeout, a name that does not resolve — as **exit 255**, and passes a remote command's status
+through otherwise. The exit code therefore cannot say what went wrong. The cause is read from a
+table of the client's own message forms, with the shell's 127 and 126 used where they are
+unambiguous, and each reason maps to a card that names the fix: install a runtime there, run
+`chmod +x`, trust the host key by hand, run `setup` on that machine. A signature that does not
+match falls back to handing the user ssh's own words rather than a confident wrong diagnosis —
+the client's text is locale-dependent in theory.
+
+One case is worth naming: a runtime that is installed but whose owner has not said what it may
+do prints a stable phrase and exits non-zero, which looks exactly like a shell reporting a
+missing file. It is classified first, so a consent gate never sends someone to reinstall a
+runtime that is already there.
+
+### Lifecycle
+
+Identical to stdio, because it is stdio: a lost connection is a closed pipe, and the manager's
+lazy deadline backoff re-runs `ssh` on the next call that needs it. The handshake budget is
+larger — twenty seconds rather than five — because a TCP round trip, a key exchange, and a
+remote process start all happen before the first frame. Keepalives make a dead network surface
+as a closed pipe within about forty-five seconds.
+
+`requireMatchingRelease` is off here, as for the other remote transports: the binary on that
+machine is not part of this hub's distribution, so release equality cannot gate the connection
+and the protocol major/minor pair is what does. Drift is reported on the card.
+
+Provisioning is not part of this transport. The runtime has to be installed on the target
+already, and the card prints the commands that check what is there.
 
 ## Paths Across Hosts
 
