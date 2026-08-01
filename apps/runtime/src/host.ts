@@ -145,7 +145,17 @@ export class RuntimeHost {
   #receive(frame: RuntimeFrame): void {
     switch (frame.type) {
       case 'hello_ack':
-        assertRuntimeProtocolCompatible(frame.protocolVersion, this.#protocolVersion);
+        // A mismatch has to settle the handshake, not escape. This runs inside
+        // the transport's frame listener — on a websocket that is the socket's
+        // `message` event, where a throw lands nowhere the caller is looking,
+        // and `waitUntilReady()` would sit until its timeout and report a
+        // stalled hub instead of the version the hub actually speaks.
+        try {
+          assertRuntimeProtocolCompatible(frame.protocolVersion, this.#protocolVersion);
+        } catch (error) {
+          this.#handshake.reject(error instanceof Error ? error : new Error(String(error)));
+          break;
+        }
         this.#ready = true;
         this.#handshake.resolve();
         break;
