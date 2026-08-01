@@ -167,6 +167,72 @@ describe('spawnRuntimeChild', () => {
     30_000
   );
 
+  it.skipIf(!hasRuntimeEntry)(
+    'connects across releases when the launcher does not own the binary',
+    async () => {
+      // The counterpart to the test above, which pins the default: a runtime on
+      // someone else's machine is not part of this hub's distribution, so
+      // release equality cannot gate it and the protocol version is what does.
+      const connection = await spawnRuntimeChild({
+        environmentId: 'devbox',
+        launch: resolveRuntimeLaunchCommand(),
+        hubVersion: `${RUNTIME_VERSION}-other`,
+        requireMatchingRelease: false,
+        onClosed: () => undefined,
+      });
+
+      try {
+        expect(connection.client.runtimeVersion).toBe(RUNTIME_VERSION);
+      } finally {
+        connection.close();
+      }
+    },
+    30_000
+  );
+
+  it.skipIf(!hasPosixShell)(
+    'hands a launcher the exit status and stderr of the wrapper it ran',
+    async () => {
+      // What an SSH launch needs to tell "no binary on that host" (127) from
+      // "the host refused the connection" (255) — neither of which the hub can
+      // see from a closed pipe alone.
+      const seen: { exitCode?: number | null; stderr?: string; command?: string } = {};
+      const error = await spawnRuntimeChild({
+        environmentId: 'devbox',
+        launch: { command: 'sh', args: ['-c', 'echo "no such file" >&2; exit 127'] },
+        hubVersion: 'hub-test',
+        handshakeTimeoutMs: 5_000,
+        describeFailure: (failure) => {
+          seen.exitCode = failure.exitCode;
+          seen.stderr = failure.stderr;
+          seen.command = failure.command;
+          return 'the launcher said so';
+        },
+        onClosed: () => undefined,
+      }).catch((caught) => caught);
+
+      expect(seen.exitCode).toBe(127);
+      expect(seen.stderr).toContain('no such file');
+      expect(seen.command).toBe('sh');
+      expect(error.message).toBe('the launcher said so');
+    },
+    30_000
+  );
+
+  it('keeps the built-in message when a launcher has nothing to add', async () => {
+    const missing = join(workdir, 'no-such-runtime');
+    const error = await spawnRuntimeChild({
+      environmentId: 'devbox',
+      launch: resolveRuntimeLaunchCommand(missing),
+      hubVersion: 'hub-test',
+      handshakeTimeoutMs: 5_000,
+      describeFailure: () => undefined,
+      onClosed: () => undefined,
+    }).catch((caught) => caught);
+
+    expect(error.message).toContain(missing);
+  }, 30_000);
+
   it.skipIf(!canSpawnRuntime)(
     'blames the working directory rather than the binary when the cwd is gone',
     async () => {

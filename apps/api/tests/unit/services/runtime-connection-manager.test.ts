@@ -127,6 +127,51 @@ describe('RuntimeConnectionManager', () => {
     expect(attempts).toBe(2);
   });
 
+  it('carries an ssh failure reason onto the status, where the card can act on it', async () => {
+    // Every ssh failure arrives as RUNTIME_UNAVAILABLE, so the code alone
+    // cannot tell "install a runtime there" from "trust the host key".
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition('ssh', { host: 'build-01' })),
+      connectors: {
+        ssh: () =>
+          Promise.reject(
+            new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'no runtime there', {
+              sshFailureReason: 'runtime-missing',
+            })
+          ),
+      },
+    });
+
+    await manager.connect('user-1', 'devbox').catch(() => undefined);
+
+    expect(manager.getStatus('user-1', 'devbox')).toEqual({
+      state: 'error',
+      errorCode: 'RUNTIME_UNAVAILABLE',
+      sshFailureReason: 'runtime-missing',
+    });
+  });
+
+  it('drops a failure detail that is not one of the known reasons', async () => {
+    // The value arrives through an untyped details bag, and the status shape it
+    // lands in is a public contract.
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition('ssh', { host: 'build-01' })),
+      connectors: {
+        ssh: () =>
+          Promise.reject(
+            new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'nope', { sshFailureReason: 'nonsense' })
+          ),
+      },
+    });
+
+    await manager.connect('user-1', 'devbox').catch(() => undefined);
+
+    expect(manager.getStatus('user-1', 'devbox')).toEqual({
+      state: 'error',
+      errorCode: 'RUNTIME_UNAVAILABLE',
+    });
+  });
+
   it('holds a lazy retry inside the backoff window and releases it after', async () => {
     let attempts = 0;
     const manager = new RuntimeConnectionManager({

@@ -8,8 +8,9 @@ import type {
   EnvironmentConnectionStatus,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID, SshFailureReasonSchema } from '@mangostudio/shared/environments';
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
+import { Value } from '@sinclair/typebox/value';
 import { getVersion } from '../../lib/config';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
@@ -22,6 +23,7 @@ import { environmentRepository } from '../../modules/environments/infrastructure
 import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-provisioner';
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { connectHttpRuntime } from './connect-http-runtime';
+import { connectSshRuntime } from './connect-ssh-runtime';
 import { RuntimeClient } from './runtime-client';
 import { spawnRuntimeChild } from './spawn-runtime-child';
 
@@ -175,6 +177,20 @@ function statusErrorCode(error: unknown): RuntimeErrorCode {
   return error instanceof RuntimeRemoteError ? error.code : 'RUNTIME_UNAVAILABLE';
 }
 
+/**
+ * The transport-specific half of a failure, when the connector could name one.
+ *
+ * Only ssh produces it today, and it has to travel as data because its client
+ * reports an unverified host key, a refused credential and an unreachable host
+ * with one exit status — none of which `errorCode` can distinguish, and all of
+ * which need a different fix. Validated rather than trusted: the value comes
+ * back through an untyped details bag.
+ */
+function failureDetail(error: unknown): Pick<EnvironmentConnectionStatus, 'sshFailureReason'> {
+  const reason = error instanceof RuntimeRemoteError ? error.details?.sshFailureReason : undefined;
+  return Value.Check(SshFailureReasonSchema, reason) ? { sshFailureReason: reason } : {};
+}
+
 export class RuntimeConnectionManager {
   readonly #connectors: RuntimeConnectionManagerOptions['connectors'];
   readonly #entries = new Map<string, RuntimeConnectionEntry>();
@@ -281,6 +297,7 @@ export class RuntimeConnectionManager {
             // problem is that the runtime has not been started on that machine.
             state: dialIn ? 'disconnected' : 'error',
             errorCode,
+            ...failureDetail(error),
             ...this.#cachedPeer(entry),
           };
           this.#publish(userId);
@@ -605,6 +622,7 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
       wsl: connectWslRuntime,
       websocket: refuseDialInRuntime,
       http: connectHttpRuntime,
+      ssh: connectSshRuntime,
     },
     publish: publishEnvironmentInvalidation,
   });

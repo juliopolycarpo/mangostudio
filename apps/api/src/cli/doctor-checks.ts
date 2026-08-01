@@ -21,6 +21,7 @@ import { type FsProbe, nearestExistingWritable } from '../lib/fs-probe';
 import type { ServerState } from '../lib/server-state';
 import type { CursorRuntimeChainStep } from '../services/providers/cursor/runtime-availability';
 import type { RuntimeBinaryProbe } from './runtime-binary-probe';
+import type { SshClientProbe } from './ssh-client-probe';
 
 export type { FsProbe } from '../lib/fs-probe';
 
@@ -142,6 +143,26 @@ export function checkRuntimeBinary(probe: RuntimeBinaryProbe, hubVersion: string
     );
   }
   return ok('Runtime binary', `v${probe.version} at ${probe.path}`);
+}
+
+/**
+ * A warning like the runtime binary above, and for the same reason: a hub with
+ * no ssh client serves every other environment normally, it just cannot launch
+ * an SSH one. Reported even where OpenSSH is usually present, because the case
+ * this exists for — a Windows host that never enabled the optional feature —
+ * looks identical from the outside until an environment refuses to connect.
+ */
+export function checkSshClient(probe: SshClientProbe): CheckResult {
+  if (!probe.path) {
+    return warn('SSH client', 'no ssh on PATH; SSH environments cannot start');
+  }
+  if (probe.error || !probe.version) {
+    return warn(
+      'SSH client',
+      `${probe.path} did not report a version (${probe.error ?? 'unknown reason'})`
+    );
+  }
+  return ok('SSH client', `${probe.version}  ${probe.path}`);
 }
 
 export function collectBuildIdentityChecks(input: BuildIdentityInput): CheckResult[] {
