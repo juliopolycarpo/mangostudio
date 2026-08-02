@@ -13,9 +13,11 @@ import type { RuntimeLibraryApplyParams, RuntimeLibraryUndoParams } from '@mango
 import {
   executeLibraryUndo,
   executePropagationWrites,
+  LIBRARY_BACKUP_MISSING_KIND,
   LibraryBackupMissingError,
   type PreparedPropagationOperation,
   type PropagationWriteEngineDeps,
+  RuntimeRemoteError,
 } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
@@ -819,14 +821,24 @@ async function runUndo(
       { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
     );
   } catch (error) {
-    if (error instanceof LibraryBackupMissingError) {
-      throw new LibraryRequestError(404, error.message);
-    }
-    if (error instanceof Error && /No library backup/.test(error.message)) {
+    // Two shapes, one condition: the in-process engine throws the class, and
+    // the RPC path flattens it to code INTERNAL carrying the kind in `details`.
+    if (error instanceof LibraryBackupMissingError || isBackupMissingResponse(error)) {
       throw new LibraryRequestError(404, error.message);
     }
     throw error;
   }
+}
+
+/**
+ * A stale backup set is the one undo failure that is the user's state rather
+ * than a fault, so it has to stay a 404 across the protocol boundary. The
+ * error class does not survive the frame, and the message is the wrong thing
+ * to match on — rewording or localising it would silently turn every stale
+ * undo into a 500.
+ */
+function isBackupMissingResponse(error: unknown): error is RuntimeRemoteError {
+  return error instanceof RuntimeRemoteError && error.details?.kind === LIBRARY_BACKUP_MISSING_KIND;
 }
 
 class AdaptationError extends Error {}

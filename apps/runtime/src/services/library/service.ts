@@ -13,7 +13,11 @@ import type {
 } from '@mangostudio/shared/library';
 import { describeLocation, LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { RuntimeToolArgumentError } from '../../errors';
+import {
+  LIBRARY_BACKUP_MISSING_KIND,
+  RuntimeServiceError,
+  RuntimeToolArgumentError,
+} from '../../errors';
 import type {
   RuntimeLibraryApplyParams,
   RuntimeLibraryApplyResult,
@@ -237,7 +241,9 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
         });
       } catch (error) {
         if (error instanceof LibraryBackupMissingError) {
-          throw new RuntimeToolArgumentError(error.message);
+          // Kept discriminable across the boundary: the class does not survive
+          // the frame, and the hub answers 404 for exactly this case.
+          throw new RuntimeServiceError(LIBRARY_BACKUP_MISSING_KIND, error.message);
         }
         throw error;
       }

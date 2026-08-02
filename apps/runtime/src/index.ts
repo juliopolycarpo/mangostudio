@@ -1,6 +1,7 @@
 export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 export { RuntimeProtocolClient, type RuntimeRequestOptions } from './client';
 export {
+  LIBRARY_BACKUP_MISSING_KIND,
   PathAccessError,
   RuntimeRemoteError,
   RuntimeServiceError,

@@ -15,6 +15,7 @@ export type RuntimeServiceErrorKind =
   | 'workdir_validation'
   | 'snapshot_conflict'
   | 'snapshot_too_large'
+  | 'library_backup_missing'
   | 'mcp_connection'
   | 'mcp_call'
   | 'mcp_session_missing';
@@ -43,6 +44,18 @@ export class RuntimeToolArgumentError extends RuntimeServiceError {
     this.name = 'RuntimeToolArgumentError';
   }
 }
+
+/**
+ * Kind carried in `details.kind` when a named backup set is gone.
+ *
+ * The class does not survive the protocol boundary — `errorPayloadFor` flattens
+ * every service error to code `INTERNAL` plus its kind — so this constant is
+ * what lets the hub answer 404 instead of matching on the message text. It goes
+ * in `details`, which is an open record on the wire, rather than in
+ * `RuntimeErrorCodeSchema`, whose closed union an older peer would reject.
+ */
+export const LIBRARY_BACKUP_MISSING_KIND =
+  'library_backup_missing' satisfies RuntimeServiceErrorKind;
 
 export class RuntimeRemoteError extends Error {
   constructor(
