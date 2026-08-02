@@ -1,8 +1,4 @@
-import type {
-  RuntimeFinding,
-  RuntimeHealth,
-  RuntimeStatus,
-} from '@mangostudio/shared/environments';
+import type { RuntimeFinding, RuntimeHealth, RuntimeStatus } from '../schemas';
 import type { RuntimeDefinition, RuntimeScanResult, SemVer } from './binary-scan';
 
 export interface MinimumRuntimeVersion {

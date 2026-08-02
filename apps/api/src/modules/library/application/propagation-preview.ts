@@ -13,11 +13,13 @@ import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   type AdapterStrategy,
   enabledLibraryLocations,
+  getLibraryLocation,
   type LibraryInstance,
   type LibraryLocationId,
   type LibraryLocationStatus,
   type LibraryResource,
   type LibraryResourceRef,
+  type LocationDefinition,
   type PropagationBlockedReason,
   type PropagationDestination,
   type PropagationOutcome,
@@ -39,7 +41,6 @@ import {
   rankAdapterStrategies,
 } from '../domain/format-adapters';
 import { LibraryRequestError } from '../domain/library-request-error';
-import { getLibraryLocation, type LocationDefinition } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 import { isAgentStrategyAvailable } from './adapters/agent-strategy';
 import { acknowledgedResourceKeys } from './conflict-resolution';

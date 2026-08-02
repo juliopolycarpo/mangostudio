@@ -10,10 +10,10 @@ import type {
   ResourceFormat,
   ResourceKind,
 } from '@mangostudio/shared/library';
+import { getLibraryLocation } from '@mangostudio/shared/library';
 import { previewLibraryPropagation } from '../../../../src/modules/library/application/propagation-preview';
 import type { AdapterCatalog } from '../../../../src/modules/library/domain/format-adapters';
 import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
-import { getLibraryLocation } from '../../../../src/modules/library/domain/registry';
 
 function instance(
   locationId: LibraryLocationId,

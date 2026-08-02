@@ -119,6 +119,17 @@ export {
   WorkdirContainmentError,
 } from './services/path-containment';
 export {
+  createRuntimePathEnv,
+  NODE_AUTH_SIGNAL_FS,
+  NODE_LOCATION_FS_PROBE,
+} from './services/probing/host-env';
+export {
+  createProbingService,
+  type ProbingHostAdapters,
+  type ProbingService,
+  probingService,
+} from './services/probing/service';
+export {
   findShellExecutable,
   isShellAvailable,
   runShellCommand,

@@ -1,4 +1,4 @@
-import type { LtsStatus } from '@mangostudio/shared/environments';
+import type { LtsStatus } from '../schemas';
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const NODE_RELEASE_DATA_STALE_AFTER_MS = 183 * DAY_MS;
@@ -36,7 +36,13 @@ interface SemVer {
   readonly patch: number;
 }
 
-export function parseNodeVersion(value: string): SemVer | null {
+/**
+ * A bare version string, fully anchored. Distinct from the runtime definitions'
+ * `parseNodeVersion`, which reads `node --version` output and tolerates what
+ * follows the number; a release-index entry with trailing anything is not a
+ * version this policy should reason about.
+ */
+export function parseExactNodeVersion(value: string): SemVer | null {
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
   if (!match) return null;
   return {
@@ -47,7 +53,7 @@ export function parseNodeVersion(value: string): SemVer | null {
 }
 
 export function normalizeNodeVersion(value: string): string | null {
-  const version = parseNodeVersion(value);
+  const version = parseExactNodeVersion(value);
   return version ? `${version.major}.${version.minor}.${version.patch}` : null;
 }
 
@@ -76,7 +82,7 @@ export function findNodeReleaseLine(
   schedule: NodeReleaseSchedule,
   version: string
 ): NodeReleaseLine | undefined {
-  const parsed = parseNodeVersion(version);
+  const parsed = parseExactNodeVersion(version);
   return parsed ? schedule.lines.find((line) => line.major === parsed.major) : undefined;
 }
 
@@ -113,8 +119,8 @@ function latestVersionForLine(
   line: NodeReleaseLine,
   latestByMajor: ReadonlyMap<number, string> | undefined
 ): SemVer | null {
-  const bundled = parseNodeVersion(line.latest ?? '');
-  const supplemental = parseNodeVersion(latestByMajor?.get(line.major) ?? '');
+  const bundled = parseExactNodeVersion(line.latest ?? '');
+  const supplemental = parseExactNodeVersion(latestByMajor?.get(line.major) ?? '');
   if (!bundled) return supplemental;
   if (!supplemental) return bundled;
   return compareVersions(supplemental, bundled) > 0 ? supplemental : bundled;
@@ -129,7 +135,7 @@ export function classifyNodeLtsStatus(
     return 'unknown';
   }
 
-  const version = parseNodeVersion(versionValue);
+  const version = parseExactNodeVersion(versionValue);
   if (!version) return 'unknown';
 
   const nowMs = options.now.getTime();

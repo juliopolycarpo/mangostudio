@@ -8,10 +8,10 @@ import type {
   RemovalPreview,
   RemovalPreviewEntry,
 } from '@mangostudio/shared/library';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { undoLibraryPropagation } from '../../../../src/modules/library/application/propagation-apply';
 import { applyLibraryRemoval } from '../../../../src/modules/library/application/removal-apply';
 import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
-import type { PathEnv } from '../../../../src/modules/library/domain/registry';
 import {
   type BackupStoreDeps,
   defaultBackupStoreDeps,

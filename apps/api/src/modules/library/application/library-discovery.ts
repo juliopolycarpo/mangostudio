@@ -2,17 +2,17 @@ import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   enabledLibraryLocations,
+  LIBRARY_LOCATION_DEFINITIONS,
   LIBRARY_SCOPES,
   type LibraryLocationId,
   type LibraryResource,
   type ResourceKind,
   resourceKey,
 } from '@mangostudio/shared/library';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import type { PathEnv } from '../../../lib/path-env';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
-import { LIBRARY_LOCATION_DEFINITIONS } from '../domain/registry';
 import { readLocationInstances } from '../infrastructure/instance-reader';
 import { type LibraryCache, libraryCache } from '../infrastructure/library-cache';
 import { createLibraryPathEnv } from '../infrastructure/location-probe';

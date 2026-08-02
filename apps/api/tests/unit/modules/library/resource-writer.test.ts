@@ -13,8 +13,9 @@ import {
 import { cp, lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
+
 import { writeFileAtomic } from '../../../../src/lib/safe-file';
-import type { PathEnv } from '../../../../src/modules/library/domain/registry';
 import {
   type ResourceWriterFs,
   writeDirectoryResource,

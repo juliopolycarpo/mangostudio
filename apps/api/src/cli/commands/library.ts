@@ -9,13 +9,13 @@ import type {
   ResourceKind,
 } from '@mangostudio/shared/library';
 import {
+  LIBRARY_LOCATION_DEFINITIONS,
   LibraryLocationStatusListSchema,
   LibraryResourceListSchema,
 } from '@mangostudio/shared/library';
 import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { discoverLibraryResourcesFromSettings } from '../../modules/library/application/library-discovery';
-import { LIBRARY_LOCATION_DEFINITIONS } from '../../modules/library/domain/registry';
 import {
   createLibraryPathEnv,
   describeLocation,

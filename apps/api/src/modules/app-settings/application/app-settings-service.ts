@@ -4,15 +4,18 @@ import {
   normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
-import { LIBRARY_SCOPES } from '@mangostudio/shared/library';
+import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  LIBRARY_SCOPES,
+  type LocationDefinition,
+} from '@mangostudio/shared/library';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';
-import { agentCliDetectionService } from '../../environments/application/agent-cli-detection';
 import {
-  LIBRARY_LOCATION_DEFINITIONS,
-  type LocationDefinition,
-} from '../../library/domain/registry';
+  environmentProbingService,
+  LOCAL_PROBE_SCOPE,
+} from '../../environments/application/probing-service';
 import { getSavedAppSettings, upsertAppSettings } from '../infrastructure/app-settings-repository';
 
 /**
@@ -37,7 +40,9 @@ async function libraryLocationDefaults(): Promise<LibraryLocationSettings> {
     return detectedDefaults.value;
   }
 
-  const value = defaultsForDetectedAgents(await agentCliDetectionService.listAgentCliStatuses());
+  const value = defaultsForDetectedAgents(
+    await environmentProbingService.listAgentCliStatuses(LOCAL_PROBE_SCOPE)
+  );
   detectedDefaults = { computedAtMs: nowMs, value };
   return value;
 }

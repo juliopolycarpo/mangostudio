@@ -5,6 +5,7 @@ import {
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
 import {
+  LIBRARY_LOCATION_DEFINITIONS,
   type LibraryCoverageState,
   LibraryCoverageStateSchema,
   type LibraryLocationId,
@@ -20,6 +21,7 @@ import {
   LibraryTargetDescriptorListSchema,
   type LibraryTargetId,
   LibraryTargetIdSchema,
+  listLibraryTargetDescriptors,
   parseResourceKey,
   type ResourceKind,
   ResourceKindSchema,
@@ -38,7 +40,6 @@ import {
 } from '../../workspaces/application/workdir-validation';
 import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import { discoverLibraryResources } from '../application/library-discovery';
-import { LIBRARY_LOCATION_DEFINITIONS, listLibraryTargetDescriptors } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 
 export const MAX_LIBRARY_CONTENT_BYTES = 512 * 1024;

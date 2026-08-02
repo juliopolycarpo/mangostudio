@@ -40,6 +40,12 @@ import {
   type RuntimeMoveFileParams,
   type RuntimeMoveFileResult,
   type RuntimeMutationResult,
+  type RuntimeProbeAgentClisParams,
+  type RuntimeProbeAgentClisResult,
+  type RuntimeProbeRuntimesParams,
+  type RuntimeProbeRuntimesResult,
+  type RuntimeProbeVersionManagersParams,
+  type RuntimeProbeVersionManagersResult,
   type RuntimeProtocolClient,
   type RuntimeReadFileParams,
   type RuntimeReadFileResult,
@@ -199,12 +205,34 @@ interface RuntimeMcpClient {
   ): Promise<RuntimeMcpAckResult>;
 }
 
+/**
+ * Toolchain detection on the target machine. Every method takes what the hub
+ * decided — which ids to look for, which of them it could install, which Node
+ * releases it knows about — and returns the same status shapes the umbrella has
+ * always published, resolved against that machine's PATH rather than the hub's.
+ */
+interface RuntimeProbingClient {
+  runtimes(
+    params: RuntimeProbeRuntimesParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeProbeRuntimesResult>;
+  versionManagers(
+    params: RuntimeProbeVersionManagersParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeProbeVersionManagersResult>;
+  agentClis(
+    params: RuntimeProbeAgentClisParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeProbeAgentClisResult>;
+}
+
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
 export class RuntimeClient {
   readonly fs: RuntimeFsClient;
   readonly shell: RuntimeShellClient;
   readonly git: RuntimeGitClient;
   readonly mcp: RuntimeMcpClient;
+  readonly probing: RuntimeProbingClient;
   readonly snapshot: RuntimeSnapshotClient;
   readonly workspace: RuntimeWorkspaceClient;
   private targetPaths?: TargetPaths;
@@ -243,6 +271,12 @@ export class RuntimeClient {
       respondToElicitation: (params, options) =>
         this.request('mcp.elicit-response', params, options),
       disconnect: (params, options) => this.request('mcp.disconnect', params, options),
+    };
+    this.probing = {
+      runtimes: (params, options) => this.request('probing.runtimes', params, options),
+      versionManagers: (params, options) =>
+        this.request('probing.version-managers', params, options),
+      agentClis: (params, options) => this.request('probing.agent-clis', params, options),
     };
     this.snapshot = {
       capture: (params, options) => this.request('snapshot.capture', params, options),

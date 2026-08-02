@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
+
 import { RegularFileReadError } from '../../../../src/lib/safe-file';
 import {
   inspectAllSettings,
   inspectSettingsTarget,
   type SettingsInspectionFs,
 } from '../../../../src/modules/library/application/settings-inspection';
-import type { PathEnv } from '../../../../src/modules/library/domain/registry';
 
 const ENV: PathEnv = {
   platform: 'linux',

@@ -11,8 +11,10 @@
 
 import {
   type AdapterStrategy,
+  getLibraryLocation,
   hashLibraryFile,
   type LibraryDivergenceAckRequest,
+  type LocationDefinition,
   type PropagationApplied,
   type PropagationApply,
   type PropagationApplyRequest,
@@ -29,10 +31,10 @@ import {
   type ResourceFormat,
   type ResourceKind,
 } from '@mangostudio/shared/library';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
-import { getLibraryLocation, type LocationDefinition, type PathEnv } from '../domain/registry';
 import {
   type BackupEntry,
   type BackupStoreDeps,

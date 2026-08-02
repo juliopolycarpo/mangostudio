@@ -9,10 +9,8 @@ import type {
 } from '@mangostudio/shared/environments';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../src/db/database';
-import type { AgentCliDetectionService } from '../../../src/modules/environments/application/agent-cli-detection';
 import { createInstallService } from '../../../src/modules/environments/application/install-service';
-import type { RuntimeDetectionService } from '../../../src/modules/environments/application/runtime-detection';
-import type { VersionManagerDetectionService } from '../../../src/modules/environments/application/version-manager-detection';
+import type { EnvironmentProbingService } from '../../../src/modules/environments/application/probing-service';
 import type { InstallRecipe } from '../../../src/modules/environments/domain/install-recipes';
 import { createInstallRunRepository } from '../../../src/modules/environments/infrastructure/install-run-repository';
 import { installRunner } from '../../../src/modules/environments/infrastructure/install-runner';
@@ -64,22 +62,16 @@ function directRecipe(argv: readonly string[]): InstallRecipe {
 }
 
 function detectionServices() {
-  const runtimeService: RuntimeDetectionService = {
+  const probingService: EnvironmentProbingService = {
     listRuntimeStatuses: () => Promise.resolve([BUN_STATUS]),
-    getRuntimeStatus: (id) => Promise.resolve(id === 'bun' ? BUN_STATUS : null),
-    resetRuntimeCache: () => undefined,
-  };
-  const versionManagerService: VersionManagerDetectionService = {
+    getRuntimeStatus: (_scope, id) => Promise.resolve(id === 'bun' ? BUN_STATUS : null),
     listVersionManagerStatuses: () => Promise.resolve([]),
     getVersionManagerStatus: () => Promise.resolve(null),
-    resetVersionManagerCache: () => undefined,
-  };
-  const agentService: AgentCliDetectionService = {
     listAgentCliStatuses: () => Promise.resolve([]),
     getAgentCliStatus: () => Promise.resolve(null),
-    resetAgentCliCache: () => undefined,
+    resetCache: () => undefined,
   };
-  return { runtimeService, versionManagerService, agentService };
+  return { probingService };
 }
 
 async function execute(argv: readonly string[]) {

@@ -1,18 +1,12 @@
-import { existsSync } from 'node:fs';
-import { readdir, readFile, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import type {
-  ManagedVersion,
-  RuntimeFinding,
-  VersionManagerStatus,
-} from '@mangostudio/shared/environments';
-import type { PathEnv } from '../../../lib/path-env';
+import type { PathEnv } from '../../runtime-env';
+import type { ManagedVersion, RuntimeFinding, VersionManagerStatus } from '../schemas';
 import {
   classifyNodeLtsStatus,
   findNodeReleaseLine,
   type NodeReleaseSchedule,
   normalizeNodeVersion,
-  parseNodeVersion,
+  parseExactNodeVersion,
 } from './lts-policy';
 
 export interface NvmFileSystem {
@@ -44,18 +38,6 @@ interface NvmAliasCache {
 const VERSION_DIRECTORY_PATTERN = /^v?(\d+\.\d+\.\d+)$/;
 const SAFE_ALIAS_PATTERN = /^[a-zA-Z0-9_.*/-]+$/;
 
-export function createNvmFileSystem(): NvmFileSystem {
-  return {
-    pathExists: existsSync,
-    readFile: (path) => readFile(path, 'utf8'),
-    readDirectory: async (path) => {
-      const entries = await readdir(path, { withFileTypes: true });
-      return entries.map((entry) => entry.name);
-    },
-    realpath,
-  };
-}
-
 async function readOptionalFile(fs: NvmFileSystem, path: string): Promise<string | undefined> {
   try {
     return await fs.readFile(path);
@@ -78,8 +60,8 @@ function normalizedPath(path: string, platform: string): string {
 }
 
 function compareVersionStrings(left: string, right: string): number {
-  const leftVersion = parseNodeVersion(left);
-  const rightVersion = parseNodeVersion(right);
+  const leftVersion = parseExactNodeVersion(left);
+  const rightVersion = parseExactNodeVersion(right);
   if (!leftVersion || !rightVersion) return left.localeCompare(right);
   if (leftVersion.major !== rightVersion.major) return leftVersion.major - rightVersion.major;
   if (leftVersion.minor !== rightVersion.minor) return leftVersion.minor - rightVersion.minor;
@@ -87,7 +69,7 @@ function compareVersionStrings(left: string, right: string): number {
 }
 
 function preferNewerVersion(latestByMajor: Map<number, string>, versionValue: string): void {
-  const version = parseNodeVersion(versionValue);
+  const version = parseExactNodeVersion(versionValue);
   if (!version) return;
   const existing = latestByMajor.get(version.major);
   if (!existing || compareVersionStrings(versionValue, existing) > 0) {

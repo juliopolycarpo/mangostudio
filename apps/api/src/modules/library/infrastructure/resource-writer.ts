@@ -2,6 +2,12 @@ import type { Dirent, Stats } from 'node:fs';
 import { cp, lstat, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { LibraryLocationId } from '@mangostudio/shared/library';
+import {
+  getLibraryLocation,
+  type LocationDefinition,
+  resourceEntryName,
+} from '@mangostudio/shared/library';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { resolvePathThroughExistingAncestor } from '../../../lib/path-containment';
 import { writeFileAtomic } from '../../../lib/safe-file';
 import {
@@ -9,12 +15,6 @@ import {
   LibraryWriteError,
   resolveContainedResourcePath,
 } from '../domain/path-safety';
-import {
-  getLibraryLocation,
-  type LocationDefinition,
-  type PathEnv,
-  resourceEntryName,
-} from '../domain/registry';
 import {
   assertBackupId,
   type BackupStoreDeps,

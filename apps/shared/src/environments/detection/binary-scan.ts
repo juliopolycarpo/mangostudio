@@ -1,11 +1,6 @@
 import { posix, win32 } from 'node:path';
-import type {
-  RuntimeId,
-  RuntimeInstallation,
-  RuntimeOrigin,
-  VersionManagerId,
-} from '@mangostudio/shared/environments';
-import type { PathEnv } from '../../../lib/path-env';
+import type { PathEnv } from '../../runtime-env';
+import type { RuntimeId, RuntimeInstallation, RuntimeOrigin, VersionManagerId } from '../schemas';
 
 export interface SemVer {
   readonly major: number;

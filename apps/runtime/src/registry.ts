@@ -4,6 +4,7 @@ import type { RuntimeMethod, RuntimeMethodMap } from './methods';
 import { runtimeFsService } from './services/fs';
 import { execGit } from './services/git';
 import { createMcpService } from './services/mcp/service';
+import { probingService } from './services/probing/service';
 import { runShellCommand } from './services/shell';
 import { captureFileSnapshot, hashFileAtPath, revertRuntimeSnapshots } from './services/snapshot';
 import {
@@ -67,6 +68,9 @@ export function createRuntimeMethodHandlers(
       handler('mcp.get-prompt', (params) => mcp.getPrompt(params)),
       handler('mcp.elicit-response', (params) => mcp.respondToElicitation(params)),
       handler('mcp.disconnect', (params) => mcp.disconnect(params)),
+      handler('probing.runtimes', (params) => probingService.probeRuntimes(params)),
+      handler('probing.version-managers', (params) => probingService.probeVersionManagers(params)),
+      handler('probing.agent-clis', (params) => probingService.probeAgentClis(params)),
     ]),
     close: () => mcp.close(),
   };

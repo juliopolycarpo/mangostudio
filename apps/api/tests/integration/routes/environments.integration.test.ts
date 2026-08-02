@@ -3,6 +3,7 @@ import {
   type AgentCliStatus,
   AgentCliStatusListSchema,
   AgentCliStatusSchema,
+  type RuntimeStatus,
   RuntimeStatusListSchema,
   RuntimeStatusSchema,
   type VersionManagerStatus,
@@ -10,11 +11,10 @@ import {
   VersionManagerStatusSchema,
 } from '@mangostudio/shared/environments';
 import { Value } from '@sinclair/typebox/value';
-import type { AgentCliDetectionService } from '../../../src/modules/environments/application/agent-cli-detection';
-import { createRuntimeDetectionService } from '../../../src/modules/environments/application/runtime-detection';
-import type { VersionManagerDetectionService } from '../../../src/modules/environments/application/version-manager-detection';
-import type { BinaryScanDeps } from '../../../src/modules/environments/domain/binary-scan';
-import { NODE_RUNTIME_DEFINITION } from '../../../src/modules/environments/domain/runtime-definitions';
+import type {
+  EnvironmentProbingService,
+  ProbeScope,
+} from '../../../src/modules/environments/application/probing-service';
 import { createEnvironmentRoutes } from '../../../src/modules/environments/http/environment-routes';
 import {
   createApiTestApp,
@@ -39,44 +39,38 @@ function createTestRoutes() {
   let versionManagerProbeCount = 0;
   let agentProbeCount = 0;
   let lastAgentForce = false;
-  const definition = {
-    ...NODE_RUNTIME_DEFINITION,
-    wellKnownDirs: () => [],
-    includeBareBinaryNames: false,
-  };
-  const createDeps = (): BinaryScanDeps => ({
-    platform: 'linux',
-    homeDir: '/home/tester',
-    env: { PATH: '/node/bin' },
-    pathExists: () => true,
-    probeVersion: () => {
-      probeCount += 1;
-      return Promise.resolve('v22.13.0');
+  const scopes: ProbeScope[] = [];
+  const runtimeStatus: RuntimeStatus = {
+    id: 'node',
+    health: 'ok',
+    installations: [
+      {
+        path: '/node/bin/node',
+        rawPath: '/node/bin/node',
+        version: 'v22.13.0',
+        origin: 'path',
+        pathIndex: 0,
+        effective: true,
+      },
+    ],
+    effective: {
+      path: '/node/bin/node',
+      rawPath: '/node/bin/node',
+      version: 'v22.13.0',
+      origin: 'path',
+      pathIndex: 0,
+      effective: true,
     },
-    realpath: (path) => Promise.resolve(path),
-  });
-  const service = createRuntimeDetectionService({
-    definitions: [definition],
-    createDeps,
-    now: () => 1_700_000_000_000,
-  });
+    findings: [],
+    installable: false,
+    probedAtMs: 1_700_000_000_000,
+  };
   const versionManagerStatus: VersionManagerStatus = {
     id: 'nvm',
     installed: true,
     root: '/home/tester/.nvm',
     versions: [],
     findings: [],
-  };
-  const versionManagerService: VersionManagerDetectionService = {
-    listVersionManagerStatuses: () => {
-      versionManagerProbeCount += 1;
-      return Promise.resolve([versionManagerStatus]);
-    },
-    getVersionManagerStatus: (id) => {
-      versionManagerProbeCount += 1;
-      return Promise.resolve(id === 'nvm' ? versionManagerStatus : null);
-    },
-    resetVersionManagerCache: () => undefined,
   };
   const agentStatus: AgentCliStatus = {
     id: 'claude',
@@ -109,26 +103,49 @@ function createTestRoutes() {
     authSignal: 'file-present',
     locations: [],
   };
-  const agentService: AgentCliDetectionService = {
-    listAgentCliStatuses: (options) => {
+  const probingService: EnvironmentProbingService = {
+    listRuntimeStatuses: (scope) => {
+      scopes.push(scope);
+      probeCount += 1;
+      return Promise.resolve([runtimeStatus]);
+    },
+    getRuntimeStatus: (scope, id) => {
+      scopes.push(scope);
+      probeCount += 1;
+      return Promise.resolve(id === 'node' ? runtimeStatus : null);
+    },
+    listVersionManagerStatuses: (scope) => {
+      scopes.push(scope);
+      versionManagerProbeCount += 1;
+      return Promise.resolve([versionManagerStatus]);
+    },
+    getVersionManagerStatus: (scope, id) => {
+      scopes.push(scope);
+      versionManagerProbeCount += 1;
+      return Promise.resolve(id === 'nvm' ? versionManagerStatus : null);
+    },
+    listAgentCliStatuses: (scope, options) => {
+      scopes.push(scope);
       agentProbeCount += 1;
       lastAgentForce = options?.force ?? false;
       return Promise.resolve([agentStatus]);
     },
-    getAgentCliStatus: (targetId, options) => {
+    getAgentCliStatus: (scope, targetId, options) => {
+      scopes.push(scope);
       agentProbeCount += 1;
       lastAgentForce = options?.force ?? false;
       return Promise.resolve(targetId === 'claude' ? agentStatus : null);
     },
-    resetAgentCliCache: () => undefined,
+    resetCache: () => undefined,
   };
 
   return {
-    routes: createEnvironmentRoutes(service, versionManagerService, agentService),
+    routes: createEnvironmentRoutes(probingService),
     getProbeCount: () => probeCount,
     getVersionManagerProbeCount: () => versionManagerProbeCount,
     getAgentProbeCount: () => agentProbeCount,
     getLastAgentForce: () => lastAgentForce,
+    getScopes: () => scopes,
   };
 }
 
@@ -153,7 +170,7 @@ describe('environment runtime routes', () => {
     expect(Value.Check(RuntimeStatusSchema, readPayload)).toBe(true);
     expect(force.status).toBe(200);
     expect(Value.Check(RuntimeStatusSchema, forcePayload)).toBe(true);
-    expect(getProbeCount()).toBe(2);
+    expect(getProbeCount()).toBe(3);
   });
 
   it('lists, reads, and force-probes authenticated version-manager status', async () => {
@@ -234,9 +251,29 @@ describe('environment runtime routes', () => {
     expect(invalidManager.status).toBe(422);
     expect(reservedManager.status).toBe(404);
     expect(invalidAgent.status).toBe(422);
-    expect(getProbeCount()).toBe(0);
+    expect(getProbeCount()).toBe(1);
     expect(getVersionManagerProbeCount()).toBe(1);
     expect(getAgentProbeCount()).toBe(0);
+  });
+
+  it('asks about the hub own machine unless the caller names another', async () => {
+    const { routes, getScopes } = createTestRoutes();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, routes);
+    restoreAuth = restore;
+
+    await app.handle(new Request('http://localhost/environments/runtimes'));
+    await app.handle(new Request('http://localhost/environments/runtimes?environmentId=ubuntu'));
+    await app.handle(
+      new Request('http://localhost/environments/agents/claude/probe?environmentId=ubuntu', {
+        method: 'POST',
+      })
+    );
+
+    expect(getScopes()).toEqual([
+      { userId: TEST_USER.id, environmentId: 'local' },
+      { userId: TEST_USER.id, environmentId: 'ubuntu' },
+      { userId: TEST_USER.id, environmentId: 'ubuntu' },
+    ]);
   });
 
   it('requires authentication for every runtime route', async () => {

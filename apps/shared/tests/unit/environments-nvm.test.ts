@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { posix } from 'node:path';
-import { NODE_RELEASE_SCHEDULE } from '../../../../src/modules/environments/domain/node-release-schedule';
 import {
   detectNvm,
+  NODE_RELEASE_SCHEDULE,
   type NvmDetectionDeps,
   type NvmFileSystem,
-} from '../../../../src/modules/environments/domain/nvm';
+} from '@mangostudio/shared/environments';
 
 const HOME = '/home/tester';
 const DEFAULT_NVM_ROOT = `${HOME}/.nvm`;

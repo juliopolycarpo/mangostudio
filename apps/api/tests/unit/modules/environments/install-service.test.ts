@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { InstallGuard, InstallRun, RuntimeStatus } from '@mangostudio/shared/environments';
-import type { AgentCliDetectionService } from '../../../../src/modules/environments/application/agent-cli-detection';
 import {
   createInstallService,
   InstallBlockedError,
   InstallPreparationError,
 } from '../../../../src/modules/environments/application/install-service';
-import type { RuntimeDetectionService } from '../../../../src/modules/environments/application/runtime-detection';
-import type { VersionManagerDetectionService } from '../../../../src/modules/environments/application/version-manager-detection';
+import type { EnvironmentProbingService } from '../../../../src/modules/environments/application/probing-service';
 import { getInstallRecipe } from '../../../../src/modules/environments/domain/install-recipes';
 import type { InstallRunRepository } from '../../../../src/modules/environments/infrastructure/install-run-repository';
 import type { InstallRunner } from '../../../../src/modules/environments/infrastructure/install-runner';
@@ -43,28 +41,20 @@ const BUN_STATUS: RuntimeStatus = {
 
 function createDetectionServices() {
   let forcedRuntimeProbes = 0;
-  const runtimeService: RuntimeDetectionService = {
+  const probingService: EnvironmentProbingService = {
     listRuntimeStatuses: () => Promise.resolve([BUN_STATUS]),
-    getRuntimeStatus: (id, options) => {
+    getRuntimeStatus: (_scope, id, options) => {
       if (options?.force) forcedRuntimeProbes += 1;
       return Promise.resolve(id === 'bun' ? BUN_STATUS : null);
     },
-    resetRuntimeCache: () => undefined,
-  };
-  const versionManagerService: VersionManagerDetectionService = {
     listVersionManagerStatuses: () => Promise.resolve([]),
     getVersionManagerStatus: () => Promise.resolve(null),
-    resetVersionManagerCache: () => undefined,
-  };
-  const agentService: AgentCliDetectionService = {
     listAgentCliStatuses: () => Promise.resolve([]),
     getAgentCliStatus: () => Promise.resolve(null),
-    resetAgentCliCache: () => undefined,
+    resetCache: () => undefined,
   };
   return {
-    runtimeService,
-    versionManagerService,
-    agentService,
+    probingService,
     getForcedRuntimeProbes: () => forcedRuntimeProbes,
   };
 }

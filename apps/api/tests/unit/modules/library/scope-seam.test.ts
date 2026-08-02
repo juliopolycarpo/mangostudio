@@ -10,16 +10,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
-import { LIBRARY_SCOPES, LibraryScopeSchema } from '@mangostudio/shared/library';
+import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  LIBRARY_SCOPES,
+  LibraryScopeSchema,
+  type LocationDefinition,
+} from '@mangostudio/shared/library';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../../src/db/database';
 import { discoverLibraryResources } from '../../../../src/modules/library/application/library-discovery';
-import {
-  LIBRARY_LOCATION_DEFINITIONS,
-  type LocationDefinition,
-  type PathEnv,
-} from '../../../../src/modules/library/domain/registry';
 import { LibraryCache } from '../../../../src/modules/library/infrastructure/library-cache';
 
 const LINUX_ENV: PathEnv = { platform: 'linux', homeDir: '/home/ada', env: {} };

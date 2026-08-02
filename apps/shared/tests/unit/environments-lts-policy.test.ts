@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-  classifyNodeLtsStatus,
-  type NodeReleaseSchedule,
-} from '../../../../src/modules/environments/domain/lts-policy';
+import { classifyNodeLtsStatus, type NodeReleaseSchedule } from '@mangostudio/shared/environments';
 
 const SCHEDULE: NodeReleaseSchedule = {
   generatedAt: '2026-07-01',

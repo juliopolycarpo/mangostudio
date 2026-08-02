@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { AgentCliStatusSchema } from '@mangostudio/shared/environments';
-import type { LibraryLocationStatus } from '@mangostudio/shared/library';
-import { Value } from '@sinclair/typebox/value';
-import { createAgentCliDetectionService } from '../../../../src/modules/environments/application/agent-cli-detection';
+import type {
+  AuthSignalFs,
+  BinaryScanDeps,
+  RuntimeDefinition,
+} from '@mangostudio/shared/environments';
 import {
+  AgentCliStatusSchema,
   CLAUDE_AGENT_CLI_DEFINITION,
   CODEX_AGENT_CLI_DEFINITION,
   CURSOR_AGENT_CLI_DEFINITION,
@@ -11,12 +13,31 @@ import {
   parseClaudeVersion,
   parseCodexVersion,
   parseCursorAgentVersion,
-} from '../../../../src/modules/environments/domain/agent-cli-definitions';
-import type { AuthSignalFs } from '../../../../src/modules/environments/domain/auth-signal';
-import type {
-  BinaryScanDeps,
-  RuntimeDefinition,
-} from '../../../../src/modules/environments/domain/binary-scan';
+} from '@mangostudio/shared/environments';
+import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
+import { Value } from '@sinclair/typebox/value';
+import type { RuntimeProbeAgentClisParams } from '../../../../src/methods';
+import {
+  createProbingService,
+  type ProbingService,
+} from '../../../../src/services/probing/service';
+
+const SELF = { version: '0.0.0-test' } as const;
+
+/** One target's status, the way the hub asks for it. */
+async function statusFor(
+  service: ProbingService,
+  targetId: LibraryTargetId,
+  self: RuntimeProbeAgentClisParams['self'] = SELF,
+  installable?: RuntimeProbeAgentClisParams['installable']
+) {
+  const { statuses } = await service.probeAgentClis({
+    targetIds: [targetId],
+    self,
+    ...(installable && { installable }),
+  });
+  return statuses[0] ?? null;
+}
 
 const LINUX_ENV = {
   platform: 'linux',
@@ -109,16 +130,16 @@ describe('agent CLI detection', () => {
   it('joins a detected CLI with config, stat-only auth, and schema-valid health', async () => {
     const configHome = '/home/tester/.claude';
     const credentials = `${configHome}/.credentials.json`;
-    const service = createAgentCliDetectionService({
-      definitions: [CLAUDE_AGENT_CLI_DEFINITION],
-      createScanDeps: (definition) => scanDeps(definition),
+    const service = createProbingService({
+      agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) => scanDeps(definition),
       createPathEnv: () => LINUX_ENV,
-      fs: new FakeAuthSignalFs(new Map([[credentials, 'never read']]), new Set([configHome])),
+      authFs: new FakeAuthSignalFs(new Map([[credentials, 'never read']]), new Set([configHome])),
       describeLocations: () => [],
       now: () => 1_700_000_000_000,
     });
 
-    const status = await service.getAgentCliStatus('claude');
+    const status = await statusFor(service, 'claude');
 
     expect(status).toMatchObject({
       id: 'claude',
@@ -135,15 +156,15 @@ describe('agent CLI detection', () => {
   });
 
   it('distinguishes a missing config home from a missing CLI', async () => {
-    const service = createAgentCliDetectionService({
-      definitions: [CLAUDE_AGENT_CLI_DEFINITION],
-      createScanDeps: (definition) => scanDeps(definition),
+    const service = createProbingService({
+      agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) => scanDeps(definition),
       createPathEnv: () => LINUX_ENV,
-      fs: new FakeAuthSignalFs(),
+      authFs: new FakeAuthSignalFs(),
       describeLocations: () => [],
     });
 
-    const status = await service.getAgentCliStatus('claude');
+    const status = await statusFor(service, 'claude');
 
     expect(findingCodes(status)).toContain('config-home-missing');
     expect(findingCodes(status)).not.toContain('cli-not-installed');
@@ -151,19 +172,18 @@ describe('agent CLI detection', () => {
   });
 
   it('reports an absent binary as installable only when a recipe is available', async () => {
-    const service = createAgentCliDetectionService({
-      definitions: [CLAUDE_AGENT_CLI_DEFINITION],
-      createScanDeps: (definition) =>
+    const service = createProbingService({
+      agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) =>
         scanDeps(definition, {
           exists: () => false,
         }),
       createPathEnv: () => LINUX_ENV,
-      fs: new FakeAuthSignalFs(),
+      authFs: new FakeAuthSignalFs(),
       describeLocations: () => [],
-      isInstallable: (targetId) => targetId === 'claude',
     });
 
-    const status = await service.getAgentCliStatus('claude');
+    const status = await statusFor(service, 'claude', SELF, { claude: true });
 
     expect(status?.health).toBe('missing');
     expect(status?.installable).toBe(true);
@@ -181,22 +201,22 @@ describe('agent CLI detection', () => {
         wellKnownDirs: () => ['/opt/claude/bin'],
       },
     };
-    const service = createAgentCliDetectionService({
-      definitions: [definition],
-      createScanDeps: (runtimeDefinition) =>
+    const service = createProbingService({
+      agentDefinitions: [definition],
+      createScanDeps: (_env, runtimeDefinition) =>
         scanDeps(runtimeDefinition, {
           path: '',
           exists: (path) => path === cliPath,
         }),
       createPathEnv: () => ({ ...LINUX_ENV, env: { PATH: '' } }),
-      fs: new FakeAuthSignalFs(
+      authFs: new FakeAuthSignalFs(
         new Map([[`${configHome}/.credentials.json`, 'never read']]),
         new Set([configHome])
       ),
       describeLocations: () => [],
     });
 
-    const status = await service.getAgentCliStatus('claude');
+    const status = await statusFor(service, 'claude');
 
     expect(status?.health).toBe('warn');
     expect(status?.effective).toBeUndefined();
@@ -208,23 +228,23 @@ describe('agent CLI detection', () => {
 
   it('preserves duplicate and PATH-shadowing analysis for agent CLIs', async () => {
     const configHome = '/home/tester/.claude';
-    const service = createAgentCliDetectionService({
-      definitions: [CLAUDE_AGENT_CLI_DEFINITION],
-      createScanDeps: (definition) =>
+    const service = createProbingService({
+      agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) =>
         scanDeps(definition, {
           path: '/first:/second',
           version: (path) =>
             path.startsWith('/first') ? '2.1.220 (Claude Code)' : '2.0.0 (Claude Code)',
         }),
       createPathEnv: () => ({ ...LINUX_ENV, env: { PATH: '/first:/second' } }),
-      fs: new FakeAuthSignalFs(
+      authFs: new FakeAuthSignalFs(
         new Map([[`${configHome}/.credentials.json`, 'never read']]),
         new Set([configHome])
       ),
       describeLocations: () => [],
     });
 
-    const status = await service.getAgentCliStatus('claude');
+    const status = await statusFor(service, 'claude');
 
     expect(status?.installations).toHaveLength(2);
     expect(findingCodes(status)).toContain('multiple-versions');
@@ -232,18 +252,18 @@ describe('agent CLI detection', () => {
   });
 
   it('fails soft when a found CLI no longer matches its version format', async () => {
-    const service = createAgentCliDetectionService({
-      definitions: [CLAUDE_AGENT_CLI_DEFINITION],
-      createScanDeps: (definition) =>
+    const service = createProbingService({
+      agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) =>
         scanDeps(definition, {
           version: () => 'unexpected output',
         }),
       createPathEnv: () => LINUX_ENV,
-      fs: new FakeAuthSignalFs(),
+      authFs: new FakeAuthSignalFs(),
       describeLocations: () => [],
     });
 
-    const status = await service.getAgentCliStatus('claude');
+    const status = await statusFor(service, 'claude');
 
     expect(status?.health).toBe('error');
     expect(status?.effective).toBeUndefined();
@@ -252,18 +272,18 @@ describe('agent CLI detection', () => {
   });
 
   it('keeps an execution failure distinct from an unparseable version', async () => {
-    const service = createAgentCliDetectionService({
-      definitions: [CLAUDE_AGENT_CLI_DEFINITION],
-      createScanDeps: (definition) =>
+    const service = createProbingService({
+      agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) =>
         scanDeps(definition, {
           version: () => null,
         }),
       createPathEnv: () => LINUX_ENV,
-      fs: new FakeAuthSignalFs(),
+      authFs: new FakeAuthSignalFs(),
       describeLocations: () => [],
     });
 
-    const status = await service.getAgentCliStatus('claude');
+    const status = await statusFor(service, 'claude');
 
     expect(findingCodes(status)).toContain('not-executable');
     expect(findingCodes(status)).not.toContain('version-probe-failed');
@@ -306,18 +326,18 @@ describe('agent CLI detection', () => {
       writable: false,
       targetIds: ['codex'],
     };
-    const service = createAgentCliDetectionService({
-      definitions: [CODEX_AGENT_CLI_DEFINITION],
-      createScanDeps: (definition) => scanDeps(definition),
+    const service = createProbingService({
+      agentDefinitions: [CODEX_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) => scanDeps(definition),
       createPathEnv: () => LINUX_ENV,
-      fs: new FakeAuthSignalFs(
+      authFs: new FakeAuthSignalFs(
         new Map([[`${configHome}/auth.json`, 'never read']]),
         new Set([configHome])
       ),
       describeLocations: () => [unwritableLocation, uncreatedLocation, readOnlyLocation],
     });
 
-    const status = await service.getAgentCliStatus('codex');
+    const status = await statusFor(service, 'codex');
 
     expect(status?.health).toBe('warn');
     expect(status?.locations).toEqual([unwritableLocation, uncreatedLocation, readOnlyLocation]);
@@ -346,11 +366,11 @@ describe('agent CLI detection', () => {
       writable: false,
       targetIds: ['claude' as const],
     });
-    const service = createAgentCliDetectionService({
-      definitions: [CLAUDE_AGENT_CLI_DEFINITION],
-      createScanDeps: (definition) => scanDeps(definition),
+    const service = createProbingService({
+      agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) => scanDeps(definition),
       createPathEnv: () => LINUX_ENV,
-      fs: new FakeAuthSignalFs(
+      authFs: new FakeAuthSignalFs(
         new Map([[`${configHome}/.credentials.json`, 'never read']]),
         new Set([configHome])
       ),
@@ -360,7 +380,7 @@ describe('agent CLI detection', () => {
       ],
     });
 
-    const status = await service.getAgentCliStatus('claude');
+    const status = await statusFor(service, 'claude');
 
     expect(status?.findings).toEqual([
       {
@@ -374,20 +394,19 @@ describe('agent CLI detection', () => {
     const configHome = '/home/tester/.cursor';
     const cliConfig = `${configHome}/cli-config.json`;
     const serviceFor = (contents: string) =>
-      createAgentCliDetectionService({
-        definitions: [CURSOR_AGENT_CLI_DEFINITION],
-        createScanDeps: (definition) => scanDeps(definition),
+      createProbingService({
+        agentDefinitions: [CURSOR_AGENT_CLI_DEFINITION],
+        createScanDeps: (_env, definition) => scanDeps(definition),
         createPathEnv: () => LINUX_ENV,
-        fs: new FakeAuthSignalFs(new Map([[cliConfig, contents]]), new Set([configHome])),
+        authFs: new FakeAuthSignalFs(new Map([[cliConfig, contents]]), new Set([configHome])),
         describeLocations: () => [],
       });
 
-    const signedIn = await serviceFor(
-      JSON.stringify({ authInfo: { id: 'ada' } })
-    ).getAgentCliStatus('cursor');
-    const signedOut = await serviceFor(JSON.stringify({ editor: 'vim' })).getAgentCliStatus(
+    const signedIn = await statusFor(
+      serviceFor(JSON.stringify({ authInfo: { id: 'ada' } })),
       'cursor'
     );
+    const signedOut = await statusFor(serviceFor(JSON.stringify({ editor: 'vim' })), 'cursor');
 
     expect(signedIn).toMatchObject({
       targetId: 'cursor',
@@ -404,18 +423,19 @@ describe('agent CLI detection', () => {
 
   it('describes the running MangoStudio process from in-process identity and the guarded session', async () => {
     const configHome = '/home/tester/.mango';
-    const service = createAgentCliDetectionService({
-      definitions: [MANGOSTUDIO_AGENT_CLI_DEFINITION],
+    const service = createProbingService({
+      agentDefinitions: [MANGOSTUDIO_AGENT_CLI_DEFINITION],
       createPathEnv: () => LINUX_ENV,
-      fs: new FakeAuthSignalFs(new Map(), new Set([configHome])),
+      authFs: new FakeAuthSignalFs(new Map(), new Set([configHome])),
       describeLocations: () => [],
-      getSelfVersion: () => '9.9.9',
-      getSelfExecutablePath: () => '/opt/mangostudio/mangostudio',
-      getSelfConfigHome: () => configHome,
       now: () => 1_700_000_000_000,
     });
 
-    const status = await service.getAgentCliStatus('mangostudio');
+    const status = await statusFor(service, 'mangostudio', {
+      version: '9.9.9',
+      executablePath: '/opt/mangostudio/mangostudio',
+      configHome,
+    });
 
     expect(status).toMatchObject({
       id: 'mangostudio',
