@@ -141,6 +141,7 @@ describe('mcp server routes', () => {
         transportKind: 'wsl',
         configJson: '{"distro":"Ubuntu"}',
         enabled: 1,
+        allowInstalls: 0,
         createdAt: stamp,
         updatedAt: stamp,
       })

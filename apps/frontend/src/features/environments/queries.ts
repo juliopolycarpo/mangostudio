@@ -47,7 +47,8 @@ export const environmentKeys = {
     [...environmentKeys.all, 'version-managers', environmentId] as const,
   agents: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...environmentKeys.all, 'agents', environmentId] as const,
-  installRecipes: () => [...environmentKeys.all, 'install-recipes'] as const,
+  installRecipes: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...environmentKeys.all, 'install-recipes', environmentId] as const,
   wsl: () => [...environmentKeys.all, 'wsl'] as const,
   pairings: () => [...environmentKeys.all, 'pairing'] as const,
   pairing: (id: string) => [...environmentKeys.pairings(), id] as const,
@@ -285,12 +286,14 @@ export function useWslDetectionQuery(enabled: boolean) {
   });
 }
 
-export function installRecipesQueryOptions() {
+export function installRecipesQueryOptions(environmentId: string = LOCAL_ENVIRONMENT_ID) {
   return queryOptions({
-    queryKey: environmentKeys.installRecipes(),
+    queryKey: environmentKeys.installRecipes(environmentId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.environments.install.recipes.get();
+      const { data, error } = await client.api.environments.install.recipes.get({
+        query: environmentQuery(environmentId),
+      });
       if (error) throw new ApiError(error.value);
       return data as InstallRecipePreview[];
     },

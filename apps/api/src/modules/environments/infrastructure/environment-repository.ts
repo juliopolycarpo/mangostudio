@@ -18,6 +18,8 @@ export interface EnvironmentRecord {
   readonly transportKind: EnvironmentTransportKind;
   readonly config: unknown;
   readonly enabled: boolean;
+  /** Whether install recipes may run on this machine. */
+  readonly allowInstalls: boolean;
   readonly createdAt: number;
   readonly updatedAt: number;
 }
@@ -35,6 +37,7 @@ export interface UpdateEnvironmentRecord {
   readonly name?: string;
   readonly config?: unknown;
   readonly enabled?: boolean;
+  readonly allowInstalls?: boolean;
 }
 
 type RemoveEnvironmentResult = 'removed' | 'referenced' | 'missing';
@@ -59,6 +62,7 @@ function toEnvironmentRecord(row: EnvironmentSelect): EnvironmentRecord {
     transportKind: row.transportKind as EnvironmentTransportKind,
     config: parseConfigJson(row.configJson),
     enabled: row.enabled === 1,
+    allowInstalls: row.allowInstalls === 1,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -103,6 +107,7 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
         transportKind: input.transportKind,
         configJson: JSON.stringify(input.config),
         enabled: input.enabled ? 1 : 0,
+        allowInstalls: 0,
         createdAt: now,
         updatedAt: now,
       };
@@ -116,6 +121,9 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
         : {
             ...input,
             config: input.config,
+            // A new environment is never trusted with installs on arrival;
+            // saying so is a separate, deliberate act.
+            allowInstalls: false,
             createdAt: now,
             updatedAt: now,
           };
@@ -127,6 +135,9 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.config !== undefined ? { configJson: JSON.stringify(input.config) } : {}),
         ...(input.enabled !== undefined ? { enabled: input.enabled ? 1 : 0 } : {}),
+        ...(input.allowInstalls !== undefined
+          ? { allowInstalls: input.allowInstalls ? 1 : 0 }
+          : {}),
       };
       const result = await db
         .updateTable('environments')

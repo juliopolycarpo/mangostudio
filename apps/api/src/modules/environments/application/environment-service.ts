@@ -57,6 +57,10 @@ function localRecord(userId: string): EnvironmentRecord {
     transportKind: 'in-process',
     config: {},
     enabled: true,
+    // The hub's own machine is governed by the loopback guard rather than by
+    // this flag, and always has been. It is reported as trusted so the card
+    // does not offer a toggle that would decide nothing.
+    allowInstalls: true,
     createdAt: 0,
     updatedAt: 0,
   };
@@ -73,6 +77,7 @@ async function toEnvironment(
     transportKind: record.transportKind,
     config: record.config,
     enabled: record.enabled,
+    allowInstalls: record.allowInstalls,
     virtual: record.id === LOCAL_ENVIRONMENT_ID,
     createdAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.createdAt,
     updatedAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.updatedAt,

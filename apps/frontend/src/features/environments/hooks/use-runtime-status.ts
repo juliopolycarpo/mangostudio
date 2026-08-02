@@ -43,8 +43,8 @@ export function useAgentCliStatuses(environmentId?: string) {
   return useQuery(agentCliStatusesQueryOptions(environmentId));
 }
 
-export function useInstallRecipes() {
-  return useQuery(installRecipesQueryOptions());
+export function useInstallRecipes(environmentId?: string) {
+  return useQuery(installRecipesQueryOptions(environmentId));
 }
 
 /**
@@ -56,7 +56,7 @@ export function useRuntimesScreenData(environmentId?: string) {
     queries: [
       runtimeStatusesQueryOptions(environmentId),
       versionManagerStatusesQueryOptions(environmentId),
-      installRecipesQueryOptions(),
+      installRecipesQueryOptions(environmentId),
     ],
   });
   const [runtimes, versionManagers, recipes] = results;

@@ -86,7 +86,7 @@ async function execute(argv: readonly string[]) {
     ...detectionServices(),
     repository,
     runner: installRunner,
-    resolveGuard: () => ALLOWED_GUARD,
+    resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
     generateId: () => {
       nextId += 1;
       return `execution-${nextId}`;

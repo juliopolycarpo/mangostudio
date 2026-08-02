@@ -1985,6 +1985,12 @@ export const messages: Messages = {
       cursor: 'Cursor',
     },
     /** Which machine a diagnostic tab is describing. */
+    /** Per-environment permission to run install recipes on that machine. */
+    trust: {
+      label: 'Allow installs on this machine',
+      hint: 'Runs allowlisted install recipes there, writing to that machine\u2019s disk. The local-surface check that protects this machine says nothing about that one, so this is the only thing that permits it.',
+      updateFailed: 'The install permission could not be changed.',
+    },
     scope: {
       label: 'Environment',
       disconnected: '{environment} is not connected',
@@ -2392,6 +2398,8 @@ export const messages: Messages = {
         'client-not-loopback':
           'This request did not come from this machine, so it cannot install anything here.',
         disabled: 'Installs are disabled in this server configuration.',
+        'environment-not-trusted':
+          'This environment has not been trusted with installs. Turn it on for that machine, on its card in Environments.',
       },
     },
   },

@@ -26,9 +26,10 @@ import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { generateId } from '../../../utils/id';
-import { evaluateInstallGuard } from '../domain/install-guards';
+import { evaluateInstallGuard, evaluateRemoteInstallGuard } from '../domain/install-guards';
 import { INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
 import { assertRecipeInput } from '../domain/recipe-input';
+import { environmentRepository } from '../infrastructure/environment-repository';
 import {
   type CompleteInstallRun,
   createInstallRunRepository,
@@ -53,12 +54,20 @@ const MAX_RECENT_STREAMS = 20;
 export interface InstallRequestContext {
   readonly userId: string;
   readonly clientIp: string | undefined;
+  /** Which machine to install on; the hub's own unless a caller says otherwise. */
+  readonly environmentId?: string;
   readonly signal?: AbortSignal;
 }
 
-/** The machine a recipe is about; the hub's own unless a caller says otherwise. */
-function probeScopeFor(context: Pick<InstallRequestContext, 'userId'>): ProbeScope {
-  return { userId: context.userId, environmentId: LOCAL_ENVIRONMENT_ID };
+function environmentIdOf(context: Pick<InstallRequestContext, 'environmentId'>): string {
+  return context.environmentId ?? LOCAL_ENVIRONMENT_ID;
+}
+
+/** The machine a recipe is about. */
+function probeScopeFor(
+  context: Pick<InstallRequestContext, 'userId' | 'environmentId'>
+): ProbeScope {
+  return { userId: context.userId, environmentId: environmentIdOf(context) };
 }
 
 export class InstallBlockedError extends Error {
@@ -145,7 +154,7 @@ interface InstallServiceDeps {
   readonly getLogPath: (runId: string) => string;
   readonly readLog: (path: string) => Promise<string>;
   readonly inspectProfileSetup: ProfileSetupInspector;
-  readonly resolveGuard: (clientIp: string | undefined) => InstallGuard;
+  readonly resolveGuard: (context: InstallRequestContext) => Promise<InstallGuard>;
 }
 
 export interface InstallService {
@@ -240,14 +249,34 @@ function createEventBuffer(): EventBuffer {
   };
 }
 
-function defaultGuard(clientIp: string | undefined): InstallGuard {
+/**
+ * Two gates, intersected, and a refusal always names which side said no.
+ *
+ * For the hub's own machine that is the loopback surface it has always been.
+ * For anyone else's it is an explicit per-environment opt-in, because nothing
+ * the hub can measure here says anything about a machine over there — and
+ * quietly inheriting the local verdict would extend a permission granted for
+ * "the browser is at this keyboard" to a host nobody consented for.
+ */
+async function defaultGuard(context: InstallRequestContext): Promise<InstallGuard> {
   const config = getConfig();
-  return evaluateInstallGuard({
-    serverHost: config.server.host,
-    clientIp,
+  const environmentId = environmentIdOf(context);
+  if (environmentId === LOCAL_ENVIRONMENT_ID) {
+    return evaluateInstallGuard({
+      serverHost: config.server.host,
+      clientIp: context.clientIp,
+      installsEnabled: config.environments.installsEnabled,
+      standalone: isStandaloneExecutable(),
+      container: config.environments.container,
+    });
+  }
+
+  const environment = await environmentRepository.find(context.userId, environmentId);
+  return evaluateRemoteInstallGuard({
     installsEnabled: config.environments.installsEnabled,
-    standalone: isStandaloneExecutable(),
-    container: config.environments.container,
+    // An environment that is not there cannot have been trusted, and saying so
+    // is more useful than a not-found: the user asked to install somewhere.
+    allowInstalls: environment?.allowInstalls === true,
   });
 }
 
@@ -262,6 +291,14 @@ function recipeInputKey(input: RecipeInput): string {
 
 function defaultInput(recipe: InstallRecipe): RecipeInput {
   return recipe.inputKind === 'none' ? { kind: 'none' } : { kind: 'node-version', version: 'lts' };
+}
+
+/** The request context, with the environment the body asked for folded in. */
+function withEnvironment(
+  context: InstallRequestContext,
+  environmentId: string | undefined
+): InstallRequestContext {
+  return environmentId === undefined ? context : { ...context, environmentId };
 }
 
 function terminalDuration(run: InstallRun): number {
@@ -399,7 +436,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         probeScopeFor(context),
         recipe,
         input,
-        deps.resolveGuard(context.clientIp),
+        await deps.resolveGuard(context),
         artifact
       )
     ).preview;
@@ -648,7 +685,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     async listRecipes(context) {
       // The guard does not vary per recipe, so it is resolved once instead of
       // re-reading config and probing the container marker for every preview.
-      const guard = deps.resolveGuard(context.clientIp);
+      const guard = await deps.resolveGuard(context);
       const scope = probeScopeFor(context);
       const details = await Promise.all(
         deps.recipes.map((recipe) => buildPreviewDetail(scope, recipe, defaultInput(recipe), guard))
@@ -656,7 +693,8 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       return details.map((detail) => detail.preview);
     },
 
-    async prepare(body, context) {
+    async prepare(body, requestContext) {
+      const context = withEnvironment(requestContext, body.environmentId);
       assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
@@ -709,7 +747,8 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       }
     },
 
-    async start(body, context) {
+    async start(body, requestContext) {
+      const context = withEnvironment(requestContext, body.environmentId);
       assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
@@ -756,7 +795,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
             probeScopeFor(context),
             recipe,
             body.input,
-            deps.resolveGuard(context.clientIp),
+            await deps.resolveGuard(context),
             artifact
           );
           assertAvailable(execution.preview);

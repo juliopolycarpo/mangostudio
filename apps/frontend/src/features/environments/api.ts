@@ -30,6 +30,13 @@ export interface InstallRequest {
   readonly recipeId: InstallRecipeId;
   readonly input: RecipeInput;
   readonly preparationId?: string;
+  /** Which machine to install on; the hub's own unless a caller says otherwise. */
+  readonly environmentId?: string;
+}
+
+/** `local` is the server default, so it never travels in a request body. */
+function environmentBody(environmentId: string | undefined): { environmentId?: string } {
+  return environmentId && environmentId !== LOCAL_ENVIRONMENT_ID ? { environmentId } : {};
 }
 
 /** The recipe could not run; `recipe` carries the argv the user can copy instead. */
@@ -114,6 +121,7 @@ export async function prepareInstall(request: InstallRequest): Promise<InstallPr
   const { data, error } = await client.api.environments.install.prepare.post({
     recipeId: request.recipeId,
     input: request.input,
+    ...environmentBody(request.environmentId),
   });
   if (error) {
     const refusal = toRefusal(error);
@@ -127,6 +135,7 @@ export async function startInstall(request: InstallRequest): Promise<InstallStar
   const { data, error } = await client.api.environments.install.post({
     recipeId: request.recipeId,
     input: request.input,
+    ...environmentBody(request.environmentId),
     ...(request.preparationId && { preparationId: request.preparationId }),
   });
   if (error) {

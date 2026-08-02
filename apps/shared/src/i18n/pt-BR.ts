@@ -2004,6 +2004,12 @@ export const messages = {
       cursor: 'Cursor',
     },
     /** Qual máquina uma aba de diagnóstico está descrevendo. */
+    /** Permissão por ambiente para rodar receitas de instalação naquela máquina. */
+    trust: {
+      label: 'Permitir instalações nesta máquina',
+      hint: 'Roda receitas de instalação da allowlist lá, escrevendo no disco daquela máquina. A verificação de superfície local que protege esta máquina não diz nada sobre aquela, então esta é a única coisa que autoriza.',
+      updateFailed: 'Não foi possível alterar a permissão de instalação.',
+    },
     scope: {
       label: 'Ambiente',
       disconnected: '{environment} não está conectado',
@@ -2416,6 +2422,8 @@ export const messages = {
         'client-not-loopback':
           'Esta requisição não veio desta máquina, então ela não pode instalar nada aqui.',
         disabled: 'As instalações estão desativadas na configuração deste servidor.',
+        'environment-not-trusted':
+          'Este ambiente não foi autorizado a instalar. Ative essa opção para a máquina em questão, no cartão dela em Ambientes.',
       },
     },
   },

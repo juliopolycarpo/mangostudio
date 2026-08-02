@@ -91,6 +91,7 @@ describe('environment entity routes', () => {
         transportKind: 'in-process',
         config: {},
         enabled: true,
+        allowInstalls: true,
         virtual: true,
         createdAt: null,
         updatedAt: null,

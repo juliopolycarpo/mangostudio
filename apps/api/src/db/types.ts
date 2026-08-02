@@ -32,6 +32,8 @@ interface EnvironmentsTable {
   transportKind: string;
   configJson: string;
   enabled: number;
+  /** Whether install recipes may run on this machine. Off until someone says so. */
+  allowInstalls: number;
   createdAt: number;
   updatedAt: number;
 }

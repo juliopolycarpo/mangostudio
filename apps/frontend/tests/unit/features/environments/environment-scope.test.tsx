@@ -49,6 +49,7 @@ function environment(
     transportKind: 'wsl',
     config: {},
     enabled: true,
+    allowInstalls: false,
     virtual: false,
     createdAt: 0,
     updatedAt: 0,

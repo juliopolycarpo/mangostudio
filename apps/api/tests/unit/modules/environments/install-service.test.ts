@@ -138,7 +138,7 @@ describe('install service', () => {
       ...detection,
       repository: memory.repository,
       runner: controlled.runner,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       generateId: () => {
         nextId += 1;
         return `run-${nextId}`;
@@ -218,7 +218,7 @@ describe('install service', () => {
       ...detection,
       repository,
       runner,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       generateId: () => {
         nextId += 1;
         return `overlap-run-${nextId}`;
@@ -248,7 +248,7 @@ describe('install service', () => {
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
-      resolveGuard: () => BLOCKED_GUARD,
+      resolveGuard: () => Promise.resolve(BLOCKED_GUARD),
       platform: 'linux',
     });
 
@@ -270,7 +270,7 @@ describe('install service', () => {
       recipes: [getInstallRecipe('bun.install.official')],
       ...detection,
       repository: memory.repository,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       inspectProfileSetup: (lines) =>
         Promise.resolve({
           lines: [...lines],
@@ -329,7 +329,7 @@ describe('install service', () => {
       repository: memory.repository,
       downloader,
       runner,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       generateId: () => {
         nextId += 1;
         return `id-${nextId}`;
@@ -369,7 +369,7 @@ describe('install service', () => {
       ...detection,
       repository: memory.repository,
       runner: controlled.runner,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       generateId: () => 'disconnect-run',
       now: () => 1_700_000_000_000,
       platform: 'linux',
@@ -412,7 +412,7 @@ describe('install service', () => {
       ...detection,
       repository: memory.repository,
       runner,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       generateId: () => 'detached-run',
       now: () => 1_700_000_000_000,
       platform: 'linux',
@@ -456,7 +456,7 @@ describe('install service', () => {
       recipes: [getInstallRecipe('bun.update')],
       ...detection,
       repository: memory.repository,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       now: () => 1_700_000_005_000,
       readLog: () => Promise.resolve('resolving dependencies\n'),
       platform: 'linux',
@@ -497,7 +497,7 @@ describe('install service', () => {
       ...detection,
       repository: memory.repository,
       runner,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       generateId: () => 'exploded-run',
       now: () => 1_700_000_002_000,
       platform: 'linux',
@@ -543,7 +543,7 @@ describe('install service', () => {
       ...detection,
       repository,
       runner,
-      resolveGuard: () => ALLOWED_GUARD,
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
       generateId: () => 'unrecorded-run',
       now: () => 1_700_000_000_000,
       platform: 'linux',
@@ -564,5 +564,69 @@ describe('install service', () => {
       done: false,
     });
     expect(events.at(-1)).toMatchObject({ type: 'exit', code: 0, status: 'succeeded', done: true });
+  });
+
+  it('asks the guard about the machine the request named, and probes that one', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const scopes: string[] = [];
+    const guardEnvironments: (string | undefined)[] = [];
+    const service = createInstallService({
+      recipes: [getInstallRecipe('bun.update')],
+      probingService: {
+        ...detection.probingService,
+        getRuntimeStatus: (scope, id) => {
+          scopes.push(scope.environmentId);
+          return detection.probingService.getRuntimeStatus(scope, id);
+        },
+      },
+      repository: memory.repository,
+      resolveGuard: (context) => {
+        guardEnvironments.push(context.environmentId);
+        return Promise.resolve(
+          context.environmentId === 'ubuntu'
+            ? { allowed: false, reasons: ['environment-not-trusted' as const] }
+            : ALLOWED_GUARD
+        );
+      },
+      now: () => 1_700_000_000_000,
+      platform: 'linux',
+    });
+
+    const [recipe] = await service.listRecipes({ ...REQUEST_CONTEXT, environmentId: 'ubuntu' });
+
+    expect(guardEnvironments).toEqual(['ubuntu']);
+    expect(recipe?.guard).toEqual({ allowed: false, reasons: ['environment-not-trusted'] });
+    // Requirements are a property of the target machine, so they were asked of
+    // it rather than of the hub.
+    expect(scopes.every((environmentId) => environmentId === 'ubuntu')).toBe(true);
+  });
+
+  it('refuses to start on an environment that was never trusted', async () => {
+    const detection = createDetectionServices();
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      recipes: [getInstallRecipe('bun.update')],
+      ...detection,
+      repository: memory.repository,
+      resolveGuard: (context) =>
+        Promise.resolve(
+          context.environmentId === 'ubuntu'
+            ? { allowed: false, reasons: ['environment-not-trusted' as const] }
+            : ALLOWED_GUARD
+        ),
+      now: () => 1_700_000_000_000,
+      platform: 'linux',
+    });
+
+    const attempt = service.start(
+      { recipeId: 'bun.update', input: NO_INPUT, environmentId: 'ubuntu' },
+      REQUEST_CONTEXT
+    );
+
+    await expect(attempt).rejects.toBeInstanceOf(InstallBlockedError);
+    await expect(
+      service.start({ recipeId: 'bun.update', input: NO_INPUT }, REQUEST_CONTEXT)
+    ).resolves.toMatchObject({ attached: false });
   });
 });
