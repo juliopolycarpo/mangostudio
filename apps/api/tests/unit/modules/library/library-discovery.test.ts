@@ -25,6 +25,11 @@ afterEach(() => {
   resetLibraryDiscoveryCache();
 });
 
+/** Force-enabled mango-* locations must not scan the developer home. */
+function fixturePathEnv() {
+  return { platform: process.platform, homeDir: root, env: {} };
+}
+
 describe('discoverLibraryResources', () => {
   it('keeps identical slugs in different kinds as distinct resources', async () => {
     const skillsDir = join(root, 'skills');
@@ -39,6 +44,7 @@ describe('discoverLibraryResources', () => {
 
     const resources = await discoverLibraryResources(getDb(), 'library-user', {
       cache: new LibraryCache(),
+      pathEnv: fixturePathEnv(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
         home: {
           'mango-skills': true,
@@ -95,6 +101,7 @@ describe('discoverLibraryResources', () => {
 
     const resources = await discoverLibraryResources(getDb(), 'five-kind-user', {
       cache: new LibraryCache(),
+      pathEnv: fixturePathEnv(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
         home: {
           'mango-skills': true,
@@ -131,6 +138,7 @@ describe('discoverLibraryResources', () => {
 
     const [resource, ...rest] = await discoverLibraryResources(getDb(), 'instruction-user', {
       cache: new LibraryCache(),
+      pathEnv: fixturePathEnv(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
         home: {
           'claude-instructions': true,
@@ -163,6 +171,7 @@ describe('discoverLibraryResources', () => {
 
     const [resource] = await discoverLibraryResources(getDb(), 'oversized-user', {
       cache: new LibraryCache(),
+      pathEnv: fixturePathEnv(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
         home: {
           'mango-settings': true,

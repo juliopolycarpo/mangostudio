@@ -186,8 +186,10 @@ describe('library.scan caps', () => {
     const settingsFile = join(root, 'config.toml');
     writeFileSync(settingsFile, `note = "${'x'.repeat(MAX_LIBRARY_FILE_BYTES)}"\n`);
 
+    // Pin PathEnv to the fixture home: mango-agents/mango-skills stay
+    // force-enabled by the normalizer and must not scan the developer machine.
     const service = createLibraryService({
-      createPathEnv: () => createRuntimePathEnv(),
+      createPathEnv: () => ({ platform: process.platform, homeDir: root, env: {} }),
       cache: new LibraryCache(),
       describeLocations: () => [],
       now: () => 0,
