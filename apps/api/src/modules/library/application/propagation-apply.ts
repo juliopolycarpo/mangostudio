@@ -237,12 +237,44 @@ async function runPreparedWrites(
   });
 }
 
+/**
+ * Raw bytes one `library.apply` frame may carry across all of its operations.
+ *
+ * Base64 inflates by 4/3, so this leaves roughly 5 MiB under
+ * `RUNTIME_MAX_FRAME_BYTES` for the envelope, the operation list, and the
+ * skipped entries. Deliberately below the ceiling rather than at it: hitting
+ * the codec limit throws inside `cloneFrame`, which only validates outside
+ * production, so an apply that failed in dev would have gone out on the wire in
+ * production and been dropped by the transport instead.
+ */
+const LIBRARY_APPLY_MAX_CONTENT_BYTES = 8 * 1024 * 1024;
+
 function toRuntimeApplyParams(
   prepared: readonly PreparedPropagationOperation[],
   skipped: readonly PropagationSkipped[],
   env: PathEnv,
   backup: BackupStoreDeps
 ): RuntimeLibraryApplyParams {
+  // Keyed by content hash so a resource fanned out to many destinations travels
+  // once. `expectedContentHash` is the hash of exactly these bytes by
+  // construction — `prepareOperation` recomputes it whenever adaptation or an
+  // edit changes them — so equal keys mean equal payloads.
+  const contents: Record<string, string> = {};
+  let contentBytes = 0;
+  for (const operation of prepared) {
+    if (operation.contents === undefined) continue;
+    if (contents[operation.expectedContentHash] !== undefined) continue;
+    const bytes = Buffer.from(operation.contents);
+    contentBytes += bytes.byteLength;
+    if (contentBytes > LIBRARY_APPLY_MAX_CONTENT_BYTES) {
+      throw new LibraryRequestError(
+        422,
+        'This apply carries more content than one write can send. Apply fewer resources at a time.'
+      );
+    }
+    contents[operation.expectedContentHash] = bytes.toString('base64');
+  }
+
   return {
     backupRoot: backup.backupDir(),
     retentionCount: backup.retentionCount(),
@@ -258,11 +290,10 @@ function toRuntimeApplyParams(
       expectedContentHash: operation.expectedContentHash,
       destinationRoot: operation.destinationRoot,
       ...(operation.sourceDir !== undefined && { sourceDir: operation.sourceDir }),
-      ...(operation.contents !== undefined && {
-        contentBase64: Buffer.from(operation.contents).toString('base64'),
-      }),
+      ...(operation.contents !== undefined && { contentRef: operation.expectedContentHash }),
       ...(operation.adaptation && { adaptation: operation.adaptation }),
     })),
+    contents,
     skipped: [...skipped],
   };
 }

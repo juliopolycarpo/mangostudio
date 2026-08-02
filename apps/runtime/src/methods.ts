@@ -737,7 +737,7 @@ export interface RuntimeLibraryApplyAdaptation {
 
 /**
  * One prepared write. Format adaptation already happened on the hub; directory
- * ops carry a sourceDir on this host, file ops carry base64 contents.
+ * ops carry a sourceDir on this host, file ops name their bytes in `contents`.
  */
 export interface RuntimeLibraryApplyOperation {
   readonly resourceKey: string;
@@ -749,12 +749,22 @@ export interface RuntimeLibraryApplyOperation {
   /** Location root the preview showed; the host refuses if its own differs. */
   readonly destinationRoot: string;
   readonly sourceDir?: string;
-  readonly contentBase64?: string;
+  /** Key into `RuntimeLibraryApplyParams.contents`. Absent for directories. */
+  readonly contentRef?: string;
   readonly adaptation?: RuntimeLibraryApplyAdaptation;
 }
 
 export interface RuntimeLibraryApplyParams extends RuntimeLibraryBackupEnvelope {
   readonly operations: readonly RuntimeLibraryApplyOperation[];
+  /**
+   * Base64 payloads keyed by content hash, referenced by `contentRef`.
+   *
+   * Shared rather than inlined per operation because propagation fans one
+   * resource out across destinations: N destinations of the same bytes used to
+   * put N base64 copies in a single frame, and two 2 MiB resources across five
+   * locations already exceeded `RUNTIME_MAX_FRAME_BYTES`.
+   */
+  readonly contents?: Readonly<Record<string, string>>;
   readonly skipped?: readonly PropagationSkipped[];
 }
 

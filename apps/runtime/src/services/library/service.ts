@@ -125,6 +125,10 @@ function pathEnvFrom(
 }
 
 function decodeApplyOperations(params: RuntimeLibraryApplyParams): PreparedPropagationOperation[] {
+  // One decode per distinct payload, not per operation: the whole point of the
+  // shared `contents` map is that a fan-out across destinations carries the
+  // bytes once, and decoding per operation would put every copy back in memory.
+  const decoded = new Map<string, Uint8Array>();
   return params.operations.map((operation) => {
     if (operation.kind === 'directory') {
       if (typeof operation.sourceDir !== 'string' || operation.sourceDir.length === 0) {
@@ -137,15 +141,19 @@ function decodeApplyOperations(params: RuntimeLibraryApplyParams): PreparedPropa
         sourceDir: operation.sourceDir,
       };
     }
-    if (typeof operation.contentBase64 !== 'string') {
+    const encoded =
+      operation.contentRef === undefined ? undefined : params.contents?.[operation.contentRef];
+    if (encoded === undefined) {
       throw new RuntimeToolArgumentError(
-        `library.apply file operation "${operation.resourceKey}" requires contentBase64.`
+        `library.apply file operation "${operation.resourceKey}" names no content in this frame.`
       );
     }
-    return {
-      ...operation,
-      contents: Buffer.from(operation.contentBase64, 'base64'),
-    };
+    let contents = decoded.get(operation.contentRef as string);
+    if (!contents) {
+      contents = Buffer.from(encoded, 'base64');
+      decoded.set(operation.contentRef as string, contents);
+    }
+    return { ...operation, contents };
   });
 }
 

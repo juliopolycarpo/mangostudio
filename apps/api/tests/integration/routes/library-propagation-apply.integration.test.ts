@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RuntimeLibraryApplyParams } from '@mangostudio/runtime';
 import {
   DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
@@ -513,6 +514,37 @@ describe('propagation apply — file-backed resources', () => {
     expect(result.failed).toEqual([]);
     expect(readFileSync(instructionPath('mango-instructions'), 'utf8')).toBe('# House rules\n');
     expect(readFileSync(instructionPath('codex-instructions'), 'utf8')).toBe('# House rules\n');
+  });
+
+  it('sends one copy of the bytes however many destinations share them', async () => {
+    writeInstruction('claude-instructions', '# House rules\n');
+    mkdirSync(join(home, '.mango'), { recursive: true });
+    mkdirSync(join(home, '.codex'), { recursive: true });
+
+    const { taken, request, entry } = await previewInstruction();
+    let sent: RuntimeLibraryApplyParams | undefined;
+    await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'claude-instructions'))]),
+      applyDeps({
+        runtimeApply: (params) => {
+          sent = params;
+          return Promise.resolve({ partial: false, applied: [], skipped: [], failed: [] });
+        },
+      })
+    );
+
+    // Two destinations, identical bytes: one payload in the frame, both
+    // operations pointing at it. Inlining per operation is what puts a wide
+    // apply over RUNTIME_MAX_FRAME_BYTES.
+    const operations = sent?.operations ?? [];
+    expect(operations).toHaveLength(2);
+    expect(Object.keys(sent?.contents ?? {})).toHaveLength(1);
+    const [ref] = Object.keys(sent?.contents ?? {});
+    expect(operations.map((operation) => operation.contentRef)).toEqual([ref, ref]);
+    expect(Buffer.from(sent?.contents?.[ref ?? ''] ?? '', 'base64').toString('utf8')).toBe(
+      '# House rules\n'
+    );
   });
 
   it('mechanically adapts plain instructions to MDC before the atomic write', async () => {

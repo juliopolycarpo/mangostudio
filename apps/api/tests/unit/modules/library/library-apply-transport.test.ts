@@ -25,6 +25,86 @@ const manifest = {
   },
 };
 
+/** Minimal preview over `claude-agents`, one file destination per resource. */
+function agentsPreview(slugs: readonly string[]): PropagationPreview {
+  return {
+    previewToken: 'token',
+    stateHash: 'hash',
+    entries: slugs.map((slug) => ({
+      resourceKey: `subagent:${slug}`,
+      ref: { kind: 'subagent', slug },
+      divergence: 'single',
+      acknowledgedDivergence: false,
+      requiresWinnerSelection: false,
+      sourceGroups: [
+        {
+          contentHash: `winner-${slug}`,
+          contentPath: `/tmp/source/${slug}`,
+          contentLocationId: 'codex-agents',
+          locationIds: ['codex-agents'],
+          instanceCount: 1,
+          formats: ['markdown-frontmatter'],
+          newestModifiedAtMs: 0,
+          sizeBytes: 1,
+        },
+      ],
+      destinations: [
+        {
+          locationId: 'claude-agents',
+          targetIds: ['claude'],
+          toFormat: 'subagent-md',
+          path: '/tmp/home/.claude/agents',
+          outcomes: [{ winnerContentHash: `winner-${slug}`, operation: 'create' }],
+        },
+      ],
+    })),
+  } as unknown as PropagationPreview;
+}
+
+function adoptAll(slugs: readonly string[]): PropagationApplyRequest['decisions'] {
+  return slugs.map((slug) => ({
+    resourceKey: `subagent:${slug}`,
+    resolution: 'adopt-group',
+    winnerContentHash: `winner-${slug}`,
+    destinations: [{ locationId: 'claude-agents', action: 'apply' }],
+  }));
+}
+
+describe('library.apply payload bounds', () => {
+  it('refuses an apply whose content cannot fit in one frame', async () => {
+    const slugs = ['a', 'b', 'c', 'd', 'e'];
+    let sent = false;
+
+    // Five distinct 2 MiB payloads — the per-file cap — is 10 MiB of raw bytes
+    // and over 13 MiB once base64 inflates it, past RUNTIME_MAX_FRAME_BYTES.
+    // Refusing here beats throwing inside the codec, which only validates
+    // outside production and so would diverge between dev and a real install.
+    await expect(
+      applyLibraryPropagation(
+        'user-1',
+        {
+          previewToken: 'token',
+          stateHash: 'hash',
+          request: { resourceKeys: slugs.map((s) => `subagent:${s}`), targetLocationIds: [] },
+          decisions: adoptAll(slugs),
+        },
+        {
+          preview: () => Promise.resolve(agentsPreview(slugs)),
+          pathEnv: () => ({ platform: 'linux', homeDir: '/tmp/home', env: {} }),
+          readSourceFile: (path) =>
+            Promise.resolve(new Uint8Array(2 * 1024 * 1024).fill(path.charCodeAt(path.length - 1))),
+          runtimeApply: () => {
+            sent = true;
+            return Promise.resolve({ partial: false, applied: [], skipped: [], failed: [] });
+          },
+        }
+      )
+    ).rejects.toMatchObject({ status: 422 });
+
+    expect(sent).toBe(false);
+  });
+});
+
 describe('library.apply transport failures', () => {
   it('refuses before any write when runtimeApply rejects as disconnected', async () => {
     let wrote = false;
