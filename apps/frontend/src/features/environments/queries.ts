@@ -126,10 +126,14 @@ export function useUpdateEnvironmentMutation() {
       return data as Environment;
     },
     // An update can carry a new transport config, which is what decides the
-    // distribution an environment claims.
-    onSuccess: (environment) => {
+    // distribution an environment claims. Flipping allowInstalls also changes
+    // which recipes the install catalog reports as runnable for that machine.
+    onSuccess: async (environment) => {
       replaceEnvironment(queryClient, environment);
-      return invalidateWslDetection(queryClient);
+      await invalidateWslDetection(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: environmentKeys.installRecipes(environment.id),
+      });
     },
   });
 }

@@ -63,18 +63,25 @@ function useColumn(environments: readonly Environment[], environmentId: string) 
   const permitted = manifest ? manifest.features.probing : true;
   const [runtimes, agents] = useQueries({
     queries: [
-      { ...runtimeStatusesQueryOptions(environmentId), enabled: permitted },
-      { ...agentCliStatusesQueryOptions(environmentId), enabled: permitted },
+      {
+        ...runtimeStatusesQueryOptions(environmentId),
+        enabled: permitted && environment?.status.state === 'connected',
+      },
+      {
+        ...agentCliStatusesQueryOptions(environmentId),
+        enabled: permitted && environment?.status.state === 'connected',
+      },
     ],
   });
 
+  const connected = environment?.status.state === 'connected';
   return {
     environment,
     permitted,
     shells: manifest?.shells ?? [],
     runtimes: runtimes?.data ?? [],
     agents: agents?.data ?? [],
-    isPending: permitted && Boolean(runtimes?.isPending || agents?.isPending),
+    isPending: permitted && connected && Boolean(runtimes?.isPending || agents?.isPending),
   };
 }
 

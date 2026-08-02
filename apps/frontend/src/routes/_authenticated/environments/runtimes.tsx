@@ -15,7 +15,7 @@ export const Route = createFileRoute('/_authenticated/environments/runtimes')({
   loader: ({ context: { queryClient }, deps }) => {
     void queryClient.prefetchQuery(runtimeStatusesQueryOptions(deps.environmentId));
     void queryClient.prefetchQuery(versionManagerStatusesQueryOptions(deps.environmentId));
-    void queryClient.prefetchQuery(installRecipesQueryOptions());
+    void queryClient.prefetchQuery(installRecipesQueryOptions(deps.environmentId));
   },
   component: RuntimesPage,
 });

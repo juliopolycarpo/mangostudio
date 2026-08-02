@@ -64,6 +64,7 @@ export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardPro
             label={formatMessage(e.runtimes.install, { runtime: name })}
             variant="primary"
             icon={<Download size={14} />}
+            environmentId={environmentId}
           />
         ) : null
       }

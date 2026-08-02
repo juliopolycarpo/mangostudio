@@ -23,6 +23,8 @@ interface InstallActionProps {
   variant?: 'primary' | 'secondary' | 'ghost';
   size?: 'sm' | 'md';
   icon?: ReactNode;
+  /** Which machine to install on; omitted means the hub's own. */
+  environmentId?: string;
 }
 
 export function InstallAction({
@@ -32,9 +34,10 @@ export function InstallAction({
   variant = 'secondary',
   size = 'sm',
   icon,
+  environmentId,
 }: InstallActionProps) {
   const { t } = useI18n();
-  const flow = useInstallFlow();
+  const flow = useInstallFlow(environmentId);
   // The console must survive the run that produced it: `finished` keeps the same
   // runId as `running`, so the stream hook is not torn down (and its buffer
   // reset to idle) the instant the exit event moves the flow forward.

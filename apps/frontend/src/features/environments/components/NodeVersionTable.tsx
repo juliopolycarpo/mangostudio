@@ -72,6 +72,7 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
           recipe={managerInstallRecipe}
           input={{ kind: 'none' }}
           label={formatMessage(e.versions.installManager, { manager })}
+          environmentId={environmentId}
         />
       </section>
     );
@@ -141,6 +142,7 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
                   input={{ kind: 'node-version', version: version.version }}
                   label={e.versions.setDefault}
                   variant="ghost"
+                  environmentId={environmentId}
                 />
               )}
             </li>
@@ -153,6 +155,7 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
           recipe={nodeInstallRecipe}
           input={{ kind: 'node-version', version: 'lts' }}
           label={e.versions.installLts}
+          environmentId={environmentId}
         />
       )}
     </section>

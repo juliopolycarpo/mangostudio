@@ -2007,7 +2007,7 @@ export const messages = {
     /** Permissão por ambiente para rodar receitas de instalação naquela máquina. */
     trust: {
       label: 'Permitir instalações nesta máquina',
-      hint: 'Roda receitas de instalação da allowlist lá, escrevendo no disco daquela máquina. A verificação de superfície local que protege esta máquina não diz nada sobre aquela, então esta é a única coisa que autoriza.',
+      hint: 'Roda receitas de instalação da allowlist lá, escrevendo no disco daquela máquina. Instalações remotas precisam do interruptor global de instalação e desta permissão por ambiente — a verificação de superfície local que protege esta máquina não diz nada sobre aquela.',
       updateFailed: 'Não foi possível alterar a permissão de instalação.',
     },
     scope: {
@@ -2033,6 +2033,8 @@ export const messages = {
       rowGroupAgent: 'Agentes',
       rowGroupShell: 'Shells',
       presenceOn: 'em {environment}',
+      presencePresent: '{environment}: instalado',
+      presenceAbsent: '{environment}: não instalado',
     },
     status: {
       ok: 'Disponível',
@@ -2364,6 +2366,7 @@ export const messages = {
       locationEntries: '{count} itens',
       notInstalled: 'Não instalada',
       empty: 'Nenhuma CLI de agente foi detectada.',
+      emptyHint: 'O MangoStudio pode instalar uma CLI de agente para você nesta máquina.',
     },
     health: {
       description: 'Tudo que está errado, em uma lista só, do mais grave ao menos grave.',

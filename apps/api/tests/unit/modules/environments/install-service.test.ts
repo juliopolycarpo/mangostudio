@@ -599,6 +599,7 @@ describe('install service', () => {
     expect(recipe?.guard).toEqual({ allowed: false, reasons: ['environment-not-trusted'] });
     // Requirements are a property of the target machine, so they were asked of
     // it rather than of the hub.
+    expect(scopes.length).toBeGreaterThan(0);
     expect(scopes.every((environmentId) => environmentId === 'ubuntu')).toBe(true);
   });
 

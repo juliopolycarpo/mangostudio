@@ -49,23 +49,31 @@ export function AgentPresenceChips({ targetId, environments }: AgentPresenceChip
 
   return (
     <div className="flex flex-wrap items-center gap-1.5" data-testid="agent-presence-chips">
-      {chips.map(({ environment, present }) => (
-        <span
-          key={environment.id}
-          data-testid="agent-presence-chip"
-          data-environment-id={environment.id}
-          data-present={present}
-          title={formatMessage(t.environments.scope.presenceOn, { environment: environment.name })}
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
-            present
-              ? 'border-primary/30 bg-primary/10 text-primary'
-              : 'border-outline-variant/20 text-on-surface-variant/60'
-          }`}
-        >
-          {environment.name}
-          <span aria-hidden="true">{present ? '✓' : '✗'}</span>
-        </span>
-      ))}
+      {chips.map(({ environment, present }) => {
+        const presenceLabel = present
+          ? formatMessage(t.environments.scope.presencePresent, { environment: environment.name })
+          : formatMessage(t.environments.scope.presenceAbsent, { environment: environment.name });
+        return (
+          <span
+            key={environment.id}
+            data-testid="agent-presence-chip"
+            data-environment-id={environment.id}
+            data-present={present}
+            title={formatMessage(t.environments.scope.presenceOn, {
+              environment: environment.name,
+            })}
+            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+              present
+                ? 'border-primary/30 bg-primary/10 text-primary'
+                : 'border-outline-variant/20 text-on-surface-variant/60'
+            }`}
+          >
+            <span aria-hidden="true">{environment.name}</span>
+            <span aria-hidden="true">{present ? '✓' : '✗'}</span>
+            <span className="sr-only">{presenceLabel}</span>
+          </span>
+        );
+      })}
     </div>
   );
 }

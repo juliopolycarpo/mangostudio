@@ -35,10 +35,6 @@ export function useRuntimeStatuses(environmentId?: string) {
   return useQuery(runtimeStatusesQueryOptions(environmentId));
 }
 
-function useVersionManagerStatuses(environmentId?: string) {
-  return useQuery(versionManagerStatusesQueryOptions(environmentId));
-}
-
 export function useAgentCliStatuses(environmentId?: string) {
   return useQuery(agentCliStatusesQueryOptions(environmentId));
 }
@@ -163,11 +159,17 @@ const SEVERITY_RANK: Record<HealthEntry['severity'], number> = { fail: 0, warn: 
 /**
  * Every finding across runtimes, version managers, and agent CLIs as one flat
  * list sorted worst-first — the browser equivalent of `mango doctor`.
+ *
+ * `enabled` keeps a disconnected or non-reporting machine from being probed at
+ * all: a sleeping remote must not wake just because Health was open.
  */
-export function useEnvironmentHealth(environmentId?: string) {
-  const runtimes = useRuntimeStatuses(environmentId);
-  const versionManagers = useVersionManagerStatuses(environmentId);
-  const agents = useAgentCliStatuses(environmentId);
+export function useEnvironmentHealth(environmentId?: string, enabled = true) {
+  const runtimes = useQuery({ ...runtimeStatusesQueryOptions(environmentId), enabled });
+  const versionManagers = useQuery({
+    ...versionManagerStatusesQueryOptions(environmentId),
+    enabled,
+  });
+  const agents = useQuery({ ...agentCliStatusesQueryOptions(environmentId), enabled });
 
   const entries = useMemo(() => {
     const collected: HealthEntry[] = [];

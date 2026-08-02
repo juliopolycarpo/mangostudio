@@ -157,7 +157,10 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
           exitCode: result.exitCode,
           status: terminalFor(result),
           truncated: result.truncated,
-          finishedAt: result.finishedAt,
+          // Audit rows are hub-local; stamp completion with the hub clock and
+          // keep the remote-measured duration as the wall time the installer
+          // actually spent on that machine.
+          finishedAt: deps.now(),
           durationMs: result.durationMs,
         };
       } catch (error) {

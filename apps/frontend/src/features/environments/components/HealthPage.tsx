@@ -27,7 +27,12 @@ export function HealthPage() {
   const { t } = useI18n();
   const e = t.environments;
   const scope = useEnvironmentScope();
-  const { entries, isPending, error, refetch } = useEnvironmentHealth(scope.environmentId);
+  const { entries, isPending, error, refetch } = useEnvironmentHealth(
+    scope.environmentId,
+    // Unknown (still loading) stays enabled so Local is not blocked on the
+    // entities fetch; a known disconnected machine must not be woken up.
+    scope.permitsProbing && (scope.environment === undefined || scope.isConnected)
+  );
   // The health scopes are exactly the static identity kinds, so an entry names
   // its subject the same way that subject's own card does.
   const { resolve, lookup } = useToolIdentities();

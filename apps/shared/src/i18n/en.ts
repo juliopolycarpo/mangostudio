@@ -1988,7 +1988,7 @@ export const messages: Messages = {
     /** Per-environment permission to run install recipes on that machine. */
     trust: {
       label: 'Allow installs on this machine',
-      hint: 'Runs allowlisted install recipes there, writing to that machine\u2019s disk. The local-surface check that protects this machine says nothing about that one, so this is the only thing that permits it.',
+      hint: 'Runs allowlisted install recipes there, writing to that machine\u2019s disk. Remote installs need both the global install switch and this per-environment permission \u2014 the local-surface check that protects this machine says nothing about that one.',
       updateFailed: 'The install permission could not be changed.',
     },
     scope: {
@@ -2014,6 +2014,8 @@ export const messages: Messages = {
       rowGroupAgent: 'Agents',
       rowGroupShell: 'Shells',
       presenceOn: 'on {environment}',
+      presencePresent: '{environment}: installed',
+      presenceAbsent: '{environment}: not installed',
     },
     status: {
       ok: 'Available',
@@ -2340,6 +2342,7 @@ export const messages: Messages = {
       locationEntries: '{count} entries',
       notInstalled: 'Not installed',
       empty: 'No agent CLIs were detected.',
+      emptyHint: 'MangoStudio can install an agent CLI for you on this machine.',
     },
     health: {
       description: 'Everything that is wrong, in one list, worst first.',

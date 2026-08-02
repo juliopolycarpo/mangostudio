@@ -78,6 +78,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
                 label={formatMessage(e.runtimes.install, { runtime: name })}
                 variant="primary"
                 icon={<Download size={14} />}
+                environmentId={environmentId}
               />
             )
           : updateRecipe && (
@@ -85,6 +86,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
                 recipe={updateRecipe}
                 input={{ kind: 'none' }}
                 label={formatMessage(e.runtimes.update, { runtime: name })}
+                environmentId={environmentId}
               />
             )
       }

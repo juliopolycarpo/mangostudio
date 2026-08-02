@@ -9,7 +9,8 @@
  */
 
 import { appendFile, mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { homedir } from 'node:os';
+import { dirname, isAbsolute, join } from 'node:path';
 import { RuntimeToolArgumentError } from '../errors';
 import type { RuntimeEventInput } from '../host';
 import type {
@@ -65,6 +66,30 @@ interface InstallHostDeps {
   readonly prepareLog: (path: string) => Promise<void>;
   readonly appendLog: (path: string, bytes: Uint8Array) => Promise<void>;
   readonly sourceEnv: () => Readonly<Record<string, string | undefined>>;
+  /** Root used to resolve relative log paths from the hub. */
+  readonly runtimeHome?: () => string;
+}
+
+function defaultRuntimeHome(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.MANGO_HOME?.trim();
+  return join(override && override.length > 0 ? override : join(homedir(), '.mango'), 'runtime');
+}
+
+/**
+ * Hub may send an absolute path (local installs) or a relative one for remotes
+ * (e.g. `.mango/runtime/logs/…` or `logs/…`). Relative paths land under the
+ * runtime home so a remote never writes beside whatever cwd the process had.
+ */
+function resolveInstallLogPath(
+  logPath: string,
+  runtimeHome: string = defaultRuntimeHome(),
+  home: string = homedir()
+): string {
+  if (isAbsolute(logPath)) return logPath;
+  if (logPath.startsWith('.mango/') || logPath.startsWith('.mango\\')) {
+    return join(home, logPath);
+  }
+  return join(runtimeHome, logPath);
 }
 
 const DEFAULT_DEPS: InstallHostDeps = {
@@ -82,6 +107,7 @@ const DEFAULT_DEPS: InstallHostDeps = {
   },
   appendLog: (path, bytes) => appendFile(path, bytes),
   sourceEnv: () => process.env,
+  runtimeHome: () => defaultRuntimeHome(),
 };
 
 export function buildInstallEnvironment(
@@ -136,19 +162,47 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
       }
 
       const startedAt = deps.now();
+      const logPath = resolveInstallLogPath(
+        params.logPath,
+        deps.runtimeHome?.() ?? defaultRuntimeHome()
+      );
       const outputLimit = params.outputLimitBytes ?? INSTALL_OUTPUT_LIMIT_BYTES;
       const emitLine = (stream: RuntimeInstallOutputEvent['stream'], line: string) => {
         publish(params.runId, { stream, line });
       };
+      const endStream = () => {
+        publish(params.runId, { stream: 'system', line: '', end: true }, true);
+      };
 
-      await deps.prepareLog(params.logPath);
+      // Reserved before any await so a concurrent cancel/start for the same id
+      // cannot slip in while prepareLog is still opening the file.
+      active.set(params.runId, () => undefined);
+
+      try {
+        await deps.prepareLog(logPath);
+      } catch (error) {
+        active.delete(params.runId);
+        const detail = error instanceof Error ? error.message : 'Unable to prepare install log.';
+        emitLine('system', detail);
+        endStream();
+        const finishedAt = deps.now();
+        return {
+          exitCode: null,
+          status: 'spawn-failed',
+          truncated: false,
+          finishedAt,
+          durationMs: finishedAt - startedAt,
+        };
+      }
 
       let child: InstallSubprocess;
       try {
         child = deps.spawn(params.argv, buildInstallEnvironment(deps.sourceEnv(), params.env));
       } catch (error) {
+        active.delete(params.runId);
         const detail = error instanceof Error ? error.message : 'Unable to start installer.';
         emitLine('system', detail);
+        endStream();
         const finishedAt = deps.now();
         return {
           exitCode: null,
@@ -190,7 +244,7 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
         if (accepted.byteLength < bytes.byteLength) truncated = true;
         if (accepted.byteLength > 0) {
           const stableCopy = accepted.slice();
-          logWrites = logWrites.then(() => deps.appendLog(params.logPath, stableCopy));
+          logWrites = logWrites.then(() => deps.appendLog(logPath, stableCopy));
         }
         return accepted;
       };
@@ -265,7 +319,7 @@ export function createInstallService(options: InstallServiceOptions): InstallSer
         : (termination ?? (exitCode === 0 ? ('succeeded' as const) : ('failed' as const)));
       // Ends the stream so the hub stops waiting on frames that cannot arrive,
       // even though the terminal status also travels on the response.
-      publish(params.runId, { stream: 'system', line: '', end: true }, true);
+      endStream();
       return {
         exitCode,
         status,

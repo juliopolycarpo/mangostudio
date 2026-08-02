@@ -73,7 +73,8 @@ export function useEnvironmentScope(): EnvironmentScope {
             ? { environmentId: undefined }
             : { environmentId: nextEnvironmentId }),
         }),
-        replace: true,
+        // Push so Back restores the machine the user was looking at before.
+        replace: false,
       });
     },
   };

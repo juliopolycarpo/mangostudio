@@ -211,6 +211,7 @@ export function createEnvironmentService(
               name: current.name,
               config: current.config,
               enabled: current.enabled,
+              allowInstalls: current.allowInstalls,
             });
           }
           throw new EnvironmentServiceError(

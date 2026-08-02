@@ -16,7 +16,7 @@ export function AgentsPage() {
   const e = t.environments;
   const scope = useEnvironmentScope();
   const agents = useAgentCliStatuses(scope.environmentId);
-  const recipes = useInstallRecipes();
+  const recipes = useInstallRecipes(scope.environmentId);
 
   const header = (
     <EnvironmentScopeHeader
@@ -64,7 +64,7 @@ export function AgentsPage() {
       {header}
 
       {statuses.length === 0 ? (
-        <EnvironmentPageState variant="empty" title={e.agents.empty} hint={e.runtimes.emptyHint} />
+        <EnvironmentPageState variant="empty" title={e.agents.empty} hint={e.agents.emptyHint} />
       ) : (
         <div className="space-y-4">
           {statuses.map((status) => (

@@ -11,7 +11,7 @@ export const Route = createFileRoute('/_authenticated/environments/agents')({
   loaderDeps: ({ search }) => ({ environmentId: search.environmentId }),
   loader: ({ context: { queryClient }, deps }) => {
     void queryClient.prefetchQuery(agentCliStatusesQueryOptions(deps.environmentId));
-    void queryClient.prefetchQuery(installRecipesQueryOptions());
+    void queryClient.prefetchQuery(installRecipesQueryOptions(deps.environmentId));
   },
   component: AgentsPage,
 });

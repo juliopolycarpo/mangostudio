@@ -102,6 +102,7 @@ interface CacheEntry<T> {
   /** The connection that answered. A different one means a different process. */
   readonly client: RuntimeClient;
   readonly status: T;
+  readonly environmentId: string;
 }
 
 type AnyStatus = RuntimeStatus | VersionManagerStatus | AgentCliStatus;
@@ -149,13 +150,17 @@ export function createEnvironmentProbingService(
   const getSelfVersion = options.getSelfVersion ?? getVersion;
   const cache = new Map<string, CacheEntry<AnyStatus>>();
   const inflight = new Map<string, Promise<readonly AnyStatus[]>>();
+  /** Newest generation per scoped probe may write cache; older ones must not. */
+  const generations = new Map<string, number>();
 
   // Environments are per-user rows, so two users can own the same id. The user
   // is part of the key for the same reason the connection is: neither of them
-  // describes the same machine.
-  const scopeKey = (scope: ProbeScope) => `${scope.userId} ${scope.environmentId}`;
+  // describes the same machine. Unit separator keeps ids that contain spaces
+  // from colliding when resetCache filters by environment.
+  const SCOPE_SEP = '\u001f';
+  const scopeKey = (scope: ProbeScope) => `${scope.userId}${SCOPE_SEP}${scope.environmentId}`;
   const entryKey = (scope: ProbeScope, kind: ProbeKind, id: string) =>
-    `${scopeKey(scope)} ${kind} ${id}`;
+    `${scopeKey(scope)}${SCOPE_SEP}${kind}${SCOPE_SEP}${id}`;
 
   const readFresh = <T extends AnyStatus>(
     scope: ProbeScope,
@@ -184,7 +189,12 @@ export function createEnvironmentProbingService(
   ): void => {
     const checkedAt = now();
     for (const status of statuses) {
-      cache.set(entryKey(scope, kind, idOf(status)), { checkedAt, client, status });
+      cache.set(entryKey(scope, kind, idOf(status)), {
+        checkedAt,
+        client,
+        status,
+        environmentId: scope.environmentId,
+      });
     }
   };
 
@@ -209,19 +219,25 @@ export function createEnvironmentProbingService(
       if (cached) return cached;
     }
 
-    const key = `${scopeKey(scope)} ${kind} ${[...ids].sort().join(',')}`;
+    const key = `${scopeKey(scope)}${SCOPE_SEP}${kind}${SCOPE_SEP}${[...ids].sort().join(',')}`;
     // A forced probe never joins a lazy one — that is the whole point of asking
     // again — but a lazy caller happily rides the forced probe already running.
-    const forcedKey = `${key} force`;
+    const forcedKey = `${key}${SCOPE_SEP}force`;
     const pending = force
       ? inflight.get(forcedKey)
       : (inflight.get(forcedKey) ?? inflight.get(key));
     if (pending) return (await pending) as T[];
 
     const inflightKey = force ? forcedKey : key;
+    // Forced vs lazy races: only the newest generation for this scoped probe
+    // may land in the cache. An older completion still answers its caller.
+    const generation = (generations.get(key) ?? 0) + 1;
+    generations.set(key, generation);
     const probing = run(client)
       .then((statuses) => {
-        writeStatuses(scope, kind, client, statuses, idOf);
+        if (generations.get(key) === generation) {
+          writeStatuses(scope, kind, client, statuses, idOf);
+        }
         return statuses;
       })
       .finally(() => {
@@ -306,7 +322,9 @@ export function createEnvironmentProbingService(
             installable: installableFor(targetIds, client.manifest.platform),
             budget: PROBE_BUDGET,
             self: {
-              version: getSelfVersion(),
+              // Remote mangostudio is whatever that runtime handshaked as —
+              // the hub's own release is the wrong answer for another machine.
+              version: local ? getSelfVersion() : client.runtimeVersion,
               ...(local && {
                 configHome: dirname(getConfig().configFilePath),
                 executablePath: process.execPath,
@@ -352,14 +370,18 @@ export function createEnvironmentProbingService(
       if (!environmentId) {
         cache.clear();
         inflight.clear();
+        generations.clear();
         return;
       }
-      const forEnvironment = (key: string) => key.split(' ')[1] === environmentId;
-      for (const key of [...cache.keys()]) {
-        if (forEnvironment(key)) cache.delete(key);
+      for (const [key, entry] of [...cache.entries()]) {
+        if (entry.environmentId === environmentId) cache.delete(key);
       }
       for (const key of [...inflight.keys()]) {
-        if (forEnvironment(key)) inflight.delete(key);
+        // scopeKey is userId SEP environmentId SEP … — environment is field 1.
+        if (key.split(SCOPE_SEP)[1] === environmentId) inflight.delete(key);
+      }
+      for (const key of [...generations.keys()]) {
+        if (key.split(SCOPE_SEP)[1] === environmentId) generations.delete(key);
       }
     },
   };

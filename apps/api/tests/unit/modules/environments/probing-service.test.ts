@@ -43,6 +43,7 @@ function fakeClient(version = 'v1'): FakeClient {
 
   const client = {
     manifest: MANIFEST,
+    runtimeVersion: '2.0.0-remote',
     probing: {
       runtimes: (params: { pathEnv?: unknown }) => {
         state.runtimeCalls += 1;
@@ -224,7 +225,9 @@ describe('what the hub sends down with a probe', () => {
 
     await service.listAgentCliStatuses(WSL);
 
-    expect(remote.selfParams).toEqual({ version: '9.9.9' });
+    // Remote mangostudio identity is the handshake version of that machine,
+    // not the hub release that would be wrong on every peer.
+    expect(remote.selfParams).toEqual({ version: '2.0.0-remote' });
     expect(remote.pathEnvParams).toBeNull();
   });
 });
