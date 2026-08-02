@@ -24,7 +24,7 @@ const RUNTIME_MANIFEST: RuntimeCapabilityManifest = {
     tools: true,
     git: true,
     probing: false,
-    mcp: false,
+    mcp: true,
     library: false,
     checkpoints: true,
   },
@@ -160,6 +160,34 @@ describe('resolveAgentRuntime with MCP tools', () => {
     });
 
     expect(runtime.toolDefinitions).toEqual([]);
+  });
+
+  it('skips MCP listing when the runtime manifest disables mcp', async () => {
+    const userId = nextUserId();
+    await insertServer(userId, 'srv');
+    let connectCalls = 0;
+    setMcpClientConnectorForTest(() => {
+      connectCalls += 1;
+      return Promise.resolve(fakeServerWithTools('ping'));
+    });
+
+    const runtime = await resolveAgentRuntime({
+      db: getDb(),
+      userId,
+      provider: 'openai',
+      profile: makeProfile(['*']),
+      runtimeManifest: {
+        ...RUNTIME_MANIFEST,
+        features: { ...RUNTIME_MANIFEST.features, mcp: false },
+      },
+      environmentId: LOCAL_ENVIRONMENT_ID,
+    });
+
+    expect(connectCalls).toBe(0);
+    expect(runtime.mcpServerSnapshots).toEqual([]);
+    expect(runtime.toolDefinitions.map((definition) => definition.name)).not.toContain(
+      'mcp__srv__ping'
+    );
   });
 
   it('busts the runtime hash when a server is enabled or disabled', async () => {

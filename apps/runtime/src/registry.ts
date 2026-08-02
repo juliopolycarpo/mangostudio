@@ -58,7 +58,7 @@ export function createRuntimeMethodHandlers(
         validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })
       ),
       handler('workspace.resolve-contained', (params) => resolveContainedWorkspacePath(params)),
-      handler('mcp.connect', (params) => mcp.connect(params)),
+      handler('mcp.connect', (params, context) => mcp.connect(params, context)),
       handler('mcp.list-tools', (params) => mcp.listTools(params)),
       handler('mcp.call-tool', (params, context) => mcp.callTool(params, context)),
       handler('mcp.list-resources', (params) => mcp.listResources(params)),

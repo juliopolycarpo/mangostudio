@@ -47,6 +47,42 @@ describe('normalizeMcpContent', () => {
       { type: 'unknown', blockType: 'video', mimeType: 'video/mp4' },
     ]);
   });
+
+  it('caps oversized text and resource text in structured content', () => {
+    const huge = 'x'.repeat(MCP_RESULT_MAX_BYTES + 1);
+    const blocks = normalizeMcpContent([
+      { type: 'text', text: huge },
+      {
+        type: 'resource',
+        resource: { uri: 'file:///big.md', mimeType: 'text/markdown', text: huge },
+      },
+    ]);
+
+    expect(blocks[0]).toEqual({ type: 'text', text: 'x'.repeat(MCP_RESULT_MAX_BYTES) });
+    expect(blocks[1]).toMatchObject({
+      type: 'resource',
+      uri: 'file:///big.md',
+      text: 'x'.repeat(MCP_RESULT_MAX_BYTES),
+    });
+  });
+
+  it('drops oversized image, audio, and blob payloads', () => {
+    const huge = 'y'.repeat(MCP_RESULT_MAX_BYTES + 1);
+    const blocks = normalizeMcpContent([
+      { type: 'image', data: huge, mimeType: 'image/png' },
+      { type: 'audio', data: huge, mimeType: 'audio/wav' },
+      {
+        type: 'resource',
+        resource: { uri: 'file:///big.bin', mimeType: 'application/octet-stream', blob: huge },
+      },
+    ]);
+
+    expect(blocks).toEqual([
+      { type: 'unknown', blockType: 'image', mimeType: 'image/png' },
+      { type: 'unknown', blockType: 'audio', mimeType: 'audio/wav' },
+      { type: 'unknown', blockType: 'resource', mimeType: 'application/octet-stream' },
+    ]);
+  });
 });
 
 describe('flattenMcpContent', () => {
@@ -104,8 +140,8 @@ describe('capMcpResultText', () => {
   });
 
   it('never cuts through a multi-byte character', () => {
-    // é is 2 bytes in UTF-8; an odd byte budget forces a mid-character cut.
-    const capped = capMcpResultText('é'.repeat(MCP_RESULT_MAX_BYTES));
+    // Prefix ASCII so an odd byte budget forces a mid-character cut on é (2 bytes).
+    const capped = capMcpResultText(`a${'é'.repeat(MCP_RESULT_MAX_BYTES)}`);
 
     expect(capped.endsWith(MCP_RESULT_TRUNCATION_MARKER)).toBe(true);
     expect(capped).not.toContain('�');

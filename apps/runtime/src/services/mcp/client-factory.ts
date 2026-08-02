@@ -127,6 +127,8 @@ export interface ConnectMcpClientOptions {
    * transport, so a fixture installed by one suite cannot hijack another's.
    */
   createTransport?: (config: RuntimeMcpServerConfig) => Promise<Transport | null>;
+  /** Cancels an in-flight connect; closes a partial transport when aborted. */
+  signal?: AbortSignal;
   /** Fires once when the session drops out from under us (crash, socket close). */
   onSessionClosed?: () => void;
   /** Fires when the server announces `notifications/tools/list_changed`. */
@@ -157,12 +159,18 @@ export async function connectMcpClient(
   config: RuntimeMcpServerConfig,
   options: ConnectMcpClientOptions
 ): Promise<McpClientHandle> {
+  options.signal?.throwIfAborted();
   const override = await options.createTransport?.(config);
+  options.signal?.throwIfAborted();
   const client = override
     ? await connectOverride(config, options, override)
     : config.transport === 'stdio'
       ? await connectStdio(config, options)
       : await connectHttp(config, options);
+  if (options.signal?.aborted) {
+    await client.close().catch(() => undefined);
+    options.signal.throwIfAborted();
+  }
   return wrapMcpClient(client, config, {
     serverId: config.id,
     serverSlug: config.slug,
@@ -199,7 +207,7 @@ async function connectOverride(
 ): Promise<Client> {
   const client = createClient(options.runtimeVersion);
   try {
-    await client.connect(transport);
+    await connectClient(client, transport, options.signal);
   } catch (error) {
     throw toConnectionError(config, error);
   }
@@ -223,7 +231,7 @@ async function connectStdio(
 
   const client = createClient(options.runtimeVersion);
   try {
-    await client.connect(transport);
+    await connectClient(client, transport, options.signal);
   } catch (error) {
     throw toConnectionError(config, error);
   }
@@ -243,7 +251,11 @@ async function connectHttp(
 
   const client = createClient(options.runtimeVersion);
   try {
-    await client.connect(new StreamableHTTPClientTransport(new URL(config.url), { requestInit }));
+    await connectClient(
+      client,
+      new StreamableHTTPClientTransport(new URL(config.url), { requestInit }),
+      options.signal
+    );
     return client;
   } catch (error) {
     if (!shouldFallBackToSse(error)) throw toConnectionError(config, error);
@@ -251,10 +263,36 @@ async function connectHttp(
 
   const sseClient = createClient(options.runtimeVersion);
   try {
-    await sseClient.connect(new SSEClientTransport(new URL(config.url), { requestInit }));
+    await connectClient(
+      sseClient,
+      new SSEClientTransport(new URL(config.url), { requestInit }),
+      options.signal
+    );
     return sseClient;
   } catch (error) {
     throw toConnectionError(config, error);
+  }
+}
+
+/**
+ * Connects while honouring cancel: abort closes the client so a partial
+ * transport does not linger, and a race that finishes after abort still fails.
+ */
+async function connectClient(
+  client: Client,
+  transport: Transport,
+  signal?: AbortSignal
+): Promise<void> {
+  signal?.throwIfAborted();
+  const onAbort = () => {
+    void client.close().catch(() => undefined);
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    await client.connect(transport);
+    signal?.throwIfAborted();
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
   }
 }
 

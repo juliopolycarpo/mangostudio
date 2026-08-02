@@ -100,6 +100,7 @@ const handles: McpClientHandle[] = [];
 afterEach(async () => {
   resetElicitationRegistryForTest();
   setMcpClientConnectorForTest(null);
+  setMcpTransportFactoryForTest(null);
   await closeAllMcpClients();
   await Promise.allSettled(handles.splice(0).map((handle) => handle.close()));
   fixtureServers.clear();

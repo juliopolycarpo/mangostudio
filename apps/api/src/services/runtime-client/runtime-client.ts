@@ -284,6 +284,14 @@ export class RuntimeClient {
     return this.protocol.onEvent(listener);
   }
 
+  /**
+   * Subscribes to transport teardown. MCP handles use this so a dead runtime
+   * connection cannot keep returning a handle whose session is already gone.
+   */
+  onClose(listener: () => void): () => void {
+    return this.protocol.onClose(listener);
+  }
+
   private async request<K extends RuntimeMethod>(
     method: K,
     params: RuntimeMethodMap[K]['params'],

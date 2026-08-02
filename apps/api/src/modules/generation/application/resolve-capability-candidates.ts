@@ -123,6 +123,9 @@ function resolveMcpCandidates(
 
   const candidates = server.tools.map((tool): ToolCapabilityCandidate => {
     const base = { name: tool.name, title: tool.toolName, ...provenance };
+    if (!input.runtimeManifest.features.mcp) {
+      return { ...base, reason: 'environment-unsupported' };
+    }
     if (!toolNameMatches(allowlist, tool.name)) return { ...base, reason: 'agent-allowlist' };
     if (!(input.toolSettings.get(tool.name)?.enabled ?? true)) {
       return { ...base, reason: 'tool-setting-disabled' };

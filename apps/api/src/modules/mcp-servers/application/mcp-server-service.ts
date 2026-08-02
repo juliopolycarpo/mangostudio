@@ -126,6 +126,10 @@ export async function updateMcpServer(
     updatedAt: Date.now(),
   });
 
+  // Drop the old session before fallible secret writes so a failed persist
+  // cannot leave a live handle on the previous environment or stale config.
+  await disposeMcpServer(userId, id);
+
   // Each transport owns exactly one secret bundle: headers for http, the child
   // environment for stdio. Persist the bundle the merged transport owns, and
   // drop the other one whenever the body switches transport, so a token never
@@ -137,9 +141,6 @@ export async function updateMcpServer(
     if (body.secretEnv !== undefined) await persistMcpSecretEnv(id, body.secretEnv);
     if (body.transport === 'stdio') await removeMcpHeaders(id);
   }
-
-  // The old session runs with stale config; drop it so next use reconnects.
-  await disposeMcpServer(userId, id);
 
   return toPublicServer(userId, await requireMcpServerRow(db, userId, id));
 }

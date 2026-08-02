@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setMcpTransportFactoryForTest } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { getDb } from '../../../../src/db/database';
@@ -75,6 +76,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   setMcpClientConnectorForTest(null);
+  setMcpTransportFactoryForTest(null);
   await closeAllMcpClients();
   rmSync(uploadsDir, { recursive: true, force: true });
 });

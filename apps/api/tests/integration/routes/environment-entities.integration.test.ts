@@ -230,7 +230,7 @@ describe('environment entity routes', () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({
       code: 'CONFLICT',
-      error: 'Environment "active-box" is still used by one or more chats.',
+      error: 'Environment "active-box" is still used by one or more chats or MCP servers.',
     });
     expect(await repository.find(TEST_USER.id, 'active-box')).not.toBeNull();
   });

@@ -28,6 +28,9 @@ export function classifyMcpCallFailure(error: unknown): McpCallFailure {
   // A dead runtime took the MCP session down with it — indistinguishable, from
   // the turn's point of view, from the server itself closing.
   if (error.code === 'RUNTIME_UNAVAILABLE') return 'server_closed';
+  // Runtime reports a missing session the same way; treat it as closed so the
+  // turn does not surface it as a generic tool failure.
+  if (error.details?.kind === 'mcp_session_missing') return 'server_closed';
   const failure = error.details?.mcpFailure;
   return typeof failure === 'string' && MCP_FAILURES.has(failure)
     ? (failure as McpCallFailure)

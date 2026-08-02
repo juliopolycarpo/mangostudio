@@ -82,7 +82,10 @@ export interface McpServiceOptions {
 }
 
 export interface McpService {
-  connect(params: RuntimeMcpConnectParams): Promise<RuntimeMcpConnectResult>;
+  connect(
+    params: RuntimeMcpConnectParams,
+    context?: RuntimeHandlerContext
+  ): Promise<RuntimeMcpConnectResult>;
   listTools(params: RuntimeMcpServerParams): Promise<RuntimeMcpListToolsResult>;
   callTool(
     params: RuntimeMcpCallToolParams,
@@ -101,6 +104,8 @@ export interface McpService {
 export function createMcpService(options: McpServiceOptions): McpService {
   const sessions = new Map<string, McpSession>();
   const pending = new Map<string, PendingElicitation>();
+  /** Serializes connect/replace per server id so concurrent connects cannot leak. */
+  const connectChains = new Map<string, Promise<unknown>>();
 
   function publishSession(event: RuntimeMcpSessionEvent): void {
     options.emit({ topic: RUNTIME_MCP_SESSION_TOPIC, payload: event });
@@ -174,43 +179,72 @@ export function createMcpService(options: McpServiceOptions): McpService {
     });
   }
 
-  return {
-    async connect(params) {
-      // A reconnect with changed config must not leave the old child running.
-      const previous = sessions.get(params.config.id);
-      if (previous) {
-        sessions.delete(params.config.id);
-        await closeSession(previous);
-      }
+  async function connectOnce(
+    params: RuntimeMcpConnectParams,
+    context?: RuntimeHandlerContext
+  ): Promise<RuntimeMcpConnectResult> {
+    context?.signal.throwIfAborted();
 
-      let handle: McpClientHandle;
-      try {
-        handle = await connectMcpClient(params.config, {
-          runtimeVersion: options.runtimeVersion,
-          ...(params.secrets ? { secrets: params.secrets } : {}),
-          ...(transportFactoryOverride ? { createTransport: transportFactoryOverride } : {}),
-          onSessionClosed: () => {
-            const session = sessions.get(params.config.id);
-            if (!session) return;
-            sessions.delete(params.config.id);
-            cancelSessionElicitations(session);
-            publishSession({ serverId: params.config.id, change: 'closed' });
-          },
-          onToolListChanged: () => {
-            publishSession({ serverId: params.config.id, change: 'tool-list-changed' });
-          },
-          requestElicitation,
-        });
-      } catch (error) {
-        throw toServiceError(error, params.config);
-      }
+    // A reconnect with changed config must not leave the old child running.
+    const previous = sessions.get(params.config.id);
+    if (previous) {
+      sessions.delete(params.config.id);
+      await closeSession(previous);
+    }
 
-      sessions.set(params.config.id, {
-        config: params.config,
-        handle,
-        pendingElicitations: new Set(),
+    context?.signal.throwIfAborted();
+
+    let handle: McpClientHandle;
+    try {
+      handle = await connectMcpClient(params.config, {
+        runtimeVersion: options.runtimeVersion,
+        ...(params.secrets ? { secrets: params.secrets } : {}),
+        ...(transportFactoryOverride ? { createTransport: transportFactoryOverride } : {}),
+        ...(context?.signal ? { signal: context.signal } : {}),
+        onSessionClosed: () => {
+          // Only the session that owns this handle may publish closed — a
+          // superseded child's teardown must not drop a newer replacement.
+          const session = sessions.get(params.config.id);
+          if (!session || session.handle !== handle) return;
+          sessions.delete(params.config.id);
+          cancelSessionElicitations(session);
+          publishSession({ serverId: params.config.id, change: 'closed' });
+        },
+        onToolListChanged: () => {
+          const session = sessions.get(params.config.id);
+          if (!session || session.handle !== handle) return;
+          publishSession({ serverId: params.config.id, change: 'tool-list-changed' });
+        },
+        requestElicitation,
       });
-      return { capabilities: handle.getCapabilities() };
+    } catch (error) {
+      throw toServiceError(error, params.config);
+    }
+
+    if (context?.signal.aborted) {
+      await closeQuietly(handle);
+      context.signal.throwIfAborted();
+    }
+
+    sessions.set(params.config.id, {
+      config: params.config,
+      handle,
+      pendingElicitations: new Set(),
+    });
+    return { capabilities: handle.getCapabilities() };
+  }
+
+  return {
+    async connect(params, context) {
+      const serverId = params.config.id;
+      const previous = connectChains.get(serverId) ?? Promise.resolve();
+      const run = previous.catch(() => undefined).then(() => connectOnce(params, context));
+      connectChains.set(serverId, run);
+      try {
+        return await run;
+      } finally {
+        if (connectChains.get(serverId) === run) connectChains.delete(serverId);
+      }
     },
 
     async listTools(params) {
@@ -285,6 +319,14 @@ export function createMcpService(options: McpServiceOptions): McpService {
   };
 }
 
+async function closeQuietly(handle: McpClientHandle): Promise<void> {
+  try {
+    await handle.close();
+  } catch {
+    // Best-effort teardown after an aborted connect.
+  }
+}
+
 /**
  * Runs one request against a live session, translating whatever the SDK throws
  * into the typed shape the hub branches on.
@@ -304,6 +346,7 @@ function toServiceError(error: unknown, config: RuntimeMcpServerConfig): Error {
   if (error instanceof McpConnectionError) {
     return new McpServiceError('mcp_connection', error.message, { serverSlug: config.slug });
   }
+  if (error instanceof Error && error.name === 'AbortError') return error;
   const failure = classifyMcpCallFailure(error);
   const message = error instanceof Error ? error.message : String(error);
   if (failure === 'other' && !(error instanceof Error)) {

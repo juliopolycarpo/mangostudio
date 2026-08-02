@@ -41,9 +41,11 @@ independent of the environment transport that connects the hub to the runtime.
   HTTP client is tried first; on a 4xx from the initialize POST it falls back to the legacy
   SSE transport, per the MCP spec-compat recipe.
 
-Only `apps/runtime/src/services/mcp/**` may import `@modelcontextprotocol/sdk`; the hub and the
-rest of the codebase consume the project-owned `McpClientHandle` wrapper, so an SDK bump stays
-contained to that directory.
+Only production code under `apps/runtime/src/services/mcp/**` may import
+`@modelcontextprotocol/sdk`; the hub and the rest of the codebase consume the project-owned
+`McpClientHandle` wrapper, so an SDK bump stays contained to that directory. API test fixtures
+(for example in-memory servers under `apps/api/tests/support/fixtures/mcp/`) may import the SDK
+to stand up controlled peers.
 
 ## Configuration
 

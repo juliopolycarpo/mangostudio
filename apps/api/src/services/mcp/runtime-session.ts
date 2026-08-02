@@ -74,11 +74,19 @@ export async function connectMcpClient(
   options: ConnectMcpClientOptions
 ): Promise<McpClientHandle> {
   const runtime = await resolveRuntime(config, options.userId);
+  // Resolve the environment before reading secrets: a missing non-local row
+  // must fail closed rather than delivering credentials into a void.
+  const transport = await resolveTransport(config, options);
+  if (config.environmentId !== LOCAL_ENVIRONMENT_ID && transport === null) {
+    throw new McpConnectionError(
+      `MCP server "${config.slug}" runs on environment "${config.environmentId}", which was not found.`
+    );
+  }
   const secrets = await readSecrets(config, options);
   // Ordered deliberately: refuse before the connect, so a plaintext target
   // never sees the credential even in a request it goes on to reject.
   if (hasSecrets(secrets)) {
-    assertSecretsMayReachEnvironment(config.slug, await resolveTransport(config, options));
+    assertSecretsMayReachEnvironment(config.slug, transport);
   }
   const { environmentId, ...wireConfig } = config;
 
@@ -167,8 +175,19 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
    */
   const activeCalls = new Map<string, AbortSignal | undefined>();
   let closedByUs = false;
+  let forgotten = false;
+  let detachEvent: () => void = () => undefined;
+  let detachClose: () => void = () => undefined;
 
-  const detach = runtime.onEvent((event) => {
+  const forgetSession = () => {
+    if (forgotten) return;
+    forgotten = true;
+    detachEvent();
+    detachClose();
+    if (!closedByUs) options.onSessionClosed?.();
+  };
+
+  detachEvent = runtime.onEvent((event) => {
     if (event.topic === RUNTIME_MCP_SESSION_TOPIC) {
       const payload = event.payload as RuntimeMcpSessionEvent;
       if (payload.serverId !== serverId) return;
@@ -176,8 +195,7 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
         options.onToolListChanged?.();
         return;
       }
-      detach();
-      if (!closedByUs) options.onSessionClosed?.();
+      forgetSession();
       return;
     }
     if (event.topic !== RUNTIME_MCP_ELICITATION_TOPIC) return;
@@ -186,18 +204,24 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
     void answerElicitation(payload);
   });
 
+  // A runtime disconnect clears evt listeners without a farewell frame, so
+  // MCP must also watch transport close — otherwise the hub keeps a dead handle.
+  detachClose = runtime.onClose(() => {
+    forgetSession();
+  });
+
   async function answerElicitation(event: RuntimeMcpElicitationEvent): Promise<void> {
     const signal = activeCalls.get(event.toolCallId);
-    const result = await createPendingElicitation({
-      userId: options.userId,
-      serverId,
-      serverSlug: config.slug,
-      toolCallId: event.toolCallId,
-      message: event.message,
-      fields: [...event.fields],
-      ...(signal ? { signal } : {}),
-    });
     try {
+      const result = await createPendingElicitation({
+        userId: options.userId,
+        serverId,
+        serverSlug: config.slug,
+        toolCallId: event.toolCallId,
+        message: event.message,
+        fields: [...event.fields],
+        ...(signal ? { signal } : {}),
+      });
       await runtime.mcp.respondToElicitation(
         {
           requestId: event.requestId,
@@ -207,17 +231,17 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
         { timeoutMs: ELICIT_RESPONSE_TIMEOUT_MS }
       );
     } catch {
-      // The runtime is gone, so the question it asked is gone with it. The
-      // pending entry is already settled; the tool call's own failure is what
-      // reports this to the turn.
+      // The pending entry settled, or the runtime is gone — either way the
+      // tool call's own failure reports this to the turn. Swallow so the
+      // fire-and-forget `void answerElicitation` never becomes an unhandled
+      // rejection (abort of createPendingElicitation used to).
     }
   }
 
   /** Marks the session dead when the failure means the far end is unreachable. */
   function noteFailure(error: unknown): never {
     if (isSessionGone(error)) {
-      detach();
-      if (!closedByUs) options.onSessionClosed?.();
+      forgetSession();
     }
     throw error;
   }
@@ -292,7 +316,7 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
 
     async close() {
       closedByUs = true;
-      detach();
+      forgetSession();
       try {
         await runtime.mcp.disconnect({ serverId }, { timeoutMs: RUNTIME_MCP_CALL_GRACE_MS });
       } catch {

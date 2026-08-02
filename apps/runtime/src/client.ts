@@ -42,6 +42,8 @@ export interface RuntimeProtocolClientOptions {
 export class RuntimeProtocolClient {
   readonly #eventListeners = new Set<(event: RuntimeEventFrame) => void>();
   readonly #pongListeners = new Set<() => void>();
+  /** Fires once when {@link close} runs; used to drop hub-side session handles. */
+  readonly #closeListeners = new Set<() => void>();
   readonly #hubVersion: string;
   readonly #pending = new Map<string, PendingRequest>();
   readonly #port: RuntimeFramePort;
@@ -144,6 +146,21 @@ export class RuntimeProtocolClient {
     return () => this.#eventListeners.delete(listener);
   }
 
+  /**
+   * Subscribes to connection teardown. Unlike `onEvent`, this fires when the
+   * hub closes the transport — event listeners are cleared without a farewell
+   * frame, so MCP handles that only watch `evt` would otherwise keep a dead
+   * session until the next failed call.
+   */
+  onClose(listener: () => void): () => void {
+    if (this.#closed) {
+      queueMicrotask(listener);
+      return () => undefined;
+    }
+    this.#closeListeners.add(listener);
+    return () => this.#closeListeners.delete(listener);
+  }
+
   /** Sends a protocol ping. The runtime answers with `pong`. */
   ping(): void {
     this.#port.send({ type: 'ping' });
@@ -173,6 +190,9 @@ export class RuntimeProtocolClient {
     this.#pending.clear();
     this.#eventListeners.clear();
     this.#pongListeners.clear();
+    const closeListeners = [...this.#closeListeners];
+    this.#closeListeners.clear();
+    for (const listener of closeListeners) listener();
     this.#port.close();
   }
 

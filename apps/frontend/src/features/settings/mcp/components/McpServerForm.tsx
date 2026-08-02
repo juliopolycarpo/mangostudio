@@ -59,13 +59,15 @@ export function McpServerForm({
   /**
    * Stored secrets count as much as newly typed ones: moving an existing
    * server is exactly the moment its saved credentials start travelling.
+   * Only the active transport's secret bundle travels.
    */
   const carriesSecrets =
     state.environmentId !== LOCAL_ENVIRONMENT_ID &&
-    (state.secretEnv.some((entry) => entry.key.trim().length > 0) ||
-      state.headers.some((entry) => entry.key.trim().length > 0) ||
-      (server?.secretEnvNames.length ?? 0) > 0 ||
-      (server?.headerNames.length ?? 0) > 0);
+    (state.transport === 'stdio'
+      ? state.secretEnv.some((entry) => entry.key.trim().length > 0) ||
+        (server?.secretEnvNames.length ?? 0) > 0
+      : state.headers.some((entry) => entry.key.trim().length > 0) ||
+        (server?.headerNames.length ?? 0) > 0);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();

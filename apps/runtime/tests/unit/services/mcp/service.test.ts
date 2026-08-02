@@ -149,6 +149,75 @@ describe('runtime MCP service', () => {
       service.respondToElicitation({ requestId: 'gone', action: 'accept', content: {} })
     ).resolves.toEqual({ ok: true });
   });
+
+  it('serializes concurrent connects so only one session remains', async () => {
+    const events: RuntimeEventInput[] = [];
+    const service = createService(events);
+    let connects = 0;
+    installFixture(() => {
+      connects += 1;
+      return createFixtureServer();
+    });
+
+    const [first, second] = await Promise.all([
+      service.connect({ config: CONFIG }),
+      service.connect({ config: CONFIG }),
+    ]);
+
+    expect(first.capabilities.tools).toBe(true);
+    expect(second.capabilities.tools).toBe(true);
+    expect(connects).toBe(2);
+    await expect(service.listTools({ serverId: CONFIG.id })).resolves.toMatchObject({
+      tools: [{ name: 'ask' }],
+    });
+    // Two sequential connects both closed their predecessor; only the last
+    // session is live — no leaked registry entry.
+    expect(events.filter((event) => event.topic === 'mcp.session')).toEqual([]);
+    await service.close();
+  });
+
+  it('ignores a closed notification from a session that was already replaced', async () => {
+    const events: RuntimeEventInput[] = [];
+    const service = createService(events);
+    const closedServers: Server[] = [];
+    installFixture(() => {
+      const server = createFixtureServer();
+      closedServers.push(server);
+      return server;
+    });
+
+    await service.connect({ config: CONFIG });
+    const firstServer = closedServers[0];
+    await service.connect({ config: CONFIG });
+
+    // Tear down the superseded SDK server; its onclose must not drop the
+    // replacement still registered under the same server id.
+    await firstServer?.close();
+    await Bun.sleep(20);
+
+    expect(events.filter((event) => event.topic === 'mcp.session')).toEqual([]);
+    await expect(service.listTools({ serverId: CONFIG.id })).resolves.toMatchObject({
+      tools: [{ name: 'ask' }],
+    });
+    await service.close();
+  });
+
+  it('abandons connect when the cancel signal aborts before registration', async () => {
+    const service = createService([]);
+    const controller = new AbortController();
+    installFixture(() => {
+      controller.abort();
+      return createFixtureServer();
+    });
+
+    await expect(
+      service.connect({ config: CONFIG }, { signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(service.listTools({ serverId: CONFIG.id })).rejects.toMatchObject({
+      kind: 'mcp_session_missing',
+    });
+    await service.close();
+  });
 });
 
 /** Whether a promise reaches any terminal state inside a generous budget. */
