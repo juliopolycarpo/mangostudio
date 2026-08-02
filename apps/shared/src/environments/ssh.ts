@@ -12,14 +12,22 @@
  * one of them changed.
  */
 
+import { mangoHomeDir, runtimeSlotCurrentBinaryPath } from '../runtime-home';
 import type { SshEnvironmentConfig } from './schemas';
 
 /**
  * Where a runtime placed on a remote machine lives. `current` is a symlink the
  * installer swaps, so the default never embeds a version that dangles after an
  * upgrade. The field stays overridable for a machine that keeps it elsewhere.
+ *
+ * Built from the runtime-home layout rather than spelled out, so an ssh launch
+ * and the installer that put the binary there cannot drift apart. The `~` is
+ * left for the target's login shell to expand — the hub has no idea where a
+ * remote account's home directory is.
  */
-export const DEFAULT_SSH_RUNTIME_PATH = '~/.mango/runtime/remote/current/mangostudio-runtime';
+export const DEFAULT_SSH_RUNTIME_PATH = runtimeSlotCurrentBinaryPath('remote', {
+  mangoHome: mangoHomeDir('~'),
+});
 
 /**
  * Options the hub sets on every SSH launch, whatever the user's `ssh_config`
