@@ -41,6 +41,7 @@ import {
 import { previewLibraryPropagation } from '../application/propagation-preview';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { assertBackupId, purgeBackupSet } from '../infrastructure/backup-store';
+import { handleLibraryError } from './library-error';
 
 export interface PropagationRouteService {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
@@ -80,9 +81,7 @@ function mapPropagationError(error: unknown, set: { status?: number | string }):
     set.status = 400;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
-  console.error('[library] Unexpected propagation error:', error);
-  set.status = 500;
-  return { error: 'Unexpected library propagation error.', code: ERROR_CODES.INTERNAL };
+  return handleLibraryError(error, set, '[library]', 'Unexpected library propagation error.');
 }
 
 function invalidResourceKey(set: { status?: number | string }): ApiErrorResponse {
