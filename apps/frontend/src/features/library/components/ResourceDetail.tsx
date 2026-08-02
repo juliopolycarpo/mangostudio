@@ -12,7 +12,7 @@ import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/share
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
@@ -22,6 +22,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { formatBytes, formatRelativeTime, hashPrefix, validInstances } from '../format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import {
+  libraryEnvironmentSearch,
   libraryKeys,
   libraryLocationsQueryOptions,
   libraryResourceQueryOptions,
@@ -43,6 +44,15 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
   const [propagating, setPropagating] = useState(false);
   const [removing, setRemoving] = useState(false);
 
+  // Every one of these is about the machine that was selected when it opened.
+  // Without this, switching away only hides them, and switching back re-opens a
+  // wizard over a different environment's instances.
+  useEffect(() => {
+    setComparing(false);
+    setPropagating(false);
+    setRemoving(false);
+  }, [scope.environmentId]);
+
   const [resourceQuery, locationsQuery, targetsQuery] = useQueries({
     queries: [
       libraryResourceQueryOptions(resourceKey, scope.environmentId),
@@ -62,15 +72,16 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
   const groups = useMemo(() => (resource ? contentGroupsOf(resource) : []), [resource]);
   const candidates = useCandidateLocations(locations, resource?.ref.kind);
 
+  // No description: the library section layout already renders the subtitle
+  // directly above the tab strip this page sits under.
   const header = (
     <EnvironmentScopeHeader
-      description={l.subtitle}
       scope={scope}
       onRefresh={() => {
         void resourceQuery.refetch();
         void locationsQuery.refetch();
         void queryClient.invalidateQueries({
-          queryKey: [...libraryKeys.all, 'content', scope.environmentId, resourceKey],
+          queryKey: libraryKeys.contents(resourceKey, scope.environmentId),
         });
       }}
     />
@@ -140,11 +151,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         <div className="min-w-0 space-y-1">
           <Link
             to={kindTab(resource)}
-            search={
-              scope.environmentId === LOCAL_ENVIRONMENT_ID
-                ? {}
-                : { environmentId: scope.environmentId }
-            }
+            search={libraryEnvironmentSearch(scope.environmentId)}
             className="inline-flex items-center gap-1.5 text-on-surface-variant text-xs hover:text-on-surface"
           >
             <ArrowLeft size={12} />

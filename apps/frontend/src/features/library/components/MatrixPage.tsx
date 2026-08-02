@@ -42,9 +42,9 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
    */
   const candidates = useCandidateLocations(matrix.locations, kind);
 
-  const header = (
-    <EnvironmentScopeHeader description={l.subtitle} scope={scope} onRefresh={matrix.refetch} />
-  );
+  // No description: the library section layout already renders the subtitle
+  // directly above the tab strip this page sits under.
+  const header = <EnvironmentScopeHeader scope={scope} onRefresh={matrix.refetch} />;
 
   if (scope.environment && !scope.permitsLibrary) {
     return (

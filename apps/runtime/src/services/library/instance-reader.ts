@@ -17,7 +17,8 @@ import { parse as parseToml } from 'smol-toml';
 import type { CachedInstanceDisplay, CachedInstanceHash, LibraryCache } from './cache';
 
 const textDecoder = new TextDecoder();
-const SKILL_ENTRYPOINT = 'SKILL.md';
+/** The file inside a skill directory that carries its text and frontmatter. */
+export const SKILL_ENTRYPOINT = 'SKILL.md';
 
 /**
  * Byte budgets for a single instance. A cold scan reads and hashes every leaf
@@ -502,7 +503,8 @@ function toPosixPath(path: string): string {
   return sep === '/' ? path : path.replaceAll(sep, '/');
 }
 
-function isPathWithin(rootPath: string, candidatePath: string): boolean {
+/** Containment over canonical paths, case-insensitive only on Windows drives. */
+export function isPathWithin(rootPath: string, candidatePath: string): boolean {
   const caseInsensitive = /^[A-Za-z]:[\\/]/.test(rootPath);
   const root = caseInsensitive ? rootPath.toLowerCase() : rootPath;
   const candidate = caseInsensitive ? candidatePath.toLowerCase() : candidatePath;

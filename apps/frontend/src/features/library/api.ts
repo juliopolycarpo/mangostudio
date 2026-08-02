@@ -8,7 +8,6 @@
  * than a thrown error the UI would report as a generic failure.
  */
 
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   LibraryResource,
@@ -24,6 +23,7 @@ import type {
 } from '@mangostudio/shared/library';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
+import { libraryEnvironmentSearch } from './queries';
 
 export type PropagationApplyResult =
   | { readonly outcome: 'applied'; readonly result: PropagationApply }
@@ -52,7 +52,7 @@ export async function rescanLibrary(
   const { data, error } = await client.api.library.rescan.post(undefined, {
     query: {
       force: force ? 'true' : 'false',
-      ...(environmentId && environmentId !== LOCAL_ENVIRONMENT_ID ? { environmentId } : {}),
+      ...libraryEnvironmentSearch(environmentId),
     },
   });
   if (error) throw new ApiError(error.value);

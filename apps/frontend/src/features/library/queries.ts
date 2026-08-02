@@ -26,13 +26,12 @@ import { ApiError } from '@/lib/utils';
 
 const STALE_TIME_MS = 30_000;
 
-function environmentQuery(environmentId?: string): { environmentId?: string } {
+/**
+ * The environment as a request query or a TanStack Router `search`: one shape
+ * for both, since `local` is the default on the server and stays out of the URL.
+ */
+export function libraryEnvironmentSearch(environmentId?: string): { environmentId?: string } {
   return environmentId && environmentId !== LOCAL_ENVIRONMENT_ID ? { environmentId } : {};
-}
-
-/** TanStack Router `search` for library routes that should keep the active environment. */
-export function libraryEnvironmentSearch(environmentId: string): { environmentId?: string } {
-  return environmentQuery(environmentId);
 }
 
 export const libraryKeys = {
@@ -41,11 +40,14 @@ export const libraryKeys = {
     [...libraryKeys.all, 'resources', environmentId, kind ?? 'all'] as const,
   resource: (key: string, environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...libraryKeys.all, 'resource', environmentId, key] as const,
+  /** Prefix over every location's copy of one resource, for invalidating them together. */
+  contents: (key: string, environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...libraryKeys.all, 'content', environmentId, key] as const,
   content: (
     key: string,
     locationId: LibraryLocationId,
     environmentId: string = LOCAL_ENVIRONMENT_ID
-  ) => [...libraryKeys.all, 'content', environmentId, key, locationId] as const,
+  ) => [...libraryKeys.contents(key, environmentId), locationId] as const,
   locations: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...libraryKeys.all, 'locations', environmentId] as const,
   targets: () => [...libraryKeys.all, 'targets'] as const,
@@ -62,7 +64,7 @@ export function libraryResourcesQueryOptions(kind?: ResourceKind, environmentId?
       const { data, error } = await client.api.library.resources.get({
         query: {
           ...(kind ? { kind } : {}),
-          ...environmentQuery(envId),
+          ...libraryEnvironmentSearch(envId),
         },
       });
       if (error) throw new ApiError(error.value);
@@ -78,7 +80,7 @@ export function libraryResourceQueryOptions(key: string, environmentId?: string)
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
       const { data, error } = await client.api.library.resources({ key }).get({
-        query: environmentQuery(envId),
+        query: libraryEnvironmentSearch(envId),
       });
       if (error) throw new ApiError(error.value);
       return data as LibraryResource;
@@ -103,7 +105,7 @@ export function libraryContentQueryOptions(
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
       const { data, error } = await client.api.library.resources({ key }).content.get({
-        query: { location: locationId, ...environmentQuery(envId) },
+        query: { location: locationId, ...libraryEnvironmentSearch(envId) },
       });
       if (error) throw new ApiError(error.value);
       return data as LibraryResourceContent;
@@ -118,7 +120,7 @@ export function libraryLocationsQueryOptions(environmentId?: string) {
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
       const { data, error } = await client.api.library.locations.get({
-        query: environmentQuery(envId),
+        query: libraryEnvironmentSearch(envId),
       });
       if (error) throw new ApiError(error.value);
       return data as LibraryLocationStatus[];

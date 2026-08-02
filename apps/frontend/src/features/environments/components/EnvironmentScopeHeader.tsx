@@ -11,7 +11,11 @@ import type { EnvironmentScope } from '../use-environment-scope';
 import { EnvironmentScopePicker } from './EnvironmentScopePicker';
 
 interface EnvironmentScopeHeaderProps {
-  readonly description: string;
+  /**
+   * Omitted by surfaces whose section layout already states it — repeating the
+   * same sentence directly under itself is the only thing that would add.
+   */
+  readonly description?: string;
   readonly scope: EnvironmentScope;
   readonly onRefresh: () => void;
   readonly children?: ReactNode;
@@ -27,8 +31,8 @@ export function EnvironmentScopeHeader({
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <p className="text-sm text-on-surface-variant/60">{description}</p>
-      <div className="flex items-center gap-2">
+      {description ? <p className="text-sm text-on-surface-variant/60">{description}</p> : null}
+      <div className="ml-auto flex items-center gap-2">
         {children}
         {scope.hasChoice && (
           <EnvironmentScopePicker

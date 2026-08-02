@@ -62,8 +62,9 @@ export function discoverLibraryResourcesFromSettings(
     kinds: options.kinds,
     locationPathOverrides: options.locationPathOverrides,
   });
-  // Same signature the runtime scan would use, so a forced rescan clears both
-  // the hub's grouped memo and any leftover flat-entry memo on a shared cache.
+  // The runtime scan builds the same target list under a `flat:` prefix. The
+  // prefixes are what keep the two apart when they share one cache instance:
+  // this memo holds grouped `LibraryResource[]`, that one holds flat entries.
   const signature = `grouped:\n${targets
     .map((target) => `${target.scope}\0${target.locationId}\0${target.path}`)
     .sort()
