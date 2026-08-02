@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
   LibraryResource,
   LibraryResourceContent,
@@ -334,6 +335,26 @@ describe('library routes', () => {
     expect(await response.json()).toMatchObject({
       code: 'VALIDATION',
       error: 'Environment "remote-box" does not advertise library discovery.',
+    });
+  });
+
+  it('maps an unreachable environment to 503 rather than a server fault', async () => {
+    const { service } = createService();
+    service.discover = () =>
+      Promise.reject(
+        new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Environment "remote-box" was not found.')
+      );
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/resources?environmentId=remote-box')
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: 'PROVIDER_ERROR',
+      error: 'Environment "remote-box" was not found.',
     });
   });
 

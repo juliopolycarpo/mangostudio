@@ -1,3 +1,4 @@
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type ApiErrorResponse,
@@ -96,6 +97,16 @@ function handleLibraryError(error: unknown, set: { status?: number | string }): 
     return {
       error: error.message,
       code: ERROR_CODES.VALIDATION,
+    };
+  }
+  // A disabled, unknown, or unreachable environment is a routine state once
+  // discovery is per-environment, not a hub fault: it gets the same 503 the
+  // environment routes give, and no error log.
+  if (error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE') {
+    set.status = 503;
+    return {
+      error: error.message,
+      code: ERROR_CODES.PROVIDER_ERROR,
     };
   }
   console.error('[library] Unexpected error:', error);
@@ -244,6 +255,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             200: LibraryResourceListSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )
@@ -293,6 +305,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             404: ApiErrorResponseSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )
@@ -328,6 +341,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             404: ApiErrorResponseSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )
@@ -351,6 +365,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             200: LibraryLocationStatusListSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )
@@ -385,6 +400,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             200: LibraryResourceListSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )
