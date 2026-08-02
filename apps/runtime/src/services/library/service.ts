@@ -25,7 +25,7 @@ import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-en
 import { type LibraryCache, libraryCache } from './cache';
 import { scanLibraryInstances } from './discovery';
 import type { ReadLibraryInstance } from './instance-reader';
-import { LibraryReadDeniedError, readLibraryContent } from './read';
+import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
 
 export interface LibraryHostAdapters {
   readonly createPathEnv: (overrides?: {
@@ -92,10 +92,24 @@ export function createLibraryService(
     },
 
     async read(params) {
+      const pathEnv = adapters.createPathEnv({
+        env: params.pathEnv?.env,
+        workspaceRoot: params.pathEnv?.workspaceRoot,
+      });
+      const root = libraryLocationRoot(params.locationId, pathEnv);
+      if (root === null) {
+        return {
+          denied: true,
+          reason: `Library location "${params.locationId}" does not resolve on this machine.`,
+          content: '',
+          truncated: false,
+          sizeBytes: 0,
+        };
+      }
       try {
         const result = await readLibraryContent({
           path: params.path,
-          allowedRoots: params.allowedRoots,
+          root,
           maxBytes: params.maxBytes,
           truncateOversize: params.truncateOversize,
         });

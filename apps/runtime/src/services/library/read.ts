@@ -4,11 +4,13 @@
  * same containment idea as workspace file ops, applied to agent homes.
  */
 
-import { open, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { basename, join, sep } from 'node:path';
-import type { ResourceKind } from '@mangostudio/shared/library';
+import { open, realpath } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
+import type { LibraryLocationId, ResourceKind } from '@mangostudio/shared/library';
+import { getLibraryLocation } from '@mangostudio/shared/library/host';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { RuntimeToolArgumentError } from '../../errors';
-import type { LibraryInstanceReaderFs } from './instance-reader';
+import { isPathWithin, SKILL_ENTRYPOINT } from './instance-reader';
 
 /** Default ceiling for a detail-view content read (hub passes its own when different). */
 export const MAX_LIBRARY_CONTENT_BYTES = 512 * 1024;
@@ -16,8 +18,11 @@ export const MAX_LIBRARY_CONTENT_BYTES = 512 * 1024;
 export interface LibraryReadParams {
   /** Absolute path of the file to read (skill entrypoints are already joined). */
   readonly path: string;
-  /** Absolute roots of the locations this scan was allowed to see. */
-  readonly allowedRoots: readonly string[];
+  /**
+   * Absolute root of the location the path must sit inside, resolved on this
+   * host from its own `PathEnv`.
+   */
+  readonly root: string;
   readonly maxBytes?: number;
   /** When true, oversize files return truncated text instead of refusing. */
   readonly truncateOversize?: boolean;
@@ -39,38 +44,33 @@ export class LibraryReadDeniedError extends Error {
 
 const textDecoder = new TextDecoder();
 
-const nodeFs: LibraryInstanceReaderFs = {
-  readDirectory: (path) => readdir(path, { withFileTypes: true }),
-  readFile,
-  realPath: realpath,
-  async stat(path) {
-    const value = await stat(path);
-    return {
-      size: value.size,
-      mtimeMs: value.mtimeMs,
-      isFile: value.isFile(),
-      isDirectory: value.isDirectory(),
-    };
-  },
-};
-
 /**
  * Builds the absolute content path for a resource instance. Skills are
  * directories; everything else is a single file at the instance path.
  */
-export function libraryContentPath(
-  kind: ResourceKind,
-  instancePath: string,
-  entrypoint = 'SKILL.md'
-): string {
-  return kind === 'skill' ? join(instancePath, entrypoint) : instancePath;
+export function libraryContentPath(kind: ResourceKind, instancePath: string): string {
+  return kind === 'skill' ? join(instancePath, SKILL_ENTRYPOINT) : instancePath;
 }
 
-function isPathWithin(rootPath: string, candidatePath: string): boolean {
-  const caseInsensitive = /^[A-Za-z]:[\\/]/.test(rootPath);
-  const root = caseInsensitive ? rootPath.toLowerCase() : rootPath;
-  const candidate = caseInsensitive ? candidatePath.toLowerCase() : candidatePath;
-  return candidate === root || candidate.startsWith(`${root}${sep}`);
+/**
+ * Directory a read for this location may not leave, resolved from this host's
+ * own `PathEnv`.
+ *
+ * A `single-file` location resolves to the file itself, and a file cannot
+ * contain anything — checking a read against it would accept whatever that name
+ * happens to point at, which is how a symlinked `CLAUDE.md` becomes a read of
+ * `/etc/passwd`. The enclosing agent home is the real boundary, so that is what
+ * single-file layouts are checked against; directory layouts are their own root.
+ *
+ * Null when the location cannot exist here — unsupported platform, or a scope
+ * whose root this `PathEnv` does not carry.
+ */
+export function libraryLocationRoot(locationId: LibraryLocationId, env: PathEnv): string | null {
+  const location = getLibraryLocation(locationId);
+  if (!location) return null;
+  const path = location.resolvePath(env);
+  if (path === null) return null;
+  return location.layout === 'single-file' ? dirname(path) : path;
 }
 
 /**
@@ -126,15 +126,20 @@ async function readBoundedCanonical(
   }
 }
 
+/**
+ * `realPath` is the only seam a caller can swap: the bytes are read from the
+ * open descriptor of the path this resolves to, so faking anything below it
+ * would mean the containment check no longer described the read.
+ */
 export async function readLibraryContent(
   params: LibraryReadParams,
-  fs: LibraryInstanceReaderFs = nodeFs
+  realPath: (path: string) => Promise<string> = realpath
 ): Promise<LibraryReadResult> {
   if (typeof params.path !== 'string' || params.path.length === 0) {
     throw new RuntimeToolArgumentError('library.read requires a non-empty path.');
   }
-  if (!Array.isArray(params.allowedRoots) || params.allowedRoots.length === 0) {
-    throw new RuntimeToolArgumentError('library.read requires at least one allowed root.');
+  if (typeof params.root !== 'string' || params.root.length === 0) {
+    throw new RuntimeToolArgumentError('library.read requires a location root.');
   }
   const maxBytes = params.maxBytes ?? MAX_LIBRARY_CONTENT_BYTES;
   if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
@@ -144,22 +149,23 @@ export async function readLibraryContent(
 
   let canonicalPath: string;
   try {
-    canonicalPath = await fs.realPath(params.path);
+    canonicalPath = await realPath(params.path);
   } catch {
     throw new LibraryReadDeniedError(`Library path "${params.path}" is not readable.`);
   }
 
-  const allowedCanonical: string[] = [];
-  for (const root of params.allowedRoots) {
-    try {
-      allowedCanonical.push(await fs.realPath(root));
-    } catch {
-      // A missing root cannot contain anything; skip it.
-    }
-  }
-  if (!allowedCanonical.some((root) => isPathWithin(root, canonicalPath))) {
+  let canonicalRoot: string;
+  try {
+    canonicalRoot = await realPath(params.root);
+  } catch {
+    // A root that does not resolve cannot contain anything.
     throw new LibraryReadDeniedError(
-      `Library path "${params.path}" is outside every registered location.`
+      `Library path "${params.path}" is outside its registered location.`
+    );
+  }
+  if (!isPathWithin(canonicalRoot, canonicalPath)) {
+    throw new LibraryReadDeniedError(
+      `Library path "${params.path}" is outside its registered location.`
     );
   }
 

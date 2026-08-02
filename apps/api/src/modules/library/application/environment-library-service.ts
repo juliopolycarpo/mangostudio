@@ -74,7 +74,6 @@ interface CacheEntry {
   readonly client: RuntimeClient;
   readonly resources: LibraryResource[];
   readonly environmentId: string;
-  readonly signature: string;
 }
 
 export interface EnvironmentLibraryServiceOptions {
@@ -82,6 +81,25 @@ export interface EnvironmentLibraryServiceOptions {
   readonly now?: () => number;
   readonly cacheTtlMs?: number;
   readonly requestTimeoutMs?: number;
+}
+
+/**
+ * Nothing expires an entry on its own, and every part of the signature is
+ * caller-supplied — user, environment, workspace root, kinds, settings — so an
+ * unbounded map would hold one whole `LibraryResource[]` matrix per combination
+ * for the life of the process. Insertion order is the eviction order; losing the
+ * oldest entry costs one rescan.
+ */
+const MAX_CACHE_ENTRIES = 64;
+
+function setBounded<K, V>(entries: Map<K, V>, key: K, value: V, maxEntries: number): void {
+  entries.delete(key);
+  entries.set(key, value);
+  while (entries.size > maxEntries) {
+    const oldest = entries.keys().next();
+    if (oldest.done) break;
+    entries.delete(oldest.value);
+  }
 }
 
 const DEFAULT_CACHE_TTL_MS = 2_000;
@@ -132,12 +150,7 @@ export function createEnvironmentLibraryService(
 
     if (!force) {
       const cached = cache.get(signature);
-      if (
-        cached &&
-        cached.client === client &&
-        now() - cached.scannedAtMs < cacheTtlMs &&
-        cached.signature === signature
-      ) {
+      if (cached && cached.client === client && now() - cached.scannedAtMs < cacheTtlMs) {
         return cached.resources;
       }
     } else {
@@ -161,13 +174,12 @@ export function createEnvironmentLibraryService(
       );
       const resources = groupLibraryScanEntries(result.entries as RuntimeLibraryScanEntry[]);
       if ((scanGeneration.get(signature) ?? 0) === generationAtStart) {
-        cache.set(signature, {
-          scannedAtMs: now(),
-          client,
-          resources,
-          environmentId: scope.environmentId,
+        setBounded(
+          cache,
           signature,
-        });
+          { scannedAtMs: now(), client, resources, environmentId: scope.environmentId },
+          MAX_CACHE_ENTRIES
+        );
       }
       return resources;
     })().finally(() => {
@@ -181,15 +193,15 @@ export function createEnvironmentLibraryService(
   return {
     discover,
 
-    async listLocations(db, scope, workspaceRoot) {
+    // Location health is resolved entirely on the target machine, so no hub
+    // settings read stands between the request and the runtime.
+    async listLocations(_db, scope, workspaceRoot) {
       const client = await resolveClient(scope);
       if (!client.manifest.features.library) {
         throw new LibraryFeatureUnavailableError(
           `Environment "${scope.environmentId}" does not advertise library discovery.`
         );
       }
-      // Ensure settings load fails closed for a missing user the same way discover does.
-      await getAppSettings(db, scope.userId);
       const result = await client.library.locations(
         { pathEnv: pathEnvParams(scope, workspaceRoot) },
         { timeoutMs: requestTimeoutMs }
@@ -197,9 +209,11 @@ export function createEnvironmentLibraryService(
       return [...result.locations];
     },
 
-    async readContent(db, scope, resource, locationId, _workspaceRoot) {
+    // The instance already carries the absolute path the scan found, so this
+    // reads no hub settings: the caller's `discover` is what applied them.
+    async readContent(_db, scope, resource, locationId, workspaceRoot) {
       const instance = resource.instances.find((candidate) => candidate.locationId === locationId);
-      if (!instance?.valid) return null;
+      if (!instance) return null;
 
       const client = await resolveClient(scope);
       if (!client.manifest.features.library) {
@@ -208,18 +222,15 @@ export function createEnvironmentLibraryService(
         );
       }
 
-      // Fail closed for a missing user the same way discover does.
-      await getAppSettings(db, scope.userId);
-
-      // Containment is against the scanned instance path itself — hub-resolved
-      // location roots can disagree with a remote machine's layout, while the
-      // instance path came from that machine's scan.
-      const allowedRoots = [instance.path];
+      // The location is named, not resolved: the runtime turns it into a root
+      // against its own layout, so the hub never guesses where another
+      // machine's agent homes are.
       const contentPath = libraryContentPath(resource.ref.kind, instance.path);
       const result = await client.library.read(
         {
           path: contentPath,
-          allowedRoots,
+          locationId,
+          pathEnv: pathEnvParams(scope, workspaceRoot),
           maxBytes: MAX_LIBRARY_CONTENT_BYTES,
           truncateOversize: true,
         },
@@ -239,13 +250,19 @@ export function createEnvironmentLibraryService(
       if (!environmentId) {
         cache.clear();
         inflight.clear();
+        scanGeneration.clear();
         return;
       }
       for (const [key, entry] of [...cache.entries()]) {
         if (entry.environmentId === environmentId) cache.delete(key);
       }
+      // Signature layout is `userId SEP environmentId SEP …`, so index 1 is the
+      // environment for both of the by-key maps.
       for (const key of [...inflight.keys()]) {
         if (key.split(SCOPE_SEP)[1] === environmentId) inflight.delete(key);
+      }
+      for (const key of [...scanGeneration.keys()]) {
+        if (key.split(SCOPE_SEP)[1] === environmentId) scanGeneration.delete(key);
       }
     },
   };

@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 describe('library.read containment', () => {
-  it('throws when the path escapes the registered roots', async () => {
+  it('throws when the path escapes the location root', async () => {
     const inside = join(root, 'skills');
     const outside = join(root, 'outside.txt');
     mkdirSync(inside);
@@ -40,12 +40,12 @@ describe('library.read containment', () => {
     await expect(
       readLibraryContent({
         path: outside,
-        allowedRoots: [inside],
+        root: inside,
       })
     ).rejects.toMatchObject({ code: 'LIBRARY_READ_DENIED' });
   });
 
-  it('reads a file that sits inside an allowed root', async () => {
+  it('reads a file that sits inside the location root', async () => {
     const inside = join(root, 'skills');
     const file = join(inside, 'ok.md');
     mkdirSync(inside);
@@ -53,12 +53,12 @@ describe('library.read containment', () => {
 
     const result = await readLibraryContent({
       path: file,
-      allowedRoots: [inside],
+      root: inside,
     });
     expect(result).toEqual({ content: 'hello', truncated: false, sizeBytes: 5 });
   });
 
-  it('denies a symlink whose realpath escapes the allowed roots', async () => {
+  it('denies a symlink whose realpath escapes the location root', async () => {
     const inside = join(root, 'skills');
     const outside = join(root, 'secret.txt');
     mkdirSync(inside);
@@ -69,7 +69,7 @@ describe('library.read containment', () => {
     await expect(
       readLibraryContent({
         path: link,
-        allowedRoots: [inside],
+        root: inside,
       })
     ).rejects.toMatchObject({ code: 'LIBRARY_READ_DENIED' });
   });
@@ -84,7 +84,7 @@ describe('library.read containment', () => {
 
     const result = await readLibraryContent({
       path: link,
-      allowedRoots: [inside],
+      root: inside,
     });
     expect(result).toEqual({ content: 'canonical', truncated: false, sizeBytes: 9 });
   });
@@ -97,7 +97,7 @@ describe('library.read containment', () => {
 
     const result = await readLibraryContent({
       path: file,
-      allowedRoots: [inside],
+      root: inside,
       maxBytes: 4,
       truncateOversize: true,
     });
@@ -113,10 +113,71 @@ describe('library.read containment', () => {
     await expect(
       readLibraryContent({
         path: file,
-        allowedRoots: [inside],
+        root: inside,
         maxBytes: 4,
       })
     ).rejects.toMatchObject({ code: 'LIBRARY_READ_DENIED' });
+  });
+});
+
+/**
+ * The hub names a location; the root comes from this host. A single-file
+ * location resolves to the file itself, so its boundary has to be the agent
+ * home around it — otherwise every symlinked `CLAUDE.md` passes containment
+ * against its own target.
+ */
+describe('library.read resolves its own root from the location', () => {
+  const serviceWithHome = (homeDir: string) =>
+    createLibraryService({
+      createPathEnv: () => ({ platform: process.platform, homeDir, env: {} }),
+      cache: new LibraryCache(),
+      describeLocations: () => [],
+      now: () => 0,
+    });
+
+  it('denies a single-file instance symlinked outside its agent home', async () => {
+    const claudeHome = join(root, '.claude');
+    mkdirSync(claudeHome, { recursive: true });
+    const outside = join(root, 'passwd');
+    writeFileSync(outside, 'root:x:0:0');
+    const instructions = join(claudeHome, 'CLAUDE.md');
+    symlinkSync(outside, instructions);
+
+    const result = await serviceWithHome(root).read({
+      path: instructions,
+      locationId: 'claude-instructions',
+    });
+    expect(result.denied).toBe(true);
+    expect(result.content).toBe('');
+  });
+
+  it('reads a single-file instance symlinked within its agent home', async () => {
+    const claudeHome = join(root, '.claude');
+    mkdirSync(claudeHome, { recursive: true });
+    const target = join(claudeHome, 'shared.md');
+    writeFileSync(target, 'shared');
+    const instructions = join(claudeHome, 'CLAUDE.md');
+    symlinkSync(target, instructions);
+
+    const result = await serviceWithHome(root).read({
+      path: instructions,
+      locationId: 'claude-instructions',
+    });
+    expect(result.denied).toBeUndefined();
+    expect(result.content).toBe('shared');
+  });
+
+  it('denies a path that names a location it does not sit under', async () => {
+    const claudeHome = join(root, '.claude');
+    mkdirSync(claudeHome, { recursive: true });
+    const elsewhere = join(root, 'elsewhere.md');
+    writeFileSync(elsewhere, 'nope');
+
+    const result = await serviceWithHome(root).read({
+      path: elsewhere,
+      locationId: 'claude-instructions',
+    });
+    expect(result.denied).toBe(true);
   });
 });
 

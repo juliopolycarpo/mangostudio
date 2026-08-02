@@ -96,10 +96,10 @@ describe('createEnvironmentLibraryService', () => {
     expect(scans).toEqual([LOCAL_ENVIRONMENT_ID, 'remote-a']);
   });
 
-  it('scopes content reads to the scanned instance path as the allowed root', async () => {
+  it('names the location for a content read and lets the runtime resolve its root', async () => {
     const userId = 'library-env-read-roots-user';
     const instancePath = '/tmp/remote-b/skills/gh';
-    let readParams: { path: string; allowedRoots: readonly string[] } | undefined;
+    let readParams: { path: string; locationId: string } | undefined;
 
     const resource = {
       ref: { kind: 'skill' as const, slug: 'gh' },
@@ -127,7 +127,7 @@ describe('createEnvironmentLibraryService', () => {
       manifest: makeManifest('remote-b'),
       library: {
         scan: () => Promise.resolve({ entries: [] }),
-        read: (params: { path: string; allowedRoots: readonly string[] }) => {
+        read: (params: { path: string; locationId: string }) => {
           readParams = params;
           return Promise.resolve({
             content: '# Skill',
@@ -152,7 +152,52 @@ describe('createEnvironmentLibraryService', () => {
     );
 
     expect(content?.content).toBe('# Skill');
-    expect(readParams?.allowedRoots).toEqual([instancePath]);
+    expect(readParams?.locationId).toBe('mango-skills');
     expect(readParams?.path).toBe(`${instancePath}/SKILL.md`);
+  });
+
+  // Parity with the pre-relocation route: a scan can report an instance whose
+  // metadata is invalid and whose file is still perfectly readable, and the
+  // detail view is where a user goes to find out why it is flagged.
+  it('serves content for an instance the scan flagged invalid', async () => {
+    const userId = 'library-env-invalid-read-user';
+    const instancePath = '/tmp/remote-c/instructions/AGENTS.md';
+
+    const resource = {
+      ref: { kind: 'instruction' as const, slug: 'agents' },
+      key: 'instruction:agents',
+      instances: [
+        {
+          locationId: 'mango-instructions' as const,
+          path: instancePath,
+          modifiedAtMs: 1,
+          format: 'markdown-plain' as const,
+          valid: false as const,
+          invalidReason: 'invalid-metadata' as const,
+          contentHash: 'hash',
+          sizeBytes: 1,
+        },
+      ],
+      coverage: [],
+      divergence: 'single' as const,
+      whitespaceOnlyDivergence: false,
+      contentGroups: [],
+    };
+
+    const client = {
+      manifest: makeManifest('remote-c'),
+      library: {
+        scan: () => Promise.resolve({ entries: [] }),
+        read: () =>
+          Promise.resolve({ content: '# Agents', truncated: false, sizeBytes: 8, denied: false }),
+        locations: () => Promise.resolve({ locations: [] }),
+      },
+    } as unknown as RuntimeClient;
+
+    const content = await createEnvironmentLibraryService({
+      resolveClient: () => Promise.resolve(client),
+    }).readContent(getDb(), { userId, environmentId: 'remote-c' }, resource, 'mango-instructions');
+
+    expect(content?.content).toBe('# Agents');
   });
 });

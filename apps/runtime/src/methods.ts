@@ -675,7 +675,15 @@ export interface RuntimeLibraryScanResult {
 
 export interface RuntimeLibraryReadParams {
   readonly path: string;
-  readonly allowedRoots: readonly string[];
+  /**
+   * Location the scan found this instance in. The root that contains the read
+   * is resolved here, from this host's own `PathEnv` — the hub names *which*
+   * location, never where it is. A hub-supplied root would be a guess about
+   * someone else's filesystem, and a root derived from the instance path
+   * contains that path by construction, which is no containment at all.
+   */
+  readonly locationId: LibraryLocationId;
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
   readonly maxBytes?: number;
   readonly truncateOversize?: boolean;
 }
@@ -684,7 +692,7 @@ export interface RuntimeLibraryReadResult {
   readonly content: string;
   readonly truncated: boolean;
   readonly sizeBytes: number;
-  /** Set when the path is outside every allowed root or otherwise refused. */
+  /** Set when the path is outside the location root or otherwise refused. */
   readonly denied?: true;
   readonly reason?: string;
 }
