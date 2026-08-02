@@ -78,9 +78,18 @@ export interface PropagationApplyDeps {
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<unknown>;
   backup: BackupStoreDeps;
   /**
-   * When set, skips the default RuntimeClient path and runs prepared writes
-   * through this callback (tests inject transport failures here).
+   * Which process performs the writes. `runtime` — the default — sends them
+   * over the protocol; `in-process` runs the engine here against the injected
+   * fs seams, which is what the parity suites exercise.
+   *
+   * Stated rather than inferred. This used to be decided by sniffing the
+   * options bag for anything test-shaped, so a caller overriding `backup` to
+   * point at a different backup root — the shape `describeBackupUsage` already
+   * accepts — silently stopped using the runtime, and a suite could look like
+   * it covered the RPC path while never touching it.
    */
+  writeEngine: 'runtime' | 'in-process';
+  /** Stands in for the RuntimeClient on the `runtime` engine; tests inject transport failures. */
   runtimeApply?: (params: RuntimeLibraryApplyParams) => Promise<PropagationApply>;
 }
 
@@ -115,19 +124,9 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
     adapt: overrides.adapt ?? ((input, strategy) => defaultAdapterRegistry.adapt(input, strategy)),
     acknowledge: overrides.acknowledge ?? acknowledgeDivergence,
     backup: overrides.backup ?? defaultBackupStoreDeps,
+    writeEngine: overrides.writeEngine ?? 'runtime',
     ...(overrides.runtimeApply && { runtimeApply: overrides.runtimeApply }),
   };
-}
-
-/** True when the caller injected FS seams — unit/integration tests bypass RPC. */
-function usesInjectedWriteEngine(overrides: Partial<PropagationApplyDeps>): boolean {
-  return (
-    overrides.writeDirectory !== undefined ||
-    overrides.writeFile !== undefined ||
-    overrides.hashAt !== undefined ||
-    overrides.backup !== undefined ||
-    overrides.runtimeApply !== undefined
-  );
 }
 
 export function applyLibraryPropagation(
@@ -135,14 +134,13 @@ export function applyLibraryPropagation(
   request: PropagationApplyRequest,
   overrides: Partial<PropagationApplyDeps> = {}
 ): Promise<PropagationApply> {
-  return serializeLibraryWrite(() => runApply(userId, request, resolveDeps(overrides), overrides));
+  return serializeLibraryWrite(() => runApply(userId, request, resolveDeps(overrides)));
 }
 
 async function runApply(
   userId: string,
   request: PropagationApplyRequest,
-  deps: PropagationApplyDeps,
-  overrides: Partial<PropagationApplyDeps>
+  deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
   try {
     assertRequestedProfileId(request.profileId, { userId });
@@ -184,7 +182,7 @@ async function runApply(
     return { partial: false, applied: [], skipped: plan.skipped, failed };
   }
 
-  const writeResult = await runPreparedWrites(userId, prepared, plan.skipped, env, deps, overrides);
+  const writeResult = await runPreparedWrites(userId, prepared, plan.skipped, env, deps);
 
   if (writeResult.failed.length === 0) {
     for (const acknowledgement of plan.acknowledgements) {
@@ -206,14 +204,13 @@ async function runPreparedWrites(
   prepared: readonly PreparedPropagationOperation[],
   skipped: readonly PropagationSkipped[],
   env: PathEnv,
-  deps: PropagationApplyDeps,
-  overrides: Partial<PropagationApplyDeps>
+  deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
   if (prepared.length === 0) {
     return { partial: false, applied: [], skipped: [...skipped], failed: [] };
   }
 
-  const written = await runWriteEngine(userId, prepared, env, deps, overrides);
+  const written = await runWriteEngine(userId, prepared, env, deps);
   return { ...written, skipped: [...skipped, ...written.skipped] };
 }
 
@@ -221,13 +218,9 @@ function runWriteEngine(
   userId: string,
   prepared: readonly PreparedPropagationOperation[],
   env: PathEnv,
-  deps: PropagationApplyDeps,
-  overrides: Partial<PropagationApplyDeps>
+  deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
-  if (usesInjectedWriteEngine(overrides)) {
-    if (overrides.runtimeApply) {
-      return overrides.runtimeApply(toRuntimeApplyParams(prepared, env, deps.backup));
-    }
+  if (deps.writeEngine === 'in-process') {
     const engineDeps: PropagationWriteEngineDeps = {
       writeDirectory: deps.writeDirectory,
       writeFile: deps.writeFile,
@@ -246,8 +239,8 @@ function runWriteEngine(
     );
   }
 
-  // Production Local path: writes run on the runtime behind RPC.
-  return runtimeApply(userId, toRuntimeApplyParams(prepared, env, deps.backup));
+  const params = toRuntimeApplyParams(prepared, env, deps.backup);
+  return deps.runtimeApply ? deps.runtimeApply(params) : runtimeApply(userId, params);
 }
 
 async function runtimeApply(
@@ -801,10 +794,9 @@ export interface PropagationUndoDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   pathEnv(): PathEnv;
   backup: BackupStoreDeps;
-  /**
-   * When set, skips the default RuntimeClient undo path (tests inject transport
-   * failures here).
-   */
+  /** Which process performs the restore; see `PropagationApplyDeps.writeEngine`. */
+  writeEngine: 'runtime' | 'in-process';
+  /** Stands in for the RuntimeClient on the `runtime` engine. */
   runtimeUndo?: (params: RuntimeLibraryUndoParams) => Promise<PropagationUndo>;
 }
 
@@ -836,30 +828,26 @@ async function runUndo(
     hashAt: overrides.hashAt ?? hashResourceAt,
     pathEnv: overrides.pathEnv ?? (() => createLibraryPathEnv()),
     backup: overrides.backup ?? defaultBackupStoreDeps,
+    writeEngine: overrides.writeEngine ?? 'runtime',
     ...(overrides.runtimeUndo && { runtimeUndo: overrides.runtimeUndo }),
   };
-
-  const injected =
-    overrides.hashAt !== undefined ||
-    overrides.backup !== undefined ||
-    overrides.runtimeUndo !== undefined;
 
   const env = deps.pathEnv();
 
   try {
-    if (injected) {
-      if (overrides.runtimeUndo) {
-        return await overrides.runtimeUndo({
-          backupRoot: deps.backup.backupDir(),
-          backupId,
-          pathEnv: writePathEnvParams(env),
-        });
-      }
+    if (deps.writeEngine === 'in-process') {
       return await executeLibraryUndo(
         { backupRoot: deps.backup.backupDir(), backupId, pathEnv: env },
         { hashAt: deps.hashAt, backup: deps.backup }
       );
     }
+
+    const params = {
+      backupRoot: deps.backup.backupDir(),
+      backupId,
+      pathEnv: writePathEnvParams(env),
+    };
+    if (deps.runtimeUndo) return await deps.runtimeUndo(params);
 
     // Never defaulted: the connection cache is keyed by user, so a stand-in id
     // would open a second Local runtime host owned by a user that does not
@@ -868,10 +856,7 @@ async function runUndo(
       throw new TypeError('undoLibraryPropagation needs a userId to reach the Local runtime.');
     }
     const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
-    return await client.library.undo(
-      { backupRoot: deps.backup.backupDir(), backupId, pathEnv: writePathEnvParams(env) },
-      { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
-    );
+    return await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
   } catch (error) {
     // Two shapes, one condition: the in-process engine throws the class, and
     // the RPC path flattens it to code INTERNAL carrying the kind in `details`.

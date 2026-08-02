@@ -188,6 +188,10 @@ function applyDeps(overrides: Partial<PropagationApplyDeps> = {}): Partial<Propa
   return {
     preview: (_userId, request) => preview(request),
     pathEnv,
+    // The parity bar: these suites drive the write engine directly against a
+    // temp home. Tests that mean to exercise the protocol say so by passing
+    // `writeEngine: 'runtime'` with a `runtimeApply` stub.
+    writeEngine: 'in-process',
     backup: backupDeps(),
     writeDirectory: (input) => writeDirectoryResource(input, writerOverrides()),
     writeFile: (input) => writeFileResource(input, writerOverrides()),
@@ -448,6 +452,7 @@ describe('propagation undo', () => {
     const undone = await undoLibraryPropagation(applied.backupId ?? '', {
       backup: backupDeps(),
       pathEnv,
+      writeEngine: 'in-process',
     });
 
     expect(undone.restored.map((item) => item.locationId)).toEqual(['claude-skills']);
@@ -475,6 +480,7 @@ describe('propagation undo', () => {
     const undone = await undoLibraryPropagation(applied.backupId ?? '', {
       backup: backupDeps(),
       pathEnv,
+      writeEngine: 'in-process',
     });
 
     expect(undone.restored).toEqual([]);
@@ -484,7 +490,11 @@ describe('propagation undo', () => {
 
   it('reports a backup that retention has already discarded', async () => {
     await expect(
-      undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', { backup: backupDeps(), pathEnv })
+      undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', {
+        backup: backupDeps(),
+        pathEnv,
+        writeEngine: 'in-process',
+      })
     ).rejects.toMatchObject({ status: 404 });
   });
 });
@@ -527,6 +537,7 @@ describe('propagation apply — file-backed resources', () => {
       userId(),
       toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'claude-instructions'))]),
       applyDeps({
+        writeEngine: 'runtime',
         runtimeApply: (params) => {
           sent = params;
           return Promise.resolve({ partial: false, applied: [], skipped: [], failed: [] });

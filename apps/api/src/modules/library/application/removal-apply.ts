@@ -49,10 +49,9 @@ export interface RemovalApplyDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   backup: BackupStoreDeps;
   treeFs: TreeRemovalFs;
-  /**
-   * When set, skips the default RuntimeClient path (tests inject transport
-   * failures here).
-   */
+  /** Which process performs the writes; see `PropagationApplyDeps.writeEngine`. */
+  writeEngine: 'runtime' | 'in-process';
+  /** Stands in for the RuntimeClient on the `runtime` engine. */
   runtimeRemove?: (params: RuntimeLibraryRemoveParams) => Promise<RemovalApply>;
 }
 
@@ -63,17 +62,9 @@ function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
     hashAt: overrides.hashAt ?? hashResourceAt,
     backup: overrides.backup ?? defaultBackupStoreDeps,
     treeFs: overrides.treeFs ?? nodeTreeRemovalFs,
+    writeEngine: overrides.writeEngine ?? 'runtime',
     ...(overrides.runtimeRemove && { runtimeRemove: overrides.runtimeRemove }),
   };
-}
-
-function usesInjectedWriteEngine(overrides: Partial<RemovalApplyDeps>): boolean {
-  return (
-    overrides.hashAt !== undefined ||
-    overrides.backup !== undefined ||
-    overrides.treeFs !== undefined ||
-    overrides.runtimeRemove !== undefined
-  );
 }
 
 export function applyLibraryRemoval(
@@ -81,16 +72,13 @@ export function applyLibraryRemoval(
   request: RemovalApplyRequest,
   overrides: Partial<RemovalApplyDeps> = {}
 ): Promise<RemovalApply> {
-  return serializeLibraryWrite(() =>
-    runRemoval(userId, request, resolveDeps(overrides), overrides)
-  );
+  return serializeLibraryWrite(() => runRemoval(userId, request, resolveDeps(overrides)));
 }
 
 async function runRemoval(
   userId: string,
   request: RemovalApplyRequest,
-  deps: RemovalApplyDeps,
-  overrides: Partial<RemovalApplyDeps>
+  deps: RemovalApplyDeps
 ): Promise<RemovalApply> {
   try {
     assertRequestedProfileId(request.profileId, { userId });
@@ -131,7 +119,7 @@ async function runRemoval(
   // The plan's own `kept` entries are merged here rather than shipped and
   // echoed: the hub decided them, and the engine returns only what it kept
   // itself — rolled back, or never attempted.
-  const removalResult = await runWriteEngine(userId, operations, plan, env, deps, overrides);
+  const removalResult = await runWriteEngine(userId, operations, plan, env, deps);
   return { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
 }
 
@@ -140,13 +128,9 @@ function runWriteEngine(
   operations: readonly PreparedRemovalOperation[],
   plan: RemovalPlan,
   env: PathEnv,
-  deps: RemovalApplyDeps,
-  overrides: Partial<RemovalApplyDeps>
+  deps: RemovalApplyDeps
 ): Promise<RemovalApply> {
-  if (usesInjectedWriteEngine(overrides)) {
-    if (overrides.runtimeRemove) {
-      return overrides.runtimeRemove(toRuntimeRemoveParams(operations, plan, env, deps.backup));
-    }
+  if (deps.writeEngine === 'in-process') {
     const engineDeps: RemovalWriteEngineDeps = {
       hashAt: deps.hashAt,
       backup: deps.backup,
@@ -165,7 +149,8 @@ function runWriteEngine(
     );
   }
 
-  return runtimeRemove(userId, toRuntimeRemoveParams(operations, plan, env, deps.backup));
+  const params = toRuntimeRemoveParams(operations, plan, env, deps.backup);
+  return deps.runtimeRemove ? deps.runtimeRemove(params) : runtimeRemove(userId, params);
 }
 
 async function runtimeRemove(

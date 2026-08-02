@@ -176,15 +176,6 @@ describe('library.apply transport failures', () => {
               'Environment "local" is unavailable; the next connection attempt is allowed in 5s.'
             )
           ),
-        // Force the injected-engine branch without calling real writers.
-        backup: {
-          fs: {} as never,
-          backupDir: () => '/tmp/backups',
-          retentionCount: () => 10,
-          retentionBytes: () => 1024,
-          now: () => new Date(),
-          randomSuffix: () => 'x',
-        },
       })
     ).rejects.toBeInstanceOf(RuntimeRemoteError);
 

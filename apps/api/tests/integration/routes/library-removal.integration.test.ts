@@ -124,6 +124,9 @@ function applyRemoval(request: RemovalApplyRequest, userId: string = TEST_USER.i
     preview: (previewUserId, previewRequest) =>
       previewRemoval(previewRequest.locationIds, previewUserId),
     pathEnv: libraryPathEnv,
+    // Drives the engine directly against this suite's temp home; the runtime
+    // engine would resolve locations against the real one.
+    writeEngine: 'in-process',
     backup: backupDeps(),
   });
 }
@@ -243,6 +246,7 @@ describe('library removal over real locations', () => {
     const undone = await undoLibraryPropagation(result.backupId ?? '', {
       backup: backupDeps(),
       pathEnv: libraryPathEnv,
+      writeEngine: 'in-process',
     });
 
     expect(undone.restored).toHaveLength(4);
