@@ -162,8 +162,9 @@ Open these first:
   (locations, targets, per-kind read precedence; path resolution is pure over
   `PathEnv`)
 - `apps/runtime/src/services/library/` (scan + contained read + settings source
-  reads + byte caps — `library.scan` / `library.read` / `library.locations` /
-  `library.settings-sources`; the engine that used to live under
+  reads + byte caps + write engines — `library.scan` / `library.read` /
+  `library.locations` / `library.settings-sources` / `library.apply` /
+  `library.remove` / `library.undo`; the FS engines that used to live under
   `apps/api/.../infrastructure`)
 - `apps/api/src/modules/library/application/library-discovery.ts` (groups a scan
   result; coverage and divergence stay hub-side)
@@ -175,7 +176,11 @@ Open these first:
 - `apps/api/src/modules/library/application/propagation-preview.ts` (source
   groups, outcomes)
 - `apps/api/src/modules/library/application/propagation-apply.ts` (token,
-  backup, verify, undo — still hub-local until write engines move)
+  planning, adapters, acknowledgements — FS writes go through runtime
+  `library.apply` / `library.undo` with an explicit `backupRoot`; injected FS
+  deps keep unit tests in-process)
+- `apps/api/src/modules/library/application/removal-apply.ts` (token, planning,
+  last-copy acknowledgement — FS removals go through `library.remove`)
 - `apps/api/src/modules/library/application/adapters/` (format conversion
   strategies)
 - `apps/api/src/modules/library/application/settings-inspection.ts` (pure: turns
@@ -220,9 +225,15 @@ otherwise a symlinked `CLAUDE.md` passes containment against its own target.
 `library.settings-sources` opens settings paths with `O_NOFOLLOW` for the same
 reason, and never touches a target's credential files.
 
-Two discovery caches coexist until the write engines move (017): the matrix
-reads through `environmentLibraryService`, while `discoverLibraryResourcesFromSettings`
-still serves the hub-local skill adapter and the propagation/removal previews.
+**Checkpoint contrast:** checkpoints stream bytes to hub-owned blobs; library
+backups stay on the machine that owned the file. The runtime holds durable
+backup data under a hub-supplied `backupRoot` — the exception to "runtime holds
+no durable user data". Retention policy is hub config; the path is a method
+parameter, never hardcoded on the runtime.
+
+Two discovery caches coexist: the matrix reads through
+`environmentLibraryService`, while `discoverLibraryResourcesFromSettings` still
+serves the hub-local skill adapter and the propagation/removal previews.
 `resetSkillsCache()` drops both.
 
 Every location carries a `scope`, and every one of them is `home` today. The
