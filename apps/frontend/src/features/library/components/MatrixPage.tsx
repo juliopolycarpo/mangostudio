@@ -6,6 +6,7 @@
  * of work, and the wizard opens once for the whole set.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ResourceKind } from '@mangostudio/shared/library';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
@@ -25,6 +26,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
   const { t } = useI18n();
   const l = t.library;
   const scope = useEnvironmentScope();
+  const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;
   const matrix = useLibraryMatrix(kind, scope.environmentId);
   const [wizardKeys, setWizardKeys] = useState<readonly string[] | null>(null);
 
@@ -106,15 +108,21 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
               <Button variant="ghost" size="sm" onClick={matrix.clearSelection}>
                 {l.matrix.clearSelection}
               </Button>
-              {/* Offered even with nothing to propagate to: the wizard is where
-                  that answer is explained, and a dead button explains nothing. */}
-              <Button
-                size="sm"
-                onClick={() => setWizardKeys([...matrix.selected])}
-                disabled={!candidates.isResolved}
-              >
-                {l.matrix.propagate}
-              </Button>
+              {/* Writes stay hub-local for now — remote preview/apply has no
+                  environmentId seam yet, so Propagate must not open there. */}
+              {isLocal ? (
+                <Button
+                  size="sm"
+                  onClick={() => setWizardKeys([...matrix.selected])}
+                  disabled={!candidates.isResolved}
+                >
+                  {l.matrix.propagate}
+                </Button>
+              ) : (
+                <span className="text-on-surface-variant text-xs" data-testid="writes-local-only">
+                  {l.matrix.writesLocalOnly}
+                </span>
+              )}
             </>
           )}
         </div>
@@ -144,7 +152,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         />
       ) : null}
 
-      {wizardKeys && wizardKeys.length > 0 && (
+      {isLocal && wizardKeys && wizardKeys.length > 0 && (
         <PropagationWizard
           resourceKeys={wizardKeys}
           locationIds={candidates.locationIds}

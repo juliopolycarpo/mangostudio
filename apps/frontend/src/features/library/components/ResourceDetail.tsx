@@ -7,6 +7,7 @@
  * version is frequently the one held in only one place.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/shared/library';
 import { useQueries } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -35,6 +36,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
   const { t, locale } = useI18n();
   const l = t.library;
   const scope = useEnvironmentScope();
+  const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;
   const [comparing, setComparing] = useState(false);
   const [propagating, setPropagating] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -117,7 +119,11 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         <div className="min-w-0 space-y-1">
           <Link
             to={kindTab(resource)}
-            search={scope.environmentId === 'local' ? {} : { environmentId: scope.environmentId }}
+            search={
+              scope.environmentId === LOCAL_ENVIRONMENT_ID
+                ? {}
+                : { environmentId: scope.environmentId }
+            }
             className="inline-flex items-center gap-1.5 text-on-surface-variant text-xs hover:text-on-surface"
           >
             <ArrowLeft size={12} />
@@ -128,21 +134,33 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
             {`${l.kinds[resource.ref.kind]} · ${l.divergence[resource.divergence]}`}
           </p>
         </div>
-        {/* Both are offered even with nowhere to act: the wizards are where that
-            answer is explained, and hiding a button explains nothing. */}
+        {/* Writes stay hub-local for now — remote preview/apply has no
+            environmentId seam yet, so these wizards must not open there. */}
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setRemoving(true)}
-            disabled={!candidates.isResolved}
-            data-testid="remove-resource"
-          >
-            {l.detail.remove}
-          </Button>
-          <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
-            {l.detail.propagate}
-          </Button>
+          {isLocal ? (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setRemoving(true)}
+                disabled={!candidates.isResolved}
+                data-testid="remove-resource"
+              >
+                {l.detail.remove}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setPropagating(true)}
+                disabled={!candidates.isResolved}
+              >
+                {l.detail.propagate}
+              </Button>
+            </>
+          ) : (
+            <span className="text-on-surface-variant text-xs" data-testid="writes-local-only">
+              {l.detail.writesLocalOnly}
+            </span>
+          )}
         </div>
       </header>
 
@@ -262,7 +280,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         {targetsQuery.isError && <p className="text-[11px] text-error">{l.matrix.loadError}</p>}
       </section>
 
-      {propagating && (
+      {isLocal && propagating && (
         <PropagationWizard
           resourceKeys={[resource.key]}
           locationIds={candidates.locationIds}
@@ -270,7 +288,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         />
       )}
 
-      {removing && (
+      {isLocal && removing && (
         <RemovalWizard
           resourceKeys={[resource.key]}
           locationIds={candidates.locationIds}

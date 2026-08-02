@@ -8,6 +8,7 @@
  * than a thrown error the UI would report as a generic failure.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   LibraryResource,
@@ -51,7 +52,7 @@ export async function rescanLibrary(
   const { data, error } = await client.api.library.rescan.post(undefined, {
     query: {
       force: force ? 'true' : 'false',
-      ...(environmentId && environmentId !== 'local' ? { environmentId } : {}),
+      ...(environmentId && environmentId !== LOCAL_ENVIRONMENT_ID ? { environmentId } : {}),
     },
   });
   if (error) throw new ApiError(error.value);
