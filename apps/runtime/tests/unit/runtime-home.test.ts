@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
   bootstrapServeToken,
   readPairingToken,
   readRuntimeSlotConfig,
+  readRuntimeSlotState,
   readServeToken,
+  resolveRuntimeSlot,
+  resolveRuntimeSource,
   runtimeSlotDir,
   writePairingToken,
   writeRuntimeSlotConfig,
@@ -25,6 +29,16 @@ async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   return { MANGO_HOME: home };
 }
 
+async function writeRawConfig(
+  slot: 'host' | 'wsl' | 'remote',
+  contents: string,
+  env: NodeJS.ProcessEnv
+): Promise<void> {
+  const directory = runtimeSlotDir(slot, env);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'runtime.json'), contents);
+}
+
 describe('runtime home', () => {
   it('anchors each slot under the runtime home', async () => {
     const env = await isolatedEnv();
@@ -33,33 +47,88 @@ describe('runtime home', () => {
     expect(runtimeSlotDir('host', env)).toBe(join(env.MANGO_HOME as string, 'runtime', 'host'));
   });
 
-  it('reports an empty slot rather than failing on a missing file', async () => {
+  it('reports the slot default rather than failing on a missing file', async () => {
     const env = await isolatedEnv();
+    const remote = await readRuntimeSlotState('remote', env);
 
-    expect(await readRuntimeSlotConfig('remote', env)).toEqual({
-      schemaVersion: 1,
-      slot: 'remote',
-    });
+    expect(remote.stored).toBeNull();
+    expect(remote.error).toBeNull();
+    expect(remote.config.profile).toBe('none');
+    expect(remote.config.setup.state).toBe('pending');
     expect(await readPairingToken('remote', env)).toBeNull();
+
+    const host = await readRuntimeSlotState('host', env);
+    expect(host.config.profile).toBe('full');
+    expect(host.config.setup.state).toBe('configured');
   });
 
   it('remembers the hub URL across runs', async () => {
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
 
-    expect(await readRuntimeSlotConfig('remote', env)).toEqual({
-      schemaVersion: 1,
-      slot: 'remote',
-      hubUrl: 'wss://hub.test/api/runtime',
-    });
+    expect((await readRuntimeSlotConfig('remote', env)).hubUrl).toBe('wss://hub.test/api/runtime');
   });
 
-  it('keeps the stored hub URL when an update does not carry one', async () => {
+  it('merges an update rather than replacing the file', async () => {
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
-    await writeRuntimeSlotConfig('remote', {}, env);
+    await writeRuntimeSlotConfig(
+      'remote',
+      { allow: RUNTIME_CONSENT_PRESETS.readonly, setup: { state: 'configured', by: 'cli' } },
+      env
+    );
 
-    expect((await readRuntimeSlotConfig('remote', env)).hubUrl).toBe('wss://hub.test/api/runtime');
+    const config = await readRuntimeSlotConfig('remote', env);
+    expect(config.hubUrl).toBe('wss://hub.test/api/runtime');
+    expect(config.profile).toBe('readonly');
+    expect(config.setup.state).toBe('configured');
+  });
+
+  it('reports a config it cannot parse instead of reading it as absent', async () => {
+    const env = await isolatedEnv();
+    await writeRawConfig('host', '{ not json', env);
+
+    const state = await readRuntimeSlotState('host', env);
+    expect(state.error).toContain('not valid JSON');
+    expect(state.stored).toBeNull();
+  });
+
+  it('reports a config that does not match the schema', async () => {
+    const env = await isolatedEnv();
+    await writeRawConfig('host', JSON.stringify({ schemaVersion: 1, slot: 'nowhere' }), env);
+
+    const state = await readRuntimeSlotState('host', env);
+    expect(state.error).toContain('does not match the runtime config schema');
+  });
+
+  it('ignores fields a newer runtime wrote', async () => {
+    const env = await isolatedEnv();
+    await writeRawConfig(
+      'wsl',
+      JSON.stringify({
+        schemaVersion: 1,
+        slot: 'wsl',
+        allow: { ...RUNTIME_CONSENT_PRESETS.full, telepathy: true },
+        setup: { state: 'configured' },
+        somethingNew: 'from a later release',
+      }),
+      env
+    );
+
+    const state = await readRuntimeSlotState('wsl', env);
+    expect(state.error).toBeNull();
+    expect(state.config.profile).toBe('full');
+  });
+
+  it('takes the slot from the directory, not from what the file claims', async () => {
+    const env = await isolatedEnv();
+    await writeRawConfig(
+      'remote',
+      JSON.stringify({ schemaVersion: 1, slot: 'host', setup: { state: 'configured' } }),
+      env
+    );
+
+    expect((await readRuntimeSlotConfig('remote', env)).slot).toBe('remote');
   });
 
   it('stores the credential owner-only and keeps it out of the pasteable file', async () => {
@@ -129,37 +198,84 @@ describe('runtime home', () => {
     expect(await readServeToken('remote', env)).toBe('serve.concurrent');
   });
 
-  it('persists an optional setupState on the pasteable config', async () => {
+  it('survives two processes provisioning one slot at once', async () => {
     const env = await isolatedEnv();
-    await writeRuntimeSlotConfig('remote', { setupState: 'pending' }, env);
+    await Promise.all([
+      writeRuntimeSlotConfig('remote', { version: '0.1.1' }, env),
+      writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env),
+    ]);
 
-    expect(await readRuntimeSlotConfig('remote', env)).toEqual({
-      schemaVersion: 1,
-      slot: 'remote',
-      setupState: 'pending',
-    });
+    // Whichever rename lands last wins the field the other did not set, but the
+    // file a reader opens is always one complete document.
+    const config = await readRuntimeSlotConfig('remote', env);
+    expect(config.version === '0.1.1' || config.hubUrl === 'wss://hub.test/api/runtime').toBe(true);
+  });
+});
+
+describe('slot and source resolution', () => {
+  it('answers to the slot its executable lives under', async () => {
+    const env = await isolatedEnv();
+    const remote = join(runtimeSlotDir('remote', env), '0.1.1', 'mangostudio-runtime');
+
+    expect(resolveRuntimeSlot(env, [remote])).toBe('remote');
+    expect(resolveRuntimeSlot(env, [join(runtimeSlotDir('wsl', env), 'current', 'x')])).toBe('wsl');
+    expect(resolveRuntimeSlot(env, ['/usr/local/bin/mangostudio-runtime'])).toBe('host');
+  });
+
+  it('calls a checkout a checkout and a slot binary provisioned', async () => {
+    const env = await isolatedEnv();
+
+    expect(resolveRuntimeSource(env, '/usr/local/bin/bun')).toBe('source-checkout');
+    expect(
+      resolveRuntimeSource(env, join(runtimeSlotDir('remote', env), '0.1.1', 'mangostudio-runtime'))
+    ).toBe('provisioned');
+    expect(resolveRuntimeSource(env, '/opt/mangostudio/mangostudio-runtime')).toBe('bundled');
   });
 });
 
 describe('stdio pending setup gate', () => {
-  it('refuses only when the executable lives under the pending remote slot', async () => {
+  it('refuses a remote slot nobody has answered for', async () => {
     const { shouldRefuseStdioForPendingSetup } = await import('../../src/cli');
-    const { runtimeSlotDir } = await import('../../src/runtime-home');
     const env = await isolatedEnv();
-    await writeRuntimeSlotConfig('remote', { setupState: 'pending' }, env);
 
     const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
     expect(await shouldRefuseStdioForPendingSetup(env, [remoteBinary])).toBe(true);
+  });
+
+  it('serves a remote slot once setup has answered', async () => {
+    const { shouldRefuseStdioForPendingSetup } = await import('../../src/cli');
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig(
+      'remote',
+      { allow: RUNTIME_CONSENT_PRESETS.full, setup: { state: 'configured', by: 'cli' } },
+      env
+    );
+
+    const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
+    expect(await shouldRefuseStdioForPendingSetup(env, [remoteBinary])).toBe(false);
+  });
+
+  it('does not gate a binary this machine installed for itself', async () => {
+    const { shouldRefuseStdioForPendingSetup } = await import('../../src/cli');
+    const env = await isolatedEnv();
+
     expect(
       await shouldRefuseStdioForPendingSetup(env, ['/usr/local/bin/mangostudio-runtime'])
     ).toBe(false);
+    expect(
+      await shouldRefuseStdioForPendingSetup(env, [
+        join(runtimeSlotDir('wsl', env), 'current', 'mangostudio-runtime'),
+      ])
+    ).toBe(false);
   });
 
-  it('stays open when setupState was never written', async () => {
+  it('refuses a host slot whose owner said no', async () => {
     const { shouldRefuseStdioForPendingSetup } = await import('../../src/cli');
-    const { runtimeSlotDir } = await import('../../src/runtime-home');
     const env = await isolatedEnv();
-    const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
-    expect(await shouldRefuseStdioForPendingSetup(env, [remoteBinary])).toBe(false);
+    await writeRuntimeSlotConfig('host', { setup: { state: 'pending' } }, env);
+
+    expect(
+      await shouldRefuseStdioForPendingSetup(env, ['/usr/local/bin/mangostudio-runtime'])
+    ).toBe(true);
   });
 });

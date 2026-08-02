@@ -1,4 +1,6 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   encodeRuntimeFrame,
@@ -11,16 +13,37 @@ import { parseRuntimeCliArgs, RUNTIME_CLI_USAGE } from '../../src/cli';
 const CLI_ENTRY = join(import.meta.dir, '../../src/cli.ts');
 const SPAWN_TIMEOUT_MS = 15_000;
 
+const homes: string[] = [];
+
+afterEach(async () => {
+  for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
+});
+
+/** A runtime home of its own, so a spawned CLI never reads the developer's. */
+async function isolatedHome(): Promise<string> {
+  const home = await mkdtemp(join(tmpdir(), 'mango-runtime-cli-'));
+  homes.push(home);
+  return home;
+}
+
 interface CliRun {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
 }
 
-async function runCli(args: readonly string[], version = '9.9.9-test'): Promise<CliRun> {
+async function runCli(
+  args: readonly string[],
+  options: { readonly version?: string; readonly env?: Record<string, string> } = {}
+): Promise<CliRun> {
   const child = Bun.spawn({
     cmd: ['bun', CLI_ENTRY, ...args],
-    env: { ...process.env, VERSION: version },
+    env: {
+      ...process.env,
+      VERSION: options.version ?? '9.9.9-test',
+      MANGO_HOME: await isolatedHome(),
+      ...options.env,
+    },
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -108,6 +131,46 @@ describe('parseRuntimeCliArgs', () => {
       argument: '--token',
     });
   });
+
+  it('parses every non-interactive setup form', () => {
+    expect(parseRuntimeCliArgs(['setup'])).toEqual({
+      command: 'setup',
+      args: { yes: false, json: false },
+    });
+    expect(
+      parseRuntimeCliArgs(['setup', '--profile', 'readonly', '--allow', 'shell=true', '--yes'])
+    ).toEqual({
+      command: 'setup',
+      args: { profile: 'readonly', allow: { shell: true }, yes: true, json: false },
+    });
+    expect(parseRuntimeCliArgs(['setup', '--profile', 'none', '--json'])).toEqual({
+      command: 'setup',
+      args: { profile: 'none', yes: false, json: true },
+    });
+  });
+
+  it('refuses a profile or an override it cannot act on', () => {
+    expect(parseRuntimeCliArgs(['setup', '--profile', 'custom'])).toEqual({
+      command: 'unknown',
+      argument: '--profile',
+    });
+    expect(parseRuntimeCliArgs(['setup', '--allow', 'telepathy=true'])).toEqual({
+      command: 'unknown',
+      argument: '--allow',
+    });
+  });
+
+  it('parses health and doctor with their one flag', () => {
+    expect(parseRuntimeCliArgs(['health'])).toEqual({ command: 'health', args: { json: false } });
+    expect(parseRuntimeCliArgs(['doctor', '--json'])).toEqual({
+      command: 'doctor',
+      args: { json: true },
+    });
+    expect(parseRuntimeCliArgs(['health', '--verbose'])).toEqual({
+      command: 'unknown',
+      argument: '--verbose',
+    });
+  });
 });
 
 describe('mangostudio-runtime binary', () => {
@@ -138,6 +201,61 @@ describe('mangostudio-runtime binary', () => {
       expect(run.exitCode).toBe(1);
       expect(run.stderr).toContain('Unknown argument: --serve');
       expect(run.stdout).toBe('');
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  it(
+    'answers setup, health, and doctor without a terminal to prompt at',
+    async () => {
+      const home = await isolatedHome();
+      const env = { MANGO_HOME: home };
+
+      const setup = await runCli(['setup', '--profile', 'readonly', '--yes', '--json'], { env });
+      expect(setup.exitCode).toBe(0);
+      expect((JSON.parse(setup.stdout) as { profile: string }).profile).toBe('readonly');
+
+      const health = await runCli(['health', '--json'], { env });
+      const report = JSON.parse(health.stdout) as {
+        slot: string;
+        allow: Record<string, boolean>;
+      };
+      expect(report.slot).toBe('host');
+      expect(report.allow.shell).toBe(false);
+
+      const doctor = await runCli(['doctor'], { env });
+      expect(doctor.exitCode).toBe(0);
+      expect(doctor.stdout).toContain('Consent');
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  it(
+    'takes an image build answer from the environment',
+    async () => {
+      const home = await isolatedHome();
+      const env = { MANGO_HOME: home, MANGOSTUDIO_RUNTIME_SETUP: 'full' };
+
+      expect((await runCli(['setup', '--yes'], { env })).exitCode).toBe(0);
+      const health = await runCli(['health', '--json'], { env });
+      expect((JSON.parse(health.stdout) as { profile: string }).profile).toBe('full');
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  it(
+    'serves a host slot with no setup step at all, which is what an image relies on',
+    async () => {
+      // The standing regression guard for containers: the runtime the Docker
+      // image ships is the `host` slot, and a `host` slot with no config is
+      // consented by the install that put it there.
+      const run = await runCli(['doctor', '--json']);
+      const payload = JSON.parse(run.stdout) as {
+        health: { profile: string; setup: { state: string } };
+      };
+      expect(run.exitCode).toBe(0);
+      expect(payload.health.profile).toBe('full');
+      expect(payload.health.setup.state).toBe('configured');
     },
     SPAWN_TIMEOUT_MS
   );

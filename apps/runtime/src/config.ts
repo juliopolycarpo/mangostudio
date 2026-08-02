@@ -1,3 +1,6 @@
+import { homedir } from 'node:os';
+import { mangoHomeDir } from '@mangostudio/shared/runtime-home';
+
 export interface RuntimeConfig {
   /** Exercise the byte codec in-process so development catches wire drift. */
   readonly validateInProcessFrames: boolean;
@@ -12,6 +15,16 @@ export interface RuntimeConfig {
    * credential for two trust decisions.
    */
   readonly serveToken: string | null;
+  /** Absolute `~/.mango`; `MANGO_HOME` moves it, which is what tests use. */
+  readonly mangoHome: string;
+  /**
+   * A consent answer supplied by the environment instead of by a person.
+   *
+   * It exists for images: a container is built once and started unattended, so
+   * there is never a terminal to answer `setup` at. Left unvalidated here —
+   * `setup` reports an unusable value rather than this silently ignoring it.
+   */
+  readonly setupProfile: string | null;
 }
 
 /** Runtime-owned environment parsing for the embedded and binary hosts. */
@@ -20,10 +33,14 @@ export function loadRuntimeConfig(
 ): RuntimeConfig {
   const pairing = env.MANGOSTUDIO_RUNTIME_TOKEN?.trim();
   const serve = env.MANGOSTUDIO_RUNTIME_SERVE_TOKEN?.trim();
+  const home = env.MANGO_HOME?.trim();
+  const setupProfile = env.MANGOSTUDIO_RUNTIME_SETUP?.trim();
   return {
     validateInProcessFrames: env.NODE_ENV !== 'production',
     pairingToken: pairing && pairing.length > 0 ? pairing : null,
     serveToken: serve && serve.length > 0 ? serve : null,
+    mangoHome: home && home.length > 0 ? home : mangoHomeDir(homedir(), process.platform),
+    setupProfile: setupProfile && setupProfile.length > 0 ? setupProfile : null,
   };
 }
 

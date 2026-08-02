@@ -242,10 +242,10 @@ describe('serve token bootstrap', () => {
 });
 
 describe('pending setup gate', () => {
-  it('records a pending setupState that the CLI can refuse on', async () => {
+  it('records a pending setup state that the CLI can refuse on', async () => {
     const env = await isolatedEnv();
-    await writeRuntimeSlotConfig('remote', { setupState: 'pending' }, env);
+    await writeRuntimeSlotConfig('remote', { setup: { state: 'pending' } }, env);
     const { readRuntimeSlotConfig } = await import('../../src/runtime-home');
-    expect((await readRuntimeSlotConfig('remote', env)).setupState).toBe('pending');
+    expect((await readRuntimeSlotConfig('remote', env)).setup.state).toBe('pending');
   });
 });
