@@ -134,6 +134,9 @@ export function createPropagationRoutes(
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          // The write engine runs on the runtime, so an unreachable runtime is
+          // the same 503 the discovery and settings routes already return.
+          503: ApiErrorResponseSchema,
         },
       }
     )
@@ -153,6 +156,9 @@ export function createPropagationRoutes(
           404: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          // Undo replays the backup set on the runtime, so an unreachable
+          // runtime is a 503 rather than an internal error.
+          503: ApiErrorResponseSchema,
         },
       }
     )

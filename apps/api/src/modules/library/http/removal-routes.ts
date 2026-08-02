@@ -107,6 +107,9 @@ export function createRemovalRoutes(service: RemovalRouteService = defaultRemova
           // a resource anywhere and did not say so out loud.
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          // The removal engine runs on the runtime, so an unreachable runtime is
+          // the same 503 the discovery and settings routes already return.
+          503: ApiErrorResponseSchema,
         },
       }
     );
