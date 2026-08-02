@@ -27,6 +27,8 @@ import { CardSectionLabel } from './ToolCard';
 interface NodeVersionTableProps {
   status: VersionManagerStatus;
   recipes: readonly InstallRecipePreview[];
+  /** The machine this table is about; a re-check has to go back to the same one. */
+  environmentId?: string;
 }
 
 const LTS_STYLES: Record<LtsStatus, string> = {
@@ -45,10 +47,10 @@ const UPGRADABLE: ReadonlySet<LtsStatus> = new Set<LtsStatus>([
   'end-of-life',
 ]);
 
-export function NodeVersionTable({ status, recipes }: NodeVersionTableProps) {
+export function NodeVersionTable({ status, recipes, environmentId }: NodeVersionTableProps) {
   const { t } = useI18n();
   const e = t.environments;
-  const probe = useProbeVersionManager();
+  const probe = useProbeVersionManager(environmentId);
   const { resolve } = useToolIdentities();
   const defaultManagerName = displayName(t, status.id);
   const identity = resolve('version-manager', status.id, defaultManagerName);

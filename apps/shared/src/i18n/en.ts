@@ -1984,6 +1984,31 @@ export const messages: Messages = {
       codex: 'Codex',
       cursor: 'Cursor',
     },
+    /** Which machine a diagnostic tab is describing. */
+    scope: {
+      label: 'Environment',
+      disconnected: '{environment} is not connected',
+      disconnectedHint:
+        'Nothing is shown rather than the last answer this machine gave, because a stale toolchain list is exactly what someone would act on.',
+      connect: 'Connect',
+      notPermitted: '{environment} does not report what is installed on it',
+      notPermittedHint:
+        'Its runtime does not offer toolchain detection. That is a setting on that machine, not a fault here.',
+      compare: 'Compare',
+      compareTitle: 'Compare environments',
+      compareHint: 'Two machines, one table. Rows are what MangoStudio knows how to look for.',
+      compareLeft: 'Left environment',
+      compareRight: 'Right environment',
+      compareClose: 'Close comparison',
+      cellPresent: 'Present',
+      cellAbsent: 'Not installed',
+      cellNotPermitted: 'Not reported',
+      cellUnknown: 'Not checked yet',
+      rowGroupRuntime: 'Toolchains',
+      rowGroupAgent: 'Agents',
+      rowGroupShell: 'Shells',
+      presenceOn: 'on {environment}',
+    },
     status: {
       ok: 'Available',
       warn: 'Needs attention',

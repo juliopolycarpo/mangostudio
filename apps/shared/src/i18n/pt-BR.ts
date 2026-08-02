@@ -2003,6 +2003,31 @@ export const messages = {
       codex: 'Codex',
       cursor: 'Cursor',
     },
+    /** Qual máquina uma aba de diagnóstico está descrevendo. */
+    scope: {
+      label: 'Ambiente',
+      disconnected: '{environment} não está conectado',
+      disconnectedHint:
+        'Nada é exibido em vez da última resposta desta máquina, porque uma lista de toolchains desatualizada é justamente o que alguém usaria para agir.',
+      connect: 'Conectar',
+      notPermitted: '{environment} não informa o que está instalado nele',
+      notPermittedHint:
+        'O runtime dessa máquina não oferece detecção de toolchains. Isso é uma configuração de lá, não uma falha daqui.',
+      compare: 'Comparar',
+      compareTitle: 'Comparar ambientes',
+      compareHint: 'Duas máquinas, uma tabela. As linhas são o que o MangoStudio sabe procurar.',
+      compareLeft: 'Ambiente à esquerda',
+      compareRight: 'Ambiente à direita',
+      compareClose: 'Fechar comparação',
+      cellPresent: 'Presente',
+      cellAbsent: 'Não instalado',
+      cellNotPermitted: 'Não informado',
+      cellUnknown: 'Ainda não verificado',
+      rowGroupRuntime: 'Toolchains',
+      rowGroupAgent: 'Agentes',
+      rowGroupShell: 'Shells',
+      presenceOn: 'em {environment}',
+    },
     status: {
       ok: 'Disponível',
       warn: 'Requer atenção',

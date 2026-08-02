@@ -23,13 +23,15 @@ import { CardSectionLabel, ToolCard } from './ToolCard';
 interface RuntimeCardProps {
   status: RuntimeStatus;
   recipes: readonly InstallRecipePreview[];
+  /** The machine this card is about; a re-check has to go back to the same one. */
+  environmentId?: string;
   children?: React.ReactNode;
 }
 
-export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
+export function RuntimeCard({ status, recipes, environmentId, children }: RuntimeCardProps) {
   const { t } = useI18n();
   const e = t.environments;
-  const probe = useProbeRuntime();
+  const probe = useProbeRuntime(environmentId);
   const { resolve } = useToolIdentities();
   const name = resolve('runtime', status.id).name;
 

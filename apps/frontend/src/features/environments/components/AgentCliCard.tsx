@@ -21,12 +21,14 @@ import { CardSectionLabel, ToolCard } from './ToolCard';
 interface AgentCliCardProps {
   status: AgentCliStatus;
   recipes: readonly InstallRecipePreview[];
+  /** The machine this card is about; a re-check has to go back to the same one. */
+  environmentId?: string;
 }
 
-export function AgentCliCard({ status, recipes }: AgentCliCardProps) {
+export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardProps) {
   const { t } = useI18n();
   const e = t.environments;
-  const probe = useProbeAgentCli();
+  const probe = useProbeAgentCli(environmentId);
   const { resolve } = useToolIdentities();
   const name = resolve('agent', status.targetId).name;
   const installRecipe = findInstallRecipe(recipes, status.id, 'install');
