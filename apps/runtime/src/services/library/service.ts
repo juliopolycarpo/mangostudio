@@ -5,6 +5,7 @@
  * backupRoot.
  */
 
+import { isAbsolute } from 'node:path';
 import type { LibraryLocationSettings } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
@@ -99,6 +100,12 @@ function assertLocationSettings(value: unknown): asserts value is LibraryLocatio
 function assertBackupRoot(value: unknown, method: string): asserts value is string {
   if (typeof value !== 'string' || value.length === 0) {
     throw new RuntimeToolArgumentError(`${method} requires a non-empty backupRoot.`);
+  }
+  // Platform-local absolute check: backupRoot names a path on this host, and a
+  // relative value would resolve against the runtime cwd rather than the hub's
+  // intended retention tree.
+  if (!isAbsolute(value)) {
+    throw new RuntimeToolArgumentError(`${method} requires an absolute backupRoot.`);
   }
 }
 

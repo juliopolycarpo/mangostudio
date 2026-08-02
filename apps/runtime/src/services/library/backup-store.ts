@@ -200,9 +200,9 @@ export async function writeBackupManifest(
 
 /**
  * `async` on purpose: `backupSetPath` rejects a malformed id by throwing, and
- * callers reach for `.catch()` to turn "no such backup" into a 404. Throwing
- * synchronously would route a caller-supplied bad id past that catch and out as
- * an unexpected 500 instead.
+ * callers map that TypeError to the same "missing backup" outcome as ENOENT.
+ * Other I/O failures (permission, etc.) propagate from `readManifestAt` so they
+ * are not collapsed into a retention-pruned 404.
  */
 export async function readBackupManifest(
   backupId: string,
@@ -215,8 +215,13 @@ async function readManifestAt(setPath: string, fs: BackupStoreFs): Promise<Backu
   let raw: string;
   try {
     raw = await fs.readFile(join(setPath, MANIFEST_NAME));
-  } catch {
-    return null;
+  } catch (error) {
+    // Missing set → null so undo can answer with LibraryBackupMissingError.
+    // Permission or other I/O failures must propagate: collapsing them into
+    // "missing" tells the user retention pruned the set when the file is still
+    // there and unreadable.
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return null;
+    throw error;
   }
   try {
     const parsed: unknown = JSON.parse(raw);

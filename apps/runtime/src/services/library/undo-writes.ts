@@ -57,7 +57,17 @@ export async function executeLibraryUndo(
   params: ExecuteLibraryUndoParams,
   deps: LibraryUndoEngineDeps = createLibraryUndoEngineDeps({ backupRoot: params.backupRoot })
 ): Promise<PropagationUndo> {
-  const manifest = await readBackupManifest(params.backupId, deps.backup).catch(() => null);
+  // `readBackupManifest` returns null for a genuinely absent set (ENOENT) and
+  // for an unparseable manifest. I/O failures other than ENOENT propagate so a
+  // permission error is not reported as "pruned by retention". Malformed ids
+  // still throw TypeError from `backupSetPath`; map those to the same missing
+  // outcome the hub turns into a 404.
+  let manifest: Awaited<ReturnType<typeof readBackupManifest>> = null;
+  try {
+    manifest = await readBackupManifest(params.backupId, deps.backup);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+  }
   if (!manifest) {
     throw new LibraryBackupMissingError(
       `No library backup "${params.backupId}" is retained. Backups are bounded by count and size.`

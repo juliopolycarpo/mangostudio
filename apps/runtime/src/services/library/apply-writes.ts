@@ -128,11 +128,30 @@ export async function executePropagationWrites(
     return { partial: true, applied, skipped: [], failed, backupId };
   }
 
-  if (written.length > 0) await persistBackupManifest(backupId, written, deps);
-
   if (written.length === 0) {
     return { partial: false, applied, skipped: [], failed };
   }
+
+  // Same contract as `executeRemovalWrites`: a successful write with no
+  // recorded manifest leaves the user unable to undo, so roll back when we can
+  // and otherwise return a partial result that still names the backup set.
+  try {
+    await persistBackupManifest(backupId, written, deps);
+  } catch (error) {
+    const rolledBack = await rollback(written, deps);
+    if (rolledBack) {
+      await discardBackupSet(backupId, deps.backup).catch(() => undefined);
+      return { partial: false, applied: [], skipped: [], failed };
+    }
+    failed.push({
+      resourceKey: params.operations[0]?.resourceKey ?? '',
+      locationId: params.operations[0]?.locationId ?? '',
+      reason: 'write-failed',
+      message: `Could not record the backup manifest, so this apply cannot be undone automatically; the previous copies are under backup set "${backupId}": ${error instanceof Error ? error.message : String(error)}`,
+    });
+    return { partial: true, applied, skipped: [], failed, backupId };
+  }
+
   return { backupId, partial: false, applied, skipped: [], failed };
 }
 
