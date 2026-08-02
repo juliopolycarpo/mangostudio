@@ -4,11 +4,11 @@
  * same containment idea as workspace file ops, applied to agent homes.
  */
 
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { open, readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, join, sep } from 'node:path';
 import type { ResourceKind } from '@mangostudio/shared/library';
 import { RuntimeToolArgumentError } from '../../errors';
-import { type LibraryInstanceReaderFs, MAX_LIBRARY_FILE_BYTES } from './instance-reader';
+import type { LibraryInstanceReaderFs } from './instance-reader';
 
 /** Default ceiling for a detail-view content read (hub passes its own when different). */
 export const MAX_LIBRARY_CONTENT_BYTES = 512 * 1024;
@@ -73,6 +73,54 @@ function isPathWithin(rootPath: string, candidatePath: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${sep}`);
 }
 
+/**
+ * Open once, fstat the descriptor, and read at most `maxBytes` — never load the
+ * whole file only to throw or truncate afterward.
+ */
+async function readBoundedCanonical(
+  canonicalPath: string,
+  maxBytes: number,
+  truncateOversize: boolean,
+  displayName: string
+): Promise<LibraryReadResult> {
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(canonicalPath, 'r');
+  } catch {
+    throw new LibraryReadDeniedError(`Library path "${displayName}" is not readable.`);
+  }
+
+  try {
+    const meta = await handle.stat();
+    if (!meta.isFile()) {
+      throw new LibraryReadDeniedError(`Library path "${displayName}" is not a regular file.`);
+    }
+
+    const sizeBytes = meta.size;
+    const shouldTruncate = sizeBytes > maxBytes;
+    if (shouldTruncate && !truncateOversize) {
+      throw new LibraryReadDeniedError(
+        `Library file "${displayName}" exceeds the ${maxBytes} byte cap.`
+      );
+    }
+
+    const limit = shouldTruncate ? maxBytes : sizeBytes;
+    if (limit === 0) {
+      return { content: '', truncated: shouldTruncate, sizeBytes };
+    }
+
+    const buffer = Buffer.alloc(limit);
+    const { bytesRead } = await handle.read(buffer, 0, limit, 0);
+    return {
+      content: textDecoder.decode(buffer.subarray(0, bytesRead)),
+      truncated: shouldTruncate,
+      sizeBytes,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function readLibraryContent(
   params: LibraryReadParams,
   fs: LibraryInstanceReaderFs = nodeFs
@@ -105,21 +153,12 @@ export async function readLibraryContent(
     );
   }
 
-  const maxBytes = params.maxBytes ?? MAX_LIBRARY_CONTENT_BYTES;
-  const bytes = await fs.readFile(params.path);
-  if (bytes.byteLength > MAX_LIBRARY_FILE_BYTES && params.truncateOversize !== true) {
-    // Detail reads may truncate; an unbounded dump of a huge asset is refused.
-    if (bytes.byteLength > maxBytes) {
-      throw new LibraryReadDeniedError(
-        `Library file "${basename(params.path)}" exceeds the ${maxBytes} byte cap.`
-      );
-    }
-  }
-  const truncated = bytes.byteLength > maxBytes;
-  const slice = truncated ? bytes.subarray(0, maxBytes) : bytes;
-  return {
-    content: textDecoder.decode(slice),
-    truncated,
-    sizeBytes: bytes.byteLength,
-  };
+  // Read the contained realpath, not the caller-supplied path: a symlink swap
+  // between the check and the open would otherwise escape containment.
+  return readBoundedCanonical(
+    canonicalPath,
+    params.maxBytes ?? MAX_LIBRARY_CONTENT_BYTES,
+    params.truncateOversize === true,
+    basename(params.path)
+  );
 }

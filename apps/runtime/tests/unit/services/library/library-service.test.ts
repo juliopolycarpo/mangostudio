@@ -3,7 +3,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -56,6 +56,67 @@ describe('library.read containment', () => {
       allowedRoots: [inside],
     });
     expect(result).toEqual({ content: 'hello', truncated: false, sizeBytes: 5 });
+  });
+
+  it('denies a symlink whose realpath escapes the allowed roots', async () => {
+    const inside = join(root, 'skills');
+    const outside = join(root, 'secret.txt');
+    mkdirSync(inside);
+    writeFileSync(outside, 'secret');
+    const link = join(inside, 'escape.md');
+    symlinkSync(outside, link);
+
+    await expect(
+      readLibraryContent({
+        path: link,
+        allowedRoots: [inside],
+      })
+    ).rejects.toMatchObject({ code: 'LIBRARY_READ_DENIED' });
+  });
+
+  it('reads through an in-root symlink via the canonical path', async () => {
+    const inside = join(root, 'skills');
+    mkdirSync(inside);
+    const target = join(inside, 'real.md');
+    writeFileSync(target, 'canonical');
+    const link = join(inside, 'alias.md');
+    symlinkSync(target, link);
+
+    const result = await readLibraryContent({
+      path: link,
+      allowedRoots: [inside],
+    });
+    expect(result).toEqual({ content: 'canonical', truncated: false, sizeBytes: 9 });
+  });
+
+  it('truncates oversize content without loading past the byte cap', async () => {
+    const inside = join(root, 'skills');
+    const file = join(inside, 'big.md');
+    mkdirSync(inside);
+    writeFileSync(file, 'abcdefghij');
+
+    const result = await readLibraryContent({
+      path: file,
+      allowedRoots: [inside],
+      maxBytes: 4,
+      truncateOversize: true,
+    });
+    expect(result).toEqual({ content: 'abcd', truncated: true, sizeBytes: 10 });
+  });
+
+  it('refuses oversize content when truncation is not requested', async () => {
+    const inside = join(root, 'skills');
+    const file = join(inside, 'big.md');
+    mkdirSync(inside);
+    writeFileSync(file, 'abcdefghij');
+
+    await expect(
+      readLibraryContent({
+        path: file,
+        allowedRoots: [inside],
+        maxBytes: 4,
+      })
+    ).rejects.toMatchObject({ code: 'LIBRARY_READ_DENIED' });
   });
 });
 
