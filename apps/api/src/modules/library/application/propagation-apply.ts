@@ -245,15 +245,7 @@ function toRuntimeApplyParams(
     backupRoot: backup.backupDir(),
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
-    pathEnv: {
-      // Only the MangoStudio directories travel, exactly as `pathEnvParams` in
-      // `environment-library-service.ts` sends them: they are hub configuration
-      // rather than a fact about the host, and the runtime already merges its
-      // own `process.env` underneath. Forwarding the hub's whole environment
-      // would put its secrets in every apply frame for no added resolution.
-      env: configuredLibraryEnv(),
-      ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
-    },
+    pathEnv: writePathEnvParams(env),
     operations: prepared.map((operation) => ({
       resourceKey: operation.resourceKey,
       locationId:
@@ -270,6 +262,20 @@ function toRuntimeApplyParams(
       ...(operation.adaptation && { adaptation: operation.adaptation }),
     })),
     skipped: [...skipped],
+  };
+}
+
+/**
+ * Only the MangoStudio directories travel, exactly as `pathEnvParams` in
+ * `environment-library-service.ts` sends them: they are hub configuration
+ * rather than a fact about the host, and the runtime already merges its own
+ * `process.env` underneath. Forwarding the hub's whole environment would put
+ * its secrets in every write frame for no added resolution.
+ */
+function writePathEnvParams(env: PathEnv): RuntimeLibraryApplyParams['pathEnv'] {
+  return {
+    env: configuredLibraryEnv(),
+    ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
   };
 }
 
@@ -739,6 +745,7 @@ export async function describeBackupUsage(
 
 export interface PropagationUndoDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
+  pathEnv(): PathEnv;
   backup: BackupStoreDeps;
   /**
    * When set, skips the default RuntimeClient undo path (tests inject transport
@@ -773,6 +780,7 @@ async function runUndo(
 ): Promise<PropagationUndo> {
   const deps: PropagationUndoDeps = {
     hashAt: overrides.hashAt ?? hashResourceAt,
+    pathEnv: overrides.pathEnv ?? (() => createLibraryPathEnv()),
     backup: overrides.backup ?? defaultBackupStoreDeps,
     ...(overrides.runtimeUndo && { runtimeUndo: overrides.runtimeUndo }),
   };
@@ -782,23 +790,19 @@ async function runUndo(
     overrides.backup !== undefined ||
     overrides.runtimeUndo !== undefined;
 
+  const env = deps.pathEnv();
+
   try {
     if (injected) {
       if (overrides.runtimeUndo) {
         return await overrides.runtimeUndo({
           backupRoot: deps.backup.backupDir(),
           backupId,
-          retentionCount: deps.backup.retentionCount(),
-          retentionBytes: deps.backup.retentionBytes(),
+          pathEnv: writePathEnvParams(env),
         });
       }
       return await executeLibraryUndo(
-        {
-          backupRoot: deps.backup.backupDir(),
-          backupId,
-          retentionCount: deps.backup.retentionCount(),
-          retentionBytes: deps.backup.retentionBytes(),
-        },
+        { backupRoot: deps.backup.backupDir(), backupId, pathEnv: env },
         { hashAt: deps.hashAt, backup: deps.backup }
       );
     }
@@ -811,12 +815,7 @@ async function runUndo(
     }
     const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
     return await client.library.undo(
-      {
-        backupRoot: deps.backup.backupDir(),
-        backupId,
-        retentionCount: deps.backup.retentionCount(),
-        retentionBytes: deps.backup.retentionBytes(),
-      },
+      { backupRoot: deps.backup.backupDir(), backupId, pathEnv: writePathEnvParams(env) },
       { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
     );
   } catch (error) {

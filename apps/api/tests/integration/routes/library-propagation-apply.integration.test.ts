@@ -444,7 +444,10 @@ describe('propagation undo', () => {
     );
     expect(applied.backupId).toBeDefined();
 
-    const undone = await undoLibraryPropagation(applied.backupId ?? '', { backup: backupDeps() });
+    const undone = await undoLibraryPropagation(applied.backupId ?? '', {
+      backup: backupDeps(),
+      pathEnv,
+    });
 
     expect(undone.restored.map((item) => item.locationId)).toEqual(['claude-skills']);
     expect(undone.removed.map((item) => item.locationId).sort()).toEqual([
@@ -468,7 +471,10 @@ describe('propagation undo', () => {
 
     // Undoing an apply must not also discard an edit made afterwards.
     writeSkill('claude-skills', 'edited after the apply\n');
-    const undone = await undoLibraryPropagation(applied.backupId ?? '', { backup: backupDeps() });
+    const undone = await undoLibraryPropagation(applied.backupId ?? '', {
+      backup: backupDeps(),
+      pathEnv,
+    });
 
     expect(undone.restored).toEqual([]);
     expect(undone.skipped[0]).toMatchObject({ reason: 'changed-since-apply' });
@@ -477,7 +483,7 @@ describe('propagation undo', () => {
 
   it('reports a backup that retention has already discarded', async () => {
     await expect(
-      undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', { backup: backupDeps() })
+      undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', { backup: backupDeps(), pathEnv })
     ).rejects.toMatchObject({ status: 404 });
   });
 });

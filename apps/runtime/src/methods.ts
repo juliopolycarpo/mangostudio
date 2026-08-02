@@ -780,8 +780,11 @@ export type RuntimeLibraryRemoveResult = RemovalApply;
 export interface RuntimeLibraryUndoParams {
   readonly backupRoot: string;
   readonly backupId: string;
-  readonly retentionCount?: number;
-  readonly retentionBytes?: number;
+  /**
+   * Resolves the registry roots the manifest's paths have to sit inside. No
+   * retention bounds travel: undo restores and removes, it never prunes.
+   */
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
 }
 
 export type RuntimeLibraryUndoResult = PropagationUndo;

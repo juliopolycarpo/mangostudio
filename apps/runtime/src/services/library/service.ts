@@ -233,8 +233,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
         return await executeLibraryUndo({
           backupRoot: params.backupRoot,
           backupId: params.backupId,
-          retentionCount: params.retentionCount,
-          retentionBytes: params.retentionBytes,
+          pathEnv: pathEnvFrom(adapters, params),
         });
       } catch (error) {
         if (error instanceof LibraryBackupMissingError) {
