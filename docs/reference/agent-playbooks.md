@@ -158,18 +158,34 @@ Open these first:
 
 Open these first:
 
-- `apps/api/src/modules/library/domain/registry.ts` (locations, targets, per-kind read precedence)
-- `apps/api/src/modules/library/application/library-discovery.ts` (scan, cache, grouping)
-- `apps/api/src/modules/library/application/coverage-resolver.ts` (present / absent / shadowed)
-- `apps/api/src/modules/library/application/propagation-preview.ts` (source groups, outcomes)
-- `apps/api/src/modules/library/application/propagation-apply.ts` (token, backup, verify, undo)
-- `apps/api/src/modules/library/application/adapters/` (format conversion strategies)
-- `apps/api/src/modules/library/http/library-routes.ts`, `propagation-routes.ts`, `settings-routes.ts`
+- `apps/shared/src/library/registry.ts` via `@mangostudio/shared/library/host`
+  (locations, targets, per-kind read precedence; path resolution is pure over
+  `PathEnv`)
+- `apps/runtime/src/services/library/` (scan + contained read + byte caps —
+  `library.scan` / `library.read` / `library.locations`; the engine that used to
+  live under `apps/api/.../infrastructure`)
+- `apps/api/src/modules/library/application/library-discovery.ts` (groups a scan
+  result; coverage and divergence stay hub-side)
+- `apps/api/src/modules/library/application/environment-library-service.ts`
+  (per-environment cache keyed by connection; hub calls the runtime with an
+  explicit `timeoutMs`)
+- `apps/api/src/modules/library/application/coverage-resolver.ts` (present /
+  absent / shadowed — pure over scan results)
+- `apps/api/src/modules/library/application/propagation-preview.ts` (source
+  groups, outcomes)
+- `apps/api/src/modules/library/application/propagation-apply.ts` (token,
+  backup, verify, undo — still hub-local until write engines move)
+- `apps/api/src/modules/library/application/adapters/` (format conversion
+  strategies)
+- `apps/api/src/modules/library/http/library-routes.ts`, `propagation-routes.ts`,
+  `settings-routes.ts` (discovery routes take optional `environmentId`, default
+  `local`)
 - `apps/shared/src/library/schemas.ts` (single source of truth for every shape)
 - `apps/frontend/src/features/library/` (`format.ts` holds the cell-state rules,
   `propagation.ts` mirrors the apply contract's validation)
 - `apps/frontend/src/routes/_authenticated/environments/library/` (the pages;
-  `environments/library.tsx` is the section layout and its tab strip)
+  `environments/library.tsx` is the section layout and its tab strip; matrix and
+  detail share the environment selector from the umbrella)
 - `apps/frontend/src/routes/_authenticated/library/` (redirect stubs only —
   every file forwards a pre-move `/library/*` bookmark and renders nothing)
 
@@ -177,9 +193,16 @@ The library is a section of the environments umbrella, not a top-level surface:
 its URLs live under `/environments/library`, and the sidebar reaches it through
 the Environments entry.
 
-There is no canonical copy of a resource: when versions diverge, only a human
-picks the winner. The API refuses an apply that does not name one, and the UI is
-built so a user cannot reach that error.
+There is no canonical copy of a resource: every location on every environment is
+a peer. When versions diverge, only a human picks the winner. The API refuses an
+apply that does not name one, and the UI is built so a user cannot reach that
+error. Two environments that happen to share one physical home are tolerated
+(same hashes show no divergence); de-duplication is out of scope.
+
+Discovery is a runtime capability (`features.library`). A disconnected
+environment never reuses another machine's matrix as if it were fresh —
+staleness here would corrupt later write decisions. The skill-discovery adapter
+that feeds chat prompts stays pinned to the hub machine (`local`) on purpose.
 
 Every location carries a `scope`, and every one of them is `home` today. The
 `workspace` scope is reserved: nothing resolves under a repository root yet, and
