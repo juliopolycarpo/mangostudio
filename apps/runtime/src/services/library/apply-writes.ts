@@ -25,6 +25,7 @@ import {
   restoreBackupEntry,
   writeBackupManifest,
 } from './backup-store';
+import { assertNotCancelled } from './cancellation';
 import { hashResourceAt } from './instance-reader';
 import {
   createResourceWriterDeps,
@@ -86,6 +87,13 @@ export interface ExecutePropagationWritesParams {
   readonly backupId?: string;
   readonly operations: readonly PreparedPropagationOperation[];
   readonly skipped?: readonly PropagationSkipped[];
+  /**
+   * Aborts between operations. The hub's RPC deadline sends a cancel that ends
+   * up here; without it the hub reports a failure while this loop keeps writing
+   * every remaining destination, and the backupId that is the only undo handle
+   * is lost with the rejected response.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export function createPropagationWriteEngineDeps(
@@ -128,6 +136,7 @@ export async function executePropagationWrites(
 
   for (const operation of params.operations) {
     try {
+      assertNotCancelled(params.signal);
       const result = await executeOperation(operation, env, backupId, deps);
       written.push(result.entry);
       applied.push(result.applied);

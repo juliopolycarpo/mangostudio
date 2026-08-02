@@ -23,6 +23,7 @@ import {
   pruneBackupSets,
   writeBackupManifest,
 } from './backup-store';
+import { assertNotCancelled } from './cancellation';
 import { hashResourceAt } from './instance-reader';
 import { assertExpectedResourceEntry } from './path-safety';
 import { requireWritableLocation, resolveResourceDestination } from './resource-writer';
@@ -58,6 +59,12 @@ export interface ExecuteRemovalWritesParams {
   readonly operations: readonly PreparedRemovalOperation[];
   readonly kept?: readonly RemovalKept[];
   readonly lastCopyResourceKeys?: readonly string[];
+  /**
+   * Aborts between operations, so the hub's RPC deadline actually stops the
+   * staging loop instead of leaving it to remove every remaining copy after the
+   * hub has already told the user the removal failed.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export function createRemovalWriteEngineDeps(
@@ -92,6 +99,7 @@ export async function executeRemovalWrites(
 
   for (const operation of params.operations) {
     try {
+      assertNotCancelled(params.signal);
       results.push(await stageOperation(operation, env, backupId, deps));
     } catch (error) {
       failed.push(describeFailure(operation, error));

@@ -181,7 +181,7 @@ describe('applyLibraryRemoval', () => {
       requestFor(preview, { acknowledgeLastCopy: ['skill:gh'] }),
       { backup }
     );
-    const undone = await undoLibraryPropagation(result.backupId ?? '', { backup });
+    const undone = await undoLibraryPropagation(result.backupId ?? '', { backup, pathEnv: env });
 
     expect(undone.restored).toHaveLength(1);
     expect(await hashResourceAt(path, 'directory')).toBe(before);

@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { executePropagationWrites } from '../../../../src/services/library/apply-writes';
+import {
+  createPropagationWriteEngineDeps,
+  executePropagationWrites,
+} from '../../../../src/services/library/apply-writes';
 import { hashResourceAt } from '../../../../src/services/library/instance-reader';
 import { executeLibraryUndo } from '../../../../src/services/library/undo-writes';
 
@@ -92,6 +95,57 @@ describe('executePropagationWrites', () => {
     expect(result.failed[0]).toMatchObject({ reason: 'guard-rejected' });
     expect(result.applied).toEqual([]);
     expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
+  });
+
+  it('stops and rolls back when the hub cancels mid-apply', async () => {
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    mkdirSync(join(home, '.agents', 'skills'), { recursive: true });
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const expected = await hashResourceAt(sourceDir, 'directory');
+    const controller = new AbortController();
+
+    const operation = (locationId: 'claude-skills' | 'agents-skills', root: string) => ({
+      resourceKey: 'skill:gh',
+      locationId,
+      slug: 'gh',
+      operation: 'create' as const,
+      kind: 'directory' as const,
+      expectedContentHash: expected,
+      destinationRoot: root,
+      sourceDir,
+    });
+
+    // Aborts the way the hub's RPC deadline does: after the first destination
+    // is written and before the loop reaches the second.
+    const result = await executePropagationWrites(
+      {
+        backupRoot,
+        pathEnv: env,
+        signal: controller.signal,
+        operations: [
+          operation('claude-skills', join(home, '.claude', 'skills')),
+          operation('agents-skills', join(home, '.agents', 'skills')),
+        ],
+      },
+      {
+        ...createPropagationWriteEngineDeps({ backupRoot }),
+        hashAt: async (path, kind) => {
+          const hash = await hashResourceAt(path, kind);
+          controller.abort();
+          return hash;
+        },
+      }
+    );
+
+    expect(result.failed[0]).toMatchObject({
+      locationId: 'agents-skills',
+      message: expect.stringContaining('cancelled'),
+    });
+    expect(result.applied).toEqual([]);
+    expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
+    expect(existsSync(join(home, '.agents', 'skills', 'gh'))).toBe(false);
   });
 
   it('refuses a manifest entry that points outside the location it names', async () => {

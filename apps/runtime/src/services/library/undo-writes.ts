@@ -18,6 +18,7 @@ import {
   readBackupManifest,
   restoreBackupEntry,
 } from './backup-store';
+import { assertNotCancelled } from './cancellation';
 import { hashResourceAt } from './instance-reader';
 import { LibraryWriteError } from './path-safety';
 
@@ -31,6 +32,13 @@ export interface ExecuteLibraryUndoParams {
   readonly backupId: string;
   /** Resolves the registry roots every touched path has to sit inside. */
   readonly pathEnv: PathEnv;
+  /**
+   * Aborts between entries. An undo that keeps restoring after the hub gave up
+   * on it leaves the user looking at a failure while the tree changes under
+   * them; stopping here means the entries not yet reached simply stay as they
+   * are, which the report already describes.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export function createLibraryUndoEngineDeps(
@@ -62,6 +70,7 @@ export async function executeLibraryUndo(
   const skipped: PropagationUndo['skipped'] = [];
 
   for (const entry of [...manifest.entries].reverse()) {
+    assertNotCancelled(params.signal);
     assertContainedInLocation(entry, params.pathEnv);
     const location = { locationId: entry.locationId, destinationPath: entry.destinationPath };
     const currentHash = await deps.hashAt(entry.resolvedPath, entry.kind).catch(() => null);

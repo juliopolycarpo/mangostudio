@@ -42,6 +42,7 @@ import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from 
 import { executeRemovalWrites } from './remove-writes';
 import { type RuntimeSettingsSourcesResult, readSettingsSources } from './settings-sources';
 import { executeLibraryUndo, LibraryBackupMissingError } from './undo-writes';
+import { serializeRuntimeLibraryWrite } from './write-queue';
 
 export interface LibraryHostAdapters {
   readonly createPathEnv: (overrides?: {
@@ -52,6 +53,8 @@ export interface LibraryHostAdapters {
   readonly describeLocations: (env: PathEnv) => LibraryLocationStatus[];
   readonly readSettingsSources: (env: PathEnv) => RuntimeSettingsSourcesResult;
   readonly now: () => number;
+  /** Every write against one backup root runs alone; see `write-queue.ts`. */
+  readonly serializeWrite: <T>(backupRoot: string, task: () => Promise<T>) => Promise<T>;
 }
 
 const DEFAULT_ADAPTERS: LibraryHostAdapters = {
@@ -63,6 +66,7 @@ const DEFAULT_ADAPTERS: LibraryHostAdapters = {
     ),
   readSettingsSources,
   now: Date.now,
+  serializeWrite: serializeRuntimeLibraryWrite,
 };
 
 export interface LibraryService {
@@ -72,9 +76,15 @@ export interface LibraryService {
   settingsSources(
     params: RuntimeLibrarySettingsSourcesParams
   ): Promise<RuntimeSettingsSourcesResult>;
-  apply(params: RuntimeLibraryApplyParams): Promise<RuntimeLibraryApplyResult>;
-  remove(params: RuntimeLibraryRemoveParams): Promise<RuntimeLibraryRemoveResult>;
-  undo(params: RuntimeLibraryUndoParams): Promise<RuntimeLibraryUndoResult>;
+  apply(
+    params: RuntimeLibraryApplyParams,
+    signal?: AbortSignal
+  ): Promise<RuntimeLibraryApplyResult>;
+  remove(
+    params: RuntimeLibraryRemoveParams,
+    signal?: AbortSignal
+  ): Promise<RuntimeLibraryRemoveResult>;
+  undo(params: RuntimeLibraryUndoParams, signal?: AbortSignal): Promise<RuntimeLibraryUndoResult>;
   /** Drops every memo this process holds; tests call this between fixtures. */
   resetCache(): void;
 }
@@ -201,44 +211,54 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
       return Promise.resolve(adapters.readSettingsSources(pathEnv));
     },
 
-    apply(params) {
+    apply(params, signal) {
       assertBackupRoot(params.backupRoot, 'library.apply');
-      return executePropagationWrites({
-        backupRoot: params.backupRoot,
-        retentionCount: params.retentionCount,
-        retentionBytes: params.retentionBytes,
-        pathEnv: pathEnvFrom(adapters, params),
-        backupId: params.backupId,
-        operations: decodeApplyOperations(params),
-        skipped: params.skipped,
-      });
+      return adapters.serializeWrite(params.backupRoot, () =>
+        executePropagationWrites({
+          backupRoot: params.backupRoot,
+          retentionCount: params.retentionCount,
+          retentionBytes: params.retentionBytes,
+          pathEnv: pathEnvFrom(adapters, params),
+          backupId: params.backupId,
+          operations: decodeApplyOperations(params),
+          skipped: params.skipped,
+          signal,
+        })
+      );
     },
 
-    remove(params) {
+    remove(params, signal) {
       assertBackupRoot(params.backupRoot, 'library.remove');
-      return executeRemovalWrites({
-        backupRoot: params.backupRoot,
-        retentionCount: params.retentionCount,
-        retentionBytes: params.retentionBytes,
-        pathEnv: pathEnvFrom(adapters, params),
-        backupId: params.backupId,
-        operations: params.operations,
-        kept: params.kept,
-        lastCopyResourceKeys: params.lastCopyResourceKeys,
-      });
+      return adapters.serializeWrite(params.backupRoot, () =>
+        executeRemovalWrites({
+          backupRoot: params.backupRoot,
+          retentionCount: params.retentionCount,
+          retentionBytes: params.retentionBytes,
+          pathEnv: pathEnvFrom(adapters, params),
+          backupId: params.backupId,
+          operations: params.operations,
+          kept: params.kept,
+          lastCopyResourceKeys: params.lastCopyResourceKeys,
+          signal,
+        })
+      );
     },
 
-    async undo(params) {
+    async undo(params, signal) {
       assertBackupRoot(params.backupRoot, 'library.undo');
       if (typeof params.backupId !== 'string' || params.backupId.length === 0) {
         throw new RuntimeToolArgumentError('library.undo requires a non-empty backupId.');
       }
+      const backupId = params.backupId;
       try {
-        return await executeLibraryUndo({
-          backupRoot: params.backupRoot,
-          backupId: params.backupId,
-          pathEnv: pathEnvFrom(adapters, params),
-        });
+        return await adapters.serializeWrite(params.backupRoot, () =>
+          executeLibraryUndo({
+            backupRoot: params.backupRoot,
+            backupId,
+            pathEnv: pathEnvFrom(adapters, params),
+            signal,
+          })
+        );
       } catch (error) {
         if (error instanceof LibraryBackupMissingError) {
           // Kept discriminable across the boundary: the class does not survive
