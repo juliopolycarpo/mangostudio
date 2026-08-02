@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
   ConceptComparison,
   LibraryTargetId,
   SettingsSnapshot,
 } from '@mangostudio/shared/library';
+import type { LibraryScope } from '../../../src/modules/library/application/environment-library-service';
 import {
   createSettingsRoutes,
   type SettingsRouteService,
@@ -37,11 +39,23 @@ const comparisons: ConceptComparison[] = [
   },
 ];
 
+const scopes: LibraryScope[] = [];
+
 const service: SettingsRouteService = {
-  list: () => snapshots,
-  get: (targetId: LibraryTargetId) =>
-    snapshots.find((snapshot) => snapshot.targetId === targetId) as SettingsSnapshot,
-  compare: () => comparisons,
+  list: (scope) => {
+    scopes.push(scope);
+    return Promise.resolve(snapshots);
+  },
+  get: (scope, targetId: LibraryTargetId) => {
+    scopes.push(scope);
+    return Promise.resolve(
+      snapshots.find((snapshot) => snapshot.targetId === targetId) as SettingsSnapshot
+    );
+  },
+  compare: (scope) => {
+    scopes.push(scope);
+    return Promise.resolve(comparisons);
+  },
 };
 
 let restoreAuth: (() => void) | null = null;
@@ -49,6 +63,7 @@ let restoreAuth: (() => void) | null = null;
 afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
+  scopes.length = 0;
 });
 
 describe('library settings routes', () => {
@@ -89,6 +104,42 @@ describe('library settings routes', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(comparisons);
+  });
+
+  it('reads the environment named in the query, defaulting to local', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createSettingsRoutes(service)
+    );
+    restoreAuth = restore;
+
+    await app.handle(new Request('http://localhost/library/settings/compare'));
+    await app.handle(
+      new Request('http://localhost/library/settings/compare?environmentId=remote-a')
+    );
+
+    expect(scopes.map((scope) => scope.environmentId)).toEqual(['local', 'remote-a']);
+  });
+
+  // The settings table has to say "I cannot reach that machine" rather than
+  // quietly describing the hub, so an unreachable environment is a 503 here for
+  // the same reason it is on the resource routes.
+  it('answers 503 when the environment cannot be reached', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createSettingsRoutes({
+        ...service,
+        compare: () =>
+          Promise.reject(new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Environment offline.')),
+      })
+    );
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/settings/compare?environmentId=remote-a')
+    );
+
+    expect(response.status).toBe(503);
   });
 
   it('registers only GET routes for settings inspection', () => {

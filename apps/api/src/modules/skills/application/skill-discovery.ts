@@ -1,6 +1,9 @@
 /**
  * Compatibility adapter from the five-kind library matrix to the established
  * SkillDescriptor contract consumed by prompts, tools, and capability checks.
+ *
+ * Chat prompt skills remain a hub-machine concern: this adapter always discovers
+ * against the local environment and never grows an `environmentId` parameter.
  */
 
 import { homedir } from 'node:os';
@@ -14,6 +17,7 @@ import type { Database } from '../../../db/types';
 import { getConfig } from '../../../lib/config';
 import { RegularFileReadError, readRegularFileUtf8 } from '../../../lib/safe-file';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import { environmentLibraryService } from '../../library/application/environment-library-service';
 import {
   discoverLibraryResources,
   resetLibraryDiscoveryCache,
@@ -121,8 +125,15 @@ export async function listUsableSkills(
   return skills.filter((skill) => skill.valid && skill.enabled && !skill.shadowed);
 }
 
+/**
+ * Two caches hold library scans until the write engines move (017): this
+ * module's hub-local discovery, and the per-environment service the matrix
+ * reads through. Anything that invalidates one invalidates the other, or a
+ * rescan clears the cache nobody was looking at.
+ */
 export function resetSkillsCache(): void {
   resetLibraryDiscoveryCache();
+  environmentLibraryService.resetCache();
 }
 
 /**

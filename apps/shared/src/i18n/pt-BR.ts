@@ -1634,6 +1634,7 @@ export const messages = {
       selectedCount: '{count} selecionados',
       clearSelection: 'Limpar seleção',
       propagate: 'Propagar',
+      writesLocalOnly: 'Propagar e remover estão disponíveis apenas nesta máquina por enquanto.',
       loadError: 'Não foi possível carregar a biblioteca.',
       retry: 'Tentar novamente',
       rescan: 'Reler do disco',
@@ -1681,6 +1682,7 @@ export const messages = {
       alsoIn: 'também em {locations}, idêntico',
       propagate: 'Propagar',
       remove: 'Remover',
+      writesLocalOnly: 'Propagar e remover estão disponíveis apenas nesta máquina por enquanto.',
       notFound: 'Este recurso não existe mais na biblioteca.',
       invalidInstance: 'Cópia ilegível em {location}',
       // 001 não normaliza fim de linha de propósito, então CRLF contra LF é uma
@@ -2019,6 +2021,11 @@ export const messages = {
       notPermitted: '{environment} não informa o que está instalado nele',
       notPermittedHint:
         'O runtime dessa máquina não oferece detecção de toolchains. Isso é uma configuração de lá, não uma falha daqui.',
+      libraryNotPermitted: '{environment} não reporta recursos da biblioteca',
+      libraryNotPermittedHint:
+        'O runtime dessa máquina não oferece descoberta da biblioteca. Isso é uma configuração de lá, não uma falha daqui.',
+      libraryDisconnectedHint:
+        'Nada é mostrado no lugar da última matriz dessa máquina, porque uma cobertura desatualizada é exatamente o que alguém usaria para agir.',
       compare: 'Comparar',
       compareTitle: 'Comparar ambientes',
       compareHint: 'Duas máquinas, uma tabela. As linhas são o que o MangoStudio sabe procurar.',

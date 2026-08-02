@@ -20,19 +20,40 @@ import { useConnectEnvironmentMutation } from '../queries';
 interface EnvironmentScopeNoticeProps {
   readonly environment: Environment;
   readonly reason: 'disconnected' | 'not-permitted';
+  /** Which tab's copy to use. Library staleness corrupts write decisions, so its hint is sharper. */
+  readonly surface?: 'probing' | 'library';
 }
 
-export function EnvironmentScopeNotice({ environment, reason }: EnvironmentScopeNoticeProps) {
+export function EnvironmentScopeNotice({
+  environment,
+  reason,
+  surface = 'probing',
+}: EnvironmentScopeNoticeProps) {
   const { t } = useI18n();
   const e = t.environments;
   const connect = useConnectEnvironmentMutation();
   const notPermitted = reason === 'not-permitted';
+  const library = surface === 'library';
+
+  const title = notPermitted
+    ? library
+      ? e.scope.libraryNotPermitted
+      : e.scope.notPermitted
+    : e.scope.disconnected;
+  const hint = notPermitted
+    ? library
+      ? e.scope.libraryNotPermittedHint
+      : e.scope.notPermittedHint
+    : library
+      ? e.scope.libraryDisconnectedHint
+      : e.scope.disconnectedHint;
 
   return (
     <div
       className="flex flex-col items-center gap-2 rounded-2xl border border-outline-variant/15 bg-surface-container-high py-10 text-center"
       data-testid="environment-scope-notice"
       data-reason={reason}
+      data-surface={surface}
     >
       {notPermitted ? (
         <ShieldOff size={26} className="text-on-surface-variant/50" />
@@ -40,13 +61,11 @@ export function EnvironmentScopeNotice({ environment, reason }: EnvironmentScope
         <PlugZap size={26} className="text-warning" />
       )}
       <p className="text-sm font-semibold text-on-surface">
-        {formatMessage(notPermitted ? e.scope.notPermitted : e.scope.disconnected, {
+        {formatMessage(title, {
           environment: environment.name,
         })}
       </p>
-      <p className="max-w-md text-sm text-on-surface-variant/60">
-        {notPermitted ? e.scope.notPermittedHint : e.scope.disconnectedHint}
-      </p>
+      <p className="max-w-md text-sm text-on-surface-variant/60">{hint}</p>
       {!notPermitted && (
         <Button
           variant="ghost"

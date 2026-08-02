@@ -17,7 +17,7 @@ export function createLocalRuntimeManifest(): RuntimeCapabilityManifest {
       git: true,
       probing: true,
       mcp: true,
-      library: false,
+      library: true,
       checkpoints: true,
     },
   };

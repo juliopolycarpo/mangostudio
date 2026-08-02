@@ -6,6 +6,7 @@
  * to read the state.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CoverageMatrix } from '../../../../src/features/library/components/CoverageMatrix';
@@ -44,6 +45,7 @@ function renderMatrix(resources: ReturnType<typeof resource>[]) {
       selected={new Set()}
       onToggleSelected={() => undefined}
       onToggleAll={() => undefined}
+      environmentId={LOCAL_ENVIRONMENT_ID}
     />
   );
 }

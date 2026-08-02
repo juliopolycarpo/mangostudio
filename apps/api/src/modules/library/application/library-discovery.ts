@@ -1,20 +1,22 @@
+import {
+  type LibraryCache,
+  type ReadLibraryInstance,
+  resolveLibraryScanTargets,
+  scanLibraryInstancesForPathEnv,
+} from '@mangostudio/runtime';
 import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
-  enabledLibraryLocations,
-  LIBRARY_SCOPES,
   type LibraryLocationId,
   type LibraryResource,
   type ResourceKind,
   resourceKey,
 } from '@mangostudio/shared/library';
-import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
-import { readLocationInstances } from '../infrastructure/instance-reader';
-import { type LibraryCache, libraryCache } from '../infrastructure/library-cache';
+import { hubLibraryDiscoveryCache } from '../infrastructure/library-cache';
 import { createLibraryPathEnv } from '../infrastructure/location-probe';
 import { resolveLibraryCoverage } from './coverage-resolver';
 import { describeDivergence, type InstanceComparison } from './divergence';
@@ -43,54 +45,45 @@ export async function discoverLibraryResources(
   return discoverLibraryResourcesFromSettings(settings, options);
 }
 
-/** Discover library resources without a database when settings are already known (CLI). */
-export async function discoverLibraryResourcesFromSettings(
+/**
+ * Discover library resources without a database when settings are already known
+ * (CLI, tests). Scanning runs through the runtime engine; coverage and
+ * divergence stay here as pure decisions over the scan result.
+ */
+export function discoverLibraryResourcesFromSettings(
   settings: AppSettings,
   options: Omit<LibraryDiscoveryOptions, 'settings'> = {}
 ): Promise<LibraryResource[]> {
   const pathEnv = options.pathEnv ?? createLibraryPathEnv();
-  const locationSettings = libraryLocationsFor(settings);
-  const enabledByScope = new Map(
-    LIBRARY_SCOPES.map((scope) => [scope, enabledLibraryLocations(locationSettings, scope)])
-  );
-  const kinds = options.kinds ? new Set(options.kinds) : null;
-  const locations = LIBRARY_LOCATION_DEFINITIONS.flatMap((location) => {
-    if (!enabledByScope.get(location.scope)?.has(location.id)) return [];
-    if (kinds && !kinds.has(location.kind)) return [];
-    const path = options.locationPathOverrides?.[location.id] ?? location.resolvePath(pathEnv);
-    return path ? [{ location, path }] : [];
-  });
-  // Scope joins the key alongside the resolved path, which is what carries the
-  // root: the same location under two workspace roots is two absolute paths and
-  // therefore two entries. Scope is redundant with that today and is in the key
-  // anyway, so a location that ever resolves to the same path at two scopes
-  // cannot silently share one memo entry.
-  const signature = locations
-    .map(({ location, path }) => `${location.scope}\0${location.id}\0${path}`)
-    .sort()
-    .join('\n');
-  const cache = options.cache ?? libraryCache;
+  const cache = options.cache ?? hubLibraryDiscoveryCache;
   const force = options.force ?? false;
+  const locationSettings = libraryLocationsFor(settings);
+  const targets = resolveLibraryScanTargets(locationSettings, pathEnv, {
+    kinds: options.kinds,
+    locationPathOverrides: options.locationPathOverrides,
+  });
+  // The runtime scan builds the same target list under a `flat:` prefix. The
+  // prefixes are what keep the two apart when they share one cache instance:
+  // this memo holds grouped `LibraryResource[]`, that one holds flat entries.
+  const signature = `grouped:\n${targets
+    .map((target) => `${target.scope}\0${target.locationId}\0${target.path}`)
+    .sort()
+    .join('\n')}`;
 
-  return await cache.getOrComputeScan(signature, (options.now ?? Date.now)(), force, async () => {
-    const scanned = (
-      await Promise.all(
-        locations.map(({ location, path }) =>
-          readLocationInstances(location, path, { cache, force })
-        )
-      )
-    ).flat();
-    return groupResources(scanned);
+  return cache.getOrComputeScan(signature, (options.now ?? Date.now)(), force, async () => {
+    const entries = await scanLibraryInstancesForPathEnv(locationSettings, pathEnv, {
+      force,
+      now: options.now,
+      cache,
+      kinds: options.kinds,
+      locationPathOverrides: options.locationPathOverrides,
+      cacheScan: false,
+    });
+    return groupResources(entries);
   });
 }
 
-function groupResources(
-  scanned: readonly {
-    readonly ref: { readonly kind: LibraryResource['ref']['kind']; readonly slug: string };
-    readonly instance: LibraryResource['instances'][number];
-    readonly whitespaceHash?: string;
-  }[]
-): LibraryResource[] {
+function groupResources(scanned: readonly ReadLibraryInstance[]): LibraryResource[] {
   const byKey = new Map<string, InstanceComparison[]>();
   const refByKey = new Map<string, LibraryResource['ref']>();
 
@@ -119,6 +112,13 @@ function groupResources(
   }).sort((left, right) => left.key.localeCompare(right.key));
 }
 
+/** Groups a runtime scan result the same way Local discovery does. */
+export function groupLibraryScanEntries(
+  scanned: readonly ReadLibraryInstance[]
+): LibraryResource[] {
+  return groupResources(scanned);
+}
+
 export function resetLibraryDiscoveryCache(): void {
-  libraryCache.clear();
+  hubLibraryDiscoveryCache.clear();
 }

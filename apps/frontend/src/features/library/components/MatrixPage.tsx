@@ -6,9 +6,13 @@
  * of work, and the wizard opens once for the whole set.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ResourceKind } from '@mangostudio/shared/library';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
+import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
+import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
@@ -21,8 +25,14 @@ import { PropagationWizard } from './PropagationWizard';
 export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
   const { t } = useI18n();
   const l = t.library;
-  const matrix = useLibraryMatrix(kind);
+  const scope = useEnvironmentScope();
+  const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;
+  const matrix = useLibraryMatrix(kind, scope.environmentId);
   const [wizardKeys, setWizardKeys] = useState<readonly string[] | null>(null);
+
+  useEffect(() => {
+    setWizardKeys(null);
+  }, [scope.environmentId]);
 
   /**
    * Every enabled location storing this kind is previewed, not only the ones
@@ -32,17 +42,68 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
    */
   const candidates = useCandidateLocations(matrix.locations, kind);
 
-  if (matrix.isPending && matrix.resources.length === 0) {
-    return <LibraryPageState variant="loading" />;
+  // No description: the library section layout already renders the subtitle
+  // directly above the tab strip this page sits under.
+  const header = <EnvironmentScopeHeader scope={scope} onRefresh={matrix.refetch} />;
+
+  if (scope.environment && !scope.permitsLibrary) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <EnvironmentScopeNotice
+          environment={scope.environment}
+          reason="not-permitted"
+          surface="library"
+        />
+      </div>
+    );
   }
+
+  if (matrix.isPending && matrix.resources.length === 0) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <LibraryPageState variant="loading" />
+      </div>
+    );
+  }
+
   if (matrix.error && matrix.resources.length === 0) {
-    return <LibraryPageState variant="error" onRetry={matrix.refetch} />;
+    return (
+      <div className="space-y-4">
+        {header}
+        {scope.environment && !scope.isConnected ? (
+          <EnvironmentScopeNotice
+            environment={scope.environment}
+            reason="disconnected"
+            surface="library"
+          />
+        ) : (
+          <LibraryPageState variant="error" onRetry={matrix.refetch} />
+        )}
+      </div>
+    );
+  }
+
+  if (!isLocal && scope.environment && !scope.isConnected) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <EnvironmentScopeNotice
+          environment={scope.environment}
+          reason="disconnected"
+          surface="library"
+        />
+      </div>
+    );
   }
 
   const selectedCount = matrix.selected.size;
 
   return (
     <div className="space-y-4">
+      {header}
+
       <MatrixFilters
         filters={matrix.filters}
         targets={matrix.targets}
@@ -64,15 +125,21 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
               <Button variant="ghost" size="sm" onClick={matrix.clearSelection}>
                 {l.matrix.clearSelection}
               </Button>
-              {/* Offered even with nothing to propagate to: the wizard is where
-                  that answer is explained, and a dead button explains nothing. */}
-              <Button
-                size="sm"
-                onClick={() => setWizardKeys([...matrix.selected])}
-                disabled={!candidates.isResolved}
-              >
-                {l.matrix.propagate}
-              </Button>
+              {/* Writes stay hub-local for now — remote preview/apply has no
+                  environmentId seam yet, so Propagate must not open there. */}
+              {isLocal ? (
+                <Button
+                  size="sm"
+                  onClick={() => setWizardKeys([...matrix.selected])}
+                  disabled={!candidates.isResolved}
+                >
+                  {l.matrix.propagate}
+                </Button>
+              ) : (
+                <span className="text-on-surface-variant text-xs" data-testid="writes-local-only">
+                  {l.matrix.writesLocalOnly}
+                </span>
+              )}
             </>
           )}
         </div>
@@ -90,6 +157,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         selected={matrix.selected}
         onToggleSelected={matrix.toggleSelected}
         onToggleAll={matrix.toggleAllVisible}
+        environmentId={scope.environmentId}
       />
 
       {matrix.resources.length === 0 ? (
@@ -102,7 +170,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         />
       ) : null}
 
-      {wizardKeys && wizardKeys.length > 0 && (
+      {isLocal && wizardKeys && wizardKeys.length > 0 && (
         <PropagationWizard
           resourceKeys={wizardKeys}
           locationIds={candidates.locationIds}

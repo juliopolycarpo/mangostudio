@@ -15,7 +15,7 @@ import type {
   ResourceKind,
 } from '@mangostudio/shared/library';
 import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { rescanLibrary } from '../api';
 import {
   DEFAULT_LIBRARY_FILTERS,
@@ -55,16 +55,21 @@ export interface LibraryMatrixState {
   readonly isRescanning: boolean;
 }
 
-export function useLibraryMatrix(kind: ResourceKind): LibraryMatrixState {
+export function useLibraryMatrix(kind: ResourceKind, environmentId?: string): LibraryMatrixState {
   const queryClient = useQueryClient();
   const [filters, setFiltersState] = useState<LibraryFilters>(DEFAULT_LIBRARY_FILTERS);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
 
+  useEffect(() => {
+    setSelected(new Set());
+    setFiltersState(DEFAULT_LIBRARY_FILTERS);
+  }, [environmentId]);
+
   const [resourcesQuery, targetsQuery, locationsQuery] = useQueries({
     queries: [
-      libraryResourcesQueryOptions(kind),
+      libraryResourcesQueryOptions(kind, environmentId),
       libraryTargetsQueryOptions(),
-      libraryLocationsQueryOptions(),
+      libraryLocationsQueryOptions(environmentId),
     ],
   });
 
@@ -85,7 +90,7 @@ export function useLibraryMatrix(kind: ResourceKind): LibraryMatrixState {
   );
 
   const rescan = useMutation({
-    mutationFn: () => rescanLibrary(true),
+    mutationFn: () => rescanLibrary(true, environmentId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
   });
 

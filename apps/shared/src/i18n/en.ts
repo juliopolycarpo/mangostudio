@@ -1609,6 +1609,7 @@ export const messages: Messages = {
       selectedCount: '{count} selected',
       clearSelection: 'Clear selection',
       propagate: 'Propagate',
+      writesLocalOnly: 'Propagate and remove are available on this machine only for now.',
       loadError: 'The library could not be loaded.',
       retry: 'Try again',
       rescan: 'Re-read from disk',
@@ -1656,6 +1657,7 @@ export const messages: Messages = {
       alsoIn: 'also in {locations}, identical',
       propagate: 'Propagate',
       remove: 'Remove',
+      writesLocalOnly: 'Propagate and remove are available on this machine only for now.',
       notFound: 'This resource is no longer in the library.',
       invalidInstance: 'Unreadable copy in {location}',
       // 001 deliberately does not normalize line endings, so a CRLF/LF split is
@@ -2000,6 +2002,11 @@ export const messages: Messages = {
       notPermitted: '{environment} does not report what is installed on it',
       notPermittedHint:
         'Its runtime does not offer toolchain detection. That is a setting on that machine, not a fault here.',
+      libraryNotPermitted: '{environment} does not report library resources',
+      libraryNotPermittedHint:
+        'Its runtime does not offer library discovery. That is a setting on that machine, not a fault here.',
+      libraryDisconnectedHint:
+        'Nothing is shown rather than the last library matrix this machine gave, because a stale coverage answer is exactly what someone would act on.',
       compare: 'Compare',
       compareTitle: 'Compare environments',
       compareHint: 'Two machines, one table. Rows are what MangoStudio knows how to look for.',

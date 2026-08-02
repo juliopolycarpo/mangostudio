@@ -5,8 +5,11 @@
  *
  * Discovery is cached server-side, so a short `staleTime` keeps navigation
  * between the kind tabs instant while a rescan stays an explicit action.
+ * Query keys include the environment so switching machines cannot reuse the
+ * previous matrix as if it described the new one.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   ConceptComparison,
   LibraryLocationId,
@@ -23,25 +26,47 @@ import { ApiError } from '@/lib/utils';
 
 const STALE_TIME_MS = 30_000;
 
+/**
+ * The environment as a request query or a TanStack Router `search`: one shape
+ * for both, since `local` is the default on the server and stays out of the URL.
+ */
+export function libraryEnvironmentSearch(environmentId?: string): { environmentId?: string } {
+  return environmentId && environmentId !== LOCAL_ENVIRONMENT_ID ? { environmentId } : {};
+}
+
 export const libraryKeys = {
   all: ['library'] as const,
-  resources: (kind?: ResourceKind) => [...libraryKeys.all, 'resources', kind ?? 'all'] as const,
-  resource: (key: string) => [...libraryKeys.all, 'resource', key] as const,
-  content: (key: string, locationId: LibraryLocationId) =>
-    [...libraryKeys.all, 'content', key, locationId] as const,
-  locations: () => [...libraryKeys.all, 'locations'] as const,
+  resources: (kind?: ResourceKind, environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...libraryKeys.all, 'resources', environmentId, kind ?? 'all'] as const,
+  resource: (key: string, environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...libraryKeys.all, 'resource', environmentId, key] as const,
+  /** Prefix over every location's copy of one resource, for invalidating them together. */
+  contents: (key: string, environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...libraryKeys.all, 'content', environmentId, key] as const,
+  content: (
+    key: string,
+    locationId: LibraryLocationId,
+    environmentId: string = LOCAL_ENVIRONMENT_ID
+  ) => [...libraryKeys.contents(key, environmentId), locationId] as const,
+  locations: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...libraryKeys.all, 'locations', environmentId] as const,
   targets: () => [...libraryKeys.all, 'targets'] as const,
-  settingsComparison: () => [...libraryKeys.all, 'settings', 'compare'] as const,
+  settingsComparison: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...libraryKeys.all, 'settings', 'compare', environmentId] as const,
   backups: () => [...libraryKeys.all, 'backups'] as const,
 };
 
-export function libraryResourcesQueryOptions(kind?: ResourceKind) {
+export function libraryResourcesQueryOptions(kind?: ResourceKind, environmentId?: string) {
+  const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
-    queryKey: libraryKeys.resources(kind),
+    queryKey: libraryKeys.resources(kind, envId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
       const { data, error } = await client.api.library.resources.get({
-        query: kind ? { kind } : {},
+        query: {
+          ...(kind ? { kind } : {}),
+          ...libraryEnvironmentSearch(envId),
+        },
       });
       if (error) throw new ApiError(error.value);
       return data as LibraryResource[];
@@ -49,12 +74,15 @@ export function libraryResourcesQueryOptions(kind?: ResourceKind) {
   });
 }
 
-export function libraryResourceQueryOptions(key: string) {
+export function libraryResourceQueryOptions(key: string, environmentId?: string) {
+  const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
-    queryKey: libraryKeys.resource(key),
+    queryKey: libraryKeys.resource(key, envId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.library.resources({ key }).get();
+      const { data, error } = await client.api.library.resources({ key }).get({
+        query: libraryEnvironmentSearch(envId),
+      });
       if (error) throw new ApiError(error.value);
       return data as LibraryResource;
     },
@@ -67,26 +95,34 @@ export function libraryResourceQueryOptions(key: string) {
  * of their entrypoints — the detail view says so rather than implying the whole
  * tree was compared.
  */
-export function libraryContentQueryOptions(key: string, locationId: LibraryLocationId) {
+export function libraryContentQueryOptions(
+  key: string,
+  locationId: LibraryLocationId,
+  environmentId?: string
+) {
+  const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
-    queryKey: libraryKeys.content(key, locationId),
+    queryKey: libraryKeys.content(key, locationId, envId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.library
-        .resources({ key })
-        .content.get({ query: { location: locationId } });
+      const { data, error } = await client.api.library.resources({ key }).content.get({
+        query: { location: locationId, ...libraryEnvironmentSearch(envId) },
+      });
       if (error) throw new ApiError(error.value);
       return data as LibraryResourceContent;
     },
   });
 }
 
-export function libraryLocationsQueryOptions() {
+export function libraryLocationsQueryOptions(environmentId?: string) {
+  const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
-    queryKey: libraryKeys.locations(),
+    queryKey: libraryKeys.locations(envId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.library.locations.get();
+      const { data, error } = await client.api.library.locations.get({
+        query: libraryEnvironmentSearch(envId),
+      });
       if (error) throw new ApiError(error.value);
       return data as LibraryLocationStatus[];
     },
@@ -111,12 +147,15 @@ export function libraryTargetsQueryOptions() {
   });
 }
 
-export function settingsComparisonQueryOptions() {
+export function settingsComparisonQueryOptions(environmentId?: string) {
+  const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
-    queryKey: libraryKeys.settingsComparison(),
+    queryKey: libraryKeys.settingsComparison(envId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.library.settings.compare.get();
+      const { data, error } = await client.api.library.settings.compare.get({
+        query: libraryEnvironmentSearch(envId),
+      });
       if (error) throw new ApiError(error.value);
       return data as ConceptComparison[];
     },

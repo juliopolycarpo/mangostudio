@@ -103,6 +103,7 @@
       "dependencies": {
         "@mangostudio/shared": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
+        "smol-toml": "^1.7.0",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",

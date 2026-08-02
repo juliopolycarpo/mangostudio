@@ -14,6 +14,9 @@ import type {
 } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { EyeOff } from 'lucide-react';
+import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
+import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
+import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { settingsComparisonQueryOptions } from '../queries';
 import { LibraryPageState } from './LibraryPageState';
@@ -21,20 +24,55 @@ import { LibraryPageState } from './LibraryPageState';
 export function SettingsComparison() {
   const { t } = useI18n();
   const l = t.library;
-  const query = useQuery(settingsComparisonQueryOptions());
+  const scope = useEnvironmentScope();
+  const query = useQuery(settingsComparisonQueryOptions(scope.environmentId));
 
-  if (query.isPending) return <LibraryPageState variant="loading" />;
+  // No description: the library section layout already renders the subtitle
+  // directly above the tab strip this page sits under.
+  const header = <EnvironmentScopeHeader scope={scope} onRefresh={() => void query.refetch()} />;
+
+  const framed = (body: React.ReactNode) => (
+    <div className="space-y-4">
+      {header}
+      {body}
+    </div>
+  );
+
+  if (scope.environment && !scope.permitsLibrary) {
+    return framed(
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="not-permitted"
+        surface="library"
+      />
+    );
+  }
+
+  // A settings table describing the wrong machine is not a cosmetic problem:
+  // it is what someone reads before deciding to change a setting.
+  if (scope.environment && !scope.isConnected) {
+    return framed(
+      <EnvironmentScopeNotice
+        environment={scope.environment}
+        reason="disconnected"
+        surface="library"
+      />
+    );
+  }
+
+  if (query.isPending) return framed(<LibraryPageState variant="loading" />);
   if (query.error) {
-    return <LibraryPageState variant="error" onRetry={() => void query.refetch()} />;
+    return framed(<LibraryPageState variant="error" onRetry={() => void query.refetch()} />);
   }
 
   const comparisons = query.data ?? [];
   if (comparisons.length === 0) {
-    return <LibraryPageState variant="empty" title={l.settings.empty} />;
+    return framed(<LibraryPageState variant="empty" title={l.settings.empty} />);
   }
 
   return (
     <div className="space-y-4" data-testid="settings-comparison">
+      {header}
       <div className="space-y-1">
         <p className="text-on-surface text-sm">{l.settings.description}</p>
         <p className="text-[11px] text-tertiary">{l.settings.comparability}</p>

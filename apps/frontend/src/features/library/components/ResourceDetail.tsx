@@ -7,17 +7,23 @@
  * version is frequently the one held in only one place.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/shared/library';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
+import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
+import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { formatBytes, formatRelativeTime, hashPrefix, validInstances } from '../format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import {
+  libraryEnvironmentSearch,
+  libraryKeys,
   libraryLocationsQueryOptions,
   libraryResourceQueryOptions,
   libraryTargetsQueryOptions,
@@ -31,14 +37,26 @@ import { RemovalWizard } from './RemovalWizard';
 export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }) {
   const { t, locale } = useI18n();
   const l = t.library;
+  const scope = useEnvironmentScope();
+  const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;
+  const queryClient = useQueryClient();
   const [comparing, setComparing] = useState(false);
   const [propagating, setPropagating] = useState(false);
   const [removing, setRemoving] = useState(false);
 
+  // Every one of these is about the machine that was selected when it opened.
+  // Without this, switching away only hides them, and switching back re-opens a
+  // wizard over a different environment's instances.
+  useEffect(() => {
+    setComparing(false);
+    setPropagating(false);
+    setRemoving(false);
+  }, [scope.environmentId]);
+
   const [resourceQuery, locationsQuery, targetsQuery] = useQueries({
     queries: [
-      libraryResourceQueryOptions(resourceKey),
-      libraryLocationsQueryOptions(),
+      libraryResourceQueryOptions(resourceKey, scope.environmentId),
+      libraryLocationsQueryOptions(scope.environmentId),
       libraryTargetsQueryOptions(),
     ],
   });
@@ -54,14 +72,73 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
   const groups = useMemo(() => (resource ? contentGroupsOf(resource) : []), [resource]);
   const candidates = useCandidateLocations(locations, resource?.ref.kind);
 
-  if (resourceQuery.isPending) return <LibraryPageState variant="loading" />;
+  // No description: the library section layout already renders the subtitle
+  // directly above the tab strip this page sits under.
+  const header = (
+    <EnvironmentScopeHeader
+      scope={scope}
+      onRefresh={() => {
+        void resourceQuery.refetch();
+        void locationsQuery.refetch();
+        void queryClient.invalidateQueries({
+          queryKey: libraryKeys.contents(resourceKey, scope.environmentId),
+        });
+      }}
+    />
+  );
+
+  if (scope.environment && !scope.permitsLibrary) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <EnvironmentScopeNotice
+          environment={scope.environment}
+          reason="not-permitted"
+          surface="library"
+        />
+      </div>
+    );
+  }
+
+  if (resourceQuery.isPending) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <LibraryPageState variant="loading" />
+      </div>
+    );
+  }
   if (resourceQuery.error || !resource) {
     return (
-      <LibraryPageState
-        variant="error"
-        title={l.detail.notFound}
-        onRetry={() => void resourceQuery.refetch()}
-      />
+      <div className="space-y-4">
+        {header}
+        {scope.environment && !scope.isConnected ? (
+          <EnvironmentScopeNotice
+            environment={scope.environment}
+            reason="disconnected"
+            surface="library"
+          />
+        ) : (
+          <LibraryPageState
+            variant="error"
+            title={l.detail.notFound}
+            onRetry={() => void resourceQuery.refetch()}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (!isLocal && scope.environment && !scope.isConnected) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <EnvironmentScopeNotice
+          environment={scope.environment}
+          reason="disconnected"
+          surface="library"
+        />
+      </div>
     );
   }
 
@@ -69,10 +146,12 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
 
   return (
     <div className="space-y-5" data-testid="resource-detail" data-resource-key={resource.key}>
+      {header}
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <Link
             to={kindTab(resource)}
+            search={libraryEnvironmentSearch(scope.environmentId)}
             className="inline-flex items-center gap-1.5 text-on-surface-variant text-xs hover:text-on-surface"
           >
             <ArrowLeft size={12} />
@@ -83,21 +162,33 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
             {`${l.kinds[resource.ref.kind]} · ${l.divergence[resource.divergence]}`}
           </p>
         </div>
-        {/* Both are offered even with nowhere to act: the wizards are where that
-            answer is explained, and hiding a button explains nothing. */}
+        {/* Writes stay hub-local for now — remote preview/apply has no
+            environmentId seam yet, so these wizards must not open there. */}
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={() => setRemoving(true)}
-            disabled={!candidates.isResolved}
-            data-testid="remove-resource"
-          >
-            {l.detail.remove}
-          </Button>
-          <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
-            {l.detail.propagate}
-          </Button>
+          {isLocal ? (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setRemoving(true)}
+                disabled={!candidates.isResolved}
+                data-testid="remove-resource"
+              >
+                {l.detail.remove}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setPropagating(true)}
+                disabled={!candidates.isResolved}
+              >
+                {l.detail.propagate}
+              </Button>
+            </>
+          ) : (
+            <span className="text-on-surface-variant text-xs" data-testid="writes-local-only">
+              {l.detail.writesLocalOnly}
+            </span>
+          )}
         </div>
       </header>
 
@@ -152,6 +243,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
                   contentHash: groups[1].contentHash,
                 }}
                 whitespaceOnly={resource.whitespaceOnlyDivergence}
+                environmentId={scope.environmentId}
               />
             )}
             {groups.length > 2 && (
@@ -216,7 +308,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         {targetsQuery.isError && <p className="text-[11px] text-error">{l.matrix.loadError}</p>}
       </section>
 
-      {propagating && (
+      {isLocal && propagating && (
         <PropagationWizard
           resourceKeys={[resource.key]}
           locationIds={candidates.locationIds}
@@ -224,7 +316,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         />
       )}
 
-      {removing && (
+      {isLocal && removing && (
         <RemovalWizard
           resourceKeys={[resource.key]}
           locationIds={candidates.locationIds}

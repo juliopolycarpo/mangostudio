@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
   LibraryResource,
   LibraryResourceContent,
   LibraryTargetDescriptor,
 } from '@mangostudio/shared/library';
 import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
+import { LibraryFeatureUnavailableError } from '../../../src/modules/library/application/environment-library-service';
 import {
   createLibraryRoutes,
   type LibraryRouteService,
@@ -79,6 +81,7 @@ afterEach(() => {
 
 function createService(resources: LibraryResource[] = [skillResource]) {
   const forced: boolean[] = [];
+  const environmentIds: (string | undefined)[] = [];
   const content: LibraryResourceContent = {
     key: 'skill:gh',
     locationId: 'agents-skills',
@@ -88,19 +91,25 @@ function createService(resources: LibraryResource[] = [skillResource]) {
   };
   const workspaceRoots: (string | undefined)[] = [];
   const service: LibraryRouteService = {
-    discover(_userId, force, workspaceRoot) {
+    discover(_userId, force, workspaceRoot, environmentId) {
       forced.push(force);
       workspaceRoots.push(workspaceRoot);
+      environmentIds.push(environmentId);
       return Promise.resolve(resources);
     },
-    listLocations(workspaceRoot) {
+    listLocations(_userId, workspaceRoot, environmentId) {
       workspaceRoots.push(workspaceRoot);
-      return [];
+      environmentIds.push(environmentId);
+      return Promise.resolve([]);
     },
     listTargets: () => [],
-    readContent: () => content,
+    readContent(_userId, _resource, _locationId, workspaceRoot, environmentId) {
+      workspaceRoots.push(workspaceRoot);
+      environmentIds.push(environmentId);
+      return Promise.resolve(content);
+    },
   };
-  return { service, forced, workspaceRoots };
+  return { service, forced, workspaceRoots, environmentIds };
 }
 
 describe('library routes', () => {
@@ -167,27 +176,28 @@ describe('library routes', () => {
 
   it('returns location health from the registry service', async () => {
     const { service } = createService();
-    service.listLocations = () => [
+    const locations = [
       {
-        id: 'agents-skills',
-        kind: 'skill',
-        scope: 'home',
+        id: 'agents-skills' as const,
+        kind: 'skill' as const,
+        scope: 'home' as const,
         path: '/home/test/.agents/skills',
-        access: 'read-write',
+        access: 'read-write' as const,
         exists: true,
         readable: true,
         writable: true,
-        targetIds: ['mangostudio', 'codex'],
+        targetIds: ['mangostudio' as const, 'codex' as const],
         entryCount: 1,
       },
     ];
+    service.listLocations = () => Promise.resolve(locations);
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/library/locations'));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(service.listLocations());
+    expect(await response.json()).toEqual(locations);
   });
 
   it('accepts a valid workspace root and answers exactly as it does without one', async () => {
@@ -269,5 +279,98 @@ describe('library routes', () => {
     // A skill in `agents-skills` covers MangoStudio and Codex from one write,
     // and that fact is only derivable from the per-kind read precedence.
     expect(targets.find((target) => target.id === 'codex')?.reads.skill).toContain('agents-skills');
+  });
+
+  it('forwards environmentId on resources, content, locations, and rescan', async () => {
+    const { service, environmentIds } = createService();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const env = 'remote-box';
+    const resources = await app.handle(
+      new Request(`http://localhost/library/resources?environmentId=${env}`)
+    );
+    const detail = await app.handle(
+      new Request(`http://localhost/library/resources/skill:gh?environmentId=${env}`)
+    );
+    const content = await app.handle(
+      new Request(
+        `http://localhost/library/resources/skill:gh/content?location=agents-skills&environmentId=${env}`
+      )
+    );
+    const locations = await app.handle(
+      new Request(`http://localhost/library/locations?environmentId=${env}`)
+    );
+    const rescan = await app.handle(
+      new Request(`http://localhost/library/rescan?force=true&environmentId=${env}`, {
+        method: 'POST',
+      })
+    );
+
+    expect(resources.status).toBe(200);
+    expect(detail.status).toBe(200);
+    expect(content.status).toBe(200);
+    expect(locations.status).toBe(200);
+    expect(rescan.status).toBe(200);
+    // resources + detail discover + content discover + content read + locations + rescan
+    expect(environmentIds).toEqual([env, env, env, env, env, env]);
+  });
+
+  it('maps a missing library feature to 422', async () => {
+    const { service } = createService();
+    service.discover = () =>
+      Promise.reject(
+        new LibraryFeatureUnavailableError(
+          'Environment "remote-box" does not advertise library discovery.'
+        )
+      );
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/resources?environmentId=remote-box')
+    );
+
+    expect(response.status).toBe(422);
+    expect(await response.json()).toMatchObject({
+      code: 'VALIDATION',
+      error: 'Environment "remote-box" does not advertise library discovery.',
+    });
+  });
+
+  it('maps an unreachable environment to 503 rather than a server fault', async () => {
+    const { service } = createService();
+    service.discover = () =>
+      Promise.reject(
+        new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Environment "remote-box" was not found.')
+      );
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/resources?environmentId=remote-box')
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: 'PROVIDER_ERROR',
+      error: 'Environment "remote-box" was not found.',
+    });
+  });
+
+  it('maps a denied content read to 404', async () => {
+    const { service } = createService();
+    service.readContent = () => Promise.resolve(null);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(
+        'http://localhost/library/resources/skill:gh/content?location=agents-skills&environmentId=remote-box'
+      )
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: 'NOT_FOUND' });
   });
 });
