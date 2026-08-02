@@ -10,10 +10,10 @@ import {
   type LibraryResourceRef,
   normalizeHashPath,
 } from '@mangostudio/shared/library';
+import type { LocationDefinition } from '@mangostudio/shared/library/host';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import { parse as parseToml } from 'smol-toml';
 import { isValidKindSlug } from '../domain/kind-rules';
-import type { LocationDefinition } from '../domain/registry';
 import type { CachedInstanceDisplay, CachedInstanceHash, LibraryCache } from './library-cache';
 
 const textDecoder = new TextDecoder();

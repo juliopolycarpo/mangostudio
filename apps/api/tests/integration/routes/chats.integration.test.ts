@@ -483,6 +483,7 @@ describe('PUT /chats/:id', () => {
         transportKind: 'stdio',
         configJson: '{}',
         enabled: 1,
+        allowInstalls: 0,
         createdAt: suffix,
         updatedAt: suffix,
       })

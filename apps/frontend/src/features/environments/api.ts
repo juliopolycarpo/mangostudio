@@ -21,6 +21,7 @@ import type {
   VersionManagerId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
@@ -29,6 +30,13 @@ export interface InstallRequest {
   readonly recipeId: InstallRecipeId;
   readonly input: RecipeInput;
   readonly preparationId?: string;
+  /** Which machine to install on; the hub's own unless a caller says otherwise. */
+  readonly environmentId?: string;
+}
+
+/** `local` is the server default, so it never travels in a request body. */
+function environmentBody(environmentId: string | undefined): { environmentId?: string } {
+  return environmentId && environmentId !== LOCAL_ENVIRONMENT_ID ? { environmentId } : {};
 }
 
 /** The recipe could not run; `recipe` carries the argv the user can copy instead. */
@@ -70,20 +78,41 @@ function toRefusal(error: EdenErrorLike): InstallRefusal | null {
   };
 }
 
-export async function probeRuntime(id: RuntimeId): Promise<RuntimeStatus> {
-  const { data, error } = await client.api.environments.runtimes({ id }).probe.post();
+/** `local` is the server default, so it never travels as a query parameter. */
+function environmentQuery(environmentId: string): { environmentId?: string } {
+  return environmentId === LOCAL_ENVIRONMENT_ID ? {} : { environmentId };
+}
+
+export async function probeRuntime(
+  id: RuntimeId,
+  environmentId: string = LOCAL_ENVIRONMENT_ID
+): Promise<RuntimeStatus> {
+  const { data, error } = await client.api.environments
+    .runtimes({ id })
+    .probe.post(undefined, { query: environmentQuery(environmentId) });
   if (error) throw new ApiError(error.value);
   return data as RuntimeStatus;
 }
 
-export async function probeVersionManager(id: VersionManagerId): Promise<VersionManagerStatus> {
-  const { data, error } = await client.api.environments['version-managers']({ id }).probe.post();
+export async function probeVersionManager(
+  id: VersionManagerId,
+  environmentId: string = LOCAL_ENVIRONMENT_ID
+): Promise<VersionManagerStatus> {
+  const { data, error } = await client.api.environments['version-managers']({ id }).probe.post(
+    undefined,
+    { query: environmentQuery(environmentId) }
+  );
   if (error) throw new ApiError(error.value);
   return data as VersionManagerStatus;
 }
 
-export async function probeAgentCli(targetId: LibraryTargetId): Promise<AgentCliStatus> {
-  const { data, error } = await client.api.environments.agents({ targetId }).probe.post();
+export async function probeAgentCli(
+  targetId: LibraryTargetId,
+  environmentId: string = LOCAL_ENVIRONMENT_ID
+): Promise<AgentCliStatus> {
+  const { data, error } = await client.api.environments
+    .agents({ targetId })
+    .probe.post(undefined, { query: environmentQuery(environmentId) });
   if (error) throw new ApiError(error.value);
   return data as AgentCliStatus;
 }
@@ -92,6 +121,7 @@ export async function prepareInstall(request: InstallRequest): Promise<InstallPr
   const { data, error } = await client.api.environments.install.prepare.post({
     recipeId: request.recipeId,
     input: request.input,
+    ...environmentBody(request.environmentId),
   });
   if (error) {
     const refusal = toRefusal(error);
@@ -105,6 +135,7 @@ export async function startInstall(request: InstallRequest): Promise<InstallStar
   const { data, error } = await client.api.environments.install.post({
     recipeId: request.recipeId,
     input: request.input,
+    ...environmentBody(request.environmentId),
     ...(request.preparationId && { preparationId: request.preparationId }),
   });
   if (error) {

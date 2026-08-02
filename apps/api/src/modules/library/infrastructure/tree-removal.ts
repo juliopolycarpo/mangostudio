@@ -16,7 +16,8 @@ import type { Dirent, Stats } from 'node:fs';
 import { lstat, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { LibraryLocationId, StagedRemovalLeftover } from '@mangostudio/shared/library';
-import type { LocationDefinition, PathEnv } from '../domain/registry';
+import type { LocationDefinition } from '@mangostudio/shared/library/host';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 
 export interface TreeRemovalFs {
   lstat(path: string): Promise<Stats | null>;

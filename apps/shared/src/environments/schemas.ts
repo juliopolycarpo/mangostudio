@@ -237,6 +237,7 @@ export const UpdateEnvironmentBodySchema = Type.Object(
     name: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
     config: Type.Optional(Type.Unknown()),
     enabled: Type.Optional(Type.Boolean()),
+    allowInstalls: Type.Optional(Type.Boolean()),
     /** Write-only Direct URL token; rejected on non-http transports. */
     token: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
   },
@@ -287,6 +288,13 @@ export const EnvironmentSchema = Type.Object(
     transportKind: EnvironmentTransportKindSchema,
     config: Type.Unknown(),
     enabled: Type.Boolean(),
+    /**
+     * Whether install recipes may run on this machine. Off until its owner
+     * says otherwise: the loopback guard that protects the hub's own machine
+     * proves nothing about anyone else's, and inheriting its verdict would
+     * silently extend a local-only permission across the network.
+     */
+    allowInstalls: Type.Boolean(),
     virtual: Type.Boolean(),
     createdAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
     updatedAt: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
@@ -537,6 +545,12 @@ export const InstallGuardReasonSchema = Type.Union([
   Type.Literal('server-not-loopback'),
   Type.Literal('client-not-loopback'),
   Type.Literal('disabled'),
+  /**
+   * The environment has not been trusted with installs. Distinct from
+   * `disabled`, which is the global switch: a refusal has to name which side
+   * said no, or the person flipping settings cannot tell which one to flip.
+   */
+  Type.Literal('environment-not-trusted'),
 ]);
 
 export const InstallGuardSchema = Type.Object({
@@ -579,6 +593,8 @@ export const InstallPrepareBodySchema = Type.Object(
   {
     recipeId: InstallRecipeIdSchema,
     input: RecipeInputSchema,
+    /** Which machine to install on; the hub's own unless a caller says otherwise. */
+    environmentId: Type.Optional(EnvironmentIdSchema),
     /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
     profileId: Type.Optional(ProfileIdSchema),
   },
@@ -595,6 +611,8 @@ export const InstallStartBodySchema = Type.Object(
   {
     recipeId: InstallRecipeIdSchema,
     input: RecipeInputSchema,
+    /** Which machine to install on; the hub's own unless a caller says otherwise. */
+    environmentId: Type.Optional(EnvironmentIdSchema),
     preparationId: Type.Optional(Type.String({ minLength: 1 })),
     /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
     profileId: Type.Optional(ProfileIdSchema),

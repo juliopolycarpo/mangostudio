@@ -9,25 +9,18 @@ import type {
 } from '@mangostudio/shared/environments';
 import { environmentDisplayNamesEn } from '@mangostudio/shared/environments';
 import {
-  type AgentCliDetectionService,
-  agentCliDetectionService,
-} from '../modules/environments/application/agent-cli-detection';
-import {
-  type RuntimeDetectionService,
-  runtimeDetectionService,
-} from '../modules/environments/application/runtime-detection';
-import {
-  type VersionManagerDetectionService,
-  versionManagerDetectionService,
-} from '../modules/environments/application/version-manager-detection';
+  environmentProbingService,
+  LOCAL_PROBE_SCOPE,
+  type ProbeOptions,
+} from '../modules/environments/application/probing-service';
 import type { CheckResult } from './doctor-checks';
 import { fail, ok, warn } from './doctor-checks';
 import { findingSeverity, renderFinding, runtimeHealthToCheckStatus } from './finding-renderer';
 
 export interface EnvironmentDoctorDeps {
-  readonly listRuntimes: RuntimeDetectionService['listRuntimeStatuses'];
-  readonly listVersionManagers: VersionManagerDetectionService['listVersionManagerStatuses'];
-  readonly listAgents: AgentCliDetectionService['listAgentCliStatuses'];
+  readonly listRuntimes: (options?: ProbeOptions) => Promise<RuntimeStatus[]>;
+  readonly listVersionManagers: (options?: ProbeOptions) => Promise<VersionManagerStatus[]>;
+  readonly listAgents: (options?: ProbeOptions) => Promise<AgentCliStatus[]>;
 }
 
 function displayName(id: string): string {
@@ -124,10 +117,13 @@ export async function collectEnvironmentDoctorSection(
 function resolveDeps(deps: Partial<EnvironmentDoctorDeps>): EnvironmentDoctorDeps {
   return {
     listRuntimes:
-      deps.listRuntimes ?? ((opts) => runtimeDetectionService.listRuntimeStatuses(opts)),
+      deps.listRuntimes ??
+      ((opts) => environmentProbingService.listRuntimeStatuses(LOCAL_PROBE_SCOPE, opts)),
     listVersionManagers:
       deps.listVersionManagers ??
-      ((opts) => versionManagerDetectionService.listVersionManagerStatuses(opts)),
-    listAgents: deps.listAgents ?? ((opts) => agentCliDetectionService.listAgentCliStatuses(opts)),
+      ((opts) => environmentProbingService.listVersionManagerStatuses(LOCAL_PROBE_SCOPE, opts)),
+    listAgents:
+      deps.listAgents ??
+      ((opts) => environmentProbingService.listAgentCliStatuses(LOCAL_PROBE_SCOPE, opts)),
   };
 }

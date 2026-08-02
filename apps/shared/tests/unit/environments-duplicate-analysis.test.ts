@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { analyzeRuntimeScan } from '../../../../src/modules/environments/domain/duplicate-analysis';
-import { NODE_RUNTIME_DEFINITION } from '../../../../src/modules/environments/domain/runtime-definitions';
+import {
+  analyzeRuntimeScan,
+  NODE_RUNTIME_DEFINITION,
+} from '@mangostudio/shared/environments/detection';
 
 describe('analyzeRuntimeScan', () => {
   it('does not report an alias as a duplicate installation', () => {

@@ -3,7 +3,7 @@
  */
 
 import type { StagedRemovalLeftover } from '@mangostudio/shared/library';
-import { LIBRARY_LOCATION_DEFINITIONS } from '../modules/library/domain/registry';
+import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import {
   createLibraryPathEnv,
   describeLocation,

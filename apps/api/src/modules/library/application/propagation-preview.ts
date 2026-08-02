@@ -30,6 +30,7 @@ import {
   type ResourceKind,
   type ValidLibraryInstance,
 } from '@mangostudio/shared/library';
+import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
@@ -39,7 +40,6 @@ import {
   rankAdapterStrategies,
 } from '../domain/format-adapters';
 import { LibraryRequestError } from '../domain/library-request-error';
-import { getLibraryLocation, type LocationDefinition } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 import { isAgentStrategyAvailable } from './adapters/agent-strategy';
 import { acknowledgedResourceKeys } from './conflict-resolution';

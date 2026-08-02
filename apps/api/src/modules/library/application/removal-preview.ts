@@ -27,11 +27,12 @@ import {
   type ResourceKind,
   type StagedRemovalLeftover,
 } from '@mangostudio/shared/library';
+import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { LibraryRequestError } from '../domain/library-request-error';
-import { getLibraryLocation, type LocationDefinition, type PathEnv } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 import { findStagedRemovalsForLocations } from '../infrastructure/tree-removal';
 import { discoverLibraryResources } from './library-discovery';

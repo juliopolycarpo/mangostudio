@@ -5,6 +5,7 @@
  */
 
 import { dirname, join } from 'node:path';
+import { type FsProbe, nearestExistingWritable } from '@mangostudio/shared/library/host';
 import {
   BUILD_INFO_FILENAME,
   type BuildInfo,
@@ -17,13 +18,12 @@ import {
   getAuthSecretValidationMessage,
   type MangoConfig,
 } from '../lib/config';
-import { type FsProbe, nearestExistingWritable } from '../lib/fs-probe';
 import type { ServerState } from '../lib/server-state';
 import type { CursorRuntimeChainStep } from '../services/providers/cursor/runtime-availability';
 import type { RuntimeBinaryProbe } from './runtime-binary-probe';
 import type { SshClientProbe } from './ssh-client-probe';
 
-export type { FsProbe } from '../lib/fs-probe';
+export type { FsProbe } from '@mangostudio/shared/library/host';
 
 export type CheckStatus = 'ok' | 'warn' | 'fail';
 

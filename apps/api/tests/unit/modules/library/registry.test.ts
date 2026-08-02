@@ -5,7 +5,7 @@ import {
   LibraryLocationStatusSchema,
   LibraryTargetDescriptorSchema,
 } from '@mangostudio/shared/library';
-import { Value } from '@sinclair/typebox/value';
+import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import {
   assertLibraryRegistryConsistency,
   COMPARABLE_RESOURCE_KINDS,
@@ -15,12 +15,12 @@ import {
   LIBRARY_TARGET_DEFINITIONS,
   listLibraryTargetDescriptors,
   listLibraryTargetLocationIds,
-  type PathEnv,
-} from '../../../../src/modules/library/domain/registry';
+} from '@mangostudio/shared/library/host';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import { Value } from '@sinclair/typebox/value';
 import {
   describeLocation,
   describeTargetLocations,
-  type LocationFsProbe,
 } from '../../../../src/modules/library/infrastructure/location-probe';
 
 const LINUX_ENV: PathEnv = {

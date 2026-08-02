@@ -14,6 +14,7 @@ import {
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
 import { DirectUrlPanel } from './DirectUrlPanel';
 import { EnvironmentPageState } from './EnvironmentPageState';
+import { InstallTrustToggle } from './InstallTrustToggle';
 import { RuntimePairingPanel } from './RuntimePairingPanel';
 import { SshPanel } from './SshPanel';
 
@@ -192,6 +193,8 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
         {environment.transportKind === 'http' ? <DirectUrlPanel environment={environment} /> : null}
 
         {environment.transportKind === 'ssh' ? <SshPanel environment={environment} /> : null}
+
+        <InstallTrustToggle environment={environment} />
 
         {actionError ? (
           <p className="text-xs text-error" role="alert">

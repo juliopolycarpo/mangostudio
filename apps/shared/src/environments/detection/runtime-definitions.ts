@@ -1,5 +1,5 @@
 import { posix, win32 } from 'node:path';
-import type { PathEnv } from '../../../lib/path-env';
+import type { PathEnv } from '../../runtime-env';
 import type { RuntimeDefinition, SemVer } from './binary-scan';
 
 function parseSemVer(raw: string, prefix: 'optional-v' | 'none'): SemVer | null {

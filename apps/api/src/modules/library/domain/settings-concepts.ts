@@ -6,7 +6,7 @@ import type {
   SettingsField,
   SettingsSnapshot,
 } from '@mangostudio/shared/library';
-import { LIBRARY_TARGET_DEFINITIONS } from './registry';
+import { LIBRARY_TARGET_DEFINITIONS } from '@mangostudio/shared/library/host';
 
 type ComparedTargetId = Exclude<LibraryTargetId, 'mangostudio'>;
 

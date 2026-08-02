@@ -1,11 +1,27 @@
 import type { InstallGuard, InstallGuardReason } from '@mangostudio/shared/environments';
 
+/**
+ * What the hub knows about its own surface. These checks are all about the
+ * machine this process runs on: whether the browser talking to it is sitting at
+ * the same keyboard, and whether installing anything here would write into a
+ * container that is about to be thrown away.
+ */
 export interface InstallGuardContext {
   readonly serverHost: string;
   readonly clientIp: string | undefined;
   readonly installsEnabled: boolean;
   readonly standalone: boolean;
   readonly container: boolean;
+}
+
+/**
+ * The same question about someone else's machine. Nothing the hub can measure
+ * locally says anything about it, so the only inputs are the global switch and
+ * a per-environment opt-in that somebody had to turn on deliberately.
+ */
+export interface RemoteInstallGuardContext {
+  readonly installsEnabled: boolean;
+  readonly allowInstalls: boolean;
 }
 
 function normalizeAddress(value: string): string {
@@ -40,6 +56,29 @@ export function evaluateInstallGuard(context: InstallGuardContext): InstallGuard
     reasons.push('server-not-loopback');
   }
   if (!isLoopbackAddress(context.clientIp)) reasons.push('client-not-loopback');
+  if (!context.installsEnabled) reasons.push('disabled');
+
+  return {
+    allowed: reasons.length === 0,
+    reasons,
+  };
+}
+
+/**
+ * The guard for an environment that is not the hub's own machine.
+ *
+ * The loopback checks are deliberately absent rather than reused. They ask
+ * "is the person driving this hub sitting at the machine that would be
+ * written to", and for a remote environment the answer is no by construction —
+ * applying them would refuse every remote install for a reason that names the
+ * wrong machine. What replaces them is an explicit per-environment opt-in, and
+ * a container is now the *runtime's* business to report, because the
+ * containerized side may be the far one.
+ */
+export function evaluateRemoteInstallGuard(context: RemoteInstallGuardContext): InstallGuard {
+  const reasons: InstallGuardReason[] = [];
+
+  if (!context.allowInstalls) reasons.push('environment-not-trusted');
   if (!context.installsEnabled) reasons.push('disabled');
 
   return {

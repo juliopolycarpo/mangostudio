@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
   type BinaryScanDeps,
-  scanRuntime,
-} from '../../../../src/modules/environments/domain/binary-scan';
-import {
   BUN_RUNTIME_DEFINITION,
   NODE_RUNTIME_DEFINITION,
   parseBunVersion,
   parseNodeVersion,
-} from '../../../../src/modules/environments/domain/runtime-definitions';
+  scanRuntime,
+} from '@mangostudio/shared/environments/detection';
 
 function fakeDeps(overrides: Partial<BinaryScanDeps> = {}): BinaryScanDeps {
   return {

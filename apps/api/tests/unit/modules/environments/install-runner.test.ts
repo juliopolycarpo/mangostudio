@@ -1,169 +1,200 @@
+/**
+ * The hub half of an install: it asks a machine to run an argv it built and
+ * relays that machine's output frames back onto the stream a browser reads.
+ * Execution itself lives in `apps/runtime`; what is tested here is the seam.
+ */
+
 import { describe, expect, it } from 'bun:test';
+import { RUNTIME_INSTALL_OUTPUT_TOPIC, type RuntimeInstallRunResult } from '@mangostudio/runtime';
+import type { RuntimeEventFrame } from '@mangostudio/shared/runtime-protocol';
 import {
-  buildInstallEnvironment,
   createInstallRunner,
   type InstallLogLine,
 } from '../../../../src/modules/environments/infrastructure/install-runner';
-
-class FakeInstallProcess {
-  readonly stdout: ReadableStream<Uint8Array>;
-  readonly stderr: ReadableStream<Uint8Array>;
-  readonly exited: Promise<number>;
-  exitCode: number | null = null;
-  killedWith: string | null = null;
-  private resolveExit!: (code: number) => void;
-
-  constructor(stdout: string, stderr: string, exitCode?: number) {
-    this.stdout = streamFrom(stdout);
-    this.stderr = streamFrom(stderr);
-    this.exited = new Promise((resolve) => {
-      this.resolveExit = resolve;
-    });
-    if (exitCode !== undefined) {
-      queueMicrotask(() => this.finish(exitCode));
-    }
-  }
-
-  kill(signal: 'SIGKILL'): void {
-    this.killedWith = signal;
-    this.finish(137);
-  }
-
-  private finish(code: number): void {
-    if (this.exitCode !== null) return;
-    this.exitCode = code;
-    this.resolveExit(code);
-  }
-}
-
-function streamFrom(text: string): ReadableStream<Uint8Array> {
-  return new ReadableStream({
-    start(controller) {
-      if (text) controller.enqueue(new TextEncoder().encode(text));
-      controller.close();
-    },
-  });
-}
-
-function createRunner(process: FakeInstallProcess, captured: { log: Uint8Array[] }) {
-  return createInstallRunner({
-    spawn: () => process,
-    prepareLog: () => Promise.resolve(),
-    appendLog: (_path, bytes) => {
-      captured.log.push(bytes);
-      return Promise.resolve();
-    },
-  });
-}
+import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 
 const COMMAND = {
+  runId: 'run-1',
+  userId: 'ada',
+  environmentId: 'ubuntu',
   argv: ['echo', 'hello'],
-  timeoutMs: 1000,
-  logPath: '/tmp/install.log',
+  timeoutMs: 1_000,
 } as const;
 
-describe('install runner', () => {
-  it('passes only allowlisted environment keys plus constant recipe overrides', () => {
-    const env = buildInstallEnvironment(
-      {
-        PATH: '/bin',
-        HOME: '/home/tester',
-        XDG_CONFIG_HOME: '/home/tester/.config',
-        HTTPS_PROXY: 'https://proxy.test',
-        ANTHROPIC_API_KEY: 'secret',
-        GITHUB_TOKEN: 'secret',
+const SUCCESS: RuntimeInstallRunResult = {
+  exitCode: 0,
+  status: 'succeeded',
+  truncated: false,
+  finishedAt: 1_700_000_001_000,
+  durationMs: 1_000,
+};
+
+interface FakeClientOptions {
+  readonly result?: RuntimeInstallRunResult | (() => Promise<RuntimeInstallRunResult>);
+  /** Frames the runtime publishes once `install.run` has been called. */
+  readonly frames?: readonly Partial<RuntimeEventFrame>[];
+}
+
+function fakeClient(options: FakeClientOptions = {}) {
+  const listeners = new Set<(event: RuntimeEventFrame) => void>();
+  const cancelled: string[] = [];
+  const runParams: unknown[] = [];
+
+  const client = {
+    onEvent: (listener: (event: RuntimeEventFrame) => void) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    install: {
+      run: (params: unknown) => {
+        runParams.push(params);
+        for (const frame of options.frames ?? []) {
+          for (const listener of [...listeners]) {
+            listener({
+              type: 'evt',
+              seq: 0,
+              topic: '',
+              payload: {},
+              ...frame,
+            } as RuntimeEventFrame);
+          }
+        }
+        const result = options.result ?? SUCCESS;
+        return typeof result === 'function' ? result() : Promise.resolve(result);
       },
-      {
-        PROFILE: '/dev/null',
-        NVM_DIR: '/home/tester/.nvm',
-        ANTHROPIC_API_KEY: 'still-secret',
-      }
-    );
+      cancel: ({ runId }: { runId: string }) => {
+        cancelled.push(runId);
+        return Promise.resolve({ ok: true as const });
+      },
+    },
+  } as unknown as RuntimeClient;
 
-    expect(env).toEqual({
-      PATH: '/bin',
-      HOME: '/home/tester',
-      XDG_CONFIG_HOME: '/home/tester/.config',
-      HTTPS_PROXY: 'https://proxy.test',
-      PROFILE: '/dev/null',
-      NVM_DIR: '/home/tester/.nvm',
+  return { client, cancelled, runParams, listenerCount: () => listeners.size };
+}
+
+function runnerFor(client: RuntimeClient) {
+  return createInstallRunner({
+    resolveClient: () => Promise.resolve(client),
+    logPathFor: (runId) => `/logs/${runId}.log`,
+    now: () => 1_700_000_000_000,
+  });
+}
+
+describe('install relay', () => {
+  it('turns the runtime output frames for this run into log lines', async () => {
+    const fake = fakeClient({
+      frames: [
+        {
+          topic: RUNTIME_INSTALL_OUTPUT_TOPIC,
+          streamId: 'run-1',
+          payload: { stream: 'stdout', line: 'hello' },
+        },
+        {
+          topic: RUNTIME_INSTALL_OUTPUT_TOPIC,
+          streamId: 'run-1',
+          payload: { stream: 'stderr', line: 'warning' },
+        },
+        // The terminal marker closes the stream; it is not a line to show.
+        {
+          topic: RUNTIME_INSTALL_OUTPUT_TOPIC,
+          streamId: 'run-1',
+          payload: { stream: 'system', line: '', end: true },
+        },
+      ],
     });
-  });
-
-  it('streams lines, writes a bounded raw log, and records success', async () => {
-    const process = new FakeInstallProcess('hello\nworld\n', 'warning\n', 0);
-    const captured = { log: [] as Uint8Array[] };
     const events: InstallLogLine[] = [];
-    const runner = createRunner(process, captured);
 
-    const result = await runner.run(COMMAND, { onLog: (event) => events.push(event) });
-
-    expect(result.status).toBe('succeeded');
-    expect(result.exitCode).toBe(0);
-    expect(result.truncated).toBe(false);
-    expect(events).toEqual([
-      { stream: 'stdout', line: 'hello' },
-      { stream: 'stdout', line: 'world' },
-      { stream: 'stderr', line: 'warning' },
-    ]);
-    expect(
-      new TextDecoder().decode(Uint8Array.from(captured.log.flatMap((chunk) => [...chunk])))
-    ).toBe('hello\nworld\nwarning\n');
-  });
-
-  it('caps captured output while continuing to a terminal result', async () => {
-    const process = new FakeInstallProcess('0123456789', '', 0);
-    const captured = { log: [] as Uint8Array[] };
-    const events: InstallLogLine[] = [];
-    const runner = createRunner(process, captured);
-
-    const result = await runner.run(COMMAND, {
-      outputLimitBytes: 4,
+    const result = await runnerFor(fake.client).run(COMMAND, {
       onLog: (event) => events.push(event),
     });
 
-    expect(result.truncated).toBe(true);
-    expect(captured.log.reduce((total, chunk) => total + chunk.byteLength, 0)).toBe(4);
-    expect(events).toContainEqual({
-      stream: 'system',
-      line: 'Output truncated after 4 bytes.',
-    });
+    expect(result).toMatchObject({ status: 'succeeded', exitCode: 0 });
+    expect(events).toEqual([
+      { stream: 'stdout', line: 'hello' },
+      { stream: 'stderr', line: 'warning' },
+    ]);
   });
 
-  it('kills timed-out and cancelled children with SIGKILL', async () => {
-    const timedOut = new FakeInstallProcess('', '');
-    const timedOutResult = await createRunner(timedOut, { log: [] }).run({
-      ...COMMAND,
-      timeoutMs: 1,
+  it('ignores frames belonging to another run or another topic', async () => {
+    const fake = fakeClient({
+      frames: [
+        {
+          topic: RUNTIME_INSTALL_OUTPUT_TOPIC,
+          streamId: 'run-2',
+          payload: { stream: 'stdout', line: 'someone else' },
+        },
+        { topic: 'mcp.session', streamId: 'run-1', payload: { stream: 'stdout', line: 'nope' } },
+      ],
     });
-    expect(timedOutResult.status).toBe('timed-out');
-    expect(timedOut.killedWith).toBe('SIGKILL');
+    const events: InstallLogLine[] = [];
 
-    const cancelled = new FakeInstallProcess('', '');
+    await runnerFor(fake.client).run(COMMAND, { onLog: (event) => events.push(event) });
+
+    expect(events).toEqual([]);
+  });
+
+  it('releases its subscription once the run settles', async () => {
+    const fake = fakeClient();
+
+    await runnerFor(fake.client).run(COMMAND);
+
+    expect(fake.listenerCount()).toBe(0);
+  });
+
+  it('asks the runtime to cancel rather than signalling a child it does not own', async () => {
     const controller = new AbortController();
-    const cancelledResultPromise = createRunner(cancelled, { log: [] }).run(COMMAND, {
-      signal: controller.signal,
+    let settle: ((result: RuntimeInstallRunResult) => void) | undefined;
+    const fake = fakeClient({
+      result: () =>
+        new Promise<RuntimeInstallRunResult>((resolve) => {
+          settle = resolve;
+        }),
     });
+
+    const running = runnerFor(fake.client).run(COMMAND, { signal: controller.signal });
     await Promise.resolve();
     controller.abort();
-    const cancelledResult = await cancelledResultPromise;
-    expect(cancelledResult.status).toBe('cancelled');
-    expect(cancelled.killedWith).toBe('SIGKILL');
+    settle?.({ ...SUCCESS, exitCode: null, status: 'cancelled' });
+
+    await expect(running).resolves.toMatchObject({ status: 'cancelled' });
+    expect(fake.cancelled).toEqual(['run-1']);
   });
 
-  it('reports a synchronous spawn failure without throwing', async () => {
+  it('never starts a run whose request was already abandoned', async () => {
+    const fake = fakeClient();
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runnerFor(fake.client).run(COMMAND, { signal: controller.signal });
+
+    expect(result.status).toBe('cancelled');
+    expect(fake.runParams).toEqual([]);
+  });
+
+  it('reports an unreachable environment as a failed spawn with the reason', async () => {
     const events: InstallLogLine[] = [];
     const runner = createInstallRunner({
-      spawn: () => {
-        throw new Error('binary missing');
-      },
-      prepareLog: () => Promise.resolve(),
+      resolveClient: () => Promise.reject(new Error('Environment "ubuntu" is disabled.')),
+      now: () => 1_700_000_000_000,
     });
 
     const result = await runner.run(COMMAND, { onLog: (event) => events.push(event) });
 
     expect(result.status).toBe('spawn-failed');
-    expect(result.exitCode).toBeNull();
-    expect(events).toEqual([{ stream: 'system', line: 'binary missing' }]);
+    expect(events).toEqual([{ stream: 'system', line: 'Environment "ubuntu" is disabled.' }]);
+  });
+
+  it('does not claim an installer never started when the link dropped mid-run', async () => {
+    const fake = fakeClient({ result: () => Promise.reject(new Error('Runtime went away.')) });
+    const events: InstallLogLine[] = [];
+
+    const result = await runnerFor(fake.client).run(COMMAND, {
+      onLog: (event) => events.push(event),
+    });
+
+    // `spawn-failed` would be a claim about the far side that the hub cannot
+    // make once the request was accepted.
+    expect(result.status).toBe('failed');
+    expect(events).toEqual([{ stream: 'system', line: 'Runtime went away.' }]);
   });
 });

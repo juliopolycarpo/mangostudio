@@ -1,4 +1,4 @@
-import type { LibraryTargetId } from '@mangostudio/shared/library';
+import type { LibraryTargetId } from '../../library';
 import type { RuntimeDefinition, SemVer } from './binary-scan';
 
 type ExternalAgentTargetId = Exclude<LibraryTargetId, 'mangostudio'>;

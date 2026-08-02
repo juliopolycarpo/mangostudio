@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import type { AdapterStrategy } from '@mangostudio/shared/library';
 import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  type LocationDefinition,
+} from '@mangostudio/shared/library/host';
+import {
   createDefaultAdapterRegistry,
   FormatAdapterRegistry,
   rankAdapterStrategies,
 } from '../../../../src/modules/library/application/adapters/registry';
-import {
-  LIBRARY_LOCATION_DEFINITIONS,
-  type LocationDefinition,
-} from '../../../../src/modules/library/domain/registry';
 
 describe('default format adapter registry', () => {
   it('copies bytes verbatim between identical formats', () => {

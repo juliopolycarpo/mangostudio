@@ -3,7 +3,7 @@ import type {
   LibraryInstance,
   LibraryResourceRef,
 } from '@mangostudio/shared/library';
-import { LIBRARY_TARGET_DEFINITIONS } from '../domain/registry';
+import { LIBRARY_TARGET_DEFINITIONS } from '@mangostudio/shared/library/host';
 
 export function resolveLibraryCoverage(
   ref: LibraryResourceRef,

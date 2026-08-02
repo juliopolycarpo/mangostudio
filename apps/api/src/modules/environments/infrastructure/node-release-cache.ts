@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { normalizeNodeVersion, parseNodeVersion } from '../domain/lts-policy';
+import {
+  normalizeNodeVersion,
+  parseExactNodeVersion,
+} from '@mangostudio/shared/environments/detection';
 
 const NODE_RELEASE_INDEX_URL = 'https://nodejs.org/dist/index.json';
 const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
@@ -35,8 +38,8 @@ interface CachedNodeReleaseMetadata {
 }
 
 function compareVersions(left: string, right: string): number {
-  const leftVersion = parseNodeVersion(left);
-  const rightVersion = parseNodeVersion(right);
+  const leftVersion = parseExactNodeVersion(left);
+  const rightVersion = parseExactNodeVersion(right);
   if (!leftVersion || !rightVersion) return left.localeCompare(right);
   if (leftVersion.major !== rightVersion.major) return leftVersion.major - rightVersion.major;
   if (leftVersion.minor !== rightVersion.minor) return leftVersion.minor - rightVersion.minor;
@@ -51,7 +54,7 @@ function parseLatestVersions(value: unknown): ReadonlyMap<number, string> | null
     const major = Number(rawMajor);
     const version = typeof rawVersion === 'string' ? normalizeNodeVersion(rawVersion) : null;
     if (!Number.isSafeInteger(major) || major < 0 || !version) return null;
-    if (parseNodeVersion(version)?.major !== major) return null;
+    if (parseExactNodeVersion(version)?.major !== major) return null;
     latestByMajor.set(major, version);
   }
   return latestByMajor.size > 0 ? latestByMajor : null;
@@ -77,7 +80,7 @@ function parseReleaseIndex(value: unknown): ReadonlyMap<number, string> | null {
   for (const entry of value) {
     if (!entry || typeof entry !== 'object' || !('version' in entry)) continue;
     const version = typeof entry.version === 'string' ? normalizeNodeVersion(entry.version) : null;
-    const parsed = version ? parseNodeVersion(version) : null;
+    const parsed = version ? parseExactNodeVersion(version) : null;
     if (!version || !parsed) continue;
 
     const existing = latestByMajor.get(parsed.major);

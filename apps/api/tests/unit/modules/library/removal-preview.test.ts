@@ -8,9 +8,9 @@ import type {
   RemovalPreviewEntry,
   ResourceKind,
 } from '@mangostudio/shared/library';
+import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import { previewLibraryRemoval } from '../../../../src/modules/library/application/removal-preview';
 import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
-import { getLibraryLocation } from '../../../../src/modules/library/domain/registry';
 
 function instance(
   locationId: LibraryLocationId,

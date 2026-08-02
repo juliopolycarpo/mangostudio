@@ -31,32 +31,28 @@ import {
   versionManagerStatusesQueryOptions,
 } from '../queries';
 
-export function useRuntimeStatuses() {
-  return useQuery(runtimeStatusesQueryOptions());
+export function useRuntimeStatuses(environmentId?: string) {
+  return useQuery(runtimeStatusesQueryOptions(environmentId));
 }
 
-function useVersionManagerStatuses() {
-  return useQuery(versionManagerStatusesQueryOptions());
+export function useAgentCliStatuses(environmentId?: string) {
+  return useQuery(agentCliStatusesQueryOptions(environmentId));
 }
 
-export function useAgentCliStatuses() {
-  return useQuery(agentCliStatusesQueryOptions());
-}
-
-export function useInstallRecipes() {
-  return useQuery(installRecipesQueryOptions());
+export function useInstallRecipes(environmentId?: string) {
+  return useQuery(installRecipesQueryOptions(environmentId));
 }
 
 /**
  * The runtimes screen needs both lists at once, and neither should block the
  * other: nvm being slow to enumerate must not delay "which node runs".
  */
-export function useRuntimesScreenData() {
+export function useRuntimesScreenData(environmentId?: string) {
   const results = useQueries({
     queries: [
-      runtimeStatusesQueryOptions(),
-      versionManagerStatusesQueryOptions(),
-      installRecipesQueryOptions(),
+      runtimeStatusesQueryOptions(environmentId),
+      versionManagerStatusesQueryOptions(environmentId),
+      installRecipesQueryOptions(environmentId),
     ],
   });
   const [runtimes, versionManagers, recipes] = results;
@@ -92,16 +88,22 @@ function writeProbedStatus<T>(
   if (!written) void queryClient.invalidateQueries({ queryKey });
 }
 
-/** Forces a fresh probe and writes the result straight into the list cache. */
-export function useProbeRuntime() {
+/**
+ * Forces a fresh probe and writes the result straight into the list cache.
+ *
+ * The environment is captured when the mutation is created rather than read at
+ * settle time, so an answer that arrives after the user switched machines
+ * lands in the cache it belongs to instead of the one on screen.
+ */
+export function useProbeRuntime(environmentId?: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: RuntimeId) => probeRuntime(id),
+    mutationFn: (id: RuntimeId) => probeRuntime(id, environmentId),
     onSuccess: (status) => {
       writeProbedStatus(
         queryClient,
-        environmentKeys.runtimes(),
+        environmentKeys.runtimes(environmentId),
         status,
         (entry: RuntimeStatus) => entry.id === status.id
       );
@@ -109,15 +111,15 @@ export function useProbeRuntime() {
   });
 }
 
-export function useProbeVersionManager() {
+export function useProbeVersionManager(environmentId?: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: VersionManagerId) => probeVersionManager(id),
+    mutationFn: (id: VersionManagerId) => probeVersionManager(id, environmentId),
     onSuccess: (status) => {
       writeProbedStatus(
         queryClient,
-        environmentKeys.versionManagers(),
+        environmentKeys.versionManagers(environmentId),
         status,
         (entry: VersionManagerStatus) => entry.id === status.id
       );
@@ -125,15 +127,15 @@ export function useProbeVersionManager() {
   });
 }
 
-export function useProbeAgentCli() {
+export function useProbeAgentCli(environmentId?: string) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (targetId: LibraryTargetId) => probeAgentCli(targetId),
+    mutationFn: (targetId: LibraryTargetId) => probeAgentCli(targetId, environmentId),
     onSuccess: (status) => {
       writeProbedStatus(
         queryClient,
-        environmentKeys.agents(),
+        environmentKeys.agents(environmentId),
         status,
         (entry: AgentCliStatus) => entry.targetId === status.targetId
       );
@@ -157,11 +159,17 @@ const SEVERITY_RANK: Record<HealthEntry['severity'], number> = { fail: 0, warn: 
 /**
  * Every finding across runtimes, version managers, and agent CLIs as one flat
  * list sorted worst-first — the browser equivalent of `mango doctor`.
+ *
+ * `enabled` keeps a disconnected or non-reporting machine from being probed at
+ * all: a sleeping remote must not wake just because Health was open.
  */
-export function useEnvironmentHealth() {
-  const runtimes = useRuntimeStatuses();
-  const versionManagers = useVersionManagerStatuses();
-  const agents = useAgentCliStatuses();
+export function useEnvironmentHealth(environmentId?: string, enabled = true) {
+  const runtimes = useQuery({ ...runtimeStatusesQueryOptions(environmentId), enabled });
+  const versionManagers = useQuery({
+    ...versionManagerStatusesQueryOptions(environmentId),
+    enabled,
+  });
+  const agents = useQuery({ ...agentCliStatusesQueryOptions(environmentId), enabled });
 
   const entries = useMemo(() => {
     const collected: HealthEntry[] = [];

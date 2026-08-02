@@ -44,7 +44,7 @@ function isInstallRefused(recipe: InstallRecipePreview): boolean {
   return !recipe.guard.allowed || !recipe.supported || recipe.missingRequirements.length > 0;
 }
 
-export function useInstallFlow() {
+export function useInstallFlow(environmentId?: string) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<InstallFlowState>({ step: 'idle' });
   const requestIdRef = useRef(0);
@@ -62,33 +62,40 @@ export function useInstallFlow() {
    * Prepares the recipe so the confirmation dialog can show the exact argv the
    * server will run, including a downloaded installer's origin and size.
    */
-  const begin = useCallback(async (recipe: InstallRecipePreview, input: RecipeInput) => {
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
+  const begin = useCallback(
+    async (recipe: InstallRecipePreview, input: RecipeInput) => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
 
-    if (isInstallRefused(recipe)) {
-      setState({ step: 'refused', recipe, message: '' });
-      return;
-    }
-
-    setState({ step: 'preparing', recipe });
-    try {
-      const result = await prepareInstall({ recipeId: recipe.id, input });
-      if (requestIdRef.current !== requestId) return;
-      if (result.outcome === 'refused') {
-        setState({ step: 'refused', recipe: result.recipe, message: result.message });
+      if (isInstallRefused(recipe)) {
+        setState({ step: 'refused', recipe, message: '' });
         return;
       }
-      setState({
-        step: 'confirming',
-        recipe: result.preparation.recipe,
-        preparation: result.preparation,
-      });
-    } catch {
-      if (requestIdRef.current !== requestId) return;
-      setState({ step: 'error', recipe });
-    }
-  }, []);
+
+      setState({ step: 'preparing', recipe });
+      try {
+        const result = await prepareInstall({
+          recipeId: recipe.id,
+          input,
+          ...(environmentId && { environmentId }),
+        });
+        if (requestIdRef.current !== requestId) return;
+        if (result.outcome === 'refused') {
+          setState({ step: 'refused', recipe: result.recipe, message: result.message });
+          return;
+        }
+        setState({
+          step: 'confirming',
+          recipe: result.preparation.recipe,
+          preparation: result.preparation,
+        });
+      } catch {
+        if (requestIdRef.current !== requestId) return;
+        setState({ step: 'error', recipe });
+      }
+    },
+    [environmentId]
+  );
 
   const confirm = useCallback(
     async (input: RecipeInput) => {
@@ -102,6 +109,7 @@ export function useInstallFlow() {
         const result = await startInstall({
           recipeId: current.recipe.id,
           input,
+          ...(environmentId && { environmentId }),
           ...(current.preparation.preparationId && {
             preparationId: current.preparation.preparationId,
           }),
@@ -117,7 +125,7 @@ export function useInstallFlow() {
         setState({ step: 'error', recipe: current.recipe });
       }
     },
-    [state]
+    [environmentId, state]
   );
 
   const cancel = useCallback(async () => {

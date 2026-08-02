@@ -2003,6 +2003,39 @@ export const messages = {
       codex: 'Codex',
       cursor: 'Cursor',
     },
+    /** Qual máquina uma aba de diagnóstico está descrevendo. */
+    /** Permissão por ambiente para rodar receitas de instalação naquela máquina. */
+    trust: {
+      label: 'Permitir instalações nesta máquina',
+      hint: 'Roda receitas de instalação da allowlist lá, escrevendo no disco daquela máquina. Instalações remotas precisam do interruptor global de instalação e desta permissão por ambiente — a verificação de superfície local que protege esta máquina não diz nada sobre aquela.',
+      updateFailed: 'Não foi possível alterar a permissão de instalação.',
+    },
+    scope: {
+      label: 'Ambiente',
+      disconnected: '{environment} não está conectado',
+      disconnectedHint:
+        'Nada é exibido em vez da última resposta desta máquina, porque uma lista de toolchains desatualizada é justamente o que alguém usaria para agir.',
+      connect: 'Conectar',
+      notPermitted: '{environment} não informa o que está instalado nele',
+      notPermittedHint:
+        'O runtime dessa máquina não oferece detecção de toolchains. Isso é uma configuração de lá, não uma falha daqui.',
+      compare: 'Comparar',
+      compareTitle: 'Comparar ambientes',
+      compareHint: 'Duas máquinas, uma tabela. As linhas são o que o MangoStudio sabe procurar.',
+      compareLeft: 'Ambiente à esquerda',
+      compareRight: 'Ambiente à direita',
+      compareClose: 'Fechar comparação',
+      cellPresent: 'Presente',
+      cellAbsent: 'Não instalado',
+      cellNotPermitted: 'Não informado',
+      cellUnknown: 'Ainda não verificado',
+      rowGroupRuntime: 'Toolchains',
+      rowGroupAgent: 'Agentes',
+      rowGroupShell: 'Shells',
+      presenceOn: 'em {environment}',
+      presencePresent: '{environment}: instalado',
+      presenceAbsent: '{environment}: não instalado',
+    },
     status: {
       ok: 'Disponível',
       warn: 'Requer atenção',
@@ -2333,6 +2366,7 @@ export const messages = {
       locationEntries: '{count} itens',
       notInstalled: 'Não instalada',
       empty: 'Nenhuma CLI de agente foi detectada.',
+      emptyHint: 'O MangoStudio pode instalar uma CLI de agente para você nesta máquina.',
     },
     health: {
       description: 'Tudo que está errado, em uma lista só, do mais grave ao menos grave.',
@@ -2391,6 +2425,8 @@ export const messages = {
         'client-not-loopback':
           'Esta requisição não veio desta máquina, então ela não pode instalar nada aqui.',
         disabled: 'As instalações estão desativadas na configuração deste servidor.',
+        'environment-not-trusted':
+          'Este ambiente não foi autorizado a instalar. Ative essa opção para a máquina em questão, no cartão dela em Ambientes.',
       },
     },
   },

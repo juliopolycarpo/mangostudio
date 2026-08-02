@@ -1,8 +1,6 @@
-import { statSync } from 'node:fs';
-import type { AgentAuthSignal } from '@mangostudio/shared/environments';
-import { readRegularFileUtf8 } from '../../../lib/safe-file';
+import type { AgentAuthSignal } from '../schemas';
 
-const MAX_AUTH_CONFIG_BYTES = 256 * 1024;
+export const MAX_AUTH_CONFIG_BYTES = 256 * 1024;
 
 interface AuthSignalStat {
   isDirectory(): boolean;
@@ -19,13 +17,6 @@ export interface AuthSignalResult {
   readonly authSignal: AgentAuthSignal;
 }
 
-export const NODE_AUTH_SIGNAL_FS: AuthSignalFs = {
-  stat: statSync,
-  readFile(path, maxBytes) {
-    return readRegularFileUtf8(path, { maxBytes }).content;
-  },
-};
-
 /** True only for "the path is not there", never for permission or I/O failures. */
 function isMissingPathError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null || !('code' in error)) return false;
@@ -37,7 +28,7 @@ function isMissingPathError(error: unknown): boolean {
  * I/O failure hides the directory rather than proving it missing, and callers
  * turn `false` into "create it", which would be wrong advice.
  */
-export function directoryExists(path: string, fs: AuthSignalFs = NODE_AUTH_SIGNAL_FS): boolean {
+export function directoryExists(path: string, fs: AuthSignalFs): boolean {
   try {
     return fs.stat(path).isDirectory();
   } catch (error) {
@@ -53,7 +44,7 @@ export function directoryExists(path: string, fs: AuthSignalFs = NODE_AUTH_SIGNA
 export function probeAuthFile(
   path: string,
   options: { readonly unknownWhenMissing: boolean },
-  fs: AuthSignalFs = NODE_AUTH_SIGNAL_FS
+  fs: AuthSignalFs
 ): AuthSignalResult {
   try {
     if (fs.stat(path).isFile()) {
@@ -77,11 +68,7 @@ export function probeAuthFile(
  * Cursor exposes sign-in state as a key in its ordinary CLI config. Read only a
  * bounded config file and retain the key's presence, never its value.
  */
-export function probeConfigKey(
-  path: string,
-  key: string,
-  fs: AuthSignalFs = NODE_AUTH_SIGNAL_FS
-): AuthSignalResult {
+export function probeConfigKey(path: string, key: string, fs: AuthSignalFs): AuthSignalResult {
   try {
     if (!fs.stat(path).isFile()) {
       return { authenticated: false, authSignal: 'config-key-present' };

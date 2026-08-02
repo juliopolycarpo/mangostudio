@@ -1,4 +1,5 @@
 import { posix, win32 } from 'node:path';
+import type { PathEnv } from '../runtime-env';
 import type {
   LibraryLocationId,
   LibraryScope,
@@ -7,12 +8,9 @@ import type {
   LocationAccess,
   ResourceFormat,
   ResourceKind,
-} from '@mangostudio/shared/library';
-import type { PathEnv } from '../../../lib/path-env';
+} from './schemas';
 
 export type LibraryLocationLayout = 'directory-of-dirs' | 'directory-of-files' | 'single-file';
-
-export type { PathEnv } from '../../../lib/path-env';
 
 export interface LocationDefinition {
   readonly id: LibraryLocationId;

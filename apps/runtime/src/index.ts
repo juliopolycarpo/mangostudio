@@ -17,6 +17,7 @@ export { createLocalRuntimeManifest } from './manifest';
 export type * from './methods';
 export {
   RUNTIME_ABSENT_HASH,
+  RUNTIME_INSTALL_OUTPUT_TOPIC,
   RUNTIME_MCP_ELICITATION_TOPIC,
   RUNTIME_MCP_SESSION_TOPIC,
 } from './methods';
@@ -81,6 +82,7 @@ export {
   execGit,
   GitExecutionError,
 } from './services/git';
+export { createInstallService } from './services/install';
 export {
   classifyMcpCallFailure,
   connectMcpClient,
@@ -118,6 +120,17 @@ export {
   resolvePathThroughExistingAncestor,
   WorkdirContainmentError,
 } from './services/path-containment';
+export {
+  createRuntimePathEnv,
+  NODE_AUTH_SIGNAL_FS,
+  NODE_LOCATION_FS_PROBE,
+} from './services/probing/host-env';
+export {
+  createProbingService,
+  type ProbingHostAdapters,
+  type ProbingService,
+  probingService,
+} from './services/probing/service';
 export {
   findShellExecutable,
   isShellAvailable,

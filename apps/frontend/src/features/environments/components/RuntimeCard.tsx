@@ -23,13 +23,15 @@ import { CardSectionLabel, ToolCard } from './ToolCard';
 interface RuntimeCardProps {
   status: RuntimeStatus;
   recipes: readonly InstallRecipePreview[];
+  /** The machine this card is about; a re-check has to go back to the same one. */
+  environmentId?: string;
   children?: React.ReactNode;
 }
 
-export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
+export function RuntimeCard({ status, recipes, environmentId, children }: RuntimeCardProps) {
   const { t } = useI18n();
   const e = t.environments;
-  const probe = useProbeRuntime();
+  const probe = useProbeRuntime(environmentId);
   const { resolve } = useToolIdentities();
   const name = resolve('runtime', status.id).name;
 
@@ -76,6 +78,7 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
                 label={formatMessage(e.runtimes.install, { runtime: name })}
                 variant="primary"
                 icon={<Download size={14} />}
+                environmentId={environmentId}
               />
             )
           : updateRecipe && (
@@ -83,6 +86,7 @@ export function RuntimeCard({ status, recipes, children }: RuntimeCardProps) {
                 recipe={updateRecipe}
                 input={{ kind: 'none' }}
                 label={formatMessage(e.runtimes.update, { runtime: name })}
+                environmentId={environmentId}
               />
             )
       }

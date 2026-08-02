@@ -1,4 +1,5 @@
 import {
+  EnvironmentIdSchema,
   InstallBlockedResponseSchema,
   InstallCancelResponseSchema,
   InstallPreparationSchema,
@@ -109,15 +110,17 @@ export function createInstallRoutes(service: InstallService = installService) {
     })
     .get(
       '/environments/install/recipes',
-      ({ user, installPeerIp, request }) =>
-        service.listRecipes(
-          requestContext({
+      ({ user, installPeerIp, request, query }) =>
+        service.listRecipes({
+          ...requestContext({
             userId: user?.id ?? '',
             peerIp: installPeerIp,
             request,
-          })
-        ),
+          }),
+          ...(query.environmentId ? { environmentId: query.environmentId } : {}),
+        }),
       {
+        query: t.Object({ environmentId: t.Optional(EnvironmentIdSchema) }),
         response: { 200: t.Array(InstallRecipePreviewSchema) },
       }
     )

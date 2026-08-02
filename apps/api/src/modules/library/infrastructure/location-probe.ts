@@ -1,3 +1,12 @@
+/**
+ * Hub-side bindings for library location probing.
+ *
+ * The description logic is shared and takes its filesystem as a parameter, so a
+ * runtime can answer for its own machine (015). What stays here is the hub's
+ * own view: this process's paths, and the MangoStudio directories the hub's
+ * configuration — not the host — decides.
+ */
+
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import type {
@@ -5,19 +14,13 @@ import type {
   LibraryLocationStatus,
   LibraryTargetId,
 } from '@mangostudio/shared/library';
-import { getConfig } from '../../../lib/config';
-import { type FsProbe, nearestExistingWritable } from '../../../lib/fs-probe';
+import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import {
-  getLibraryLocation,
-  type LibraryLocationLayout,
-  listLibraryTargetLocationIds,
-  type PathEnv,
-} from '../domain/registry';
-
-export interface LocationFsProbe extends FsProbe {
-  isReadable(path: string): boolean;
-  countEntries(path: string, layout: Exclude<LibraryLocationLayout, 'single-file'>): number;
-}
+  describeLocation as describeLocationWith,
+  describeTargetLocations as describeTargetLocationsWith,
+} from '@mangostudio/shared/library/host';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import { getConfig } from '../../../lib/config';
 
 const nodeLocationFsProbe: LocationFsProbe = {
   exists: existsSync,
@@ -49,14 +52,14 @@ const nodeLocationFsProbe: LocationFsProbe = {
 };
 
 /**
- * Builds the runtime path inputs once per operation. The configured Mango skills
- * directory is injected through the same env-shaped seam used by all resolvers.
+ * Builds the runtime path inputs once per operation. The configured Mango
+ * directories are injected through the same env-shaped seam used by all
+ * resolvers, which is also how they reach a runtime probing on the hub's behalf.
  */
 export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv {
   const env = {
     ...process.env,
-    AGENTS_DIR: getConfig().agents.dir,
-    SKILLS_DIR: getConfig().skills.dir,
+    ...configuredLibraryEnv(),
     ...overrides.env,
   };
   return {
@@ -69,12 +72,23 @@ export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv 
   };
 }
 
+/**
+ * The MangoStudio library directories as this hub's configuration resolved
+ * them. They are product configuration rather than a property of a host, so
+ * they travel to a runtime probing the hub's own machine — and deliberately do
+ * not travel anywhere else, where the hub's paths would name nothing.
+ */
+export function configuredLibraryEnv(): Record<string, string> {
+  const config = getConfig();
+  return { AGENTS_DIR: config.agents.dir, SKILLS_DIR: config.skills.dir };
+}
+
 export function describeTargetLocations(
   targetId: LibraryTargetId,
   env: PathEnv = createLibraryPathEnv(),
   fs: LocationFsProbe = nodeLocationFsProbe
 ): LibraryLocationStatus[] {
-  return listLibraryTargetLocationIds(targetId).map((id) => describeLocation(id, env, fs));
+  return describeTargetLocationsWith(targetId, env, fs);
 }
 
 export function describeLocation(
@@ -82,56 +96,5 @@ export function describeLocation(
   env: PathEnv = createLibraryPathEnv(),
   fs: LocationFsProbe = nodeLocationFsProbe
 ): LibraryLocationStatus {
-  const location = getLibraryLocation(id);
-  if (!location) {
-    throw new TypeError(`Unknown library location: ${id}`);
-  }
-
-  const path = location.resolvePath(env);
-  if (path === null) {
-    return {
-      id: location.id,
-      kind: location.kind,
-      scope: location.scope,
-      path: null,
-      access: location.access,
-      exists: false,
-      readable: false,
-      writable: false,
-      targetIds: [...location.readBy],
-    };
-  }
-
-  const exists = fs.exists(path);
-  const readable = exists && fs.isReadable(path);
-  const writable = exists ? fs.isWritable(path) : nearestExistingWritable(path, fs);
-  const entryCount =
-    exists && readable && location.layout !== 'single-file'
-      ? safeEntryCount(fs, path, location.layout)
-      : undefined;
-
-  return {
-    id: location.id,
-    kind: location.kind,
-    scope: location.scope,
-    path,
-    access: location.access,
-    exists,
-    readable,
-    writable,
-    targetIds: [...location.readBy],
-    ...(entryCount !== undefined && { entryCount }),
-  };
-}
-
-function safeEntryCount(
-  fs: LocationFsProbe,
-  path: string,
-  layout: Exclude<LibraryLocationLayout, 'single-file'>
-): number | undefined {
-  try {
-    return fs.countEntries(path, layout);
-  } catch {
-    return undefined;
-  }
+  return describeLocationWith(id, env, fs);
 }

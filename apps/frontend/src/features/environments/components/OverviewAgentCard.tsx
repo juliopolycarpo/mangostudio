@@ -15,7 +15,9 @@ import { formatMessage } from '@/lib/i18n-format';
 import { describeFinding, findInstallRecipe, findingSeverity, worstFinding } from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
 import { useToolIdentities } from '../identity/use-tool-identities';
+import { useEnvironmentEntitiesQuery } from '../queries';
 import { AgentAuthState } from './AgentAuthState';
+import { AgentPresenceChips } from './AgentPresenceChips';
 import { FindingIcon } from './FindingList';
 import { HealthBadge } from './HealthBadge';
 import { InstallAction } from './InstallAction';
@@ -32,6 +34,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
   const e = t.environments;
   const probe = useProbeAgentCli();
   const { resolve, lookup } = useToolIdentities();
+  const environments = useEnvironmentEntitiesQuery();
   const name = resolve('agent', status.targetId).name;
   const installRecipe = findInstallRecipe(recipes, status.id, 'install');
   const finding = worstFinding(status.findings);
@@ -77,6 +80,8 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
       }
     >
       <AgentAuthState status={status} showHint={false} />
+
+      <AgentPresenceChips targetId={status.targetId} environments={environments.data ?? []} />
 
       {/* One line for the worst finding, because a card with room for one has
           to spend it on what actually stops the agent from working. */}

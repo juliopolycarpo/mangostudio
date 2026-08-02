@@ -15,13 +15,11 @@ import { promisify } from 'node:util';
 import {
   type BinaryScanDeps,
   binaryCandidateNames,
-  scanRuntime,
-} from '../../../../modules/environments/domain/binary-scan';
-import {
   NODE_RUNTIME_DEFINITION,
   parseNodeVersion,
   wellKnownNodeDirectories as runtimeWellKnownNodeDirectories,
-} from '../../../../modules/environments/domain/runtime-definitions';
+  scanRuntime,
+} from '@mangostudio/shared/environments/detection';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CACHE_TTL_MS = 30_000;

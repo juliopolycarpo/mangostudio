@@ -25,7 +25,10 @@ does not override the local-surface checks below.
 ## Guard Model
 
 Every recipe preview reports whether execution is allowed and, when it is not, every reason that
-blocked it. Execution requires all of these conditions:
+blocked it. Which conditions apply depends on which machine the install would run on, because the
+two questions are genuinely different.
+
+### The hub's own machine (`local`)
 
 - The server binds to a loopback address, unless it is a standalone binary launched by the user.
 - The request's socket peer is loopback. Forwarded client-IP headers are never trusted for this
@@ -35,8 +38,26 @@ blocked it. Execution requires all of these conditions:
   `apps/api/src/lib/config.ts`, so it is visible wherever configuration is reported.
 - Environment installs are explicitly enabled.
 
+### Any other environment
+
+The loopback checks are **not reused**. They ask "is the person driving this hub sitting at the
+machine that would be written to", and for a remote environment the answer is no by construction —
+applying them would refuse every remote install for a reason that names the wrong machine.
+
+What replaces them:
+
+- Environment installs are explicitly enabled (the same global switch).
+- The environment carries `allowInstalls`, a per-environment opt-in stored in the `environments`
+  table and off on arrival. It is a column rather than part of the transport config because it is
+  the hub's policy about a machine, not part of how to reach one.
+
+**Two gates, intersected, and a refusal always names which side said no.**
+`environment-not-trusted` and `disabled` are different switches in different places; someone who
+flips one has to be told when the other is still closed. The toggle lives on the environment's card
+under Environments.
+
 Blocked recipes remain useful: the response includes a shell command the user can review, copy,
-and run themselves.
+and run themselves — on the machine it names.
 
 ## Recipe Boundary
 
@@ -69,12 +90,28 @@ Official script installers have a prepare step before execution:
 
 MangoStudio never pipes a live network response into a shell.
 
+## Where Execution Happens
+
+The hub decides *whether*; the runtime does the spawning. `install.run` carries an argv the hub
+already built from a code-defined recipe — nothing is interpolated on the far side — and the child's
+output travels back on the `install.output` `evt` stream keyed by the run id. The hub relays those
+frames onto the SSE stream a browser reads, so the browser contract is unchanged in shape; only the
+host that produced the bytes moved.
+
+Two records, two owners, deliberately: the audit row, the recipe resolution, the TTL and the
+decision to run at all stay hub-side, while the bounded raw log is written on the machine that
+produced it. Cancellation crosses as `install.cancel` rather than a signal, because the child
+belongs to the other side.
+
+Recipes are platform-checked against the **runtime's** platform, not the hub's. A Linux recipe is
+offerable from a Windows hub when the environment is a WSL distribution; that is the point.
+
 ## Execution Limits
 
-The runner uses `Bun.spawn(argv)` with stdin disabled and stdout/stderr piped. It forwards only
+The runtime uses `Bun.spawn(argv)` with stdin disabled and stdout/stderr piped. It forwards only
 the runtime path/home/temp/XDG variables, proxy variables, and the small set of code-owned
-recipe overrides needed by nvm. Connector tokens, API keys, GitHub tokens, and other credential
-variables are withheld.
+recipe overrides needed by nvm — read from *its* environment, not the hub's. Connector tokens, API
+keys, GitHub tokens, and other credential variables are withheld.
 
 Each run has:
 
@@ -88,8 +125,9 @@ Each run has:
 - a user-scoped audit record containing the exact argv, timestamps, terminal status, exit code,
   and truncation state.
 
-Audit metadata is stored in `environment_install_runs`. Bounded logs are stored under
-`~/.mango/logs/installs/<runId>.log`.
+Audit metadata is stored in `environment_install_runs` on the hub. Bounded logs are written by the
+machine that ran the installer: `~/.mango/logs/installs/<runId>.log` on the hub's own machine, and
+under the runtime's own home elsewhere.
 
 ## Shell Profiles and Recovery
 
@@ -112,9 +150,12 @@ event, so a reconnecting client never waits on a stream that has nothing left to
 
 ## API Surface
 
-- `GET /api/environments/install/recipes` previews recipes and guard results.
-- `POST /api/environments/install/prepare` fetches and inspects a script installer.
-- `POST /api/environments/install` starts or attaches to a run.
+- `GET /api/environments/install/recipes` previews recipes and guard results. Takes an optional
+  `environmentId` query parameter; omitted means the hub's own machine.
+- `POST /api/environments/install/prepare` fetches and inspects a script installer. Takes an
+  optional `environmentId` in the body.
+- `POST /api/environments/install` starts or attaches to a run. Takes an optional `environmentId`
+  in the body.
 - `GET /api/environments/install/:runId/log` streams run events as SSE.
 - `POST /api/environments/install/:runId/cancel` requests cancellation.
 - `GET /api/environments/install/runs` returns the authenticated user's audit history.

@@ -1,4 +1,13 @@
 import type {
+  AgentCliStatus,
+  RuntimeId,
+  RuntimeStatus,
+  VersionManagerId,
+  VersionManagerStatus,
+} from '@mangostudio/shared/environments';
+import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
+import type { LibraryTargetId } from '@mangostudio/shared/library';
+import type {
   McpElicitationAction,
   McpElicitationField,
   McpPromptDescriptor,
@@ -522,6 +531,108 @@ export interface RuntimeMcpSessionEvent {
   readonly change: 'closed' | 'tool-list-changed';
 }
 
+/**
+ * Bounds a probe's spawns on the machine that runs them. The budget belongs
+ * with the spawns rather than on the hub, where a timer would only be racing
+ * the transport; the hub's own `timeoutMs` sits above these values so a dead
+ * link and an over-running probe are still distinguishable.
+ */
+export interface RuntimeProbeBudget {
+  readonly probeTimeoutMs?: number;
+  readonly totalTimeoutMs?: number;
+  readonly maxConcurrency?: number;
+}
+
+interface RuntimeProbeParams {
+  readonly budget?: RuntimeProbeBudget;
+  /**
+   * Variables merged over this host's own environment. The hub pins the
+   * MangoStudio library directories here for its own machine — they are
+   * product configuration, not a property of a host — and pins nothing for
+   * anyone else's, where its paths would name nothing.
+   */
+  readonly pathEnv?: { readonly env?: Readonly<Record<string, string>> };
+}
+
+export interface RuntimeProbeRuntimesParams extends RuntimeProbeParams {
+  readonly ids?: readonly RuntimeId[];
+  /** Hub policy: which ids this release can offer an install recipe for. */
+  readonly installable?: Readonly<Partial<Record<RuntimeId, boolean>>>;
+  readonly minimumVersions?: Readonly<Partial<Record<RuntimeId, MinimumRuntimeVersion>>>;
+}
+
+export interface RuntimeProbeRuntimesResult {
+  readonly statuses: readonly RuntimeStatus[];
+}
+
+export interface RuntimeProbeVersionManagersParams extends RuntimeProbeParams {
+  readonly ids?: readonly VersionManagerId[];
+  /**
+   * Latest published patch per major, keyed by major as a string because a
+   * JSON object cannot key on a number. The hub fetches it: reaching the
+   * network is its policy, and a runtime on a locked-down host may have none.
+   */
+  readonly latestByMajor?: Readonly<Record<string, string>>;
+}
+
+export interface RuntimeProbeVersionManagersResult {
+  readonly statuses: readonly VersionManagerStatus[];
+}
+
+export interface RuntimeProbeAgentClisParams extends RuntimeProbeParams {
+  readonly targetIds?: readonly LibraryTargetId[];
+  readonly installable?: Readonly<Partial<Record<LibraryTargetId, boolean>>>;
+  /**
+   * What the hub is, for the `mangostudio` target. `configHome` and
+   * `executablePath` are sent only when this host *is* the hub's machine;
+   * elsewhere the runtime answers with its own, which is the honest reading of
+   * "what MangoStudio looks like over there".
+   */
+  readonly self: {
+    readonly version: string;
+    readonly configHome?: string;
+    readonly executablePath?: string;
+  };
+}
+
+export interface RuntimeProbeAgentClisResult {
+  readonly statuses: readonly AgentCliStatus[];
+}
+
+/** Topic carrying one install run's output up to the hub, keyed by run id. */
+export const RUNTIME_INSTALL_OUTPUT_TOPIC = 'install.output' as const;
+
+export interface RuntimeInstallOutputEvent {
+  readonly stream: 'stdout' | 'stderr' | 'system';
+  readonly line: string;
+  /** Marks the frame that closes the stream; its `line` is empty. */
+  readonly end?: true;
+}
+
+export interface RuntimeInstallRunParams {
+  /** Hub-minted run id. It is the stream key, so it is part of the contract. */
+  readonly runId: string;
+  /** Already built by the hub from a code-defined recipe; never interpolated here. */
+  readonly argv: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs: number;
+  /** Where this machine keeps the run's log; the hub's own path means nothing here. */
+  readonly logPath: string;
+  readonly outputLimitBytes?: number;
+}
+
+export interface RuntimeInstallRunResult {
+  readonly exitCode: number | null;
+  readonly status: 'succeeded' | 'failed' | 'cancelled' | 'timed-out' | 'spawn-failed';
+  readonly truncated: boolean;
+  readonly finishedAt: number;
+  readonly durationMs: number;
+}
+
+export interface RuntimeInstallCancelParams {
+  readonly runId: string;
+}
+
 export interface RuntimeMethodMap {
   'fs.read-file': {
     readonly params: RuntimeReadFileParams;
@@ -634,6 +745,26 @@ export interface RuntimeMethodMap {
   'mcp.disconnect': {
     readonly params: RuntimeMcpServerParams;
     readonly result: RuntimeMcpAckResult;
+  };
+  'probing.runtimes': {
+    readonly params: RuntimeProbeRuntimesParams;
+    readonly result: RuntimeProbeRuntimesResult;
+  };
+  'probing.version-managers': {
+    readonly params: RuntimeProbeVersionManagersParams;
+    readonly result: RuntimeProbeVersionManagersResult;
+  };
+  'probing.agent-clis': {
+    readonly params: RuntimeProbeAgentClisParams;
+    readonly result: RuntimeProbeAgentClisResult;
+  };
+  'install.run': {
+    readonly params: RuntimeInstallRunParams;
+    readonly result: RuntimeInstallRunResult;
+  };
+  'install.cancel': {
+    readonly params: RuntimeInstallCancelParams;
+    readonly result: { readonly ok: true };
   };
 }
 

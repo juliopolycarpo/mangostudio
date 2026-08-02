@@ -1984,6 +1984,39 @@ export const messages: Messages = {
       codex: 'Codex',
       cursor: 'Cursor',
     },
+    /** Which machine a diagnostic tab is describing. */
+    /** Per-environment permission to run install recipes on that machine. */
+    trust: {
+      label: 'Allow installs on this machine',
+      hint: 'Runs allowlisted install recipes there, writing to that machine\u2019s disk. Remote installs need both the global install switch and this per-environment permission \u2014 the local-surface check that protects this machine says nothing about that one.',
+      updateFailed: 'The install permission could not be changed.',
+    },
+    scope: {
+      label: 'Environment',
+      disconnected: '{environment} is not connected',
+      disconnectedHint:
+        'Nothing is shown rather than the last answer this machine gave, because a stale toolchain list is exactly what someone would act on.',
+      connect: 'Connect',
+      notPermitted: '{environment} does not report what is installed on it',
+      notPermittedHint:
+        'Its runtime does not offer toolchain detection. That is a setting on that machine, not a fault here.',
+      compare: 'Compare',
+      compareTitle: 'Compare environments',
+      compareHint: 'Two machines, one table. Rows are what MangoStudio knows how to look for.',
+      compareLeft: 'Left environment',
+      compareRight: 'Right environment',
+      compareClose: 'Close comparison',
+      cellPresent: 'Present',
+      cellAbsent: 'Not installed',
+      cellNotPermitted: 'Not reported',
+      cellUnknown: 'Not checked yet',
+      rowGroupRuntime: 'Toolchains',
+      rowGroupAgent: 'Agents',
+      rowGroupShell: 'Shells',
+      presenceOn: 'on {environment}',
+      presencePresent: '{environment}: installed',
+      presenceAbsent: '{environment}: not installed',
+    },
     status: {
       ok: 'Available',
       warn: 'Needs attention',
@@ -2309,6 +2342,7 @@ export const messages: Messages = {
       locationEntries: '{count} entries',
       notInstalled: 'Not installed',
       empty: 'No agent CLIs were detected.',
+      emptyHint: 'MangoStudio can install an agent CLI for you on this machine.',
     },
     health: {
       description: 'Everything that is wrong, in one list, worst first.',
@@ -2367,6 +2401,8 @@ export const messages: Messages = {
         'client-not-loopback':
           'This request did not come from this machine, so it cannot install anything here.',
         disabled: 'Installs are disabled in this server configuration.',
+        'environment-not-trusted':
+          'This environment has not been trusted with installs. Turn it on for that machine, on its card in Environments.',
       },
     },
   },

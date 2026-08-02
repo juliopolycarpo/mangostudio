@@ -5,7 +5,7 @@ import type {
   LibraryResourceContent,
   LibraryTargetDescriptor,
 } from '@mangostudio/shared/library';
-import { listLibraryTargetDescriptors } from '../../../src/modules/library/domain/registry';
+import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
 import {
   createLibraryRoutes,
   type LibraryRouteService,

@@ -24,6 +24,10 @@ import {
   type ResourceKind,
   ResourceKindSchema,
 } from '@mangostudio/shared/library';
+import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  listLibraryTargetDescriptors,
+} from '@mangostudio/shared/library/host';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import {
@@ -38,7 +42,6 @@ import {
 } from '../../workspaces/application/workdir-validation';
 import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import { discoverLibraryResources } from '../application/library-discovery';
-import { LIBRARY_LOCATION_DEFINITIONS, listLibraryTargetDescriptors } from '../domain/registry';
 import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
 
 export const MAX_LIBRARY_CONTENT_BYTES = 512 * 1024;

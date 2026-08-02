@@ -19,15 +19,18 @@ import type {
   RuntimeStatus,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
+import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
-import { evaluateInstallGuard } from '../domain/install-guards';
+import { evaluateInstallGuard, evaluateRemoteInstallGuard } from '../domain/install-guards';
 import { INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
 import { assertRecipeInput } from '../domain/recipe-input';
+import { environmentRepository } from '../infrastructure/environment-repository';
 import {
   type CompleteInstallRun,
   createInstallRunRepository,
@@ -40,20 +43,39 @@ import {
   installerDownloader,
 } from '../infrastructure/installer-download';
 import { inspectProfileSetup, type ProfileSetupInspector } from '../infrastructure/profile-setup';
-import { type AgentCliDetectionService, agentCliDetectionService } from './agent-cli-detection';
-import { type RuntimeDetectionService, runtimeDetectionService } from './runtime-detection';
 import {
-  type VersionManagerDetectionService,
-  versionManagerDetectionService,
-} from './version-manager-detection';
+  type EnvironmentProbingService,
+  environmentProbingService,
+  type ProbeScope,
+} from './probing-service';
 
 const PREPARATION_TTL_MS = 10 * 60 * 1000;
 const MAX_RECENT_STREAMS = 20;
+/** Separates environment from recipe in activity maps so ids stay unambiguous. */
+const ACTIVITY_SEP = '\u001f';
 
 export interface InstallRequestContext {
   readonly userId: string;
   readonly clientIp: string | undefined;
+  /** Which machine to install on; the hub's own unless a caller says otherwise. */
+  readonly environmentId?: string;
   readonly signal?: AbortSignal;
+}
+
+function environmentIdOf(context: Pick<InstallRequestContext, 'environmentId'>): string {
+  return context.environmentId ?? LOCAL_ENVIRONMENT_ID;
+}
+
+/** The machine a recipe is about. */
+function probeScopeFor(
+  context: Pick<InstallRequestContext, 'userId' | 'environmentId'>
+): ProbeScope {
+  return { userId: context.userId, environmentId: environmentIdOf(context) };
+}
+
+/** Concurrent same-recipe installs on different machines must not attach. */
+function activityKey(environmentId: string, recipeId: InstallRecipeId): string {
+  return `${environmentId}${ACTIVITY_SEP}${recipeId}`;
 }
 
 export class InstallBlockedError extends Error {
@@ -109,6 +131,7 @@ interface ActiveInstall {
   readonly userId: string;
   readonly profileId: string;
   readonly recipeId: InstallRecipeId;
+  readonly environmentId: string;
   readonly abortController: AbortController;
   readonly stream: EventBuffer;
 }
@@ -130,19 +153,20 @@ interface RecipeRequirements {
 
 interface InstallServiceDeps {
   readonly recipes: readonly InstallRecipe[];
-  readonly runtimeService: RuntimeDetectionService;
-  readonly versionManagerService: VersionManagerDetectionService;
-  readonly agentService: AgentCliDetectionService;
+  readonly probingService: EnvironmentProbingService;
   readonly repository: InstallRunRepository;
   readonly downloader: InstallerDownloader;
   readonly runner: InstallRunner;
   readonly now: () => number;
   readonly generateId: () => string;
+  /** Fallback platform when the target runtime has not handshaked yet. */
   readonly platform: string;
+  /** Target machine platform; defaults to the runtime manifest for remotes. */
+  readonly resolvePlatform?: (scope: ProbeScope) => Promise<string>;
   readonly getLogPath: (runId: string) => string;
   readonly readLog: (path: string) => Promise<string>;
   readonly inspectProfileSetup: ProfileSetupInspector;
-  readonly resolveGuard: (clientIp: string | undefined) => InstallGuard;
+  readonly resolveGuard: (context: InstallRequestContext) => Promise<InstallGuard>;
 }
 
 export interface InstallService {
@@ -237,14 +261,34 @@ function createEventBuffer(): EventBuffer {
   };
 }
 
-function defaultGuard(clientIp: string | undefined): InstallGuard {
+/**
+ * Two gates, intersected, and a refusal always names which side said no.
+ *
+ * For the hub's own machine that is the loopback surface it has always been.
+ * For anyone else's it is an explicit per-environment opt-in, because nothing
+ * the hub can measure here says anything about a machine over there — and
+ * quietly inheriting the local verdict would extend a permission granted for
+ * "the browser is at this keyboard" to a host nobody consented for.
+ */
+async function defaultGuard(context: InstallRequestContext): Promise<InstallGuard> {
   const config = getConfig();
-  return evaluateInstallGuard({
-    serverHost: config.server.host,
-    clientIp,
+  const environmentId = environmentIdOf(context);
+  if (environmentId === LOCAL_ENVIRONMENT_ID) {
+    return evaluateInstallGuard({
+      serverHost: config.server.host,
+      clientIp: context.clientIp,
+      installsEnabled: config.environments.installsEnabled,
+      standalone: isStandaloneExecutable(),
+      container: config.environments.container,
+    });
+  }
+
+  const environment = await environmentRepository.find(context.userId, environmentId);
+  return evaluateRemoteInstallGuard({
     installsEnabled: config.environments.installsEnabled,
-    standalone: isStandaloneExecutable(),
-    container: config.environments.container,
+    // An environment that is not there cannot have been trusted, and saying so
+    // is more useful than a not-found: the user asked to install somewhere.
+    allowInstalls: environment?.allowInstalls === true,
   });
 }
 
@@ -261,6 +305,14 @@ function defaultInput(recipe: InstallRecipe): RecipeInput {
   return recipe.inputKind === 'none' ? { kind: 'none' } : { kind: 'node-version', version: 'lts' };
 }
 
+/** The request context, with the environment the body asked for folded in. */
+function withEnvironment(
+  context: InstallRequestContext,
+  environmentId: string | undefined
+): InstallRequestContext {
+  return environmentId === undefined ? context : { ...context, environmentId };
+}
+
 function terminalDuration(run: InstallRun): number {
   return Math.max(0, (run.finishedAt ?? run.startedAt) - run.startedAt);
 }
@@ -269,12 +321,20 @@ function isInstallPlatform(platform: string): platform is InstallPlatform {
   return platform === 'darwin' || platform === 'linux';
 }
 
+async function defaultResolvePlatform(scope: ProbeScope, fallback: string): Promise<string> {
+  if (scope.environmentId === LOCAL_ENVIRONMENT_ID) return fallback;
+  try {
+    const client = await getRuntimeClient(scope.userId, scope.environmentId);
+    return client.manifest.platform;
+  } catch {
+    return fallback;
+  }
+}
+
 export function createInstallService(overrides: Partial<InstallServiceDeps> = {}): InstallService {
   const deps: InstallServiceDeps = {
     recipes: INSTALL_RECIPES,
-    runtimeService: runtimeDetectionService,
-    versionManagerService: versionManagerDetectionService,
-    agentService: agentCliDetectionService,
+    probingService: environmentProbingService,
     repository: createInstallRunRepository(),
     downloader: installerDownloader,
     runner: installRunner,
@@ -287,12 +347,14 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     resolveGuard: defaultGuard,
     ...overrides,
   };
+  const resolvePlatform =
+    deps.resolvePlatform ?? ((scope) => defaultResolvePlatform(scope, deps.platform));
   const recipesById = new Map(deps.recipes.map((recipe) => [recipe.id, recipe] as const));
   const preparations = new Map<string, PreparedInstall>();
-  const activeByRecipe = new Map<InstallRecipeId, ActiveInstall>();
+  const activeByRecipe = new Map<string, ActiveInstall>();
   const activeByRun = new Map<string, ActiveInstall>();
   const recentStreams = new Map<string, RecentInstallStream>();
-  const startingByRecipe = new Map<InstallRecipeId, StartingInstall>();
+  const startingByRecipe = new Map<string, StartingInstall>();
 
   const resolveRecipe = (id: InstallRecipeId): InstallRecipe => {
     // Only the configured recipe set is executable. Falling back to the global
@@ -303,24 +365,28 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   };
 
   const resolveRequirement = async (
+    scope: ProbeScope,
     requirement: RuntimeId
   ): Promise<{ available: boolean; nvmDir?: string }> => {
     if (requirement === 'nvm') {
-      const status = await deps.versionManagerService.getVersionManagerStatus('nvm');
+      const status = await deps.probingService.getVersionManagerStatus(scope, 'nvm');
       return {
         available: status?.installed === true,
         ...(status?.root && { nvmDir: status.root }),
       };
     }
-    const status = await deps.runtimeService.getRuntimeStatus(requirement);
+    const status = await deps.probingService.getRuntimeStatus(scope, requirement);
     return { available: Boolean(status && status.installations.length > 0) };
   };
 
-  const inspectRequirements = async (recipe: InstallRecipe): Promise<RecipeRequirements> => {
+  const inspectRequirements = async (
+    scope: ProbeScope,
+    recipe: InstallRecipe
+  ): Promise<RecipeRequirements> => {
     const missing: RuntimeId[] = [];
     let nvmDir: string | undefined;
     for (const requirement of recipe.requires) {
-      const result = await resolveRequirement(requirement);
+      const result = await resolveRequirement(scope, requirement);
       if (!result.available) missing.push(requirement);
       if (result.nvmDir) nvmDir = result.nvmDir;
     }
@@ -332,17 +398,22 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
    * callers that also need the resolved `nvmDir` do not re-run detection.
    */
   const buildPreviewDetail = async (
+    scope: ProbeScope,
     recipe: InstallRecipe,
     input: RecipeInput,
     guard: InstallGuard,
     artifact?: InstallerArtifact
   ): Promise<{ preview: InstallRecipePreview; requirements: RecipeRequirements }> => {
     assertRecipeInput(input, recipe.inputKind);
-    const requirements = await inspectRequirements(recipe);
-    const profileSetup: InstallProfileSetup | undefined = recipe.profileLines
-      ? await deps.inspectProfileSetup(recipe.profileLines)
-      : undefined;
-    const supported = isInstallPlatform(deps.platform) && recipe.platforms.includes(deps.platform);
+    const requirements = await inspectRequirements(scope, recipe);
+    // Profile files live on the target machine. Inspecting the hub's own home
+    // for a remote install would report a lie, so remote previews omit it.
+    const profileSetup: InstallProfileSetup | undefined =
+      recipe.profileLines && scope.environmentId === LOCAL_ENVIRONMENT_ID
+        ? await deps.inspectProfileSetup(recipe.profileLines)
+        : undefined;
+    const platform = await resolvePlatform(scope);
+    const supported = isInstallPlatform(platform) && recipe.platforms.includes(platform);
     const argv = recipe.argv(input, {
       ...(recipe.download && {
         installerPath: artifact?.path ?? '<downloaded-installer>',
@@ -388,15 +459,22 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     context: InstallRequestContext,
     artifact?: InstallerArtifact
   ): Promise<InstallRecipePreview> =>
-    (await buildPreviewDetail(recipe, input, deps.resolveGuard(context.clientIp), artifact))
-      .preview;
+    (
+      await buildPreviewDetail(
+        probeScopeFor(context),
+        recipe,
+        input,
+        await deps.resolveGuard(context),
+        artifact
+      )
+    ).preview;
 
   const assertAvailable = (preview: InstallRecipePreview): void => {
     if (!preview.guard.allowed) throw new InstallBlockedError(preview);
     if (!preview.supported) {
       throw new InstallUnavailableError(
         preview,
-        `Recipe ${preview.id} is not supported on ${deps.platform}.`
+        `Recipe ${preview.id} is not supported on this platform.`
       );
     }
     if (preview.missingRequirements.length > 0) {
@@ -434,7 +512,11 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     }
   };
 
-  const publishProbes = async (recipe: InstallRecipe, stream: EventBuffer): Promise<void> => {
+  const publishProbes = async (
+    scope: ProbeScope,
+    recipe: InstallRecipe,
+    stream: EventBuffer
+  ): Promise<void> => {
     const publish = (
       target: InstallProbeEvent['target'],
       status: RuntimeStatus | VersionManagerStatus | AgentCliStatus | null
@@ -446,7 +528,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       if (recipe.runtimeId === 'nvm') {
         publish(
           'version-manager',
-          await deps.versionManagerService.getVersionManagerStatus('nvm', { force: true })
+          await deps.probingService.getVersionManagerStatus(scope, 'nvm', { force: true })
         );
         return;
       }
@@ -457,19 +539,19 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       ) {
         publish(
           'agent',
-          await deps.agentService.getAgentCliStatus(recipe.runtimeId, { force: true })
+          await deps.probingService.getAgentCliStatus(scope, recipe.runtimeId, { force: true })
         );
         return;
       }
 
       publish(
         'runtime',
-        await deps.runtimeService.getRuntimeStatus(recipe.runtimeId, { force: true })
+        await deps.probingService.getRuntimeStatus(scope, recipe.runtimeId, { force: true })
       );
       if (recipe.requires.includes('nvm')) {
         publish(
           'version-manager',
-          await deps.versionManagerService.getVersionManagerStatus('nvm', { force: true })
+          await deps.probingService.getVersionManagerStatus(scope, 'nvm', { force: true })
         );
       }
     } catch (error) {
@@ -508,6 +590,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   };
 
   const executeRun = async (
+    scope: ProbeScope,
     active: ActiveInstall,
     recipe: InstallRecipe,
     argv: readonly string[],
@@ -517,10 +600,12 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     try {
       const result = await deps.runner.run(
         {
+          runId: active.runId,
+          userId: active.userId,
+          environmentId: scope.environmentId,
           argv,
           env: recipeEnv,
           timeoutMs: recipe.timeoutMs,
-          logPath: deps.getLogPath(active.runId),
         },
         {
           signal: active.abortController.signal,
@@ -535,7 +620,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         }
       );
       await recordTerminal(active, result);
-      await publishProbes(recipe, active.stream);
+      await publishProbes(scope, recipe, active.stream);
       active.stream.publish({
         type: 'exit',
         code: result.exitCode,
@@ -564,8 +649,9 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     } finally {
       active.stream.close();
       activeByRun.delete(active.runId);
-      if (activeByRecipe.get(active.recipeId)?.runId === active.runId) {
-        activeByRecipe.delete(active.recipeId);
+      const key = activityKey(active.environmentId, active.recipeId);
+      if (activeByRecipe.get(key)?.runId === active.runId) {
+        activeByRecipe.delete(key);
       }
       try {
         await artifact?.cleanup();
@@ -630,14 +716,16 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     async listRecipes(context) {
       // The guard does not vary per recipe, so it is resolved once instead of
       // re-reading config and probing the container marker for every preview.
-      const guard = deps.resolveGuard(context.clientIp);
+      const guard = await deps.resolveGuard(context);
+      const scope = probeScopeFor(context);
       const details = await Promise.all(
-        deps.recipes.map((recipe) => buildPreviewDetail(recipe, defaultInput(recipe), guard))
+        deps.recipes.map((recipe) => buildPreviewDetail(scope, recipe, defaultInput(recipe), guard))
       );
       return details.map((detail) => detail.preview);
     },
 
-    async prepare(body, context) {
+    async prepare(body, requestContext) {
+      const context = withEnvironment(requestContext, body.environmentId);
       assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
@@ -690,14 +778,17 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       }
     },
 
-    async start(body, context) {
+    async start(body, requestContext) {
+      const context = withEnvironment(requestContext, body.environmentId);
       assertRequestedProfileId(body.profileId, context);
       await cleanupExpiredPreparations();
       const recipe = resolveRecipe(body.recipeId);
       const preview = await buildPreview(recipe, body.input, context);
       assertAvailable(preview);
 
-      const existing = activeByRecipe.get(recipe.id);
+      const environmentId = environmentIdOf(context);
+      const key = activityKey(environmentId, recipe.id);
+      const existing = activeByRecipe.get(key);
       if (existing) {
         if (existing.userId !== context.userId) {
           throw new InstallConflictError(`Recipe ${recipe.id} is already running.`);
@@ -705,7 +796,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         return { runId: existing.runId, attached: true };
       }
 
-      const starting = startingByRecipe.get(recipe.id);
+      const starting = startingByRecipe.get(key);
       if (starting) {
         if (starting.userId !== context.userId) {
           throw new InstallConflictError(`Recipe ${recipe.id} is already starting.`);
@@ -734,9 +825,10 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
 
         try {
           const execution = await buildPreviewDetail(
+            probeScopeFor(context),
             recipe,
             body.input,
-            deps.resolveGuard(context.clientIp),
+            await deps.resolveGuard(context),
             artifact
           );
           assertAvailable(execution.preview);
@@ -766,6 +858,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
             userId: context.userId,
             profileId,
             recipeId: recipe.id,
+            environmentId,
             abortController: new AbortController(),
             stream: createEventBuffer(),
           };
@@ -773,7 +866,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
           // Registered before the audit row exists so a concurrent read can
           // never see a `running` row that this process does not yet own and
           // mistake it for one orphaned by a restart.
-          activeByRecipe.set(recipe.id, active);
+          activeByRecipe.set(key, active);
           activeByRun.set(runId, active);
           try {
             await deps.repository.create({
@@ -785,25 +878,25 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
               startedAt,
             });
           } catch (error) {
-            activeByRecipe.delete(recipe.id);
+            activeByRecipe.delete(key);
             activeByRun.delete(runId);
             throw error;
           }
 
           rememberStream(runId, context.userId, active.stream);
-          void executeRun(active, recipe, argv, recipeEnv, artifact);
+          void executeRun(probeScopeFor(context), active, recipe, argv, recipeEnv, artifact);
           return { runId, attached: false };
         } catch (error) {
           await artifact?.cleanup().catch(() => undefined);
           throw error;
         }
       })();
-      startingByRecipe.set(recipe.id, { userId: context.userId, promise: startPromise });
+      startingByRecipe.set(key, { userId: context.userId, promise: startPromise });
       try {
         return await startPromise;
       } finally {
-        if (startingByRecipe.get(recipe.id)?.promise === startPromise) {
-          startingByRecipe.delete(recipe.id);
+        if (startingByRecipe.get(key)?.promise === startPromise) {
+          startingByRecipe.delete(key);
         }
       }
     },

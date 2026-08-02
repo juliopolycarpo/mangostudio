@@ -18,6 +18,7 @@ import type {
   VersionManagerStatusList,
   WslDetection,
 } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ENVIRONMENTS_TOPIC } from '@mangostudio/shared/realtime';
 import {
   type QueryClient,
@@ -32,17 +33,31 @@ import { ApiError } from '@/lib/utils';
 
 const STALE_TIME_MS = 30_000;
 
+/**
+ * Detection answers describe one machine, so every detection key carries the
+ * environment it is about. A cache shared across machines would show WSL's
+ * toolchains under Local's name for as long as the entry stayed fresh.
+ */
 export const environmentKeys = {
   all: ['environments'] as const,
   entities: () => [...environmentKeys.all, 'entities'] as const,
-  runtimes: () => [...environmentKeys.all, 'runtimes'] as const,
-  versionManagers: () => [...environmentKeys.all, 'version-managers'] as const,
-  agents: () => [...environmentKeys.all, 'agents'] as const,
-  installRecipes: () => [...environmentKeys.all, 'install-recipes'] as const,
+  runtimes: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...environmentKeys.all, 'runtimes', environmentId] as const,
+  versionManagers: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...environmentKeys.all, 'version-managers', environmentId] as const,
+  agents: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...environmentKeys.all, 'agents', environmentId] as const,
+  installRecipes: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...environmentKeys.all, 'install-recipes', environmentId] as const,
   wsl: () => [...environmentKeys.all, 'wsl'] as const,
   pairings: () => [...environmentKeys.all, 'pairing'] as const,
   pairing: (id: string) => [...environmentKeys.pairings(), id] as const,
 };
+
+/** `local` is the server default, so it never travels as a query parameter. */
+function environmentQuery(environmentId: string): { environmentId?: string } {
+  return environmentId === LOCAL_ENVIRONMENT_ID ? {} : { environmentId };
+}
 
 function environmentEntitiesQueryOptions() {
   return queryOptions({
@@ -111,10 +126,14 @@ export function useUpdateEnvironmentMutation() {
       return data as Environment;
     },
     // An update can carry a new transport config, which is what decides the
-    // distribution an environment claims.
-    onSuccess: (environment) => {
+    // distribution an environment claims. Flipping allowInstalls also changes
+    // which recipes the install catalog reports as runnable for that machine.
+    onSuccess: async (environment) => {
       replaceEnvironment(queryClient, environment);
-      return invalidateWslDetection(queryClient);
+      await invalidateWslDetection(queryClient);
+      await queryClient.invalidateQueries({
+        queryKey: environmentKeys.installRecipes(environment.id),
+      });
     },
   });
 }
@@ -212,36 +231,42 @@ export function useRevokeRuntimePairingMutation(id: string) {
   });
 }
 
-export function runtimeStatusesQueryOptions() {
+export function runtimeStatusesQueryOptions(environmentId: string = LOCAL_ENVIRONMENT_ID) {
   return queryOptions({
-    queryKey: environmentKeys.runtimes(),
+    queryKey: environmentKeys.runtimes(environmentId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.environments.runtimes.get();
+      const { data, error } = await client.api.environments.runtimes.get({
+        query: environmentQuery(environmentId),
+      });
       if (error) throw new ApiError(error.value);
       return data as RuntimeStatusList;
     },
   });
 }
 
-export function versionManagerStatusesQueryOptions() {
+export function versionManagerStatusesQueryOptions(environmentId: string = LOCAL_ENVIRONMENT_ID) {
   return queryOptions({
-    queryKey: environmentKeys.versionManagers(),
+    queryKey: environmentKeys.versionManagers(environmentId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.environments['version-managers'].get();
+      const { data, error } = await client.api.environments['version-managers'].get({
+        query: environmentQuery(environmentId),
+      });
       if (error) throw new ApiError(error.value);
       return data as VersionManagerStatusList;
     },
   });
 }
 
-export function agentCliStatusesQueryOptions() {
+export function agentCliStatusesQueryOptions(environmentId: string = LOCAL_ENVIRONMENT_ID) {
   return queryOptions({
-    queryKey: environmentKeys.agents(),
+    queryKey: environmentKeys.agents(environmentId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.environments.agents.get();
+      const { data, error } = await client.api.environments.agents.get({
+        query: environmentQuery(environmentId),
+      });
       if (error) throw new ApiError(error.value);
       return data as AgentCliStatusList;
     },
@@ -265,12 +290,14 @@ export function useWslDetectionQuery(enabled: boolean) {
   });
 }
 
-export function installRecipesQueryOptions() {
+export function installRecipesQueryOptions(environmentId: string = LOCAL_ENVIRONMENT_ID) {
   return queryOptions({
-    queryKey: environmentKeys.installRecipes(),
+    queryKey: environmentKeys.installRecipes(environmentId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.environments.install.recipes.get();
+      const { data, error } = await client.api.environments.install.recipes.get({
+        query: environmentQuery(environmentId),
+      });
       if (error) throw new ApiError(error.value);
       return data as InstallRecipePreview[];
     },

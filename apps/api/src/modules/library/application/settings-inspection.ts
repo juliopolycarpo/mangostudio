@@ -7,17 +7,17 @@ import type {
   SettingsSourceSnapshot,
 } from '@mangostudio/shared/library';
 import {
-  type RegularFileContent,
-  RegularFileReadError,
-  readRegularFileUtf8,
-} from '../../../lib/safe-file';
-import {
   getLibraryLocation,
   getLibraryTarget,
   LIBRARY_TARGET_DEFINITIONS,
   type LocationDefinition,
-  type PathEnv,
-} from '../domain/registry';
+} from '@mangostudio/shared/library/host';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import {
+  type RegularFileContent,
+  RegularFileReadError,
+  readRegularFileUtf8,
+} from '../../../lib/safe-file';
 import { createLibraryPathEnv } from '../infrastructure/location-probe';
 import {
   type JsonSettingsParserOptions,
