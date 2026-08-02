@@ -6,6 +6,7 @@
 
 import { dirname, join } from 'node:path';
 import { type FsProbe, nearestExistingWritable } from '@mangostudio/shared/library/host';
+import { deniedCapabilities, RUNTIME_CONFIG_FILE_NAME } from '@mangostudio/shared/runtime-home';
 import {
   BUILD_INFO_FILENAME,
   type BuildInfo,
@@ -21,6 +22,7 @@ import {
 import type { ServerState } from '../lib/server-state';
 import type { CursorRuntimeChainStep } from '../services/providers/cursor/runtime-availability';
 import type { RuntimeBinaryProbe } from './runtime-binary-probe';
+import type { RuntimeSlotProbe } from './runtime-slot-probe';
 import type { SshClientProbe } from './ssh-client-probe';
 
 export type { FsProbe } from '@mangostudio/shared/library/host';
@@ -143,6 +145,32 @@ export function checkRuntimeBinary(probe: RuntimeBinaryProbe, hubVersion: string
     );
   }
   return ok('Runtime binary', `v${probe.version} at ${probe.path}`);
+}
+
+/**
+ * One row per slot in the runtime home, saying what that machine has agreed a
+ * hub may do there.
+ *
+ * A slot still waiting for `setup` is a warning rather than a failure: the hub
+ * runs fine, the runtime in that slot simply refuses to serve until somebody at
+ * the machine answers. Everything else about it — that it is installed, that it
+ * is reachable — is true and unhelpful without this line.
+ */
+export function checkRuntimeSlot(probe: RuntimeSlotProbe): CheckResult {
+  const label = `Runtime slot (${probe.slot})`;
+  if (probe.error) {
+    return fail(
+      label,
+      `${RUNTIME_CONFIG_FILE_NAME} in ${probe.directory} ${probe.error}; run "mangostudio-runtime setup" to rewrite it`
+    );
+  }
+  if (probe.config.setup.state === 'pending') {
+    return warn(label, 'waiting for consent; run "mangostudio-runtime setup" on that machine');
+  }
+  const version = probe.config.version ? `v${probe.config.version}  ` : '';
+  const denied = deniedCapabilities(probe.config.allow);
+  const detail = `${version}${probe.config.profile}${denied.length > 0 ? ` (denied: ${denied.join(', ')})` : ''}`;
+  return ok(label, `${detail}  ${probe.directory}`);
 }
 
 /**

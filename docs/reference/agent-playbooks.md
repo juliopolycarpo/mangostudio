@@ -581,6 +581,13 @@ Reconnection is a backoff deadline checked on the next use, not a scheduled time
 stdout is protocol-only — anything written to it there desynchronises the stream and
 tears the connection down.
 
+Where a runtime lives and what it is allowed to do — `~/.mango/runtime/<slot>/`, the
+`allow` set, and the CLI that writes it:
+
+- `apps/shared/src/runtime-home/` (schemas, presets, path layout — the contract)
+- `apps/runtime/src/runtime-home.ts` (the half that touches disk), `src/setup.ts`, `src/health.ts`
+- `apps/api/src/cli/runtime-slot-probe.ts` (what `mango doctor` reports per slot)
+
 WSL is a launcher over that same transport, not a protocol of its own:
 
 - `apps/api/src/modules/environments/domain/wsl-output.ts` (UTF-16LE + localized listing)
