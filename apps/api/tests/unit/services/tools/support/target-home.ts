@@ -36,10 +36,16 @@ export async function withTargetHome<T>(home: string, body: () => Promise<T>): P
       }),
     connectors: {
       'in-process': async (_definition, onUnavailable) => {
-        const host = new RuntimeHost({
+        let host: RuntimeHost | undefined;
+        const registry = createRuntimeMethodHandlers({
+          runtimeVersion: VERSION,
+          emit: (event) => host?.emit(event),
+        });
+        host = new RuntimeHost({
           runtimeVersion: VERSION,
           manifest: { ...createLocalRuntimeManifest(), homeDir: home },
-          handlers: createRuntimeMethodHandlers(),
+          handlers: registry.handlers,
+          onClose: () => void registry.close(),
         });
         const connection = await connectInProcessRuntime(host, { hubVersion: VERSION });
         return {

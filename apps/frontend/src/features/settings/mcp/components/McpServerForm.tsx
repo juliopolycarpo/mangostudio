@@ -4,12 +4,14 @@
  * the source of truth — API validation errors surface through the caller.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer, McpTransport } from '@mangostudio/shared/mcp';
 import { AlertTriangle, Plus, X } from 'lucide-react';
 import { type FormEvent, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Toggle } from '@/components/ui/Toggle';
+import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import {
   createEmptyFormState,
@@ -41,6 +43,7 @@ export function McpServerForm({
 }: McpServerFormProps) {
   const { t } = useI18n();
   const s = t.settings.mcp;
+  const environments = useEnvironmentEntitiesQuery();
 
   const [state, setState] = useState<McpServerFormState>(() =>
     server ? formStateFromServer(server) : createEmptyFormState()
@@ -49,6 +52,22 @@ export function McpServerForm({
 
   const patch = (updates: Partial<McpServerFormState>) =>
     setState((prev) => ({ ...prev, ...updates }));
+
+  const selectedEnvironmentName =
+    environments.data?.find((environment) => environment.id === state.environmentId)?.name ??
+    state.environmentId;
+  /**
+   * Stored secrets count as much as newly typed ones: moving an existing
+   * server is exactly the moment its saved credentials start travelling.
+   * Only the active transport's secret bundle travels.
+   */
+  const carriesSecrets =
+    state.environmentId !== LOCAL_ENVIRONMENT_ID &&
+    (state.transport === 'stdio'
+      ? state.secretEnv.some((entry) => entry.key.trim().length > 0) ||
+        (server?.secretEnvNames.length ?? 0) > 0
+      : state.headers.some((entry) => entry.key.trim().length > 0) ||
+        (server?.headerNames.length ?? 0) > 0);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
@@ -117,6 +136,51 @@ export function McpServerForm({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* ── Hosting environment ── */}
+          <div className="flex flex-col gap-1.5">
+            <label
+              htmlFor="mcp-server-environment"
+              className="text-sm font-medium text-on-surface-variant"
+            >
+              {s.environmentLabel}
+            </label>
+            <select
+              id="mcp-server-environment"
+              value={state.environmentId}
+              onChange={(event) => patch({ environmentId: event.target.value })}
+              disabled={environments.isPending && !environments.data}
+              className="rounded-xl border border-outline-variant/20 bg-surface-container-high px-3 py-2 text-sm text-on-surface outline-none transition-colors hover:border-primary/30 focus:border-primary/60 disabled:opacity-60"
+            >
+              {environments.isPending && !environments.data ? (
+                <option value={state.environmentId}>{s.environmentsLoading}</option>
+              ) : null}
+              {/* An environment that vanished (or is not readable) still has to
+                  render, or editing an unrelated field would silently rehome
+                  the server to whichever option the browser picked first. */}
+              {environments.data?.some((environment) => environment.id === state.environmentId) ===
+              false ? (
+                <option value={state.environmentId}>{state.environmentId}</option>
+              ) : null}
+              {environments.data?.map((environment) => (
+                <option key={environment.id} value={environment.id} disabled={!environment.enabled}>
+                  {environment.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-on-surface-variant/60">{s.environmentHint}</p>
+            {carriesSecrets ? (
+              <div className="flex items-start gap-2 rounded-xl border border-warning/25 bg-warning/5 p-3 text-xs text-on-surface-variant">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-warning" />
+                <span>
+                  <strong className="font-semibold text-on-surface">
+                    {s.remoteSecretNoticeTitle}
+                  </strong>{' '}
+                  {s.remoteSecretNotice.replace('{environment}', selectedEnvironmentName)}
+                </span>
+              </div>
+            ) : null}
           </div>
 
           {state.transport === 'stdio' ? (

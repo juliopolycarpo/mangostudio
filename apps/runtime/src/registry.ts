@@ -1,8 +1,9 @@
 import { RuntimeToolArgumentError } from './errors';
-import type { RuntimeHandlerContext, RuntimeMethodHandler } from './host';
+import type { RuntimeEventInput, RuntimeHandlerContext, RuntimeMethodHandler } from './host';
 import type { RuntimeMethod, RuntimeMethodMap } from './methods';
 import { runtimeFsService } from './services/fs';
 import { execGit } from './services/git';
+import { createMcpService } from './services/mcp/service';
 import { runShellCommand } from './services/shell';
 import { captureFileSnapshot, hashFileAtPath, revertRuntimeSnapshots } from './services/snapshot';
 import {
@@ -11,35 +12,64 @@ import {
   validateWorkdir,
 } from './services/workspace';
 
+export interface RuntimeMethodRegistryOptions {
+  /** Release string this host reports to the MCP servers it initializes. */
+  readonly runtimeVersion: string;
+  /** Publishes an `evt` frame; the MCP methods stream elicitations through it. */
+  readonly emit: (event: RuntimeEventInput) => void;
+}
+
+export interface RuntimeMethodRegistry {
+  readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
+  /** Releases everything the handlers hold open — MCP sessions today. */
+  close(): Promise<void>;
+}
+
 /** Registers the protocol methods owned by the runtime in this release. */
-export function createRuntimeMethodHandlers(): ReadonlyMap<string, RuntimeMethodHandler> {
-  return new Map<string, RuntimeMethodHandler>([
-    handler('fs.read-file', (params) => runtimeFsService.readFile(params)),
-    handler('fs.write-file', (params) => runtimeFsService.writeFile(params)),
-    handler('fs.create-file', (params) => runtimeFsService.createFile(params)),
-    handler('fs.edit-file', (params) => runtimeFsService.editFile(params)),
-    handler('fs.replace-range', (params) => runtimeFsService.replaceRange(params)),
-    handler('fs.delete-file', (params) => runtimeFsService.deleteFile(params)),
-    handler('fs.move-file', (params) => runtimeFsService.moveFile(params)),
-    handler('fs.list-directory', (params) => runtimeFsService.listDirectory(params)),
-    handler('fs.glob', (params, context) => runtimeFsService.glob(params, context.signal)),
-    handler('fs.grep', (params, context) => runtimeFsService.grep(params, context.signal)),
-    handler('fs.apply-patch', (params) => runtimeFsService.applyPatch(params)),
-    handler('shell.run', (params, context) =>
-      runShellCommand({ ...params, signal: context.signal })
-    ),
-    handler('git.exec', (params, context) => execGit(params, context.signal)),
-    handler('snapshot.capture', (params) => captureFileSnapshot(params.path)),
-    handler('snapshot.hash', async (params) => ({
-      hash: await hashFileAtPath(params.path),
-    })),
-    handler('snapshot.revert', (params) => revertRuntimeSnapshots(params)),
-    handler('workspace.browse', (params) => browseWorkspace(params)),
-    handler('workspace.validate', (params) =>
-      validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })
-    ),
-    handler('workspace.resolve-contained', (params) => resolveContainedWorkspacePath(params)),
-  ]);
+export function createRuntimeMethodHandlers(
+  options: RuntimeMethodRegistryOptions
+): RuntimeMethodRegistry {
+  const mcp = createMcpService({ runtimeVersion: options.runtimeVersion, emit: options.emit });
+
+  return {
+    handlers: new Map<string, RuntimeMethodHandler>([
+      handler('fs.read-file', (params) => runtimeFsService.readFile(params)),
+      handler('fs.write-file', (params) => runtimeFsService.writeFile(params)),
+      handler('fs.create-file', (params) => runtimeFsService.createFile(params)),
+      handler('fs.edit-file', (params) => runtimeFsService.editFile(params)),
+      handler('fs.replace-range', (params) => runtimeFsService.replaceRange(params)),
+      handler('fs.delete-file', (params) => runtimeFsService.deleteFile(params)),
+      handler('fs.move-file', (params) => runtimeFsService.moveFile(params)),
+      handler('fs.list-directory', (params) => runtimeFsService.listDirectory(params)),
+      handler('fs.glob', (params, context) => runtimeFsService.glob(params, context.signal)),
+      handler('fs.grep', (params, context) => runtimeFsService.grep(params, context.signal)),
+      handler('fs.apply-patch', (params) => runtimeFsService.applyPatch(params)),
+      handler('shell.run', (params, context) =>
+        runShellCommand({ ...params, signal: context.signal })
+      ),
+      handler('git.exec', (params, context) => execGit(params, context.signal)),
+      handler('snapshot.capture', (params) => captureFileSnapshot(params.path)),
+      handler('snapshot.hash', async (params) => ({
+        hash: await hashFileAtPath(params.path),
+      })),
+      handler('snapshot.revert', (params) => revertRuntimeSnapshots(params)),
+      handler('workspace.browse', (params) => browseWorkspace(params)),
+      handler('workspace.validate', (params) =>
+        validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })
+      ),
+      handler('workspace.resolve-contained', (params) => resolveContainedWorkspacePath(params)),
+      handler('mcp.connect', (params, context) => mcp.connect(params, context)),
+      handler('mcp.list-tools', (params) => mcp.listTools(params)),
+      handler('mcp.call-tool', (params, context) => mcp.callTool(params, context)),
+      handler('mcp.list-resources', (params) => mcp.listResources(params)),
+      handler('mcp.read-resource', (params) => mcp.readResource(params)),
+      handler('mcp.list-prompts', (params) => mcp.listPrompts(params)),
+      handler('mcp.get-prompt', (params) => mcp.getPrompt(params)),
+      handler('mcp.elicit-response', (params) => mcp.respondToElicitation(params)),
+      handler('mcp.disconnect', (params) => mcp.disconnect(params)),
+    ]),
+    close: () => mcp.close(),
+  };
 }
 
 function handler<K extends RuntimeMethod>(

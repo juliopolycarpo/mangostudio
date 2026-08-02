@@ -14,7 +14,10 @@ export type RuntimeServiceErrorKind =
   | 'workspace_containment'
   | 'workdir_validation'
   | 'snapshot_conflict'
-  | 'snapshot_too_large';
+  | 'snapshot_too_large'
+  | 'mcp_connection'
+  | 'mcp_call'
+  | 'mcp_session_missing';
 
 export class RuntimeServiceError extends Error {
   constructor(

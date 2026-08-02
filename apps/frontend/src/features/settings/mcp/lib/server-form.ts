@@ -5,6 +5,7 @@
  * covers required-field feedback before a request is made.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import type {
   AddMcpServerBody,
@@ -23,6 +24,8 @@ export interface McpServerFormState {
   name: string;
   slug: string;
   transport: McpTransport;
+  /** Environment whose runtime hosts the session; `local` is the hub itself. */
+  environmentId: string;
   command: string;
   args: string[];
   env: KeyValueEntry[];
@@ -53,6 +56,7 @@ export function createEmptyFormState(): McpServerFormState {
     name: '',
     slug: '',
     transport: 'stdio',
+    environmentId: LOCAL_ENVIRONMENT_ID,
     command: '',
     args: [],
     env: [],
@@ -69,6 +73,7 @@ export function formStateFromServer(server: McpServer): McpServerFormState {
     name: server.name,
     slug: server.slug,
     transport: server.transport,
+    environmentId: server.environmentId,
     command: server.command ?? '',
     args: [...server.args],
     env: Object.entries(server.env).map(([key, value]) => ({ key, value })),
@@ -118,6 +123,7 @@ export function buildAddBody(state: McpServerFormState): AddMcpServerBody {
     slug: state.slug.trim(),
     enabled: state.enabled,
     timeoutMs: parseTimeoutMs(state.timeoutMs),
+    environmentId: state.environmentId,
   };
   if (state.transport === 'stdio') {
     const secretEnv = entriesToRecord(state.secretEnv);

@@ -21,6 +21,20 @@ import {
   type RuntimeGrepResult,
   type RuntimeListDirectoryParams,
   type RuntimeListDirectoryResult,
+  type RuntimeMcpAckResult,
+  type RuntimeMcpCallResult,
+  type RuntimeMcpCallToolParams,
+  type RuntimeMcpConnectParams,
+  type RuntimeMcpConnectResult,
+  type RuntimeMcpElicitResponseParams,
+  type RuntimeMcpGetPromptParams,
+  type RuntimeMcpListPromptsResult,
+  type RuntimeMcpListResourcesResult,
+  type RuntimeMcpListToolsResult,
+  type RuntimeMcpPromptResult,
+  type RuntimeMcpReadResourceParams,
+  type RuntimeMcpReadResourceResult,
+  type RuntimeMcpServerParams,
   type RuntimeMethod,
   type RuntimeMethodMap,
   type RuntimeMoveFileParams,
@@ -53,6 +67,8 @@ import {
   StaleFileError,
   StaleLineNumbersError,
 } from '@mangostudio/runtime';
+import type { RuntimeEventFrame } from '@mangostudio/shared/runtime-protocol';
+import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
 import { createTargetPaths, type TargetPaths } from './target-paths';
@@ -139,11 +155,56 @@ interface RuntimeWorkspaceClient {
   ): Promise<RuntimeWorkspaceResolveContainedResult>;
 }
 
+/**
+ * MCP sessions live on the target machine, so every method here addresses one
+ * by `serverId` rather than holding a client: the hub owns the rows and the
+ * secrets, the runtime owns the connection.
+ */
+interface RuntimeMcpClient {
+  connect(
+    params: RuntimeMcpConnectParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpConnectResult>;
+  listTools(
+    params: RuntimeMcpServerParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpListToolsResult>;
+  callTool(
+    params: RuntimeMcpCallToolParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpCallResult>;
+  listResources(
+    params: RuntimeMcpServerParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpListResourcesResult>;
+  readResource(
+    params: RuntimeMcpReadResourceParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpReadResourceResult>;
+  listPrompts(
+    params: RuntimeMcpServerParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpListPromptsResult>;
+  getPrompt(
+    params: RuntimeMcpGetPromptParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpPromptResult>;
+  respondToElicitation(
+    params: RuntimeMcpElicitResponseParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpAckResult>;
+  disconnect(
+    params: RuntimeMcpServerParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeMcpAckResult>;
+}
+
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
 export class RuntimeClient {
   readonly fs: RuntimeFsClient;
   readonly shell: RuntimeShellClient;
   readonly git: RuntimeGitClient;
+  readonly mcp: RuntimeMcpClient;
   readonly snapshot: RuntimeSnapshotClient;
   readonly workspace: RuntimeWorkspaceClient;
   private targetPaths?: TargetPaths;
@@ -170,6 +231,18 @@ export class RuntimeClient {
     };
     this.git = {
       exec: (params, options) => this.request('git.exec', params, options),
+    };
+    this.mcp = {
+      connect: (params, options) => this.request('mcp.connect', params, options),
+      listTools: (params, options) => this.request('mcp.list-tools', params, options),
+      callTool: (params, options) => this.request('mcp.call-tool', params, options),
+      listResources: (params, options) => this.request('mcp.list-resources', params, options),
+      readResource: (params, options) => this.request('mcp.read-resource', params, options),
+      listPrompts: (params, options) => this.request('mcp.list-prompts', params, options),
+      getPrompt: (params, options) => this.request('mcp.get-prompt', params, options),
+      respondToElicitation: (params, options) =>
+        this.request('mcp.elicit-response', params, options),
+      disconnect: (params, options) => this.request('mcp.disconnect', params, options),
     };
     this.snapshot = {
       capture: (params, options) => this.request('snapshot.capture', params, options),
@@ -200,6 +273,23 @@ export class RuntimeClient {
 
   get runtimeVersion(): string {
     return this.protocol.runtimeVersion;
+  }
+
+  /**
+   * Subscribes to the runtime's `evt` stream. Returns the unsubscribe; the
+   * connection dropping clears every listener on its own, so a caller that
+   * forgets one leaks nothing past the socket.
+   */
+  onEvent(listener: (event: RuntimeEventFrame) => void): () => void {
+    return this.protocol.onEvent(listener);
+  }
+
+  /**
+   * Subscribes to transport teardown. MCP handles use this so a dead runtime
+   * connection cannot keep returning a handle whose session is already gone.
+   */
+  onClose(listener: () => void): () => void {
+    return this.protocol.onClose(listener);
   }
 
   private async request<K extends RuntimeMethod>(
@@ -256,7 +346,12 @@ function translateRuntimeError(error: unknown): Error {
       return new ShellExecutionError(error.message);
     case 'snapshot_conflict':
       return withMessage(new RuntimeSnapshotConflictError(resolvedPath), error.message);
+    case 'mcp_connection':
+      return new McpConnectionError(error.message, { cause: error });
     default:
+      // `mcp_call` deliberately stays a RuntimeRemoteError: the turn pipeline
+      // classifies it from the `mcpFailure` detail the runtime attached, and
+      // wrapping it here would drop that.
       return error;
   }
 }

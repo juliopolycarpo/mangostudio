@@ -829,6 +829,15 @@ export const messages: Messages = {
         stdio: 'stdio',
         http: 'HTTP',
       },
+      environmentLabel: 'Environment',
+      environmentHint:
+        'Where this server runs. A stdio command is spawned there, and an HTTP URL is dialed from there — so an address that only resolves on that machine works.',
+      environmentsLoading: 'Loading environments…',
+      environmentMissing: 'Unknown environment',
+      remoteSecretNotice:
+        'This server’s secrets are sent to {environment} when it connects, and held in that machine’s memory for as long as the session lives. Only assign it to machines you trust with those credentials.',
+      remoteSecretNoticeTitle: 'Secrets travel to this machine',
+
       status: {
         connected: 'Connected',
         connecting: 'Connecting',

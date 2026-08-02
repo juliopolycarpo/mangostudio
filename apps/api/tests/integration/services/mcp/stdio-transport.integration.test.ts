@@ -1,19 +1,21 @@
 /**
  * Spawns the stdio fixture with bun to cover process lifecycle: connect,
  * tool calls, spawn env hygiene, and crash-mid-session recovery through the
- * connection manager.
+ * connection manager. The child belongs to the Local environment's runtime, so
+ * this also covers the hub → runtime → child chain end to end.
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { connectMcpClient } from '../../../../src/services/mcp/client-factory';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   closeAllMcpClients,
   getMcpClient,
   getMcpRuntimeStatus,
 } from '../../../../src/services/mcp/connection-manager';
+import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 import type { McpServerRuntimeConfig } from '../../../../src/services/mcp/types';
 import { waitForProcessExit } from '../../../support/fixtures/managed-process';
 
@@ -30,6 +32,7 @@ function stdioConfig(id: string, env: Record<string, string> = {}): McpServerRun
     env,
     url: null,
     timeoutMs: 10_000,
+    environmentId: LOCAL_ENVIRONMENT_ID,
   };
 }
 

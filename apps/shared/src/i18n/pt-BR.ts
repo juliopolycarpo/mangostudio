@@ -841,6 +841,14 @@ export const messages = {
         stdio: 'stdio',
         http: 'HTTP',
       },
+      environmentLabel: 'Ambiente',
+      environmentHint:
+        'Onde este servidor roda. Um comando stdio é iniciado lá, e uma URL HTTP é acessada de lá — então um endereço que só resolve naquela máquina funciona.',
+      environmentsLoading: 'Carregando ambientes…',
+      environmentMissing: 'Ambiente desconhecido',
+      remoteSecretNotice:
+        'Os segredos deste servidor são enviados para {environment} ao conectar, e mantidos na memória daquela máquina enquanto a sessão durar. Atribua apenas a máquinas em que você confia com essas credenciais.',
+      remoteSecretNoticeTitle: 'Segredos viajam para esta máquina',
       status: {
         connected: 'Conectado',
         connecting: 'Conectando',

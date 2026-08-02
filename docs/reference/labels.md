@@ -41,7 +41,7 @@ zero or multiple `type:` labels. Closed issues are left alone so label cleanup d
 - `area: settings` — app/provider/tool settings modules + frontend settings
 - `area: tools` — tool registry, tool settings, `apps/shared/src/tool-settings/**`
 - `area: skills` — `apps/api/src/modules/skills/**`, `apps/frontend/src/features/settings/skills/**`, `apps/shared/src/skills/**`
-- `area: mcp` — `apps/api/src/services/mcp/**`, `apps/api/src/modules/mcp-servers/**`, `apps/frontend/src/features/settings/mcp/**`, `apps/shared/src/mcp/**`
+- `area: mcp` — `apps/api/src/services/mcp/**`, `apps/api/src/modules/mcp-servers/**`, `apps/runtime/src/services/mcp/**`, `apps/frontend/src/features/settings/mcp/**`, `apps/shared/src/mcp/**`
 - `area: i18n` — `apps/shared/src/i18n/**`
 - `area: components` — `apps/frontend/src/components/**`
 

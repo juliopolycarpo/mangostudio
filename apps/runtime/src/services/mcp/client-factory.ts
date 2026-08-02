@@ -1,7 +1,11 @@
 /**
- * Builds connected MCP clients from server rows. This file (plus its siblings
- * in `services/mcp/`) is the only place allowed to import
- * `@modelcontextprotocol/sdk`; everything else consumes `McpClientHandle`.
+ * Builds connected MCP clients from the config the hub sends down. This file
+ * (plus its siblings in `services/mcp/`) is the only place allowed to import
+ * `@modelcontextprotocol/sdk`; everything else consumes {@link McpClientHandle}.
+ *
+ * The server runs here — a stdio server is a child of this process, an HTTP
+ * server is dialed from this machine — which is the point: a URL that only
+ * resolves inside a WSL distribution or on a remote host now resolves.
  */
 
 import type {
@@ -16,6 +20,7 @@ import {
   StreamableHTTPClientTransport,
   StreamableHTTPError,
 } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   ElicitRequestSchema,
   type ElicitResult,
@@ -23,29 +28,27 @@ import {
   McpError,
   ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { getVersion } from '../../lib/config';
-import { createDiagnosticLogger } from '../../lib/logger';
+import { writeRuntimeDiagnostic } from '../../diagnostics';
+import type {
+  RuntimeMcpCallResult,
+  RuntimeMcpResourceContents,
+  RuntimeMcpSecrets,
+  RuntimeMcpServerConfig,
+} from '../../methods';
 import { flattenMcpContent, normalizeMcpContent } from './content-mapping';
-import { createPendingElicitation, type McpElicitationResult } from './elicitation-registry';
 import { flattenElicitationSchema } from './elicitation-schema';
-import { readMcpHeaders } from './header-secrets';
 import { buildStdioEnv } from './stdio-env';
-import { readMcpSecretEnv } from './stdio-env-secrets';
 import {
-  type McpCallResult,
   type McpClientHandle,
   McpConnectionError,
-  type McpPromptResult,
+  type McpElicitationRequest,
+  type McpElicitationResult,
   type McpRequestOptions,
-  type McpResourceContents,
   type McpServerCapabilities,
-  type McpServerRuntimeConfig,
 } from './types';
 
 /** Request cap applied when neither the call nor the server row sets one. */
-const DEFAULT_MCP_TIMEOUT_MS = 30_000;
-
-const logger = createDiagnosticLogger('mcp-client');
+export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 
 interface QueuedToolCall {
   enqueuedAt: number;
@@ -114,21 +117,35 @@ class ToolCallQueue {
 }
 
 export interface ConnectMcpClientOptions {
-  /** Owning user; required so elicitation requests can be auth-scoped. */
-  userId: string;
-  /** Header lookup override for tests; defaults to the secret-store bundle. */
-  resolveHeaders?: (serverId: string) => Promise<Record<string, string>>;
-  /** stdio environment-secret lookup override for tests. */
-  resolveSecretEnv?: (serverId: string) => Promise<Record<string, string>>;
+  /** Release string reported to the server during `initialize`. */
+  runtimeVersion: string;
+  /** Hub-held credentials for this session; kept in memory, never persisted. */
+  secrets?: RuntimeMcpSecrets;
+  /**
+   * Transport override for tests; bypasses stdio spawning and HTTP dialing.
+   * Returning `null` declines this server and falls back to the real
+   * transport, so a fixture installed by one suite cannot hijack another's.
+   */
+  createTransport?: (config: RuntimeMcpServerConfig) => Promise<Transport | null>;
+  /** Cancels an in-flight connect; closes a partial transport when aborted. */
+  signal?: AbortSignal;
   /** Fires once when the session drops out from under us (crash, socket close). */
   onSessionClosed?: () => void;
   /** Fires when the server announces `notifications/tools/list_changed`. */
   onToolListChanged?: () => void;
+  /**
+   * Carries a mid-call `elicitation/create` up to the hub, which owns the
+   * pending registry and the chat surface that answers it.
+   */
+  requestElicitation?: (request: McpElicitationRequest) => Promise<McpElicitationResult>;
 }
 
 export interface WrapMcpClientOptions
-  extends Pick<ConnectMcpClientOptions, 'onSessionClosed' | 'onToolListChanged' | 'userId'> {
-  /** Server row id for pending-elicitation ownership. */
+  extends Pick<
+    ConnectMcpClientOptions,
+    'onSessionClosed' | 'onToolListChanged' | 'requestElicitation'
+  > {
+  /** Server row id, echoed on every elicitation so the hub can route it. */
   serverId: string;
   /** Server slug shown on the elicitation card. */
   serverSlug: string;
@@ -136,22 +153,30 @@ export interface WrapMcpClientOptions
 
 /**
  * Connects to an MCP server and returns the project-owned handle.
- * // Usage: const handle = await connectMcpClient(config)
+ * // Usage: const handle = await connectMcpClient(config, { runtimeVersion })
  */
 export async function connectMcpClient(
-  config: McpServerRuntimeConfig,
+  config: RuntimeMcpServerConfig,
   options: ConnectMcpClientOptions
 ): Promise<McpClientHandle> {
-  const client =
-    config.transport === 'stdio'
+  options.signal?.throwIfAborted();
+  const override = await options.createTransport?.(config);
+  options.signal?.throwIfAborted();
+  const client = override
+    ? await connectOverride(config, options, override)
+    : config.transport === 'stdio'
       ? await connectStdio(config, options)
       : await connectHttp(config, options);
+  if (options.signal?.aborted) {
+    await client.close().catch(() => undefined);
+    options.signal.throwIfAborted();
+  }
   return wrapMcpClient(client, config, {
-    userId: options.userId,
     serverId: config.id,
     serverSlug: config.slug,
-    onSessionClosed: options.onSessionClosed,
-    onToolListChanged: options.onToolListChanged,
+    ...(options.onSessionClosed ? { onSessionClosed: options.onSessionClosed } : {}),
+    ...(options.onToolListChanged ? { onToolListChanged: options.onToolListChanged } : {}),
+    ...(options.requestElicitation ? { requestElicitation: options.requestElicitation } : {}),
   });
 }
 
@@ -168,32 +193,45 @@ export function shouldFallBackToSse(error: unknown): boolean {
   );
 }
 
-function createClient(): Client {
+function createClient(runtimeVersion: string): Client {
   return new Client(
-    { name: 'mangostudio', version: getVersion() },
+    { name: 'mangostudio', version: runtimeVersion },
     { capabilities: { elicitation: { form: {} } } }
   );
 }
 
+async function connectOverride(
+  config: RuntimeMcpServerConfig,
+  options: ConnectMcpClientOptions,
+  transport: Transport
+): Promise<Client> {
+  const client = createClient(options.runtimeVersion);
+  try {
+    await connectClient(client, transport, options.signal);
+  } catch (error) {
+    throw toConnectionError(config, error);
+  }
+  return client;
+}
+
 async function connectStdio(
-  config: McpServerRuntimeConfig,
+  config: RuntimeMcpServerConfig,
   options: ConnectMcpClientOptions
 ): Promise<Client> {
   if (!config.command?.trim()) {
     throw new McpConnectionError(`MCP server "${config.slug}" has no command configured.`);
   }
 
-  const secretEnv = await (options.resolveSecretEnv ?? readMcpSecretEnv)(config.id);
   const transport = new StdioClientTransport({
     command: config.command,
-    args: config.args,
-    env: buildStdioEnv({ ...config.env, ...secretEnv }),
+    args: [...config.args],
+    env: buildStdioEnv({ ...config.env, ...options.secrets?.env }),
     stderr: 'ignore',
   });
 
-  const client = createClient();
+  const client = createClient(options.runtimeVersion);
   try {
-    await client.connect(transport);
+    await connectClient(client, transport, options.signal);
   } catch (error) {
     throw toConnectionError(config, error);
   }
@@ -201,34 +239,64 @@ async function connectStdio(
 }
 
 async function connectHttp(
-  config: McpServerRuntimeConfig,
+  config: RuntimeMcpServerConfig,
   options: ConnectMcpClientOptions
 ): Promise<Client> {
   if (!config.url) {
     throw new McpConnectionError(`MCP server "${config.slug}" has no URL configured.`);
   }
 
-  const headers = await (options.resolveHeaders ?? readMcpHeaders)(config.id);
+  const headers = { ...options.secrets?.headers };
   const requestInit = Object.keys(headers).length > 0 ? { headers } : undefined;
 
-  const client = createClient();
+  const client = createClient(options.runtimeVersion);
   try {
-    await client.connect(new StreamableHTTPClientTransport(new URL(config.url), { requestInit }));
+    await connectClient(
+      client,
+      new StreamableHTTPClientTransport(new URL(config.url), { requestInit }),
+      options.signal
+    );
     return client;
   } catch (error) {
     if (!shouldFallBackToSse(error)) throw toConnectionError(config, error);
   }
 
-  const sseClient = createClient();
+  const sseClient = createClient(options.runtimeVersion);
   try {
-    await sseClient.connect(new SSEClientTransport(new URL(config.url), { requestInit }));
+    await connectClient(
+      sseClient,
+      new SSEClientTransport(new URL(config.url), { requestInit }),
+      options.signal
+    );
     return sseClient;
   } catch (error) {
     throw toConnectionError(config, error);
   }
 }
 
-function toConnectionError(config: McpServerRuntimeConfig, error: unknown): McpConnectionError {
+/**
+ * Connects while honouring cancel: abort closes the client so a partial
+ * transport does not linger, and a race that finishes after abort still fails.
+ */
+async function connectClient(
+  client: Client,
+  transport: Transport,
+  signal?: AbortSignal
+): Promise<void> {
+  signal?.throwIfAborted();
+  const onAbort = () => {
+    void client.close().catch(() => undefined);
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  try {
+    await client.connect(transport);
+    signal?.throwIfAborted();
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+  }
+}
+
+function toConnectionError(config: RuntimeMcpServerConfig, error: unknown): McpConnectionError {
   const detail = error instanceof Error ? error.message : String(error);
   return new McpConnectionError(`Failed to connect to MCP server "${config.slug}": ${detail}`, {
     cause: error,
@@ -241,7 +309,7 @@ function toConnectionError(config: McpServerRuntimeConfig, error: unknown): McpC
  */
 export function wrapMcpClient(
   client: Client,
-  config: Pick<McpServerRuntimeConfig, 'timeoutMs'>,
+  config: Pick<RuntimeMcpServerConfig, 'timeoutMs'>,
   callbacks: WrapMcpClientOptions
 ): McpClientHandle {
   let closedByUs = false;
@@ -263,26 +331,29 @@ export function wrapMcpClient(
     // Form mode is the only capability we declare; URL (or unknown) modes
     // cancel so servers degrade instead of hanging on an unsupported UI.
     if (params.mode === 'url' || !('requestedSchema' in params)) {
-      logger.warn('elicitation_unsupported_mode', {
+      writeRuntimeDiagnostic('mcp_elicitation_unsupported_mode', {
         serverSlug: callbacks.serverSlug,
         mode: params.mode,
       });
       return { action: 'cancel' };
     }
 
-    if (!activeToolCall) {
-      logger.warn('elicitation_outside_tool_call', { serverSlug: callbacks.serverSlug });
+    // No hub-minted tool call id means nothing upstream can own the answer,
+    // and no relay means the hub never asked for one.
+    if (!activeToolCall || !callbacks.requestElicitation) {
+      writeRuntimeDiagnostic('mcp_elicitation_outside_tool_call', {
+        serverSlug: callbacks.serverSlug,
+      });
       return { action: 'cancel' };
     }
 
-    const result = await createPendingElicitation({
-      userId: callbacks.userId,
+    const result = await callbacks.requestElicitation({
       serverId: callbacks.serverId,
       serverSlug: callbacks.serverSlug,
       toolCallId: activeToolCall.id,
       message: params.message,
       fields: flattenElicitationSchema(params.requestedSchema),
-      signal: activeToolCall.signal,
+      ...(activeToolCall.signal ? { signal: activeToolCall.signal } : {}),
     });
     return toElicitResult(result);
   });
@@ -322,14 +393,10 @@ export function wrapMcpClient(
     async callTool(name, args, options) {
       const slot = await toolCallQueue.acquire(options?.signal);
       try {
-        if (slot.queued) {
-          logger.debug('tool_call_queue_wait', {
-            serverSlug: callbacks.serverSlug,
-            queueWaitMs: slot.queueWaitMs,
-          });
-        }
         const toolCallId = options?.toolCallId?.trim();
-        activeToolCall = toolCallId ? { id: toolCallId, signal: options?.signal } : undefined;
+        activeToolCall = toolCallId
+          ? { id: toolCallId, ...(options?.signal ? { signal: options.signal } : {}) }
+          : undefined;
         const result = await client.callTool(
           { name, arguments: args },
           undefined,
@@ -363,7 +430,7 @@ export function wrapMcpClient(
 
     async readResource(uri, options) {
       const result = await client.readResource({ uri }, requestOptions(options));
-      return result.contents.map((entry): McpResourceContents => {
+      return result.contents.map((entry): RuntimeMcpResourceContents => {
         const text = 'text' in entry && typeof entry.text === 'string' ? entry.text : undefined;
         const blob = 'blob' in entry && typeof entry.blob === 'string' ? entry.blob : undefined;
         return {
@@ -401,14 +468,13 @@ export function wrapMcpClient(
         { name, ...(args ? { arguments: args } : {}) },
         requestOptions(options)
       );
-      const prompt: McpPromptResult = {
+      return {
         ...(result.description !== undefined ? { description: result.description } : {}),
         messages: result.messages.map((message) => ({
           role: message.role,
           text: flattenMcpContent(normalizeMcpContent([message.content])),
         })),
       };
-      return prompt;
     },
 
     async close() {
@@ -419,8 +485,10 @@ export function wrapMcpClient(
 }
 
 /**
- * Distinguishes why a `callTool` request failed, so callers can report the
- * precise end-of-life reason for elicitations that were still pending.
+ * Distinguishes why a `callTool` request failed, so the hub can report the
+ * precise end-of-life reason for elicitations that were still pending. It runs
+ * here because the SDK error types stop at this boundary; the answer travels
+ * to the hub as an error detail.
  */
 export function classifyMcpCallFailure(error: unknown): 'timeout' | 'server_closed' | 'other' {
   if (error instanceof McpError) {
@@ -432,12 +500,12 @@ export function classifyMcpCallFailure(error: unknown): 'timeout' | 'server_clos
 
 function toElicitResult(result: McpElicitationResult): ElicitResult {
   if (result.action === 'accept') {
-    return { action: 'accept', content: result.content ?? {} };
+    return { action: 'accept', content: { ...result.content } };
   }
   return { action: result.action };
 }
 
-function mapCallResult(result: Awaited<ReturnType<Client['callTool']>>): McpCallResult {
+function mapCallResult(result: Awaited<ReturnType<Client['callTool']>>): RuntimeMcpCallResult {
   const rawContent = Array.isArray(result.content) ? result.content : [];
   const content = normalizeMcpContent(rawContent);
   return {

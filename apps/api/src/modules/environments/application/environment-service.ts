@@ -238,7 +238,7 @@ export function createEnvironmentService(
       const result = await repository.remove(userId, id);
       if (result === 'referenced') {
         throw new EnvironmentServiceError(
-          `Environment "${id}" is still used by one or more chats.`,
+          `Environment "${id}" is still used by one or more chats or MCP servers.`,
           409
         );
       }

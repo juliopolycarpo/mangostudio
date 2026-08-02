@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type ToolIdentityListResponse,
   ToolIdentityListResponseSchema,
@@ -44,6 +45,7 @@ async function seedMcpServer(userId: string, slug: string): Promise<void> {
       name: `Server ${slug}`,
       slug,
       transport: 'stdio',
+      environmentId: LOCAL_ENVIRONMENT_ID,
       command: 'bun',
       argsJson: '[]',
       envJson: '{}',

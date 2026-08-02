@@ -3,6 +3,7 @@
  * transport switching, test-connection results, and delete confirmation.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +16,7 @@ const STDIO_SERVER: McpServer = {
   name: 'Everything',
   slug: 'everything',
   transport: 'stdio',
+  environmentId: LOCAL_ENVIRONMENT_ID,
   command: 'bunx',
   args: ['@modelcontextprotocol/server-everything'],
   env: {},
@@ -33,6 +35,7 @@ const HTTP_SERVER: McpServer = {
   name: 'Remote',
   slug: 'remote',
   transport: 'http',
+  environmentId: LOCAL_ENVIRONMENT_ID,
   command: null,
   args: [],
   env: {},
@@ -265,6 +268,7 @@ describe('McpSettingsPage', () => {
             name: 'Remote',
             slug: 'remote',
             transport: 'http',
+            environmentId: LOCAL_ENVIRONMENT_ID,
             url: 'https://new.example.com/mcp',
             fingerprint: 'b'.repeat(64),
             status: 'ready',
@@ -336,6 +340,7 @@ describe('McpSettingsPage', () => {
             name: 'Incoming',
             slug: 'foo',
             transport: 'http',
+            environmentId: LOCAL_ENVIRONMENT_ID,
             url: 'https://match.example.com/mcp',
             fingerprint: 'b'.repeat(64),
             status: 'ready',

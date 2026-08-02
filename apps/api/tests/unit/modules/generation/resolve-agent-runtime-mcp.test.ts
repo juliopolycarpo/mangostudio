@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { getDb } from '../../../../src/db/database';
 import { resolveAgentRuntime } from '../../../../src/modules/generation/application/resolve-agent-runtime';
@@ -23,7 +24,7 @@ const RUNTIME_MANIFEST: RuntimeCapabilityManifest = {
     tools: true,
     git: true,
     probing: false,
-    mcp: false,
+    mcp: true,
     library: false,
     checkpoints: true,
   },
@@ -46,6 +47,7 @@ async function insertServer(userId: string, slug: string, enabled = 1): Promise<
       name: `Server ${slug}`,
       slug,
       transport: 'stdio',
+      environmentId: LOCAL_ENVIRONMENT_ID,
       command: 'bun',
       argsJson: '[]',
       envJson: '{}',
@@ -91,6 +93,7 @@ function resolveWithProfile(userId: string, profile: AgentProfile) {
     provider: 'openai',
     profile,
     runtimeManifest: RUNTIME_MANIFEST,
+    environmentId: LOCAL_ENVIRONMENT_ID,
   });
 }
 
@@ -157,6 +160,34 @@ describe('resolveAgentRuntime with MCP tools', () => {
     });
 
     expect(runtime.toolDefinitions).toEqual([]);
+  });
+
+  it('skips MCP listing when the runtime manifest disables mcp', async () => {
+    const userId = nextUserId();
+    await insertServer(userId, 'srv');
+    let connectCalls = 0;
+    setMcpClientConnectorForTest(() => {
+      connectCalls += 1;
+      return Promise.resolve(fakeServerWithTools('ping'));
+    });
+
+    const runtime = await resolveAgentRuntime({
+      db: getDb(),
+      userId,
+      provider: 'openai',
+      profile: makeProfile(['*']),
+      runtimeManifest: {
+        ...RUNTIME_MANIFEST,
+        features: { ...RUNTIME_MANIFEST.features, mcp: false },
+      },
+      environmentId: LOCAL_ENVIRONMENT_ID,
+    });
+
+    expect(connectCalls).toBe(0);
+    expect(runtime.mcpServerSnapshots).toEqual([]);
+    expect(runtime.toolDefinitions.map((definition) => definition.name)).not.toContain(
+      'mcp__srv__ping'
+    );
   });
 
   it('busts the runtime hash when a server is enabled or disabled', async () => {

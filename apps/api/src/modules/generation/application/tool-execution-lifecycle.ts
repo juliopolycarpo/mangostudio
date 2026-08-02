@@ -13,7 +13,7 @@ import {
   type ToolExecutionSource,
   type ToolExecutionStatus,
 } from '@mangostudio/shared/tool-executions';
-import { classifyMcpCallFailure } from '../../../services/mcp/client-factory';
+import { classifyMcpCallFailure } from '../../../services/mcp/call-failure';
 import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import { ToolArgumentError } from '../../../services/tools/arg-parsing';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';

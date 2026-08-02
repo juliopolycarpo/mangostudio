@@ -1,19 +1,20 @@
 /**
  * In-memory MCP fixture for turn-level end-to-end tests: a real SDK server
- * (text, rich content, elicitation, delay, disconnect, and failure tools) linked to the client over
- * the SDK's in-memory transport, exposed as a connection-manager connector.
+ * (text, rich content, elicitation, delay, disconnect, and failure tools) linked
+ * to the runtime's own client over the SDK's in-memory transport. Only the
+ * transport is substituted, so the hub → runtime → SDK path — including the
+ * elicitation hop back — runs exactly as it does in production.
+ *
  * The transport wiring specifics (stdio spawn, HTTP) are covered by the
  * dedicated transport integration tests; this fixture keeps the turn tests
  * deterministic while still exercising the real SDK request/response path.
  */
 
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { setMcpTransportFactoryForTest } from '@mangostudio/runtime';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { connectMcpClient } from '../../../../src/services/mcp/client-factory';
-import { wrapMcpClient } from '../../../../src/services/mcp/client-factory';
-import type { McpClientHandle } from '../../../../src/services/mcp/types';
+import { connectMcpClient } from '../../../../src/services/mcp/runtime-session';
 
 /** Length of the oversized `big` tool payload; well past the 64 KiB result cap. */
 const OVERSIZED_TOOL_OUTPUT_LENGTH = 100_000;
@@ -297,30 +298,21 @@ function createTurnMcpServer(
 export function createControlledTurnMcpFixture(): ControlledTurnMcpFixture {
   const controls = createTurnMcpFixtureControls();
   const servers = new Set<Server>();
-  const connector: typeof connectMcpClient = async (config, options) => {
+
+  setMcpTransportFactoryForTest(async () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     const server = createTurnMcpServer(controls);
     servers.add(server);
     server.onclose = () => servers.delete(server);
     await server.connect(serverTransport);
-    const client = new Client(
-      { name: 'turn-fixture-client', version: '0.0.0' },
-      { capabilities: { elicitation: { form: {} } } }
-    );
-    await client.connect(clientTransport);
-    return wrapMcpClient(client, config, {
-      userId: options.userId,
-      serverId: config.id,
-      serverSlug: config.slug,
-      onSessionClosed: options.onSessionClosed,
-      onToolListChanged: options.onToolListChanged,
-    });
-  };
+    return clientTransport;
+  });
 
   return {
-    connector,
+    connector: connectMcpClient,
     controls,
     async close() {
+      setMcpTransportFactoryForTest(null);
       await Promise.allSettled([...servers].map((server) => server.close()));
     },
     assertNoOpenServers() {
@@ -332,28 +324,19 @@ export function createControlledTurnMcpFixture(): ControlledTurnMcpFixture {
 }
 
 /**
- * Returns a connection-manager connector that links a fresh in-memory server
- * to each client, so a reconnect after a dropped session gets a live server.
+ * Returns a connection-manager connector that links a fresh in-memory server to
+ * each session the runtime opens, so a reconnect after a dropped session gets a
+ * live server. The connector itself is the real one — only the transport under
+ * it is a fixture, so the hub → runtime → SDK path is fully exercised.
  * // Usage: setMcpClientConnectorForTest(inMemoryMcpConnector())
  */
 export function inMemoryMcpConnector(
   createServer: () => Server = createTurnMcpServer
 ): typeof connectMcpClient {
-  return async (config, options): Promise<McpClientHandle> => {
+  setMcpTransportFactoryForTest(async () => {
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-    const server = createServer();
-    await server.connect(serverTransport);
-    const client = new Client(
-      { name: 'turn-fixture-client', version: '0.0.0' },
-      { capabilities: { elicitation: { form: {} } } }
-    );
-    await client.connect(clientTransport);
-    return wrapMcpClient(client, config, {
-      userId: options.userId,
-      serverId: config.id,
-      serverSlug: config.slug,
-      onSessionClosed: options.onSessionClosed,
-      onToolListChanged: options.onToolListChanged,
-    });
-  };
+    await createServer().connect(serverTransport);
+    return clientTransport;
+  });
+  return connectMcpClient;
 }

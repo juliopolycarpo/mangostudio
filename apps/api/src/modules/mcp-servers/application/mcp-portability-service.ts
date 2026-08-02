@@ -5,6 +5,7 @@
  */
 
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   ApplyMcpPortabilityImportBody,
@@ -367,6 +368,10 @@ function withFingerprint(server: Omit<NormalizedServer, 'fingerprint'>): Normali
     name: normalizeName(server.name),
     slug: server.slug,
     transport: server.transport,
+    // A portable document describes a server, not a machine: an import lands
+    // on Local and the user moves it from the settings card if it belongs
+    // elsewhere.
+    environmentId: LOCAL_ENVIRONMENT_ID,
     command: server.command,
     args: server.args,
     env: server.env,
@@ -559,6 +564,10 @@ function toInsertRow(userId: string, id: string, server: NormalizedServer): McpS
     name: server.name,
     slug: server.slug,
     transport: server.transport,
+    // A portable document describes a server, not a machine: an import lands
+    // on Local and the user moves it from the settings card if it belongs
+    // elsewhere.
+    environmentId: LOCAL_ENVIRONMENT_ID,
     command: server.command,
     argsJson: JSON.stringify(server.args),
     envJson: JSON.stringify(server.env),

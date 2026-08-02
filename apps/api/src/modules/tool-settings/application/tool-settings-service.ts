@@ -45,7 +45,9 @@ export async function listToolSettingsDescriptors(
 ): Promise<ToolSettingsListResponse> {
   const [savedSettings, mcpTools] = await Promise.all([
     listSavedToolSettings(db, userId),
-    listMcpBridgeTools(db, userId),
+    // Settings are not turn-scoped: a per-tool toggle has to be reachable for
+    // every configured server, whichever machine hosts it.
+    listMcpBridgeTools(db, userId, { allEnvironments: true }),
   ]);
   return {
     tools: [

@@ -254,6 +254,8 @@ interface McpServersTable {
   /** Per-user unique identifier; becomes the tool namespace prefix. */
   slug: string;
   transport: 'stdio' | 'http';
+  /** Environment whose runtime hosts the session; `local` for the hub itself. */
+  environmentId: string;
   /** stdio transport only. */
   command: string | null;
   argsJson: string; // JSON-serialized string[]

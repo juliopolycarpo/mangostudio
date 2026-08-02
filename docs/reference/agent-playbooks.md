@@ -282,10 +282,15 @@ uncached avatar silently becomes a monogram.
 
 Open these first:
 
-- `apps/api/src/services/mcp/client-factory.ts` (SDK boundary, transports)
+- `apps/runtime/src/services/mcp/` (SDK boundary, transports, session registry —
+  the server runs on the environment's runtime, not in the hub)
+- `apps/api/src/services/mcp/runtime-session.ts` (hub handle over the protocol,
+  secret delivery, elicitation hop)
 - `apps/api/src/services/mcp/connection-manager.ts` (per-user sessions, reconnect)
-- `apps/api/src/services/mcp/tool-bridge.ts` (namespacing + per-turn resolution)
-- `apps/api/src/services/mcp/tool-naming.ts`, `content-mapping.ts`, `header-secrets.ts`
+- `apps/api/src/services/mcp/tool-bridge.ts` (namespacing + per-turn resolution,
+  scoped to the chat's environment)
+- `apps/api/src/services/mcp/tool-naming.ts`, `header-secrets.ts`,
+  `secret-transport-guard.ts`
 - `apps/api/src/modules/mcp-servers/http/mcp-server-routes.ts`
 - `apps/shared/src/mcp/`
 - `apps/frontend/src/features/settings/mcp/`

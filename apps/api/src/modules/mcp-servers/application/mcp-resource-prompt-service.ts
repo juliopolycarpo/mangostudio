@@ -5,6 +5,7 @@
  * its contents as chat attachments so a turn carries them as context.
  */
 
+import { capMcpResultText } from '@mangostudio/runtime';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   GetMcpPromptBody,
@@ -18,7 +19,6 @@ import type {
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getMcpClient } from '../../../services/mcp/connection-manager';
-import { capMcpResultText } from '../../../services/mcp/content-mapping';
 import { persistMcpResourceAttachments } from '../../../services/mcp/rich-content';
 import { toMcpRuntimeConfig } from '../../../services/mcp/runtime-config';
 import type { McpClientHandle, McpServerCapabilities } from '../../../services/mcp/types';
@@ -92,7 +92,7 @@ export async function getMcpServerPrompt(
   const prompt = await wrapProviderError(() => handle.getPrompt(body.name, body.arguments));
   return {
     ...(prompt.description !== undefined ? { description: prompt.description } : {}),
-    messages: prompt.messages,
+    messages: [...prompt.messages],
   };
 }
 

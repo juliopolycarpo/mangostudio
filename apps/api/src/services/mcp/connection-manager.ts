@@ -3,11 +3,15 @@
  * single-flight connects, last-known status tracking, and idle keep-alive
  * (sessions are held until the server row changes or the app shuts down).
  * There is no background retry loop — a failed or dropped session simply
- * reconnects on next use.
+ * reconnects on next use, which is also how a runtime restart heals: the
+ * session it was holding is gone, and the next caller opens a fresh one.
+ *
+ * A server row belongs to exactly one environment, so `(userId, serverId)`
+ * stays unique without the environment in the key.
  */
 
 import type { McpServerStatus, McpToolDescriptor } from '@mangostudio/shared/mcp';
-import { connectMcpClient } from './client-factory';
+import { connectMcpClient } from './runtime-session';
 import type { McpClientHandle, McpRequestOptions, McpServerRuntimeConfig } from './types';
 
 export interface McpRuntimeStatus {

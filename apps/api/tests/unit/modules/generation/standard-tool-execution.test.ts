@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import {
   classifyMcpElicitationCancelReason,
   executeStandardToolCallsWithProgress,
@@ -15,15 +15,32 @@ import type { RegisteredTool } from '../../../../src/services/tools/types';
 
 const hasBash = isShellAvailable('bash');
 
+/** The shape an MCP failure reaches the hub in: classified by the runtime. */
+function mcpFailure(failure: 'timeout' | 'server_closed', message: string): RuntimeRemoteError {
+  return new RuntimeRemoteError('INTERNAL', message, {
+    kind: 'mcp_call',
+    serverSlug: 'fixture',
+    mcpFailure: failure,
+  });
+}
+
 describe('classifyMcpElicitationCancelReason', () => {
   it('distinguishes timeouts, closed sessions, and other tool failures', () => {
-    expect(
-      classifyMcpElicitationCancelReason(new McpError(ErrorCode.RequestTimeout, 'timed out'))
-    ).toBe('tool_timeout');
-    expect(
-      classifyMcpElicitationCancelReason(new McpError(ErrorCode.ConnectionClosed, 'closed'))
-    ).toBe('server_closed');
+    expect(classifyMcpElicitationCancelReason(mcpFailure('timeout', 'timed out'))).toBe(
+      'tool_timeout'
+    );
+    expect(classifyMcpElicitationCancelReason(mcpFailure('server_closed', 'closed'))).toBe(
+      'server_closed'
+    );
     expect(classifyMcpElicitationCancelReason(new Error('tool failed'))).toBe('tool_failed');
+  });
+
+  it('reports a runtime lost mid-call as a closed session, never a bare failure', () => {
+    expect(
+      classifyMcpElicitationCancelReason(
+        new RuntimeRemoteError('RUNTIME_UNAVAILABLE', 'Runtime connection was closed.')
+      )
+    ).toBe('server_closed');
   });
 
   it('prefers turn abort over MCP timeout classification', () => {
@@ -34,15 +51,12 @@ describe('classifyMcpElicitationCancelReason', () => {
     const parent = new AbortController();
     parent.abort();
     expect(
-      classifyMcpElicitationCancelReason(
-        new McpError(ErrorCode.RequestTimeout, 'timed out'),
-        parent.signal
-      )
+      classifyMcpElicitationCancelReason(mcpFailure('timeout', 'timed out'), parent.signal)
     ).toBe('turn_aborted');
 
-    expect(
-      classifyMcpElicitationCancelReason(new McpError(ErrorCode.RequestTimeout, 'timed out'))
-    ).toBe('tool_timeout');
+    expect(classifyMcpElicitationCancelReason(mcpFailure('timeout', 'timed out'))).toBe(
+      'tool_timeout'
+    );
   });
 });
 

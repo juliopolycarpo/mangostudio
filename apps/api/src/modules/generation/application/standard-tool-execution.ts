@@ -12,7 +12,7 @@ import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/sha
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
-import { classifyMcpCallFailure } from '../../../services/mcp/client-factory';
+import { classifyMcpCallFailure } from '../../../services/mcp/call-failure';
 import {
   bindElicitationSink,
   cancelPendingElicitations,
@@ -405,7 +405,12 @@ async function prepareStandardToolCall(
       return {
         kind: 'mcp',
         db: context.db,
-        target: await resolveMcpToolExecution(context.db, context.userId, name),
+        target: await resolveMcpToolExecution(
+          context.db,
+          context.userId,
+          name,
+          context.environmentId
+        ),
       };
     } catch (error) {
       throw new ToolPolicyError(errorToToolMessage(error), 'unknown_tool');

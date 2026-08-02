@@ -1,10 +1,11 @@
 /**
- * Card for one MCP server: identity, transport chip, last-known status badge,
- * explicit test-connection action with inline result, and expandable tools.
+ * Card for one MCP server: identity, transport chip, hosting environment,
+ * last-known status badge, explicit test-connection action with inline result,
+ * and expandable tools.
  */
 
 import type { McpServer, McpServerStatus, TestMcpServerResponse } from '@mangostudio/shared/mcp';
-import { ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Pencil, Server, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -12,6 +13,7 @@ import { Toggle } from '@/components/ui/Toggle';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { ToolIdentityMenu } from '@/features/environments/identity/ToolIdentityMenu';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
+import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useTestMcpServer, useUpdateMcpServer } from '../hooks/use-mcp-servers';
@@ -46,6 +48,12 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
   // what this card and every other surface *call* it.
   const { resolve } = useToolIdentities();
   const identity = resolve('mcp', server.slug, server.name);
+  // The id is the fallback rather than a blank: an environment that was
+  // removed still tells the user which one this server is waiting for.
+  const environments = useEnvironmentEntitiesQuery();
+  const environmentName =
+    environments.data?.find((environment) => environment.id === server.environmentId)?.name ??
+    server.environmentId;
 
   const handleTest = () => {
     setTestResult(null);
@@ -75,6 +83,13 @@ export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) 
             <h4 className="text-sm font-bold text-on-surface">{identity.name}</h4>
             <span className="rounded-full bg-surface-container-highest px-2 py-0.5 text-xs text-on-surface-variant">
               {s.transports[server.transport]}
+            </span>
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-surface-container-highest px-2 py-0.5 text-xs text-on-surface-variant"
+              title={`${s.environmentLabel}: ${environmentName}`}
+            >
+              <Server size={11} aria-hidden="true" />
+              {environmentName}
             </span>
             <span
               className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusStyles[server.status]}`}

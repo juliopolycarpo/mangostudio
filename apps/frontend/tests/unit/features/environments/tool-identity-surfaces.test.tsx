@@ -9,6 +9,7 @@
  * command, and every id on the wire stay as they were.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import type { ToolIdentityListResponse } from '@mangostudio/shared/tool-identity';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +44,7 @@ function mcpServer(overrides: Partial<McpServer> = {}): McpServer {
     name: 'Weather',
     slug: 'weather',
     transport: 'stdio',
+    environmentId: LOCAL_ENVIRONMENT_ID,
     command: 'bunx',
     args: ['weather-mcp'],
     env: {},

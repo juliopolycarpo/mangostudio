@@ -17,6 +17,7 @@ export function toMcpRuntimeConfig(row: McpServerSelect): McpServerRuntimeConfig
     env: parseJsonStringRecord(row.envJson),
     url: row.url,
     timeoutMs: row.timeoutMs,
+    environmentId: row.environmentId,
   };
 }
 

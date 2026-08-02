@@ -100,6 +100,7 @@ export async function prepareSubagentTurn(
     requestRuntimeSettings: getSubagentRuntimeSettings(input.targetProfile),
     profile: input.targetProfile,
     runtimeManifest: runtimeClient.manifest,
+    environmentId: input.environmentId,
   });
   // Subagents can neither delegate further nor ask the human: their turn
   // result flows to the parent model, not the UI, so a question card would
@@ -647,7 +648,7 @@ async function executeSubagentTools(input: {
             input.userId,
             call.name,
             safeJsonParse(call.argsStr) ?? {},
-            { signal: input.signal, toolCallId: callId }
+            { signal: input.signal, toolCallId: callId, environmentId: input.environmentId }
           );
           if (mcpResult.isError) {
             result = { error: mcpResult.contentText };

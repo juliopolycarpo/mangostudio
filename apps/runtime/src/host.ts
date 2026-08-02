@@ -24,6 +24,12 @@ export interface RuntimeHostOptions {
   readonly manifest: RuntimeCapabilityManifest;
   readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
   readonly protocolVersion?: RuntimeProtocolVersion;
+  /**
+   * Releases whatever the handlers hold open beyond a single request — MCP
+   * sessions, and their child processes. Fired once, on close: a handler map
+   * with state of its own has no other way to learn the host is going away.
+   */
+  readonly onClose?: () => void;
 }
 
 export interface RuntimeEventInput {
@@ -44,6 +50,8 @@ export class RuntimeHost {
   readonly #manifest: RuntimeCapabilityManifest;
   readonly #protocolVersion: RuntimeProtocolVersion;
   readonly #runtimeVersion: string;
+  readonly #onClose?: () => void;
+  #closed = false;
   #detach?: () => void;
   #handshake = deferredHandshake();
   #port?: RuntimeFramePort;
@@ -54,6 +62,7 @@ export class RuntimeHost {
     this.#manifest = options.manifest;
     this.#handlers = options.handlers;
     this.#protocolVersion = options.protocolVersion ?? RUNTIME_PROTOCOL_VERSION;
+    if (options.onClose) this.#onClose = options.onClose;
   }
 
   attach(port: RuntimeFramePort): void {
@@ -140,6 +149,12 @@ export class RuntimeHost {
     this.#port = undefined;
     this.#ready = false;
     this.#handshake.reject(new Error('Runtime host closed before the handshake completed.'));
+    // Closing twice is a normal path — a failed handshake releases the host,
+    // and so does the caller that never got the handle — but the sessions
+    // `onClose` tears down must only be released once.
+    if (this.#closed) return;
+    this.#closed = true;
+    this.#onClose?.();
   }
 
   #receive(frame: RuntimeFrame): void {
