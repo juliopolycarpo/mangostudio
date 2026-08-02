@@ -13,7 +13,6 @@ import {
   libraryContentPath,
   MAX_LIBRARY_CONTENT_BYTES,
   type RuntimeLibraryScanEntry,
-  resolveLibraryScanTargets,
 } from '@mangostudio/runtime';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
@@ -191,7 +190,7 @@ export function createEnvironmentLibraryService(
       return [...result.locations];
     },
 
-    async readContent(db, scope, resource, locationId, workspaceRoot) {
+    async readContent(db, scope, resource, locationId, _workspaceRoot) {
       const instance = resource.instances.find((candidate) => candidate.locationId === locationId);
       if (!instance) return null;
 
@@ -202,23 +201,13 @@ export function createEnvironmentLibraryService(
         );
       }
 
-      const settings = await getAppSettings(db, scope.userId);
-      const locationSettings = libraryLocationsFor(settings);
-      // Resolve allowed roots on the hub from the same settings the scan used,
-      // then ask the runtime to enforce containment against its own realpaths.
-      const pathEnv = {
-        platform: client.manifest.platform,
-        homeDir: client.manifest.homeDir,
-        env: {
-          ...(isHubMachine(scope.environmentId) ? configuredLibraryEnv() : {}),
-        },
-        ...(workspaceRoot !== undefined && { workspaceRoot }),
-      };
-      const allowedRoots = resolveLibraryScanTargets(locationSettings, pathEnv).map(
-        (target) => target.path
-      );
-      if (allowedRoots.length === 0) return null;
+      // Fail closed for a missing user the same way discover does.
+      await getAppSettings(db, scope.userId);
 
+      // Containment is against the scanned instance path itself — hub-resolved
+      // location roots can disagree with a remote machine's layout, while the
+      // instance path came from that machine's scan.
+      const allowedRoots = [instance.path];
       const contentPath = libraryContentPath(resource.ref.kind, instance.path);
       const result = await client.library.read(
         {
