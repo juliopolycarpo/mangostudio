@@ -102,6 +102,9 @@ function readSource(location: LocationDefinition, path: string): RuntimeSettings
   const locationId = location.id;
   if (location.format === 'rules-dsl') {
     const read = readRulesDirectory(path);
+    // null is "nothing there" — same as a missing settings file, not an empty
+    // present directory (which would report present: true with rules: []).
+    if (read === null) return { locationId, present: false };
     return read.failureReason === undefined
       ? { locationId, present: true, sizeBytes: read.sizeBytes, rules: read.rules }
       : failed(locationId, read.failureReason);
@@ -129,13 +132,17 @@ interface RulesDirectoryRead {
   readonly failureReason?: RuntimeSettingsReadFailure;
 }
 
-function readRulesDirectory(path: string): RulesDirectoryRead {
+/**
+ * Null means the directory is absent (`ENOENT`). An empty existing directory
+ * is a successful present read with `rules: []`.
+ */
+function readRulesDirectory(path: string): RulesDirectoryRead | null {
   let entries: Dirent<string>[];
   try {
     entries = readdirSync(path, { withFileTypes: true });
   } catch (error) {
     const code = (error as NodeJS.ErrnoException | undefined)?.code;
-    if (code === 'ENOENT') return { rules: [], sizeBytes: 0, failureReason: undefined };
+    if (code === 'ENOENT') return null;
     return {
       rules: [],
       sizeBytes: 0,
