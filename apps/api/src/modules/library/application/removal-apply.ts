@@ -128,6 +128,21 @@ async function runRemoval(
     lastCopy: operation.lastCopy,
   }));
 
+  // The plan's own `kept` entries are merged here rather than shipped and
+  // echoed: the hub decided them, and the engine returns only what it kept
+  // itself — rolled back, or never attempted.
+  const removalResult = await runWriteEngine(userId, operations, plan, env, deps, overrides);
+  return { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
+}
+
+function runWriteEngine(
+  userId: string,
+  operations: readonly PreparedRemovalOperation[],
+  plan: RemovalPlan,
+  env: PathEnv,
+  deps: RemovalApplyDeps,
+  overrides: Partial<RemovalApplyDeps>
+): Promise<RemovalApply> {
   if (usesInjectedWriteEngine(overrides)) {
     if (overrides.runtimeRemove) {
       return overrides.runtimeRemove(toRuntimeRemoveParams(operations, plan, env, deps.backup));
@@ -144,17 +159,21 @@ async function runRemoval(
         retentionBytes: deps.backup.retentionBytes(),
         pathEnv: env,
         operations,
-        kept: plan.kept,
         lastCopyResourceKeys: plan.lastCopyResourceKeys,
       },
       engineDeps
     );
   }
 
+  return runtimeRemove(userId, toRuntimeRemoveParams(operations, plan, env, deps.backup));
+}
+
+async function runtimeRemove(
+  userId: string,
+  params: RuntimeLibraryRemoveParams
+): Promise<RemovalApply> {
   const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
-  return client.library.remove(toRuntimeRemoveParams(operations, plan, env, deps.backup), {
-    timeoutMs: LIBRARY_WRITE_TIMEOUT_MS,
-  });
+  return await client.library.remove(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
 }
 
 function toRuntimeRemoveParams(
@@ -175,12 +194,7 @@ function toRuntimeRemoveParams(
       env: configuredLibraryEnv(),
       ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
     },
-    operations: operations.map((operation) => ({
-      ...operation,
-      locationId:
-        operation.locationId as RuntimeLibraryRemoveParams['operations'][number]['locationId'],
-    })),
-    kept: [...plan.kept],
+    operations,
     lastCopyResourceKeys: [...plan.lastCopyResourceKeys],
   };
 }

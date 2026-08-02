@@ -195,6 +195,12 @@ async function runApply(
   return writeResult;
 }
 
+/**
+ * `skipped` is merged here rather than sent and echoed. The plan already holds
+ * it, so shipping it to the engine only to read it back would put it on the
+ * wire twice and give the write engines a field they never decide anything
+ * from. Both engine paths return an empty array.
+ */
 async function runPreparedWrites(
   userId: string,
   prepared: readonly PreparedPropagationOperation[],
@@ -207,9 +213,20 @@ async function runPreparedWrites(
     return { partial: false, applied: [], skipped: [...skipped], failed: [] };
   }
 
+  const written = await runWriteEngine(userId, prepared, env, deps, overrides);
+  return { ...written, skipped: [...skipped, ...written.skipped] };
+}
+
+function runWriteEngine(
+  userId: string,
+  prepared: readonly PreparedPropagationOperation[],
+  env: PathEnv,
+  deps: PropagationApplyDeps,
+  overrides: Partial<PropagationApplyDeps>
+): Promise<PropagationApply> {
   if (usesInjectedWriteEngine(overrides)) {
     if (overrides.runtimeApply) {
-      return overrides.runtimeApply(toRuntimeApplyParams(prepared, skipped, env, deps.backup));
+      return overrides.runtimeApply(toRuntimeApplyParams(prepared, env, deps.backup));
     }
     const engineDeps: PropagationWriteEngineDeps = {
       writeDirectory: deps.writeDirectory,
@@ -224,17 +241,21 @@ async function runPreparedWrites(
         retentionBytes: deps.backup.retentionBytes(),
         pathEnv: env,
         operations: prepared,
-        skipped,
       },
       engineDeps
     );
   }
 
   // Production Local path: writes run on the runtime behind RPC.
+  return runtimeApply(userId, toRuntimeApplyParams(prepared, env, deps.backup));
+}
+
+async function runtimeApply(
+  userId: string,
+  params: RuntimeLibraryApplyParams
+): Promise<PropagationApply> {
   const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
-  return client.library.apply(toRuntimeApplyParams(prepared, skipped, env, deps.backup), {
-    timeoutMs: LIBRARY_WRITE_TIMEOUT_MS,
-  });
+  return await client.library.apply(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
 }
 
 /**
@@ -251,7 +272,6 @@ const LIBRARY_APPLY_MAX_CONTENT_BYTES = 8 * 1024 * 1024;
 
 function toRuntimeApplyParams(
   prepared: readonly PreparedPropagationOperation[],
-  skipped: readonly PropagationSkipped[],
   env: PathEnv,
   backup: BackupStoreDeps
 ): RuntimeLibraryApplyParams {
@@ -280,21 +300,11 @@ function toRuntimeApplyParams(
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
     pathEnv: writePathEnvParams(env),
-    operations: prepared.map((operation) => ({
-      resourceKey: operation.resourceKey,
-      locationId:
-        operation.locationId as RuntimeLibraryApplyParams['operations'][number]['locationId'],
-      slug: operation.slug,
-      operation: operation.operation,
-      kind: operation.kind,
-      expectedContentHash: operation.expectedContentHash,
-      destinationRoot: operation.destinationRoot,
-      ...(operation.sourceDir !== undefined && { sourceDir: operation.sourceDir }),
-      ...(operation.contents !== undefined && { contentRef: operation.expectedContentHash }),
-      ...(operation.adaptation && { adaptation: operation.adaptation }),
+    operations: prepared.map(({ contents: _bytes, ...operation }) => ({
+      ...operation,
+      ...(operation.kind === 'file' && { contentRef: operation.expectedContentHash }),
     })),
     contents,
-    skipped: [...skipped],
   };
 }
 

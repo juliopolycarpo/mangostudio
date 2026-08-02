@@ -2,17 +2,20 @@
  * Filesystem execution for a prepared propagation apply: write, verify, backup
  * manifest, and compensate on failure. Planning, tokens, and format adapters
  * stay on the hub; this module only mutates the host that holds the files.
+ *
+ * `skipped` is not part of the exchange. The hub decides what to skip while
+ * planning and already holds the list, so sending it here only to have it
+ * echoed back would put it on the wire twice and give the engine a field to
+ * keep in sync for no decision it makes. The result carries an empty array and
+ * the hub merges its own.
  */
 
 import { resolve as resolvePath } from 'node:path';
 import type {
-  AdapterStrategy,
-  AdaptNote,
-  AdaptProvenance,
+  LibraryLocationId,
   PropagationApplied,
   PropagationApply,
   PropagationFailure,
-  PropagationSkipped,
 } from '@mangostudio/shared/library';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import {
@@ -34,42 +37,18 @@ import {
   writeDirectoryResource,
   writeFileResource,
 } from './resource-writer';
-
-export interface PreparedPropagationAdaptation {
-  readonly strategy: AdapterStrategy;
-  readonly lossy: boolean;
-  readonly requiresReview: boolean;
-  readonly notes: readonly AdaptNote[];
-  readonly provenance?: AdaptProvenance;
-}
-
-export interface PreparedPropagationOperation {
-  readonly resourceKey: string;
-  readonly locationId: string;
-  readonly slug: string;
-  readonly operation: Extract<
-    PropagationApplied['operation'],
-    'create' | 'overwrite' | 'adapt-create' | 'adapt-overwrite'
-  >;
-  readonly kind: 'file' | 'directory';
-  readonly expectedContentHash: string;
-  /** Location root the preview showed, as resolved on the hub. */
-  readonly destinationRoot: string;
-  readonly sourceDir?: string;
-  readonly contents?: string | Uint8Array;
-  readonly adaptation?: PreparedPropagationAdaptation;
-}
+import type { PreparedPropagationOperation } from './write-shapes';
 
 export interface PropagationWriteEngineDeps {
   writeDirectory(input: {
-    readonly locationId: string;
+    readonly locationId: LibraryLocationId;
     readonly slug: string;
     readonly sourceDir: string;
     readonly env: PathEnv;
     readonly backupId: string;
   }): Promise<ResourceWriteResult>;
   writeFile(input: {
-    readonly locationId: string;
+    readonly locationId: LibraryLocationId;
     readonly slug: string;
     readonly contents: string | Uint8Array;
     readonly env: PathEnv;
@@ -86,7 +65,6 @@ export interface ExecutePropagationWritesParams {
   readonly pathEnv: PathEnv;
   readonly backupId?: string;
   readonly operations: readonly PreparedPropagationOperation[];
-  readonly skipped?: readonly PropagationSkipped[];
   /**
    * Aborts between operations. The hub's RPC deadline sends a cancel that ends
    * up here; without it the hub reports a failure while this loop keeps writing
@@ -107,13 +85,8 @@ export function createPropagationWriteEngineDeps(
   const writer = createResourceWriterDeps(options);
   const backup = createBackupStoreDeps(options);
   return {
-    writeDirectory:
-      overrides.writeDirectory ??
-      ((input) =>
-        writeDirectoryResource({ ...input, locationId: input.locationId as never }, writer)),
-    writeFile:
-      overrides.writeFile ??
-      ((input) => writeFileResource({ ...input, locationId: input.locationId as never }, writer)),
+    writeDirectory: overrides.writeDirectory ?? ((input) => writeDirectoryResource(input, writer)),
+    writeFile: overrides.writeFile ?? ((input) => writeFileResource(input, writer)),
     hashAt: overrides.hashAt ?? hashResourceAt,
     backup: overrides.backup ?? backup,
   };
@@ -132,7 +105,6 @@ export async function executePropagationWrites(
   const written: BackupEntry[] = [];
   const applied: PropagationApplied[] = [];
   const failed: PropagationFailure[] = [];
-  const skipped = params.skipped ?? [];
 
   for (const operation of params.operations) {
     try {
@@ -150,18 +122,18 @@ export async function executePropagationWrites(
     const rolledBack = await rollback(written, deps);
     if (rolledBack) {
       await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-      return { partial: false, applied: [], skipped: [...skipped], failed };
+      return { partial: false, applied: [], skipped: [], failed };
     }
     await persistBackupManifest(backupId, written, deps);
-    return { partial: true, applied, skipped: [...skipped], failed, backupId };
+    return { partial: true, applied, skipped: [], failed, backupId };
   }
 
   if (written.length > 0) await persistBackupManifest(backupId, written, deps);
 
   if (written.length === 0) {
-    return { partial: false, applied, skipped: [...skipped], failed };
+    return { partial: false, applied, skipped: [], failed };
   }
-  return { backupId, partial: false, applied, skipped: [...skipped], failed };
+  return { backupId, partial: false, applied, skipped: [], failed };
 }
 
 async function persistBackupManifest(

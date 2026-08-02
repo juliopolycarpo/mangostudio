@@ -34,7 +34,7 @@ import type {
   RuntimeLibraryUndoResult,
 } from '../../methods';
 import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-env';
-import { executePropagationWrites, type PreparedPropagationOperation } from './apply-writes';
+import { executePropagationWrites } from './apply-writes';
 import { type LibraryCache, libraryCache } from './cache';
 import { scanLibraryInstances } from './discovery';
 import type { ReadLibraryInstance } from './instance-reader';
@@ -43,6 +43,7 @@ import { executeRemovalWrites } from './remove-writes';
 import { type RuntimeSettingsSourcesResult, readSettingsSources } from './settings-sources';
 import { executeLibraryUndo, LibraryBackupMissingError } from './undo-writes';
 import { serializeRuntimeLibraryWrite } from './write-queue';
+import type { PreparedPropagationOperation } from './write-shapes';
 
 export interface LibraryHostAdapters {
   readonly createPathEnv: (overrides?: {
@@ -229,7 +230,6 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           pathEnv: pathEnvFrom(adapters, params),
           backupId: params.backupId,
           operations: decodeApplyOperations(params),
-          skipped: params.skipped,
           signal,
         })
       );
@@ -245,7 +245,6 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           pathEnv: pathEnvFrom(adapters, params),
           backupId: params.backupId,
           operations: params.operations,
-          kept: params.kept,
           lastCopyResourceKeys: params.lastCopyResourceKeys,
           signal,
         })

@@ -2,8 +2,6 @@ export {
   createPropagationWriteEngineDeps,
   type ExecutePropagationWritesParams,
   executePropagationWrites,
-  type PreparedPropagationAdaptation,
-  type PreparedPropagationOperation,
   type PropagationWriteEngineDeps,
 } from './apply-writes';
 export {
@@ -66,7 +64,6 @@ export {
   createRemovalWriteEngineDeps,
   type ExecuteRemovalWritesParams,
   executeRemovalWrites,
-  type PreparedRemovalOperation,
   type RemovalWriteEngineDeps,
 } from './remove-writes';
 export {
@@ -111,3 +108,8 @@ export {
   LibraryBackupMissingError,
   type LibraryUndoEngineDeps,
 } from './undo-writes';
+export type {
+  PreparedPropagationAdaptation,
+  PreparedPropagationOperation,
+  PreparedRemovalOperation,
+} from './write-shapes';

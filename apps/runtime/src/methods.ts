@@ -37,6 +37,11 @@ import type {
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
 import type { RuntimeSettingsSourcesResult } from './services/library/settings-sources';
+import type {
+  PreparedPropagationAdaptation,
+  PreparedPropagationOperation,
+  PreparedRemovalOperation,
+} from './services/library/write-shapes';
 
 export const RUNTIME_ABSENT_HASH = 'absent';
 
@@ -727,32 +732,21 @@ export interface RuntimeLibraryBackupEnvelope {
   readonly backupId?: string;
 }
 
-export interface RuntimeLibraryApplyAdaptation {
-  readonly strategy: AdapterStrategy;
-  readonly lossy: boolean;
-  readonly requiresReview: boolean;
-  readonly notes: readonly AdaptNote[];
-  readonly provenance?: AdaptProvenance;
-}
-
 /**
- * One prepared write. Format adaptation already happened on the hub; directory
- * ops carry a sourceDir on this host, file ops name their bytes in `contents`.
+ * The write operations are the engines' own shapes, encoded.
+ *
+ * Declaring them twice — once here for the wire, once in the engine — meant
+ * every crossing needed a cast, and a field added to one half compiled cleanly
+ * while being dropped in transit. The engine module owns the shape because it
+ * is the thing that acts on it; the only wire-specific difference is that bytes
+ * travel as a key into `contents` rather than as a buffer.
  */
-export interface RuntimeLibraryApplyOperation {
-  readonly resourceKey: string;
-  readonly locationId: LibraryLocationId;
-  readonly slug: string;
-  readonly operation: 'create' | 'overwrite' | 'adapt-create' | 'adapt-overwrite';
-  readonly kind: 'file' | 'directory';
-  readonly expectedContentHash: string;
-  /** Location root the preview showed; the host refuses if its own differs. */
-  readonly destinationRoot: string;
-  readonly sourceDir?: string;
+export type RuntimeLibraryApplyAdaptation = PreparedPropagationAdaptation;
+
+export type RuntimeLibraryApplyOperation = Omit<PreparedPropagationOperation, 'contents'> & {
   /** Key into `RuntimeLibraryApplyParams.contents`. Absent for directories. */
   readonly contentRef?: string;
-  readonly adaptation?: RuntimeLibraryApplyAdaptation;
-}
+};
 
 export interface RuntimeLibraryApplyParams extends RuntimeLibraryBackupEnvelope {
   readonly operations: readonly RuntimeLibraryApplyOperation[];
@@ -765,24 +759,14 @@ export interface RuntimeLibraryApplyParams extends RuntimeLibraryBackupEnvelope 
    * locations already exceeded `RUNTIME_MAX_FRAME_BYTES`.
    */
   readonly contents?: Readonly<Record<string, string>>;
-  readonly skipped?: readonly PropagationSkipped[];
 }
 
 export type RuntimeLibraryApplyResult = PropagationApply;
 
-export interface RuntimeLibraryRemoveOperation {
-  readonly resourceKey: string;
-  readonly locationId: LibraryLocationId;
-  readonly slug: string;
-  readonly kind: 'file' | 'directory';
-  readonly expectedPath: string;
-  readonly expectedContentHash: string;
-  readonly lastCopy: boolean;
-}
+export type RuntimeLibraryRemoveOperation = PreparedRemovalOperation;
 
 export interface RuntimeLibraryRemoveParams extends RuntimeLibraryBackupEnvelope {
   readonly operations: readonly RuntimeLibraryRemoveOperation[];
-  readonly kept?: readonly RemovalKept[];
   readonly lastCopyResourceKeys?: readonly string[];
 }
 

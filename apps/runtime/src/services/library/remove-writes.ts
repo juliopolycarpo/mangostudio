@@ -2,6 +2,10 @@
  * Filesystem execution for a prepared library removal: backup, stage aside,
  * verify gone, persist the manifest, then commit staged trees. Preview tokens,
  * last-copy acknowledgements, and planning stay on the hub.
+ *
+ * The hub's own `kept` entries are not part of the exchange: it decided them
+ * while planning and already holds them. The result carries only what this
+ * engine kept — rolled back or never attempted — and the hub merges.
  */
 
 import { resolve as resolvePath } from 'node:path';
@@ -33,16 +37,7 @@ import {
   stageResourceRemoval,
   type TreeRemovalFs,
 } from './tree-removal';
-
-export interface PreparedRemovalOperation {
-  readonly resourceKey: string;
-  readonly locationId: string;
-  readonly slug: string;
-  readonly kind: 'file' | 'directory';
-  readonly expectedPath: string;
-  readonly expectedContentHash: string;
-  readonly lastCopy: boolean;
-}
+import type { PreparedRemovalOperation } from './write-shapes';
 
 export interface RemovalWriteEngineDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
@@ -57,7 +52,6 @@ export interface ExecuteRemovalWritesParams {
   readonly pathEnv: PathEnv;
   readonly backupId?: string;
   readonly operations: readonly PreparedRemovalOperation[];
-  readonly kept?: readonly RemovalKept[];
   readonly lastCopyResourceKeys?: readonly string[];
   /**
    * Aborts between operations, so the hub's RPC deadline actually stops the
@@ -92,7 +86,6 @@ export async function executeRemovalWrites(
 ): Promise<RemovalApply> {
   const env = params.pathEnv;
   const backupId = params.backupId ?? createBackupId(deps.backup);
-  const kept = params.kept ?? [];
   const lastCopyResourceKeys = params.lastCopyResourceKeys ?? [];
   const results: StagedOperation[] = [];
   const failed: RemovalFailure[] = [];
@@ -114,7 +107,7 @@ export async function executeRemovalWrites(
   if (failed.length > 0) {
     const unattempted = notAttempted(params.operations, results.length);
     const unrestored = await rollback(staged);
-    const keptAll = [...kept, ...rolledBack(results, unrestored), ...unattempted];
+    const keptAll = [...rolledBack(results, unrestored), ...unattempted];
     if (unrestored.size === 0) {
       await discardBackupSet(backupId, deps.backup).catch(() => undefined);
       return { partial: false, removed: [], kept: keptAll, failed };
@@ -130,7 +123,7 @@ export async function executeRemovalWrites(
   }
 
   if (entries.length === 0) {
-    return { partial: false, removed, kept: [...kept], failed };
+    return { partial: false, removed, kept: [], failed };
   }
 
   try {
@@ -144,7 +137,7 @@ export async function executeRemovalWrites(
       reason: 'remove-failed',
       message: `Could not record the backup manifest, so this removal cannot be undone automatically; the copies are under backup set "${backupId}": ${errorMessage(error)}`,
     });
-    const keptAll = [...kept, ...rolledBack(results, unrestored)];
+    const keptAll = [...rolledBack(results, unrestored)];
     return unrestored.size === 0
       ? { partial: false, removed: [], kept: keptAll, failed }
       : {
@@ -162,7 +155,7 @@ export async function executeRemovalWrites(
   }
   await pruneBackupSets(backupId, deps.backup);
 
-  return { backupId, partial: false, removed, kept: [...kept], failed };
+  return { backupId, partial: false, removed, kept: [], failed };
 }
 
 async function persistManifest(
