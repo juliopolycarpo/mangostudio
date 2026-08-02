@@ -8,7 +8,7 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ResourceKind } from '@mangostudio/shared/library';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
@@ -29,6 +29,10 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
   const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;
   const matrix = useLibraryMatrix(kind, scope.environmentId);
   const [wizardKeys, setWizardKeys] = useState<readonly string[] | null>(null);
+
+  useEffect(() => {
+    setWizardKeys(null);
+  }, [scope.environmentId]);
 
   /**
    * Every enabled location storing this kind is previewed, not only the ones
@@ -77,6 +81,19 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         ) : (
           <LibraryPageState variant="error" onRetry={matrix.refetch} />
         )}
+      </div>
+    );
+  }
+
+  if (!isLocal && scope.environment && !scope.isConnected) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <EnvironmentScopeNotice
+          environment={scope.environment}
+          reason="disconnected"
+          surface="library"
+        />
       </div>
     );
   }
@@ -140,6 +157,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         selected={matrix.selected}
         onToggleSelected={matrix.toggleSelected}
         onToggleAll={matrix.toggleAllVisible}
+        environmentId={scope.environmentId}
       />
 
       {matrix.resources.length === 0 ? (

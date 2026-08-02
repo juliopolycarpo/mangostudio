@@ -30,6 +30,11 @@ function environmentQuery(environmentId?: string): { environmentId?: string } {
   return environmentId && environmentId !== LOCAL_ENVIRONMENT_ID ? { environmentId } : {};
 }
 
+/** TanStack Router `search` for library routes that should keep the active environment. */
+export function libraryEnvironmentSearch(environmentId: string): { environmentId?: string } {
+  return environmentQuery(environmentId);
+}
+
 export const libraryKeys = {
   all: ['library'] as const,
   resources: (kind?: ResourceKind, environmentId: string = LOCAL_ENVIRONMENT_ID) =>

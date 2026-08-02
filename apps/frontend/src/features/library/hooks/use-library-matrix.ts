@@ -15,7 +15,7 @@ import type {
   ResourceKind,
 } from '@mangostudio/shared/library';
 import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { rescanLibrary } from '../api';
 import {
   DEFAULT_LIBRARY_FILTERS,
@@ -59,6 +59,11 @@ export function useLibraryMatrix(kind: ResourceKind, environmentId?: string): Li
   const queryClient = useQueryClient();
   const [filters, setFiltersState] = useState<LibraryFilters>(DEFAULT_LIBRARY_FILTERS);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+
+  useEffect(() => {
+    setSelected(new Set());
+    setFiltersState(DEFAULT_LIBRARY_FILTERS);
+  }, [environmentId]);
 
   const [resourcesQuery, targetsQuery, locationsQuery] = useQueries({
     queries: [

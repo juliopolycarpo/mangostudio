@@ -97,6 +97,7 @@ export function createEnvironmentLibraryService(
   const requestTimeoutMs = options.requestTimeoutMs ?? LIBRARY_REQUEST_TIMEOUT_MS;
   const cache = new Map<string, CacheEntry>();
   const inflight = new Map<string, Promise<LibraryResource[]>>();
+  const scanGeneration = new Map<string, number>();
 
   const scopeKey = (scope: LibraryScope) => `${scope.userId}${SCOPE_SEP}${scope.environmentId}`;
   const isHubMachine = (environmentId: string) => environmentId === LOCAL_ENVIRONMENT_ID;
@@ -139,10 +140,14 @@ export function createEnvironmentLibraryService(
       ) {
         return cached.resources;
       }
+    } else {
+      scanGeneration.set(signature, (scanGeneration.get(signature) ?? 0) + 1);
     }
 
     const pending = inflight.get(signature);
     if (pending && !force) return pending;
+
+    const generationAtStart = scanGeneration.get(signature) ?? 0;
 
     const scanning = (async () => {
       const result = await client.library.scan(
@@ -155,13 +160,15 @@ export function createEnvironmentLibraryService(
         { timeoutMs: requestTimeoutMs }
       );
       const resources = groupLibraryScanEntries(result.entries as RuntimeLibraryScanEntry[]);
-      cache.set(signature, {
-        scannedAtMs: now(),
-        client,
-        resources,
-        environmentId: scope.environmentId,
-        signature,
-      });
+      if ((scanGeneration.get(signature) ?? 0) === generationAtStart) {
+        cache.set(signature, {
+          scannedAtMs: now(),
+          client,
+          resources,
+          environmentId: scope.environmentId,
+          signature,
+        });
+      }
       return resources;
     })().finally(() => {
       if (inflight.get(signature) === scanning) inflight.delete(signature);
@@ -192,7 +199,7 @@ export function createEnvironmentLibraryService(
 
     async readContent(db, scope, resource, locationId, _workspaceRoot) {
       const instance = resource.instances.find((candidate) => candidate.locationId === locationId);
-      if (!instance) return null;
+      if (!instance?.valid) return null;
 
       const client = await resolveClient(scope);
       if (!client.manifest.features.library) {

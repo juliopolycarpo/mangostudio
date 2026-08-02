@@ -23,6 +23,7 @@ import { useToolIdentities } from '@/features/environments/identity/use-tool-ide
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { CELL_GLYPHS, type CoverageCellState, coverageCells, type LocationGroup } from '../format';
+import { libraryEnvironmentSearch } from '../queries';
 import { CoverageCell } from './CoverageCell';
 
 const ROW_HEIGHT_PX = 40;
@@ -46,6 +47,7 @@ interface CoverageMatrixProps {
   readonly selected: ReadonlySet<string>;
   readonly onToggleSelected: (resourceKey: string) => void;
   readonly onToggleAll: () => void;
+  readonly environmentId: string;
 }
 
 export function CoverageMatrix({
@@ -55,6 +57,7 @@ export function CoverageMatrix({
   selected,
   onToggleSelected,
   onToggleAll,
+  environmentId,
 }: CoverageMatrixProps) {
   const { t } = useI18n();
   const l = t.library;
@@ -180,6 +183,7 @@ export function CoverageMatrix({
                 locations={locations}
                 selected={selected.has(row.key)}
                 onToggleSelected={onToggleSelected}
+                environmentId={environmentId}
               />
             );
           })}
@@ -203,11 +207,13 @@ function ResourceRow({
   locations,
   selected,
   onToggleSelected,
+  environmentId,
 }: {
   readonly resource: LibraryResource;
   readonly locations: readonly LibraryLocationStatus[];
   readonly selected: boolean;
   readonly onToggleSelected: (resourceKey: string) => void;
+  readonly environmentId: string;
 }) {
   const { t } = useI18n();
   const l = t.library;
@@ -234,6 +240,7 @@ function ResourceRow({
         <Link
           to="/environments/library/$resourceKey"
           params={{ resourceKey: resource.key }}
+          search={libraryEnvironmentSearch(environmentId)}
           aria-label={formatMessage(l.matrix.openDetail, { resource: resource.ref.slug })}
           className="block truncate font-medium text-on-surface hover:text-primary"
         >

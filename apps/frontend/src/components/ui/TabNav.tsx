@@ -13,6 +13,7 @@ const TAB_LINK_ACTIVE = 'font-semibold text-primary border-b-2 border-primary -m
 interface Tab {
   readonly to: LinkProps['to'];
   readonly label: string;
+  readonly search?: LinkProps['search'];
   /**
    * Lights only on its own URL. A tab whose path is the prefix of its siblings
    * — a surface root next to the pages under it — stays lit on every one of
@@ -39,10 +40,11 @@ export function TabNav({ tabs, label }: Props) {
       className="flex flex-wrap gap-1 border-b border-outline-variant/20 pb-0 sm:gap-0.5"
       aria-label={label}
     >
-      {tabs.map(({ to, label: tabLabel, exact = false }) => (
+      {tabs.map(({ to, label: tabLabel, exact = false, search }) => (
         <Link
           key={to}
           to={to}
+          search={search}
           activeOptions={{ exact }}
           className={TAB_LINK_BASE}
           activeProps={{ className: TAB_LINK_ACTIVE }}

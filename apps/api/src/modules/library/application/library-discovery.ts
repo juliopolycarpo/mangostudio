@@ -1,6 +1,5 @@
 import {
   type LibraryCache,
-  libraryCache,
   type ReadLibraryInstance,
   resolveLibraryScanTargets,
   scanLibraryInstancesForPathEnv,
@@ -17,6 +16,7 @@ import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import { hubLibraryDiscoveryCache } from '../infrastructure/library-cache';
 import { createLibraryPathEnv } from '../infrastructure/location-probe';
 import { resolveLibraryCoverage } from './coverage-resolver';
 import { describeDivergence, type InstanceComparison } from './divergence';
@@ -55,7 +55,7 @@ export function discoverLibraryResourcesFromSettings(
   options: Omit<LibraryDiscoveryOptions, 'settings'> = {}
 ): Promise<LibraryResource[]> {
   const pathEnv = options.pathEnv ?? createLibraryPathEnv();
-  const cache = options.cache ?? libraryCache;
+  const cache = options.cache ?? hubLibraryDiscoveryCache;
   const force = options.force ?? false;
   const locationSettings = libraryLocationsFor(settings);
   const targets = resolveLibraryScanTargets(locationSettings, pathEnv, {
@@ -64,10 +64,10 @@ export function discoverLibraryResourcesFromSettings(
   });
   // Same signature the runtime scan would use, so a forced rescan clears both
   // the hub's grouped memo and any leftover flat-entry memo on a shared cache.
-  const signature = targets
+  const signature = `grouped:\n${targets
     .map((target) => `${target.scope}\0${target.locationId}\0${target.path}`)
     .sort()
-    .join('\n');
+    .join('\n')}`;
 
   return cache.getOrComputeScan(signature, (options.now ?? Date.now)(), force, async () => {
     const entries = await scanLibraryInstancesForPathEnv(locationSettings, pathEnv, {
@@ -119,5 +119,5 @@ export function groupLibraryScanEntries(
 }
 
 export function resetLibraryDiscoveryCache(): void {
-  libraryCache.clear();
+  hubLibraryDiscoveryCache.clear();
 }

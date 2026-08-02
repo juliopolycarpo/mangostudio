@@ -9,7 +9,7 @@
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/shared/library';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -22,6 +22,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { formatBytes, formatRelativeTime, hashPrefix, validInstances } from '../format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import {
+  libraryKeys,
   libraryLocationsQueryOptions,
   libraryResourceQueryOptions,
   libraryTargetsQueryOptions,
@@ -37,6 +38,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
   const l = t.library;
   const scope = useEnvironmentScope();
   const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;
+  const queryClient = useQueryClient();
   const [comparing, setComparing] = useState(false);
   const [propagating, setPropagating] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -64,7 +66,13 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
     <EnvironmentScopeHeader
       description={l.subtitle}
       scope={scope}
-      onRefresh={() => void resourceQuery.refetch()}
+      onRefresh={() => {
+        void resourceQuery.refetch();
+        void locationsQuery.refetch();
+        void queryClient.invalidateQueries({
+          queryKey: [...libraryKeys.all, 'content', scope.environmentId, resourceKey],
+        });
+      }}
     />
   );
 
@@ -106,6 +114,19 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
             onRetry={() => void resourceQuery.refetch()}
           />
         )}
+      </div>
+    );
+  }
+
+  if (!isLocal && scope.environment && !scope.isConnected) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <EnvironmentScopeNotice
+          environment={scope.environment}
+          reason="disconnected"
+          surface="library"
+        />
       </div>
     );
   }

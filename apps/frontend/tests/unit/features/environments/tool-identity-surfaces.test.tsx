@@ -99,6 +99,7 @@ describe('tool identity across surfaces', () => {
         selected={new Set()}
         onToggleSelected={() => undefined}
         onToggleAll={() => undefined}
+        environmentId={LOCAL_ENVIRONMENT_ID}
       />
     );
 

@@ -110,9 +110,14 @@ async function readBoundedCanonical(
     }
 
     const buffer = Buffer.alloc(limit);
-    const { bytesRead } = await handle.read(buffer, 0, limit, 0);
+    let offset = 0;
+    while (offset < limit) {
+      const { bytesRead } = await handle.read(buffer, offset, limit - offset, offset);
+      if (bytesRead === 0) break;
+      offset += bytesRead;
+    }
     return {
-      content: textDecoder.decode(buffer.subarray(0, bytesRead)),
+      content: textDecoder.decode(buffer.subarray(0, offset)),
       truncated: shouldTruncate,
       sizeBytes,
     };
@@ -131,6 +136,11 @@ export async function readLibraryContent(
   if (!Array.isArray(params.allowedRoots) || params.allowedRoots.length === 0) {
     throw new RuntimeToolArgumentError('library.read requires at least one allowed root.');
   }
+  const maxBytes = params.maxBytes ?? MAX_LIBRARY_CONTENT_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) {
+    throw new RuntimeToolArgumentError('library.read requires a positive integer maxBytes.');
+  }
+  const cappedMaxBytes = Math.min(maxBytes, MAX_LIBRARY_CONTENT_BYTES);
 
   let canonicalPath: string;
   try {
@@ -157,7 +167,7 @@ export async function readLibraryContent(
   // between the check and the open would otherwise escape containment.
   return readBoundedCanonical(
     canonicalPath,
-    params.maxBytes ?? MAX_LIBRARY_CONTENT_BYTES,
+    cappedMaxBytes,
     params.truncateOversize === true,
     basename(params.path)
   );

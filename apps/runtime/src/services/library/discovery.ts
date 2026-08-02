@@ -88,10 +88,10 @@ export function scanLibraryInstances(
   // therefore two entries. Scope is redundant with that today and is in the key
   // anyway, so a location that ever resolves to the same path at two scopes
   // cannot silently share one memo entry.
-  const signature = targets
+  const signature = `flat:\n${targets
     .map((target) => `${target.scope}\0${target.locationId}\0${target.path}`)
     .sort()
-    .join('\n');
+    .join('\n')}`;
   const cache = options.cache ?? libraryCache;
   const force = options.force ?? false;
   const locationById = new Map(
