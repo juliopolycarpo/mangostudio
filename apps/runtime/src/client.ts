@@ -154,8 +154,13 @@ export class RuntimeProtocolClient {
    */
   onClose(listener: () => void): () => void {
     if (this.#closed) {
-      queueMicrotask(listener);
-      return () => undefined;
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) listener();
+      });
+      return () => {
+        cancelled = true;
+      };
     }
     this.#closeListeners.add(listener);
     return () => this.#closeListeners.delete(listener);
@@ -192,7 +197,13 @@ export class RuntimeProtocolClient {
     this.#pongListeners.clear();
     const closeListeners = [...this.#closeListeners];
     this.#closeListeners.clear();
-    for (const listener of closeListeners) listener();
+    for (const listener of closeListeners) {
+      try {
+        listener();
+      } catch {
+        // A listener failure must not block notifying the rest or closing the port.
+      }
+    }
     this.#port.close();
   }
 

@@ -38,7 +38,10 @@ export function normalizeMcpContent(
 ): RuntimeMcpContentBlock[] {
   return rawBlocks.map((block) => {
     if (block.type === 'text' && typeof block.text === 'string') {
-      return { type: 'text', text: truncateUtf8(block.text, MCP_RESULT_MAX_BYTES) };
+      const capped = capUtf8Text(block.text, MCP_RESULT_MAX_BYTES);
+      return capped.truncated
+        ? { type: 'text', text: capped.text, truncated: true }
+        : { type: 'text', text: capped.text };
     }
     if (
       (block.type === 'image' || block.type === 'audio') &&
@@ -53,7 +56,14 @@ export function normalizeMcpContent(
     if (block.type === 'resource' && isResourcePayload(block.resource)) {
       const { uri, mimeType, text, blob } = block.resource;
       const cappedText =
-        typeof text === 'string' ? { text: truncateUtf8(text, MCP_RESULT_MAX_BYTES) } : undefined;
+        typeof text === 'string'
+          ? (() => {
+              const capped = capUtf8Text(text, MCP_RESULT_MAX_BYTES);
+              return capped.truncated
+                ? { text: capped.text, textTruncated: true as const }
+                : { text: capped.text };
+            })()
+          : undefined;
       const keepBlob =
         typeof blob === 'string' && Buffer.byteLength(blob, 'utf8') <= MCP_RESULT_MAX_BYTES
           ? { blob }
@@ -110,10 +120,8 @@ export function flattenMcpContent(blocks: ReadonlyArray<RuntimeMcpContentBlock>)
   // the same signal as when flatten itself has to cut a multi-block join.
   const blockWasCapped = blocks.some(
     (block) =>
-      (block.type === 'text' && Buffer.byteLength(block.text, 'utf8') >= MCP_RESULT_MAX_BYTES) ||
-      (block.type === 'resource' &&
-        typeof block.text === 'string' &&
-        Buffer.byteLength(block.text, 'utf8') >= MCP_RESULT_MAX_BYTES)
+      (block.type === 'text' && block.truncated) ||
+      (block.type === 'resource' && block.textTruncated)
   );
   if (blockWasCapped && !joined.endsWith(MCP_RESULT_TRUNCATION_MARKER)) {
     return `${truncateUtf8(joined, MCP_RESULT_MAX_BYTES)}${MCP_RESULT_TRUNCATION_MARKER}`;
@@ -139,6 +147,16 @@ export function capMcpResultText(text: string): string {
   if (Buffer.byteLength(text, 'utf8') <= MCP_RESULT_MAX_BYTES) return text;
   const capped = truncateUtf8(text, MCP_RESULT_MAX_BYTES);
   return `${capped}${MCP_RESULT_TRUNCATION_MARKER}`;
+}
+
+function capUtf8Text(
+  text: string,
+  maxBytes: number
+): { readonly text: string; readonly truncated: boolean } {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) {
+    return { text, truncated: false };
+  }
+  return { text: truncateUtf8(text, maxBytes), truncated: true };
 }
 
 function truncateUtf8(text: string, maxBytes: number): string {

@@ -58,11 +58,16 @@ describe('normalizeMcpContent', () => {
       },
     ]);
 
-    expect(blocks[0]).toEqual({ type: 'text', text: 'x'.repeat(MCP_RESULT_MAX_BYTES) });
+    expect(blocks[0]).toEqual({
+      type: 'text',
+      text: 'x'.repeat(MCP_RESULT_MAX_BYTES),
+      truncated: true,
+    });
     expect(blocks[1]).toMatchObject({
       type: 'resource',
       uri: 'file:///big.md',
       text: 'x'.repeat(MCP_RESULT_MAX_BYTES),
+      textTruncated: true,
     });
   });
 
@@ -125,6 +130,25 @@ describe('flattenMcpContent', () => {
   it('returns an empty string for empty content', () => {
     expect(flattenMcpContent([])).toBe('');
   });
+
+  it('appends the truncation marker when normalize shortened a multi-byte text block', () => {
+    const huge = '字'.repeat(MCP_RESULT_MAX_BYTES);
+    const blocks = normalizeMcpContent([{ type: 'text', text: huge }]);
+    expect(blocks[0]?.type).toBe('text');
+    if (blocks[0]?.type !== 'text') return;
+    expect(blocks[0].truncated).toBe(true);
+    expect(Buffer.byteLength(blocks[0].text, 'utf8')).toBeLessThan(MCP_RESULT_MAX_BYTES);
+
+    const flat = flattenMcpContent(blocks);
+    expect(flat.endsWith(MCP_RESULT_TRUNCATION_MARKER)).toBe(true);
+  });
+
+  it('does not append a marker for text that is exactly at the byte cap without truncation', () => {
+    const exact = 'a'.repeat(MCP_RESULT_MAX_BYTES);
+    const flat = flattenMcpContent([{ type: 'text', text: exact }]);
+    expect(flat).toBe(exact);
+    expect(flat.endsWith(MCP_RESULT_TRUNCATION_MARKER)).toBe(false);
+  });
 });
 
 describe('capMcpResultText', () => {
@@ -148,7 +172,10 @@ describe('capMcpResultText', () => {
   });
 
   it('applies the cap through flattenMcpContent', () => {
-    const text = flattenMcpContent([{ type: 'text', text: 'x'.repeat(MCP_RESULT_MAX_BYTES * 2) }]);
+    const blocks = normalizeMcpContent([
+      { type: 'text', text: 'x'.repeat(MCP_RESULT_MAX_BYTES * 2) },
+    ]);
+    const text = flattenMcpContent(blocks);
 
     expect(text.endsWith(MCP_RESULT_TRUNCATION_MARKER)).toBe(true);
     expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(

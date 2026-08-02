@@ -399,7 +399,7 @@ export interface RuntimeMcpServerCapabilities {
  * them; consumers decide what to persist or inline.
  */
 export type RuntimeMcpContentBlock =
-  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'text'; readonly text: string; readonly truncated?: true }
   | { readonly type: 'image'; readonly data: string; readonly mimeType: string }
   | { readonly type: 'audio'; readonly data: string; readonly mimeType: string }
   | {
@@ -407,6 +407,8 @@ export type RuntimeMcpContentBlock =
       readonly uri: string;
       readonly mimeType?: string;
       readonly text?: string;
+      /** Set when {@link text} was shortened to fit the runtime frame cap. */
+      readonly textTruncated?: true;
       readonly blob?: string;
     }
   | { readonly type: 'unknown'; readonly blockType: string; readonly mimeType?: string };
