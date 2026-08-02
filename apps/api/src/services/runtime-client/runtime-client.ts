@@ -22,13 +22,19 @@ import {
   type RuntimeInstallCancelParams,
   type RuntimeInstallRunParams,
   type RuntimeInstallRunResult,
+  type RuntimeLibraryApplyParams,
+  type RuntimeLibraryApplyResult,
   type RuntimeLibraryLocationsParams,
   type RuntimeLibraryLocationsResult,
   type RuntimeLibraryReadParams,
   type RuntimeLibraryReadResult,
+  type RuntimeLibraryRemoveParams,
+  type RuntimeLibraryRemoveResult,
   type RuntimeLibraryScanParams,
   type RuntimeLibraryScanResult,
   type RuntimeLibrarySettingsSourcesParams,
+  type RuntimeLibraryUndoParams,
+  type RuntimeLibraryUndoResult,
   type RuntimeListDirectoryParams,
   type RuntimeListDirectoryResult,
   type RuntimeMcpAckResult,
@@ -269,6 +275,18 @@ interface RuntimeLibraryClient {
     params?: RuntimeLibrarySettingsSourcesParams,
     options?: RuntimeRequestOptions
   ): Promise<RuntimeSettingsSourcesResult>;
+  apply(
+    params: RuntimeLibraryApplyParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryApplyResult>;
+  remove(
+    params: RuntimeLibraryRemoveParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryRemoveResult>;
+  undo(
+    params: RuntimeLibraryUndoParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryUndoResult>;
 }
 
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
@@ -335,6 +353,10 @@ export class RuntimeClient {
       locations: (params = {}, options) => this.request('library.locations', params, options),
       settingsSources: (params = {}, options) =>
         this.request('library.settings-sources', params, options),
+      // Hub callers should pass an explicit timeoutMs (60_000 matches library reads).
+      apply: (params, options) => this.request('library.apply', params, options),
+      remove: (params, options) => this.request('library.remove', params, options),
+      undo: (params, options) => this.request('library.undo', params, options),
     };
     this.snapshot = {
       capture: (params, options) => this.request('snapshot.capture', params, options),

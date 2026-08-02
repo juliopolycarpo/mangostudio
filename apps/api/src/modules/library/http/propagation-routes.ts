@@ -41,6 +41,7 @@ import {
 import { previewLibraryPropagation } from '../application/propagation-preview';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { assertBackupId, purgeBackupSet } from '../infrastructure/backup-store';
+import { handleLibraryError } from './library-error';
 
 export interface PropagationRouteService {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
@@ -56,7 +57,7 @@ export interface PropagationRouteService {
 const defaultPropagationRouteService: PropagationRouteService = {
   preview: (userId, request) => previewLibraryPropagation(userId, request),
   apply: (userId, request) => applyLibraryPropagation(userId, request),
-  undo: (_userId, backupId) => undoLibraryPropagation(backupId),
+  undo: (userId, backupId) => undoLibraryPropagation(backupId, {}, userId),
   backupUsage: () => describeBackupUsage(),
   purgeBackup: (backupId) => purgeBackupSet(backupId),
   listAcks: (userId) => listDivergenceAcks(userId),
@@ -80,9 +81,7 @@ function mapPropagationError(error: unknown, set: { status?: number | string }):
     set.status = 400;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
-  console.error('[library] Unexpected propagation error:', error);
-  set.status = 500;
-  return { error: 'Unexpected library propagation error.', code: ERROR_CODES.INTERNAL };
+  return handleLibraryError(error, set, '[library]', 'Unexpected library propagation error.');
 }
 
 function invalidResourceKey(set: { status?: number | string }): ApiErrorResponse {
@@ -135,6 +134,9 @@ export function createPropagationRoutes(
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          // The write engine runs on the runtime, so an unreachable runtime is
+          // the same 503 the discovery and settings routes already return.
+          503: ApiErrorResponseSchema,
         },
       }
     )
@@ -154,6 +156,9 @@ export function createPropagationRoutes(
           404: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          // Undo replays the backup set on the runtime, so an unreachable
+          // runtime is a 503 rather than an internal error.
+          503: ApiErrorResponseSchema,
         },
       }
     )

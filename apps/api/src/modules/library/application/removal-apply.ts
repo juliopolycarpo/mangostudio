@@ -10,49 +10,38 @@
  * best-effort is worse than no removal feature.
  */
 
-import { resolve as resolvePath } from 'node:path';
+import type { RuntimeLibraryRemoveParams } from '@mangostudio/runtime';
+import {
+  executeRemovalWrites,
+  type PreparedRemovalOperation,
+  type RemovalWriteEngineDeps,
+} from '@mangostudio/runtime';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   RemovalApply,
   RemovalApplyRequest,
-  RemovalFailure,
   RemovalKept,
   RemovalPreview,
   RemovalPreviewEntry,
   RemovalPreviewRequest,
-  RemovalRemoved,
 } from '@mangostudio/shared/library';
-import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
+import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
+import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
-import { assertExpectedResourceEntry } from '../domain/path-safety';
-import {
-  type BackupEntry,
-  type BackupStoreDeps,
-  backupExistingResource,
-  createBackupId,
-  defaultBackupStoreDeps,
-  discardBackupSet,
-  pruneBackupSets,
-  writeBackupManifest,
-} from '../infrastructure/backup-store';
+import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
 import { hashResourceAt } from '../infrastructure/instance-reader';
-import { createLibraryPathEnv } from '../infrastructure/location-probe';
-import {
-  requireWritableLocation,
-  resolveResourceDestination,
-} from '../infrastructure/resource-writer';
-import {
-  nodeTreeRemovalFs,
-  type StagedRemoval,
-  stageResourceRemoval,
-  type TreeRemovalFs,
-} from '../infrastructure/tree-removal';
+import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
+import { nodeTreeRemovalFs, type TreeRemovalFs } from '../infrastructure/tree-removal';
 import { serializeLibraryWrite } from './apply-queue';
 import { compareText } from './preview-state';
 import { previewLibraryRemoval } from './removal-preview';
+
+/** Matches library reads: hub deadline sits above runtime write work. */
+const LIBRARY_WRITE_TIMEOUT_MS = 60_000;
 
 export interface RemovalApplyDeps {
   preview(userId: string, request: RemovalPreviewRequest): Promise<RemovalPreview>;
@@ -60,6 +49,10 @@ export interface RemovalApplyDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   backup: BackupStoreDeps;
   treeFs: TreeRemovalFs;
+  /** Which process performs the writes; see `PropagationApplyDeps.writeEngine`. */
+  writeEngine: 'runtime' | 'in-process';
+  /** Stands in for the RuntimeClient on the `runtime` engine. */
+  runtimeRemove?: (params: RuntimeLibraryRemoveParams) => Promise<RemovalApply>;
 }
 
 function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
@@ -69,6 +62,8 @@ function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
     hashAt: overrides.hashAt ?? hashResourceAt,
     backup: overrides.backup ?? defaultBackupStoreDeps,
     treeFs: overrides.treeFs ?? nodeTreeRemovalFs,
+    writeEngine: overrides.writeEngine ?? 'runtime',
+    ...(overrides.runtimeRemove && { runtimeRemove: overrides.runtimeRemove }),
   };
 }
 
@@ -111,124 +106,82 @@ async function runRemoval(
 
   const plan = planRemoval(preview, request);
   const env = deps.pathEnv();
-  const backupId = createBackupId(deps.backup);
-  const results: StagedOperation[] = [];
-  const failed: RemovalFailure[] = [];
+  const operations: PreparedRemovalOperation[] = plan.operations.map((operation) => ({
+    resourceKey: operation.resourceKey,
+    locationId: operation.locationId,
+    slug: operation.slug,
+    kind: operation.kind,
+    expectedPath: operation.expectedPath,
+    expectedContentHash: operation.expectedContentHash,
+    lastCopy: operation.lastCopy,
+  }));
 
-  for (const operation of plan.operations) {
-    try {
-      results.push(await stageOperation(operation, env, backupId, deps));
-    } catch (error) {
-      failed.push(describeFailure(operation, error));
-      break;
-    }
-  }
-
-  const staged = results.map((result) => result.staged);
-  const entries = results.map((result) => result.entry);
-  const removed = results.map((result) => result.removed);
-
-  if (failed.length > 0) {
-    // Captured before the rollback, because it is the staging loop that stopped
-    // short: everything after the failing operation was never tried, and the
-    // user reviewed those locations too.
-    const unattempted = notAttempted(plan.operations, results.length);
-    const unrestored = await rollback(staged);
-    const kept = [...plan.kept, ...rolledBack(results, unrestored), ...unattempted];
-    if (unrestored.size === 0) {
-      // Every tree is back where it started, so the copies in the backup set
-      // are redundant and keeping them would only confuse the retention budget.
-      await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-      return { partial: false, removed: [], kept, failed };
-    }
-    // Compensation failed for some copies. Only those are reported as removed:
-    // a tree the rollback did put back is on disk, and listing it here would
-    // send the caller to restore a path that never went anywhere. The manifest
-    // still carries every entry, so `undo` can reach all of them.
-    await persistManifest(backupId, entries, plan, deps);
-    return {
-      partial: true,
-      removed: stillRemoved(results, unrestored),
-      kept,
-      failed,
-      backupId,
-    };
-  }
-
-  if (entries.length === 0) {
-    return { partial: false, removed, kept: plan.kept, failed };
-  }
-
-  // The manifest lands before the staged trees are deleted, never after. Until
-  // it exists there is no handle `undo` can take, and the staged tree is the
-  // last in-place copy — destroying it first would turn a crash in between into
-  // an unrecoverable removal.
-  try {
-    await persistManifest(backupId, entries, plan, deps);
-  } catch (error) {
-    const unrestored = await rollback(staged);
-    if (unrestored.size === 0) await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-    failed.push({
-      resourceKey: plan.operations[0]?.resourceKey ?? '',
-      locationId: plan.operations[0]?.locationId ?? '',
-      reason: 'remove-failed',
-      // The set id belongs in the message rather than in `backupId`: without a
-      // manifest `undo` resolves nothing and answers 404, so returning the field
-      // would render a restore button that cannot work. Naming the set here
-      // still points a human at the copies, which is all that is left.
-      message: `Could not record the backup manifest, so this removal cannot be undone automatically; the copies are under backup set "${backupId}": ${errorMessage(error)}`,
-    });
-    const kept = [...plan.kept, ...rolledBack(results, unrestored)];
-    return unrestored.size === 0
-      ? { partial: false, removed: [], kept, failed }
-      : {
-          partial: true,
-          removed: stillRemoved(results, unrestored),
-          kept,
-          failed,
-        };
-  }
-
-  for (const stage of staged) {
-    // A staged tree that cannot be deleted is a stale sibling the next preview
-    // and `mango doctor` both report. It is never a reason to fail an apply
-    // whose destinations are already provably gone.
-    await stage.commit().catch((error: unknown) => {
-      console.error(`[library] Could not clean up "${stage.stagePath}":`, error);
-    });
-  }
-  await pruneBackupSets(backupId, deps.backup);
-
-  return { backupId, partial: false, removed, kept: plan.kept, failed };
+  // The plan's own `kept` entries are merged here rather than shipped and
+  // echoed: the hub decided them, and the engine returns only what it kept
+  // itself — rolled back, or never attempted.
+  const removalResult = await runWriteEngine(userId, operations, plan, env, deps);
+  return { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
 }
 
-async function persistManifest(
-  backupId: string,
-  entries: readonly BackupEntry[],
+function runWriteEngine(
+  userId: string,
+  operations: readonly PreparedRemovalOperation[],
   plan: RemovalPlan,
+  env: PathEnv,
   deps: RemovalApplyDeps
-): Promise<void> {
-  await writeBackupManifest(
-    {
-      version: 2,
-      backupId,
-      createdAtMs: deps.backup.now().getTime(),
-      entries: [...entries],
-      // Every entry here carries a backup, so undoing this set only ever puts
-      // content back. Recording that is what lets a listed row say "put the
-      // removed copies back" instead of the neutral verb a propagation set has
-      // to use, where undo can also delete.
-      operation: 'removal',
-      // Pinning is decided by what the apply actually did, not by what the
-      // preview offered: a set holding someone's only copy of a skill must
-      // never be evicted to reclaim disk.
-      ...(plan.lastCopyResourceKeys.length > 0 && {
-        pinned: true,
-        lastCopyResourceKeys: [...plan.lastCopyResourceKeys],
-      }),
+): Promise<RemovalApply> {
+  if (deps.writeEngine === 'in-process') {
+    const engineDeps: RemovalWriteEngineDeps = {
+      hashAt: deps.hashAt,
+      backup: deps.backup,
+      treeFs: deps.treeFs,
+    };
+    return executeRemovalWrites(
+      {
+        backupRoot: deps.backup.backupDir(),
+        retentionCount: deps.backup.retentionCount(),
+        retentionBytes: deps.backup.retentionBytes(),
+        pathEnv: env,
+        operations,
+        lastCopyResourceKeys: plan.lastCopyResourceKeys,
+      },
+      engineDeps
+    );
+  }
+
+  const params = toRuntimeRemoveParams(operations, plan, env, deps.backup);
+  return deps.runtimeRemove ? deps.runtimeRemove(params) : runtimeRemove(userId, params);
+}
+
+async function runtimeRemove(
+  userId: string,
+  params: RuntimeLibraryRemoveParams
+): Promise<RemovalApply> {
+  const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
+  return await client.library.remove(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
+}
+
+function toRuntimeRemoveParams(
+  operations: readonly PreparedRemovalOperation[],
+  plan: RemovalPlan,
+  env: PathEnv,
+  backup: BackupStoreDeps
+): RuntimeLibraryRemoveParams {
+  return {
+    backupRoot: backup.backupDir(),
+    retentionCount: backup.retentionCount(),
+    retentionBytes: backup.retentionBytes(),
+    pathEnv: {
+      // Only the MangoStudio directories travel, matching `pathEnvParams` in
+      // `environment-library-service.ts`; the runtime merges its own
+      // `process.env` underneath, so forwarding the hub's would only put its
+      // secrets in the frame.
+      env: configuredLibraryEnv(),
+      ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
     },
-    deps.backup
-  );
+    operations,
+    lastCopyResourceKeys: [...plan.lastCopyResourceKeys],
+  };
 }
 
 interface PlannedRemoval {
@@ -389,196 +342,6 @@ function markLastCopy(operations: PlannedRemoval[], entry: RemovalPreviewEntry):
   }
 }
 
-interface StagedOperation {
-  readonly staged: StagedRemoval;
-  readonly entry: BackupEntry;
-  readonly removed: RemovalRemoved;
-}
-
-/**
- * Backs one instance up and moves it aside, leaving nothing deleted yet.
- *
- * Every guard the writer applies runs first — registry access, layout, the
- * containment check behind `resolveResourceDestination`, and the entry-type
- * check that refuses to unlink a device or a socket — and the content is
- * re-hashed from disk rather than trusted from the preview.
- */
-async function stageOperation(
-  operation: PlannedRemoval,
-  env: PathEnv,
-  backupId: string,
-  deps: RemovalApplyDeps
-): Promise<StagedOperation> {
-  const location = requireWritableLocation(
-    operation.locationId,
-    operation.kind === 'directory' ? 'directory-of-dirs' : 'file'
-  );
-  const destination = resolveResourceDestination(location, operation.slug, env);
-  assertPreviewedPath(operation, location, destination.logicalPath);
-  assertExpectedResourceEntry(destination.resolvedPath, operation.kind);
-
-  const contentHash = await deps.hashAt(destination.resolvedPath, operation.kind);
-  if (contentHash !== operation.expectedContentHash) {
-    throw new GuardError(
-      `"${destination.logicalPath}" hashed to ${contentHash}, not the ${operation.expectedContentHash} the preview described.`
-    );
-  }
-
-  let backupPath: string;
-  try {
-    backupPath = await backupExistingResource(
-      {
-        resolvedPath: destination.resolvedPath,
-        locationId: location.id,
-        slug: operation.slug,
-        backupId,
-      },
-      deps.backup
-    );
-  } catch (error) {
-    throw new BackupError(`Could not back up "${destination.logicalPath}": ${errorMessage(error)}`);
-  }
-
-  const staged = await stageResourceRemoval(
-    { resolvedPath: destination.resolvedPath, suffix: deps.backup.randomSuffix() },
-    deps.treeFs
-  );
-
-  return {
-    staged,
-    entry: {
-      locationId: location.id,
-      slug: operation.slug,
-      kind: operation.kind,
-      destinationPath: destination.logicalPath,
-      resolvedPath: destination.resolvedPath,
-      backupPath,
-      // The identity the coverage matrix uses, so a retained set can name the
-      // resources it holds rather than counting anonymous entries.
-      resourceKey: operation.resourceKey,
-      // What the apply left at the destination is *nothing*, so undo compares
-      // against the removed content: a path recreated with different bytes
-      // after the removal is a change undo must not silently discard.
-      writtenContentHash: contentHash,
-    },
-    removed: {
-      resourceKey: operation.resourceKey,
-      locationId: location.id,
-      path: destination.logicalPath,
-      contentHash,
-      lastCopy: operation.lastCopy,
-    },
-  };
-}
-
-/**
- * The path the registry derives must be the one the preview showed. They are
- * built from the same definition, so a disagreement means the environment moved
- * under the request — and the one operation that must never act on a guess
- * about which file it is about to delete is this one.
- */
-function assertPreviewedPath(
-  operation: PlannedRemoval,
-  location: LocationDefinition,
-  logicalPath: string
-): void {
-  if (resolvePath(logicalPath) === resolvePath(operation.expectedPath)) return;
-  throw new GuardError(
-    `"${operation.resourceKey}" resolves to "${logicalPath}" at "${location.id}", not the previewed "${operation.expectedPath}".`
-  );
-}
-
-/**
- * Renames every staged tree back, newest first. Returns the stage paths whose
- * compensation failed — empty means the disk is exactly as it was, and anything
- * else is the one case where the backups must be kept and the apply reported as
- * partial.
- */
-async function rollback(staged: readonly StagedRemoval[]): Promise<ReadonlySet<string>> {
-  const unrestored = new Set<string>();
-  for (const stage of [...staged].reverse()) {
-    try {
-      await stage.rollback();
-    } catch (error) {
-      unrestored.add(stage.stagePath);
-      console.error(`[library] Could not restore "${stage.resolvedPath}":`, error);
-    }
-  }
-  return unrestored;
-}
-
-/**
- * The copies a failed compensation really did leave gone. Anything the rollback
- * put back is on disk and must not be reported as removed — the response is
- * what the caller reads to decide which paths still need restoring.
- */
-function stillRemoved(
-  results: readonly StagedOperation[],
-  unrestored: ReadonlySet<string>
-): RemovalRemoved[] {
-  return results
-    .filter((result) => unrestored.has(result.staged.stagePath))
-    .map((result) => result.removed);
-}
-
-/**
- * The copies a compensation did put back. They sit on disk exactly as they did
- * before the apply, so the caller has to see them as kept — reporting them
- * nowhere at all would leave a location the user reviewed unaccounted for.
- */
-function rolledBack(
-  results: readonly StagedOperation[],
-  unrestored: ReadonlySet<string>
-): RemovalKept[] {
-  return results
-    .filter((result) => !unrestored.has(result.staged.stagePath))
-    .map((result) => ({
-      resourceKey: result.removed.resourceKey,
-      locationId: result.removed.locationId,
-      reason: 'rolled-back' as const,
-    }));
-}
-
-/**
- * The copies the apply stopped short of. Staging halts at the first failure, so
- * every operation after it was planned, shown to the user, and then silently
- * skipped. `staged` is how many succeeded; the one at that index is the failure
- * already recorded in `failed`.
- */
-function notAttempted(operations: readonly PlannedRemoval[], staged: number): RemovalKept[] {
-  return operations.slice(staged + 1).map((operation) => ({
-    resourceKey: operation.resourceKey,
-    locationId: operation.locationId,
-    reason: 'not-attempted' as const,
-  }));
-}
-
-class GuardError extends Error {}
-class BackupError extends Error {}
-
-function describeFailure(operation: PlannedRemoval, error: unknown): RemovalFailure {
-  const reason =
-    error instanceof GuardError
-      ? 'guard-rejected'
-      : error instanceof BackupError
-        ? 'backup-failed'
-        : error instanceof Error && error.name === 'LibraryWriteError'
-          ? 'guard-rejected'
-          : error instanceof Error && error.name === 'RemovalVerificationError'
-            ? 'verification-failed'
-            : 'remove-failed';
-  return {
-    resourceKey: operation.resourceKey,
-    locationId: operation.locationId,
-    reason,
-    message: errorMessage(error),
-  };
-}
-
 function validationError(message: string): LibraryRequestError {
   return new LibraryRequestError(422, message);
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

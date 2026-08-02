@@ -80,6 +80,9 @@ export function createRuntimeMethodHandlers(
       handler('library.read', (params) => libraryService.read(params)),
       handler('library.locations', (params) => libraryService.locations(params)),
       handler('library.settings-sources', (params) => libraryService.settingsSources(params)),
+      handler('library.apply', (params, context) => libraryService.apply(params, context.signal)),
+      handler('library.remove', (params, context) => libraryService.remove(params, context.signal)),
+      handler('library.undo', (params, context) => libraryService.undo(params, context.signal)),
     ]),
     close: async () => {
       install.close();

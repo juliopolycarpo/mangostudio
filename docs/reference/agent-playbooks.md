@@ -162,8 +162,9 @@ Open these first:
   (locations, targets, per-kind read precedence; path resolution is pure over
   `PathEnv`)
 - `apps/runtime/src/services/library/` (scan + contained read + settings source
-  reads + byte caps — `library.scan` / `library.read` / `library.locations` /
-  `library.settings-sources`; the engine that used to live under
+  reads + byte caps + write engines — `library.scan` / `library.read` /
+  `library.locations` / `library.settings-sources` / `library.apply` /
+  `library.remove` / `library.undo`; the FS engines that used to live under
   `apps/api/.../infrastructure`)
 - `apps/api/src/modules/library/application/library-discovery.ts` (groups a scan
   result; coverage and divergence stay hub-side)
@@ -175,7 +176,11 @@ Open these first:
 - `apps/api/src/modules/library/application/propagation-preview.ts` (source
   groups, outcomes)
 - `apps/api/src/modules/library/application/propagation-apply.ts` (token,
-  backup, verify, undo — still hub-local until write engines move)
+  planning, adapters, acknowledgements — FS writes go through runtime
+  `library.apply` / `library.undo` with an explicit `backupRoot`; injected FS
+  deps keep unit tests in-process)
+- `apps/api/src/modules/library/application/removal-apply.ts` (token, planning,
+  last-copy acknowledgement — FS removals go through `library.remove`)
 - `apps/api/src/modules/library/application/adapters/` (format conversion
   strategies)
 - `apps/api/src/modules/library/application/settings-inspection.ts` (pure: turns
@@ -220,9 +225,44 @@ otherwise a symlinked `CLAUDE.md` passes containment against its own target.
 `library.settings-sources` opens settings paths with `O_NOFOLLOW` for the same
 reason, and never touches a target's credential files.
 
-Two discovery caches coexist until the write engines move (017): the matrix
-reads through `environmentLibraryService`, while `discoverLibraryResourcesFromSettings`
-still serves the hub-local skill adapter and the propagation/removal previews.
+**Checkpoint contrast:** checkpoints stream bytes to hub-owned blobs; library
+backups stay on the machine that owned the file. The runtime holds durable
+backup data under a hub-supplied `backupRoot` — the exception to "runtime holds
+no durable user data". Retention policy is hub config; the path is a method
+parameter, never hardcoded on the runtime.
+
+Four rules hold the write boundary, and each exists because the alternative
+fails silently:
+
+- **The runtime refuses a destination the preview did not describe.** Both
+  engines compare what the hub said the location resolves to against what it
+  resolves to here. The hub's `destinationRoot` is where the user was told the
+  bytes were going; the runtime's own `PathEnv` is where they would actually
+  land. Those agree in-process and are allowed to disagree between machines.
+- **The manifest is untrusted input.** `library.undo` drives `rm -rf` and
+  overwriting copies from a JSON file under a caller-supplied root, so every
+  entry has to resolve inside the registry location it names and every backup
+  path under the backup root. A corrupt or forged set refuses whole.
+- **Cancellation is cooperative and honoured.** The hub sets an explicit
+  `timeoutMs` on every write RPC; the engines check the abort between
+  operations and fall into their existing compensation path, so the disk agrees
+  with the failure the hub already reported. Writes serialize per `backupRoot`
+  on the runtime as well as on the hub — the hub releases its lock when the
+  deadline fires, while the work here is still rolling back.
+- **Which process writes is stated, not inferred.** `writeEngine` on the apply,
+  removal, and undo deps picks `runtime` (the default, over the protocol) or
+  `in-process` (the engine here, against injected fs seams). Tests say which
+  they mean; a suite that means to cover the protocol cannot silently avoid it.
+
+Propagated file bytes travel once per distinct payload in a `contents` map
+keyed by content hash, because fanning one resource across destinations used to
+put one base64 copy per destination in a single frame. An apply whose content
+still will not fit is refused hub-side with a 422 rather than left to throw in
+the codec, which only validates outside production.
+
+Two discovery caches coexist: the matrix reads through
+`environmentLibraryService`, while `discoverLibraryResourcesFromSettings` still
+serves the hub-local skill adapter and the propagation/removal previews.
 `resetSkillsCache()` drops both.
 
 Every location carries a `scope`, and every one of them is `home` today. The

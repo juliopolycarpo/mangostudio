@@ -124,6 +124,9 @@ function applyRemoval(request: RemovalApplyRequest, userId: string = TEST_USER.i
     preview: (previewUserId, previewRequest) =>
       previewRemoval(previewRequest.locationIds, previewUserId),
     pathEnv: libraryPathEnv,
+    // Drives the engine directly against this suite's temp home; the runtime
+    // engine would resolve locations against the real one.
+    writeEngine: 'in-process',
     backup: backupDeps(),
   });
 }
@@ -240,7 +243,11 @@ describe('library removal over real locations', () => {
     expect(paths.filter((path) => existsSync(path))).toEqual([]);
     expect(await currentDivergence()).toBeUndefined();
 
-    const undone = await undoLibraryPropagation(result.backupId ?? '', { backup: backupDeps() });
+    const undone = await undoLibraryPropagation(result.backupId ?? '', {
+      backup: backupDeps(),
+      pathEnv: libraryPathEnv,
+      writeEngine: 'in-process',
+    });
 
     expect(undone.restored).toHaveLength(4);
     expect(paths.every((path) => existsSync(path))).toBe(true);

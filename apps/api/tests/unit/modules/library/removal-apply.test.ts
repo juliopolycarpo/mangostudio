@@ -140,6 +140,7 @@ function apply(
   return applyLibraryRemoval('user-1', request, {
     preview: () => Promise.resolve(preview),
     pathEnv: env,
+    writeEngine: 'in-process',
     backup: overrides.backup ?? backupDeps(),
     ...(overrides.treeFs && { treeFs: overrides.treeFs }),
   });
@@ -181,7 +182,11 @@ describe('applyLibraryRemoval', () => {
       requestFor(preview, { acknowledgeLastCopy: ['skill:gh'] }),
       { backup }
     );
-    const undone = await undoLibraryPropagation(result.backupId ?? '', { backup });
+    const undone = await undoLibraryPropagation(result.backupId ?? '', {
+      backup,
+      pathEnv: env,
+      writeEngine: 'in-process',
+    });
 
     expect(undone.restored).toHaveLength(1);
     expect(await hashResourceAt(path, 'directory')).toBe(before);

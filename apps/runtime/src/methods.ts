@@ -8,11 +8,19 @@ import type {
 } from '@mangostudio/shared/environments';
 import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
 import type {
+  AdapterStrategy,
+  AdaptNote,
+  AdaptProvenance,
   LibraryInstance,
   LibraryLocationId,
   LibraryLocationStatus,
   LibraryResourceRef,
   LibraryTargetId,
+  PropagationApply,
+  PropagationSkipped,
+  PropagationUndo,
+  RemovalApply,
+  RemovalKept,
   ResourceKind,
 } from '@mangostudio/shared/library';
 import type {
@@ -29,6 +37,11 @@ import type {
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
 import type { RuntimeSettingsSourcesResult } from './services/library/settings-sources';
+import type {
+  PreparedPropagationAdaptation,
+  PreparedPropagationOperation,
+  PreparedRemovalOperation,
+} from './services/library/write-shapes';
 
 export const RUNTIME_ABSENT_HASH = 'absent';
 
@@ -710,6 +723,67 @@ export interface RuntimeLibrarySettingsSourcesParams {
   readonly pathEnv?: RuntimeLibraryPathEnvParams;
 }
 
+export interface RuntimeLibraryBackupEnvelope {
+  /** Absolute backup root on this host. Hub-supplied; never invented here. */
+  readonly backupRoot: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
+  readonly backupId?: string;
+}
+
+/**
+ * The write operations are the engines' own shapes, encoded.
+ *
+ * Declaring them twice — once here for the wire, once in the engine — meant
+ * every crossing needed a cast, and a field added to one half compiled cleanly
+ * while being dropped in transit. The engine module owns the shape because it
+ * is the thing that acts on it; the only wire-specific difference is that bytes
+ * travel as a key into `contents` rather than as a buffer.
+ */
+export type RuntimeLibraryApplyAdaptation = PreparedPropagationAdaptation;
+
+export type RuntimeLibraryApplyOperation = Omit<PreparedPropagationOperation, 'contents'> & {
+  /** Key into `RuntimeLibraryApplyParams.contents`. Absent for directories. */
+  readonly contentRef?: string;
+};
+
+export interface RuntimeLibraryApplyParams extends RuntimeLibraryBackupEnvelope {
+  readonly operations: readonly RuntimeLibraryApplyOperation[];
+  /**
+   * Base64 payloads keyed by content hash, referenced by `contentRef`.
+   *
+   * Shared rather than inlined per operation because propagation fans one
+   * resource out across destinations: N destinations of the same bytes used to
+   * put N base64 copies in a single frame, and two 2 MiB resources across five
+   * locations already exceeded `RUNTIME_MAX_FRAME_BYTES`.
+   */
+  readonly contents?: Readonly<Record<string, string>>;
+}
+
+export type RuntimeLibraryApplyResult = PropagationApply;
+
+export type RuntimeLibraryRemoveOperation = PreparedRemovalOperation;
+
+export interface RuntimeLibraryRemoveParams extends RuntimeLibraryBackupEnvelope {
+  readonly operations: readonly RuntimeLibraryRemoveOperation[];
+  readonly lastCopyResourceKeys?: readonly string[];
+}
+
+export type RuntimeLibraryRemoveResult = RemovalApply;
+
+export interface RuntimeLibraryUndoParams {
+  readonly backupRoot: string;
+  readonly backupId: string;
+  /**
+   * Resolves the registry roots the manifest's paths have to sit inside. No
+   * retention bounds travel: undo restores and removes, it never prunes.
+   */
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
+}
+
+export type RuntimeLibraryUndoResult = PropagationUndo;
+
 export interface RuntimeMethodMap {
   'fs.read-file': {
     readonly params: RuntimeReadFileParams;
@@ -858,6 +932,18 @@ export interface RuntimeMethodMap {
   'library.settings-sources': {
     readonly params: RuntimeLibrarySettingsSourcesParams;
     readonly result: RuntimeSettingsSourcesResult;
+  };
+  'library.apply': {
+    readonly params: RuntimeLibraryApplyParams;
+    readonly result: RuntimeLibraryApplyResult;
+  };
+  'library.remove': {
+    readonly params: RuntimeLibraryRemoveParams;
+    readonly result: RuntimeLibraryRemoveResult;
+  };
+  'library.undo': {
+    readonly params: RuntimeLibraryUndoParams;
+    readonly result: RuntimeLibraryUndoResult;
   };
 }
 

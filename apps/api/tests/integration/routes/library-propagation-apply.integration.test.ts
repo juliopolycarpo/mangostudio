@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { RuntimeLibraryApplyParams } from '@mangostudio/runtime';
 import {
   DEFAULT_APP_SETTINGS,
   libraryLocationsFor,
@@ -187,6 +188,10 @@ function applyDeps(overrides: Partial<PropagationApplyDeps> = {}): Partial<Propa
   return {
     preview: (_userId, request) => preview(request),
     pathEnv,
+    // The parity bar: these suites drive the write engine directly against a
+    // temp home. Tests that mean to exercise the protocol say so by passing
+    // `writeEngine: 'runtime'` with a `runtimeApply` stub.
+    writeEngine: 'in-process',
     backup: backupDeps(),
     writeDirectory: (input) => writeDirectoryResource(input, writerOverrides()),
     writeFile: (input) => writeFileResource(input, writerOverrides()),
@@ -444,7 +449,11 @@ describe('propagation undo', () => {
     );
     expect(applied.backupId).toBeDefined();
 
-    const undone = await undoLibraryPropagation(applied.backupId ?? '', { backup: backupDeps() });
+    const undone = await undoLibraryPropagation(applied.backupId ?? '', {
+      backup: backupDeps(),
+      pathEnv,
+      writeEngine: 'in-process',
+    });
 
     expect(undone.restored.map((item) => item.locationId)).toEqual(['claude-skills']);
     expect(undone.removed.map((item) => item.locationId).sort()).toEqual([
@@ -468,7 +477,11 @@ describe('propagation undo', () => {
 
     // Undoing an apply must not also discard an edit made afterwards.
     writeSkill('claude-skills', 'edited after the apply\n');
-    const undone = await undoLibraryPropagation(applied.backupId ?? '', { backup: backupDeps() });
+    const undone = await undoLibraryPropagation(applied.backupId ?? '', {
+      backup: backupDeps(),
+      pathEnv,
+      writeEngine: 'in-process',
+    });
 
     expect(undone.restored).toEqual([]);
     expect(undone.skipped[0]).toMatchObject({ reason: 'changed-since-apply' });
@@ -477,7 +490,11 @@ describe('propagation undo', () => {
 
   it('reports a backup that retention has already discarded', async () => {
     await expect(
-      undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', { backup: backupDeps() })
+      undoLibraryPropagation('2020-01-01T00-00-00.000Z-deadbeef', {
+        backup: backupDeps(),
+        pathEnv,
+        writeEngine: 'in-process',
+      })
     ).rejects.toMatchObject({ status: 404 });
   });
 });
@@ -507,6 +524,38 @@ describe('propagation apply — file-backed resources', () => {
     expect(result.failed).toEqual([]);
     expect(readFileSync(instructionPath('mango-instructions'), 'utf8')).toBe('# House rules\n');
     expect(readFileSync(instructionPath('codex-instructions'), 'utf8')).toBe('# House rules\n');
+  });
+
+  it('sends one copy of the bytes however many destinations share them', async () => {
+    writeInstruction('claude-instructions', '# House rules\n');
+    mkdirSync(join(home, '.mango'), { recursive: true });
+    mkdirSync(join(home, '.codex'), { recursive: true });
+
+    const { taken, request, entry } = await previewInstruction();
+    let sent: RuntimeLibraryApplyParams | undefined;
+    await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'claude-instructions'))]),
+      applyDeps({
+        writeEngine: 'runtime',
+        runtimeApply: (params) => {
+          sent = params;
+          return Promise.resolve({ partial: false, applied: [], skipped: [], failed: [] });
+        },
+      })
+    );
+
+    // Two destinations, identical bytes: one payload in the frame, both
+    // operations pointing at it. Inlining per operation is what puts a wide
+    // apply over RUNTIME_MAX_FRAME_BYTES.
+    const operations = sent?.operations ?? [];
+    expect(operations).toHaveLength(2);
+    expect(Object.keys(sent?.contents ?? {})).toHaveLength(1);
+    const [ref] = Object.keys(sent?.contents ?? {});
+    expect(operations.map((operation) => operation.contentRef)).toEqual([ref, ref]);
+    expect(Buffer.from(sent?.contents?.[ref ?? ''] ?? '', 'base64').toString('utf8')).toBe(
+      '# House rules\n'
+    );
   });
 
   it('mechanically adapts plain instructions to MDC before the atomic write', async () => {

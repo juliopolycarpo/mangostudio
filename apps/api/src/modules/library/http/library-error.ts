@@ -15,7 +15,8 @@ import { LibraryFeatureUnavailableError } from '../application/environment-libra
 export function handleLibraryError(
   error: unknown,
   set: { status?: number | string },
-  logPrefix = '[library]'
+  logPrefix = '[library]',
+  unexpectedMessage = 'Unexpected library discovery error.'
 ): ApiErrorResponse {
   if (error instanceof LibraryFeatureUnavailableError) {
     set.status = 422;
@@ -27,5 +28,5 @@ export function handleLibraryError(
   }
   console.error(`${logPrefix} Unexpected error:`, error);
   set.status = 500;
-  return { error: 'Unexpected library discovery error.', code: ERROR_CODES.INTERNAL };
+  return { error: unexpectedMessage, code: ERROR_CODES.INTERNAL };
 }

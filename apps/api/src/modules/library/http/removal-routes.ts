@@ -31,6 +31,7 @@ import { requireAuth } from '../../../plugins/auth-middleware';
 import { applyLibraryRemoval } from '../application/removal-apply';
 import { previewLibraryRemoval } from '../application/removal-preview';
 import { LibraryRequestError } from '../domain/library-request-error';
+import { handleLibraryError } from './library-error';
 
 export interface RemovalRouteService {
   preview(userId: string, request: RemovalPreviewRequest): Promise<RemovalPreview>;
@@ -58,9 +59,7 @@ function mapRemovalError(error: unknown, set: { status?: number | string }): Api
     set.status = 400;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
-  console.error('[library] Unexpected removal error:', error);
-  set.status = 500;
-  return { error: 'Unexpected library removal error.', code: ERROR_CODES.INTERNAL };
+  return handleLibraryError(error, set, '[library]', 'Unexpected library removal error.');
 }
 
 export function createRemovalRoutes(service: RemovalRouteService = defaultRemovalRouteService) {
@@ -108,6 +107,9 @@ export function createRemovalRoutes(service: RemovalRouteService = defaultRemova
           // a resource anywhere and did not say so out loud.
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          // The removal engine runs on the runtime, so an unreachable runtime is
+          // the same 503 the discovery and settings routes already return.
+          503: ApiErrorResponseSchema,
         },
       }
     );
