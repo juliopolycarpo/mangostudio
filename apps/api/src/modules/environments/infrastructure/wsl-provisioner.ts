@@ -20,6 +20,7 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
@@ -28,17 +29,25 @@ import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib
 import {
   DISTRO_RUNTIME_PATH,
   type DistroPlatformProbe,
+  type DistroSlotProbe,
+  distroRuntimeConfigAfterInstall,
   findReleaseChecksum,
   INSTALL_ARCHIVE_SCRIPT,
   INSTALL_BINARY_SCRIPT,
+  LEGACY_DISTRO_RUNTIME_PATH,
   type LinuxPlatformId,
   localRuntimeBuildCommand,
   localRuntimeBuildPath,
   PLATFORM_PROBE_SCRIPT,
+  PROBE_SLOT_SCRIPT,
+  parseDistroSlotProbe,
+  REMOVE_LEGACY_RUNTIME_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
   resolveLinuxPlatformId,
+  SETUP_FULL_SCRIPT,
   VERSION_SCRIPT,
+  WRITE_CONFIG_SCRIPT,
 } from '../domain/wsl-runtime-release';
 
 /** Platform archives are tens of megabytes; the cap is generous but finite. */
@@ -74,11 +83,15 @@ export interface DistroCommandResult {
 }
 
 export interface WslProvisionerDeps extends SafeFetchDeps {
-  /** Runs a shell script inside a distribution, optionally feeding it stdin. */
+  /**
+   * Runs a shell script inside a distribution, optionally feeding it stdin and
+   * positional arguments. Every script is a constant and every value that
+   * varies — a distribution name, a version — travels as an argv entry.
+   */
   runInDistro(
     distro: string,
     script: string,
-    options?: { readonly stdin?: Uint8Array }
+    options?: { readonly stdin?: Uint8Array; readonly args?: readonly string[] }
   ): Promise<DistroCommandResult>;
   /** Reads a file the hub only hopes is there, hence the null rather than a throw. */
   readBytes(path: string): Promise<Uint8Array | null>;
@@ -87,6 +100,8 @@ export interface WslProvisionerDeps extends SafeFetchDeps {
   /** Where this checkout's own Linux runtime build would be. */
   localBuildPath(platformId: LinuxPlatformId): string;
   version(): string;
+  /** Name this hub records as the installer, for the config it writes. */
+  hubHost(): string;
 }
 
 export interface WslProvisioner {
@@ -103,67 +118,186 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
   return {
     async ensure(distro: string): Promise<void> {
       const version = deps.version();
-      // A hub update leaves behind a binary the handshake would refuse, so
-      // drift is answered by reinstalling rather than by an error the user has
-      // no action for. A binary built for another architecture fails this the
-      // same way an absent one does, which is the same answer: install it.
-      const present = await deps.runInDistro(distro, VERSION_SCRIPT);
-      if (present.exitCode === 0 && present.stdout.trim() === version) return;
+      const slot = parseDistroSlotProbe((await deps.runInDistro(distro, PROBE_SLOT_SCRIPT)).stdout);
+      const recorded = slot.config?.version === version;
 
-      const platformId = await install(deps, distro, version);
+      // Version equality settles it for a release: a published tag's bytes
+      // never change, so a distribution holding that version holds these bytes.
+      if (
+        recorded &&
+        !isDevelopmentVersion(version) &&
+        (await runsVersion(deps, distro, version))
+      ) {
+        return;
+      }
 
-      const installed = await deps.runInDistro(distro, VERSION_SCRIPT);
-      if (installed.exitCode !== 0) {
-        throw new WslProvisioningError(
-          `The runtime was placed in "${distro}" but does not run there: ${describe(installed)}`
-        );
+      const platformId = resolvePlatformId(await probePlatform(deps, distro), distro);
+      const source = await loadSource(deps, distro, version, platformId);
+      const digest = `sha256:${sha256(source.bytes)}`;
+
+      // A checkout rebuilds under the same `dev` name, so nothing but the
+      // digest can tell one build from another — and that is the hole this
+      // closes: a rebuilt runtime used to stay on the hub forever, because the
+      // distribution's copy also called itself `dev`.
+      if (
+        recorded &&
+        slot.config?.digest === digest &&
+        (await runsVersion(deps, distro, version))
+      ) {
+        return;
       }
-      if (installed.stdout.trim() !== version) {
-        const mismatch = `The runtime installed in "${distro}" reports version ${installed.stdout.trim()} rather than ${version}.`;
-        // The likely cause in a checkout is a runtime compiled by
-        // `bun run build:binary`, which stamps the package version into what it
-        // builds — right for a release, wrong for a hub that reports `dev`.
-        throw new WslProvisioningError(
-          isDevelopmentVersion(version)
-            ? `${mismatch} A checkout's runtime has to be compiled without a version stamp: \`${localRuntimeBuildCommand(platformId, deps.localBuildPath(platformId))}\`.`
-            : mismatch
-        );
-      }
+
+      await install(deps, distro, version, platformId, source);
+      await recordInstall(deps, distro, version, slot, digest);
+      // First provision only: an upgrade replaces bytes, never the answer
+      // somebody gave about what a hub may do inside this distribution.
+      if (!slot.config?.setup) await grantConsent(deps, distro);
+      await removeLegacyRuntime(deps, distro);
       logger.info('provisioned', { distro, version });
     },
   };
 }
 
-/** Returns the target the distribution was provisioned for, which the caller reports against. */
-async function install(
-  deps: WslProvisionerDeps,
-  distro: string,
-  version: string
-): Promise<LinuxPlatformId> {
-  const platformId = resolveLinuxPlatformId(await probePlatform(deps, distro));
+function resolvePlatformId(probe: DistroPlatformProbe, distro: string): LinuxPlatformId {
+  const platformId = resolveLinuxPlatformId(probe);
   if (!platformId) {
     throw new WslProvisioningError(
       `Could not tell which Linux build "${distro}" needs. Only x86-64 and arm64 distributions are supported.`
     );
   }
+  return platformId;
+}
 
-  // A checkout's version names no release, so asking one for assets can only
-  // 404: the answer there is the build the developer already has, taken whole
-  // rather than out of an archive nobody published.
-  const source = isDevelopmentVersion(version)
+/**
+ * The bytes to push and the script that unpacks them.
+ *
+ * A checkout's version names no release, so asking one for assets can only
+ * 404: the answer there is the build the developer already has, taken whole
+ * rather than out of an archive nobody published.
+ */
+async function loadSource(
+  deps: WslProvisionerDeps,
+  distro: string,
+  version: string,
+  platformId: LinuxPlatformId
+): Promise<{ readonly script: string; readonly bytes: Uint8Array }> {
+  return isDevelopmentVersion(version)
     ? { script: INSTALL_BINARY_SCRIPT, bytes: await loadLocalBuild(deps, distro, platformId) }
     : {
         script: INSTALL_ARCHIVE_SCRIPT,
         bytes: await loadRelease(deps, distro, version, platformId),
       };
+}
 
-  const result = await deps.runInDistro(distro, source.script, { stdin: source.bytes });
+/**
+ * Whether the installed binary runs and says what the config claims.
+ *
+ * The config recording a version proves what was written, not that it survived:
+ * a distribution whose runtime was deleted or built for another architecture
+ * needs the answer "install one" rather than a launch failure later.
+ */
+async function runsVersion(
+  deps: WslProvisionerDeps,
+  distro: string,
+  version: string
+): Promise<boolean> {
+  const present = await deps.runInDistro(distro, VERSION_SCRIPT);
+  return present.exitCode === 0 && present.stdout.trim() === version;
+}
+
+/** Places the bytes and confirms what landed actually runs as this version. */
+async function install(
+  deps: WslProvisionerDeps,
+  distro: string,
+  version: string,
+  platformId: LinuxPlatformId,
+  source: { readonly script: string; readonly bytes: Uint8Array }
+): Promise<void> {
+  const result = await deps.runInDistro(distro, source.script, {
+    stdin: source.bytes,
+    args: [version],
+  });
   if (result.exitCode !== 0) {
     throw new WslProvisioningError(
       `Could not unpack the runtime inside "${distro}": ${describe(result)}`
     );
   }
-  return platformId;
+
+  const check = await deps.runInDistro(distro, VERSION_SCRIPT);
+  if (check.exitCode !== 0) {
+    throw new WslProvisioningError(
+      `The runtime was placed in "${distro}" but does not run there: ${describe(check)}`
+    );
+  }
+  if (check.stdout.trim() !== version) {
+    const mismatch = `The runtime installed in "${distro}" reports version ${check.stdout.trim()} rather than ${version}.`;
+    // The likely cause in a checkout is a runtime compiled by
+    // `bun run build:binary`, which stamps the package version into what it
+    // builds — right for a release, wrong for a hub that reports `dev`.
+    throw new WslProvisioningError(
+      isDevelopmentVersion(version)
+        ? `${mismatch} A checkout's runtime has to be compiled without a version stamp: \`${localRuntimeBuildCommand(platformId, deps.localBuildPath(platformId))}\`.`
+        : mismatch
+    );
+  }
+}
+
+/**
+ * Writes down what was installed, keeping whatever the distribution already
+ * said about consent. Not fatal on its own: a distribution that holds the right
+ * binary but could not record it still runs, it just re-provisions next time.
+ */
+async function recordInstall(
+  deps: WslProvisionerDeps,
+  distro: string,
+  version: string,
+  slot: DistroSlotProbe,
+  digest: string
+): Promise<void> {
+  const config = distroRuntimeConfigAfterInstall({
+    stored: slot.config,
+    home: slot.home,
+    version,
+    digest,
+    hubVersion: deps.version(),
+    hubHost: deps.hubHost(),
+    at: new Date().toISOString(),
+  });
+
+  const result = await deps.runInDistro(distro, WRITE_CONFIG_SCRIPT, {
+    stdin: new TextEncoder().encode(`${JSON.stringify(config, null, 2)}\n`),
+  });
+  if (result.exitCode !== 0) {
+    logger.warn('config_write_failed', { distro, detail: describe(result) });
+  }
+}
+
+async function grantConsent(deps: WslProvisionerDeps, distro: string): Promise<void> {
+  const result = await deps.runInDistro(distro, SETUP_FULL_SCRIPT);
+  if (result.exitCode !== 0) {
+    throw new WslProvisioningError(
+      `The runtime in "${distro}" could not record what it is allowed to do: ${describe(result)}`
+    );
+  }
+}
+
+/**
+ * Deletes the unversioned binary #771 left at `~/.mango/bin`.
+ *
+ * Two runtimes in one distribution guarantee somebody eventually debugs the
+ * wrong one, and the old path is unreleased, so there is nothing to migrate —
+ * only something to remove. A failure here is logged rather than raised: the
+ * distribution is provisioned either way.
+ */
+async function removeLegacyRuntime(deps: WslProvisionerDeps, distro: string): Promise<void> {
+  const result = await deps.runInDistro(distro, REMOVE_LEGACY_RUNTIME_SCRIPT);
+  if (result.exitCode !== 0) {
+    logger.warn('legacy_runtime_removal_failed', { distro, detail: describe(result) });
+    return;
+  }
+  if (result.stdout.includes('removed')) {
+    logger.info('legacy_runtime_removed', { distro, path: LEGACY_DISTRO_RUNTIME_PATH });
+  }
 }
 
 async function loadRelease(
@@ -333,15 +467,18 @@ function describe(result: DistroCommandResult): string {
 /**
  * Runs one script through the distribution's `sh`. The distribution name is an
  * argv entry and the script is a constant, so nothing user-supplied is ever
- * parsed as shell.
+ * parsed as shell. Positional arguments land as `$1`, `$2`, … after the `$0`
+ * that names the runtime in anything the shell reports.
  */
 function runInDistroWithWsl(
   distro: string,
   script: string,
-  options: { readonly stdin?: Uint8Array } = {}
+  options: { readonly stdin?: Uint8Array; readonly args?: readonly string[] } = {}
 ): Promise<DistroCommandResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn('wsl.exe', ['-d', distro, '--exec', 'sh', '-c', script], {
+    const argv = ['-d', distro, '--exec', 'sh', '-c', script];
+    if (options.args?.length) argv.push('mangostudio-runtime', ...options.args);
+    const child = spawn('wsl.exe', argv, {
       stdio: 'pipe',
       windowsHide: true,
       timeout: DISTRO_COMMAND_TIMEOUT_MS,
@@ -400,6 +537,7 @@ const defaultDeps: WslProvisionerDeps = {
   cacheDir: (version) => join(getHomeMangoDir(), 'runtime-cache', version),
   localBuildPath: (platformId) => localRuntimeBuildPath(getRuntimeBaseDir(), platformId),
   version: getVersion,
+  hubHost: hostname,
 };
 
 export const wslProvisioner = createWslProvisioner();

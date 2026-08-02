@@ -1,19 +1,28 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 import {
+  DISTRO_RUNTIME_PATH,
+  distroRuntimeConfigAfterInstall,
   findReleaseChecksum,
   INSTALL_ARCHIVE_SCRIPT,
   INSTALL_BINARY_SCRIPT,
   localRuntimeBuildCommand,
   localRuntimeBuildPath,
+  PROBE_SLOT_SCRIPT,
+  parseDistroSlotProbe,
+  REMOVE_LEGACY_RUNTIME_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
   resolveLinuxPlatformId,
+  SETUP_FULL_SCRIPT,
+  VERSION_SCRIPT,
   wslLaunchCommand,
 } from '../../../../src/modules/environments/domain/wsl-runtime-release';
 
-const RUNTIME_PATH = '"$HOME/.mango/bin/mangostudio-runtime"';
-const STAGED_PATH = '"$HOME/.mango/bin/mangostudio-runtime.incoming"';
+const SLOT_DIR = '"$HOME/.mango/runtime/wsl';
+const RUNTIME_PATH = `${SLOT_DIR}/$1/mangostudio-runtime"`;
+const STAGED_PATH = `${SLOT_DIR}/$1/mangostudio-runtime.incoming"`;
+const CURRENT_BINARY = `${SLOT_DIR}/current/mangostudio-runtime"`;
 
 const GLIBC = 'ldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35';
 const MUSL = 'musl libc (x86_64)';
@@ -72,6 +81,110 @@ describe('install scripts', () => {
       expect(chmod).toBeLessThan(rename);
     }
   });
+
+  it('takes the version as an argument, never as text inside the script', () => {
+    // A value spliced into one of these strings would be parsed by the
+    // distribution's shell; `$1` is an argv entry the shell only expands.
+    for (const script of [INSTALL_ARCHIVE_SCRIPT, INSTALL_BINARY_SCRIPT]) {
+      expect(script).toContain('/$1/');
+      expect(script).toContain('mkdir -p "$HOME/.mango/runtime/wsl/$1"');
+    }
+  });
+
+  it('points current at the version it just installed', () => {
+    // 013's ssh default and 023's service unit both embed `current`, so an
+    // upgrade that did not move it would leave them on bytes that are gone.
+    for (const script of [INSTALL_ARCHIVE_SCRIPT, INSTALL_BINARY_SCRIPT]) {
+      expect(script).toContain('ln -sfn "$1" "$HOME/.mango/runtime/wsl/current"');
+      expect(script.indexOf('ln -sfn')).toBeGreaterThan(script.indexOf('mv -f '));
+    }
+  });
+});
+
+describe('slot scripts', () => {
+  it('launches, versions, and consents through the current link', () => {
+    for (const script of [VERSION_SCRIPT, SETUP_FULL_SCRIPT]) {
+      expect(script).toContain(CURRENT_BINARY);
+    }
+    expect(SETUP_FULL_SCRIPT).toContain('setup --profile full --yes');
+    expect(DISTRO_RUNTIME_PATH).toBe('~/.mango/runtime/wsl/current/mangostudio-runtime');
+  });
+
+  it('removes the unversioned binary the previous layout left behind', () => {
+    expect(REMOVE_LEGACY_RUNTIME_SCRIPT).toContain('rm -f "$HOME/.mango/bin/mangostudio-runtime"');
+    // Silence would leave the hub unable to say whether anything was there.
+    expect(REMOVE_LEGACY_RUNTIME_SCRIPT).toContain('echo removed');
+  });
+});
+
+describe('parseDistroSlotProbe', () => {
+  it('reads the home directory and the config out of one round trip', () => {
+    expect(PROBE_SLOT_SCRIPT).toContain('"$HOME"');
+    const probe = parseDistroSlotProbe(
+      '/home/dev\n{"schemaVersion":1,"slot":"wsl","version":"1.2.3"}\n'
+    );
+
+    expect(probe.home).toBe('/home/dev');
+    expect(probe.config?.version).toBe('1.2.3');
+  });
+
+  it('reports a distribution with no config yet', () => {
+    expect(parseDistroSlotProbe('/home/dev\n')).toEqual({ home: '/home/dev', config: null });
+    expect(parseDistroSlotProbe('/home/dev')).toEqual({ home: '/home/dev', config: null });
+  });
+
+  it('treats a config it cannot read as absent, which re-provisions and rewrites it', () => {
+    expect(parseDistroSlotProbe('/home/dev\n{ truncated').config).toBeNull();
+    expect(
+      parseDistroSlotProbe('/home/dev\n{"schemaVersion":1,"slot":"nowhere"}').config
+    ).toBeNull();
+  });
+});
+
+describe('distroRuntimeConfigAfterInstall', () => {
+  const params = {
+    home: '/home/dev',
+    version: '1.2.4',
+    digest: `sha256:${'a'.repeat(64)}`,
+    hubVersion: '1.2.4',
+    hubHost: 'win-desktop',
+    at: '2026-08-02T00:00:00.000Z',
+  };
+
+  it('records what was installed and where', () => {
+    const config = distroRuntimeConfigAfterInstall({ ...params, stored: null });
+
+    expect(config).toMatchObject({
+      schemaVersion: 1,
+      slot: 'wsl',
+      source: 'provisioned',
+      version: '1.2.4',
+      binaryPath: '/home/dev/.mango/runtime/wsl/1.2.4/mangostudio-runtime',
+      digest: params.digest,
+      installedBy: { hubVersion: '1.2.4', host: 'win-desktop', transport: 'wsl' },
+    });
+  });
+
+  it('leaves consent exactly as the distribution recorded it', () => {
+    // Upgrades replace bytes, never the answer somebody gave about what a hub
+    // may do here.
+    const config = distroRuntimeConfigAfterInstall({
+      ...params,
+      stored: {
+        schemaVersion: 1,
+        slot: 'wsl',
+        version: '1.2.3',
+        profile: 'readonly',
+        allow: { fsRead: true, shell: false },
+        setup: { state: 'configured', by: 'cli' },
+      },
+    });
+
+    expect(config.profile).toBe('readonly');
+    expect(config.allow).toEqual({ fsRead: true, shell: false });
+    expect(config.setup).toEqual({ state: 'configured', by: 'cli' });
+    expect(config.version).toBe('1.2.4');
+  });
 });
 
 describe('local runtime build', () => {
@@ -105,7 +218,7 @@ describe('wslLaunchCommand', () => {
       '--exec',
       'sh',
       '-c',
-      'exec "$HOME/.mango/bin/mangostudio-runtime" "$@"',
+      'exec "$HOME/.mango/runtime/wsl/current/mangostudio-runtime" "$@"',
       'mangostudio-runtime',
       '--stdio',
     ]);
