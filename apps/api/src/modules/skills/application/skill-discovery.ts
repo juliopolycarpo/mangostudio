@@ -1,6 +1,9 @@
 /**
  * Compatibility adapter from the five-kind library matrix to the established
  * SkillDescriptor contract consumed by prompts, tools, and capability checks.
+ *
+ * Chat prompt skills remain a hub-machine concern: this adapter always discovers
+ * against the local environment and never grows an `environmentId` parameter.
  */
 
 import { homedir } from 'node:os';

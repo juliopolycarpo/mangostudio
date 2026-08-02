@@ -46,12 +46,16 @@ const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
  * which are product configuration rather than a fact about the host.
  */
 export function createRuntimePathEnv(
-  overrides: { readonly env?: Readonly<Record<string, string>> } = {}
+  overrides: {
+    readonly env?: Readonly<Record<string, string>>;
+    readonly workspaceRoot?: string;
+  } = {}
 ): PathEnv {
   return {
     platform: process.platform,
     homeDir: homedir(),
     env: { ...process.env, ...overrides.env },
+    ...(overrides.workspaceRoot !== undefined && { workspaceRoot: overrides.workspaceRoot }),
   };
 }
 

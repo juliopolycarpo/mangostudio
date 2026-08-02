@@ -4,6 +4,7 @@ import type { RuntimeMethod, RuntimeMethodMap } from './methods';
 import { runtimeFsService } from './services/fs';
 import { execGit } from './services/git';
 import { createInstallService } from './services/install';
+import { libraryService } from './services/library/service';
 import { createMcpService } from './services/mcp/service';
 import { probingService } from './services/probing/service';
 import { runShellCommand } from './services/shell';
@@ -75,6 +76,9 @@ export function createRuntimeMethodHandlers(
       handler('probing.agent-clis', (params) => probingService.probeAgentClis(params)),
       handler('install.run', (params) => install.run(params)),
       handler('install.cancel', (params) => install.cancel(params)),
+      handler('library.scan', (params) => libraryService.scan(params)),
+      handler('library.read', (params) => libraryService.read(params)),
+      handler('library.locations', (params) => libraryService.locations(params)),
     ]),
     close: async () => {
       install.close();

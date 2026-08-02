@@ -1,3 +1,4 @@
+import type { LibraryLocationSettings } from '@mangostudio/shared/app-settings';
 import type {
   AgentCliStatus,
   RuntimeId,
@@ -6,7 +7,14 @@ import type {
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
-import type { LibraryTargetId } from '@mangostudio/shared/library';
+import type {
+  LibraryInstance,
+  LibraryLocationId,
+  LibraryLocationStatus,
+  LibraryResourceRef,
+  LibraryTargetId,
+  ResourceKind,
+} from '@mangostudio/shared/library';
 import type {
   McpElicitationAction,
   McpElicitationField,
@@ -633,6 +641,62 @@ export interface RuntimeInstallCancelParams {
   readonly runId: string;
 }
 
+/**
+ * Variables merged over this host's own environment for library path
+ * resolution. The hub pins configured MangoStudio directories here for its own
+ * machine and pins nothing for anyone else's.
+ */
+export interface RuntimeLibraryPathEnvParams {
+  readonly env?: Readonly<Record<string, string>>;
+  readonly workspaceRoot?: string;
+}
+
+export interface RuntimeLibraryScanParams {
+  /**
+   * Enabled/disabled map per scope. The hub resolves the user's settings; this
+   * host only needs the boolean map to know which locations to open.
+   */
+  readonly locationSettings: LibraryLocationSettings;
+  readonly force?: boolean;
+  readonly kinds?: readonly ResourceKind[];
+  readonly locationPathOverrides?: Readonly<Partial<Record<LibraryLocationId, string>>>;
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
+}
+
+export interface RuntimeLibraryScanEntry {
+  readonly ref: LibraryResourceRef;
+  readonly instance: LibraryInstance;
+  readonly whitespaceHash?: string;
+}
+
+export interface RuntimeLibraryScanResult {
+  readonly entries: readonly RuntimeLibraryScanEntry[];
+}
+
+export interface RuntimeLibraryReadParams {
+  readonly path: string;
+  readonly allowedRoots: readonly string[];
+  readonly maxBytes?: number;
+  readonly truncateOversize?: boolean;
+}
+
+export interface RuntimeLibraryReadResult {
+  readonly content: string;
+  readonly truncated: boolean;
+  readonly sizeBytes: number;
+  /** Set when the path is outside every allowed root or otherwise refused. */
+  readonly denied?: true;
+  readonly reason?: string;
+}
+
+export interface RuntimeLibraryLocationsParams {
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
+}
+
+export interface RuntimeLibraryLocationsResult {
+  readonly locations: readonly LibraryLocationStatus[];
+}
+
 export interface RuntimeMethodMap {
   'fs.read-file': {
     readonly params: RuntimeReadFileParams;
@@ -765,6 +829,18 @@ export interface RuntimeMethodMap {
   'install.cancel': {
     readonly params: RuntimeInstallCancelParams;
     readonly result: { readonly ok: true };
+  };
+  'library.scan': {
+    readonly params: RuntimeLibraryScanParams;
+    readonly result: RuntimeLibraryScanResult;
+  };
+  'library.read': {
+    readonly params: RuntimeLibraryReadParams;
+    readonly result: RuntimeLibraryReadResult;
+  };
+  'library.locations': {
+    readonly params: RuntimeLibraryLocationsParams;
+    readonly result: RuntimeLibraryLocationsResult;
   };
 }
 

@@ -22,6 +22,12 @@ import {
   type RuntimeInstallCancelParams,
   type RuntimeInstallRunParams,
   type RuntimeInstallRunResult,
+  type RuntimeLibraryLocationsParams,
+  type RuntimeLibraryLocationsResult,
+  type RuntimeLibraryReadParams,
+  type RuntimeLibraryReadResult,
+  type RuntimeLibraryScanParams,
+  type RuntimeLibraryScanResult,
   type RuntimeListDirectoryParams,
   type RuntimeListDirectoryResult,
   type RuntimeMcpAckResult,
@@ -244,6 +250,21 @@ interface RuntimeProbingClient {
   ): Promise<RuntimeProbeAgentClisResult>;
 }
 
+interface RuntimeLibraryClient {
+  scan(
+    params: RuntimeLibraryScanParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryScanResult>;
+  read(
+    params: RuntimeLibraryReadParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryReadResult>;
+  locations(
+    params?: RuntimeLibraryLocationsParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryLocationsResult>;
+}
+
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
 export class RuntimeClient {
   readonly fs: RuntimeFsClient;
@@ -252,6 +273,7 @@ export class RuntimeClient {
   readonly install: RuntimeInstallClient;
   readonly mcp: RuntimeMcpClient;
   readonly probing: RuntimeProbingClient;
+  readonly library: RuntimeLibraryClient;
   readonly snapshot: RuntimeSnapshotClient;
   readonly workspace: RuntimeWorkspaceClient;
   private targetPaths?: TargetPaths;
@@ -300,6 +322,11 @@ export class RuntimeClient {
       versionManagers: (params, options) =>
         this.request('probing.version-managers', params, options),
       agentClis: (params, options) => this.request('probing.agent-clis', params, options),
+    };
+    this.library = {
+      scan: (params, options) => this.request('library.scan', params, options),
+      read: (params, options) => this.request('library.read', params, options),
+      locations: (params = {}, options) => this.request('library.locations', params, options),
     };
     this.snapshot = {
       capture: (params, options) => this.request('snapshot.capture', params, options),
