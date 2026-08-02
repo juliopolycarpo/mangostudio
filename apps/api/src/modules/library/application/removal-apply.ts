@@ -163,16 +163,16 @@ function toRuntimeRemoveParams(
   env: PathEnv,
   backup: BackupStoreDeps
 ): RuntimeLibraryRemoveParams {
-  const mergedEnv: Record<string, string> = { ...configuredLibraryEnv() };
-  for (const [key, value] of Object.entries(env.env)) {
-    if (value !== undefined) mergedEnv[key] = value;
-  }
   return {
     backupRoot: backup.backupDir(),
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
     pathEnv: {
-      env: mergedEnv,
+      // Only the MangoStudio directories travel, matching `pathEnvParams` in
+      // `environment-library-service.ts`; the runtime merges its own
+      // `process.env` underneath, so forwarding the hub's would only put its
+      // secrets in the frame.
+      env: configuredLibraryEnv(),
       ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
     },
     operations: operations.map((operation) => ({

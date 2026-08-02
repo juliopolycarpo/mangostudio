@@ -246,7 +246,12 @@ function toRuntimeApplyParams(
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
     pathEnv: {
-      env: mergePathEnv(configuredLibraryEnv(), env.env),
+      // Only the MangoStudio directories travel, exactly as `pathEnvParams` in
+      // `environment-library-service.ts` sends them: they are hub configuration
+      // rather than a fact about the host, and the runtime already merges its
+      // own `process.env` underneath. Forwarding the hub's whole environment
+      // would put its secrets in every apply frame for no added resolution.
+      env: configuredLibraryEnv(),
       ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
     },
     operations: prepared.map((operation) => ({
@@ -254,17 +259,13 @@ function toRuntimeApplyParams(
       locationId:
         operation.locationId as RuntimeLibraryApplyParams['operations'][number]['locationId'],
       slug: operation.slug,
-      operation: narrowAppliedOperation(operation.operation),
+      operation: operation.operation,
       kind: operation.kind,
       expectedContentHash: operation.expectedContentHash,
       destinationPath: operation.destinationPath,
       ...(operation.sourceDir !== undefined && { sourceDir: operation.sourceDir }),
       ...(operation.contents !== undefined && {
-        contentBase64: Buffer.from(
-          typeof operation.contents === 'string'
-            ? Buffer.from(operation.contents, 'utf8')
-            : operation.contents
-        ).toString('base64'),
+        contentBase64: Buffer.from(operation.contents).toString('base64'),
       }),
       ...(operation.adaptation && { adaptation: operation.adaptation }),
     })),
@@ -284,18 +285,6 @@ function narrowAppliedOperation(
     return operation;
   }
   throw new TypeError(`Prepared library write cannot carry operation "${operation}".`);
-}
-
-function mergePathEnv(
-  ...parts: ReadonlyArray<Readonly<Record<string, string | undefined>>>
-): Readonly<Record<string, string>> {
-  const merged: Record<string, string> = {};
-  for (const part of parts) {
-    for (const [key, value] of Object.entries(part)) {
-      if (value !== undefined) merged[key] = value;
-    }
-  }
-  return merged;
 }
 
 interface PlannedOperation {
@@ -772,7 +761,7 @@ export interface PropagationUndoDeps {
 export function undoLibraryPropagation(
   backupId: string,
   overrides: Partial<PropagationUndoDeps> = {},
-  userId = 'local'
+  userId?: string
 ): Promise<PropagationUndo> {
   return serializeLibraryWrite(() => runUndo(backupId, overrides, userId));
 }
@@ -780,7 +769,7 @@ export function undoLibraryPropagation(
 async function runUndo(
   backupId: string,
   overrides: Partial<PropagationUndoDeps>,
-  userId: string
+  userId: string | undefined
 ): Promise<PropagationUndo> {
   const deps: PropagationUndoDeps = {
     hashAt: overrides.hashAt ?? hashResourceAt,
@@ -814,6 +803,12 @@ async function runUndo(
       );
     }
 
+    // Never defaulted: the connection cache is keyed by user, so a stand-in id
+    // would open a second Local runtime host owned by a user that does not
+    // exist rather than reusing the caller's.
+    if (userId === undefined) {
+      throw new TypeError('undoLibraryPropagation needs a userId to reach the Local runtime.');
+    }
     const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
     return await client.library.undo(
       {
