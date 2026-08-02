@@ -161,9 +161,10 @@ Open these first:
 - `apps/shared/src/library/registry.ts` via `@mangostudio/shared/library/host`
   (locations, targets, per-kind read precedence; path resolution is pure over
   `PathEnv`)
-- `apps/runtime/src/services/library/` (scan + contained read + byte caps —
-  `library.scan` / `library.read` / `library.locations`; the engine that used to
-  live under `apps/api/.../infrastructure`)
+- `apps/runtime/src/services/library/` (scan + contained read + settings source
+  reads + byte caps — `library.scan` / `library.read` / `library.locations` /
+  `library.settings-sources`; the engine that used to live under
+  `apps/api/.../infrastructure`)
 - `apps/api/src/modules/library/application/library-discovery.ts` (groups a scan
   result; coverage and divergence stay hub-side)
 - `apps/api/src/modules/library/application/environment-library-service.ts`
@@ -177,9 +178,12 @@ Open these first:
   backup, verify, undo — still hub-local until write engines move)
 - `apps/api/src/modules/library/application/adapters/` (format conversion
   strategies)
+- `apps/api/src/modules/library/application/settings-inspection.ts` (pure: turns
+  the runtime's source bytes into per-target snapshots — one parser for every
+  machine)
 - `apps/api/src/modules/library/http/library-routes.ts`, `propagation-routes.ts`,
-  `settings-routes.ts` (discovery routes take optional `environmentId`, default
-  `local`)
+  `settings-routes.ts` (read routes take optional `environmentId`, default
+  `local`; `library-error.ts` is the one error mapping they share)
 - `apps/shared/src/library/schemas.ts` (single source of truth for every shape)
 - `apps/frontend/src/features/library/` (`format.ts` holds the cell-state rules,
   `propagation.ts` mirrors the apply contract's validation)
@@ -201,8 +205,25 @@ error. Two environments that happen to share one physical home are tolerated
 
 Discovery is a runtime capability (`features.library`). A disconnected
 environment never reuses another machine's matrix as if it were fresh —
-staleness here would corrupt later write decisions. The skill-discovery adapter
-that feeds chat prompts stays pinned to the hub machine (`local`) on purpose.
+staleness here would corrupt later write decisions. Every read tab is scoped the
+same way, settings comparison included: the tab strip carries `environmentId`
+across tabs, so any page that answered about the hub while the URL named another
+machine would be lying about which settings a user is about to change. The
+skill-discovery adapter that feeds chat prompts stays pinned to the hub machine
+(`local`) on purpose.
+
+Containment for `library.read` is resolved on the runtime from the location id
+the hub names, never from a root the hub supplies: a root derived from the
+instance path contains that path by construction. A `single-file` location
+resolves to the file itself, so its boundary is the agent home around it —
+otherwise a symlinked `CLAUDE.md` passes containment against its own target.
+`library.settings-sources` opens settings paths with `O_NOFOLLOW` for the same
+reason, and never touches a target's credential files.
+
+Two discovery caches coexist until the write engines move (017): the matrix
+reads through `environmentLibraryService`, while `discoverLibraryResourcesFromSettings`
+still serves the hub-local skill adapter and the propagation/removal previews.
+`resetSkillsCache()` drops both.
 
 Every location carries a `scope`, and every one of them is `home` today. The
 `workspace` scope is reserved: nothing resolves under a repository root yet, and
