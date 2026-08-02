@@ -41,6 +41,7 @@
     "./turn-recovery": "./src/turn-recovery/index.ts",
     "./utils/model-detection": "./src/utils/model-detection.ts",
     "./runtime-env": "./src/runtime-env/index.ts",
+    "./runtime-env/env-file": "./src/runtime-env/env-file.ts",
     "./prompt-rules": "./src/prompt-rules/index.ts",
     "./questions": "./src/questions/index.ts",
     "./workspaces": "./src/workspaces/index.ts",

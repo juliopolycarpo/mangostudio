@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env';
+// The concrete module, not the barrel: Vite loads this config through Node's
+// ESM resolver, which does not resolve a barrel's extensionless re-exports.
+import { parseRuntimeEnvFile } from '@mangostudio/shared/runtime-env/env-file';
 import tailwindcss from '@tailwindcss/vite';
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite';
 import react from '@vitejs/plugin-react';
