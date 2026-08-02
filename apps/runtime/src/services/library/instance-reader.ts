@@ -30,6 +30,9 @@ export const MAX_LIBRARY_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_LIBRARY_INSTANCE_BYTES = 16 * 1024 * 1024;
 /** Parity with the legacy skill scanner, which capped SKILL.md at this size. */
 export const MAX_SKILL_ENTRYPOINT_BYTES = 256 * 1024;
+/** Entry count and depth caps so a hostile or huge tree fails before materializing. */
+const MAX_LIBRARY_INSTANCE_ENTRIES = 10_000;
+const MAX_LIBRARY_INSTANCE_DEPTH = 32;
 
 interface FileMetadata {
   readonly size: number;
@@ -210,14 +213,19 @@ async function readOneEntry(
   }
 
   try {
+    // Hash/read the contained realpath when checked: a symlink swap between the
+    // check and the open would otherwise escape containment. Keep `path` on the
+    // instance for UI/write paths (caller path).
+    let readPath = path;
     if (containmentRoot) {
       const canonicalPath = await fs.realPath(path);
       if (!isPathWithin(containmentRoot, canonicalPath)) throw new PathEscapeError();
+      readPath = canonicalPath;
     }
     const hashed =
       expectedType === 'directory'
-        ? await hashDirectory(location, slug, path, metadata, options, fs)
-        : await hashFile(location, slug, path, metadata, options, fs);
+        ? await hashDirectory(location, slug, readPath, metadata, options, fs)
+        : await hashFile(location, slug, readPath, metadata, options, fs);
     const display = hashed.value.display;
     const instanceBase = {
       locationId: location.id,
@@ -360,8 +368,10 @@ async function collectLeafFiles(
   const leaves: LeafFile[] = [];
   const visitedDirectories = new Set<string>();
   const canonicalRoot = await fs.realPath(rootPath);
+  let totalBytes = 0;
 
-  async function visit(directoryPath: string): Promise<void> {
+  async function visit(directoryPath: string, depth: number): Promise<void> {
+    if (depth > MAX_LIBRARY_INSTANCE_DEPTH) throw new InstanceTooLargeError();
     const canonicalDirectory = await fs.realPath(directoryPath);
     if (!isPathWithin(canonicalRoot, canonicalDirectory)) throw new PathEscapeError();
     if (visitedDirectories.has(canonicalDirectory)) throw new PathEscapeError();
@@ -372,8 +382,11 @@ async function collectLeafFiles(
       const absolutePath = join(directoryPath, entry.name);
       const metadata = await fs.stat(absolutePath);
       if (metadata.isDirectory) {
-        await visit(absolutePath);
+        await visit(absolutePath, depth + 1);
       } else if (metadata.isFile) {
+        totalBytes += metadata.size;
+        if (totalBytes > MAX_LIBRARY_INSTANCE_BYTES) throw new InstanceTooLargeError();
+        if (leaves.length >= MAX_LIBRARY_INSTANCE_ENTRIES) throw new InstanceTooLargeError();
         leaves.push({
           absolutePath,
           relativePath: toPosixPath(relative(rootPath, absolutePath)),
@@ -384,7 +397,7 @@ async function collectLeafFiles(
     }
   }
 
-  await visit(rootPath);
+  await visit(rootPath, 0);
   return leaves.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
 }
 

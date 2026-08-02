@@ -243,6 +243,8 @@ describe('library.scan environments stay disjoint', () => {
       force: true,
       locationPathOverrides: { 'mango-skills': join(homeA, 'skills') },
     });
+    // Second scan must not use force: force bypasses the scan memo, so a
+    // colliding cache key would never be observed.
     const scanB = await createLibraryService({
       createPathEnv: () => createRuntimePathEnv(),
       cache,
@@ -250,7 +252,7 @@ describe('library.scan environments stay disjoint', () => {
       now: () => 1,
     }).scan({
       locationSettings,
-      force: true,
+      force: false,
       locationPathOverrides: { 'mango-skills': join(homeB, 'skills') },
     });
 

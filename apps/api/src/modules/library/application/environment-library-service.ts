@@ -118,6 +118,9 @@ export function createEnvironmentLibraryService(
   const cache = new Map<string, CacheEntry>();
   const inflight = new Map<string, Promise<LibraryResource[]>>();
   const scanGeneration = new Map<string, number>();
+  // Bumped on every resetCache so an in-flight non-forced scan cannot write
+  // pre-reset results after scanGeneration keys were cleared (both sides 0).
+  let resetEpoch = 0;
 
   const scopeKey = (scope: LibraryScope) => `${scope.userId}${SCOPE_SEP}${scope.environmentId}`;
   const isHubMachine = (environmentId: string) => environmentId === LOCAL_ENVIRONMENT_ID;
@@ -163,6 +166,7 @@ export function createEnvironmentLibraryService(
     if (pending && !force) return pending;
 
     const generationAtStart = scanGeneration.get(signature) ?? 0;
+    const epochAtStart = resetEpoch;
 
     const scanning = (async () => {
       const result = await client.library.scan(
@@ -175,7 +179,10 @@ export function createEnvironmentLibraryService(
         { timeoutMs: requestTimeoutMs }
       );
       const resources = groupLibraryScanEntries(result.entries as RuntimeLibraryScanEntry[]);
-      if ((scanGeneration.get(signature) ?? 0) === generationAtStart) {
+      if (
+        (scanGeneration.get(signature) ?? 0) === generationAtStart &&
+        resetEpoch === epochAtStart
+      ) {
         setBounded(
           cache,
           signature,
@@ -265,6 +272,7 @@ export function createEnvironmentLibraryService(
     },
 
     resetCache(environmentId) {
+      resetEpoch += 1;
       if (!environmentId) {
         cache.clear();
         inflight.clear();

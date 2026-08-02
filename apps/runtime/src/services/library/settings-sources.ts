@@ -152,7 +152,9 @@ function readRulesDirectory(path: string): RulesDirectoryRead | null {
 
   const rules: RuntimeSettingsRuleFile[] = [];
   let sizeBytes = 0;
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+  for (const entry of entries.sort((left, right) =>
+    left.name < right.name ? -1 : left.name > right.name ? 1 : 0
+  )) {
     if (entry.name.startsWith('.') || !entry.isFile() || !entry.name.endsWith('.rules')) continue;
     let file: { content: string; sizeBytes: number };
     try {
