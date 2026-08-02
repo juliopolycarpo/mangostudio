@@ -40,7 +40,7 @@ describe('executePropagationWrites', () => {
           operation: 'create',
           kind: 'directory',
           expectedContentHash: expected,
-          destinationPath: join(home, '.claude', 'skills', 'gh'),
+          destinationRoot: join(home, '.claude', 'skills'),
           sourceDir,
         },
       ],
@@ -62,6 +62,38 @@ describe('executePropagationWrites', () => {
     expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
   });
 
+  it('refuses a write whose destination is not the one the preview showed', async () => {
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const expected = await hashResourceAt(sourceDir, 'directory');
+
+    // What a runtime whose location resolution disagrees with the hub's looks
+    // like: the previewed path is somebody else's home, and nothing but this
+    // guard stands between that and a write into this one.
+    const result = await executePropagationWrites({
+      backupRoot,
+      pathEnv: env,
+      operations: [
+        {
+          resourceKey: 'skill:gh',
+          locationId: 'claude-skills',
+          slug: 'gh',
+          operation: 'create',
+          kind: 'directory',
+          expectedContentHash: expected,
+          destinationRoot: join('/somebody', 'else', '.claude', 'skills'),
+          sourceDir,
+        },
+      ],
+    });
+
+    expect(result.failed[0]).toMatchObject({ reason: 'guard-rejected' });
+    expect(result.applied).toEqual([]);
+    expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
+  });
+
   it('refuses a manifest entry that points outside the location it names', async () => {
     const sourceDir = join(home, 'source');
     mkdirSync(sourceDir);
@@ -80,7 +112,7 @@ describe('executePropagationWrites', () => {
           operation: 'create',
           kind: 'directory',
           expectedContentHash: expected,
-          destinationPath: join(home, '.claude', 'skills', 'gh'),
+          destinationRoot: join(home, '.claude', 'skills'),
           sourceDir,
         },
       ],

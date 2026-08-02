@@ -256,7 +256,7 @@ function toRuntimeApplyParams(
       operation: operation.operation,
       kind: operation.kind,
       expectedContentHash: operation.expectedContentHash,
-      destinationPath: operation.destinationPath,
+      destinationRoot: operation.destinationRoot,
       ...(operation.sourceDir !== undefined && { sourceDir: operation.sourceDir }),
       ...(operation.contents !== undefined && {
         contentBase64: Buffer.from(operation.contents).toString('base64'),
@@ -304,7 +304,8 @@ interface PlannedOperation {
   readonly sourcePath: string;
   readonly editedContent?: string;
   readonly expectedContentHash: string;
-  readonly destinationPath: string;
+  /** Location root the preview showed; the runtime refuses a different one. */
+  readonly destinationRoot: string;
   readonly adaptation?: {
     readonly strategy: AdapterStrategy;
     readonly kind: ResourceKind;
@@ -571,6 +572,16 @@ function planDestination(
   if (!location) {
     throw validationError(`Unknown library location: "${destination.locationId}".`);
   }
+  // The preview leaves `path` null only where the location is unsupported, and
+  // such a destination is always blocked above. Pinning it here is what lets
+  // the write engine treat `destinationRoot` as the root the user approved and
+  // refuse anything else; an empty-string stand-in would make that check a
+  // no-op precisely when resolution disagrees.
+  if (destination.path === null) {
+    throw validationError(
+      `Destination "${destination.locationId}" for "${entry.resourceKey}" has no path to write to.`
+    );
+  }
 
   if (decision.resolution === 'edit-then-adopt') {
     // Edited text is written verbatim, so it can only land where the format it
@@ -591,7 +602,7 @@ function planDestination(
       sourcePath: '',
       editedContent: winner.editedContent,
       expectedContentHash: '',
-      destinationPath: destination.path ?? '',
+      destinationRoot: destination.path,
     };
   }
 
@@ -629,7 +640,7 @@ function planDestination(
     kind: writeKindFor(location),
     sourcePath: winner.sourcePath,
     expectedContentHash: winner.contentHash,
-    destinationPath: destination.path ?? '',
+    destinationRoot: destination.path,
     ...(outcome.adaptation &&
       selectedStrategy && {
         adaptation: {
@@ -669,7 +680,7 @@ async function prepareOperation(
       operation: narrowAppliedOperation(operation.operation),
       kind: 'directory',
       expectedContentHash: operation.expectedContentHash,
-      destinationPath: operation.destinationPath,
+      destinationRoot: operation.destinationRoot,
       sourceDir: operation.sourcePath,
     };
   }
@@ -713,7 +724,7 @@ async function prepareOperation(
   const expectedContentHash =
     operation.editedContent === undefined && adaptation === undefined
       ? operation.expectedContentHash
-      : (await hashLibraryFile(operation.destinationPath, { readFile: () => bytes })).contentHash;
+      : (await hashLibraryFile(operation.destinationRoot, { readFile: () => bytes })).contentHash;
 
   return {
     resourceKey: operation.resourceKey,
@@ -722,7 +733,7 @@ async function prepareOperation(
     operation: narrowAppliedOperation(operation.operation),
     kind: 'file',
     expectedContentHash,
-    destinationPath: operation.destinationPath,
+    destinationRoot: operation.destinationRoot,
     contents: bytes,
     ...(adaptation && { adaptation }),
   };

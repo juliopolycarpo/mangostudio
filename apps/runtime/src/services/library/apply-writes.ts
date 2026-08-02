@@ -4,6 +4,7 @@
  * stay on the hub; this module only mutates the host that holds the files.
  */
 
+import { resolve as resolvePath } from 'node:path';
 import type {
   AdapterStrategy,
   AdaptNote,
@@ -28,6 +29,7 @@ import { hashResourceAt } from './instance-reader';
 import {
   createResourceWriterDeps,
   type ResourceWriteResult,
+  requireWritableLocation,
   writeDirectoryResource,
   writeFileResource,
 } from './resource-writer';
@@ -50,7 +52,8 @@ export interface PreparedPropagationOperation {
   >;
   readonly kind: 'file' | 'directory';
   readonly expectedContentHash: string;
-  readonly destinationPath: string;
+  /** Location root the preview showed, as resolved on the hub. */
+  readonly destinationRoot: string;
   readonly sourceDir?: string;
   readonly contents?: string | Uint8Array;
   readonly adaptation?: PreparedPropagationAdaptation;
@@ -176,6 +179,7 @@ async function executeOperation(
   backupId: string,
   deps: PropagationWriteEngineDeps
 ): Promise<{ entry: BackupEntry; applied: PropagationApplied }> {
+  assertPreviewedRoot(operation, env);
   const result = await performWrite(operation, env, backupId, deps);
   const writtenContentHash = await deps.hashAt(result.resolvedDestinationPath, operation.kind);
   if (writtenContentHash !== operation.expectedContentHash) {
@@ -266,7 +270,36 @@ async function rollback(
   return complete;
 }
 
+/**
+ * Refuses a write whose location does not resolve where the preview said.
+ *
+ * The counterpart of `remove-writes.ts:assertPreviewedPath`, and load-bearing
+ * for the same reason: `destinationRoot` is where the review step told the user
+ * these bytes were going, while the root actually written under is resolved
+ * here, from this host's own `PathEnv`. Those two agree for the in-process
+ * Local runtime and are allowed to disagree the moment they are different
+ * machines — at which point writing anyway lands bytes in a place nobody
+ * consented to, silently.
+ *
+ * The root is compared rather than the resource path because that is what the
+ * preview carries: `PropagationDestination.path` is `location.resolvePath(env)`
+ * for the layouts that hold many resources, and the resource path itself only
+ * for `single-file`, where the two coincide.
+ */
+function assertPreviewedRoot(operation: PreparedPropagationOperation, env: PathEnv): void {
+  const location = requireWritableLocation(
+    operation.locationId,
+    operation.kind === 'directory' ? 'directory-of-dirs' : 'file'
+  );
+  const root = location.resolvePath(env);
+  if (root !== null && resolvePath(root) === resolvePath(operation.destinationRoot)) return;
+  throw new GuardError(
+    `"${location.id}" resolves to "${root ?? 'nothing'}" on this machine, not the previewed "${operation.destinationRoot}".`
+  );
+}
+
 class VerificationError extends Error {}
+class GuardError extends Error {}
 
 function describeFailure(
   operation: PreparedPropagationOperation,
@@ -275,9 +308,11 @@ function describeFailure(
   const reason =
     error instanceof VerificationError
       ? 'verification-failed'
-      : error instanceof Error && error.name === 'LibraryWriteError'
+      : error instanceof GuardError
         ? 'guard-rejected'
-        : 'write-failed';
+        : error instanceof Error && error.name === 'LibraryWriteError'
+          ? 'guard-rejected'
+          : 'write-failed';
   return {
     resourceKey: operation.resourceKey,
     locationId: operation.locationId,

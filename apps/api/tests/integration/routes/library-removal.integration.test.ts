@@ -240,7 +240,10 @@ describe('library removal over real locations', () => {
     expect(paths.filter((path) => existsSync(path))).toEqual([]);
     expect(await currentDivergence()).toBeUndefined();
 
-    const undone = await undoLibraryPropagation(result.backupId ?? '', { backup: backupDeps() });
+    const undone = await undoLibraryPropagation(result.backupId ?? '', {
+      backup: backupDeps(),
+      pathEnv: libraryPathEnv,
+    });
 
     expect(undone.restored).toHaveLength(4);
     expect(paths.every((path) => existsSync(path))).toBe(true);

@@ -746,7 +746,8 @@ export interface RuntimeLibraryApplyOperation {
   readonly operation: 'create' | 'overwrite' | 'adapt-create' | 'adapt-overwrite';
   readonly kind: 'file' | 'directory';
   readonly expectedContentHash: string;
-  readonly destinationPath: string;
+  /** Location root the preview showed; the host refuses if its own differs. */
+  readonly destinationRoot: string;
   readonly sourceDir?: string;
   readonly contentBase64?: string;
   readonly adaptation?: RuntimeLibraryApplyAdaptation;
