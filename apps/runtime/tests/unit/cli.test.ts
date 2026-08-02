@@ -149,15 +149,16 @@ describe('parseRuntimeCliArgs', () => {
     });
   });
 
-  it('refuses a profile or an override it cannot act on', () => {
-    expect(parseRuntimeCliArgs(['setup', '--profile', 'custom'])).toEqual({
-      command: 'unknown',
-      argument: '--profile',
-    });
-    expect(parseRuntimeCliArgs(['setup', '--allow', 'telepathy=true'])).toEqual({
-      command: 'unknown',
-      argument: '--allow',
-    });
+  it('says why a profile or an override cannot be acted on', () => {
+    // A flag that exists given a value it cannot take is a different failure
+    // from a flag nobody has heard of, and only one of them has a fix.
+    const profile = parseRuntimeCliArgs(['setup', '--profile', 'custom']);
+    expect(profile).toMatchObject({ command: 'invalid' });
+    expect(profile).toHaveProperty('reason', expect.stringContaining('custom'));
+
+    const allow = parseRuntimeCliArgs(['setup', '--allow', 'telepathy=true']);
+    expect(allow).toMatchObject({ command: 'invalid' });
+    expect(allow).toHaveProperty('reason', expect.stringContaining('telepathy'));
   });
 
   it('parses health and doctor with their one flag', () => {
@@ -201,6 +202,17 @@ describe('mangostudio-runtime binary', () => {
       expect(run.exitCode).toBe(1);
       expect(run.stderr).toContain('Unknown argument: --serve');
       expect(run.stdout).toBe('');
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  it(
+    'says what was wrong with a value rather than calling the flag unknown',
+    async () => {
+      const run = await runCli(['setup', '--profile', 'everything']);
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr).toContain('--profile takes full, readonly, or none');
+      expect(run.stderr).not.toContain('Unknown argument');
     },
     SPAWN_TIMEOUT_MS
   );

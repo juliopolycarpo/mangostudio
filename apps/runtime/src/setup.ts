@@ -111,7 +111,9 @@ export async function runRuntimeSetup(
   }
 
   const named = args.profile ?? fromEnvironment ?? null;
-  const interactive = named === null && !args.yes && deps.ask !== undefined;
+  // `--json` is for a caller reading one document off stdout; a prompt printed
+  // into that stream would corrupt it before the answer could help anyone.
+  const interactive = named === null && !args.yes && !args.json && deps.ask !== undefined;
 
   if (named === null && !interactive) {
     return fail(
@@ -215,11 +217,8 @@ async function promptForProfile(
  * exactly why it is asked rather than assumed.
  */
 async function promptForUpdates(deps: RuntimeSetupDeps, fallback: boolean): Promise<boolean> {
-  const answer = (
-    await deps.ask?.('Let the hub update this runtime when it offers a new version? [Y/n]: ')
-  )
-    ?.trim()
-    .toLowerCase();
+  const question = `Let the hub update this runtime when it offers a new version? [${fallback ? 'Y/n' : 'y/N'}]: `;
+  const answer = (await deps.ask?.(question))?.trim().toLowerCase();
   if (!answer) return fallback;
   return parseBoolean(answer) ?? answer.startsWith('y');
 }

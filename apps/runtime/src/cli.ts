@@ -64,7 +64,9 @@ export type RuntimeCliInvocation =
   | { readonly command: 'doctor'; readonly args: { readonly json: boolean } }
   | { readonly command: 'version' }
   | { readonly command: 'help' }
-  | { readonly command: 'unknown'; readonly argument: string };
+  | { readonly command: 'unknown'; readonly argument: string }
+  /** A flag that exists, given a value it cannot take. Says which and why. */
+  | { readonly command: 'invalid'; readonly reason: string };
 
 export const RUNTIME_CLI_USAGE = `Usage: mangostudio-runtime <command>
 
@@ -158,15 +160,19 @@ function parseSetupArgs(args: readonly string[]): RuntimeCliInvocation {
     if (flag === '--profile') {
       const value = args[++index];
       if (!value || !isRuntimeSetupProfile(value)) {
-        return { command: 'unknown', argument: '--profile' };
+        return {
+          command: 'invalid',
+          reason: `--profile takes full, readonly, or none${value ? `, not "${value}"` : ''}. "custom" is what any other set of permissions is called, not one you can ask for.`,
+        };
       }
       setup.profile = value;
       continue;
     }
     if (flag === '--allow') {
       const value = args[++index];
-      const parsed = value ? parseAllowOverrides(value) : { error: 'missing' };
-      if ('error' in parsed) return { command: 'unknown', argument: '--allow' };
+      if (!value) return { command: 'invalid', reason: '--allow needs a key=value list.' };
+      const parsed = parseAllowOverrides(value);
+      if ('error' in parsed) return { command: 'invalid', reason: parsed.error };
       setup.allow = { ...setup.allow, ...parsed.allow };
       continue;
     }
@@ -272,6 +278,9 @@ export async function runRuntimeCli(args: readonly string[]): Promise<number> {
     case 'help':
       process.stdout.write(`${RUNTIME_CLI_USAGE}\n`);
       return 0;
+    case 'invalid':
+      process.stderr.write(`${invocation.reason}\n\n${RUNTIME_CLI_USAGE}\n`);
+      return 1;
     default:
       process.stderr.write(`Unknown argument: ${invocation.argument}\n\n${RUNTIME_CLI_USAGE}\n`);
       return 1;
