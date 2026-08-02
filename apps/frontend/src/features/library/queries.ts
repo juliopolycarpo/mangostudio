@@ -51,7 +51,8 @@ export const libraryKeys = {
   locations: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...libraryKeys.all, 'locations', environmentId] as const,
   targets: () => [...libraryKeys.all, 'targets'] as const,
-  settingsComparison: () => [...libraryKeys.all, 'settings', 'compare'] as const,
+  settingsComparison: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...libraryKeys.all, 'settings', 'compare', environmentId] as const,
   backups: () => [...libraryKeys.all, 'backups'] as const,
 };
 
@@ -146,12 +147,15 @@ export function libraryTargetsQueryOptions() {
   });
 }
 
-export function settingsComparisonQueryOptions() {
+export function settingsComparisonQueryOptions(environmentId?: string) {
+  const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
-    queryKey: libraryKeys.settingsComparison(),
+    queryKey: libraryKeys.settingsComparison(envId),
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
-      const { data, error } = await client.api.library.settings.compare.get();
+      const { data, error } = await client.api.library.settings.compare.get({
+        query: libraryEnvironmentSearch(envId),
+      });
       if (error) throw new ApiError(error.value);
       return data as ConceptComparison[];
     },
