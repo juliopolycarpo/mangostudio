@@ -9,6 +9,9 @@
 import type { ResourceKind } from '@mangostudio/shared/library';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
+import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
+import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
@@ -21,7 +24,8 @@ import { PropagationWizard } from './PropagationWizard';
 export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
   const { t } = useI18n();
   const l = t.library;
-  const matrix = useLibraryMatrix(kind);
+  const scope = useEnvironmentScope();
+  const matrix = useLibraryMatrix(kind, scope.environmentId);
   const [wizardKeys, setWizardKeys] = useState<readonly string[] | null>(null);
 
   /**
@@ -32,17 +36,55 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
    */
   const candidates = useCandidateLocations(matrix.locations, kind);
 
-  if (matrix.isPending && matrix.resources.length === 0) {
-    return <LibraryPageState variant="loading" />;
+  const header = (
+    <EnvironmentScopeHeader description={l.subtitle} scope={scope} onRefresh={matrix.refetch} />
+  );
+
+  if (scope.environment && !scope.permitsLibrary) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <EnvironmentScopeNotice
+          environment={scope.environment}
+          reason="not-permitted"
+          surface="library"
+        />
+      </div>
+    );
   }
+
+  if (matrix.isPending && matrix.resources.length === 0) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <LibraryPageState variant="loading" />
+      </div>
+    );
+  }
+
   if (matrix.error && matrix.resources.length === 0) {
-    return <LibraryPageState variant="error" onRetry={matrix.refetch} />;
+    return (
+      <div className="space-y-4">
+        {header}
+        {scope.environment && !scope.isConnected ? (
+          <EnvironmentScopeNotice
+            environment={scope.environment}
+            reason="disconnected"
+            surface="library"
+          />
+        ) : (
+          <LibraryPageState variant="error" onRetry={matrix.refetch} />
+        )}
+      </div>
+    );
   }
 
   const selectedCount = matrix.selected.size;
 
   return (
     <div className="space-y-4">
+      {header}
+
       <MatrixFilters
         filters={matrix.filters}
         targets={matrix.targets}

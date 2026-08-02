@@ -44,9 +44,15 @@ interface EdenErrorLike {
   readonly value?: unknown;
 }
 
-export async function rescanLibrary(force: boolean): Promise<LibraryResource[]> {
+export async function rescanLibrary(
+  force: boolean,
+  environmentId?: string
+): Promise<LibraryResource[]> {
   const { data, error } = await client.api.library.rescan.post(undefined, {
-    query: { force: force ? 'true' : 'false' },
+    query: {
+      force: force ? 'true' : 'false',
+      ...(environmentId && environmentId !== 'local' ? { environmentId } : {}),
+    },
   });
   if (error) throw new ApiError(error.value);
   return data as LibraryResource[];

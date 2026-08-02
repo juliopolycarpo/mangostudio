@@ -93,12 +93,12 @@ function createService(resources: LibraryResource[] = [skillResource]) {
       workspaceRoots.push(workspaceRoot);
       return Promise.resolve(resources);
     },
-    listLocations(workspaceRoot) {
+    listLocations(_userId, workspaceRoot) {
       workspaceRoots.push(workspaceRoot);
-      return [];
+      return Promise.resolve([]);
     },
     listTargets: () => [],
-    readContent: () => content,
+    readContent: () => Promise.resolve(content),
   };
   return { service, forced, workspaceRoots };
 }
@@ -167,27 +167,28 @@ describe('library routes', () => {
 
   it('returns location health from the registry service', async () => {
     const { service } = createService();
-    service.listLocations = () => [
+    const locations = [
       {
-        id: 'agents-skills',
-        kind: 'skill',
-        scope: 'home',
+        id: 'agents-skills' as const,
+        kind: 'skill' as const,
+        scope: 'home' as const,
         path: '/home/test/.agents/skills',
-        access: 'read-write',
+        access: 'read-write' as const,
         exists: true,
         readable: true,
         writable: true,
-        targetIds: ['mangostudio', 'codex'],
+        targetIds: ['mangostudio' as const, 'codex' as const],
         entryCount: 1,
       },
     ];
+    service.listLocations = () => Promise.resolve(locations);
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/library/locations'));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(service.listLocations());
+    expect(await response.json()).toEqual(locations);
   });
 
   it('accepts a valid workspace root and answers exactly as it does without one', async () => {

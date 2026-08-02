@@ -23,7 +23,7 @@ import type {
 } from '../../methods';
 import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-env';
 import { type LibraryCache, libraryCache } from './cache';
-import { resolveLibraryScanTargets, scanLibraryInstances } from './discovery';
+import { scanLibraryInstances } from './discovery';
 import type { ReadLibraryInstance } from './instance-reader';
 import { LibraryReadDeniedError, readLibraryContent } from './read';
 

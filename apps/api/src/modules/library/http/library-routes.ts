@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type ApiErrorResponse,
   ApiErrorResponseSchema,
@@ -24,27 +24,22 @@ import {
   type ResourceKind,
   ResourceKindSchema,
 } from '@mangostudio/shared/library';
-import {
-  LIBRARY_LOCATION_DEFINITIONS,
-  listLibraryTargetDescriptors,
-} from '@mangostudio/shared/library/host';
+import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
-import {
-  type RegularFileContent,
-  RegularFileReadError,
-  readRegularFileUtf8,
-} from '../../../lib/safe-file';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   validateWorkdir,
   type WorkdirValidationResult,
 } from '../../workspaces/application/workdir-validation';
 import { WorkspacePathError } from '../../workspaces/application/workspace-path';
-import { discoverLibraryResources } from '../application/library-discovery';
-import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
+import {
+  environmentLibraryService,
+  LibraryFeatureUnavailableError,
+  type LibraryScope,
+} from '../application/environment-library-service';
 
-export const MAX_LIBRARY_CONTENT_BYTES = 512 * 1024;
+export { MAX_LIBRARY_CONTENT_BYTES } from '@mangostudio/runtime';
 
 interface ResourceFilters {
   readonly kind?: ResourceKind;
@@ -79,37 +74,6 @@ function filterLibraryResources(
   });
 }
 
-function readResourceContent(
-  resource: LibraryResource,
-  locationId: LibraryLocationId
-): LibraryResourceContent | null {
-  const instance = resource.instances.find((candidate) => candidate.locationId === locationId);
-  if (!instance) return null;
-
-  const contentPath =
-    resource.ref.kind === 'skill' ? join(instance.path, 'SKILL.md') : instance.path;
-  // A scan can report an instance whose entrypoint is missing, unreadable, or a
-  // symlink, and the file can also vanish between the scan and this read. Those
-  // are "no content here", not a server fault, so they must not become a 500.
-  let result: RegularFileContent;
-  try {
-    result = readRegularFileUtf8(contentPath, {
-      maxBytes: MAX_LIBRARY_CONTENT_BYTES,
-      truncateOversize: true,
-    });
-  } catch (error) {
-    if (error instanceof RegularFileReadError) return null;
-    throw error;
-  }
-  return {
-    key: resource.key,
-    locationId,
-    content: result.content,
-    truncated: result.truncated,
-    sizeBytes: result.sizeBytes,
-  };
-}
-
 function invalidResourceKey(set: { status?: number | string }): ApiErrorResponse {
   set.status = 400;
   return {
@@ -127,6 +91,13 @@ function resourceNotFound(set: { status?: number | string }): ApiErrorResponse {
 }
 
 function handleLibraryError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+  if (error instanceof LibraryFeatureUnavailableError) {
+    set.status = 422;
+    return {
+      error: error.message,
+      code: ERROR_CODES.VALIDATION,
+    };
+  }
   console.error('[library] Unexpected error:', error);
   set.status = 500;
   return {
@@ -150,6 +121,7 @@ function handleLibraryError(error: unknown, set: { status?: number | string }): 
  * entity or id space exists to validate against.
  */
 const WorkspaceRootSchema = t.Optional(t.String({ minLength: 1, maxLength: 4096 }));
+const EnvironmentIdQuerySchema = t.Optional(EnvironmentIdSchema);
 
 const resourceQuery = t.Object({
   kind: t.Optional(ResourceKindSchema),
@@ -157,6 +129,7 @@ const resourceQuery = t.Object({
   location: t.Optional(LibraryLocationIdSchema),
   state: t.Optional(LibraryCoverageStateSchema),
   workspaceRoot: WorkspaceRootSchema,
+  environmentId: EnvironmentIdQuerySchema,
 });
 const resourceParams = t.Object({ key: t.String() });
 
@@ -192,28 +165,56 @@ async function resolveWorkspaceRoot(
     : rejectWorkspaceRoot(set, `The workspace root is ${validation.reason}.`);
 }
 
+function scopeFor(userId: string, environmentId: string | undefined): LibraryScope {
+  return {
+    userId,
+    environmentId: environmentId ?? LOCAL_ENVIRONMENT_ID,
+  };
+}
+
 export interface LibraryRouteService {
-  discover(userId: string, force: boolean, workspaceRoot?: string): Promise<LibraryResource[]>;
-  listLocations(workspaceRoot?: string): LibraryLocationStatus[];
+  discover(
+    userId: string,
+    force: boolean,
+    workspaceRoot?: string,
+    environmentId?: string
+  ): Promise<LibraryResource[]>;
+  listLocations(
+    userId: string,
+    workspaceRoot?: string,
+    environmentId?: string
+  ): Promise<LibraryLocationStatus[]>;
   listTargets(): LibraryTargetDescriptor[];
   readContent(
+    userId: string,
     resource: LibraryResource,
-    locationId: LibraryLocationId
-  ): LibraryResourceContent | null;
+    locationId: LibraryLocationId,
+    workspaceRoot?: string,
+    environmentId?: string
+  ): Promise<LibraryResourceContent | null>;
 }
 
 const defaultLibraryRouteService: LibraryRouteService = {
-  discover: (userId, force, workspaceRoot) =>
-    discoverLibraryResources(getDb(), userId, {
+  discover: (userId, force, workspaceRoot, environmentId) =>
+    environmentLibraryService.discover(getDb(), scopeFor(userId, environmentId), {
       force,
-      pathEnv: createLibraryPathEnv({ workspaceRoot }),
+      workspaceRoot,
     }),
-  listLocations(workspaceRoot) {
-    const env = createLibraryPathEnv({ workspaceRoot });
-    return LIBRARY_LOCATION_DEFINITIONS.map((location) => describeLocation(location.id, env));
-  },
+  listLocations: (userId, workspaceRoot, environmentId) =>
+    environmentLibraryService.listLocations(
+      getDb(),
+      scopeFor(userId, environmentId),
+      workspaceRoot
+    ),
   listTargets: listLibraryTargetDescriptors,
-  readContent: readResourceContent,
+  readContent: (userId, resource, locationId, workspaceRoot, environmentId) =>
+    environmentLibraryService.readContent(
+      getDb(),
+      scopeFor(userId, environmentId),
+      resource,
+      locationId,
+      workspaceRoot
+    ),
 };
 
 export function createLibraryRoutes(service: LibraryRouteService = defaultLibraryRouteService) {
@@ -226,7 +227,12 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(user?.id ?? '', false, workspace.root);
+            const resources = await service.discover(
+              user?.id ?? '',
+              false,
+              workspace.root,
+              query.environmentId
+            );
             return filterLibraryResources(resources, query);
           } catch (error) {
             return handleLibraryError(error, set);
@@ -253,10 +259,23 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(user?.id ?? '', false, workspace.root);
+            const resources = await service.discover(
+              user?.id ?? '',
+              false,
+              workspace.root,
+              query.environmentId
+            );
             const resource = resources.find((candidate) => candidate.key === params.key);
             if (!resource) return resourceNotFound(set);
-            return service.readContent(resource, query.location) ?? resourceNotFound(set);
+            return (
+              (await service.readContent(
+                user?.id ?? '',
+                resource,
+                query.location,
+                workspace.root,
+                query.environmentId
+              )) ?? resourceNotFound(set)
+            );
           } catch (error) {
             return handleLibraryError(error, set);
           }
@@ -266,6 +285,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           query: t.Object({
             location: LibraryLocationIdSchema,
             workspaceRoot: WorkspaceRootSchema,
+            environmentId: EnvironmentIdQuerySchema,
           }),
           response: {
             200: LibraryResourceContentSchema,
@@ -283,7 +303,12 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(user?.id ?? '', false, workspace.root);
+            const resources = await service.discover(
+              user?.id ?? '',
+              false,
+              workspace.root,
+              query.environmentId
+            );
             return (
               resources.find((candidate) => candidate.key === params.key) ?? resourceNotFound(set)
             );
@@ -293,7 +318,10 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
         },
         {
           params: resourceParams,
-          query: t.Object({ workspaceRoot: WorkspaceRootSchema }),
+          query: t.Object({
+            workspaceRoot: WorkspaceRootSchema,
+            environmentId: EnvironmentIdQuerySchema,
+          }),
           response: {
             200: LibraryResourceSchema,
             400: ApiErrorResponseSchema,
@@ -305,16 +333,24 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
       )
       .get(
         '/library/locations',
-        async ({ query, set }): Promise<LibraryLocationStatus[] | ApiErrorResponse> => {
+        async ({ query, set, user }): Promise<LibraryLocationStatus[] | ApiErrorResponse> => {
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
-          return service.listLocations(workspace.root);
+          try {
+            return await service.listLocations(user?.id ?? '', workspace.root, query.environmentId);
+          } catch (error) {
+            return handleLibraryError(error, set);
+          }
         },
         {
-          query: t.Object({ workspaceRoot: WorkspaceRootSchema }),
+          query: t.Object({
+            workspaceRoot: WorkspaceRootSchema,
+            environmentId: EnvironmentIdQuerySchema,
+          }),
           response: {
             200: LibraryLocationStatusListSchema,
             422: ApiErrorResponseSchema,
+            500: ApiErrorResponseSchema,
           },
         }
       )
@@ -329,7 +365,12 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
-            return await service.discover(user?.id ?? '', query.force === 'true', workspace.root);
+            return await service.discover(
+              user?.id ?? '',
+              query.force === 'true',
+              workspace.root,
+              query.environmentId
+            );
           } catch (error) {
             return handleLibraryError(error, set);
           }
@@ -338,6 +379,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           query: t.Object({
             force: t.Optional(t.Union([t.Literal('true'), t.Literal('false')])),
             workspaceRoot: WorkspaceRootSchema,
+            environmentId: EnvironmentIdQuerySchema,
           }),
           response: {
             200: LibraryResourceListSchema,

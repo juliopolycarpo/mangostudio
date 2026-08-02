@@ -28,6 +28,7 @@ interface InstanceDiffProps {
   readonly right: { readonly locationId: LibraryLocationId; readonly contentHash: string };
   /** True when the two versions differ only in whitespace, per the scanner. */
   readonly whitespaceOnly: boolean;
+  readonly environmentId?: string;
 }
 
 export function InstanceDiff({
@@ -36,14 +37,15 @@ export function InstanceDiff({
   left,
   right,
   whitespaceOnly,
+  environmentId,
 }: InstanceDiffProps) {
   const { t } = useI18n();
   const l = t.library;
 
   const [leftQuery, rightQuery] = useQueries({
     queries: [
-      libraryContentQueryOptions(resourceKey, left.locationId),
-      libraryContentQueryOptions(resourceKey, right.locationId),
+      libraryContentQueryOptions(resourceKey, left.locationId, environmentId),
+      libraryContentQueryOptions(resourceKey, right.locationId, environmentId),
     ],
   });
 

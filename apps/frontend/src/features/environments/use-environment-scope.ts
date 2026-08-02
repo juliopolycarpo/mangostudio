@@ -29,6 +29,11 @@ export interface EnvironmentScope {
    * wrong with the machine, it just will not say what is on it.
    */
   readonly permitsProbing: boolean;
+  /**
+   * Whether this environment can scan agent-home libraries. Same shape as
+   * probing: a runtime that omits the feature is not a fault, just unavailable.
+   */
+  readonly permitsLibrary: boolean;
   /** Absent until the runtime has handshaked at least once. */
   readonly isConnected: boolean;
   readonly select: (environmentId: string) => void;
@@ -62,6 +67,7 @@ export function useEnvironmentScope(): EnvironmentScope {
     // greying out a working environment for a moment is worse than letting the
     // request answer for itself.
     permitsProbing: manifest ? manifest.features.probing : true,
+    permitsLibrary: manifest ? manifest.features.library : true,
     isConnected: environment?.status.state === 'connected',
     select: (nextEnvironmentId) => {
       void navigate({

@@ -13,6 +13,9 @@ import { Link } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
+import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
+import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
+import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { formatBytes, formatRelativeTime, hashPrefix, validInstances } from '../format';
@@ -31,14 +34,15 @@ import { RemovalWizard } from './RemovalWizard';
 export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }) {
   const { t, locale } = useI18n();
   const l = t.library;
+  const scope = useEnvironmentScope();
   const [comparing, setComparing] = useState(false);
   const [propagating, setPropagating] = useState(false);
   const [removing, setRemoving] = useState(false);
 
   const [resourceQuery, locationsQuery, targetsQuery] = useQueries({
     queries: [
-      libraryResourceQueryOptions(resourceKey),
-      libraryLocationsQueryOptions(),
+      libraryResourceQueryOptions(resourceKey, scope.environmentId),
+      libraryLocationsQueryOptions(scope.environmentId),
       libraryTargetsQueryOptions(),
     ],
   });
@@ -54,14 +58,53 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
   const groups = useMemo(() => (resource ? contentGroupsOf(resource) : []), [resource]);
   const candidates = useCandidateLocations(locations, resource?.ref.kind);
 
-  if (resourceQuery.isPending) return <LibraryPageState variant="loading" />;
+  const header = (
+    <EnvironmentScopeHeader
+      description={l.subtitle}
+      scope={scope}
+      onRefresh={() => void resourceQuery.refetch()}
+    />
+  );
+
+  if (scope.environment && !scope.permitsLibrary) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <EnvironmentScopeNotice
+          environment={scope.environment}
+          reason="not-permitted"
+          surface="library"
+        />
+      </div>
+    );
+  }
+
+  if (resourceQuery.isPending) {
+    return (
+      <div className="space-y-4">
+        {header}
+        <LibraryPageState variant="loading" />
+      </div>
+    );
+  }
   if (resourceQuery.error || !resource) {
     return (
-      <LibraryPageState
-        variant="error"
-        title={l.detail.notFound}
-        onRetry={() => void resourceQuery.refetch()}
-      />
+      <div className="space-y-4">
+        {header}
+        {scope.environment && !scope.isConnected ? (
+          <EnvironmentScopeNotice
+            environment={scope.environment}
+            reason="disconnected"
+            surface="library"
+          />
+        ) : (
+          <LibraryPageState
+            variant="error"
+            title={l.detail.notFound}
+            onRetry={() => void resourceQuery.refetch()}
+          />
+        )}
+      </div>
     );
   }
 
@@ -69,10 +112,12 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
 
   return (
     <div className="space-y-5" data-testid="resource-detail" data-resource-key={resource.key}>
+      {header}
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <Link
             to={kindTab(resource)}
+            search={scope.environmentId === 'local' ? {} : { environmentId: scope.environmentId }}
             className="inline-flex items-center gap-1.5 text-on-surface-variant text-xs hover:text-on-surface"
           >
             <ArrowLeft size={12} />
@@ -152,6 +197,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
                   contentHash: groups[1].contentHash,
                 }}
                 whitespaceOnly={resource.whitespaceOnlyDivergence}
+                environmentId={scope.environmentId}
               />
             )}
             {groups.length > 2 && (

@@ -2019,6 +2019,11 @@ export const messages = {
       notPermitted: '{environment} não informa o que está instalado nele',
       notPermittedHint:
         'O runtime dessa máquina não oferece detecção de toolchains. Isso é uma configuração de lá, não uma falha daqui.',
+      libraryNotPermitted: '{environment} não reporta recursos da biblioteca',
+      libraryNotPermittedHint:
+        'O runtime dessa máquina não oferece descoberta da biblioteca. Isso é uma configuração de lá, não uma falha daqui.',
+      libraryDisconnectedHint:
+        'Nada é mostrado no lugar da última matriz dessa máquina, porque uma cobertura desatualizada é exatamente o que alguém usaria para agir.',
       compare: 'Comparar',
       compareTitle: 'Comparar ambientes',
       compareHint: 'Duas máquinas, uma tabela. As linhas são o que o MangoStudio sabe procurar.',
