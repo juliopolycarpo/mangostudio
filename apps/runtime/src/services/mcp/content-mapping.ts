@@ -104,7 +104,21 @@ function isResourcePayload(value: unknown): value is ResourcePayloadLike {
  * // Usage: const text = flattenMcpContent(normalizeMcpContent(result.content))
  */
 export function flattenMcpContent(blocks: ReadonlyArray<RuntimeMcpContentBlock>): string {
-  return capMcpResultText(blocks.map(blockToFlatText).join('\n\n'));
+  const joined = blocks.map(blockToFlatText).join('\n\n');
+  // normalize truncates oversized text blocks to exactly MCP_RESULT_MAX_BYTES
+  // without a marker (frame bound). Surface the marker here so the model sees
+  // the same signal as when flatten itself has to cut a multi-block join.
+  const blockWasCapped = blocks.some(
+    (block) =>
+      (block.type === 'text' && Buffer.byteLength(block.text, 'utf8') >= MCP_RESULT_MAX_BYTES) ||
+      (block.type === 'resource' &&
+        typeof block.text === 'string' &&
+        Buffer.byteLength(block.text, 'utf8') >= MCP_RESULT_MAX_BYTES)
+  );
+  if (blockWasCapped && !joined.endsWith(MCP_RESULT_TRUNCATION_MARKER)) {
+    return `${truncateUtf8(joined, MCP_RESULT_MAX_BYTES)}${MCP_RESULT_TRUNCATION_MARKER}`;
+  }
+  return capMcpResultText(joined);
 }
 
 function blockToFlatText(block: RuntimeMcpContentBlock): string {

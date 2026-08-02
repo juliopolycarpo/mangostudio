@@ -4,7 +4,7 @@
  * protocol boundary and every elicitation makes the trip back.
  */
 
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { setMcpTransportFactoryForTest } from '@mangostudio/runtime';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -32,13 +32,19 @@ const servers: Server[] = [];
 /** Fixture server per configured id; the transport factory dials into these. */
 const fixtureServers = new Map<string, Server>();
 
-setMcpTransportFactoryForTest(async (config) => {
-  const server = fixtureServers.get(config.id);
-  if (!server) return null;
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  await server.connect(serverTransport);
-  return clientTransport;
-});
+const handles: McpClientHandle[] = [];
+
+function installTransportFactory(): void {
+  setMcpTransportFactoryForTest(async (config) => {
+    const server = fixtureServers.get(config.id);
+    if (!server) return null;
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await server.connect(serverTransport);
+    return clientTransport;
+  });
+}
+
+installTransportFactory();
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -95,7 +101,9 @@ async function connectHandle(serverId: string, server: Server): Promise<McpClien
   return handle;
 }
 
-const handles: McpClientHandle[] = [];
+beforeEach(() => {
+  installTransportFactory();
+});
 
 afterEach(async () => {
   resetElicitationRegistryForTest();

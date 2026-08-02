@@ -24,7 +24,7 @@ const RUNTIME_MANIFEST: RuntimeCapabilityManifest = {
     tools: true,
     git: true,
     probing: false,
-    mcp: false,
+    mcp: true,
     library: false,
     checkpoints: true,
   },
@@ -244,6 +244,26 @@ describe('resolveToolCandidates', () => {
     expect(byName.get('zsh')?.reason).toBe('environment-unsupported');
     expect(effectiveToolDefinitions(candidates).map((definition) => definition.name)).toEqual([
       'bash',
+    ]);
+  });
+
+  it('rejects MCP tools when the runtime manifest disables mcp', () => {
+    const candidates = resolveCandidates({
+      profile: makeProfile(),
+      toolSettings: new Map(),
+      registeredTools: [makeRegisteredTool('alpha')],
+      mcpServers: [makeSnapshot('srv', ['ping'])],
+      runtimeManifest: {
+        ...RUNTIME_MANIFEST,
+        features: { ...RUNTIME_MANIFEST.features, mcp: false },
+      },
+    });
+
+    const byName = new Map(candidates.map((candidate) => [candidate.name, candidate]));
+    expect(byName.get('alpha')?.definition).toBeDefined();
+    expect(byName.get('mcp__srv__ping')?.reason).toBe('environment-unsupported');
+    expect(effectiveToolDefinitions(candidates).map((definition) => definition.name)).toEqual([
+      'alpha',
     ]);
   });
 
