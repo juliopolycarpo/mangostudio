@@ -19,6 +19,9 @@ import {
   type RuntimeGlobResult,
   type RuntimeGrepParams,
   type RuntimeGrepResult,
+  type RuntimeInstallCancelParams,
+  type RuntimeInstallRunParams,
+  type RuntimeInstallRunResult,
   type RuntimeListDirectoryParams,
   type RuntimeListDirectoryResult,
   type RuntimeMcpAckResult,
@@ -206,6 +209,21 @@ interface RuntimeMcpClient {
 }
 
 /**
+ * Install execution on the target machine. The hub keeps the recipe, the audit
+ * row and the decision to run at all; only the child process is over there.
+ */
+interface RuntimeInstallClient {
+  run(
+    params: RuntimeInstallRunParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeInstallRunResult>;
+  cancel(
+    params: RuntimeInstallCancelParams,
+    options?: RuntimeRequestOptions
+  ): Promise<{ readonly ok: true }>;
+}
+
+/**
  * Toolchain detection on the target machine. Every method takes what the hub
  * decided — which ids to look for, which of them it could install, which Node
  * releases it knows about — and returns the same status shapes the umbrella has
@@ -231,6 +249,7 @@ export class RuntimeClient {
   readonly fs: RuntimeFsClient;
   readonly shell: RuntimeShellClient;
   readonly git: RuntimeGitClient;
+  readonly install: RuntimeInstallClient;
   readonly mcp: RuntimeMcpClient;
   readonly probing: RuntimeProbingClient;
   readonly snapshot: RuntimeSnapshotClient;
@@ -271,6 +290,10 @@ export class RuntimeClient {
       respondToElicitation: (params, options) =>
         this.request('mcp.elicit-response', params, options),
       disconnect: (params, options) => this.request('mcp.disconnect', params, options),
+    };
+    this.install = {
+      run: (params, options) => this.request('install.run', params, options),
+      cancel: (params, options) => this.request('install.cancel', params, options),
     };
     this.probing = {
       runtimes: (params, options) => this.request('probing.runtimes', params, options),

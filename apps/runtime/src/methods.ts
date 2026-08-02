@@ -599,6 +599,40 @@ export interface RuntimeProbeAgentClisResult {
   readonly statuses: readonly AgentCliStatus[];
 }
 
+/** Topic carrying one install run's output up to the hub, keyed by run id. */
+export const RUNTIME_INSTALL_OUTPUT_TOPIC = 'install.output' as const;
+
+export interface RuntimeInstallOutputEvent {
+  readonly stream: 'stdout' | 'stderr' | 'system';
+  readonly line: string;
+  /** Marks the frame that closes the stream; its `line` is empty. */
+  readonly end?: true;
+}
+
+export interface RuntimeInstallRunParams {
+  /** Hub-minted run id. It is the stream key, so it is part of the contract. */
+  readonly runId: string;
+  /** Already built by the hub from a code-defined recipe; never interpolated here. */
+  readonly argv: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly timeoutMs: number;
+  /** Where this machine keeps the run's log; the hub's own path means nothing here. */
+  readonly logPath: string;
+  readonly outputLimitBytes?: number;
+}
+
+export interface RuntimeInstallRunResult {
+  readonly exitCode: number | null;
+  readonly status: 'succeeded' | 'failed' | 'cancelled' | 'timed-out' | 'spawn-failed';
+  readonly truncated: boolean;
+  readonly finishedAt: number;
+  readonly durationMs: number;
+}
+
+export interface RuntimeInstallCancelParams {
+  readonly runId: string;
+}
+
 export interface RuntimeMethodMap {
   'fs.read-file': {
     readonly params: RuntimeReadFileParams;
@@ -723,6 +757,14 @@ export interface RuntimeMethodMap {
   'probing.agent-clis': {
     readonly params: RuntimeProbeAgentClisParams;
     readonly result: RuntimeProbeAgentClisResult;
+  };
+  'install.run': {
+    readonly params: RuntimeInstallRunParams;
+    readonly result: RuntimeInstallRunResult;
+  };
+  'install.cancel': {
+    readonly params: RuntimeInstallCancelParams;
+    readonly result: { readonly ok: true };
   };
 }
 

@@ -572,10 +572,12 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     try {
       const result = await deps.runner.run(
         {
+          runId: active.runId,
+          userId: active.userId,
+          environmentId: scope.environmentId,
           argv,
           env: recipeEnv,
           timeoutMs: recipe.timeoutMs,
-          logPath: deps.getLogPath(active.runId),
         },
         {
           signal: active.abortController.signal,

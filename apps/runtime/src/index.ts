@@ -17,6 +17,7 @@ export { createLocalRuntimeManifest } from './manifest';
 export type * from './methods';
 export {
   RUNTIME_ABSENT_HASH,
+  RUNTIME_INSTALL_OUTPUT_TOPIC,
   RUNTIME_MCP_ELICITATION_TOPIC,
   RUNTIME_MCP_SESSION_TOPIC,
 } from './methods';
@@ -81,6 +82,7 @@ export {
   execGit,
   GitExecutionError,
 } from './services/git';
+export { createInstallService } from './services/install';
 export {
   classifyMcpCallFailure,
   connectMcpClient,

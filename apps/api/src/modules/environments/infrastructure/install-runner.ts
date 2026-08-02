@@ -1,34 +1,29 @@
-import { appendFile, mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+/**
+ * Runs an install recipe on the environment it was approved for.
+ *
+ * Execution moved to the runtime, so what is left here is the relay: the hub
+ * asks a machine to run an argv it built, and turns the machine's `evt` frames
+ * back into the log callbacks the install service has always consumed. The SSE
+ * stream a browser sees is unchanged in shape — only the host that produced the
+ * bytes moved.
+ *
+ * Cancellation crosses the boundary as a method call rather than a signal,
+ * because the child belongs to the other side; a runtime that has gone away
+ * cannot be told, which the connection failure already reports.
+ */
+
+import {
+  RUNTIME_INSTALL_OUTPUT_TOPIC,
+  type RuntimeInstallOutputEvent,
+  type RuntimeInstallRunResult,
+} from '@mangostudio/runtime';
 import type { InstallRunStatus } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { getInstallLogPath } from '../../../lib/mango-paths';
+import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
+import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 
-const INSTALL_OUTPUT_LIMIT_BYTES = 1024 * 1024;
-
-const INSTALL_ENV_KEYS = [
-  'PATH',
-  'HOME',
-  'SHELL',
-  'TMPDIR',
-  'TMP',
-  'TEMP',
-  'XDG_CONFIG_HOME',
-  'XDG_CACHE_HOME',
-  'XDG_DATA_HOME',
-  'XDG_STATE_HOME',
-  'XDG_RUNTIME_DIR',
-  'NVM_DIR',
-  'BUN_INSTALL',
-  'HTTP_PROXY',
-  'HTTPS_PROXY',
-  'NO_PROXY',
-  'http_proxy',
-  'https_proxy',
-  'no_proxy',
-] as const;
-
-const RECIPE_ENV_KEYS = ['NVM_DIR', 'PROFILE'] as const;
-
-type InstallOutputStream = 'stdout' | 'stderr' | 'system';
+type InstallOutputStream = RuntimeInstallOutputEvent['stream'];
 
 export interface InstallLogLine {
   readonly stream: InstallOutputStream;
@@ -36,10 +31,12 @@ export interface InstallLogLine {
 }
 
 interface RunInstallCommand {
+  readonly runId: string;
+  readonly userId: string;
+  readonly environmentId: string;
   readonly argv: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
-  readonly logPath: string;
 }
 
 interface RunInstallOptions {
@@ -56,59 +53,40 @@ interface InstallRunnerResult {
   readonly durationMs: number;
 }
 
-interface InstallSubprocess {
-  readonly stdout: ReadableStream<Uint8Array>;
-  readonly stderr: ReadableStream<Uint8Array>;
-  readonly exited: Promise<number>;
-  readonly exitCode: number | null;
-  kill(signal: 'SIGKILL'): void;
-}
-
-interface InstallRunnerDeps {
-  readonly spawn: (argv: readonly string[], env: Record<string, string>) => InstallSubprocess;
-  readonly now: () => number;
-  readonly prepareLog: (path: string) => Promise<void>;
-  readonly appendLog: (path: string, bytes: Uint8Array) => Promise<void>;
-}
-
-const defaultDeps: InstallRunnerDeps = {
-  spawn: (argv, env) =>
-    Bun.spawn([...argv], {
-      env,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    }) as InstallSubprocess,
-  now: Date.now,
-  prepareLog: async (path) => {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, new Uint8Array());
-  },
-  appendLog: (path, bytes) => appendFile(path, bytes),
-};
-
 export interface InstallRunner {
   run(command: RunInstallCommand, options?: RunInstallOptions): Promise<InstallRunnerResult>;
 }
 
-export function buildInstallEnvironment(
-  source: NodeJS.ProcessEnv = process.env,
-  recipeEnv: Readonly<Record<string, string>> = {}
-): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const key of INSTALL_ENV_KEYS) {
-    const value = source[key];
-    if (value !== undefined) env[key] = value;
-  }
-  for (const key of RECIPE_ENV_KEYS) {
-    const value = recipeEnv[key];
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
+export interface InstallRunnerDeps {
+  readonly resolveClient: (userId: string, environmentId: string) => Promise<RuntimeClient>;
+  /**
+   * Where the run's log lives on the machine that produces it. The hub's own
+   * layout is used for its own machine; a remote runtime is told a path under
+   * its own home rather than one that only exists here.
+   */
+  readonly logPathFor: (runId: string, environmentId: string) => string;
+  readonly now: () => number;
 }
 
-function emitLine(options: RunInstallOptions, stream: InstallOutputStream, line: string): void {
-  options.onLog?.({ stream, line });
+/**
+ * A remote runtime writes its log beside its own runtime home. The hub keeps
+ * the authoritative copy in the stream it relays and in the audit row, so this
+ * path only has to be writable there, not meaningful here.
+ */
+function defaultLogPath(runId: string, environmentId: string): string {
+  return environmentId === LOCAL_ENVIRONMENT_ID
+    ? getInstallLogPath(runId)
+    : `.mango/runtime/logs/install-${runId}.log`;
+}
+
+const defaultDeps: InstallRunnerDeps = {
+  resolveClient: (userId, environmentId) => getRuntimeClient(userId, environmentId),
+  logPathFor: defaultLogPath,
+  now: Date.now,
+};
+
+function terminalFor(result: RuntimeInstallRunResult): Exclude<InstallRunStatus, 'running'> {
+  return result.status;
 }
 
 export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}): InstallRunner {
@@ -117,149 +95,81 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
   return {
     async run(command, options = {}) {
       const startedAt = deps.now();
-      const outputLimit = options.outputLimitBytes ?? INSTALL_OUTPUT_LIMIT_BYTES;
-      await deps.prepareLog(command.logPath);
-
-      if (options.signal?.aborted) {
+      const failure = (status: Exclude<InstallRunStatus, 'running'>): InstallRunnerResult => {
         const finishedAt = deps.now();
         return {
           exitCode: null,
-          status: 'cancelled',
+          status,
           truncated: false,
           finishedAt,
           durationMs: finishedAt - startedAt,
         };
+      };
+
+      if (options.signal?.aborted) return failure('cancelled');
+
+      let client: RuntimeClient;
+      try {
+        client = await deps.resolveClient(command.userId, command.environmentId);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'The environment is unavailable.';
+        options.onLog?.({ stream: 'system', line: detail });
+        return failure('spawn-failed');
       }
 
-      let child: InstallSubprocess;
+      // Subscribed before the request goes out: a fast installer can produce
+      // output before `run` resolves, and a listener attached afterwards would
+      // miss exactly the first lines someone is watching for.
+      const unsubscribe = client.onEvent((event) => {
+        if (event.topic !== RUNTIME_INSTALL_OUTPUT_TOPIC) return;
+        if (event.streamId !== command.runId) return;
+        const payload = event.payload as RuntimeInstallOutputEvent;
+        if (payload.end) return;
+        options.onLog?.({ stream: payload.stream, line: payload.line });
+      });
+
+      const cancel = () => {
+        // The child belongs to the other side, so cancellation is a request
+        // rather than a signal; a runtime that is already gone cannot be told,
+        // and the run's own failure reports that.
+        void client.install.cancel({ runId: command.runId }).catch(() => undefined);
+      };
+      options.signal?.addEventListener('abort', cancel, { once: true });
+      if (options.signal?.aborted) cancel();
+
       try {
-        child = deps.spawn(command.argv, buildInstallEnvironment(process.env, command.env));
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : 'Unable to start installer.';
-        emitLine(options, 'system', detail);
-        const finishedAt = deps.now();
+        const result = await client.install.run(
+          {
+            runId: command.runId,
+            argv: [...command.argv],
+            ...(command.env && { env: command.env }),
+            timeoutMs: command.timeoutMs,
+            logPath: deps.logPathFor(command.runId, command.environmentId),
+            ...(options.outputLimitBytes !== undefined && {
+              outputLimitBytes: options.outputLimitBytes,
+            }),
+          },
+          // Above the recipe's own timeout: the runtime kills the child on
+          // time, and this deadline only catches a link that stopped answering.
+          { timeoutMs: command.timeoutMs + 30_000 }
+        );
         return {
-          exitCode: null,
-          status: 'spawn-failed',
-          truncated: false,
-          finishedAt,
-          durationMs: finishedAt - startedAt,
+          exitCode: result.exitCode,
+          status: terminalFor(result),
+          truncated: result.truncated,
+          finishedAt: result.finishedAt,
+          durationMs: result.durationMs,
         };
-      }
-
-      let termination: 'cancelled' | 'timed-out' | null = null;
-      let streamFailed = false;
-      let capturedBytes = 0;
-      let truncated = false;
-      let truncationReported = false;
-      let logWrites = Promise.resolve();
-
-      const kill = (reason: 'cancelled' | 'timed-out') => {
-        if (termination || child.exitCode !== null) return;
-        termination = reason;
-        try {
-          child.kill('SIGKILL');
-        } catch {
-          // The child may exit between the state check and signal delivery.
-        }
-      };
-
-      const timeoutId = setTimeout(() => kill('timed-out'), command.timeoutMs);
-      const abortHandler = () => kill('cancelled');
-      options.signal?.addEventListener('abort', abortHandler, { once: true });
-      if (options.signal?.aborted) abortHandler();
-
-      const capture = (bytes: Uint8Array): Uint8Array => {
-        const remaining = outputLimit - capturedBytes;
-        if (remaining <= 0) {
-          truncated = true;
-          return new Uint8Array();
-        }
-        const accepted = bytes.subarray(0, remaining);
-        capturedBytes += accepted.byteLength;
-        if (accepted.byteLength < bytes.byteLength) truncated = true;
-        if (accepted.byteLength > 0) {
-          const stableCopy = accepted.slice();
-          logWrites = logWrites.then(() => deps.appendLog(command.logPath, stableCopy));
-        }
-        return accepted;
-      };
-
-      const reportTruncation = () => {
-        if (!truncated || truncationReported) return;
-        truncationReported = true;
-        emitLine(options, 'system', `Output truncated after ${outputLimit} bytes.`);
-      };
-
-      const readStream = async (
-        stream: ReadableStream<Uint8Array>,
-        streamName: Exclude<InstallOutputStream, 'system'>
-      ) => {
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        let pending = '';
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            if (!value) continue;
-            const accepted = capture(value);
-            reportTruncation();
-            if (accepted.byteLength === 0) continue;
-            pending += decoder.decode(accepted, { stream: true });
-            const lines = pending.split('\n');
-            pending = lines.pop() ?? '';
-            for (const line of lines) {
-              emitLine(options, streamName, line.endsWith('\r') ? line.slice(0, -1) : line);
-            }
-          }
-          pending += decoder.decode();
-          if (pending) emitLine(options, streamName, pending);
-        } finally {
-          reader.releaseLock();
-        }
-      };
-
-      let exitCode: number | null = null;
-      try {
-        const results = await Promise.all([
-          readStream(child.stdout, 'stdout'),
-          readStream(child.stderr, 'stderr'),
-          child.exited,
-        ]);
-        exitCode = results[2];
       } catch (error) {
-        kill('cancelled');
-        streamFailed = true;
-        await child.exited.catch(() => undefined);
-        const detail = error instanceof Error ? error.message : 'Installer output stream failed.';
-        emitLine(options, 'system', detail);
+        const detail = error instanceof Error ? error.message : 'Install execution failed.';
+        options.onLog?.({ stream: 'system', line: detail });
+        // The installer may well have started; reporting `spawn-failed` would
+        // claim otherwise. `failed` is the honest reading of "we lost track".
+        return failure('failed');
       } finally {
-        clearTimeout(timeoutId);
-        options.signal?.removeEventListener('abort', abortHandler);
+        unsubscribe();
+        options.signal?.removeEventListener('abort', cancel);
       }
-
-      // The queued log writes are drained on every path so a rejected append can
-      // never surface as an unhandled rejection, and a log-file failure never
-      // overrides the child's own terminal status.
-      try {
-        await logWrites;
-      } catch (error) {
-        const detail = error instanceof Error ? error.message : 'Unknown log write failure.';
-        emitLine(options, 'system', `Install log write failed: ${detail}`);
-      }
-
-      const finishedAt = deps.now();
-      const status: Exclude<InstallRunStatus, 'running'> = streamFailed
-        ? 'failed'
-        : (termination ?? (exitCode === 0 ? 'succeeded' : 'failed'));
-      return {
-        exitCode,
-        status,
-        truncated,
-        finishedAt,
-        durationMs: finishedAt - startedAt,
-      };
     },
   };
 }

@@ -193,14 +193,23 @@ resolver.
 
 Open these first:
 
-- `apps/api/src/modules/environments/application/runtime-detection.ts` (PATH scan, cache, probe)
-- `apps/api/src/modules/environments/application/version-manager-detection.ts` (nvm + LTS)
-- `apps/api/src/modules/environments/application/agent-cli-detection.ts` (per-target CLI + auth)
+- `apps/shared/src/environments/detection/` (the pure domain: PATH scan, duplicate
+  analysis, runtime and agent definitions, auth signals, nvm, the Node release policy)
+- `apps/runtime/src/services/probing/` (the same domain bound to a real host —
+  `service.ts` is the three `probing.*` methods, `host-env.ts` the fs/spawn seams)
+- `apps/api/src/modules/environments/application/probing-service.ts` (per-environment
+  cache, force/dedupe, and the policy the hub sends down)
 - `apps/api/src/modules/environments/application/install-service.ts` (guards, prepare, run)
+- `apps/runtime/src/services/install.ts` (the spawn+capture loop, and only that)
 - `apps/api/src/modules/environments/http/environment-routes.ts`, `install-routes.ts`
 - `apps/shared/src/environments/schemas.ts` (single source of truth for every shape)
-- `apps/frontend/src/features/environments/` (`format.ts` holds the presentation rules)
+- `apps/frontend/src/features/environments/` (`format.ts` holds the presentation rules;
+  `use-environment-scope.ts` is which machine a tab is describing)
 - `apps/frontend/src/routes/_authenticated/environments/`
+
+Detection runs on the runtime and describes *that* machine. Toolchains, Agents and
+Health carry an `environmentId` search param (absent means the hub's own), and the
+Health tab's compare mode puts two of them side by side.
 
 The umbrella covers everything about the user's tooling, so its tabs are
 Overview, Toolchains, Agents, Health, and Library — the last one nests the whole

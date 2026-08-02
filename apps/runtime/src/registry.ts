@@ -3,6 +3,7 @@ import type { RuntimeEventInput, RuntimeHandlerContext, RuntimeMethodHandler } f
 import type { RuntimeMethod, RuntimeMethodMap } from './methods';
 import { runtimeFsService } from './services/fs';
 import { execGit } from './services/git';
+import { createInstallService } from './services/install';
 import { createMcpService } from './services/mcp/service';
 import { probingService } from './services/probing/service';
 import { runShellCommand } from './services/shell';
@@ -31,6 +32,7 @@ export function createRuntimeMethodHandlers(
   options: RuntimeMethodRegistryOptions
 ): RuntimeMethodRegistry {
   const mcp = createMcpService({ runtimeVersion: options.runtimeVersion, emit: options.emit });
+  const install = createInstallService({ emit: options.emit });
 
   return {
     handlers: new Map<string, RuntimeMethodHandler>([
@@ -71,8 +73,13 @@ export function createRuntimeMethodHandlers(
       handler('probing.runtimes', (params) => probingService.probeRuntimes(params)),
       handler('probing.version-managers', (params) => probingService.probeVersionManagers(params)),
       handler('probing.agent-clis', (params) => probingService.probeAgentClis(params)),
+      handler('install.run', (params) => install.run(params)),
+      handler('install.cancel', (params) => install.cancel(params)),
     ]),
-    close: () => mcp.close(),
+    close: async () => {
+      install.close();
+      await mcp.close();
+    },
   };
 }
 
