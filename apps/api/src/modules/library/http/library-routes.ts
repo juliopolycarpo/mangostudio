@@ -5,7 +5,6 @@ import {
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
 import {
-  LIBRARY_LOCATION_DEFINITIONS,
   type LibraryCoverageState,
   LibraryCoverageStateSchema,
   type LibraryLocationId,
@@ -21,11 +20,14 @@ import {
   LibraryTargetDescriptorListSchema,
   type LibraryTargetId,
   LibraryTargetIdSchema,
-  listLibraryTargetDescriptors,
   parseResourceKey,
   type ResourceKind,
   ResourceKindSchema,
 } from '@mangostudio/shared/library';
+import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  listLibraryTargetDescriptors,
+} from '@mangostudio/shared/library/host';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import {

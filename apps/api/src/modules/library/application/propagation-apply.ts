@@ -11,10 +11,8 @@
 
 import {
   type AdapterStrategy,
-  getLibraryLocation,
   hashLibraryFile,
   type LibraryDivergenceAckRequest,
-  type LocationDefinition,
   type PropagationApplied,
   type PropagationApply,
   type PropagationApplyRequest,
@@ -31,6 +29,7 @@ import {
   type ResourceFormat,
   type ResourceKind,
 } from '@mangostudio/shared/library';
+import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { constantTimeEquals } from '../../../utils/hash';

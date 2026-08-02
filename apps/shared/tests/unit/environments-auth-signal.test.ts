@@ -4,7 +4,7 @@ import {
   directoryExists,
   probeAuthFile,
   probeConfigKey,
-} from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/environments/detection';
 
 class FakeAuthSignalFs implements AuthSignalFs {
   readonly readPaths: string[] = [];

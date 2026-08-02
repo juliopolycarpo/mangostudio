@@ -17,11 +17,11 @@ import type {
   VersionManagerId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   AGENT_CLI_DEFINITIONS,
-  LOCAL_ENVIRONMENT_ID,
   NODE_RELEASE_LIVE_DATA_STALE_AFTER_MS,
-} from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/environments/detection';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import { getConfig, getHomeMangoDir, getVersion } from '../../../lib/config';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';

@@ -2,13 +2,13 @@ import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   enabledLibraryLocations,
-  LIBRARY_LOCATION_DEFINITIONS,
   LIBRARY_SCOPES,
   type LibraryLocationId,
   type LibraryResource,
   type ResourceKind,
   resourceKey,
 } from '@mangostudio/shared/library';
+import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';

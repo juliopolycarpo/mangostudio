@@ -10,12 +10,11 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
+import { LIBRARY_SCOPES, LibraryScopeSchema } from '@mangostudio/shared/library';
 import {
   LIBRARY_LOCATION_DEFINITIONS,
-  LIBRARY_SCOPES,
-  LibraryScopeSchema,
   type LocationDefinition,
-} from '@mangostudio/shared/library';
+} from '@mangostudio/shared/library/host';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { Value } from '@sinclair/typebox/value';

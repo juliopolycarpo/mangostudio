@@ -10,7 +10,7 @@ import type {
   ResourceFormat,
   ResourceKind,
 } from '@mangostudio/shared/library';
-import { getLibraryLocation } from '@mangostudio/shared/library';
+import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import { previewLibraryPropagation } from '../../../../src/modules/library/application/propagation-preview';
 import type { AdapterCatalog } from '../../../../src/modules/library/domain/format-adapters';
 import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';

@@ -16,7 +16,7 @@ import type {
   LibraryLocationId,
   PropagationBackupSet,
 } from '@mangostudio/shared/library';
-import { getLibraryLocation } from '@mangostudio/shared/library';
+import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import { getConfig } from '../../../lib/config';
 
 export interface BackupEntry {

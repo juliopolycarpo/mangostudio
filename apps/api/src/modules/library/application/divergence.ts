@@ -4,7 +4,7 @@ import type {
   LibraryInstance,
   ResourceKind,
 } from '@mangostudio/shared/library';
-import { COMPARABLE_RESOURCE_KINDS } from '@mangostudio/shared/library';
+import { COMPARABLE_RESOURCE_KINDS } from '@mangostudio/shared/library/host';
 
 export interface InstanceComparison {
   readonly instance: LibraryInstance;

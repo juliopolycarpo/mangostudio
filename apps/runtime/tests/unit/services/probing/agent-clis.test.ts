@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import { AgentCliStatusSchema } from '@mangostudio/shared/environments';
 import type {
   AuthSignalFs,
   BinaryScanDeps,
   RuntimeDefinition,
-} from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/environments/detection';
 import {
-  AgentCliStatusSchema,
   CLAUDE_AGENT_CLI_DEFINITION,
   CODEX_AGENT_CLI_DEFINITION,
   CURSOR_AGENT_CLI_DEFINITION,
@@ -13,7 +13,7 @@ import {
   parseClaudeVersion,
   parseCodexVersion,
   parseCursorAgentVersion,
-} from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { Value } from '@sinclair/typebox/value';
 import type { RuntimeProbeAgentClisParams } from '../../../../src/methods';

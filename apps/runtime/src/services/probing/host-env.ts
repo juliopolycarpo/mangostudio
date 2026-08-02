@@ -29,8 +29,8 @@ import type {
   NvmDetectionDeps,
   NvmFileSystem,
   RuntimeDefinition,
-} from '@mangostudio/shared/environments';
-import type { LocationFsProbe } from '@mangostudio/shared/library';
+} from '@mangostudio/shared/environments/detection';
+import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 
 const execFileAsync = promisify(execFile);

@@ -1,11 +1,11 @@
 import type {
   AgentCliStatus,
-  MinimumRuntimeVersion,
   RuntimeId,
   RuntimeStatus,
   VersionManagerId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import type {
   McpElicitationAction,

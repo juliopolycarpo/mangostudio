@@ -6,7 +6,7 @@ import {
   getLibraryLocation,
   type LocationDefinition,
   resourceEntryName,
-} from '@mangostudio/shared/library';
+} from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { resolvePathThroughExistingAncestor } from '../../../lib/path-containment';
 import { writeFileAtomic } from '../../../lib/safe-file';

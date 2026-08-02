@@ -13,12 +13,12 @@ import type {
   LibraryLocationId,
   LibraryLocationStatus,
   LibraryTargetId,
-  LocationFsProbe,
 } from '@mangostudio/shared/library';
+import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import {
   describeLocation as describeLocationWith,
   describeTargetLocations as describeTargetLocationsWith,
-} from '@mangostudio/shared/library';
+} from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { getConfig } from '../../../lib/config';
 

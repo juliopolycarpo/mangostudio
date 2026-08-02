@@ -4,11 +4,11 @@ import {
   normalizeAppSettings,
 } from '@mangostudio/shared/app-settings';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
+import { LIBRARY_SCOPES } from '@mangostudio/shared/library';
 import {
   LIBRARY_LOCATION_DEFINITIONS,
-  LIBRARY_SCOPES,
   type LocationDefinition,
-} from '@mangostudio/shared/library';
+} from '@mangostudio/shared/library/host';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';

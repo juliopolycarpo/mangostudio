@@ -9,10 +9,10 @@ import type {
   ResourceKind,
 } from '@mangostudio/shared/library';
 import {
-  LIBRARY_LOCATION_DEFINITIONS,
   LibraryLocationStatusListSchema,
   LibraryResourceListSchema,
 } from '@mangostudio/shared/library';
+import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import { Type } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
 import { discoverLibraryResourcesFromSettings } from '../../modules/library/application/library-discovery';

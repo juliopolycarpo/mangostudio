@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library';
+import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import {
   type LibraryInstanceReaderFs,
   readLocationInstances,

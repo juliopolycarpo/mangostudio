@@ -22,7 +22,7 @@ import type {
   RemovalPreviewRequest,
   RemovalRemoved,
 } from '@mangostudio/shared/library';
-import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library';
+import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { constantTimeEquals } from '../../../utils/hash';

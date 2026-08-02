@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import type { AdapterStrategy } from '@mangostudio/shared/library';
-import { LIBRARY_LOCATION_DEFINITIONS, type LocationDefinition } from '@mangostudio/shared/library';
+import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  type LocationDefinition,
+} from '@mangostudio/shared/library/host';
 import {
   createDefaultAdapterRegistry,
   FormatAdapterRegistry,

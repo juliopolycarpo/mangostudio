@@ -13,13 +13,11 @@
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   enabledLibraryLocations,
-  getLibraryLocation,
   type LibraryInstance,
   type LibraryLocationId,
   type LibraryLocationStatus,
   type LibraryResource,
   type LibraryResourceRef,
-  type LocationDefinition,
   parseResourceKey,
   type RemovalBlockedReason,
   type RemovalLocation,
@@ -29,6 +27,7 @@ import {
   type ResourceKind,
   type StagedRemovalLeftover,
 } from '@mangostudio/shared/library';
+import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';

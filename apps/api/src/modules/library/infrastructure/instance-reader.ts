@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { basename, extname, join, relative, sep } from 'node:path';
-import type { LocationDefinition } from '@mangostudio/shared/library';
 import {
   hashLibraryDirectory,
   hashLibraryFile,
@@ -11,6 +10,7 @@ import {
   type LibraryResourceRef,
   normalizeHashPath,
 } from '@mangostudio/shared/library';
+import type { LocationDefinition } from '@mangostudio/shared/library/host';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import { parse as parseToml } from 'smol-toml';
 import { isValidKindSlug } from '../domain/kind-rules';

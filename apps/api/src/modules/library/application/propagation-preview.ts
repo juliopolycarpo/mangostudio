@@ -13,13 +13,11 @@ import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   type AdapterStrategy,
   enabledLibraryLocations,
-  getLibraryLocation,
   type LibraryInstance,
   type LibraryLocationId,
   type LibraryLocationStatus,
   type LibraryResource,
   type LibraryResourceRef,
-  type LocationDefinition,
   type PropagationBlockedReason,
   type PropagationDestination,
   type PropagationOutcome,
@@ -32,6 +30,7 @@ import {
   type ResourceKind,
   type ValidLibraryInstance,
 } from '@mangostudio/shared/library';
+import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';

@@ -5,7 +5,7 @@ import {
   NODE_RELEASE_SCHEDULE,
   type NvmDetectionDeps,
   type NvmFileSystem,
-} from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/environments/detection';
 
 const HOME = '/home/tester';
 const DEFAULT_NVM_ROOT = `${HOME}/.nvm`;

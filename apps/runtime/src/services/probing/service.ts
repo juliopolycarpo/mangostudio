@@ -10,10 +10,17 @@
  */
 
 import { posix, win32 } from 'node:path';
+import type {
+  AgentCliStatus,
+  RuntimeFinding,
+  RuntimeHealth,
+  RuntimeId,
+  RuntimeStatus,
+  VersionManagerId,
+} from '@mangostudio/shared/environments';
 import {
   AGENT_CLI_DEFINITIONS,
   type AgentCliDefinition,
-  type AgentCliStatus,
   type AuthSignalFs,
   analyzeRuntimeScan,
   type BinaryScanDeps,
@@ -28,19 +35,10 @@ import {
   probeAuthFile,
   probeConfigKey,
   type RuntimeDefinition,
-  type RuntimeFinding,
-  type RuntimeHealth,
-  type RuntimeId,
-  type RuntimeStatus,
   scanRuntime,
-  type VersionManagerId,
-} from '@mangostudio/shared/environments';
-import {
-  describeTargetLocations,
-  getLibraryTarget,
-  type LibraryLocationStatus,
-  type LibraryTargetId,
-} from '@mangostudio/shared/library';
+} from '@mangostudio/shared/environments/detection';
+import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
+import { describeTargetLocations, getLibraryTarget } from '@mangostudio/shared/library/host';
 import { CURSOR_MIN_NODE_VERSION } from '@mangostudio/shared/provider-settings';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { RuntimeToolArgumentError } from '../../errors';

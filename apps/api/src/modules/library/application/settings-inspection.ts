@@ -11,7 +11,7 @@ import {
   getLibraryTarget,
   LIBRARY_TARGET_DEFINITIONS,
   type LocationDefinition,
-} from '@mangostudio/shared/library';
+} from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import {
   type RegularFileContent,

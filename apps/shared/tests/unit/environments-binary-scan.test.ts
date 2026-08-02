@@ -6,7 +6,7 @@ import {
   parseBunVersion,
   parseNodeVersion,
   scanRuntime,
-} from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/environments/detection';
 
 function fakeDeps(overrides: Partial<BinaryScanDeps> = {}): BinaryScanDeps {
   return {

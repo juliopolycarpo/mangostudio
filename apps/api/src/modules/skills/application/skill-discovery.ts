@@ -6,7 +6,7 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { LibraryInstance, LibraryLocationId } from '@mangostudio/shared/library';
-import { getLibraryLocation } from '@mangostudio/shared/library';
+import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import type { SkillDescriptor, SkillSource } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';

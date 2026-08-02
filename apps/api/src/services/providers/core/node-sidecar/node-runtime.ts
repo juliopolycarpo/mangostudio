@@ -19,7 +19,7 @@ import {
   parseNodeVersion,
   wellKnownNodeDirectories as runtimeWellKnownNodeDirectories,
   scanRuntime,
-} from '@mangostudio/shared/environments';
+} from '@mangostudio/shared/environments/detection';
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CACHE_TTL_MS = 30_000;

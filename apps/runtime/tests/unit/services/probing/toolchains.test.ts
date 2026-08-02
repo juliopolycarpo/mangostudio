@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { BinaryScanDeps, NvmDetectionDeps } from '@mangostudio/shared/environments';
-import { NODE_RUNTIME_DEFINITION } from '@mangostudio/shared/environments';
+import type { BinaryScanDeps, NvmDetectionDeps } from '@mangostudio/shared/environments/detection';
+import { NODE_RUNTIME_DEFINITION } from '@mangostudio/shared/environments/detection';
 import { createProbingService } from '../../../../src/services/probing/service';
 
 const LINUX_ENV = {

@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { normalizeNodeVersion, parseExactNodeVersion } from '@mangostudio/shared/environments';
+import {
+  normalizeNodeVersion,
+  parseExactNodeVersion,
+} from '@mangostudio/shared/environments/detection';
 
 const NODE_RELEASE_INDEX_URL = 'https://nodejs.org/dist/index.json';
 const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1_000;
