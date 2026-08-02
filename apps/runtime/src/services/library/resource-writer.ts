@@ -180,7 +180,7 @@ export async function writeDirectoryResource(
   await deps.fs.mkdir(dirname(destination.resolvedPath));
   const existing = await deps.fs.lstat(destination.resolvedPath);
   const backupPath = existing
-    ? await backupResource(destination.resolvedPath, input, backupId, deps)
+    ? await backupResource(destination.resolvedPath, input, backupId, store)
     : undefined;
 
   const suffix = deps.randomSuffix();
@@ -225,7 +225,7 @@ export async function writeFileResource(
   await deps.fs.mkdir(dirname(destination.resolvedPath));
   const existing = await deps.fs.lstat(destination.resolvedPath);
   const backupPath = existing
-    ? await backupResource(destination.resolvedPath, input, backupId, deps)
+    ? await backupResource(destination.resolvedPath, input, backupId, store)
     : undefined;
 
   // The logical path is handed to the writer, not the resolved one, so the
@@ -327,9 +327,8 @@ async function backupResource(
   resolvedPath: string,
   input: ResourceWriteInputBase,
   backupId: string,
-  deps: ResourceWriterDeps
+  store: BackupStoreDeps
 ): Promise<string> {
-  const store = backupDeps(deps);
   const backupPath = await backupExistingResource(
     { resolvedPath, locationId: input.locationId, slug: input.slug, backupId },
     store
