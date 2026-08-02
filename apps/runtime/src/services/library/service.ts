@@ -1,7 +1,8 @@
 /**
- * Library scan and contained reads, executed on the machine that holds the
- * agent homes. Policy (which locations are enabled, how long answers stay
- * fresh, coverage over targets) stays on the hub; this host only looks.
+ * Library scan, contained reads, and write engines executed on the machine that
+ * holds the agent homes. Policy (tokens, planning, adapters, acknowledgements)
+ * stays on the hub; this host only looks and mutates under a hub-supplied
+ * backupRoot.
  */
 
 import type { LibraryLocationSettings } from '@mangostudio/shared/app-settings';
@@ -14,20 +15,29 @@ import { describeLocation, LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/sha
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { RuntimeToolArgumentError } from '../../errors';
 import type {
+  RuntimeLibraryApplyParams,
+  RuntimeLibraryApplyResult,
   RuntimeLibraryLocationsParams,
   RuntimeLibraryLocationsResult,
   RuntimeLibraryReadParams,
   RuntimeLibraryReadResult,
+  RuntimeLibraryRemoveParams,
+  RuntimeLibraryRemoveResult,
   RuntimeLibraryScanParams,
   RuntimeLibraryScanResult,
   RuntimeLibrarySettingsSourcesParams,
+  RuntimeLibraryUndoParams,
+  RuntimeLibraryUndoResult,
 } from '../../methods';
 import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-env';
+import { executePropagationWrites, type PreparedPropagationOperation } from './apply-writes';
 import { type LibraryCache, libraryCache } from './cache';
 import { scanLibraryInstances } from './discovery';
 import type { ReadLibraryInstance } from './instance-reader';
 import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
+import { executeRemovalWrites } from './remove-writes';
 import { type RuntimeSettingsSourcesResult, readSettingsSources } from './settings-sources';
+import { executeLibraryUndo, LibraryBackupMissingError } from './undo-writes';
 
 export interface LibraryHostAdapters {
   readonly createPathEnv: (overrides?: {
@@ -58,6 +68,9 @@ export interface LibraryService {
   settingsSources(
     params: RuntimeLibrarySettingsSourcesParams
   ): Promise<RuntimeSettingsSourcesResult>;
+  apply(params: RuntimeLibraryApplyParams): Promise<RuntimeLibraryApplyResult>;
+  remove(params: RuntimeLibraryRemoveParams): Promise<RuntimeLibraryRemoveResult>;
+  undo(params: RuntimeLibraryUndoParams): Promise<RuntimeLibraryUndoResult>;
   /** Drops every memo this process holds; tests call this between fixtures. */
   resetCache(): void;
 }
@@ -65,6 +78,12 @@ export interface LibraryService {
 function assertLocationSettings(value: unknown): asserts value is LibraryLocationSettings {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new RuntimeToolArgumentError('library.scan requires locationSettings.');
+  }
+}
+
+function assertBackupRoot(value: unknown, method: string): asserts value is string {
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new RuntimeToolArgumentError(`${method} requires a non-empty backupRoot.`);
   }
 }
 
@@ -76,15 +95,52 @@ function serializeEntry(entry: ReadLibraryInstance): RuntimeLibraryScanResult['e
   };
 }
 
+function pathEnvFrom(
+  adapters: LibraryHostAdapters,
+  params: {
+    readonly pathEnv?: {
+      readonly env?: Readonly<Record<string, string>>;
+      readonly workspaceRoot?: string;
+    };
+  }
+): PathEnv {
+  return adapters.createPathEnv({
+    env: params.pathEnv?.env,
+    workspaceRoot: params.pathEnv?.workspaceRoot,
+  });
+}
+
+function decodeApplyOperations(params: RuntimeLibraryApplyParams): PreparedPropagationOperation[] {
+  return params.operations.map((operation) => {
+    if (operation.kind === 'directory') {
+      if (typeof operation.sourceDir !== 'string' || operation.sourceDir.length === 0) {
+        throw new RuntimeToolArgumentError(
+          `library.apply directory operation "${operation.resourceKey}" requires sourceDir.`
+        );
+      }
+      return {
+        ...operation,
+        sourceDir: operation.sourceDir,
+      };
+    }
+    if (typeof operation.contentBase64 !== 'string') {
+      throw new RuntimeToolArgumentError(
+        `library.apply file operation "${operation.resourceKey}" requires contentBase64.`
+      );
+    }
+    return {
+      ...operation,
+      contents: Buffer.from(operation.contentBase64, 'base64'),
+    };
+  });
+}
+
 export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {}): LibraryService {
   const adapters: LibraryHostAdapters = { ...DEFAULT_ADAPTERS, ...overrides };
   return {
     async scan(params) {
       assertLocationSettings(params.locationSettings);
-      const pathEnv = adapters.createPathEnv({
-        env: params.pathEnv?.env,
-        workspaceRoot: params.pathEnv?.workspaceRoot,
-      });
+      const pathEnv = pathEnvFrom(adapters, params);
       const entries = await scanLibraryInstances({
         locationSettings: params.locationSettings,
         pathEnv,
@@ -98,10 +154,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
     },
 
     async read(params) {
-      const pathEnv = adapters.createPathEnv({
-        env: params.pathEnv?.env,
-        workspaceRoot: params.pathEnv?.workspaceRoot,
-      });
+      const pathEnv = pathEnvFrom(adapters, params);
       const root = libraryLocationRoot(params.locationId, pathEnv);
       if (root === null) {
         return {
@@ -135,19 +188,60 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
     },
 
     locations(params) {
-      const pathEnv = adapters.createPathEnv({
-        env: params.pathEnv?.env,
-        workspaceRoot: params.pathEnv?.workspaceRoot,
-      });
+      const pathEnv = pathEnvFrom(adapters, params);
       return Promise.resolve({ locations: adapters.describeLocations(pathEnv) });
     },
 
     settingsSources(params) {
-      const pathEnv = adapters.createPathEnv({
-        env: params.pathEnv?.env,
-        workspaceRoot: params.pathEnv?.workspaceRoot,
-      });
+      const pathEnv = pathEnvFrom(adapters, params);
       return Promise.resolve(adapters.readSettingsSources(pathEnv));
+    },
+
+    apply(params) {
+      assertBackupRoot(params.backupRoot, 'library.apply');
+      return executePropagationWrites({
+        backupRoot: params.backupRoot,
+        retentionCount: params.retentionCount,
+        retentionBytes: params.retentionBytes,
+        pathEnv: pathEnvFrom(adapters, params),
+        backupId: params.backupId,
+        operations: decodeApplyOperations(params),
+        skipped: params.skipped,
+      });
+    },
+
+    remove(params) {
+      assertBackupRoot(params.backupRoot, 'library.remove');
+      return executeRemovalWrites({
+        backupRoot: params.backupRoot,
+        retentionCount: params.retentionCount,
+        retentionBytes: params.retentionBytes,
+        pathEnv: pathEnvFrom(adapters, params),
+        backupId: params.backupId,
+        operations: params.operations,
+        kept: params.kept,
+        lastCopyResourceKeys: params.lastCopyResourceKeys,
+      });
+    },
+
+    async undo(params) {
+      assertBackupRoot(params.backupRoot, 'library.undo');
+      if (typeof params.backupId !== 'string' || params.backupId.length === 0) {
+        throw new RuntimeToolArgumentError('library.undo requires a non-empty backupId.');
+      }
+      try {
+        return await executeLibraryUndo({
+          backupRoot: params.backupRoot,
+          backupId: params.backupId,
+          retentionCount: params.retentionCount,
+          retentionBytes: params.retentionBytes,
+        });
+      } catch (error) {
+        if (error instanceof LibraryBackupMissingError) {
+          throw new RuntimeToolArgumentError(error.message);
+        }
+        throw error;
+      }
     },
 
     resetCache() {

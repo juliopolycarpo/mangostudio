@@ -8,11 +8,19 @@ import type {
 } from '@mangostudio/shared/environments';
 import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
 import type {
+  AdapterStrategy,
+  AdaptNote,
+  AdaptProvenance,
   LibraryInstance,
   LibraryLocationId,
   LibraryLocationStatus,
   LibraryResourceRef,
   LibraryTargetId,
+  PropagationApply,
+  PropagationSkipped,
+  PropagationUndo,
+  RemovalApply,
+  RemovalKept,
   ResourceKind,
 } from '@mangostudio/shared/library';
 import type {
@@ -710,6 +718,74 @@ export interface RuntimeLibrarySettingsSourcesParams {
   readonly pathEnv?: RuntimeLibraryPathEnvParams;
 }
 
+export interface RuntimeLibraryBackupEnvelope {
+  /** Absolute backup root on this host. Hub-supplied; never invented here. */
+  readonly backupRoot: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
+  readonly backupId?: string;
+}
+
+export interface RuntimeLibraryApplyAdaptation {
+  readonly strategy: AdapterStrategy;
+  readonly lossy: boolean;
+  readonly requiresReview: boolean;
+  readonly notes: readonly AdaptNote[];
+  readonly provenance?: AdaptProvenance;
+}
+
+/**
+ * One prepared write. Format adaptation already happened on the hub; directory
+ * ops carry a sourceDir on this host, file ops carry base64 contents.
+ */
+export interface RuntimeLibraryApplyOperation {
+  readonly resourceKey: string;
+  readonly locationId: LibraryLocationId;
+  readonly slug: string;
+  readonly operation: 'create' | 'overwrite' | 'adapt-create' | 'adapt-overwrite';
+  readonly kind: 'file' | 'directory';
+  readonly expectedContentHash: string;
+  readonly destinationPath: string;
+  readonly sourceDir?: string;
+  readonly contentBase64?: string;
+  readonly adaptation?: RuntimeLibraryApplyAdaptation;
+}
+
+export interface RuntimeLibraryApplyParams extends RuntimeLibraryBackupEnvelope {
+  readonly operations: readonly RuntimeLibraryApplyOperation[];
+  readonly skipped?: readonly PropagationSkipped[];
+}
+
+export type RuntimeLibraryApplyResult = PropagationApply;
+
+export interface RuntimeLibraryRemoveOperation {
+  readonly resourceKey: string;
+  readonly locationId: LibraryLocationId;
+  readonly slug: string;
+  readonly kind: 'file' | 'directory';
+  readonly expectedPath: string;
+  readonly expectedContentHash: string;
+  readonly lastCopy: boolean;
+}
+
+export interface RuntimeLibraryRemoveParams extends RuntimeLibraryBackupEnvelope {
+  readonly operations: readonly RuntimeLibraryRemoveOperation[];
+  readonly kept?: readonly RemovalKept[];
+  readonly lastCopyResourceKeys?: readonly string[];
+}
+
+export type RuntimeLibraryRemoveResult = RemovalApply;
+
+export interface RuntimeLibraryUndoParams {
+  readonly backupRoot: string;
+  readonly backupId: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+}
+
+export type RuntimeLibraryUndoResult = PropagationUndo;
+
 export interface RuntimeMethodMap {
   'fs.read-file': {
     readonly params: RuntimeReadFileParams;
@@ -858,6 +934,18 @@ export interface RuntimeMethodMap {
   'library.settings-sources': {
     readonly params: RuntimeLibrarySettingsSourcesParams;
     readonly result: RuntimeSettingsSourcesResult;
+  };
+  'library.apply': {
+    readonly params: RuntimeLibraryApplyParams;
+    readonly result: RuntimeLibraryApplyResult;
+  };
+  'library.remove': {
+    readonly params: RuntimeLibraryRemoveParams;
+    readonly result: RuntimeLibraryRemoveResult;
+  };
+  'library.undo': {
+    readonly params: RuntimeLibraryUndoParams;
+    readonly result: RuntimeLibraryUndoResult;
   };
 }
 

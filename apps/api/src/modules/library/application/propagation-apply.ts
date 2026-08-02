@@ -9,6 +9,15 @@
  * None of them is optional, and none of them should be relaxed for speed.
  */
 
+import type { RuntimeLibraryApplyParams, RuntimeLibraryUndoParams } from '@mangostudio/runtime';
+import {
+  executeLibraryUndo,
+  executePropagationWrites,
+  LibraryBackupMissingError,
+  type PreparedPropagationOperation,
+  type PropagationWriteEngineDeps,
+} from '@mangostudio/runtime';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type AdapterStrategy,
   hashLibraryFile,
@@ -32,22 +41,16 @@ import {
 import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
+import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
 import {
-  type BackupEntry,
   type BackupStoreDeps,
-  createBackupId,
   defaultBackupStoreDeps,
-  discardBackupSet,
   listBackupSets,
-  pruneBackupSets,
-  readBackupManifest,
-  restoreBackupEntry,
-  writeBackupManifest,
 } from '../infrastructure/backup-store';
 import { hashResourceAt, readResourceFile } from '../infrastructure/instance-reader';
-import { createLibraryPathEnv } from '../infrastructure/location-probe';
+import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
 import {
   type ResourceWriteResult,
   writeDirectoryResource,
@@ -59,6 +62,9 @@ import { serializeLibraryWrite } from './apply-queue';
 import { acknowledgeDivergence } from './conflict-resolution';
 import { previewLibraryPropagation } from './propagation-preview';
 
+/** Matches library reads: hub deadline sits above runtime write work. */
+const LIBRARY_WRITE_TIMEOUT_MS = 60_000;
+
 export interface PropagationApplyDeps {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
   pathEnv(): PathEnv;
@@ -69,6 +75,11 @@ export interface PropagationApplyDeps {
   adapt(input: AdaptInput, strategy: AdapterStrategy): Promise<AdaptResult>;
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<unknown>;
   backup: BackupStoreDeps;
+  /**
+   * When set, skips the default RuntimeClient path and runs prepared writes
+   * through this callback (tests inject transport failures here).
+   */
+  runtimeApply?: (params: RuntimeLibraryApplyParams) => Promise<PropagationApply>;
 }
 
 interface DirectoryWrite {
@@ -102,7 +113,19 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
     adapt: overrides.adapt ?? ((input, strategy) => defaultAdapterRegistry.adapt(input, strategy)),
     acknowledge: overrides.acknowledge ?? acknowledgeDivergence,
     backup: overrides.backup ?? defaultBackupStoreDeps,
+    ...(overrides.runtimeApply && { runtimeApply: overrides.runtimeApply }),
   };
+}
+
+/** True when the caller injected FS seams — unit/integration tests bypass RPC. */
+function usesInjectedWriteEngine(overrides: Partial<PropagationApplyDeps>): boolean {
+  return (
+    overrides.writeDirectory !== undefined ||
+    overrides.writeFile !== undefined ||
+    overrides.hashAt !== undefined ||
+    overrides.backup !== undefined ||
+    overrides.runtimeApply !== undefined
+  );
 }
 
 export function applyLibraryPropagation(
@@ -110,13 +133,14 @@ export function applyLibraryPropagation(
   request: PropagationApplyRequest,
   overrides: Partial<PropagationApplyDeps> = {}
 ): Promise<PropagationApply> {
-  return serializeLibraryWrite(() => runApply(userId, request, resolveDeps(overrides)));
+  return serializeLibraryWrite(() => runApply(userId, request, resolveDeps(overrides), overrides));
 }
 
 async function runApply(
   userId: string,
   request: PropagationApplyRequest,
-  deps: PropagationApplyDeps
+  deps: PropagationApplyDeps,
+  overrides: Partial<PropagationApplyDeps>
 ): Promise<PropagationApply> {
   try {
     assertRequestedProfileId(request.profileId, { userId });
@@ -142,73 +166,136 @@ async function runApply(
 
   const plan = planApply(preview, request.decisions);
   const env = deps.pathEnv();
-  const backupId = createBackupId(deps.backup);
-  const written: BackupEntry[] = [];
-  const applied: PropagationApplied[] = [];
+  const prepared: PreparedPropagationOperation[] = [];
   const failed: PropagationFailure[] = [];
 
   for (const operation of plan.operations) {
     try {
-      const result = await executeOperation(operation, userId, env, backupId, deps);
-      written.push(result.entry);
-      applied.push(result.applied);
+      prepared.push(await prepareOperation(operation, userId, deps));
     } catch (error) {
-      failed.push(describeFailure(operation, error));
+      failed.push(describePrepareFailure(operation, error));
       break;
     }
   }
 
   if (failed.length > 0) {
-    const rolledBack = await rollback(written, deps);
-    // The backup set is the only recovery path when a compensation fails, so it
-    // is discarded only once the filesystem is provably back where it started.
-    if (rolledBack) {
-      await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-      return { partial: false, applied: [], skipped: plan.skipped, failed };
+    return { partial: false, applied: [], skipped: plan.skipped, failed };
+  }
+
+  const writeResult = await runPreparedWrites(userId, prepared, plan.skipped, env, deps, overrides);
+
+  if (writeResult.failed.length === 0) {
+    for (const acknowledgement of plan.acknowledgements) {
+      await deps.acknowledge(userId, acknowledgement);
     }
-    // Compensation failed, so some writes are still on disk. They are reported
-    // as applied — telling the caller nothing landed would hide exactly the
-    // paths it now has to undo — and the manifest is what `undo` needs to do it.
-    await persistBackupManifest(backupId, written, deps);
-    return { partial: true, applied, skipped: plan.skipped, failed, backupId };
   }
 
-  // The manifest lands before the acknowledgements, not after: it is the only
-  // handle `undo` takes, and a failure between the writes and the manifest would
-  // otherwise leave committed writes with no way back.
-  if (written.length > 0) await persistBackupManifest(backupId, written, deps);
-
-  for (const acknowledgement of plan.acknowledgements) {
-    await deps.acknowledge(userId, acknowledgement);
-  }
-
-  if (written.length === 0) {
-    return { partial: false, applied, skipped: plan.skipped, failed };
-  }
-  return { backupId, partial: false, applied, skipped: plan.skipped, failed };
+  return writeResult;
 }
 
-async function persistBackupManifest(
-  backupId: string,
-  written: readonly BackupEntry[],
-  deps: PropagationApplyDeps
-): Promise<void> {
-  await writeBackupManifest(
-    {
-      version: 2,
-      backupId,
-      createdAtMs: deps.backup.now().getTime(),
-      entries: [...written],
-      // Recorded by the flow that wrote the set, never derived from the entries
-      // afterwards. An apply that only overwrote pre-existing files leaves every
-      // entry carrying a backup — the shape a removal produces — so a reader
-      // guessing from them would offer to "put back" content this apply created
-      // and undo would delete.
-      operation: 'propagation',
+async function runPreparedWrites(
+  userId: string,
+  prepared: readonly PreparedPropagationOperation[],
+  skipped: readonly PropagationSkipped[],
+  env: PathEnv,
+  deps: PropagationApplyDeps,
+  overrides: Partial<PropagationApplyDeps>
+): Promise<PropagationApply> {
+  if (prepared.length === 0) {
+    return { partial: false, applied: [], skipped: [...skipped], failed: [] };
+  }
+
+  if (usesInjectedWriteEngine(overrides)) {
+    if (overrides.runtimeApply) {
+      return overrides.runtimeApply(toRuntimeApplyParams(prepared, skipped, env, deps.backup));
+    }
+    const engineDeps: PropagationWriteEngineDeps = {
+      writeDirectory: deps.writeDirectory,
+      writeFile: deps.writeFile,
+      hashAt: deps.hashAt,
+      backup: deps.backup,
+    };
+    return executePropagationWrites(
+      {
+        backupRoot: deps.backup.backupDir(),
+        retentionCount: deps.backup.retentionCount(),
+        retentionBytes: deps.backup.retentionBytes(),
+        pathEnv: env,
+        operations: prepared,
+        skipped,
+      },
+      engineDeps
+    );
+  }
+
+  // Production Local path: writes run on the runtime behind RPC.
+  const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
+  return client.library.apply(toRuntimeApplyParams(prepared, skipped, env, deps.backup), {
+    timeoutMs: LIBRARY_WRITE_TIMEOUT_MS,
+  });
+}
+
+function toRuntimeApplyParams(
+  prepared: readonly PreparedPropagationOperation[],
+  skipped: readonly PropagationSkipped[],
+  env: PathEnv,
+  backup: BackupStoreDeps
+): RuntimeLibraryApplyParams {
+  return {
+    backupRoot: backup.backupDir(),
+    retentionCount: backup.retentionCount(),
+    retentionBytes: backup.retentionBytes(),
+    pathEnv: {
+      env: mergePathEnv(configuredLibraryEnv(), env.env),
+      ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
     },
-    deps.backup
-  );
-  await pruneBackupSets(backupId, deps.backup);
+    operations: prepared.map((operation) => ({
+      resourceKey: operation.resourceKey,
+      locationId:
+        operation.locationId as RuntimeLibraryApplyParams['operations'][number]['locationId'],
+      slug: operation.slug,
+      operation: narrowAppliedOperation(operation.operation),
+      kind: operation.kind,
+      expectedContentHash: operation.expectedContentHash,
+      destinationPath: operation.destinationPath,
+      ...(operation.sourceDir !== undefined && { sourceDir: operation.sourceDir }),
+      ...(operation.contents !== undefined && {
+        contentBase64: Buffer.from(
+          typeof operation.contents === 'string'
+            ? Buffer.from(operation.contents, 'utf8')
+            : operation.contents
+        ).toString('base64'),
+      }),
+      ...(operation.adaptation && { adaptation: operation.adaptation }),
+    })),
+    skipped: [...skipped],
+  };
+}
+
+function narrowAppliedOperation(
+  operation: PropagationApplied['operation']
+): 'create' | 'overwrite' | 'adapt-create' | 'adapt-overwrite' {
+  if (
+    operation === 'create' ||
+    operation === 'overwrite' ||
+    operation === 'adapt-create' ||
+    operation === 'adapt-overwrite'
+  ) {
+    return operation;
+  }
+  throw new TypeError(`Prepared library write cannot carry operation "${operation}".`);
+}
+
+function mergePathEnv(
+  ...parts: ReadonlyArray<Readonly<Record<string, string | undefined>>>
+): Readonly<Record<string, string>> {
+  const merged: Record<string, string> = {};
+  for (const part of parts) {
+    for (const [key, value] of Object.entries(part)) {
+      if (value !== undefined) merged[key] = value;
+    }
+  }
+  return merged;
 }
 
 interface PlannedOperation {
@@ -563,102 +650,38 @@ function writeKindFor(location: LocationDefinition): 'file' | 'directory' {
   return location.layout === 'directory-of-dirs' ? 'directory' : 'file';
 }
 
-async function executeOperation(
+/**
+ * Hub-side preparation: read source bytes, run format adapters, compute the
+ * expected post-write hash. The runtime write engine never adapts.
+ */
+async function prepareOperation(
   operation: PlannedOperation,
   userId: string,
-  env: PathEnv,
-  backupId: string,
   deps: PropagationApplyDeps
-): Promise<{ entry: BackupEntry; applied: PropagationApplied }> {
-  const { result, expectedContentHash, adaptation } = await performWrite(
-    operation,
-    userId,
-    env,
-    backupId,
-    deps
-  );
-
-  // Re-hash what is actually on disk. A truncated write or a bad adapter output
-  // has to be caught here, not by the user noticing something broken later.
-  const writtenContentHash = await deps.hashAt(result.resolvedDestinationPath, operation.kind);
-  if (writtenContentHash !== expectedContentHash) {
-    throw new VerificationError(
-      `Wrote "${result.destinationPath}" but its content hashed to ${writtenContentHash}, not ${expectedContentHash}.`
-    );
-  }
-
-  return {
-    entry: {
-      locationId: operation.locationId,
-      slug: operation.slug,
-      kind: operation.kind,
-      destinationPath: result.destinationPath,
-      resolvedPath: result.resolvedDestinationPath,
-      writtenContentHash,
-      // The identity the coverage matrix uses, so a retained set can name what
-      // it holds rather than counting anonymous entries. A slug alone cannot be
-      // turned back into one.
-      resourceKey: operation.resourceKey,
-      ...(result.backupPath && { backupPath: result.backupPath }),
-    },
-    applied: {
-      resourceKey: operation.resourceKey,
-      locationId: operation.locationId,
-      operation: operation.operation,
-      destinationPath: result.destinationPath,
-      contentHash: writtenContentHash,
-      ...(adaptation && {
-        adaptation: {
-          strategy: adaptation.strategy,
-          lossy: adaptation.result.lossy,
-          requiresReview: adaptation.result.requiresReview,
-          notes: [...adaptation.result.notes],
-          ...(adaptation.result.provenance && { provenance: adaptation.result.provenance }),
-        },
-      }),
-    },
-  };
-}
-
-interface CompletedAdaptation {
-  readonly strategy: AdapterStrategy;
-  readonly result: AdaptSuccess;
-}
-
-async function performWrite(
-  operation: PlannedOperation,
-  userId: string,
-  env: PathEnv,
-  backupId: string,
-  deps: PropagationApplyDeps
-): Promise<{
-  result: ResourceWriteResult;
-  expectedContentHash: string;
-  adaptation?: CompletedAdaptation;
-}> {
+): Promise<PreparedPropagationOperation> {
   if (operation.kind === 'directory') {
-    // No adapter converts a directory tree, so a planned adaptation here would
-    // otherwise be dropped and the source copied across unconverted.
     if (operation.adaptation) {
       throw new AdaptationError(
         `"${operation.resourceKey}" is a directory resource and cannot be adapted.`
       );
     }
-    const result = await deps.writeDirectory({
+    return {
+      resourceKey: operation.resourceKey,
       locationId: operation.locationId,
       slug: operation.slug,
+      operation: narrowAppliedOperation(operation.operation),
+      kind: 'directory',
+      expectedContentHash: operation.expectedContentHash,
+      destinationPath: operation.destinationPath,
       sourceDir: operation.sourcePath,
-      env,
-      backupId,
-    });
-    return { result, expectedContentHash: operation.expectedContentHash };
+    };
   }
 
   let bytes =
     operation.editedContent === undefined
       ? await deps.readSourceFile(operation.sourcePath)
       : new TextEncoder().encode(operation.editedContent);
-  let adaptation: CompletedAdaptation | undefined;
+  let adaptation: PreparedPropagationOperation['adaptation'];
   if (operation.adaptation) {
     let content: string;
     try {
@@ -666,7 +689,7 @@ async function performWrite(
     } catch {
       throw new AdaptationError('Source is not valid UTF-8 and cannot be adapted safely.');
     }
-    const result = await deps.adapt(
+    const result: AdaptResult = await deps.adapt(
       {
         content,
         kind: operation.adaptation.kind,
@@ -680,49 +703,32 @@ async function performWrite(
       operation.adaptation.strategy
     );
     if (!result.ok) throw new AdaptationError(clientFacingAdaptationMessage(result.error));
-    adaptation = { strategy: operation.adaptation.strategy, result };
-    bytes = new TextEncoder().encode(result.content);
+    const success: AdaptSuccess = result;
+    adaptation = {
+      strategy: operation.adaptation.strategy,
+      lossy: success.lossy,
+      requiresReview: success.requiresReview,
+      notes: [...success.notes],
+      ...(success.provenance && { provenance: success.provenance }),
+    };
+    bytes = new TextEncoder().encode(success.content);
   }
-  // Edited bytes exist in no location yet, so their expected hash is computed
-  // here rather than taken from a preview group.
   const expectedContentHash =
     operation.editedContent === undefined && adaptation === undefined
       ? operation.expectedContentHash
       : (await hashLibraryFile(operation.destinationPath, { readFile: () => bytes })).contentHash;
 
-  // The raw bytes go to the writer, never a decoded string: decoding strips a
-  // UTF-8 BOM and turns undecodable bytes into U+FFFD, so a re-encoded copy of a
-  // BOM-prefixed CLAUDE.md would hash differently and fail verification below.
-  const result = await deps.writeFile({
+  return {
+    resourceKey: operation.resourceKey,
     locationId: operation.locationId,
     slug: operation.slug,
+    operation: narrowAppliedOperation(operation.operation),
+    kind: 'file',
+    expectedContentHash,
+    destinationPath: operation.destinationPath,
     contents: bytes,
-    env,
-    backupId,
-  });
-  return { result, expectedContentHash, ...(adaptation && { adaptation }) };
-}
-
-/**
- * Undoes the writes recorded so far, newest first. Returns false when any
- * compensation failed, which is the one case where the caller must not discard
- * the backups and must report the apply as partial.
- */
-async function rollback(
-  written: readonly BackupEntry[],
-  deps: PropagationApplyDeps
-): Promise<boolean> {
-  let complete = true;
-  for (const entry of [...written].reverse()) {
-    try {
-      if (entry.backupPath) await restoreBackupEntry(entry, deps.backup);
-      else await deps.backup.fs.remove(entry.resolvedPath);
-    } catch (error) {
-      complete = false;
-      console.error(`[library] Could not roll back "${entry.destinationPath}":`, error);
-    }
-  }
-  return complete;
+    ...(adaptation && { adaptation }),
+  };
 }
 
 /** Retained sets and what they cost, plus the bounds they are trimmed to. */
@@ -745,6 +751,11 @@ export async function describeBackupUsage(
 export interface PropagationUndoDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   backup: BackupStoreDeps;
+  /**
+   * When set, skips the default RuntimeClient undo path (tests inject transport
+   * failures here).
+   */
+  runtimeUndo?: (params: RuntimeLibraryUndoParams) => Promise<PropagationUndo>;
 }
 
 /**
@@ -754,56 +765,76 @@ export interface PropagationUndoDeps {
  * reverted: undoing an apply must not also discard an edit the user made
  * afterwards, and silently doing so would be the same class of mistake the
  * state hash exists to prevent.
+ *
+ * `userId` selects the Local runtime connection for the production RPC path.
+ * Injected backup/hash/runtimeUndo overrides keep unit tests in-process.
  */
 export function undoLibraryPropagation(
   backupId: string,
-  overrides: Partial<PropagationUndoDeps> = {}
+  overrides: Partial<PropagationUndoDeps> = {},
+  userId = 'local'
+): Promise<PropagationUndo> {
+  return serializeLibraryWrite(() => runUndo(backupId, overrides, userId));
+}
+
+async function runUndo(
+  backupId: string,
+  overrides: Partial<PropagationUndoDeps>,
+  userId: string
 ): Promise<PropagationUndo> {
   const deps: PropagationUndoDeps = {
     hashAt: overrides.hashAt ?? hashResourceAt,
     backup: overrides.backup ?? defaultBackupStoreDeps,
+    ...(overrides.runtimeUndo && { runtimeUndo: overrides.runtimeUndo }),
   };
-  return serializeLibraryWrite(() => runUndo(backupId, deps));
-}
 
-async function runUndo(backupId: string, deps: PropagationUndoDeps): Promise<PropagationUndo> {
-  const manifest = await readBackupManifest(backupId, deps.backup).catch(() => null);
-  if (!manifest) {
-    throw new LibraryRequestError(
-      404,
-      `No library backup "${backupId}" is retained. Backups are bounded by count and size.`
+  const injected =
+    overrides.hashAt !== undefined ||
+    overrides.backup !== undefined ||
+    overrides.runtimeUndo !== undefined;
+
+  try {
+    if (injected) {
+      if (overrides.runtimeUndo) {
+        return await overrides.runtimeUndo({
+          backupRoot: deps.backup.backupDir(),
+          backupId,
+          retentionCount: deps.backup.retentionCount(),
+          retentionBytes: deps.backup.retentionBytes(),
+        });
+      }
+      return await executeLibraryUndo(
+        {
+          backupRoot: deps.backup.backupDir(),
+          backupId,
+          retentionCount: deps.backup.retentionCount(),
+          retentionBytes: deps.backup.retentionBytes(),
+        },
+        { hashAt: deps.hashAt, backup: deps.backup }
+      );
+    }
+
+    const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
+    return await client.library.undo(
+      {
+        backupRoot: deps.backup.backupDir(),
+        backupId,
+        retentionCount: deps.backup.retentionCount(),
+        retentionBytes: deps.backup.retentionBytes(),
+      },
+      { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
     );
+  } catch (error) {
+    if (error instanceof LibraryBackupMissingError) {
+      throw new LibraryRequestError(404, error.message);
+    }
+    if (error instanceof Error && /No library backup/.test(error.message)) {
+      throw new LibraryRequestError(404, error.message);
+    }
+    throw error;
   }
-
-  const restored: PropagationUndo['restored'] = [];
-  const removed: PropagationUndo['removed'] = [];
-  const skipped: PropagationUndo['skipped'] = [];
-
-  for (const entry of [...manifest.entries].reverse()) {
-    const location = { locationId: entry.locationId, destinationPath: entry.destinationPath };
-    const currentHash = await deps.hashAt(entry.resolvedPath, entry.kind).catch(() => null);
-    if (currentHash !== null && currentHash !== entry.writtenContentHash) {
-      skipped.push({ ...location, reason: 'changed-since-apply' });
-      continue;
-    }
-
-    if (!entry.backupPath) {
-      await deps.backup.fs.remove(entry.resolvedPath);
-      removed.push(location);
-      continue;
-    }
-    if (!(await deps.backup.fs.lstat(entry.backupPath))) {
-      skipped.push({ ...location, reason: 'backup-missing' });
-      continue;
-    }
-    await restoreBackupEntry(entry, deps.backup);
-    restored.push(location);
-  }
-
-  return { backupId, restored, removed, skipped };
 }
 
-class VerificationError extends Error {}
 class AdaptationError extends Error {}
 
 /**
@@ -827,15 +858,13 @@ function clientFacingAdaptationMessage(error: {
   }
 }
 
-function describeFailure(operation: PlannedOperation, error: unknown): PropagationFailure {
+function describePrepareFailure(operation: PlannedOperation, error: unknown): PropagationFailure {
   const reason =
     error instanceof AdaptationError
       ? 'adaptation-failed'
-      : error instanceof VerificationError
-        ? 'verification-failed'
-        : error instanceof Error && error.name === 'LibraryWriteError'
-          ? 'guard-rejected'
-          : 'write-failed';
+      : error instanceof Error && error.name === 'LibraryWriteError'
+        ? 'guard-rejected'
+        : 'write-failed';
   return {
     resourceKey: operation.resourceKey,
     locationId: operation.locationId,

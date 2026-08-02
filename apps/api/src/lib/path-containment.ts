@@ -6,12 +6,9 @@
  */
 
 import {
-  isPathPrefix,
   PathAccessError,
   resolvePathThroughExistingAncestor as resolvePathThroughExistingAncestorRuntime,
 } from '@mangostudio/runtime';
-
-export { isPathPrefix };
 
 export function resolvePathThroughExistingAncestor(inputPath: string): string {
   try {

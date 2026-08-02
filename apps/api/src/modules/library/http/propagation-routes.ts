@@ -56,7 +56,7 @@ export interface PropagationRouteService {
 const defaultPropagationRouteService: PropagationRouteService = {
   preview: (userId, request) => previewLibraryPropagation(userId, request),
   apply: (userId, request) => applyLibraryPropagation(userId, request),
-  undo: (_userId, backupId) => undoLibraryPropagation(backupId),
+  undo: (userId, backupId) => undoLibraryPropagation(backupId, {}, userId),
   backupUsage: () => describeBackupUsage(),
   purgeBackup: (backupId) => purgeBackupSet(backupId),
   listAcks: (userId) => listDivergenceAcks(userId),

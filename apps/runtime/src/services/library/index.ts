@@ -1,4 +1,29 @@
 export {
+  createPropagationWriteEngineDeps,
+  type ExecutePropagationWritesParams,
+  executePropagationWrites,
+  type PreparedPropagationAdaptation,
+  type PreparedPropagationOperation,
+  type PropagationWriteEngineDeps,
+} from './apply-writes';
+export {
+  assertBackupId,
+  type BackupEntry,
+  type BackupManifest,
+  type BackupStoreDeps,
+  backupExistingResource,
+  type CreateBackupStoreDepsOptions,
+  createBackupId,
+  createBackupStoreDeps,
+  discardBackupSet,
+  listBackupSets,
+  pruneBackupSets,
+  purgeBackupSet,
+  readBackupManifest,
+  restoreBackupEntry,
+  writeBackupManifest,
+} from './backup-store';
+export {
   type CachedInstanceDisplay,
   type CachedInstanceHash,
   LIBRARY_SCAN_CACHE_TTL_MS,
@@ -23,6 +48,13 @@ export {
   readResourceFile,
 } from './instance-reader';
 export {
+  assertExpectedResourceEntry,
+  type ContainedResourcePath,
+  LibraryWriteError,
+  type LibraryWriteFailure,
+  resolveContainedResourcePath,
+} from './path-safety';
+export {
   LibraryReadDeniedError,
   type LibraryReadParams,
   type LibraryReadResult,
@@ -30,6 +62,27 @@ export {
   MAX_LIBRARY_CONTENT_BYTES,
   readLibraryContent,
 } from './read';
+export {
+  createRemovalWriteEngineDeps,
+  type ExecuteRemovalWritesParams,
+  executeRemovalWrites,
+  type PreparedRemovalOperation,
+  type RemovalWriteEngineDeps,
+} from './remove-writes';
+export {
+  type CreateResourceWriterDepsOptions,
+  createResourceWriterDeps,
+  type DirectoryResourceWriteInput,
+  type FileResourceWriteInput,
+  type ResolvedDestination,
+  type ResourceWriteResult,
+  type ResourceWriterDeps,
+  type ResourceWriterFs,
+  requireWritableLocation,
+  resolveResourceDestination,
+  writeDirectoryResource,
+  writeFileResource,
+} from './resource-writer';
 export {
   createLibraryService,
   type LibraryHostAdapters,
@@ -42,3 +95,19 @@ export {
   type RuntimeSettingsSourcesResult,
   readSettingsSources,
 } from './settings-sources';
+export {
+  findStagedRemovalLeftovers,
+  findStagedRemovalsForLocations,
+  nodeTreeRemovalFs,
+  type StagedRemoval,
+  stagedRemovalDirectory,
+  stageResourceRemoval,
+  type TreeRemovalFs,
+} from './tree-removal';
+export {
+  createLibraryUndoEngineDeps,
+  type ExecuteLibraryUndoParams,
+  executeLibraryUndo,
+  LibraryBackupMissingError,
+  type LibraryUndoEngineDeps,
+} from './undo-writes';
