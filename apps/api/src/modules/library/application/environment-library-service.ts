@@ -30,6 +30,7 @@ import { getRuntimeClient } from '../../../services/runtime-client/runtime-conne
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { configuredLibraryEnv } from '../infrastructure/location-probe';
 import { groupLibraryScanEntries } from './library-discovery';
+import type { SettingsSourcePayload } from './settings-inspection';
 
 /**
  * Remote scans hash every enabled location; the hub's own deadline sits above
@@ -66,6 +67,7 @@ export interface EnvironmentLibraryService {
     locationId: LibraryLocationId,
     workspaceRoot?: string
   ): Promise<LibraryResourceContent | null>;
+  readSettingsSources(scope: LibraryScope): Promise<SettingsSourcePayload>;
   resetCache(environmentId?: string): void;
 }
 
@@ -244,6 +246,22 @@ export function createEnvironmentLibraryService(
         truncated: result.truncated,
         sizeBytes: result.sizeBytes,
       };
+    },
+
+    // Settings are read fresh every time. The comparison is one small read per
+    // location and it is what a user opens *after* editing a settings file, so
+    // a cache here would answer with the state they just changed.
+    async readSettingsSources(scope) {
+      const client = await resolveClient(scope);
+      if (!client.manifest.features.library) {
+        throw new LibraryFeatureUnavailableError(
+          `Environment "${scope.environmentId}" does not advertise library discovery.`
+        );
+      }
+      return client.library.settingsSources(
+        { pathEnv: pathEnvParams(scope) },
+        { timeoutMs: requestTimeoutMs }
+      );
     },
 
     resetCache(environmentId) {

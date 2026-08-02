@@ -1,4 +1,3 @@
-import { RuntimeRemoteError } from '@mangostudio/runtime';
 import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type ApiErrorResponse,
@@ -36,9 +35,9 @@ import {
 import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import {
   environmentLibraryService,
-  LibraryFeatureUnavailableError,
   type LibraryScope,
 } from '../application/environment-library-service';
+import { handleLibraryError } from './library-error';
 
 export { MAX_LIBRARY_CONTENT_BYTES } from '@mangostudio/runtime';
 
@@ -88,32 +87,6 @@ function resourceNotFound(set: { status?: number | string }): ApiErrorResponse {
   return {
     error: 'Library resource not found.',
     code: ERROR_CODES.NOT_FOUND,
-  };
-}
-
-function handleLibraryError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
-  if (error instanceof LibraryFeatureUnavailableError) {
-    set.status = 422;
-    return {
-      error: error.message,
-      code: ERROR_CODES.VALIDATION,
-    };
-  }
-  // A disabled, unknown, or unreachable environment is a routine state once
-  // discovery is per-environment, not a hub fault: it gets the same 503 the
-  // environment routes give, and no error log.
-  if (error instanceof RuntimeRemoteError && error.code === 'RUNTIME_UNAVAILABLE') {
-    set.status = 503;
-    return {
-      error: error.message,
-      code: ERROR_CODES.PROVIDER_ERROR,
-    };
-  }
-  console.error('[library] Unexpected error:', error);
-  set.status = 500;
-  return {
-    error: 'Unexpected library discovery error.',
-    code: ERROR_CODES.INTERNAL,
   };
 }
 

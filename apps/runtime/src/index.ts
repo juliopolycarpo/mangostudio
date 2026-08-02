@@ -107,6 +107,8 @@ export {
   MAX_SKILL_ENTRYPOINT_BYTES,
   type ReadLibraryInstance,
   type ReadLibraryInstancesOptions,
+  type RuntimeSettingsSource,
+  type RuntimeSettingsSourcesResult,
   readLibraryContent,
   readLocationInstances,
   readResourceFile,

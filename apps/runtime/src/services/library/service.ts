@@ -20,12 +20,14 @@ import type {
   RuntimeLibraryReadResult,
   RuntimeLibraryScanParams,
   RuntimeLibraryScanResult,
+  RuntimeLibrarySettingsSourcesParams,
 } from '../../methods';
 import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-env';
 import { type LibraryCache, libraryCache } from './cache';
 import { scanLibraryInstances } from './discovery';
 import type { ReadLibraryInstance } from './instance-reader';
 import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
+import { type RuntimeSettingsSourcesResult, readSettingsSources } from './settings-sources';
 
 export interface LibraryHostAdapters {
   readonly createPathEnv: (overrides?: {
@@ -34,6 +36,7 @@ export interface LibraryHostAdapters {
   }) => PathEnv;
   readonly cache: LibraryCache;
   readonly describeLocations: (env: PathEnv) => LibraryLocationStatus[];
+  readonly readSettingsSources: (env: PathEnv) => RuntimeSettingsSourcesResult;
   readonly now: () => number;
 }
 
@@ -44,6 +47,7 @@ const DEFAULT_ADAPTERS: LibraryHostAdapters = {
     LIBRARY_LOCATION_DEFINITIONS.map((location) =>
       describeLocation(location.id, env, NODE_LOCATION_FS_PROBE)
     ),
+  readSettingsSources,
   now: Date.now,
 };
 
@@ -51,6 +55,9 @@ export interface LibraryService {
   scan(params: RuntimeLibraryScanParams): Promise<RuntimeLibraryScanResult>;
   read(params: RuntimeLibraryReadParams): Promise<RuntimeLibraryReadResult>;
   locations(params: RuntimeLibraryLocationsParams): Promise<RuntimeLibraryLocationsResult>;
+  settingsSources(
+    params: RuntimeLibrarySettingsSourcesParams
+  ): Promise<RuntimeSettingsSourcesResult>;
   /** Drops every memo this process holds; tests call this between fixtures. */
   resetCache(): void;
 }
@@ -69,9 +76,8 @@ function serializeEntry(entry: ReadLibraryInstance): RuntimeLibraryScanResult['e
   };
 }
 
-export function createLibraryService(
-  adapters: LibraryHostAdapters = DEFAULT_ADAPTERS
-): LibraryService {
+export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {}): LibraryService {
+  const adapters: LibraryHostAdapters = { ...DEFAULT_ADAPTERS, ...overrides };
   return {
     async scan(params) {
       assertLocationSettings(params.locationSettings);
@@ -134,6 +140,14 @@ export function createLibraryService(
         workspaceRoot: params.pathEnv?.workspaceRoot,
       });
       return Promise.resolve({ locations: adapters.describeLocations(pathEnv) });
+    },
+
+    settingsSources(params) {
+      const pathEnv = adapters.createPathEnv({
+        env: params.pathEnv?.env,
+        workspaceRoot: params.pathEnv?.workspaceRoot,
+      });
+      return Promise.resolve(adapters.readSettingsSources(pathEnv));
     },
 
     resetCache() {

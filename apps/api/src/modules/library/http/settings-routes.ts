@@ -1,5 +1,6 @@
+import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
-import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema } from '@mangostudio/shared/errors';
 import {
   type ConceptComparison,
   ConceptComparisonListSchema,
@@ -11,84 +12,104 @@ import {
 } from '@mangostudio/shared/library';
 import { Elysia, t } from 'elysia';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import {
+  environmentLibraryService,
+  type LibraryScope,
+} from '../application/environment-library-service';
 import { inspectAllSettings, inspectSettingsTarget } from '../application/settings-inspection';
 import { compareSettingsSnapshots } from '../domain/settings-concepts';
+import { handleLibraryError } from './library-error';
 
 export interface SettingsRouteService {
-  list(): SettingsSnapshot[];
-  get(targetId: LibraryTargetId): SettingsSnapshot;
-  compare(): ConceptComparison[];
+  list(scope: LibraryScope): Promise<SettingsSnapshot[]>;
+  get(scope: LibraryScope, targetId: LibraryTargetId): Promise<SettingsSnapshot>;
+  compare(scope: LibraryScope): Promise<ConceptComparison[]>;
 }
 
 const defaultSettingsRouteService: SettingsRouteService = {
-  list: inspectAllSettings,
-  get: inspectSettingsTarget,
-  compare() {
-    return compareSettingsSnapshots(inspectAllSettings());
+  async list(scope) {
+    return inspectAllSettings(await environmentLibraryService.readSettingsSources(scope));
+  },
+  async get(scope, targetId) {
+    return inspectSettingsTarget(
+      targetId,
+      await environmentLibraryService.readSettingsSources(scope)
+    );
+  },
+  async compare(scope) {
+    return compareSettingsSnapshots(
+      inspectAllSettings(await environmentLibraryService.readSettingsSources(scope))
+    );
   },
 };
+
+const environmentQuery = t.Object({ environmentId: t.Optional(EnvironmentIdSchema) });
+
+function scopeFor(userId: string, environmentId: string | undefined): LibraryScope {
+  return { userId, environmentId: environmentId ?? LOCAL_ENVIRONMENT_ID };
+}
 
 export function createSettingsRoutes(service: SettingsRouteService = defaultSettingsRouteService) {
   return new Elysia()
     .use(requireAuth)
     .get(
       '/library/settings',
-      ({ set }): SettingsSnapshot[] | ApiErrorResponse => {
+      async ({ query, set, user }): Promise<SettingsSnapshot[] | ApiErrorResponse> => {
         try {
-          return service.list();
+          return await service.list(scopeFor(user?.id ?? '', query.environmentId));
         } catch (error) {
-          return handleSettingsError(error, set);
+          return handleLibraryError(error, set, '[library-settings]');
         }
       },
       {
+        query: environmentQuery,
         response: {
           200: SettingsSnapshotListSchema,
+          422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       }
     )
     .get(
       '/library/settings/compare',
-      ({ set }): ConceptComparison[] | ApiErrorResponse => {
+      async ({ query, set, user }): Promise<ConceptComparison[] | ApiErrorResponse> => {
         try {
-          return service.compare();
+          return await service.compare(scopeFor(user?.id ?? '', query.environmentId));
         } catch (error) {
-          return handleSettingsError(error, set);
+          return handleLibraryError(error, set, '[library-settings]');
         }
       },
       {
+        query: environmentQuery,
         response: {
           200: ConceptComparisonListSchema,
+          422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       }
     )
     .get(
       '/library/settings/:targetId',
-      ({ params, set }): SettingsSnapshot | ApiErrorResponse => {
+      async ({ params, query, set, user }): Promise<SettingsSnapshot | ApiErrorResponse> => {
         try {
-          return service.get(params.targetId);
+          return await service.get(scopeFor(user?.id ?? '', query.environmentId), params.targetId);
         } catch (error) {
-          return handleSettingsError(error, set);
+          return handleLibraryError(error, set, '[library-settings]');
         }
       },
       {
         params: t.Object({ targetId: LibraryTargetIdSchema }),
+        query: environmentQuery,
         response: {
           200: SettingsSnapshotSchema,
+          422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       }
     );
-}
-
-function handleSettingsError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
-  console.error('[library-settings] Unexpected error:', error);
-  set.status = 500;
-  return {
-    error: 'Unexpected library settings inspection error.',
-    code: ERROR_CODES.INTERNAL,
-  };
 }
 
 export const librarySettingsRoutes = createSettingsRoutes();

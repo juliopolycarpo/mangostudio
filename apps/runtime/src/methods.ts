@@ -28,6 +28,7 @@ import type {
   ListDirectoryResponse,
   WorkdirValidationReason,
 } from '@mangostudio/shared/workspaces';
+import type { RuntimeSettingsSourcesResult } from './services/library/settings-sources';
 
 export const RUNTIME_ABSENT_HASH = 'absent';
 
@@ -705,6 +706,10 @@ export interface RuntimeLibraryLocationsResult {
   readonly locations: readonly LibraryLocationStatus[];
 }
 
+export interface RuntimeLibrarySettingsSourcesParams {
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
+}
+
 export interface RuntimeMethodMap {
   'fs.read-file': {
     readonly params: RuntimeReadFileParams;
@@ -849,6 +854,10 @@ export interface RuntimeMethodMap {
   'library.locations': {
     readonly params: RuntimeLibraryLocationsParams;
     readonly result: RuntimeLibraryLocationsResult;
+  };
+  'library.settings-sources': {
+    readonly params: RuntimeLibrarySettingsSourcesParams;
+    readonly result: RuntimeSettingsSourcesResult;
   };
 }
 

@@ -37,3 +37,8 @@ export {
   libraryService,
   scanLibraryInstancesForPathEnv,
 } from './service';
+export {
+  type RuntimeSettingsSource,
+  type RuntimeSettingsSourcesResult,
+  readSettingsSources,
+} from './settings-sources';

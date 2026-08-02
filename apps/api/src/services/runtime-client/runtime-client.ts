@@ -28,6 +28,7 @@ import {
   type RuntimeLibraryReadResult,
   type RuntimeLibraryScanParams,
   type RuntimeLibraryScanResult,
+  type RuntimeLibrarySettingsSourcesParams,
   type RuntimeListDirectoryParams,
   type RuntimeListDirectoryResult,
   type RuntimeMcpAckResult,
@@ -62,6 +63,7 @@ import {
   type RuntimeReplaceRangeParams,
   type RuntimeReplaceRangeResult,
   type RuntimeRequestOptions,
+  type RuntimeSettingsSourcesResult,
   type RuntimeShellResult,
   type RuntimeShellRunParams,
   type RuntimeSnapshotCaptureParams,
@@ -263,6 +265,10 @@ interface RuntimeLibraryClient {
     params?: RuntimeLibraryLocationsParams,
     options?: RuntimeRequestOptions
   ): Promise<RuntimeLibraryLocationsResult>;
+  settingsSources(
+    params?: RuntimeLibrarySettingsSourcesParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeSettingsSourcesResult>;
 }
 
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
@@ -327,6 +333,8 @@ export class RuntimeClient {
       scan: (params, options) => this.request('library.scan', params, options),
       read: (params, options) => this.request('library.read', params, options),
       locations: (params = {}, options) => this.request('library.locations', params, options),
+      settingsSources: (params = {}, options) =>
+        this.request('library.settings-sources', params, options),
     };
     this.snapshot = {
       capture: (params, options) => this.request('snapshot.capture', params, options),
