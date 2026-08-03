@@ -25,7 +25,10 @@ import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
-import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
+import {
+  getRuntimeClient,
+  getRuntimeConnectionManager,
+} from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { evaluateInstallGuard, evaluateRemoteInstallGuard } from '../domain/install-guards';
 import { INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
@@ -284,11 +287,15 @@ async function defaultGuard(context: InstallRequestContext): Promise<InstallGuar
   }
 
   const environment = await environmentRepository.find(context.userId, environmentId);
+  const status = getRuntimeConnectionManager().getStatus(context.userId, environmentId);
+  const shellFeature = status.manifest?.features.shell;
   return evaluateRemoteInstallGuard({
     installsEnabled: config.environments.installsEnabled,
     // An environment that is not there cannot have been trusted, and saying so
     // is more useful than a not-found: the user asked to install somewhere.
     allowInstalls: environment?.allowInstalls === true,
+    // Absent on older peers — treat as granted until consent is visible.
+    runtimeShellAllowed: shellFeature !== false,
   });
 }
 

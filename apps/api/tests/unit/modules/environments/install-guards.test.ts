@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { InstallGuard } from '@mangostudio/shared/environments';
 import {
   evaluateInstallGuard,
   evaluateRemoteInstallGuard,
@@ -118,5 +119,42 @@ describe('install guards for another machine', () => {
     const guard = evaluateRemoteInstallGuard({ installsEnabled: false, allowInstalls: true });
 
     expect(guard).toEqual({ allowed: false, reasons: ['disabled'] });
+  });
+
+  it.each<{
+    name: string;
+    context: Parameters<typeof evaluateRemoteInstallGuard>[0];
+    expected: InstallGuard;
+  }>([
+    {
+      name: 'trusted + shell allowed',
+      context: { installsEnabled: true, allowInstalls: true, runtimeShellAllowed: true },
+      expected: { allowed: true, reasons: [] },
+    },
+    {
+      name: 'trusted + shell unknown',
+      context: { installsEnabled: true, allowInstalls: true },
+      expected: { allowed: true, reasons: [] },
+    },
+    {
+      name: 'trusted + shell denied',
+      context: { installsEnabled: true, allowInstalls: true, runtimeShellAllowed: false },
+      expected: { allowed: false, reasons: ['runtime-denied'] },
+    },
+    {
+      name: 'untrusted + shell denied',
+      context: { installsEnabled: true, allowInstalls: false, runtimeShellAllowed: false },
+      expected: {
+        allowed: false,
+        reasons: ['environment-not-trusted', 'runtime-denied'],
+      },
+    },
+    {
+      name: 'disabled + shell denied',
+      context: { installsEnabled: false, allowInstalls: true, runtimeShellAllowed: false },
+      expected: { allowed: false, reasons: ['disabled', 'runtime-denied'] },
+    },
+  ])('intersects consent with trust: $name', ({ context, expected }) => {
+    expect(evaluateRemoteInstallGuard(context)).toEqual(expected);
   });
 });

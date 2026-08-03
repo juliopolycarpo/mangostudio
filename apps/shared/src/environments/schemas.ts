@@ -551,6 +551,12 @@ export const InstallGuardReasonSchema = Type.Union([
    * said no, or the person flipping settings cannot tell which one to flip.
    */
   Type.Literal('environment-not-trusted'),
+  /**
+   * The connected machine's consent refuses shell, which every install recipe
+   * needs. Distinct from trust: the environment may be trusted and still deny
+   * the capability that would run the installer.
+   */
+  Type.Literal('runtime-denied'),
 ]);
 
 export const InstallGuardSchema = Type.Object({

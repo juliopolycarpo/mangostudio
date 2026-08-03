@@ -2435,6 +2435,8 @@ export const messages = {
         disabled: 'As instalações estão desativadas na configuração deste servidor.',
         'environment-not-trusted':
           'Este ambiente não foi autorizado a instalar. Ative essa opção para a máquina em questão, no cartão dela em Ambientes.',
+        'runtime-denied':
+          'Essa máquina recusa shell, e toda instalação precisa dele. Execute mangostudio-runtime setup lá e conceda shell, ou instale manualmente.',
       },
     },
   },

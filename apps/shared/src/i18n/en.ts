@@ -2411,6 +2411,8 @@ export const messages: Messages = {
         disabled: 'Installs are disabled in this server configuration.',
         'environment-not-trusted':
           'This environment has not been trusted with installs. Turn it on for that machine, on its card in Environments.',
+        'runtime-denied':
+          'That machine refuses shell, which every install needs. Run mangostudio-runtime setup there and grant shell, or install by hand.',
       },
     },
   },
