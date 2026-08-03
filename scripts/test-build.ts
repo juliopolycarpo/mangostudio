@@ -241,15 +241,29 @@ function validateRawReleaseAssets(): void {
   console.log('\n📦 Validating raw release binaries...');
   const checksumsPath = join(RELEASE_ASSETS_DIR, 'SHA256SUMS');
   if (!existsSync(checksumsPath)) fail('SHA256SUMS is missing from release-assets/');
-  if (!existsSync(RAW_HUB_ASSET_PATH)) fail(`Raw hub asset missing: ${RAW_HUB_ASSET_NAME}`);
-  if (!existsSync(RAW_RUNTIME_ASSET_PATH)) {
-    fail(`Raw runtime asset missing: ${RAW_RUNTIME_ASSET_NAME}`);
+
+  // Target distribution bundles ship archive + SHA256SUMS only. Under SKIP_BUILD,
+  // prove the published raw checksums match the binaries extracted from that
+  // archive instead of requiring duplicate uncompressed uploads in every target
+  // artifact. Local/rebuild smoke still requires the real release-assets copies.
+  const hubPath = existsSync(RAW_HUB_ASSET_PATH) ? RAW_HUB_ASSET_PATH : BINARY_PATH;
+  const runtimePath = existsSync(RAW_RUNTIME_ASSET_PATH)
+    ? RAW_RUNTIME_ASSET_PATH
+    : RUNTIME_BINARY_PATH;
+
+  if (!SKIP_BUILD) {
+    if (!existsSync(RAW_HUB_ASSET_PATH)) fail(`Raw hub asset missing: ${RAW_HUB_ASSET_NAME}`);
+    if (!existsSync(RAW_RUNTIME_ASSET_PATH)) {
+      fail(`Raw runtime asset missing: ${RAW_RUNTIME_ASSET_NAME}`);
+    }
+  } else if (!existsSync(hubPath) || !existsSync(runtimePath)) {
+    fail('Materialized hub/runtime binaries missing for raw checksum verification');
   }
 
   const manifest = readFileSync(checksumsPath, 'utf8');
   for (const [name, path] of [
-    [RAW_HUB_ASSET_NAME, RAW_HUB_ASSET_PATH],
-    [RAW_RUNTIME_ASSET_NAME, RAW_RUNTIME_ASSET_PATH],
+    [RAW_HUB_ASSET_NAME, hubPath],
+    [RAW_RUNTIME_ASSET_NAME, runtimePath],
   ] as const) {
     const expected = findChecksum(manifest, name);
     const actual = sha256File(path);

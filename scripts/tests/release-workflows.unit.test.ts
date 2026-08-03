@@ -841,12 +841,15 @@ describe('release workflow binary gate', () => {
 
   test('target bundles carry archives once and materialize them after verification', () => {
     const action = readText('.github/actions/download-distribution/action.yml');
+    const smoke = readText('scripts/test-build.ts');
 
     expect(targetBundleMembers({ archive: 'release-assets/target.tar.gz' })).toEqual([
       'distribution-manifest.json',
       'release-assets/target.tar.gz',
       'release-assets/SHA256SUMS',
     ]);
+    // SKIP_BUILD smoke must not require raw binaries in the slim target bundle.
+    expect(smoke).toContain('existsSync(RAW_HUB_ASSET_PATH) ? RAW_HUB_ASSET_PATH : BINARY_PATH');
     expect(action).toContain('--expect downloaded');
     expect(action.indexOf('Verify distribution identity and checksums')).toBeLessThan(
       action.indexOf('Materialize target directory')
