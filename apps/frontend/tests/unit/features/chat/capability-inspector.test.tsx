@@ -213,6 +213,18 @@ describe('CapabilityInspector', () => {
               environmentName: 'Devbox',
               environmentId: 'devbox',
             },
+            {
+              // A remote a user chose to call "Local". Keying off the name
+              // rather than the id would silently rename their machine.
+              name: 'grep',
+              title: 'Grep',
+              source: 'builtin',
+              state: 'unavailable',
+              reason: 'runtime-denied',
+              category: 'system',
+              environmentName: 'Local',
+              environmentId: 'devbox-two',
+            },
           ],
         },
       }
@@ -224,9 +236,12 @@ describe('CapabilityInspector', () => {
     await waitFor(() => {
       expect(screen.getByText('refused by this machine')).toBeInTheDocument();
     });
-    // A remote's name is the user's own text and travels through untouched.
+    // A remote's name is the user's own text and travels through untouched —
+    // including a remote whose name happens to be the hub's own literal, which
+    // is what proves the substitution keys off the id and not the string.
     expect(screen.getByText('refused by Devbox')).toBeInTheDocument();
-    expect(screen.queryByText('refused by Local')).not.toBeInTheDocument();
+    expect(screen.getByText('refused by Local')).toBeInTheDocument();
+    expect(screen.getAllByText('refused by this machine')).toHaveLength(1);
   });
 
   it('asks for a chat before fetching when none is open', async () => {
