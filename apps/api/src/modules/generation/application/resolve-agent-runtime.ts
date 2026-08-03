@@ -54,6 +54,8 @@ export interface ResolveAgentRuntimeInput {
   readonly runtimeManifest: RuntimeCapabilityManifest;
   /** The turn's environment; scopes which MCP servers can be offered. */
   readonly environmentId: string;
+  /** Display name of the chat's environment; attached to runtime-denied. */
+  readonly environmentName?: string;
 }
 
 export function resolveRuntimeAgentId(
@@ -87,6 +89,7 @@ export async function resolveAgentRuntime(
     registeredTools: getAllTools(),
     mcpServers: mcpServerSnapshots,
     runtimeManifest: input.runtimeManifest,
+    environmentName: input.environmentName,
   });
   const toolDefinitions = effectiveToolDefinitions(toolCandidates);
   const allowedToolNames = new Set(toolDefinitions.map((definition) => definition.name));

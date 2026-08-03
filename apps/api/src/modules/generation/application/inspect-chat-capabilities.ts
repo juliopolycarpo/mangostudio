@@ -38,6 +38,7 @@ import { listMcpServerRows } from '../../mcp-servers/infrastructure/mcp-server-r
 import { listSkills } from '../../skills/application/skill-discovery';
 import { SKILL_TOOL_NAME } from '../../skills/domain/skill';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
+import { resolveEnvironmentDisplayName } from './environment-display-name';
 import { resolveAgentRuntime, resolveRuntimeAgentId } from './resolve-agent-runtime';
 import type { ToolCapabilityCandidate } from './resolve-capability-candidates';
 import { resolveModel } from './resolve-model';
@@ -72,6 +73,10 @@ export async function inspectChatCapabilities(
     ? getProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
   const runtimeClient = await getRuntimeClient(input.userId, ownedChat.environmentId);
+  const environmentName = await resolveEnvironmentDisplayName(
+    input.userId,
+    ownedChat.environmentId
+  );
 
   const [chat, agentRuntime, appSettings, serverRows, skills] = await Promise.all([
     getById(input.chatId, input.db),
@@ -84,6 +89,7 @@ export async function inspectChatCapabilities(
       profile,
       runtimeManifest: runtimeClient.manifest,
       environmentId: ownedChat.environmentId,
+      environmentName,
     }),
     getAppSettings(input.db, input.userId),
     listMcpServerRows(input.db, input.userId),
@@ -167,6 +173,7 @@ function toToolEntry(
     ...(candidate.category ? { category: candidate.category } : {}),
     ...(candidate.serverSlug ? { serverSlug: candidate.serverSlug } : {}),
     ...(candidate.serverName ? { serverName: candidate.serverName } : {}),
+    ...(candidate.environmentName ? { environmentName: candidate.environmentName } : {}),
   };
 
   // Mirror resolveTurnContext: an effective delegate tool is still withheld

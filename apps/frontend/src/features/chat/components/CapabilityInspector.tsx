@@ -22,24 +22,26 @@ import { useState } from 'react';
 import { ToolAvatar } from '@/components/ui/ToolAvatar';
 import { useToolIdentities } from '@/features/environments/identity/use-tool-identities';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import type { ChatCapabilitiesSelection } from '../hooks/use-chat-capabilities';
 import { chatCapabilitiesQueryOptions } from '../hooks/use-chat-capabilities';
 
 type CapabilityLabels = Messages['chat']['capabilities'];
 
 const REASON_LABEL_KEY: Record<CapabilityReasonCode, keyof CapabilityLabels['reasons']> = {
-  'agent-tools-disabled': 'agentToolsDisabled',
-  'agent-allowlist': 'agentAllowlist',
-  'tool-setting-disabled': 'toolSettingDisabled',
-  'name-over-provider-limit': 'nameOverProviderLimit',
-  'environment-unsupported': 'environmentUnsupported',
-  'server-disabled': 'serverDisabled',
-  'server-unavailable': 'serverUnavailable',
-  'delegation-disabled': 'delegationDisabled',
-  'skill-invalid': 'skillInvalid',
-  'skill-disabled': 'skillDisabled',
-  'skill-shadowed': 'skillShadowed',
-  'skill-tool-disabled': 'skillToolDisabled',
+  'agent-tools-disabled': 'agent-tools-disabled',
+  'agent-allowlist': 'agent-allowlist',
+  'tool-setting-disabled': 'tool-setting-disabled',
+  'name-over-provider-limit': 'name-over-provider-limit',
+  'environment-unsupported': 'environment-unsupported',
+  'runtime-denied': 'runtime-denied',
+  'server-disabled': 'server-disabled',
+  'server-unavailable': 'server-unavailable',
+  'delegation-disabled': 'delegation-disabled',
+  'skill-invalid': 'skill-invalid',
+  'skill-disabled': 'skill-disabled',
+  'skill-shadowed': 'skill-shadowed',
+  'skill-tool-disabled': 'skill-tool-disabled',
 };
 
 const STATE_DOT_CLASS: Record<CapabilityState, string> = {
@@ -184,7 +186,7 @@ function CapabilityPanel({
             labels={labels}
             title={tool.title}
             state={tool.state}
-            reasonText={reasonText(labels, tool.reason)}
+            reasonText={reasonText(labels, tool.reason, tool.environmentName)}
             reasonManageTo={reasonManageTo(tool.reason)}
           />
         ))}
@@ -269,7 +271,7 @@ function McpServerRows({
         }
         subtitle={labels.health[server.health]}
         state={server.state}
-        reasonText={reasonText(labels, server.reason)}
+        reasonText={reasonText(labels, server.reason, server.environmentName)}
         reasonManageTo={reasonManageTo(server.reason)}
       />
       {tools.map((tool) => (
@@ -278,7 +280,7 @@ function McpServerRows({
             labels={labels}
             title={tool.title}
             state={tool.state}
-            reasonText={reasonText(labels, tool.reason)}
+            reasonText={reasonText(labels, tool.reason, tool.environmentName)}
             reasonManageTo={reasonManageTo(tool.reason)}
           />
         </div>
@@ -370,10 +372,12 @@ function CapabilityRow({
 
 function reasonText(
   labels: CapabilityLabels,
-  reason: CapabilityReasonCode | undefined
+  reason: CapabilityReasonCode | undefined,
+  environmentName?: string
 ): string | undefined {
   if (!reason) return undefined;
-  return labels.reasons[REASON_LABEL_KEY[reason]];
+  const template = labels.reasons[REASON_LABEL_KEY[reason]];
+  return environmentName ? formatMessage(template, { environmentName }) : template;
 }
 
 function reasonManageTo(reason: CapabilityReasonCode | undefined): '/settings/agents' | undefined {

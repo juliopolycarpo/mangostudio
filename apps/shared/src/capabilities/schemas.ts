@@ -34,6 +34,8 @@ export const CapabilityReasonCodeSchema = Type.Union([
   Type.Literal('name-over-provider-limit'),
   /** The selected execution environment does not provide this capability. */
   Type.Literal('environment-unsupported'),
+  /** The connected machine's consent refuses this capability. */
+  Type.Literal('runtime-denied'),
   /** The owning MCP server is toggled off. */
   Type.Literal('server-disabled'),
   /** The owning MCP server failed to connect or list tools in budget. */
@@ -73,6 +75,8 @@ export const CapabilityToolEntrySchema = Type.Object({
   /** Owning server provenance — MCP tools only. */
   serverSlug: Type.Optional(Type.String({ minLength: 1 })),
   serverName: Type.Optional(Type.String({ minLength: 1 })),
+  /** Environment that refused — present with `runtime-denied`. */
+  environmentName: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 /** Last-known (passive) server health; never triggers a connect or probe. */
@@ -89,6 +93,8 @@ export const CapabilityMcpServerEntrySchema = Type.Object({
   health: CapabilityMcpServerHealthSchema,
   /** How many of this server's tools are effective for the turn. */
   effectiveToolCount: Type.Integer({ minimum: 0 }),
+  /** Environment that refused — present with `runtime-denied`. */
+  environmentName: Type.Optional(Type.String({ minLength: 1 })),
 });
 
 export const CapabilitySkillEntrySchema = Type.Object({

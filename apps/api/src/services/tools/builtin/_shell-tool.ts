@@ -162,6 +162,7 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
     // Command execution is powerful; require explicit opt-in.
     enabledByDefault: false,
     canDisable: true,
+    requiredCapabilities: ['shell'],
     defaultParameters: {
       timeoutSeconds: SHELL_DEFAULT_TIMEOUT_SECONDS,
       maxOutputBytes: SHELL_DEFAULT_MAX_OUTPUT_BYTES,
