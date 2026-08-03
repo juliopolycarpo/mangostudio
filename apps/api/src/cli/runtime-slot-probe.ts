@@ -20,6 +20,7 @@
 import { readFile, stat } from 'node:fs/promises';
 import {
   type ResolvedRuntimeSlotConfig,
+  RUNTIME_SLOTS,
   type RuntimeSlot,
   RuntimeSlotConfigSchema,
   resolveRuntimeSlotConfig,
@@ -28,8 +29,6 @@ import {
 } from '@mangostudio/shared/runtime-home';
 import { Value } from '@sinclair/typebox/value';
 import { getRuntimeHomeMangoDir } from '../lib/config';
-
-const SLOTS: readonly RuntimeSlot[] = ['host', 'wsl', 'remote'];
 
 export interface RuntimeSlotProbe {
   readonly slot: RuntimeSlot;
@@ -47,7 +46,7 @@ export interface RuntimeSlotProbe {
 export async function probeRuntimeSlots(
   mangoHome: string = getRuntimeHomeMangoDir()
 ): Promise<RuntimeSlotProbe[]> {
-  const probes = await Promise.all(SLOTS.map((slot) => probeSlot(slot, mangoHome)));
+  const probes = await Promise.all(RUNTIME_SLOTS.map((slot) => probeSlot(slot, mangoHome)));
   return probes.filter((probe): probe is RuntimeSlotProbe => probe !== null);
 }
 

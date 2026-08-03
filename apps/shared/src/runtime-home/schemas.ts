@@ -41,6 +41,15 @@ export const RuntimeSlotSchema = Type.Union([
 ]);
 export type RuntimeSlot = Static<typeof RuntimeSlotSchema>;
 
+/** Every slot, in the order a report lists them. Derived, so it cannot drift. */
+export const RUNTIME_SLOTS = RuntimeSlotSchema.anyOf.map(
+  (member) => member.const
+) as readonly RuntimeSlot[];
+
+export function isRuntimeSlot(value: string): value is RuntimeSlot {
+  return (RUNTIME_SLOTS as readonly string[]).includes(value);
+}
+
 /** Where the bytes in this slot came from, which is what disambiguates `host`. */
 export const RuntimeInstallSourceSchema = Type.Union([
   /** A release put it beside the hub executable. */

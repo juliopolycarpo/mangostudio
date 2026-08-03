@@ -147,6 +147,21 @@ describe('parseRuntimeCliArgs', () => {
       command: 'setup',
       args: { profile: 'none', yes: false, json: true },
     });
+    expect(
+      parseRuntimeCliArgs(['setup', '--slot', 'remote', '--profile', 'readonly', '--yes'])
+    ).toEqual({
+      command: 'setup',
+      args: { slot: 'remote', profile: 'readonly', yes: true, json: false },
+    });
+  });
+
+  it('says why a slot cannot be acted on, and what a slot is', () => {
+    const invalid = parseRuntimeCliArgs(['setup', '--slot', 'ssh']);
+    expect(invalid).toMatchObject({ command: 'invalid' });
+    // "ssh" is the transport somebody reached for; the message has to say that
+    // a slot is not one, or the next guess is "websocket".
+    expect(invalid).toHaveProperty('reason', expect.stringContaining('ssh'));
+    expect(invalid).toHaveProperty('reason', expect.stringContaining('not how a hub reaches it'));
   });
 
   it('says why a profile or an override cannot be acted on', () => {

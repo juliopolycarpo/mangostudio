@@ -20,7 +20,7 @@
  * import did.
  */
 
-import type { RuntimeSlot } from './schemas';
+import { RUNTIME_SLOTS, type RuntimeSlot } from './schemas';
 
 export const MANGO_HOME_DIR_NAME = '.mango';
 export const RUNTIME_HOME_DIR_NAME = 'runtime';
@@ -150,7 +150,7 @@ export function runtimeSlotForPath(path: string, options: RuntimeHomeOptions): R
   };
   const candidate = normalize(path);
 
-  for (const slot of ['host', 'wsl', 'remote'] as const) {
+  for (const slot of RUNTIME_SLOTS) {
     const root = normalize(runtimeSlotDir(slot, options));
     if (candidate === root || candidate.startsWith(`${root}${separator}`)) return slot;
   }

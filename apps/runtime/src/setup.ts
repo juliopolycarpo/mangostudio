@@ -20,6 +20,7 @@ import {
   type RuntimeCapabilityAllow,
   type RuntimeConsentProfile,
   type RuntimeSetupAuthority,
+  type RuntimeSlot,
   SHELL_TRUST_NOTICE,
 } from '@mangostudio/shared/runtime-home';
 import { loadRuntimeConfig } from './config';
@@ -39,6 +40,13 @@ export interface RuntimeSetupArgs {
   readonly profile?: RuntimeSetupProfileArg;
   /** `--allow k=v` overrides applied over the chosen preset. */
   readonly allow?: Readonly<Partial<RuntimeCapabilityAllow>>;
+  /**
+   * Which slot this answer is for. Without it, the one this binary sits in —
+   * which is right for an installed runtime and wrong for a downloaded one:
+   * `connect` and `serve` answer for `remote` wherever the binary happens to
+   * live, so a runtime on a PATH needs to be able to say so.
+   */
+  readonly slot?: RuntimeSlot;
   readonly yes: boolean;
   readonly json: boolean;
 }
@@ -99,10 +107,16 @@ export async function runRuntimeSetup(
   deps: RuntimeSetupDeps
 ): Promise<number> {
   const env = deps.env;
-  const slot = resolveRuntimeSlot(env);
+  const slot = args.slot ?? resolveRuntimeSlot(env);
   const fromEnvironment = loadRuntimeConfig(env).setupProfile;
+  const environmentProfile =
+    fromEnvironment !== null && isRuntimeSetupProfile(fromEnvironment) ? fromEnvironment : null;
 
-  if (fromEnvironment !== null && !isRuntimeSetupProfile(fromEnvironment)) {
+  // An unusable environment answer is only fatal when nothing outranks it.
+  // Flags come first by design, and the command that repairs a machine whose
+  // `MANGOSTUDIO_RUNTIME_SETUP` went stale is precisely an explicit
+  // `setup --profile … --yes` — which this used to reject before reading it.
+  if (args.profile === undefined && fromEnvironment !== null && environmentProfile === null) {
     return fail(
       deps,
       args.json,
@@ -110,7 +124,7 @@ export async function runRuntimeSetup(
     );
   }
 
-  const named = args.profile ?? fromEnvironment ?? null;
+  const named = args.profile ?? environmentProfile;
   // `--json` is for a caller reading one document off stdout; a prompt printed
   // into that stream would corrupt it before the answer could help anyone.
   const interactive = named === null && !args.yes && !args.json && deps.ask !== undefined;
@@ -135,7 +149,7 @@ export async function runRuntimeSetup(
       : undefined;
   const allow = { ...base, ...update, ...args.allow } satisfies RuntimeCapabilityAllow;
   const by: RuntimeSetupAuthority =
-    args.profile === undefined && fromEnvironment !== null ? 'env' : 'cli';
+    args.profile === undefined && environmentProfile !== null ? 'env' : 'cli';
   const binaryPath = resolveRuntimeBinaryPath(env);
 
   // A merge, so answering the consent question leaves the hub URL a `connect`
@@ -153,7 +167,7 @@ export async function runRuntimeSetup(
     env
   );
 
-  const report = await collectRuntimeHealth(deps);
+  const report = await collectRuntimeHealth({ ...deps, slot });
   if (args.json) {
     deps.write(JSON.stringify(report));
     return 0;

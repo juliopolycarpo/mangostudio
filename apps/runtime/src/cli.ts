@@ -10,6 +10,7 @@
 
 import { Console } from 'node:console';
 import { createInterface } from 'node:readline/promises';
+import { isRuntimeSlot } from '@mangostudio/shared/runtime-home';
 import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
 import {
@@ -40,6 +41,18 @@ import {
   runRuntimeSetup,
 } from './setup';
 import { createStdioFramePort, type StdioFramePortClosure } from './transports/stdio';
+
+/**
+ * The slot `connect` and `serve` answer for.
+ *
+ * A runtime somebody starts by hand to pair with a hub is a `remote` one
+ * whatever directory it happens to sit in: the hub did not install it there,
+ * and the person running these commands is the machine's owner. That is why
+ * these two name the slot instead of deriving it from the executable's path
+ * the way `setup` and `health` do — and why the command they recommend has to
+ * name it too, or it edits a different file than the one they just wrote.
+ */
+const PAIRED_SLOT = 'remote' as const;
 
 export interface RuntimeConnectArgs {
   readonly hubUrl?: string;
@@ -103,6 +116,10 @@ setup options:
   --allow k=v[,k=v]
                Adjust single capabilities over the preset, e.g.
                --profile readonly --allow shell=true
+  --slot <host|wsl|remote>
+               Which slot to answer for. Defaults to the one this binary sits
+               in; pass "remote" for a runtime you downloaded onto a PATH and
+               paired with "connect" or "serve".
   --yes        Never prompt; requires --profile or the environment answer.
   --json       Print the resulting health payload instead of prose.
 
@@ -150,6 +167,7 @@ function parseSetupArgs(args: readonly string[]): RuntimeCliInvocation {
   const setup: {
     profile?: RuntimeSetupArgs['profile'];
     allow?: RuntimeSetupArgs['allow'];
+    slot?: RuntimeSetupArgs['slot'];
     yes: boolean;
     json: boolean;
   } = { yes: false, json: false };
@@ -173,6 +191,17 @@ function parseSetupArgs(args: readonly string[]): RuntimeCliInvocation {
       const parsed = parseAllowOverrides(value);
       if ('error' in parsed) return { command: 'invalid', reason: parsed.error };
       setup.allow = { ...setup.allow, ...parsed.allow };
+      continue;
+    }
+    if (flag === '--slot') {
+      const value = args[++index];
+      if (!value || !isRuntimeSlot(value)) {
+        return {
+          command: 'invalid',
+          reason: `--slot takes host, wsl, or remote${value ? `, not "${value}"` : ''}. A slot names who put a runtime on this machine, not how a hub reaches it.`,
+        };
+      }
+      setup.slot = value;
       continue;
     }
     if (flag === '--yes' || flag === '-y') {
@@ -303,7 +332,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     process.stderr.write(`mangostudio-runtime: ${message}\n`);
   };
 
-  const stored = await readRuntimeSlotConfig('remote');
+  const stored = await readRuntimeSlotConfig(PAIRED_SLOT);
   const hubUrl = args.hubUrl ?? stored.hubUrl;
   if (!hubUrl) {
     log('No hub URL. Pass --hub <url>; the pairing card in MangoStudio prints it.');
@@ -318,7 +347,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     return 1;
   }
 
-  const consent = await consentByInvocation('remote', runtimeVersion);
+  const consent = await consentByInvocation(PAIRED_SLOT, runtimeVersion);
   if (!consent.granted) {
     if (consent.reason) log(consent.reason);
     log(RUNTIME_SETUP_PENDING_MESSAGE);
@@ -326,12 +355,12 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
   }
   if (consent.recorded) {
     log(
-      'Recorded full permissions for this machine. Run "mangostudio-runtime setup" to narrow them.'
+      `Recorded full permissions for this machine. Run "mangostudio-runtime setup --slot ${PAIRED_SLOT}" to narrow them.`
     );
   }
 
-  await writeRuntimeSlotConfig('remote', { hubUrl });
-  const { restricted } = await writePairingToken('remote', token);
+  await writeRuntimeSlotConfig(PAIRED_SLOT, { hubUrl });
+  const { restricted } = await writePairingToken(PAIRED_SLOT, token);
   if (!restricted) {
     log(
       process.platform === 'win32'
@@ -379,7 +408,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
   // answered by the person who started this. What is different is the blast
   // radius — this opens a listening socket — so the recorded answer is the one
   // thing between an unattended restart and a machine nobody consented for.
-  const consent = await consentByInvocation('remote', runtimeVersion);
+  const consent = await consentByInvocation(PAIRED_SLOT, runtimeVersion);
   if (!consent.granted) {
     if (consent.reason) log(consent.reason);
     log(RUNTIME_SETUP_PENDING_MESSAGE);
@@ -387,7 +416,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
   }
   if (consent.recorded) {
     log(
-      'Recorded full permissions for this machine. Run "mangostudio-runtime setup" to narrow them.'
+      `Recorded full permissions for this machine. Run "mangostudio-runtime setup --slot ${PAIRED_SLOT}" to narrow them.`
     );
   }
 
@@ -440,7 +469,7 @@ async function resolveToken(source: RuntimeConnectArgs['tokenSource']): Promise<
   if (fromEnv) return fromEnv;
   // `--token` was not given and the environment is empty: fall back to whatever
   // a previous run stored, which is what makes an unattended restart work.
-  return source === 'env' ? null : await readPairingToken('remote');
+  return source === 'env' ? null : await readPairingToken(PAIRED_SLOT);
 }
 
 async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promise<{
@@ -458,9 +487,9 @@ async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promi
     return fromEnv ? { token: fromEnv, generated: false } : null;
   }
   if (fromEnv) return { token: fromEnv, generated: false };
-  const stored = await readServeToken('remote');
+  const stored = await readServeToken(PAIRED_SLOT);
   if (stored) return { token: stored, generated: false };
-  const bootstrapped = await bootstrapServeToken('remote');
+  const bootstrapped = await bootstrapServeToken(PAIRED_SLOT);
   return {
     token: bootstrapped.token,
     generated: true,

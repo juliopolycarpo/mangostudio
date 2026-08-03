@@ -15,6 +15,7 @@
 import {
   deniedCapabilities,
   type RuntimeHealthReport,
+  type RuntimeSlot,
   SHELL_TRUST_NOTICE,
 } from '@mangostudio/shared/runtime-home';
 import { createLocalRuntimeManifest } from './manifest';
@@ -28,13 +29,15 @@ import {
 export interface RuntimeHealthOptions {
   readonly runtimeVersion: string;
   readonly env?: NodeJS.ProcessEnv;
+  /** Which slot to report on; without it, the one this binary sits in. */
+  readonly slot?: RuntimeSlot;
 }
 
 export async function collectRuntimeHealth(
   options: RuntimeHealthOptions
 ): Promise<RuntimeHealthReport> {
   const env = options.env;
-  const slot = resolveRuntimeSlot(env);
+  const slot = options.slot ?? resolveRuntimeSlot(env);
   const { config, error } = await readRuntimeSlotState(slot, env);
   const manifest = createLocalRuntimeManifest();
 

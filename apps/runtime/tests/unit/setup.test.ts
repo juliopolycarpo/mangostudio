@@ -118,6 +118,38 @@ describe('runtime setup', () => {
     expect((await readRuntimeSlotConfig('host', env)).setup.at).toBeUndefined();
   });
 
+  it('lets an explicit profile override an environment answer it cannot use', async () => {
+    // Flags outrank the environment, so the command that repairs a machine
+    // whose MANGOSTUDIO_RUNTIME_SETUP went stale must not be blocked by it.
+    const env = await isolatedEnv({ MANGOSTUDIO_RUNTIME_SETUP: 'everything' });
+    const run = await setup({ profile: 'readonly', yes: true }, { env });
+
+    expect(run.code).toBe(0);
+    const config = await readRuntimeSlotConfig('host', env);
+    expect(config.profile).toBe('readonly');
+    expect(config.setup.by).toBe('cli');
+  });
+
+  it('answers for the slot it was pointed at, not the one it sits in', async () => {
+    // `connect` and `serve` write the `remote` slot wherever the binary lives,
+    // so the setup they recommend has to be able to reach the same file.
+    const env = await isolatedEnv();
+    const run = await setup({ profile: 'readonly', slot: 'remote', yes: true }, { env });
+
+    expect(run.code).toBe(0);
+    expect((await readRuntimeSlotConfig('remote', env)).profile).toBe('readonly');
+    // The slot this binary sits in is untouched, and still unanswered.
+    expect((await readRuntimeSlotConfig('host', env)).setup.at).toBeUndefined();
+  });
+
+  it('reports on the slot it answered for', async () => {
+    const env = await isolatedEnv();
+    const run = await setup({ profile: 'none', slot: 'remote', json: true }, { env });
+
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.lines[0] ?? '{}')).toMatchObject({ slot: 'remote', profile: 'none' });
+  });
+
   it('refuses to invent an answer when there is nobody to ask', async () => {
     const run = await setup({ yes: true });
 
