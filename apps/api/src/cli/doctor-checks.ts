@@ -158,14 +158,17 @@ export function checkRuntimeBinary(probe: RuntimeBinaryProbe, hubVersion: string
  */
 export function checkRuntimeSlot(probe: RuntimeSlotProbe): CheckResult {
   const label = `Runtime slot (${probe.slot})`;
+  // Named, because `setup` run without it answers for the slot the binary sits
+  // in — which is not the slot this row is about unless they happen to agree.
+  const setupCommand = `mangostudio-runtime setup --slot ${probe.slot}`;
   if (probe.error) {
     return fail(
       label,
-      `${RUNTIME_CONFIG_FILE_NAME} in ${probe.directory} ${probe.error}; run "mangostudio-runtime setup" to rewrite it`
+      `${RUNTIME_CONFIG_FILE_NAME} in ${probe.directory} ${probe.error}; run "${setupCommand}" to rewrite it`
     );
   }
   if (probe.config.setup.state === 'pending') {
-    return warn(label, 'waiting for consent; run "mangostudio-runtime setup" on that machine');
+    return warn(label, `waiting for consent; run "${setupCommand}" on that machine`);
   }
   const version = probe.config.version ? `v${probe.config.version}  ` : '';
   const denied = deniedCapabilities(probe.config.allow);

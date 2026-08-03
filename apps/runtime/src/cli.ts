@@ -603,10 +603,14 @@ async function runHealth(json: boolean, runtimeVersion: string): Promise<number>
       `binary      ${report.binaryPath ?? 'workspace entry (source checkout)'}`,
       `digest      ${report.digest ?? '-'}`,
       `profile     ${report.profile} (${report.setup.state})`,
-      `allow       ${Object.entries(report.allow)
-        .filter(([, granted]) => granted)
-        .map(([key]) => key)
-        .join(', ')}`,
+      // `none` grants nothing, and a bare `allow` with trailing space reads as
+      // a line that failed to render rather than one that says so.
+      `allow       ${
+        Object.entries(report.allow)
+          .filter(([, granted]) => granted)
+          .map(([key]) => key)
+          .join(', ') || 'none'
+      }`,
       `shells      ${report.shells.join(', ') || 'none'}`,
       `git         ${report.git.available ? (report.git.version ?? 'available') : 'not found'}`,
       ...(report.lastError ? [`error       ${report.lastError}`] : []),

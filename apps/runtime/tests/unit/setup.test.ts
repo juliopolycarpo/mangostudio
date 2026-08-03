@@ -7,6 +7,7 @@ import {
   RUNTIME_CONSENT_PRESETS,
   SHELL_TRUST_NOTICE,
 } from '@mangostudio/shared/runtime-home';
+import { parseRuntimeCliArgs } from '../../src/cli';
 import { collectRuntimeHealth, diagnoseRuntimeHealth, worstSeverity } from '../../src/health';
 import { readRuntimeSlotConfig, writeRuntimeSlotConfig } from '../../src/runtime-home';
 import { parseAllowOverrides, type RuntimeSetupArgs, runRuntimeSetup } from '../../src/setup';
@@ -254,7 +255,7 @@ describe('runtime health', () => {
     );
     const consent = findings.find((finding) => finding.title === 'Consent');
     expect(consent?.severity).toBe('fail');
-    expect(consent?.fix).toBe('mangostudio-runtime setup');
+    expect(consent?.fix).toBe('mangostudio-runtime setup --slot host');
     expect(worstSeverity(findings)).toBe('fail');
   });
 
@@ -278,6 +279,28 @@ describe('runtime health', () => {
       await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env })
     );
     expect(findings.find((finding) => finding.title === 'Version')?.severity).toBe('warn');
+  });
+
+  it('only ever prints a fix that setup would accept', async () => {
+    // A doctor whose advertised fix exits on "Nothing to answer with" is worse
+    // than one that says nothing: the reader believes they tried the fix.
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig('host', { version: '0.0.1', setup: { state: 'pending' } }, env);
+
+    const findings = diagnoseRuntimeHealth(
+      await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env })
+    );
+    const fixes = findings.flatMap((finding) => (finding.fix ? [finding.fix] : []));
+    expect(fixes.length).toBeGreaterThan(0);
+
+    for (const fix of fixes) {
+      const parsed = parseRuntimeCliArgs(fix.replace('mangostudio-runtime ', '').split(' '));
+      expect(parsed.command).toBe('setup');
+      // `--yes` with no profile is rejected at run time, not at parse time, so
+      // parsing alone would not have caught the command doctor used to print.
+      const run = await setup((parsed as { args: RuntimeSetupArgs }).args, { env, answers: ['2'] });
+      expect(run.code).toBe(0);
+    }
   });
 
   it('treats a config it cannot parse as a failure, not as an absent one', async () => {

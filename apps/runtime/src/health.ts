@@ -84,24 +84,30 @@ export interface RuntimeDoctorFinding {
  */
 export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDoctorFinding[] {
   const findings: RuntimeDoctorFinding[] = [];
+  // Every fix names the slot the report is about. `setup` otherwise infers one
+  // from where the binary sits, which is the wrong file whenever this report
+  // was not about that slot either.
+  const setupCommand = `mangostudio-runtime setup --slot ${report.slot}`;
 
   if (report.lastError) {
     findings.push({
       severity: 'fail',
       title: 'Config',
       detail: report.lastError,
-      fix: 'mangostudio-runtime setup',
+      fix: setupCommand,
     });
   }
 
-  findings.push(consentFinding(report));
+  findings.push(consentFinding(report, setupCommand));
 
   if (report.version && report.version !== report.runtimeVersion) {
     findings.push({
       severity: 'warn',
       title: 'Version',
       detail: `the config records ${report.version} but this binary is ${report.runtimeVersion}; the install was replaced without updating the config`,
-      fix: 'mangostudio-runtime setup --yes',
+      // Not `--yes`: that refuses without a profile to say yes to, so the fix
+      // doctor printed would have exited on "Nothing to answer with".
+      fix: setupCommand,
     });
   }
 
@@ -140,13 +146,13 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
   return findings;
 }
 
-function consentFinding(report: RuntimeHealthReport): RuntimeDoctorFinding {
+function consentFinding(report: RuntimeHealthReport, setupCommand: string): RuntimeDoctorFinding {
   if (report.setup.state === 'pending') {
     return {
       severity: 'fail',
       title: 'Consent',
       detail: `nobody has said what a hub may do on this machine, so the ${report.slot} runtime refuses to serve`,
-      fix: 'mangostudio-runtime setup',
+      fix: setupCommand,
     };
   }
 
@@ -159,7 +165,7 @@ function consentFinding(report: RuntimeHealthReport): RuntimeDoctorFinding {
       severity: 'warn',
       title: 'Consent',
       detail: 'none — every capability is refused, so a hub can reach this runtime and do nothing',
-      fix: 'mangostudio-runtime setup',
+      fix: setupCommand,
     };
   }
   return {
