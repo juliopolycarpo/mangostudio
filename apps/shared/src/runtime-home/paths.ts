@@ -130,14 +130,24 @@ export function runtimeSlotVersionBinaryPath(
  *
  * A runtime has to answer this about its own executable: the same binary serves
  * a `host` install and an ssh-pushed `remote` one, and only its location says
- * which consent file governs it. Comparison is case-sensitive and separator
- * normalised, and a prefix match must land on a boundary — `…/runtime/remotely`
- * is not the `remote` slot.
+ * which consent file governs it. A prefix match must land on a boundary —
+ * `…/runtime/remotely` is not the `remote` slot.
+ *
+ * Comparison follows the target's own rules rather than one set for both.
+ * Windows accepts either separator and matches without regard to case, so a
+ * binary reported as `C:\USERS\…` has to find the config that governs it. Posix
+ * does neither: there, `\` is an ordinary character in a file's name, and
+ * treating it as a separator would place `…/runtime/host\x` — a file outside
+ * every slot — under `host`, which is the slot that means full consent.
  */
 export function runtimeSlotForPath(path: string, options: RuntimeHomeOptions): RuntimeSlot | null {
+  const windows = options.platform === 'win32';
   const separator = separatorFor(options.platform);
-  const normalize = (value: string): string =>
-    value.replaceAll(options.platform === 'win32' ? '/' : '\\', separator).replace(/[\\/]+$/, '');
+  const normalize = (value: string): string => {
+    const spelled = windows ? value.replaceAll('/', separator) : value;
+    const trimmed = spelled.replace(windows ? /[\\/]+$/ : /\/+$/, '');
+    return windows ? trimmed.toLowerCase() : trimmed;
+  };
   const candidate = normalize(path);
 
   for (const slot of ['host', 'wsl', 'remote'] as const) {

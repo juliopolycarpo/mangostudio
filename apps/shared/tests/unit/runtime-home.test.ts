@@ -65,6 +65,25 @@ describe('runtime home paths', () => {
       runtimeSlotForPath('C:/Users/j/.mango/runtime/host/current/mangostudio-runtime.exe', WIN_HOME)
     ).toBe('host');
   });
+
+  it('matches a win32 path however Windows spelled its case', () => {
+    // `process.execPath` and `homedir()` disagree about case often enough that
+    // a case-sensitive compare loses the config governing the running binary.
+    expect(
+      runtimeSlotForPath('C:\\USERS\\J\\.mango\\Runtime\\Host\\current\\x.exe', WIN_HOME)
+    ).toBe('host');
+  });
+
+  it('keeps a backslash a filename on posix, where it is one', () => {
+    // Reading it as a separator would put a file that sits beside the slots
+    // inside `host` — the slot whose default is full consent.
+    expect(runtimeSlotForPath('/home/j/.mango/runtime/host\\x', POSIX_HOME)).toBeNull();
+    expect(runtimeSlotForPath('/home/j/.mango/runtime/remote\\x', POSIX_HOME)).toBeNull();
+  });
+
+  it('does not fold case on posix, where two spellings are two files', () => {
+    expect(runtimeSlotForPath('/home/j/.mango/runtime/HOST/x', POSIX_HOME)).toBeNull();
+  });
 });
 
 describe('consent presets', () => {
