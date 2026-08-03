@@ -108,8 +108,10 @@ export async function resolveTurnContext(
   const provider = providerType
     ? getProvider(providerType)
     : await getProviderForModel(modelId, input.userId);
-  const runtimeClient = await getRuntimeClient(input.userId, chat.environmentId);
-  const environmentName = await resolveEnvironmentDisplayName(input.userId, chat.environmentId);
+  const [runtimeClient, environmentName] = await Promise.all([
+    getRuntimeClient(input.userId, chat.environmentId),
+    resolveEnvironmentDisplayName(input.userId, chat.environmentId),
+  ]);
 
   const [agentRuntime, appSettings] = await Promise.all([
     resolveAgentRuntime({

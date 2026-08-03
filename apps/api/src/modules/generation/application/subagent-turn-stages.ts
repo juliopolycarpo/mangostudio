@@ -91,8 +91,10 @@ export async function prepareSubagentTurn(
   const provider = resolvedModel.providerType
     ? getRegisteredProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
-  const runtimeClient = await getRuntimeClient(input.userId, input.environmentId);
-  const environmentName = await resolveEnvironmentDisplayName(input.userId, input.environmentId);
+  const [runtimeClient, environmentName] = await Promise.all([
+    getRuntimeClient(input.userId, input.environmentId),
+    resolveEnvironmentDisplayName(input.userId, input.environmentId),
+  ]);
   const runtime = await resolveAgentRuntime({
     db: input.db,
     userId: input.userId,
