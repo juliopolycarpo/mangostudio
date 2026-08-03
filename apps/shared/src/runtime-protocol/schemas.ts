@@ -1,4 +1,5 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
 
 /** Protocol version shared by every transport in this release. */
 export const RUNTIME_PROTOCOL_VERSION = '1.0' as const;
@@ -95,6 +96,15 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
       Type.Literal('custom'),
     ])
   ),
+  /**
+   * What the machine's owner granted, before intersection with what the
+   * machine actually has. `features` alone cannot answer "did someone refuse
+   * this, or is the binary just missing?" — `git` is false either way — and a
+   * UI that reads a refusal into an absent git tells the owner they denied
+   * something they did not. Absent on older peers; a consumer that needs the
+   * distinction must handle its absence rather than assume a refusal.
+   */
+  allow: Type.Optional(RuntimeCapabilityAllowSchema),
 });
 export type RuntimeCapabilityManifest = Static<typeof RuntimeCapabilityManifestSchema>;
 

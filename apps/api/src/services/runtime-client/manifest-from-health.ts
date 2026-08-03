@@ -56,5 +56,6 @@ export function capabilityManifestFromHealth(
       update: allow.update,
     },
     profile: report.profile,
+    allow,
   };
 }

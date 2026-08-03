@@ -52,6 +52,10 @@ export function createLocalRuntimeManifest(
       update: allow.update,
     },
     profile: profileForAllow(allow),
+    // Sent beside the intersection so a reader can tell the two apart: `git`
+    // false in `features` with `allow.git` true is a machine without git, not
+    // an owner who refused it.
+    allow,
   };
 }
 

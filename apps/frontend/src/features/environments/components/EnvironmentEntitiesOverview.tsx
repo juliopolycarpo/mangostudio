@@ -349,7 +349,7 @@ function PermissionsRow({ environment }: { environment: Environment }) {
   const manifest = environment.status.manifest;
   if (!manifest) return null;
 
-  const denied = FEATURE_KEYS.filter((key) => manifest.features[key] === false);
+  const denied = FEATURE_KEYS.filter((key) => isRefused(manifest, key));
   const profile = manifest.profile;
   const narrowed = (profile !== undefined && profile !== 'full') || denied.length > 0;
   if (!narrowed) return null;
@@ -393,6 +393,24 @@ function PermissionsRow({ environment }: { environment: Environment }) {
       <CopyLine label={labels.setupCommand} value={setupCommand} />
     </div>
   );
+}
+
+/**
+ * Whether the machine's owner refused a capability, as opposed to the machine
+ * not having it. `features` is the intersection of the two, so it cannot tell
+ * them apart on its own: a full-consent machine with no git binary reports
+ * `features.git === false` and would otherwise be listed here as denied.
+ * Peers that predate `allow` have only the intersection to offer.
+ */
+function isRefused(
+  manifest: RuntimeCapabilityManifest,
+  key: (typeof FEATURE_KEYS)[number]
+): boolean {
+  const allow = manifest.allow;
+  if (!allow) return manifest.features[key] === false;
+  // `tools` is a summary of the allow set rather than a member of it; it is
+  // false only when every capability below it already reads as denied.
+  return key in allow ? allow[key as keyof typeof allow] === false : false;
 }
 
 function setupSlotFor(environment: Environment): 'host' | 'wsl' | 'remote' {
