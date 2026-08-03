@@ -758,14 +758,15 @@ export type InstallStreamEvent = Static<typeof InstallStreamEventSchema>;
 /**
  * Hub-driven runtime lifecycle actions on an environment card. The hub
  * computes which ones apply per transport so the browser never renders a
- * button it cannot honour.
+ * button it cannot honour. Removal is not one of these: it travels as the
+ * `removeRuntime` query param on `DELETE /environments/:id`, not as a
+ * lifecycle action.
  */
 export const RuntimeLifecycleActionSchema = Type.Union([
   Type.Literal('install'),
   Type.Literal('reinstall'),
   Type.Literal('upgrade'),
   Type.Literal('setup'),
-  Type.Literal('remove'),
 ]);
 export type RuntimeLifecycleAction = Static<typeof RuntimeLifecycleActionSchema>;
 

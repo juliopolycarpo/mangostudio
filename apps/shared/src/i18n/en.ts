@@ -2171,7 +2171,6 @@ export const messages: Messages = {
           reinstall: 'Reinstall',
           upgrade: 'Upgrade',
           setup: 'Set up consent',
-          remove: 'Remove runtime',
         },
         manual: {
           install: 'Install on that machine',
@@ -2287,7 +2286,7 @@ export const messages: Messages = {
           'This URL is plaintext HTTP to a public host. Prefer https:// or a private/LAN address.',
         reachSsh: 'A machine I reach over SSH',
         sshHint:
-          'MangoStudio starts the runtime there with your own ssh client, so keys, your agent, ~/.ssh/config and known_hosts all apply. The runtime has to be installed on that machine already — nothing is pushed there for you yet.',
+          'MangoStudio starts the runtime there with your own ssh client, so keys, your agent, ~/.ssh/config and known_hosts all apply. Nothing needs to be installed first — the environment card can push the runtime and run setup for you after you add it.',
         sshHostLabel: 'Host',
         sshUserLabel: 'User',
         sshPortLabel: 'Port',

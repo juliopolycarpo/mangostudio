@@ -2190,7 +2190,6 @@ export const messages = {
           reinstall: 'Reinstalar',
           upgrade: 'Atualizar',
           setup: 'Configurar consentimento',
-          remove: 'Remover runtime',
         },
         manual: {
           install: 'Instalar naquela máquina',
@@ -2308,7 +2307,7 @@ export const messages = {
           'Esta URL é HTTP sem TLS para um host público. Prefira https:// ou um endereço privado/LAN.',
         reachSsh: 'Uma máquina que eu alcanço por SSH',
         sshHint:
-          'O MangoStudio inicia o runtime lá com o seu próprio cliente ssh, então chaves, seu agente, o ~/.ssh/config e o known_hosts valem normalmente. O runtime já precisa estar instalado naquela máquina — nada é enviado para lá automaticamente ainda.',
+          'O MangoStudio inicia o runtime lá com o seu próprio cliente ssh, então chaves, seu agente, o ~/.ssh/config e o known_hosts valem normalmente. Não é preciso instalar nada antes — o card do ambiente pode enviar o runtime e configurar o consentimento para você depois de adicioná-lo.',
         sshHostLabel: 'Host',
         sshUserLabel: 'Usuário',
         sshPortLabel: 'Porta',

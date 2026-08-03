@@ -115,8 +115,8 @@ Which one to reach for:
   inbound connections.
 - **A machine you already reach with `ssh`** — SSH. It reuses the keys, agent, `~/.ssh/config`
   and `known_hosts` that are already set up, needs nothing on the hub beyond an ssh client, and
-  needs no credential of MangoStudio's own. The runtime has to be installed on that machine
-  already; nothing is pushed there yet.
+  needs no credential of MangoStudio's own. Nothing needs to be installed first: the
+  environment card can push the runtime binary and run `setup` over the same ssh channel.
 
 The shared NDJSON codec validates every frame, buffers partial lines, and rejects records
 larger than 16 MiB. Production in-process delivery uses structured cloning while retaining
