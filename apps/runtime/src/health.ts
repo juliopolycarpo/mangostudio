@@ -14,6 +14,7 @@
 
 import {
   deniedCapabilities,
+  RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
   type RuntimeSlot,
   SHELL_TRUST_NOTICE,
@@ -39,7 +40,15 @@ export async function collectRuntimeHealth(
   const env = options.env;
   const slot = options.slot ?? resolveRuntimeSlot(env);
   const { config, error } = await readRuntimeSlotState(slot, env);
-  const manifest = createLocalRuntimeManifest(config.allow);
+  // An unreadable config is an unknown answer, and an unknown answer is never
+  // yes. `readRuntimeSlotState` hands back the slot default alongside its
+  // error — full, for `host` and `wsl` — while the consent source the dispatch
+  // gate reads applies `none` to the same failure. Reporting the default here
+  // would advertise capabilities every gated call refuses, and (once the hub
+  // refreshes from this payload) project them onto the environment card.
+  const denyEverything = error !== null;
+  const allow = denyEverything ? RUNTIME_CONSENT_PRESETS.none : config.allow;
+  const manifest = createLocalRuntimeManifest(allow);
 
   return {
     schemaVersion: config.schemaVersion,
@@ -53,8 +62,8 @@ export async function collectRuntimeHealth(
     // Read, never recomputed. Hashing ~95 MB to answer "how are you" would make
     // the cheapest question the most expensive one; the installer writes it.
     digest: config.digest,
-    profile: config.profile,
-    allow: config.allow,
+    profile: denyEverything ? 'none' : config.profile,
+    allow,
     setup: config.setup,
     platform: manifest.platform,
     arch: manifest.arch,
@@ -147,6 +156,18 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
 }
 
 function consentFinding(report: RuntimeHealthReport, setupCommand: string): RuntimeDoctorFinding {
+  // Reported before the presets are read, so `none` is never mistaken for a
+  // choice someone made: an unreadable config refuses everything until it can
+  // be read, which is a different problem with a different fix.
+  if (report.lastError) {
+    return {
+      severity: 'fail',
+      title: 'Consent',
+      detail: `the ${report.slot} config could not be read, so every capability is refused until it can be`,
+      fix: setupCommand,
+    };
+  }
+
   if (report.setup.state === 'pending') {
     return {
       severity: 'fail',
