@@ -10,6 +10,11 @@
  * Only this machine's slots appear. A `wsl` slot lives inside the distribution
  * and a `remote` one on the far host, so a plain install has just `host` — and
  * often not even that, since a `host` slot with no file means full consent.
+ *
+ * The home comes from `getRuntimeHomeMangoDir`, not from this hub's own
+ * `~/.mango`: a spawned runtime inherits `MANGO_HOME` from here, and doctor
+ * reporting on a directory the runtime beside it does not use would be worse
+ * than reporting nothing.
  */
 
 import { readFile, stat } from 'node:fs/promises';
@@ -22,7 +27,7 @@ import {
   runtimeSlotDir,
 } from '@mangostudio/shared/runtime-home';
 import { Value } from '@sinclair/typebox/value';
-import { getHomeMangoDir } from '../lib/config';
+import { getRuntimeHomeMangoDir } from '../lib/config';
 
 const SLOTS: readonly RuntimeSlot[] = ['host', 'wsl', 'remote'];
 
@@ -40,7 +45,7 @@ export interface RuntimeSlotProbe {
  * that matters on a machine that does have a runtime home.
  */
 export async function probeRuntimeSlots(
-  mangoHome: string = getHomeMangoDir()
+  mangoHome: string = getRuntimeHomeMangoDir()
 ): Promise<RuntimeSlotProbe[]> {
   const probes = await Promise.all(SLOTS.map((slot) => probeSlot(slot, mangoHome)));
   return probes.filter((probe): probe is RuntimeSlotProbe => probe !== null);

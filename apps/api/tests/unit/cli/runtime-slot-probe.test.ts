@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { checkRuntimeSlot } from '../../../src/cli/doctor-checks';
 import { probeRuntimeSlots } from '../../../src/cli/runtime-slot-probe';
+import { getHomeMangoDir, getRuntimeHomeMangoDir } from '../../../src/lib/config';
 
 const homes: string[] = [];
 
@@ -26,6 +27,14 @@ async function mangoHome(slots: Readonly<Record<string, string | null>> = {}): P
 describe('probeRuntimeSlots', () => {
   it('reports nothing when there is no runtime home', async () => {
     expect(await probeRuntimeSlots(await mangoHome())).toEqual([]);
+  });
+
+  it('defaults to the home a runtime this hub spawns would use', async () => {
+    // A runtime child inherits MANGO_HOME from the hub, so doctor has to read
+    // the same directory or it describes slots nothing writes to.
+    const home = await mangoHome({ host: null });
+    expect(getRuntimeHomeMangoDir({ MANGO_HOME: home })).toBe(home);
+    expect(getRuntimeHomeMangoDir({})).toBe(getHomeMangoDir());
   });
 
   it('reads what each slot on this machine has agreed to', async () => {
