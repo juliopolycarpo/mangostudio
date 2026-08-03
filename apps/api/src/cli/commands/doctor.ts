@@ -61,6 +61,7 @@ import {
   checkInstance,
   checkRuntime,
   checkRuntimeBinary,
+  checkRuntimeSlot,
   checkSshClient,
   collectBuildIdentityChecks,
   collectCursorDoctorChecks,
@@ -74,6 +75,7 @@ import { collectMcpDoctorChecks } from '../mcp-doctor-checks';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
 import { probeRuntimeBinary, type RuntimeBinaryProbe } from '../runtime-binary-probe';
+import { probeRuntimeSlots, type RuntimeSlotProbe } from '../runtime-slot-probe';
 import { collectSkillsDoctorChecks } from '../skills-doctor-checks';
 import { probeSshClient, type SshClientProbe } from '../ssh-client-probe';
 
@@ -87,6 +89,7 @@ export interface DoctorDeps {
   isCursorConfigured: (config: MangoConfig) => boolean;
   probeCursorRuntime: typeof probeCursorDoctorRuntime;
   probeRuntimeBinary: () => Promise<RuntimeBinaryProbe>;
+  probeRuntimeSlots: () => Promise<RuntimeSlotProbe[]>;
   probeSshClient: () => Promise<SshClientProbe>;
   listChatGptConnectors: (config: MangoConfig) => SecretMetadataRow[];
   collectChatGptChecks: (
@@ -155,6 +158,7 @@ async function collectResults(
     checkInstance(instance.state, instance.alive),
     checkRuntime(getVersion(), isStandaloneExecutable()),
     checkRuntimeBinary(await d.probeRuntimeBinary(), getVersion()),
+    ...(await d.probeRuntimeSlots()).map(checkRuntimeSlot),
     checkSshClient(await d.probeSshClient()),
     ...collectBuildIdentityChecks({
       serverBuild,
@@ -310,6 +314,7 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,
     probeCursorRuntime: deps.probeCursorRuntime ?? probeCursorDoctorRuntime,
     probeRuntimeBinary: deps.probeRuntimeBinary ?? probeRuntimeBinary,
+    probeRuntimeSlots: deps.probeRuntimeSlots ?? (() => probeRuntimeSlots()),
     probeSshClient: deps.probeSshClient ?? (() => probeSshClient()),
     listChatGptConnectors: deps.listChatGptConnectors ?? listChatGptConnectorRows,
     collectChatGptChecks:

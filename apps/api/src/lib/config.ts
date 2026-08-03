@@ -273,6 +273,22 @@ export function getHomeMangoDir(): string {
   return join(homedir(), '.mango');
 }
 
+/**
+ * The `~/.mango` a runtime this hub spawns will use.
+ *
+ * Runtime children inherit this process's environment and read `MANGO_HOME` as
+ * their own home, so a hub that ignored it would report on a directory nothing
+ * writes to — `mango doctor` would describe slots while the runtime beside it
+ * used others. Only the runtime home follows the variable; the database, logs,
+ * and config.toml stay at {@link getHomeMangoDir}, because moving those is a
+ * different decision and nobody has asked for it.
+ */
+// Usage: getRuntimeHomeMangoDir() // → "/home/user/.mango"
+export function getRuntimeHomeMangoDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.MANGO_HOME?.trim();
+  return override && override.length > 0 ? override : getHomeMangoDir();
+}
+
 /** What a build reports when no release stamped a version into it. */
 const DEVELOPMENT_VERSION = 'dev';
 

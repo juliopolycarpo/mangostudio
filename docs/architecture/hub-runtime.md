@@ -98,6 +98,134 @@ larger than 16 MiB. Production in-process delivery uses structured cloning while
 schema validation, so embedded execution cannot exchange values a byte transport could not
 represent during development and tests.
 
+## The Runtime Home
+
+Every runtime keeps its state in one place on the machine it runs on:
+
+```text
+~/.mango/runtime/
+├── host/                          # the runtime this machine's own install ships
+│   └── runtime.json               # no bytes: the binary sits beside the hub
+├── wsl/                           # placed by a Windows hub, inside the distribution
+│   ├── runtime.json
+│   ├── current -> 0.1.1           # the symlink an upgrade swaps
+│   └── 0.1.1/mangostudio-runtime
+└── remote/                        # placed over ssh, or installed for ws / Direct URL
+    ├── runtime.json
+    ├── credentials.json           # 0600; pairing and serve tokens only
+    ├── current -> 0.1.1
+    └── 0.1.1/mangostudio-runtime
+```
+
+A **slot** names who put the runtime there, not which transport talks to it. One machine
+reachable by ssh *and* a dialled-in WebSocket shares one slot, one consent file, and one
+binary. Config lives at the slot root and bytes under `<version>/`, so an upgrade replaces
+bytes and never consent. `current` is what keeps an ssh launch argument and a service
+unit's `ExecStart` from embedding a version that dangles after the next upgrade; it is
+published with `ln -sfn`, which creates a temporary link and renames it over the old one.
+
+`host` holds no bytes. A release ships `mangostudio-runtime` beside the hub binary and
+`host/runtime.json` records where that resolved to; `source` says whether a reader is
+looking at a bundled binary, a source checkout with none, or one an install provisioned.
+
+`runtime.json` must stay safe to paste into a bug report, which is why pairing and serve
+tokens live in `credentials.json` at 0600 instead. Writes are atomic, because two hubs can
+provision one machine at once. Every field past `schemaVersion` and `slot` is optional and
+unknown keys are ignored: a runtime and a hub on different versions share this file, so a
+field written by a newer one must not brick an older one. The schema is
+`@mangostudio/shared/runtime-home`.
+
+### Consent
+
+`allow` is a feature-level set — `fsRead`, `fsWrite`, `shell`, `git`, `probing`, `mcp`,
+`library`, `checkpoints`, `update` — and `profile` names a preset over it: `full`,
+`readonly` (reads, git, probing, and library only), `none`, or `custom` for anything else.
+The stored profile is a label and the set is the decision, so the name is re-derived on
+read: a hand-edited file cannot claim `readonly` over a shell grant.
+
+**`allow.shell` grants everything a shell can reach.** `readonly` is the only profile that
+meaningfully constrains a hub. The capability list is a description of the intended
+surface, not a sandbox, and every consent surface says so.
+
+Who answers depends on who installed:
+
+- `host` and `wsl` are full with no gate. An account on this machine put them there —
+  010's one-click WSL connect stays one click — and a `wsl` distribution's first provision
+  records that by running the runtime's own `setup`, never by the hub writing an `allow`
+  block itself.
+- `remote` is pending until somebody at that machine answers. A slot with no config at all
+  is *also* pending: the thing that installs a remote runtime is somebody else's hub, and
+  a gate that only exists once that hub writes it is a gate that hub can decline to write.
+- `connect` and `serve` are the exception, because a person is standing at the machine
+  holding a token their hub printed. The invocation is the answer, and it is recorded and
+  logged rather than assumed, so `health` afterwards says what the machine allows. A file
+  that already says `pending` is obeyed even there — somebody deliberately staged that
+  machine for an answer.
+- A config that cannot be read refuses everywhere, in every slot. An unknown answer must
+  not resolve to the slot default, because the file it replaced may have said something
+  narrower — and for `host` and `wsl` the default is full. The same rule governs the hub
+  side of WSL provisioning: an unreadable `runtime.json` in a distribution is re-written
+  with the gate closed rather than re-granted.
+
+A runtime whose slot is pending refuses before serving anything and exits non-zero with a
+stable phrase (`RUNTIME_SETUP_PENDING_SIGNATURE`) that the ssh failure classifier keys on,
+so "not set up yet" is never reported as "no binary there".
+
+### Enforcement
+
+The gate above decides whether a runtime serves at all. `allow` decides what it serves,
+and it is enforced at dispatch: every protocol method names the capabilities it needs
+(`apps/runtime/src/consent-gate.ts`), and a host built from a narrowed `allow` answers the
+ones it lacks with a refusal instead of running them. The table is keyed by `RuntimeMethod`,
+so a new method with no capability decided for it is a type error.
+
+A denied method stays registered and refuses, rather than disappearing from the map. An
+absent method comes back as `METHOD_UNSUPPORTED`, which is also what an older runtime says
+about a method it has never heard of — a hub cannot tell those apart, and only one of them
+has a fix. The refusal instead carries `details.kind = "consent_denied"`, the capability
+that was missing, and the `setup` command that grants it. It goes in `details` because
+`RuntimeErrorCodeSchema` is a closed union that an older peer rejects outright, so a new
+top-level code would break the mixed-version pairing the compat window exists to protect.
+
+Some methods need two capabilities. `library.apply` is a library operation *and* a write to
+somebody's files; `readonly` grants the first and refuses the second, so listing only
+`library` would have let the profile whose whole promise is "no writes" write files.
+
+Local (in-process) is not exempt: it reads the `host` slot like any other runtime, so
+narrowing that slot gives a read-only Local.
+
+### CLI
+
+```text
+mangostudio-runtime setup  [--profile full|readonly|none] [--allow k=v,…]
+                           [--slot host|wsl|remote] [--yes] [--json]
+mangostudio-runtime health [--json]
+mangostudio-runtime doctor [--json]
+```
+
+`setup` asks when it can and takes flags when it cannot; `MANGOSTUDIO_RUNTIME_SETUP` is
+the same answer from the environment, which is how a container image supplies one at build
+time. Flags outrank the environment, so an unusable `MANGOSTUDIO_RUNTIME_SETUP` is only
+fatal when nothing overrode it — otherwise the command that repairs it could not run.
+`--yes` with nothing to say yes to is an error rather than a silent default. The
+non-interactive shape is what makes running `setup` over an ssh channel possible without
+the hub reaching around the CLI.
+
+`--slot` says which slot the answer is for. Without it, setup answers for the slot the
+binary sits in, which is right for an installed runtime and wrong for a downloaded one:
+`connect` and `serve` write `remote` wherever they run from, so those two — and every fix
+`doctor` prints — name the slot in the command they recommend.
+
+`health --json` is one payload — slot, source, version, binary, digest, profile, `allow`,
+shells, git, and any error reading the home — for a terminal on the machine and, from 019,
+for the `runtime.health` protocol method a hub calls on a runtime it cannot run commands
+on. `doctor` reads that payload and names the command that fixes each finding, because
+these machines are often reachable only through the thing that is failing.
+
+`mango doctor` on the hub reports one row per slot present in its own runtime home, so a
+runtime that is installed, reachable, and refusing everything does not look identical to
+one that is absent.
+
 ## Stdio Transport
 
 `mangostudio-runtime` is a second binary built from `apps/runtime/src/cli.ts` and shipped in
@@ -153,12 +281,13 @@ chats through the embedded Local runtime, it just cannot start stdio environment
 
 `transportKind: 'wsl'` carries `{ distro }` and is a launcher over the stdio transport
 rather than a protocol of its own. The argv is
-`wsl.exe -d <distro> --exec sh -c 'exec "$HOME/.mango/bin/mangostudio-runtime" "$@"'
-mangostudio-runtime`, which the stdio spawn then appends `--stdio` to. The distribution
-name is an argv entry and the script is a constant, so a name containing spaces, quotes,
-or shell metacharacters is data throughout. `$HOME` is expanded by the distribution's own
-shell because `wsl.exe --exec` expands nothing and the hub does not know where a
-distribution's home directory is.
+`wsl.exe -d <distro> --exec sh -c 'exec
+"$HOME/.mango/runtime/wsl/current/mangostudio-runtime" "$@"' mangostudio-runtime`, which
+the stdio spawn then appends `--stdio` to. The distribution name is an argv entry and the
+script is a constant, so a name containing spaces, quotes, or shell metacharacters is data
+throughout. `$HOME` is expanded by the distribution's own shell because `wsl.exe --exec`
+expands nothing and the hub does not know where a distribution's home directory is — and
+where a version has to appear in a script, it arrives as `$1` for the same reason.
 
 `GET /environments/wsl` lists what the Windows host reports and marks distributions an
 environment already points at. It is gated to win32 and answers every other platform with
@@ -166,13 +295,24 @@ a typed reason instead of a spawn that cannot work. Reading `wsl.exe --list --ve
 means decoding UTF-16LE (UTF-8 under `WSL_UTF8`) and parsing by column shape: the headers
 and the state column are localized, and the columns are padded to their widest value.
 
-Connect provisions on demand. The distribution is asked which runtime it has, and when
-that is absent, unrunnable, or from another release, the Linux build for this hub's own
-version is fetched from its release, verified against that release's `SHA256SUMS`, cached
-under `~/.mango/runtime-cache/<version>/`, and piped into the distribution's own `tar`. A
-hub update is therefore absorbed by reinstalling rather than by a handshake failure the
-user cannot act on. There is no standalone runtime asset in a release yet, so the platform
-archive is fetched and one member is extracted from it.
+Connect provisions on demand. The distribution is asked where its home is and what its
+`runtime.json` records, and when that names another version — or the binary it names does
+not run — the Linux build for this hub's own version is fetched from its release, verified
+against that release's `SHA256SUMS`, cached under `~/.mango/runtime-cache/<version>/`, and
+piped into the distribution's own `tar`. A hub update is therefore absorbed by
+reinstalling rather than by a handshake failure the user cannot act on. There is no
+standalone runtime asset in a release yet, so the platform archive is fetched and one
+member is extracted from it.
+
+What lands is written down: version, digest, and which hub installed it. The digest is
+what version equality cannot supply in a checkout — two `dev` builds are different
+binaries with the same name, so without it a rebuilt runtime would never reach the
+distribution. A release short-circuits on version alone, because a published tag's bytes
+do not change and hashing tens of megabytes to learn that would be absurd. Consent is
+recorded once, on the first provision, by running the installed runtime's own `setup`;
+upgrades leave it alone. The unversioned `~/.mango/bin/mangostudio-runtime` that the first
+WSL release wrote is deleted on the first install into this layout, and the removal is
+logged.
 
 A hub running from a source checkout reports version `dev`, which names no release — there
 is no `vdev` tag and there never will be — so it installs the Linux runtime the checkout

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
+import type { RuntimeSlotConfig } from '@mangostudio/shared/runtime-home';
 import {
   createWslProvisioner,
   type DistroCommandResult,
@@ -11,15 +12,30 @@ const ASSET = `mangostudio-${VERSION}-linux-x64.tar.gz`;
 const ARCHIVE = new TextEncoder().encode('pretend this is a tar.gz');
 const DIGEST = createHash('sha256').update(ARCHIVE).digest('hex');
 const CHECKSUMS = `${DIGEST}  ${ASSET}\n`;
+const DISTRO_HOME = '/home/dev';
 
 interface DistroCall {
   readonly distro: string;
   readonly script: string;
   readonly stdinBytes: number;
+  readonly args: readonly string[];
 }
 
 function ok(stdout = ''): DistroCommandResult {
   return { stdout, stderr: '', exitCode: 0 };
+}
+
+/** What the hub would have written for a distribution already holding `version`. */
+function provisionedConfig(version: string, bytes: Uint8Array): RuntimeSlotConfig {
+  return {
+    schemaVersion: 1,
+    slot: 'wsl',
+    source: 'provisioned',
+    version,
+    digest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+    profile: 'full',
+    setup: { state: 'configured', by: 'cli' },
+  };
 }
 
 function harness(
@@ -31,6 +47,8 @@ function harness(
     readonly archive?: Uint8Array;
     /** Version the distribution already reports, if any, before provisioning. */
     readonly installed?: string;
+    /** What the distribution's `runtime.json` says before provisioning. */
+    readonly config?: RuntimeSlotConfig | null;
     /** What this hub reports, which decides whether a release exists to install from. */
     readonly version?: string;
     /** Bytes at the local build path, standing in for a checkout that built one. */
@@ -43,9 +61,11 @@ function harness(
   const read: string[] = [];
   const written = new Map<string, Uint8Array>();
   let installed = options.installed;
+  let config = options.config ?? null;
 
   const provisioner = createWslProvisioner({
     version: () => version,
+    hubHost: () => 'win-desktop',
     cacheDir: (cacheVersion) => `/cache/${cacheVersion}`,
     localBuildPath: (platformId) => `/repo/.mango/out/${platformId}/mangostudio-runtime`,
     readBytes: (path) => {
@@ -59,10 +79,29 @@ function harness(
       return Promise.resolve();
     },
     runInDistro: (distro, script, runOptions) => {
-      calls.push({ distro, script, stdinBytes: runOptions?.stdin?.byteLength ?? 0 });
+      calls.push({
+        distro,
+        script,
+        stdinBytes: runOptions?.stdin?.byteLength ?? 0,
+        args: runOptions?.args ?? [],
+      });
       const override = options.respond?.(script);
       if (override) return Promise.resolve(override);
+      // Before the `printf` arm: the config write prints a lock owner too, so
+      // the looser pattern would swallow it and record nothing.
+      if (script.includes('runtime.json.incoming')) {
+        config = JSON.parse(new TextDecoder().decode(runOptions?.stdin)) as RuntimeSlotConfig;
+        return Promise.resolve(ok());
+      }
+      if (script.startsWith('printf')) {
+        return Promise.resolve(ok(`${DISTRO_HOME}\n${config ? JSON.stringify(config) : ''}`));
+      }
       if (script.includes('uname -m')) return Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'));
+      if (script.includes('setup --profile')) {
+        config = { ...(config as RuntimeSlotConfig), setup: { state: 'configured', by: 'cli' } };
+        return Promise.resolve(ok());
+      }
+      if (script.includes('.mango/bin')) return Promise.resolve(ok());
       if (script.includes('mv -f ')) {
         installed = version;
         return Promise.resolve(ok());
@@ -83,7 +122,7 @@ function harness(
     }) as typeof fetch,
   });
 
-  return { provisioner, calls, read, requested, written };
+  return { provisioner, calls, read, requested, written, config: () => config };
 }
 
 describe('WslProvisioner', () => {
@@ -97,29 +136,98 @@ describe('WslProvisioner', () => {
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${ASSET}`,
     ]);
     expect(written.get(`/cache/${VERSION}/${ASSET}`)).toEqual(ARCHIVE);
-    // Version check, platform probe, unpack with the archive on stdin, then the
-    // version check again to prove what landed actually runs.
-    expect(calls).toHaveLength(4);
     expect(calls.every((call) => call.distro === 'Ubuntu')).toBe(true);
-    expect(calls[2]?.script).toContain('tar -xzf -');
-    expect(calls[2]?.stdinBytes).toBe(ARCHIVE.byteLength);
+
+    const unpack = calls.find((call) => call.script.includes('tar -xzf -'));
+    expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
+    // The version is an argv entry, never text inside the script.
+    expect(unpack?.args).toEqual([VERSION]);
   });
 
-  it('does nothing when the distribution already matches this hub', async () => {
-    const { provisioner, calls, requested } = harness({ installed: VERSION });
+  it('records what it installed and what the distribution may do', async () => {
+    const { provisioner, calls, config } = harness();
 
     await provisioner.ensure('Ubuntu');
 
-    expect(calls).toHaveLength(1);
+    expect(config()).toMatchObject({
+      slot: 'wsl',
+      source: 'provisioned',
+      version: VERSION,
+      digest: `sha256:${DIGEST}`,
+      binaryPath: `${DISTRO_HOME}/.mango/runtime/wsl/${VERSION}/mangostudio-runtime`,
+      installedBy: { host: 'win-desktop', transport: 'wsl' },
+    });
+    // Consent is written by the runtime's own `setup`, never by the hub.
+    expect(calls.some((call) => call.script.includes('setup --profile full --yes'))).toBe(true);
+  });
+
+  it('deletes the unversioned binary the previous layout left behind', async () => {
+    const { provisioner, calls } = harness();
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(calls.some((call) => call.script.includes('rm -f "$HOME/.mango/bin/'))).toBe(true);
+  });
+
+  it('does nothing when the distribution already matches this hub', async () => {
+    const { provisioner, calls, requested } = harness({
+      installed: VERSION,
+      config: provisionedConfig(VERSION, ARCHIVE),
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    // What it holds, then that it still runs — and nothing else.
+    expect(calls).toHaveLength(2);
     expect(requested).toEqual([]);
   });
 
-  it('replaces a runtime an older release left behind', async () => {
-    const { provisioner, requested } = harness({ installed: '1.0.0' });
+  it('reinstalls when the recorded runtime is no longer there', async () => {
+    const { provisioner, requested } = harness({ config: provisionedConfig(VERSION, ARCHIVE) });
 
     await provisioner.ensure('Ubuntu');
 
     expect(requested).toHaveLength(2);
+  });
+
+  it('replaces a runtime an older release left behind', async () => {
+    const { provisioner, requested } = harness({
+      installed: '1.0.0',
+      config: provisionedConfig('1.0.0', ARCHIVE),
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(requested).toHaveLength(2);
+  });
+
+  it('arms the gate rather than re-granting when the distribution config is unreadable', async () => {
+    // The file that could not be read may have narrowed this distribution, and
+    // an unknown answer must not resolve to full.
+    const { provisioner, calls, config } = harness({
+      respond: (script) => (script.startsWith('printf') ? ok('/home/dev\n{ truncated') : undefined),
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(calls.some((call) => call.script.includes('setup --profile'))).toBe(false);
+    expect(config()).toMatchObject({ setup: { state: 'pending', by: 'install' } });
+  });
+
+  it('leaves consent alone when it upgrades a distribution', async () => {
+    const { provisioner, calls, config } = harness({
+      installed: '1.0.0',
+      config: {
+        ...provisionedConfig('1.0.0', ARCHIVE),
+        profile: 'readonly',
+        allow: { fsRead: true, shell: false },
+      },
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(calls.some((call) => call.script.includes('setup --profile'))).toBe(false);
+    expect(config()).toMatchObject({ version: VERSION, profile: 'readonly' });
   });
 
   it('reuses a cached archive whose digest still matches', async () => {
@@ -150,7 +258,7 @@ describe('WslProvisioner', () => {
     });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(WslProvisioningError);
-    // Only the version check and the platform probe ran; nothing was piped in.
+    // Only the two probes ran; nothing was piped into the distribution.
     expect(calls).toHaveLength(2);
     expect(calls.every((call) => call.stdinBytes === 0)).toBe(true);
   });
@@ -161,7 +269,7 @@ describe('WslProvisioner', () => {
     // Nothing to download here, so the offline advice would be a dead end: the
     // answer is a newer MangoStudio or a hand-placed binary.
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
-      /does not publish .* put a matching runtime at ~\/\.mango\/bin\/mangostudio-runtime/s
+      /does not publish .* put a matching runtime at ~\/\.mango\/runtime\/wsl\/current\/mangostudio-runtime/s
     );
   });
 
@@ -184,7 +292,7 @@ describe('WslProvisioner', () => {
       new RegExp(
         `Could not download .*\\. Either download .*/${ASSET} to /cache/${VERSION}/${ASSET} ` +
           'on this host and connect again, or put the 1\\.2\\.3 runtime at ' +
-          '~/\\.mango/bin/mangostudio-runtime inside "Ubuntu" yourself\\.',
+          '~/\\.mango/runtime/wsl/current/mangostudio-runtime inside "Ubuntu" yourself\\.',
         's'
       )
     );
@@ -243,9 +351,40 @@ describe('WslProvisioner', () => {
     // binary goes in whole rather than being unpacked from an archive.
     expect(requested).toEqual([]);
     expect(read).toEqual(['/repo/.mango/out/linux-x64/mangostudio-runtime']);
-    expect(calls[2]?.script).toContain('cat > ');
-    expect(calls[2]?.script).not.toContain('tar');
-    expect(calls[2]?.stdinBytes).toBe(build.byteLength);
+    const unpack = calls.find((call) => call.stdinBytes === build.byteLength);
+    expect(unpack?.script).toContain('cat > ');
+    expect(unpack?.script).not.toContain('tar');
+  });
+
+  it('leaves a checkout alone when the build it would push is already there', async () => {
+    const build = new TextEncoder().encode('a runtime this checkout compiled');
+    const { provisioner, calls } = harness({
+      version: 'dev',
+      installed: 'dev',
+      localBuild: build,
+      config: provisionedConfig('dev', build),
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(calls.some((call) => call.stdinBytes > 0)).toBe(false);
+  });
+
+  it('re-pushes a checkout build that changed under the same dev version', async () => {
+    // The hole version equality cannot see: two `dev` builds are different
+    // binaries with the same name, so without a digest the first one installed
+    // would stay in the distribution forever.
+    const rebuilt = new TextEncoder().encode('a runtime this checkout rebuilt');
+    const { provisioner, calls } = harness({
+      version: 'dev',
+      installed: 'dev',
+      localBuild: rebuilt,
+      config: provisionedConfig('dev', new TextEncoder().encode('the previous build')),
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(calls.some((call) => call.stdinBytes === rebuilt.byteLength)).toBe(true);
   });
 
   it('tells a checkout how to build the runtime it does not have', async () => {

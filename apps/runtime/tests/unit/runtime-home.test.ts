@@ -1,12 +1,17 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
   bootstrapServeToken,
+  consentByInvocation,
   readPairingToken,
   readRuntimeSlotConfig,
+  readRuntimeSlotState,
   readServeToken,
+  resolveRuntimeSlot,
+  resolveRuntimeSource,
   runtimeSlotDir,
   writePairingToken,
   writeRuntimeSlotConfig,
@@ -25,6 +30,23 @@ async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   return { MANGO_HOME: home };
 }
 
+/** A pid that certainly belongs to nothing: a process this test watched exit. */
+async function deadPid(): Promise<number> {
+  const child = Bun.spawn(['sh', '-c', 'exit 0'], { stdout: 'ignore', stderr: 'ignore' });
+  await child.exited;
+  return child.pid;
+}
+
+async function writeRawConfig(
+  slot: 'host' | 'wsl' | 'remote',
+  contents: string,
+  env: NodeJS.ProcessEnv
+): Promise<void> {
+  const directory = runtimeSlotDir(slot, env);
+  await mkdir(directory, { recursive: true });
+  await writeFile(join(directory, 'runtime.json'), contents);
+}
+
 describe('runtime home', () => {
   it('anchors each slot under the runtime home', async () => {
     const env = await isolatedEnv();
@@ -33,33 +55,101 @@ describe('runtime home', () => {
     expect(runtimeSlotDir('host', env)).toBe(join(env.MANGO_HOME as string, 'runtime', 'host'));
   });
 
-  it('reports an empty slot rather than failing on a missing file', async () => {
+  it('reports the slot default rather than failing on a missing file', async () => {
     const env = await isolatedEnv();
+    const remote = await readRuntimeSlotState('remote', env);
 
-    expect(await readRuntimeSlotConfig('remote', env)).toEqual({
-      schemaVersion: 1,
-      slot: 'remote',
-    });
+    expect(remote.stored).toBeNull();
+    expect(remote.error).toBeNull();
+    expect(remote.config.profile).toBe('none');
+    expect(remote.config.setup.state).toBe('pending');
     expect(await readPairingToken('remote', env)).toBeNull();
+
+    const host = await readRuntimeSlotState('host', env);
+    expect(host.config.profile).toBe('full');
+    expect(host.config.setup.state).toBe('configured');
   });
 
   it('remembers the hub URL across runs', async () => {
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
 
-    expect(await readRuntimeSlotConfig('remote', env)).toEqual({
-      schemaVersion: 1,
-      slot: 'remote',
-      hubUrl: 'wss://hub.test/api/runtime',
-    });
+    expect((await readRuntimeSlotConfig('remote', env)).hubUrl).toBe('wss://hub.test/api/runtime');
   });
 
-  it('keeps the stored hub URL when an update does not carry one', async () => {
+  it('merges an update rather than replacing the file', async () => {
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
-    await writeRuntimeSlotConfig('remote', {}, env);
+    await writeRuntimeSlotConfig(
+      'remote',
+      { allow: RUNTIME_CONSENT_PRESETS.readonly, setup: { state: 'configured', by: 'cli' } },
+      env
+    );
 
-    expect((await readRuntimeSlotConfig('remote', env)).hubUrl).toBe('wss://hub.test/api/runtime');
+    const config = await readRuntimeSlotConfig('remote', env);
+    expect(config.hubUrl).toBe('wss://hub.test/api/runtime');
+    expect(config.profile).toBe('readonly');
+    expect(config.setup.state).toBe('configured');
+  });
+
+  it('reports a config it cannot parse instead of reading it as absent', async () => {
+    const env = await isolatedEnv();
+    await writeRawConfig('host', '{ not json', env);
+
+    const state = await readRuntimeSlotState('host', env);
+    expect(state.error).toContain('not valid JSON');
+    expect(state.stored).toBeNull();
+  });
+
+  it('reports a config it cannot open instead of reading it as absent', async () => {
+    const env = await isolatedEnv();
+    // A directory where the file belongs fails the read with EISDIR, which is
+    // the portable stand-in for the EACCES/EPERM/EIO family: a file is there
+    // and this process cannot see what it says. `host` is the slot that makes
+    // the distinction matter, because absence there means full consent.
+    await mkdir(join(runtimeSlotDir('host', env), 'runtime.json'), { recursive: true });
+
+    const state = await readRuntimeSlotState('host', env);
+    expect(state.error).toContain('could not be read');
+    expect(state.stored).toBeNull();
+  });
+
+  it('reports a config that does not match the schema', async () => {
+    const env = await isolatedEnv();
+    await writeRawConfig('host', JSON.stringify({ schemaVersion: 1, slot: 'nowhere' }), env);
+
+    const state = await readRuntimeSlotState('host', env);
+    expect(state.error).toContain('does not match the runtime config schema');
+  });
+
+  it('ignores fields a newer runtime wrote', async () => {
+    const env = await isolatedEnv();
+    await writeRawConfig(
+      'wsl',
+      JSON.stringify({
+        schemaVersion: 1,
+        slot: 'wsl',
+        allow: { ...RUNTIME_CONSENT_PRESETS.full, telepathy: true },
+        setup: { state: 'configured' },
+        somethingNew: 'from a later release',
+      }),
+      env
+    );
+
+    const state = await readRuntimeSlotState('wsl', env);
+    expect(state.error).toBeNull();
+    expect(state.config.profile).toBe('full');
+  });
+
+  it('takes the slot from the directory, not from what the file claims', async () => {
+    const env = await isolatedEnv();
+    await writeRawConfig(
+      'remote',
+      JSON.stringify({ schemaVersion: 1, slot: 'host', setup: { state: 'configured' } }),
+      env
+    );
+
+    expect((await readRuntimeSlotConfig('remote', env)).slot).toBe('remote');
   });
 
   it('stores the credential owner-only and keeps it out of the pasteable file', async () => {
@@ -129,37 +219,179 @@ describe('runtime home', () => {
     expect(await readServeToken('remote', env)).toBe('serve.concurrent');
   });
 
-  it('persists an optional setupState on the pasteable config', async () => {
+  it('keeps both writers changes when two provision one slot at once', async () => {
     const env = await isolatedEnv();
-    await writeRuntimeSlotConfig('remote', { setupState: 'pending' }, env);
+    await Promise.all([
+      writeRuntimeSlotConfig('remote', { version: '0.1.1' }, env),
+      writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env),
+    ]);
 
-    expect(await readRuntimeSlotConfig('remote', env)).toEqual({
-      schemaVersion: 1,
-      slot: 'remote',
-      setupState: 'pending',
-    });
+    // Read-merge-rename without a lock drops whichever field the loser set;
+    // the field at stake in real use is `allow`.
+    const config = await readRuntimeSlotConfig('remote', env);
+    expect(config.version).toBe('0.1.1');
+    expect(config.hubUrl).toBe('wss://hub.test/api/runtime');
+  });
+
+  it('does not let an installer write undo consent recorded at the same moment', async () => {
+    const env = await isolatedEnv();
+    await Promise.all([
+      writeRuntimeSlotConfig(
+        'wsl',
+        { allow: RUNTIME_CONSENT_PRESETS.readonly, setup: { state: 'configured', by: 'cli' } },
+        env
+      ),
+      writeRuntimeSlotConfig('wsl', { version: '0.1.2', digest: `sha256:${'c'.repeat(64)}` }, env),
+    ]);
+
+    const config = await readRuntimeSlotConfig('wsl', env);
+    expect(config.profile).toBe('readonly');
+    expect(config.version).toBe('0.1.2');
+  });
+
+  it('does not widen a slot a setup narrowed while the launch was deciding', async () => {
+    const env = await isolatedEnv();
+    // `connect` on an unanswered slot takes the invocation as consent and
+    // records `full`. Deciding that outside the lock leaves a window: a setup
+    // that lands in it completes, and is then overwritten by an answer taken
+    // before it ran. Both orders are legitimate — what must not happen is a
+    // stored `readonly` coming back as `full`.
+    const [, consent] = await Promise.all([
+      writeRuntimeSlotConfig(
+        'remote',
+        {
+          profile: 'readonly',
+          allow: RUNTIME_CONSENT_PRESETS.readonly,
+          setup: { state: 'configured', by: 'cli' },
+        },
+        env
+      ),
+      consentByInvocation('remote', '0.1.1', env),
+    ]);
+
+    const config = await readRuntimeSlotConfig('remote', env);
+    if (consent.recorded) {
+      // The launch got there first; setup then narrowed it, and stuck.
+      expect(config.profile).toBe('readonly');
+    } else {
+      // Setup got there first, so the launch read a real answer and kept it.
+      expect(config.profile).toBe('readonly');
+      expect(consent.granted).toBe(true);
+    }
+  });
+
+  it('reclaims a lock whose owner was killed before it could clean up', async () => {
+    const env = await isolatedEnv();
+    const directory = runtimeSlotDir('host', env);
+    await mkdir(directory, { recursive: true });
+    // What a SIGKILL mid-write leaves: a lock naming a process on this machine
+    // that no longer exists. Without reclaiming it, every later write to this
+    // slot times out and nobody can answer the consent question again.
+    await writeFile(
+      join(directory, 'runtime.lock'),
+      JSON.stringify({ pid: await deadPid(), host: hostname() })
+    );
+
+    await writeRuntimeSlotConfig('host', { version: '0.1.3' }, env);
+    expect((await readRuntimeSlotConfig('host', env)).version).toBe('0.1.3');
+  });
+
+  it('waits for a lock whose owner is still running instead of stealing it', async () => {
+    const env = await isolatedEnv();
+    const directory = runtimeSlotDir('host', env);
+    await mkdir(directory, { recursive: true });
+    const lock = join(directory, 'runtime.lock');
+    // A live owner on this machine, which is what reclaiming must never touch:
+    // stealing a held lock trades a slot nobody can write for one two writers
+    // corrupt.
+    await writeFile(lock, JSON.stringify({ pid: process.pid, host: hostname() }));
+
+    const write = writeRuntimeSlotConfig('host', { version: '0.1.4' }, env);
+    await Bun.sleep(100);
+    expect(await Bun.file(join(directory, 'runtime.json')).exists()).toBe(false);
+
+    await rm(lock);
+    await write;
+    expect((await readRuntimeSlotConfig('host', env)).version).toBe('0.1.4');
+  });
+});
+
+describe('slot and source resolution', () => {
+  it('answers to the slot its executable lives under', async () => {
+    const env = await isolatedEnv();
+    const remote = join(runtimeSlotDir('remote', env), '0.1.1', 'mangostudio-runtime');
+
+    expect(resolveRuntimeSlot(env, [remote])).toBe('remote');
+    expect(resolveRuntimeSlot(env, [join(runtimeSlotDir('wsl', env), 'current', 'x')])).toBe('wsl');
+    expect(resolveRuntimeSlot(env, ['/usr/local/bin/mangostudio-runtime'])).toBe('host');
+  });
+
+  it('calls a checkout a checkout and a slot binary provisioned', async () => {
+    const env = await isolatedEnv();
+
+    expect(resolveRuntimeSource(env, '/usr/local/bin/bun')).toBe('source-checkout');
+    expect(
+      resolveRuntimeSource(env, join(runtimeSlotDir('remote', env), '0.1.1', 'mangostudio-runtime'))
+    ).toBe('provisioned');
+    expect(resolveRuntimeSource(env, '/opt/mangostudio/mangostudio-runtime')).toBe('bundled');
   });
 });
 
 describe('stdio pending setup gate', () => {
-  it('refuses only when the executable lives under the pending remote slot', async () => {
-    const { shouldRefuseStdioForPendingSetup } = await import('../../src/cli');
-    const { runtimeSlotDir } = await import('../../src/runtime-home');
+  it('refuses a remote slot nobody has answered for', async () => {
+    const { stdioConsent } = await import('../../src/cli');
     const env = await isolatedEnv();
-    await writeRuntimeSlotConfig('remote', { setupState: 'pending' }, env);
 
     const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
-    expect(await shouldRefuseStdioForPendingSetup(env, [remoteBinary])).toBe(true);
-    expect(
-      await shouldRefuseStdioForPendingSetup(env, ['/usr/local/bin/mangostudio-runtime'])
-    ).toBe(false);
+    expect((await stdioConsent(env, [remoteBinary])).refusal).not.toBeNull();
   });
 
-  it('stays open when setupState was never written', async () => {
-    const { shouldRefuseStdioForPendingSetup } = await import('../../src/cli');
-    const { runtimeSlotDir } = await import('../../src/runtime-home');
+  it('serves a remote slot once setup has answered', async () => {
+    const { stdioConsent } = await import('../../src/cli');
     const env = await isolatedEnv();
+    await writeRuntimeSlotConfig(
+      'remote',
+      { allow: RUNTIME_CONSENT_PRESETS.full, setup: { state: 'configured', by: 'cli' } },
+      env
+    );
+
     const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
-    expect(await shouldRefuseStdioForPendingSetup(env, [remoteBinary])).toBe(false);
+    expect((await stdioConsent(env, [remoteBinary])).refusal).toBeNull();
+  });
+
+  it('does not gate a binary this machine installed for itself', async () => {
+    const { stdioConsent } = await import('../../src/cli');
+    const env = await isolatedEnv();
+
+    expect((await stdioConsent(env, ['/usr/local/bin/mangostudio-runtime'])).refusal).toBeNull();
+    expect(
+      (
+        await stdioConsent(env, [
+          join(runtimeSlotDir('wsl', env), 'current', 'mangostudio-runtime'),
+        ])
+      ).refusal
+    ).toBeNull();
+  });
+
+  it('refuses a host slot whose owner said no', async () => {
+    const { stdioConsent } = await import('../../src/cli');
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig('host', { setup: { state: 'pending' } }, env);
+
+    expect(
+      (await stdioConsent(env, ['/usr/local/bin/mangostudio-runtime'])).refusal
+    ).not.toBeNull();
+  });
+
+  it('refuses a slot whose consent file cannot be read', async () => {
+    // An unreadable answer is an unknown answer, and the file it replaced may
+    // well have said no.
+    const { stdioConsent } = await import('../../src/cli');
+    const env = await isolatedEnv();
+    await writeRawConfig('host', '{ truncated', env);
+
+    expect(
+      (await stdioConsent(env, ['/usr/local/bin/mangostudio-runtime'])).refusal
+    ).not.toBeNull();
   });
 });

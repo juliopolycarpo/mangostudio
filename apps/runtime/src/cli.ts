@@ -9,23 +9,55 @@
  */
 
 import { Console } from 'node:console';
-import { resolve } from 'node:path';
+import { createInterface } from 'node:readline/promises';
+import {
+  isRuntimeSlot,
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeCapabilityAllow,
+  type RuntimeSlot,
+} from '@mangostudio/shared/runtime-home';
 import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
+import {
+  collectRuntimeHealth,
+  diagnoseRuntimeHealth,
+  type RuntimeDoctorFinding,
+  worstSeverity,
+} from './health';
 import { createLocalRuntimeHost } from './runtime';
 import {
   bootstrapServeToken,
+  consentByInvocation,
   RUNTIME_SETUP_PENDING_MESSAGE,
-  type RuntimeSlot,
   readPairingToken,
   readRuntimeSlotConfig,
+  readRuntimeSlotState,
   readServeToken,
+  resolveRuntimeSlot,
   runtimeSlotDir,
   writePairingToken,
   writeRuntimeSlotConfig,
 } from './runtime-home';
 import { parseListenAddress, serveRuntime } from './serve';
+import {
+  isRuntimeSetupProfile,
+  parseAllowOverrides,
+  type RuntimeSetupArgs,
+  runRuntimeSetup,
+} from './setup';
 import { createStdioFramePort, type StdioFramePortClosure } from './transports/stdio';
+
+/**
+ * The slot `connect` and `serve` answer for.
+ *
+ * A runtime somebody starts by hand to pair with a hub is a `remote` one
+ * whatever directory it happens to sit in: the hub did not install it there,
+ * and the person running these commands is the machine's owner. That is why
+ * these two name the slot instead of deriving it from the executable's path
+ * the way `setup` and `health` do — and why the command they recommend has to
+ * name it too, or it edits a different file than the one they just wrote.
+ */
+const PAIRED_SLOT = 'remote' as const;
 
 export interface RuntimeConnectArgs {
   readonly hubUrl?: string;
@@ -44,9 +76,14 @@ export type RuntimeCliInvocation =
   | { readonly command: 'stdio' }
   | { readonly command: 'connect'; readonly args: RuntimeConnectArgs }
   | { readonly command: 'serve'; readonly args: RuntimeServeArgs }
+  | { readonly command: 'setup'; readonly args: RuntimeSetupArgs }
+  | { readonly command: 'health'; readonly args: { readonly json: boolean } }
+  | { readonly command: 'doctor'; readonly args: { readonly json: boolean } }
   | { readonly command: 'version' }
   | { readonly command: 'help' }
-  | { readonly command: 'unknown'; readonly argument: string };
+  | { readonly command: 'unknown'; readonly argument: string }
+  /** A flag that exists, given a value it cannot take. Says which and why. */
+  | { readonly command: 'invalid'; readonly reason: string };
 
 export const RUNTIME_CLI_USAGE = `Usage: mangostudio-runtime <command>
 
@@ -54,6 +91,9 @@ Commands:
   --stdio      Serve the runtime protocol over stdin/stdout (NDJSON frames)
   connect      Dial a hub over WebSocket and serve it until stopped
   serve        Listen for a hub over WebSocket (Direct URL)
+  setup        Say what a hub may do on this machine
+  health       Print this runtime's slot, version, and permissions
+  doctor       health, plus what is wrong and the command that fixes it
   --version    Print the runtime version
   --help       Show this message
 
@@ -74,6 +114,23 @@ serve options:
                and printed once. Never pass the secret as an argument.
                MANGOSTUDIO_RUNTIME_TOKEN is for connect only.
 
+setup options:
+  --profile <full|readonly|none>
+               Capability preset. Without it, setup asks. Or set
+               MANGOSTUDIO_RUNTIME_SETUP, which is how images answer.
+  --allow k=v[,k=v]
+               Adjust single capabilities over the preset, e.g.
+               --profile readonly --allow shell=true
+  --slot <host|wsl|remote>
+               Which slot to answer for. Defaults to the one this binary sits
+               in; pass "remote" for a runtime you downloaded onto a PATH and
+               paired with "connect" or "serve".
+  --yes        Never prompt; requires --profile or the environment answer.
+  --json       Print the resulting health payload instead of prose.
+
+health / doctor options:
+  --json       Machine-readable output.
+
 MangoStudio spawns this binary for stdio environments; it is not meant to be
 run interactively there. stdout carries protocol frames only — diagnostics go
 to stderr.`;
@@ -87,6 +144,8 @@ export function parseRuntimeCliArgs(args: readonly string[]): RuntimeCliInvocati
 
   if (first === 'connect') return parseConnectArgs(rest);
   if (first === 'serve') return parseServeArgs(rest);
+  if (first === 'setup') return parseSetupArgs(rest);
+  if (first === 'health' || first === 'doctor') return parseReportArgs(first, rest);
 
   const extra = rest[0];
   if (extra !== undefined) return { command: 'unknown', argument: extra };
@@ -107,6 +166,73 @@ export function parseRuntimeCliArgs(args: readonly string[]): RuntimeCliInvocati
     default:
       return { command: 'unknown', argument: first };
   }
+}
+
+function parseSetupArgs(args: readonly string[]): RuntimeCliInvocation {
+  const setup: {
+    profile?: RuntimeSetupArgs['profile'];
+    allow?: RuntimeSetupArgs['allow'];
+    slot?: RuntimeSetupArgs['slot'];
+    yes: boolean;
+    json: boolean;
+  } = { yes: false, json: false };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag === '--profile') {
+      const value = args[++index];
+      if (!value || !isRuntimeSetupProfile(value)) {
+        return {
+          command: 'invalid',
+          reason: `--profile takes full, readonly, or none${value ? `, not "${value}"` : ''}. "custom" is what any other set of permissions is called, not one you can ask for.`,
+        };
+      }
+      setup.profile = value;
+      continue;
+    }
+    if (flag === '--allow') {
+      const value = args[++index];
+      if (!value) return { command: 'invalid', reason: '--allow needs a key=value list.' };
+      const parsed = parseAllowOverrides(value);
+      if ('error' in parsed) return { command: 'invalid', reason: parsed.error };
+      setup.allow = { ...setup.allow, ...parsed.allow };
+      continue;
+    }
+    if (flag === '--slot') {
+      const value = args[++index];
+      if (!value || !isRuntimeSlot(value)) {
+        return {
+          command: 'invalid',
+          reason: `--slot takes host, wsl, or remote${value ? `, not "${value}"` : ''}. A slot names who put a runtime on this machine, not how a hub reaches it.`,
+        };
+      }
+      setup.slot = value;
+      continue;
+    }
+    if (flag === '--yes' || flag === '-y') {
+      setup.yes = true;
+      continue;
+    }
+    if (flag === '--json') {
+      setup.json = true;
+      continue;
+    }
+    return { command: 'unknown', argument: flag ?? '--' };
+  }
+
+  return { command: 'setup', args: setup };
+}
+
+function parseReportArgs(
+  command: 'health' | 'doctor',
+  args: readonly string[]
+): RuntimeCliInvocation {
+  let json = false;
+  for (const flag of args) {
+    if (flag !== '--json') return { command: 'unknown', argument: flag };
+    json = true;
+  }
+  return { command, args: { json } };
 }
 
 function parseConnectArgs(args: readonly string[]): RuntimeCliInvocation {
@@ -173,12 +299,21 @@ export async function runRuntimeCli(args: readonly string[]): Promise<number> {
       return await runConnect(invocation.args, runtimeVersion);
     case 'serve':
       return await runServe(invocation.args, runtimeVersion);
+    case 'setup':
+      return await runSetup(invocation.args, runtimeVersion);
+    case 'health':
+      return await runHealth(invocation.args.json, runtimeVersion);
+    case 'doctor':
+      return await runDoctor(invocation.args.json, runtimeVersion);
     case 'version':
       process.stdout.write(`${runtimeVersion}\n`);
       return 0;
     case 'help':
       process.stdout.write(`${RUNTIME_CLI_USAGE}\n`);
       return 0;
+    case 'invalid':
+      process.stderr.write(`${invocation.reason}\n\n${RUNTIME_CLI_USAGE}\n`);
+      return 1;
     default:
       process.stderr.write(`Unknown argument: ${invocation.argument}\n\n${RUNTIME_CLI_USAGE}\n`);
       return 1;
@@ -188,20 +323,21 @@ export async function runRuntimeCli(args: readonly string[]): Promise<number> {
 /**
  * Dials, and serves whatever the hub asks for.
  *
- * Note what is *not* checked here yet: whether the machine's owner has agreed
- * to any of it. The consent gate belongs before the dial — a runtime whose slot
- * is still `pending` should refuse and name `setup` rather than connect and
- * then decide per call — but the setup CLI that writes that state does not
- * exist, and a gate reading a field nothing writes is a gate that is always
- * open while looking closed. Until it lands, connecting is the consent: the
- * operator ran this command on this machine with a token they were handed.
+ * `connect` is the one entry point where the invocation *is* the consent, and
+ * that is not a loophole. Somebody is standing at this machine holding a
+ * pairing token their hub printed; asking them to run a second command before
+ * the first one works would be theatre. So a slot nobody has answered for yet
+ * is answered here — recorded as `full`, logged, and visible in `health`
+ * afterwards, which is the part that matters. An armed gate is different: once
+ * a file says `pending`, somebody deliberately staged this machine for an
+ * answer, and this refuses like every other entry point until they give one.
  */
 async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Promise<number> {
   const log = (message: string): void => {
     process.stderr.write(`mangostudio-runtime: ${message}\n`);
   };
 
-  const stored = await readRuntimeSlotConfig('remote');
+  const stored = await readRuntimeSlotConfig(PAIRED_SLOT);
   const hubUrl = args.hubUrl ?? stored.hubUrl;
   if (!hubUrl) {
     log('No hub URL. Pass --hub <url>; the pairing card in MangoStudio prints it.');
@@ -216,8 +352,20 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     return 1;
   }
 
-  await writeRuntimeSlotConfig('remote', { hubUrl });
-  const { restricted } = await writePairingToken('remote', token);
+  const consent = await consentByInvocation(PAIRED_SLOT, runtimeVersion);
+  if (!consent.granted) {
+    if (consent.reason) log(consent.reason);
+    log(RUNTIME_SETUP_PENDING_MESSAGE);
+    return 1;
+  }
+  if (consent.recorded) {
+    log(
+      `Recorded full permissions for this machine. Run "mangostudio-runtime setup --slot ${PAIRED_SLOT}" to narrow them.`
+    );
+  }
+
+  await writeRuntimeSlotConfig(PAIRED_SLOT, { hubUrl });
+  const { restricted } = await writePairingToken(PAIRED_SLOT, token);
   if (!restricted) {
     log(
       process.platform === 'win32'
@@ -235,7 +383,8 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     const outcome = await connectToHub({
       hubUrl,
       token,
-      createHost: () => createLocalRuntimeHost({ runtimeVersion }),
+      createHost: () =>
+        createLocalRuntimeHost({ runtimeVersion, allow: consent.allow, slot: PAIRED_SLOT }),
       log,
       signal: controller.signal,
     });
@@ -261,10 +410,20 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
     return 1;
   }
 
-  const stored = await readRuntimeSlotConfig('remote');
-  if (stored.setupState === 'pending') {
+  // Same rule as `connect`: an armed gate is obeyed, an unanswered slot is
+  // answered by the person who started this. What is different is the blast
+  // radius — this opens a listening socket — so the recorded answer is the one
+  // thing between an unattended restart and a machine nobody consented for.
+  const consent = await consentByInvocation(PAIRED_SLOT, runtimeVersion);
+  if (!consent.granted) {
+    if (consent.reason) log(consent.reason);
     log(RUNTIME_SETUP_PENDING_MESSAGE);
     return 1;
+  }
+  if (consent.recorded) {
+    log(
+      `Recorded full permissions for this machine. Run "mangostudio-runtime setup --slot ${PAIRED_SLOT}" to narrow them.`
+    );
   }
 
   const resolved = await resolveServeToken(args.tokenSource);
@@ -295,7 +454,8 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
     const handle = serveRuntime({
       listen,
       token: resolved.token,
-      createHost: () => createLocalRuntimeHost({ runtimeVersion }),
+      createHost: () =>
+        createLocalRuntimeHost({ runtimeVersion, allow: consent.allow, slot: PAIRED_SLOT }),
       log,
       signal: controller.signal,
     });
@@ -316,7 +476,7 @@ async function resolveToken(source: RuntimeConnectArgs['tokenSource']): Promise<
   if (fromEnv) return fromEnv;
   // `--token` was not given and the environment is empty: fall back to whatever
   // a previous run stored, which is what makes an unattended restart work.
-  return source === 'env' ? null : await readPairingToken('remote');
+  return source === 'env' ? null : await readPairingToken(PAIRED_SLOT);
 }
 
 async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promise<{
@@ -334,9 +494,9 @@ async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promi
     return fromEnv ? { token: fromEnv, generated: false } : null;
   }
   if (fromEnv) return { token: fromEnv, generated: false };
-  const stored = await readServeToken('remote');
+  const stored = await readServeToken(PAIRED_SLOT);
   if (stored) return { token: stored, generated: false };
-  const bootstrapped = await bootstrapServeToken('remote');
+  const bootstrapped = await bootstrapServeToken(PAIRED_SLOT);
   return {
     token: bootstrapped.token,
     generated: true,
@@ -347,17 +507,20 @@ async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promi
 async function serveStdio(runtimeVersion: string): Promise<number> {
   redirectConsoleToStderr();
 
-  // SSH (and any other launch of a remote-slot binary) speaks stdio, not serve.
-  // The consent gate has to live here too or a pending remote slot still starts
-  // a fully functional host and the hub's setup-pending classifier never sees
-  // its signature. Host/WSL binaries are unaffected: they do not live under the
-  // remote slot directory, and those slots are consented by installation.
-  if (await shouldRefuseStdioForPendingSetup()) {
-    process.stderr.write(`mangostudio-runtime: ${RUNTIME_SETUP_PENDING_MESSAGE}\n`);
+  // SSH (and any other hub launch) speaks stdio, not serve. The consent gate has
+  // to live here too or a pending slot still starts a fully functional host and
+  // the hub's setup-pending classifier never sees its signature.
+  const consent = await stdioConsent();
+  if (consent.refusal) {
+    process.stderr.write(`mangostudio-runtime: ${consent.refusal}\n`);
     return 1;
   }
 
-  const host = createLocalRuntimeHost({ runtimeVersion });
+  const host = createLocalRuntimeHost({
+    runtimeVersion,
+    allow: consent.allow,
+    slot: consent.slot,
+  });
   let stop: (closure: StdioFramePortClosure) => void = () => undefined;
   const finished = new Promise<StdioFramePortClosure>((resolve) => {
     stop = resolve;
@@ -386,27 +549,120 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
   return 0;
 }
 
-/**
- * True when this process is the remote-slot binary and that slot is still
- * awaiting `setup`. Custom `remoteRuntimePath` values outside the slot tree are
- * not detected here — those stay a follow-up once launches can pass a slot.
- */
-export async function shouldRefuseStdioForPendingSetup(
-  env: NodeJS.ProcessEnv = process.env,
-  executablePaths: readonly string[] = [process.argv[1] ?? '', process.execPath]
-): Promise<boolean> {
-  if (!executablePaths.some((path) => pathIsUnderSlot(path, 'remote', env))) {
-    return false;
-  }
-  const stored = await readRuntimeSlotConfig('remote', env);
-  return stored.setupState === 'pending';
+/** What a launched runtime may do here, and why it may not when it may not. */
+export interface StdioConsent {
+  readonly slot: RuntimeSlot;
+  /** The sentence to print and exit on, or null when the launch may serve. */
+  readonly refusal: string | null;
+  readonly allow: RuntimeCapabilityAllow;
 }
 
-function pathIsUnderSlot(path: string, slot: RuntimeSlot, env: NodeJS.ProcessEnv): boolean {
-  if (!path) return false;
-  const root = resolve(runtimeSlotDir(slot, env));
-  const resolved = resolve(path);
-  return resolved === root || resolved.startsWith(`${root}/`) || resolved.startsWith(`${root}\\`);
+const DENY_EVERYTHING = RUNTIME_CONSENT_PRESETS.none;
+
+/**
+ * Why a hub-launched runtime must not serve, or null when it may.
+ *
+ * Unlike `connect` and `serve`, there is nobody here to take the invocation as
+ * consent: a hub started this over ssh, and the account that owns the machine
+ * may be asleep. So a `remote` slot with no answer refuses, while `host` and
+ * `wsl` proceed — those were placed by an install somebody on this machine ran.
+ * A config that cannot be read refuses in every slot: an unknown answer must
+ * not resolve to the slot default, because the file it replaced may have said
+ * something narrower.
+ *
+ * Every refusal carries the setup-pending signature, because every one of them
+ * is fixed by the same command and the hub tells them apart from a missing
+ * binary by that phrase.
+ *
+ * A custom `remoteRuntimePath` outside the slot tree reads as `host` and is not
+ * gated; giving a launch its slot is what closes that, and it is a follow-up.
+ */
+export async function stdioConsent(
+  env: NodeJS.ProcessEnv = process.env,
+  executablePaths: readonly string[] = [process.execPath, process.argv[1] ?? '']
+): Promise<StdioConsent> {
+  const slot = resolveRuntimeSlot(env, executablePaths);
+  const { config, error } = await readRuntimeSlotState(slot, env);
+  if (error) {
+    return { slot, refusal: `${error} ${RUNTIME_SETUP_PENDING_MESSAGE}`, allow: DENY_EVERYTHING };
+  }
+  if (config.setup.state === 'pending') {
+    return { slot, refusal: RUNTIME_SETUP_PENDING_MESSAGE, allow: DENY_EVERYTHING };
+  }
+  return { slot, refusal: null, allow: config.allow };
+}
+
+async function runSetup(args: RuntimeSetupArgs, runtimeVersion: string): Promise<number> {
+  // `setup` is a conversation, not a protocol stream, so it owns stdout here.
+  const write = (line: string): void => {
+    process.stdout.write(`${line}\n`);
+  };
+  // Nothing can prompt down a pipe, and a prompt nobody answers is a hang. An
+  // ssh channel and a container build both land here.
+  if (!process.stdin.isTTY) {
+    return await runRuntimeSetup(args, { runtimeVersion, write });
+  }
+
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await runRuntimeSetup(args, {
+      runtimeVersion,
+      write,
+      ask: (question) => rl.question(question),
+    });
+  } finally {
+    rl.close();
+  }
+}
+
+async function runHealth(json: boolean, runtimeVersion: string): Promise<number> {
+  const report = await collectRuntimeHealth({ runtimeVersion });
+  if (json) {
+    process.stdout.write(`${JSON.stringify(report)}\n`);
+    return 0;
+  }
+  process.stdout.write(
+    [
+      `slot        ${report.slot} (${report.source})`,
+      `directory   ${runtimeSlotDir(report.slot)}`,
+      `version     ${report.runtimeVersion}`,
+      `binary      ${report.binaryPath ?? 'workspace entry (source checkout)'}`,
+      `digest      ${report.digest ?? '-'}`,
+      `profile     ${report.profile} (${report.setup.state})`,
+      // `none` grants nothing, and a bare `allow` with trailing space reads as
+      // a line that failed to render rather than one that says so.
+      `allow       ${
+        Object.entries(report.allow)
+          .filter(([, granted]) => granted)
+          .map(([key]) => key)
+          .join(', ') || 'none'
+      }`,
+      `shells      ${report.shells.join(', ') || 'none'}`,
+      `git         ${report.git.available ? (report.git.version ?? 'available') : 'not found'}`,
+      ...(report.lastError ? [`error       ${report.lastError}`] : []),
+      '',
+    ].join('\n')
+  );
+  return 0;
+}
+
+/** Exits non-zero on a failure so a provisioner can gate on it. */
+async function runDoctor(json: boolean, runtimeVersion: string): Promise<number> {
+  const report = await collectRuntimeHealth({ runtimeVersion });
+  const findings = diagnoseRuntimeHealth(report);
+
+  if (json) {
+    process.stdout.write(`${JSON.stringify({ health: report, findings })}\n`);
+  } else {
+    for (const finding of findings) process.stdout.write(`${renderFinding(finding)}\n`);
+  }
+  return worstSeverity(findings) === 'fail' ? 1 : 0;
+}
+
+function renderFinding(finding: RuntimeDoctorFinding): string {
+  const mark = finding.severity === 'ok' ? 'ok  ' : finding.severity === 'warn' ? 'warn' : 'fail';
+  const line = `${mark}  ${finding.title.padEnd(8)} ${finding.detail}`;
+  return finding.fix ? `${line}\n            fix: ${finding.fix}` : line;
 }
 
 /**

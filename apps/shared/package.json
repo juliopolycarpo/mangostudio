@@ -56,7 +56,8 @@
     "./api-keys": "./src/api-keys/index.ts",
     "./realtime": "./src/realtime/index.ts",
     "./tool-identity": "./src/tool-identity/index.ts",
-    "./runtime-protocol": "./src/runtime-protocol/index.ts"
+    "./runtime-protocol": "./src/runtime-protocol/index.ts",
+    "./runtime-home": "./src/runtime-home/index.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
