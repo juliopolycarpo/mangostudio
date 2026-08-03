@@ -53,6 +53,23 @@ function separatorFor(platform?: string): string {
 }
 
 /**
+ * Drops the separators a path ends with, walking back from the end.
+ *
+ * A loop rather than `/\/+$/`, which backtracks quadratically on a long run of
+ * separators — these strings come out of a config file and an executable path,
+ * so the input is not this module's to vouch for.
+ */
+function trimTrailingSeparators(value: string, windows: boolean): string {
+  let end = value.length;
+  while (end > 0) {
+    const character = value[end - 1];
+    if (character !== '/' && !(windows && character === '\\')) break;
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+/**
  * Joins segments for the target platform, the way that platform spells paths.
  *
  * Only trailing separators are trimmed, and only the ones the target actually
@@ -60,14 +77,14 @@ function separatorFor(platform?: string): string {
  * name is the one thing this must never rewrite.
  */
 function joinFor(platform: string | undefined, ...segments: readonly string[]): string {
+  const windows = platform === 'win32';
   const separator = separatorFor(platform);
-  const trailing = platform === 'win32' ? /[\\/]+$/ : /\/+$/;
   const joined = segments.reduce((left, right) => {
     if (!left) return right;
     if (!right) return left;
-    return `${left.replace(trailing, '')}${separator}${right}`;
+    return `${trimTrailingSeparators(left, windows)}${separator}${right}`;
   }, '');
-  return platform === 'win32' ? joined.replaceAll('/', separator) : joined;
+  return windows ? joined.replaceAll('/', separator) : joined;
 }
 
 /** `<home>/.mango`. Takes the home directory so this stays free of `node:os`. */
@@ -152,7 +169,7 @@ export function runtimeSlotForPath(path: string, options: RuntimeHomeOptions): R
   const separator = separatorFor(options.platform);
   const normalize = (value: string): string => {
     const spelled = windows ? value.replaceAll('/', separator) : value;
-    const trimmed = spelled.replace(windows ? /[\\/]+$/ : /\/+$/, '');
+    const trimmed = trimTrailingSeparators(spelled, windows);
     return windows ? trimmed.toLowerCase() : trimmed;
   };
   const candidate = normalize(path);
