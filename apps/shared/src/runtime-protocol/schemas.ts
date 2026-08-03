@@ -20,6 +20,31 @@ export const RuntimeErrorCodeSchema = Type.Union([
 ]);
 export type RuntimeErrorCode = Static<typeof RuntimeErrorCodeSchema>;
 
+/**
+ * Wire form of `err.code`: open so a newer peer's refusal (or any future
+ * literal) does not tear the socket down. Consumers narrow with
+ * {@link narrowRuntimeErrorCode}; unknown codes degrade to `INTERNAL`.
+ */
+export const RuntimeWireErrorCodeSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: '^[A-Z][A-Z0-9_]*$',
+});
+export type RuntimeWireErrorCode = Static<typeof RuntimeWireErrorCodeSchema>;
+
+const KNOWN_RUNTIME_ERROR_CODES = new Set<string>(
+  RuntimeErrorCodeSchema.anyOf.map((entry) => entry.const)
+);
+
+/**
+ * Map a wire error code onto the known union. A code this build has never
+ * heard of is a policy refusal from the future (or a typo); treating either as
+ * a protocol violation would drop the connection instead of surfacing a state.
+ */
+export function narrowRuntimeErrorCode(code: string): RuntimeErrorCode {
+  return KNOWN_RUNTIME_ERROR_CODES.has(code) ? (code as RuntimeErrorCode) : 'INTERNAL';
+}
+
 export const RuntimeShellKindSchema = Type.Union([
   Type.Literal('bash'),
   Type.Literal('zsh'),
@@ -27,34 +52,30 @@ export const RuntimeShellKindSchema = Type.Union([
 ]);
 export type RuntimeShellKind = Static<typeof RuntimeShellKindSchema>;
 
-export const RuntimeCapabilityManifestSchema = Type.Object(
-  {
-    platform: Type.String({ minLength: 1 }),
-    arch: Type.String({ minLength: 1 }),
-    pathStyle: Type.Union([Type.Literal('posix'), Type.Literal('win32')]),
-    homeDir: Type.String({ minLength: 1 }),
-    shells: Type.Array(RuntimeShellKindSchema, { uniqueItems: true }),
-    git: Type.Object(
-      {
-        available: Type.Boolean(),
-        version: Type.Optional(Type.String({ minLength: 1 })),
-      },
-      { additionalProperties: false }
-    ),
-    features: Type.Object(
-      {
-        tools: Type.Boolean(),
-        git: Type.Boolean(),
-        probing: Type.Boolean(),
-        mcp: Type.Boolean(),
-        library: Type.Boolean(),
-        checkpoints: Type.Boolean(),
-      },
-      { additionalProperties: false }
-    ),
-  },
-  { additionalProperties: false }
-);
+/**
+ * Capability announcement in `hello`. Manifest objects tolerate unknown keys
+ * so an older hub can keep talking to a newer runtime that advertises extra
+ * feature flags; frame envelopes themselves stay closed.
+ */
+export const RuntimeCapabilityManifestSchema = Type.Object({
+  platform: Type.String({ minLength: 1 }),
+  arch: Type.String({ minLength: 1 }),
+  pathStyle: Type.Union([Type.Literal('posix'), Type.Literal('win32')]),
+  homeDir: Type.String({ minLength: 1 }),
+  shells: Type.Array(RuntimeShellKindSchema, { uniqueItems: true }),
+  git: Type.Object({
+    available: Type.Boolean(),
+    version: Type.Optional(Type.String({ minLength: 1 })),
+  }),
+  features: Type.Object({
+    tools: Type.Boolean(),
+    git: Type.Boolean(),
+    probing: Type.Boolean(),
+    mcp: Type.Boolean(),
+    library: Type.Boolean(),
+    checkpoints: Type.Boolean(),
+  }),
+});
 export type RuntimeCapabilityManifest = Static<typeof RuntimeCapabilityManifestSchema>;
 
 const RuntimeFrameIdSchema = Type.String({ minLength: 1, maxLength: 256 });
@@ -116,7 +137,7 @@ export type RuntimeSuccessResponseFrame = Static<typeof RuntimeSuccessResponseFr
 
 export const RuntimeErrorPayloadSchema = Type.Object(
   {
-    code: RuntimeErrorCodeSchema,
+    code: RuntimeWireErrorCodeSchema,
     message: Type.String({ minLength: 1 }),
     details: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   },

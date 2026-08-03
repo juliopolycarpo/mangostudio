@@ -1,5 +1,6 @@
 import {
   assertRuntimeProtocolCompatible,
+  narrowRuntimeErrorCode,
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeCapabilityManifest,
   type RuntimeEventFrame,
@@ -267,6 +268,12 @@ export class RuntimeProtocolClient {
       pending.resolve(frame.ok);
       return;
     }
-    pending.reject(new RuntimeRemoteError(frame.err.code, frame.err.message, frame.err.details));
+    pending.reject(
+      new RuntimeRemoteError(
+        narrowRuntimeErrorCode(frame.err.code),
+        frame.err.message,
+        frame.err.details
+      )
+    );
   }
 }
