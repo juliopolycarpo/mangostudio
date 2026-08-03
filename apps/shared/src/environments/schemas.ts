@@ -799,3 +799,36 @@ export const RuntimeLifecycleStartResponseSchema = Type.Object({
   runId: Type.String({ minLength: 1 }),
 });
 export type RuntimeLifecycleStartResponse = Static<typeof RuntimeLifecycleStartResponseSchema>;
+
+/**
+ * Consent the hub asks an SSH machine to record via `setup --yes --json`.
+ * Profile presets fill `allow`; `custom` requires an explicit allow matrix.
+ */
+export const RuntimeSetupBodySchema = Type.Object(
+  {
+    profile: Type.Union([
+      Type.Literal('full'),
+      Type.Literal('readonly'),
+      Type.Literal('none'),
+      Type.Literal('custom'),
+    ]),
+    allow: Type.Optional(
+      Type.Object(
+        {
+          fsRead: Type.Optional(Type.Boolean()),
+          fsWrite: Type.Optional(Type.Boolean()),
+          shell: Type.Optional(Type.Boolean()),
+          git: Type.Optional(Type.Boolean()),
+          probing: Type.Optional(Type.Boolean()),
+          mcp: Type.Optional(Type.Boolean()),
+          library: Type.Optional(Type.Boolean()),
+          checkpoints: Type.Optional(Type.Boolean()),
+          update: Type.Optional(Type.Boolean()),
+        },
+        { additionalProperties: Type.Never() }
+      )
+    ),
+  },
+  { additionalProperties: Type.Never() }
+);
+export type RuntimeSetupBody = Static<typeof RuntimeSetupBodySchema>;

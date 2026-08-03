@@ -7,6 +7,7 @@ import {
   RuntimeLifecycleViewSchema,
   RuntimePairingIssueSchema,
   RuntimePairingStatusSchema,
+  RuntimeSetupBodySchema,
   UpdateEnvironmentBodySchema,
 } from '@mangostudio/shared/environments';
 import {
@@ -292,6 +293,26 @@ export function createEnvironmentEntityRoutes(
           params: environmentParams,
           response: {
             200: RuntimeLifecycleStartResponseSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+          },
+        }
+      )
+      .post(
+        '/environments/:id/runtime/setup',
+        async ({ params, body, user, set }) => {
+          try {
+            return await lifecycle.startSetup(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
+        },
+        {
+          params: environmentParams,
+          body: RuntimeSetupBodySchema,
+          response: {
+            200: RuntimeLifecycleViewSchema,
             400: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,

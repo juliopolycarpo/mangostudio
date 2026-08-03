@@ -15,6 +15,7 @@ import type {
   RuntimeLifecycleView,
   RuntimePairingIssue,
   RuntimePairingStatus,
+  RuntimeSetupBody,
   RuntimeStatusList,
   UpdateEnvironmentBody,
   VersionManagerStatusList,
@@ -255,6 +256,21 @@ export function useStartRuntimeInstallMutation(id: string) {
       const { data, error } = await client.api.environments({ id }).runtime.install.post();
       if (error) throw new ApiError(error.value);
       return data as RuntimeLifecycleStartResponse;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.runtimeLifecycle(id) });
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+    },
+  });
+}
+
+export function useRuntimeSetupMutation(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RuntimeSetupBody) => {
+      const { data, error } = await client.api.environments({ id }).runtime.setup.post(body);
+      if (error) throw new ApiError(error.value);
+      return data as RuntimeLifecycleView;
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: environmentKeys.runtimeLifecycle(id) });

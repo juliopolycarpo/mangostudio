@@ -10,15 +10,20 @@ import type {
   RuntimeLifecycleAction,
   RuntimeLifecycleView,
 } from '@mangostudio/shared/environments';
-import { Download, RefreshCw, RotateCcw } from 'lucide-react';
+import { Download, RefreshCw, RotateCcw, Shield } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useInstallStream } from '../hooks/use-install-stream';
-import { useRuntimeLifecycleQuery, useStartRuntimeInstallMutation } from '../queries';
+import {
+  useRuntimeLifecycleQuery,
+  useRuntimeSetupMutation,
+  useStartRuntimeInstallMutation,
+} from '../queries';
 import { CopyLine } from './CopyLine';
 import { InstallConsole } from './InstallConsole';
+import { RuntimeConsentDialog } from './RuntimeConsentDialog';
 
 const ACTION_ICONS: Partial<Record<RuntimeLifecycleAction, typeof Download>> = {
   install: Download,
@@ -40,7 +45,9 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
     environment.transportKind === 'http';
   const view = useRuntimeLifecycleQuery(environment.id, enabled);
   const install = useStartRuntimeInstallMutation(environment.id);
+  const setup = useRuntimeSetupMutation(environment.id);
   const [runId, setRunId] = useState<string | null>(null);
+  const [consentOpen, setConsentOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const streamPath = runId
@@ -57,6 +64,7 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
   const data = view.data;
   const busy =
     install.isPending ||
+    setup.isPending ||
     Boolean(
       runId && stream.phase !== 'finished' && stream.phase !== 'failed' && stream.phase !== 'idle'
     );
@@ -133,7 +141,41 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
                 </button>
               );
             })}
+          {data.actions.includes('setup') ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setConsentOpen(true)}
+              className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary/10 px-2 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/15 disabled:opacity-45"
+            >
+              <Shield size={12} />
+              {labels.actions.setup}
+            </button>
+          ) : null}
         </div>
+      ) : null}
+
+      {consentOpen ? (
+        <RuntimeConsentDialog
+          machineName={environment.name}
+          initialProfile={data.health?.profile ?? 'full'}
+          initialAllow={data.health?.allow}
+          isPending={setup.isPending}
+          onCancel={() => setConsentOpen(false)}
+          onConfirm={(input) => {
+            setActionError(null);
+            void setup
+              .mutateAsync({
+                profile: input.profile === 'custom' ? 'custom' : input.profile,
+                ...(input.allow ? { allow: input.allow } : {}),
+              })
+              .then(() => {
+                setConsentOpen(false);
+                void view.refetch();
+              })
+              .catch((error) => setActionError(resolveApiErrorMessage(error, labels.actionFailed)));
+          }}
+        />
       ) : null}
 
       {data.manualCommands ? <ManualCommands view={data} /> : null}

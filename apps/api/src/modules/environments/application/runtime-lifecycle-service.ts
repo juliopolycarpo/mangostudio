@@ -10,8 +10,15 @@ import type {
   InstallStreamEvent,
   RuntimeLifecycleStartResponse,
   RuntimeLifecycleView,
+  RuntimeSetupBody,
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import {
+  RUNTIME_CAPABILITY_KEYS,
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeCapabilityAllow,
+  resolveRuntimePlatformId,
+} from '@mangostudio/shared/runtime-home';
 import { getVersion } from '../../../lib/config';
 import {
   getRuntimeConnectionManager,
@@ -20,7 +27,11 @@ import {
 import { generateId } from '../../../utils/id';
 import { environmentConfigFor } from '../domain/environment-config';
 import { buildRuntimeLifecycleView, healthHasRuntime } from '../domain/runtime-lifecycle-view';
+import { pushRuntimeBinary, RuntimePushError } from '../domain/runtime-push';
+import { loadRuntimeReleaseBytes, RuntimeAssetLoadError } from '../domain/runtime-release-fetch';
+import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
 import { environmentRepository } from '../infrastructure/environment-repository';
+import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
 import {
   type WslProvisioner,
   WslProvisioningError,
@@ -66,6 +77,11 @@ export class RuntimeLifecycleUnavailableError extends Error {
 export interface RuntimeLifecycleService {
   getView(userId: string, environmentId: string): Promise<RuntimeLifecycleView>;
   startInstall(userId: string, environmentId: string): Promise<RuntimeLifecycleStartResponse>;
+  startSetup(
+    userId: string,
+    environmentId: string,
+    body: RuntimeSetupBody
+  ): Promise<RuntimeLifecycleView>;
   getRunStream(runId: string, userId: string): Promise<AsyncIterable<InstallStreamEvent> | null>;
   cancel(runId: string, userId: string): Promise<boolean>;
 }
@@ -259,27 +275,11 @@ export function createRuntimeLifecycleService(
         );
       }
 
-      // SSH push lands in the next commit; refuse clearly until then.
-      if (record.transportKind === 'ssh') {
-        throw new RuntimeLifecycleUnavailableError(
-          'SSH runtime push is not available yet on this release.',
-          409
-        );
-      }
-
       if (activeByEnvironment.has(environmentId)) {
         throw new RuntimeLifecycleConflictError(
           `A runtime install is already running for environment "${environmentId}".`
         );
       }
-
-      const config = environmentConfigFor(record.transportKind, record.config);
-      if (record.transportKind !== 'wsl' || !('distro' in config)) {
-        throw new RuntimeLifecycleUnavailableError(
-          `Environment "${environmentId}" has no WSL distribution configured.`
-        );
-      }
-      const distro = config.distro;
 
       const runId = generateId();
       const stream = createEventBuffer();
@@ -298,10 +298,15 @@ export function createRuntimeLifecycleService(
 
       const cached = manager.getCachedHealth(userId, environmentId);
       const action = healthHasRuntime(cached?.health ?? null) ? 'reinstall' : 'install';
+      const targetLabel =
+        record.transportKind === 'wsl'
+          ? environmentConfigFor('wsl', record.config).distro
+          : environmentConfigFor('ssh', record.config).host;
+
       stream.publish({
         type: 'log',
         stream: 'system',
-        line: `Starting runtime ${action} for "${distro}" (hub ${getVersion()}).`,
+        line: `Starting runtime ${action} for "${targetLabel}" (hub ${getVersion()}).`,
         done: false,
       });
 
@@ -311,7 +316,11 @@ export function createRuntimeLifecycleService(
             finish(run, 'cancelled', null);
             return;
           }
-          await provisioner.ensure(distro);
+          if (record.transportKind === 'wsl') {
+            await provisioner.ensure(environmentConfigFor('wsl', record.config).distro);
+          } else {
+            await pushOverSsh(record.config, stream, abort.signal);
+          }
           if (abort.signal.aborted) {
             finish(run, 'cancelled', null);
             return;
@@ -319,10 +328,9 @@ export function createRuntimeLifecycleService(
           stream.publish({
             type: 'log',
             stream: 'system',
-            line: `Runtime ${action} finished for "${distro}".`,
+            line: `Runtime ${action} finished for "${targetLabel}".`,
             done: false,
           });
-          // Refresh so the panel picks up the new health without waiting.
           await manager
             .connect(userId, environmentId, { force: true })
             .then(() => manager.refreshManifest(userId, environmentId))
@@ -334,7 +342,10 @@ export function createRuntimeLifecycleService(
             return;
           }
           const detail =
-            error instanceof WslProvisioningError || error instanceof Error
+            error instanceof WslProvisioningError ||
+            error instanceof RuntimePushError ||
+            error instanceof RuntimeAssetLoadError ||
+            error instanceof Error
               ? error.message
               : String(error);
           stream.publish({
@@ -348,6 +359,61 @@ export function createRuntimeLifecycleService(
       })();
 
       return { runId };
+    },
+
+    async startSetup(userId, environmentId, body) {
+      if (environmentId === LOCAL_ENVIRONMENT_ID) {
+        throw new RuntimeLifecycleUnavailableError(
+          'Local consent is recorded on this machine with mangostudio-runtime setup.',
+          409
+        );
+      }
+      const record = await environmentRepository.find(userId, environmentId);
+      if (!record) {
+        throw new RuntimeLifecycleUnavailableError(`Environment "${environmentId}" was not found.`);
+      }
+      if (record.transportKind !== 'ssh') {
+        throw new RuntimeLifecycleUnavailableError(
+          'Setup-over-ssh is only available for SSH environments.',
+          409
+        );
+      }
+
+      const config = environmentConfigFor('ssh', record.config);
+      const runner = createSshCommandRunner(config);
+      const allow = resolveSetupAllow(body);
+
+      // Code-defined scripts; values travel as $1. `custom` is not a --profile
+      // value — the CLI derives that name from any non-preset allow set.
+      const result =
+        body.profile === 'custom'
+          ? await runner(
+              'exec "$HOME"/.mango/runtime/remote/current/mangostudio-runtime setup --slot remote --allow "$1" --yes --json',
+              {
+                args: [
+                  RUNTIME_CAPABILITY_KEYS.map(
+                    (key) => `${key}=${allow[key] ? 'true' : 'false'}`
+                  ).join(','),
+                ],
+                timeoutMs: 60_000,
+              }
+            )
+          : await runner(
+              'exec "$HOME"/.mango/runtime/remote/current/mangostudio-runtime setup --slot remote --profile "$1" --yes --json',
+              { args: [body.profile], timeoutMs: 60_000 }
+            );
+      if (result.exitCode !== 0) {
+        throw new RuntimeLifecycleUnavailableError(
+          `Setup on "${config.host}" failed: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
+          409
+        );
+      }
+
+      await manager
+        .connect(userId, environmentId, { force: true })
+        .then(() => manager.refreshManifest(userId, environmentId))
+        .catch(() => undefined);
+      return this.getView(userId, environmentId);
     },
 
     getRunStream(runId, userId) {
@@ -372,3 +438,70 @@ export function createRuntimeLifecycleService(
 }
 
 export const runtimeLifecycleService = createRuntimeLifecycleService();
+
+async function pushOverSsh(
+  configUnknown: unknown,
+  stream: EventBuffer,
+  signal: AbortSignal
+): Promise<void> {
+  const config = environmentConfigFor('ssh', configUnknown);
+  const runner = createSshCommandRunner(config);
+  const probe = await runner(PLATFORM_PROBE_SCRIPT, { timeoutMs: 30_000 });
+  if (probe.exitCode !== 0) {
+    throw new RuntimePushError(
+      `Could not probe "${config.host}": ${probe.stderr.trim() || probe.stdout.trim() || `exit ${probe.exitCode}`}`
+    );
+  }
+  const lines = probe.stdout.trim().split(/\r?\n/);
+  const platformProbe =
+    lines.length >= 3
+      ? { kernel: lines[0] ?? '', machine: lines[1] ?? '', libc: lines[2] ?? '' }
+      : { kernel: 'Linux', machine: lines[0] ?? '', libc: lines[1] ?? '' };
+  const platformId = resolveRuntimePlatformId(platformProbe);
+  if (!platformId) {
+    throw new RuntimePushError(
+      `Could not tell which runtime build "${config.host}" needs (${platformProbe.kernel} ${platformProbe.machine}).`
+    );
+  }
+
+  stream.publish({
+    type: 'log',
+    stream: 'system',
+    line: `Resolved platform ${platformId}; loading release asset…`,
+    done: false,
+  });
+  if (signal.aborted) return;
+
+  const asset = await loadRuntimeReleaseBytes(platformId);
+  const total = asset.bytes.byteLength;
+  let lastPct = -1;
+  await pushRuntimeBinary({
+    runner,
+    slot: 'remote',
+    version: getVersion(),
+    bytes: asset.bytes,
+    fromArchive: asset.fromArchive,
+    timeoutMs: 600_000,
+    onStdinProgress: (written) => {
+      const pct = Math.min(100, Math.floor((written / total) * 100));
+      if (pct === lastPct || pct % 5 !== 0) return;
+      lastPct = pct;
+      stream.publish({
+        type: 'log',
+        stream: 'stdout',
+        line: `Transferred ${pct}% (${written}/${total} bytes)`,
+        done: false,
+      });
+    },
+  });
+}
+
+function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
+  if (body.profile !== 'custom') {
+    return RUNTIME_CONSENT_PRESETS[body.profile];
+  }
+  const base = RUNTIME_CONSENT_PRESETS.none;
+  return Object.fromEntries(
+    RUNTIME_CAPABILITY_KEYS.map((key) => [key, body.allow?.[key] ?? base[key]])
+  ) as RuntimeCapabilityAllow;
+}

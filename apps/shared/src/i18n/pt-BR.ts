@@ -2194,6 +2194,14 @@ export const messages = {
           setup: 'Registrar consentimento',
           serviceInstall: 'Manter em execução',
         },
+        consent: {
+          title: 'Permissões do runtime',
+          description: 'Escolha o que o MangoStudio pode fazer em {name}.',
+          profileLabel: 'Perfil',
+          allowLabel: 'Capacidades',
+          cancel: 'Cancelar',
+          confirm: 'Aplicar em {name}',
+        },
       },
       pairing: {
         title: 'Pareamento',

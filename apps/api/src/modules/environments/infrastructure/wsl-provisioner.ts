@@ -439,7 +439,13 @@ async function probePlatform(
       `Could not start the "${distro}" distribution: ${describe(result)}`
     );
   }
-  const [machine = '', libc = ''] = result.stdout.trim().split(/\r?\n/);
+  const lines = result.stdout.trim().split(/\r?\n/);
+  // Older probe scripts printed only machine + libc; accept both shapes.
+  if (lines.length >= 3) {
+    const [kernel = '', machineLine = '', libcLine = ''] = lines;
+    return { kernel, machine: machineLine, libc: libcLine };
+  }
+  const [machine = '', libc = ''] = lines;
   return { machine, libc };
 }
 

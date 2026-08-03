@@ -16,6 +16,7 @@
 
 import { join } from 'node:path';
 import {
+  type LinuxPlatformId,
   mangoHomeDir,
   RUNTIME_BINARY_BASENAME,
   RUNTIME_CONFIG_FILE_NAME,
@@ -23,6 +24,7 @@ import {
   RUNTIME_CURRENT_LINK_NAME,
   type RuntimeSlotConfig,
   RuntimeSlotConfigSchema,
+  resolveLinuxPlatformId as resolveLinuxPlatformIdShared,
   runtimeSlotCurrentBinaryPath,
   runtimeSlotVersionBinaryPath,
 } from '@mangostudio/shared/runtime-home';
@@ -34,6 +36,8 @@ import {
   runtimeSlotShellPath,
   runtimeVersionScript,
 } from './runtime-push';
+
+export type { LinuxPlatformId };
 
 const REPOSITORY = 'juliopolycarpo/mangostudio';
 
@@ -59,9 +63,9 @@ export const DISTRO_RUNTIME_PATH = runtimeSlotCurrentBinaryPath('wsl', {
 /** The unversioned binary #771 shipped, kept only so it can be removed. */
 export const LEGACY_DISTRO_RUNTIME_PATH = '~/.mango/bin/mangostudio-runtime';
 
-export type LinuxPlatformId = 'linux-x64' | 'linux-arm64' | 'linux-x64-musl' | 'linux-arm64-musl';
-
 export interface DistroPlatformProbe {
+  /** `uname -s` output. Present once the probe script reports it. */
+  readonly kernel?: string;
   /** `uname -m` output. */
   readonly machine: string;
   /** First line of `ldd --version`, which names the C library. */
@@ -69,11 +73,11 @@ export interface DistroPlatformProbe {
 }
 
 /**
- * Reports both halves of the target triple in one round trip. Alpine on WSL is
- * a real configuration and needs the musl build, which `uname -m` alone cannot
- * distinguish from glibc.
+ * Reports kernel, machine, and libc in one round trip. Alpine on WSL is a real
+ * configuration and needs the musl build, which `uname -m` alone cannot
+ * distinguish from glibc. `uname -s` lets SSH targets resolve Darwin vs Linux.
  */
-export const PLATFORM_PROBE_SCRIPT = 'uname -m; (ldd --version 2>&1 || true) | head -n 1';
+export const PLATFORM_PROBE_SCRIPT = 'uname -s; uname -m; (ldd --version 2>&1 || true) | head -n 1';
 
 const CURRENT_BINARY = distroPath(RUNTIME_CURRENT_LINK_NAME, RUNTIME_ARCHIVE_MEMBER);
 const CONFIG_PATH = distroPath(RUNTIME_CONFIG_FILE_NAME);
@@ -276,24 +280,15 @@ export function wslLaunchCommand(distro: string): RuntimeLaunchCommand {
 }
 
 export function resolveLinuxPlatformId(probe: DistroPlatformProbe): LinuxPlatformId | null {
-  const machine = probe.machine.trim().toLowerCase();
-  const architecture =
-    machine === 'x86_64' || machine === 'amd64'
-      ? 'linux-x64'
-      : machine === 'aarch64' || machine === 'arm64'
-        ? 'linux-arm64'
-        : null;
-  if (!architecture) return null;
-
-  return /musl/i.test(probe.libc) ? (`${architecture}-musl` as LinuxPlatformId) : architecture;
+  return resolveLinuxPlatformIdShared(probe);
 }
 
-export function releaseArchiveName(version: string, platformId: LinuxPlatformId): string {
+export function releaseArchiveName(version: string, platformId: string): string {
   return `mangostudio-${version}-${platformId}.tar.gz`;
 }
 
 /** Raw runtime binary asset name published beside the platform archive. */
-export function releaseRuntimeBinaryName(version: string, platformId: LinuxPlatformId): string {
+export function releaseRuntimeBinaryName(version: string, platformId: string): string {
   return `mangostudio-runtime-${version}-${platformId}`;
 }
 
