@@ -93,6 +93,19 @@ describe('runtime home', () => {
     expect(state.stored).toBeNull();
   });
 
+  it('reports a config it cannot open instead of reading it as absent', async () => {
+    const env = await isolatedEnv();
+    // A directory where the file belongs fails the read with EISDIR, which is
+    // the portable stand-in for the EACCES/EPERM/EIO family: a file is there
+    // and this process cannot see what it says. `host` is the slot that makes
+    // the distinction matter, because absence there means full consent.
+    await mkdir(join(runtimeSlotDir('host', env), 'runtime.json'), { recursive: true });
+
+    const state = await readRuntimeSlotState('host', env);
+    expect(state.error).toContain('could not be read');
+    expect(state.stored).toBeNull();
+  });
+
   it('reports a config that does not match the schema', async () => {
     const env = await isolatedEnv();
     await writeRawConfig('host', JSON.stringify({ schemaVersion: 1, slot: 'nowhere' }), env);

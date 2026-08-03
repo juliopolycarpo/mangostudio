@@ -153,7 +153,17 @@ export async function readRuntimeSlotState(
   let raw: string;
   try {
     raw = await readFile(path, 'utf8');
-  } catch {
+  } catch (error) {
+    // Only a confirmed absence may take the slot default, because for `host`
+    // and `wsl` that default is full consent. `EACCES`, `EISDIR`, `EPERM` and
+    // `EIO` all mean a file is there and this process cannot see what it says,
+    // which is an unknown answer — and an unknown answer is never yes.
+    // `ENOTDIR` joins `ENOENT`: a path component that is not a directory
+    // cannot be holding the file.
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+      return unusable(`${path} could not be read (${describe(error)}).`);
+    }
     return { config: resolveRuntimeSlotConfig(slot, null, fallback), stored: null, error: null };
   }
 

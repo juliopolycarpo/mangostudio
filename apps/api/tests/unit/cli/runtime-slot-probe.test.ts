@@ -71,6 +71,16 @@ describe('probeRuntimeSlots', () => {
 
     expect(probe?.error).toBe('is not valid JSON');
   });
+
+  it('reports a config it cannot open rather than reading it as absent', async () => {
+    // EISDIR stands in for the EACCES/EPERM/EIO family portably. Absence in the
+    // `host` slot means full consent, so the two must not answer alike.
+    const home = await mangoHome({ host: null });
+    await mkdir(join(home, 'runtime', 'host', 'runtime.json'), { recursive: true });
+
+    const [probe] = await probeRuntimeSlots(home);
+    expect(probe?.error).toBe('could not be read');
+  });
 });
 
 describe('checkRuntimeSlot', () => {

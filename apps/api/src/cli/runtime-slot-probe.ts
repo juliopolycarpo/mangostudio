@@ -60,8 +60,15 @@ async function probeSlot(slot: RuntimeSlot, mangoHome: string): Promise<RuntimeS
   let raw: string;
   try {
     raw = await readFile(runtimeSlotConfigPath(slot, options), 'utf8');
-  } catch {
-    return { ...base, config: resolve(slot, null), error: null };
+  } catch (error) {
+    // Absent is the ordinary case and resolves to the slot default. A file this
+    // process cannot open is not that: for `host` and `wsl` the default is full
+    // consent, so reporting one as absent would show doctor a machine wide open
+    // when the file on it may say `readonly`.
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR'
+      ? { ...base, config: resolve(slot, null), error: null }
+      : { ...base, config: resolve(slot, null), error: 'could not be read' };
   }
 
   try {
