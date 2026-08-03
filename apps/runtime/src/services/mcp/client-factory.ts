@@ -70,11 +70,6 @@ class ToolCallQueue {
 
   acquire(signal?: AbortSignal): Promise<ToolCallSlot> {
     signal?.throwIfAborted();
-    if (!this.active) {
-      this.active = true;
-      return Promise.resolve(this.createSlot(false, 0));
-    }
-
     return new Promise<ToolCallSlot>((resolve, reject) => {
       const entry: QueuedToolCall = {
         enqueuedAt: Date.now(),
@@ -89,6 +84,7 @@ class ToolCallQueue {
       };
       signal?.addEventListener('abort', entry.onAbort, { once: true });
       this.waiting.push(entry);
+      this.drain();
     });
   }
 
@@ -100,19 +96,20 @@ class ToolCallQueue {
       release: () => {
         if (released) return;
         released = true;
-        this.releaseNext();
+        this.active = false;
+        this.drain();
       },
     };
   }
 
-  private releaseNext(): void {
+  private drain(): void {
+    if (this.active) return;
     const next = this.waiting.shift();
-    if (!next) {
-      this.active = false;
-      return;
-    }
+    if (!next) return;
+    this.active = true;
     next.signal?.removeEventListener('abort', next.onAbort);
-    next.resolve(this.createSlot(true, Date.now() - next.enqueuedAt));
+    const queueWaitMs = Date.now() - next.enqueuedAt;
+    next.resolve(this.createSlot(queueWaitMs > 0, queueWaitMs));
   }
 }
 

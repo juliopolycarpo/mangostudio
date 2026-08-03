@@ -249,6 +249,8 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
   const deadline = (options?: McpRequestOptions) =>
     requestDeadline(options?.timeoutMs ?? config.timeoutMs);
 
+  let callToolChain: Promise<unknown> = Promise.resolve();
+
   return {
     getCapabilities: () => input.capabilities,
 
@@ -259,29 +261,36 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
       return [...result.tools];
     },
 
-    async callTool(name, args, callOptions) {
+    callTool(name, args, callOptions) {
       const toolCallId = callOptions?.toolCallId?.trim();
-      if (toolCallId) activeCalls.set(toolCallId, callOptions?.signal);
-      try {
-        return await runtime.mcp
-          .callTool(
-            {
-              serverId,
-              toolName: name,
-              args,
-              ...(toolCallId ? { toolCallId } : {}),
-              ...(callOptions?.timeoutMs !== undefined
-                ? { timeoutMs: callOptions.timeoutMs }
-                : config.timeoutMs !== null
-                  ? { timeoutMs: config.timeoutMs }
-                  : {}),
-            },
-            requestOptions(callOptions, deadline(callOptions))
-          )
-          .catch(noteFailure);
-      } finally {
-        if (toolCallId) activeCalls.delete(toolCallId);
-      }
+      const previous = callToolChain;
+      const run = previous
+        .catch(() => undefined)
+        .then(async () => {
+          if (toolCallId) activeCalls.set(toolCallId, callOptions?.signal);
+          try {
+            return await runtime.mcp
+              .callTool(
+                {
+                  serverId,
+                  toolName: name,
+                  args,
+                  ...(toolCallId ? { toolCallId } : {}),
+                  ...(callOptions?.timeoutMs !== undefined
+                    ? { timeoutMs: callOptions.timeoutMs }
+                    : config.timeoutMs !== null
+                      ? { timeoutMs: config.timeoutMs }
+                      : {}),
+                },
+                requestOptions(callOptions, deadline(callOptions))
+              )
+              .catch(noteFailure);
+          } finally {
+            if (toolCallId) activeCalls.delete(toolCallId);
+          }
+        });
+      callToolChain = run;
+      return run;
     },
 
     async listResources(callOptions) {

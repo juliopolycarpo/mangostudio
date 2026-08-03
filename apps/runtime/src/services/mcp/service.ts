@@ -106,6 +106,8 @@ export function createMcpService(options: McpServiceOptions): McpService {
   const pending = new Map<string, PendingElicitation>();
   /** Serializes connect/replace per server id so concurrent connects cannot leak. */
   const connectChains = new Map<string, Promise<unknown>>();
+  /** Serializes tool calls per server; the host dispatches requests concurrently. */
+  const callToolChains = new Map<string, Promise<unknown>>();
 
   function publishSession(event: RuntimeMcpSessionEvent): void {
     options.emit({ topic: RUNTIME_MCP_SESSION_TOPIC, payload: event });
@@ -254,17 +256,27 @@ export function createMcpService(options: McpServiceOptions): McpService {
 
     callTool(params, context) {
       const session = requireSession(params.serverId);
-      return call(session, () =>
-        session.handle.callTool(
-          params.toolName,
-          { ...params.args },
-          {
-            signal: context.signal,
-            ...(params.toolCallId ? { toolCallId: params.toolCallId } : {}),
-            ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),
-          }
-        )
-      );
+      const serverId = params.serverId;
+      const previous = callToolChains.get(serverId) ?? Promise.resolve();
+      const run = previous
+        .catch(() => undefined)
+        .then(() =>
+          call(session, () =>
+            session.handle.callTool(
+              params.toolName,
+              { ...params.args },
+              {
+                signal: context.signal,
+                ...(params.toolCallId ? { toolCallId: params.toolCallId } : {}),
+                ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),
+              }
+            )
+          )
+        );
+      callToolChains.set(serverId, run);
+      return run.finally(() => {
+        if (callToolChains.get(serverId) === run) callToolChains.delete(serverId);
+      });
     },
 
     async listResources(params) {
