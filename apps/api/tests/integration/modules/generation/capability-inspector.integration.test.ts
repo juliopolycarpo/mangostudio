@@ -12,10 +12,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  connectInProcessRuntime,
+  createLocalRuntimeManifest,
+  createRuntimeMethodHandlers,
+  RuntimeHost,
+} from '@mangostudio/runtime';
 import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ChatCapabilitiesResponseSchema } from '@mangostudio/shared/capabilities';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
@@ -45,6 +52,11 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
+import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
+import {
+  RuntimeConnectionManager,
+  setRuntimeConnectionManagerForTests,
+} from '../../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
 
@@ -154,6 +166,55 @@ async function allowAllToolsForChatAgent(): Promise<void> {
     subagentIds: [],
     metadata: {},
   });
+}
+
+/**
+ * Runs `body` against a Local runtime whose consent refuses MCP — what a
+ * machine set up with `--profile readonly` announces at connect.
+ */
+async function withMcpDeniedRuntime<T>(body: () => Promise<T>): Promise<T> {
+  const manager = new RuntimeConnectionManager({
+    resolveEnvironment: (userId) =>
+      Promise.resolve({
+        id: LOCAL_ENVIRONMENT_ID,
+        userId,
+        name: 'Local',
+        transportKind: 'in-process' as const,
+        config: {},
+        enabled: true,
+      }),
+    connectors: {
+      'in-process': async (_definition, onUnavailable) => {
+        let host: RuntimeHost | undefined;
+        const registry = createRuntimeMethodHandlers({
+          runtimeVersion: 'test',
+          emit: (event) => host?.emit(event),
+        });
+        host = new RuntimeHost({
+          runtimeVersion: 'test',
+          manifest: createLocalRuntimeManifest({
+            ...RUNTIME_CONSENT_PRESETS.full,
+            mcp: false,
+          }),
+          handlers: registry.handlers,
+          onClose: () => void registry.close(),
+        });
+        const connection = await connectInProcessRuntime(host, { hubVersion: 'test' });
+        return {
+          client: new RuntimeClient(connection.client, onUnavailable),
+          close: () => connection.close(),
+        };
+      },
+    },
+  });
+
+  setRuntimeConnectionManagerForTests(manager);
+  try {
+    return await body();
+  } finally {
+    await manager.closeAll();
+    setRuntimeConnectionManagerForTests(undefined);
+  }
 }
 
 function inspect(overrides: Partial<Parameters<typeof inspectChatCapabilities>[0]> = {}) {
@@ -275,6 +336,31 @@ describe('inspectChatCapabilities', () => {
     expect(beta?.state).toBe('disabled');
     expect(beta?.reason).toBe('server-disabled');
     expect(beta?.health).toBe('disabled');
+  });
+
+  it('names the refusing machine on servers a denied runtime would reject', async () => {
+    await insertServer('alpha', 1);
+    let connectCalls = 0;
+    setMcpClientConnectorForTest(() => {
+      connectCalls += 1;
+      return Promise.resolve(
+        makeFakeMcpHandle({
+          listTools: () =>
+            Promise.resolve([{ name: 'echo', description: '', inputSchema: { type: 'object' } }]),
+        })
+      );
+    });
+
+    const capabilities = await withMcpDeniedRuntime(() => inspect());
+
+    const alpha = capabilities.mcpServers.find((server) => server.slug === 'alpha');
+    expect(alpha?.state).toBe('unavailable');
+    expect(alpha?.reason).toBe('runtime-denied');
+    expect(alpha?.environmentName).toBe('Local');
+    // The peer refuses mcp.connect; the inspector must not spend the listing
+    // budget rediscovering that, nor report it as a generic server failure.
+    expect(connectCalls).toBe(0);
+    expect(capabilities.tools.some((tool) => tool.source === 'mcp')).toBe(false);
   });
 
   it('reports allowlist exclusions as disabled while preserving turn parity', async () => {

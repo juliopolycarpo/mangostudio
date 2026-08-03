@@ -136,6 +136,9 @@ function resolveMcpCandidates(
 
   const candidates = server.tools.map((tool): ToolCapabilityCandidate => {
     const base = { name: tool.name, title: tool.toolName, ...provenance };
+    // A refusing machine is snapshotted without a listing, so this normally has
+    // no tools to reach. Kept as the fail-closed guard: a listed snapshot must
+    // never hand the provider tools the machine would refuse to run.
     if (input.runtimeManifest.features.mcp === false) {
       return runtimeDenied(base, input.environmentName);
     }

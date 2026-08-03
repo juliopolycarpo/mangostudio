@@ -210,6 +210,13 @@ withholds tools and install affordances that the connected manifest refuses
 machine will do. A hub that offered a tool the runtime will refuse would be lying; a hub
 that silently dropped one without naming the machine would be opaque.
 
+MCP is the one capability whose refusal the hub acts on before asking. Tool rows only exist
+once a session lists them, and `mcp.connect` on a refusing machine answers `RUNTIME_DENIED`
+— so a turn against such a machine snapshots the environment's enabled server rows without
+connecting and reports the refusal at the server level, naming the machine. Attempting the
+listing would spend the per-server budget to rediscover what the manifest already said, and
+would surface as `server-unavailable` — a connection failure the user cannot act on.
+
 Some methods need two capabilities. `library.apply` is a library operation *and* a write to
 somebody's files; `readonly` grants the first and refuses the second, so listing only
 `library` would have let the profile whose whole promise is "no writes" write files.

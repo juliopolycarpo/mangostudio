@@ -57,6 +57,11 @@ export interface McpBridgeServerSnapshot {
   overlongToolNames: string[];
   /** False when the server failed to connect or list within the budget. */
   listed: boolean;
+  /**
+   * True when the turn's machine refuses MCP and no connect was attempted.
+   * Distinguishes a refusal we can name from a connection that merely failed.
+   */
+  runtimeDenied: boolean;
 }
 
 /**
@@ -86,26 +91,11 @@ export async function listMcpBridgeServers(
   userId: string,
   scope: McpBridgeScope
 ): Promise<McpBridgeServerSnapshot[]> {
-  let query = db
-    .selectFrom('mcp_servers')
-    .selectAll()
-    .where('userId', '=', userId)
-    .where('enabled', '=', 1);
-  if ('environmentId' in scope) {
-    query = query.where('environmentId', '=', scope.environmentId);
-  }
-  const rows = await query.orderBy('createdAt', 'asc').execute();
+  const rows = await selectEnabledServerRows(db, userId, scope);
 
   return Promise.all(
     rows.map(async (row) => {
-      const snapshot: McpBridgeServerSnapshot = {
-        serverId: row.id,
-        slug: row.slug,
-        name: row.name,
-        tools: [],
-        overlongToolNames: [],
-        listed: false,
-      };
+      const snapshot = unlistedSnapshot(row, false);
       try {
         const tools = await withBudget(
           listMcpToolsCached(userId, toMcpRuntimeConfig(row)),
@@ -122,6 +112,52 @@ export async function listMcpBridgeServers(
       return snapshot;
     })
   );
+}
+
+/**
+ * Snapshots the in-scope servers without connecting to any of them, for a turn
+ * whose target machine refuses MCP. The peer answers `mcp.connect` with
+ * `RUNTIME_DENIED`, so attempting the listing would spend the per-server budget
+ * to learn what consent already told us; the rows exist so the inspector can
+ * name the refusing machine instead of reporting a generic failure.
+ *
+ * // Usage: const servers = await listDeniedMcpBridgeServers(db, userId, { environmentId })
+ */
+export async function listDeniedMcpBridgeServers(
+  db: Kysely<Database>,
+  userId: string,
+  scope: McpBridgeScope
+): Promise<McpBridgeServerSnapshot[]> {
+  const rows = await selectEnabledServerRows(db, userId, scope);
+  return rows.map((row) => unlistedSnapshot(row, true));
+}
+
+function selectEnabledServerRows(
+  db: Kysely<Database>,
+  userId: string,
+  scope: McpBridgeScope
+): Promise<McpServerSelect[]> {
+  let query = db
+    .selectFrom('mcp_servers')
+    .selectAll()
+    .where('userId', '=', userId)
+    .where('enabled', '=', 1);
+  if ('environmentId' in scope) {
+    query = query.where('environmentId', '=', scope.environmentId);
+  }
+  return query.orderBy('createdAt', 'asc').execute();
+}
+
+function unlistedSnapshot(row: McpServerSelect, runtimeDenied: boolean): McpBridgeServerSnapshot {
+  return {
+    serverId: row.id,
+    slug: row.slug,
+    name: row.name,
+    tools: [],
+    overlongToolNames: [],
+    listed: false,
+    runtimeDenied,
+  };
 }
 
 /**

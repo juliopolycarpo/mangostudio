@@ -93,6 +93,7 @@ function makeSnapshot(
     }),
     overlongToolNames: [],
     listed: true,
+    runtimeDenied: false,
     ...overrides,
   };
 }

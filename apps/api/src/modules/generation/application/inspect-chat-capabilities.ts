@@ -72,11 +72,10 @@ export async function inspectChatCapabilities(
   const provider = resolvedModel.providerType
     ? getProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
-  const runtimeClient = await getRuntimeClient(input.userId, ownedChat.environmentId);
-  const environmentName = await resolveEnvironmentDisplayName(
-    input.userId,
-    ownedChat.environmentId
-  );
+  const [runtimeClient, environmentName] = await Promise.all([
+    getRuntimeClient(input.userId, ownedChat.environmentId),
+    resolveEnvironmentDisplayName(input.userId, ownedChat.environmentId),
+  ]);
 
   const [chat, agentRuntime, appSettings, serverRows, skills] = await Promise.all([
     getById(input.chatId, input.db),
@@ -114,13 +113,14 @@ export async function inspectChatCapabilities(
     agentRuntime.mcpServerSnapshots.map((snapshot) => [snapshot.slug, snapshot])
   );
   const mcpServers = serverRows.map((row) =>
-    toMcpServerEntry(
+    toMcpServerEntry({
       row,
-      snapshotsBySlug.get(row.slug),
-      input.userId,
-      profile.toolsEnabled,
-      enabledToolNames
-    )
+      snapshot: snapshotsBySlug.get(row.slug),
+      userId: input.userId,
+      toolsEnabled: profile.toolsEnabled,
+      enabledToolNames,
+      environmentName,
+    })
   );
 
   const skillEntries = skills.map((skill) =>
@@ -201,18 +201,23 @@ export function candidateState(reason: ToolCapabilityCandidate['reason']): Capab
     : 'unavailable';
 }
 
-function toMcpServerEntry(
-  row: McpServerSelect,
-  snapshot: McpBridgeServerSnapshot | undefined,
-  userId: string,
-  toolsEnabled: boolean,
-  enabledToolNames: ReadonlySet<string>
-): CapabilityMcpServerEntry {
+interface McpServerEntryInput {
+  readonly row: McpServerSelect;
+  readonly snapshot: McpBridgeServerSnapshot | undefined;
+  readonly userId: string;
+  readonly toolsEnabled: boolean;
+  readonly enabledToolNames: ReadonlySet<string>;
+  /** Display name of the chat's environment; attached to runtime-denied. */
+  readonly environmentName: string;
+}
+
+function toMcpServerEntry(input: McpServerEntryInput): CapabilityMcpServerEntry {
+  const { row, snapshot } = input;
   const base = {
     slug: row.slug,
     name: row.name,
     effectiveToolCount: snapshot
-      ? snapshot.tools.filter((tool) => enabledToolNames.has(tool.name)).length
+      ? snapshot.tools.filter((tool) => input.enabledToolNames.has(tool.name)).length
       : 0,
   };
 
@@ -223,9 +228,20 @@ function toMcpServerEntry(
   // Last-known status: reading it adds no probe of its own, and the runtime
   // listing above has already settled. Raw transport error text is never
   // surfaced — only the status code.
-  const health = getMcpRuntimeStatus(userId, row.id).status;
-  if (!toolsEnabled) {
+  const health = getMcpRuntimeStatus(input.userId, row.id).status;
+  if (!input.toolsEnabled) {
     return { ...base, state: 'disabled', reason: 'agent-tools-disabled', health };
+  }
+  // Checked before `listed`: the machine's refusal is why no listing was
+  // attempted, and naming it beats reporting a connection that never ran.
+  if (snapshot?.runtimeDenied) {
+    return {
+      ...base,
+      state: 'unavailable',
+      reason: 'runtime-denied',
+      health,
+      environmentName: input.environmentName,
+    };
   }
   if (!snapshot?.listed) {
     return { ...base, state: 'unavailable', reason: 'server-unavailable', health };
