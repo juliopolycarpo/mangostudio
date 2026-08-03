@@ -154,8 +154,20 @@ export const SETUP_FULL_SCRIPT = `exec ${CURRENT_BINARY} setup --profile full --
  * installed binary inside the distribution on every connect would make the
  * cheapest check the most expensive one, and the hub pushed those bytes, so it
  * already knows what their digest is.
+ *
+ * A `cat` that fails says so, because silence here means something specific.
+ * No config resolves to "nobody has answered yet", which is what lets the first
+ * provision record full consent; a config the hub cannot read may have narrowed
+ * this distribution, and reporting it as absent would hand back everything it
+ * took away. The marker is deliberately not JSON, so a partial read that dies
+ * mid-file lands on the same answer.
  */
-export const PROBE_SLOT_SCRIPT = `printf '%s\\n' "$HOME"; cat ${CONFIG_PATH} 2>/dev/null || true`;
+const CONFIG_UNREADABLE_MARKER = '<runtime.json unreadable>';
+export const PROBE_SLOT_SCRIPT =
+  `printf '%s\\n' "$HOME"; ` +
+  `cat ${CONFIG_PATH} 2>/dev/null || ` +
+  `{ [ -e ${CONFIG_PATH} ] && printf '%s\\n' '${CONFIG_UNREADABLE_MARKER}'; }; ` +
+  'true';
 
 /** What a distribution answered {@link PROBE_SLOT_SCRIPT} with. */
 export interface DistroSlotProbe {
@@ -177,6 +189,7 @@ export function parseDistroSlotProbe(stdout: string): DistroSlotProbe {
   const home = (newline === -1 ? stdout : stdout.slice(0, newline)).trim();
   const rest = newline === -1 ? '' : stdout.slice(newline + 1).trim();
   if (!rest) return { home, config: null, unreadable: false };
+  if (rest === CONFIG_UNREADABLE_MARKER) return { home, config: null, unreadable: true };
 
   try {
     const parsed: unknown = JSON.parse(rest);

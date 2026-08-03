@@ -13,7 +13,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, readlink, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readlink, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -185,6 +185,24 @@ describe.skipIf(!hasPosixShell)('WSL config scripts against a real shell', () =>
     expect(probe.home).toBe(home);
     expect(probe.config).toBeNull();
     expect(probe.unreadable).toBe(false);
+  });
+
+  it('tells a config it cannot read apart from one that is not there', async () => {
+    const home = await distroHome();
+    // A directory where the file belongs makes `cat` fail with EISDIR, which no
+    // amount of privilege bypasses — unlike a chmod, which root ignores.
+    await mkdir(slotPath(home, 'runtime.json'), { recursive: true });
+
+    const run = await runScript(home, PROBE_SLOT_SCRIPT);
+    // Still exits clean: the provisioner reads the answer, it does not catch it.
+    expect(run.exitCode).toBe(0);
+
+    const probe = parseDistroSlotProbe(run.stdout);
+    expect(probe.home).toBe(home);
+    expect(probe.config).toBeNull();
+    // The distinction that matters: absent means nobody has answered and the
+    // provisioner may record full consent, unreadable means it must not.
+    expect(probe.unreadable).toBe(true);
   });
 
   it('removes the unversioned binary and says it did', async () => {
