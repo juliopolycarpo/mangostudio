@@ -22,7 +22,10 @@ import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/a
 import { ChatCapabilitiesResponseSchema } from '@mangostudio/shared/capabilities';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
-import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import {
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeCapabilityAllow,
+} from '@mangostudio/shared/runtime-home';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
@@ -169,10 +172,13 @@ async function allowAllToolsForChatAgent(): Promise<void> {
 }
 
 /**
- * Runs `body` against a Local runtime whose consent refuses MCP — what a
- * machine set up with `--profile readonly` announces at connect.
+ * Runs `body` against a Local runtime that announces `allow` as its consent —
+ * what `mangostudio-runtime setup --slot host` on this machine would produce.
  */
-async function withMcpDeniedRuntime<T>(body: () => Promise<T>): Promise<T> {
+async function withRuntimeConsent<T>(
+  allow: RuntimeCapabilityAllow,
+  body: () => Promise<T>
+): Promise<T> {
   const manager = new RuntimeConnectionManager({
     resolveEnvironment: (userId) =>
       Promise.resolve({
@@ -192,10 +198,7 @@ async function withMcpDeniedRuntime<T>(body: () => Promise<T>): Promise<T> {
         });
         host = new RuntimeHost({
           runtimeVersion: 'test',
-          manifest: createLocalRuntimeManifest({
-            ...RUNTIME_CONSENT_PRESETS.full,
-            mcp: false,
-          }),
+          manifest: createLocalRuntimeManifest(allow),
           handlers: registry.handlers,
           onClose: () => void registry.close(),
         });
@@ -351,7 +354,10 @@ describe('inspectChatCapabilities', () => {
       );
     });
 
-    const capabilities = await withMcpDeniedRuntime(() => inspect());
+    const capabilities = await withRuntimeConsent(
+      { ...RUNTIME_CONSENT_PRESETS.full, mcp: false },
+      () => inspect()
+    );
 
     const alpha = capabilities.mcpServers.find((server) => server.slug === 'alpha');
     expect(alpha?.state).toBe('unavailable');
@@ -361,6 +367,48 @@ describe('inspectChatCapabilities', () => {
     // budget rediscovering that, nor report it as a generic server failure.
     expect(connectCalls).toBe(0);
     expect(capabilities.tools.some((tool) => tool.source === 'mcp')).toBe(false);
+  });
+
+  it('shrinks the turn tool list on a readonly machine and explains every drop', async () => {
+    // The plan's regression bar for the cosmetic filter: a readonly machine
+    // must reach the provider with fewer tools than a full one, the inspector
+    // must name why for each, and the turn must still resolve — a refused
+    // capability is a state, not a failed turn.
+    const full = await resolveTurnContext(
+      { chatId, userId: user.id, prompt: 'full probe', model: MODEL_ID },
+      getDb()
+    );
+
+    const [capabilities, readonlyTurn] = await withRuntimeConsent(
+      RUNTIME_CONSENT_PRESETS.readonly,
+      async () =>
+        [
+          await inspect(),
+          await resolveTurnContext(
+            { chatId, userId: user.id, prompt: 'readonly probe', model: MODEL_ID },
+            getDb()
+          ),
+        ] as const
+    );
+
+    const fullNames = full.toolDefinitions.map((definition) => definition.name);
+    const readonlyNames = readonlyTurn.toolDefinitions.map((definition) => definition.name);
+    expect(readonlyNames.length).toBeLessThan(fullNames.length);
+    expect(fullNames).toContain('write_file');
+    expect(readonlyNames).not.toContain('write_file');
+    expect(readonlyNames).toContain('read_file');
+
+    // The inspector is the same projection the turn used, so parity holds
+    // under denial too — and every withheld tool carries the machine's name.
+    expect(effectiveToolNames(capabilities)).toEqual(readonlyNames);
+    const denied = capabilities.tools.filter((tool) => tool.reason === 'runtime-denied');
+    expect(denied.length).toBeGreaterThan(0);
+    expect(denied.every((tool) => tool.environmentName === 'Local')).toBe(true);
+    expect(denied.every((tool) => tool.state === 'unavailable')).toBe(true);
+    expect(capabilities.tools.find((tool) => tool.name === 'write_file')?.reason).toBe(
+      'runtime-denied'
+    );
+    expect(Value.Check(ChatCapabilitiesResponseSchema, capabilities)).toBe(true);
   });
 
   it('reports allowlist exclusions as disabled while preserving turn parity', async () => {
