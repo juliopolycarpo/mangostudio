@@ -2,10 +2,17 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type {
   CreateEnvironmentBody,
   Environment,
+  RuntimeLifecycleView,
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
+import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
+import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
+import {
+  createRuntimeLifecycleService,
+  type RuntimeLifecycleService,
+} from '../../../src/modules/environments/application/runtime-lifecycle-service';
 import { createEnvironmentEntityRoutes } from '../../../src/modules/environments/http/environment-entity-routes';
 import {
   type CreateEnvironmentRecord,
@@ -41,7 +48,10 @@ afterEach(async () => {
   setRealtimeBusForTests(undefined);
 });
 
-function createTestApp(connectors: RuntimeConnectionManagerOptions['connectors'] = {}) {
+function createTestApp(
+  connectors: RuntimeConnectionManagerOptions['connectors'] = {},
+  lifecycle?: RuntimeLifecycleService
+) {
   const repository = createEnvironmentRepository(getDb());
   const manager = new RuntimeConnectionManager({
     resolveEnvironment: async (userId, environmentId) => {
@@ -53,7 +63,17 @@ function createTestApp(connectors: RuntimeConnectionManagerOptions['connectors']
   const service = createEnvironmentService(repository, manager);
   const { app, restore } = createAuthenticatedApiTestApp(
     TEST_USER,
-    createEnvironmentEntityRoutes(service)
+    createEnvironmentEntityRoutes(
+      service,
+      undefined,
+      lifecycle ??
+        createRuntimeLifecycleService({
+          manager,
+          provisioner: {
+            ensure: async () => undefined,
+          },
+        })
+    )
   );
   restoreAuth = restore;
   return { app, repository, manager };
@@ -427,5 +447,92 @@ describe('environment entity routes', () => {
     await app.handle(new Request('http://localhost/environments/event-box', jsonRequest('DELETE')));
 
     expect(events).toEqual(['environments', 'environments', 'environments']);
+  });
+
+  it('returns a runtime lifecycle view for Local and WSL', async () => {
+    const { app, repository } = createTestApp();
+    await repository.create({
+      id: 'wsl-box',
+      userId: TEST_USER.id,
+      name: 'WSL box',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+
+    const local = await app.handle(new Request('http://localhost/environments/local/runtime'));
+    expect(local.status).toBe(200);
+    const localView = (await local.json()) as RuntimeLifecycleView;
+    expect(Value.Check(RuntimeLifecycleViewSchema, localView)).toBe(true);
+    expect(localView.actions).toEqual([]);
+
+    const wsl = await app.handle(new Request('http://localhost/environments/wsl-box/runtime'));
+    expect(wsl.status).toBe(200);
+    const wslView = (await wsl.json()) as RuntimeLifecycleView;
+    expect(Value.Check(RuntimeLifecycleViewSchema, wslView)).toBe(true);
+    expect(wslView.actions).toEqual(['install', 'reinstall', 'upgrade']);
+  });
+
+  it('starts a WSL runtime install and streams SSE exit', async () => {
+    let ensured = false;
+    const { app, repository } = createTestApp(
+      {},
+      createRuntimeLifecycleService({
+        provisioner: {
+          ensure: async () => {
+            ensured = true;
+            await Promise.resolve();
+          },
+        },
+      })
+    );
+    await repository.create({
+      id: 'wsl-install',
+      userId: TEST_USER.id,
+      name: 'WSL install',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+
+    const started = await app.handle(
+      new Request('http://localhost/environments/wsl-install/runtime/install', jsonRequest('POST'))
+    );
+    expect(started.status).toBe(200);
+    const { runId } = (await started.json()) as { runId: string };
+    expect(runId.length).toBeGreaterThan(0);
+
+    const log = await app.handle(
+      new Request(`http://localhost/environments/wsl-install/runtime/runs/${runId}/log`)
+    );
+    expect(log.status).toBe(200);
+    expect(log.headers.get('Content-Type')).toContain('text/event-stream');
+
+    const body = await log.text();
+    expect(body).toContain('"type":"exit"');
+    expect(body).toContain('"status":"succeeded"');
+    expect(ensured).toBe(true);
+  });
+
+  it('refuses card install for Local and stdio', async () => {
+    const { app, repository } = createTestApp();
+    await repository.create({
+      id: 'stdio-box',
+      userId: TEST_USER.id,
+      name: 'Stdio',
+      transportKind: 'stdio',
+      config: {},
+      enabled: true,
+    });
+
+    const local = await app.handle(
+      new Request('http://localhost/environments/local/runtime/install', jsonRequest('POST'))
+    );
+    expect(local.status).toBe(409);
+
+    const stdio = await app.handle(
+      new Request('http://localhost/environments/stdio-box/runtime/install', jsonRequest('POST'))
+    );
+    expect(stdio.status).toBe(409);
   });
 });

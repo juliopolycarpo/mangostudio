@@ -14,6 +14,7 @@ import {
   LOCAL_ENVIRONMENT_NAME,
   SshFailureReasonSchema,
 } from '@mangostudio/shared/environments';
+import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 import { Value } from '@sinclair/typebox/value';
 import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
@@ -33,6 +34,12 @@ import { connectSshRuntime } from './connect-ssh-runtime';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
 import { spawnRuntimeChild } from './spawn-runtime-child';
+
+/** Last `runtime.health` retained across disconnect the way the manifest is. */
+export interface CachedRuntimeHealth {
+  readonly health: RuntimeHealthReport;
+  readonly readAtMs: number;
+}
 
 export interface RuntimeEnvironmentDefinition {
   readonly id: string;
@@ -87,6 +94,13 @@ interface RuntimeConnectionEntry {
   manifestReadAtMs?: number;
   /** In-flight background refresh, so reads coalesce onto one round-trip. */
   manifestRefresh?: Promise<void>;
+  /**
+   * Full `runtime.health` last read from the peer. Kept across disconnect so a
+   * card can still show version/digest/slot after the socket drops.
+   */
+  health?: RuntimeHealthReport;
+  /** Epoch ms {@link health} was last read. */
+  healthReadAtMs?: number;
   /**
    * Epoch ms before which a lazy connect fails fast instead of respawning.
    * `Infinity` latches the environment until someone connects it explicitly.
@@ -232,6 +246,16 @@ export class RuntimeConnectionManager {
         state: 'disconnected',
       }
     );
+  }
+
+  /**
+   * Last full `runtime.health` for this environment, including after disconnect.
+   * Absent until {@link refreshManifest} (or an explicit health read) has run.
+   */
+  getCachedHealth(userId: string, environmentId: string): CachedRuntimeHealth | null {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (!entry?.health || entry.healthReadAtMs === undefined) return null;
+    return { health: entry.health, readAtMs: entry.healthReadAtMs };
   }
 
   async getClient(
@@ -543,6 +567,8 @@ export class RuntimeConnectionManager {
     ) {
       return this.getStatus(userId, environmentId);
     }
+    entry.health = health;
+    entry.healthReadAtMs = entry.manifestReadAtMs;
     const manifest = capabilityManifestFromHealth(health);
     client.replaceManifest(manifest);
     const changed = !Value.Equal(entry.status.manifest, manifest);

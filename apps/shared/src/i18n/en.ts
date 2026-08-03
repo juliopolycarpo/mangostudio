@@ -2153,6 +2153,29 @@ export const messages: Messages = {
         allowShellHonesty:
           'allow.shell grants everything a shell can reach — the capability list below it describes intent, not a sandbox.',
       },
+      runtime: {
+        title: 'Runtime',
+        loading: 'Loading runtime status…',
+        loadFailed: 'Could not load runtime status.',
+        actionFailed: 'The runtime action failed.',
+        stale: 'Stale',
+        noHealth: 'No runtime health yet. Connect or install to see version and digest.',
+        version: 'v{version}',
+        slot: 'slot {slot}',
+        digest: '{digest}…',
+        actions: {
+          install: 'Install runtime',
+          reinstall: 'Reinstall',
+          upgrade: 'Upgrade',
+          setup: 'Set up consent',
+          remove: 'Remove runtime',
+        },
+        manual: {
+          install: 'Install on that machine',
+          setup: 'Record consent',
+          serviceInstall: 'Keep it running',
+        },
+      },
       pairing: {
         title: 'Pairing',
         description: 'The runtime on that machine dials MangoStudio with this credential.',

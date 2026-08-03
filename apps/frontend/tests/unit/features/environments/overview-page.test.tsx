@@ -227,6 +227,15 @@ describe('OverviewPage', () => {
     scenario
       .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
       .respondWithJson('GET', '/api/environments', { body: [readonlyLocal, ENVIRONMENTS[1]] })
+      .respondWithJson('GET', '/api/environments/local/runtime', {
+        body: {
+          health: null,
+          readAt: null,
+          stale: false,
+          slotBytes: null,
+          actions: [],
+        },
+      })
       .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
       .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })

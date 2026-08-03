@@ -11,6 +11,8 @@ import type {
   CreateEnvironmentBody,
   Environment,
   InstallRecipePreview,
+  RuntimeLifecycleStartResponse,
+  RuntimeLifecycleView,
   RuntimePairingIssue,
   RuntimePairingStatus,
   RuntimeStatusList,
@@ -41,6 +43,7 @@ const STALE_TIME_MS = 30_000;
 export const environmentKeys = {
   all: ['environments'] as const,
   entities: () => [...environmentKeys.all, 'entities'] as const,
+  runtimeLifecycle: (id: string) => [...environmentKeys.all, 'runtime-lifecycle', id] as const,
   runtimes: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...environmentKeys.all, 'runtimes', environmentId] as const,
   versionManagers: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
@@ -226,6 +229,35 @@ export function useRevokeRuntimePairingMutation(id: string) {
     // status is stale too, not just the pairing panel's.
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: environmentKeys.pairing(id) });
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+    },
+  });
+}
+
+export function useRuntimeLifecycleQuery(id: string, enabled = true) {
+  return useQuery({
+    queryKey: environmentKeys.runtimeLifecycle(id),
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: enabled ? 15_000 : false,
+    queryFn: async () => {
+      const { data, error } = await client.api.environments({ id }).runtime.get();
+      if (error) throw new ApiError(error.value);
+      return data as RuntimeLifecycleView;
+    },
+  });
+}
+
+export function useStartRuntimeInstallMutation(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const { data, error } = await client.api.environments({ id }).runtime.install.post();
+      if (error) throw new ApiError(error.value);
+      return data as RuntimeLifecycleStartResponse;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.runtimeLifecycle(id) });
       await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
     },
   });

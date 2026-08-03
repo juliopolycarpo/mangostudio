@@ -2172,6 +2172,29 @@ export const messages = {
         allowShellHonesty:
           'allow.shell concede tudo o que um shell alcança — a lista de capacidades abaixo descreve a intenção, não um sandbox.',
       },
+      runtime: {
+        title: 'Runtime',
+        loading: 'Carregando status do runtime…',
+        loadFailed: 'Não foi possível carregar o status do runtime.',
+        actionFailed: 'A ação do runtime falhou.',
+        stale: 'Desatualizado',
+        noHealth: 'Sem health do runtime ainda. Conecte ou instale para ver versão e digest.',
+        version: 'v{version}',
+        slot: 'slot {slot}',
+        digest: '{digest}…',
+        actions: {
+          install: 'Instalar runtime',
+          reinstall: 'Reinstalar',
+          upgrade: 'Atualizar',
+          setup: 'Configurar consentimento',
+          remove: 'Remover runtime',
+        },
+        manual: {
+          install: 'Instalar naquela máquina',
+          setup: 'Registrar consentimento',
+          serviceInstall: 'Manter em execução',
+        },
+      },
       pairing: {
         title: 'Pareamento',
         description: 'O runtime naquela máquina disca para o MangoStudio com esta credencial.',

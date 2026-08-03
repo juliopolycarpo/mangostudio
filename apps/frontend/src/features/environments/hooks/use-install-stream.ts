@@ -54,6 +54,11 @@ type ConsumeOutcome = 'exited' | 'failed' | 'dropped';
 
 export interface UseInstallStreamOptions {
   readonly runId: string | null;
+  /**
+   * Absolute path under the API base for the SSE log. Defaults to the
+   * environments install run stream. Runtime lifecycle passes its own path.
+   */
+  readonly streamPath?: string | null;
   readonly maxLines?: number;
   readonly onProbe?: (event: InstallProbeEvent) => void;
   readonly onExit?: (event: InstallExitEvent) => void;
@@ -78,6 +83,7 @@ function parseEvent(payload: string): InstallStreamEvent | null {
 
 export function useInstallStream({
   runId,
+  streamPath,
   maxLines = INSTALL_CONSOLE_MAX_LINES,
   onProbe,
   onExit,
@@ -101,13 +107,14 @@ export function useInstallStream({
     // Held so cleanup can tear the body down itself rather than trusting the
     // fetch abort to propagate before the component is gone.
     let activeReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    const path = streamPath ?? `/api/environments/install/${encodeURIComponent(runId)}/log`;
 
     /** One connection attempt; see `ConsumeOutcome` for what may be retried. */
     const consume = async (): Promise<ConsumeOutcome> => {
-      const response = await fetch(
-        `${getApiBaseUrl()}/api/environments/install/${encodeURIComponent(runId)}/log`,
-        { credentials: 'include', signal: controller.signal }
-      );
+      const response = await fetch(`${getApiBaseUrl()}${path}`, {
+        credentials: 'include',
+        signal: controller.signal,
+      });
       if (!response.ok || !response.body) {
         throw new Error(`Install log stream responded ${response.status}`);
       }
@@ -235,7 +242,7 @@ export function useInstallStream({
       void activeReader?.cancel().catch(() => undefined);
       controller.abort();
     };
-  }, [runId, maxLines]);
+  }, [runId, streamPath, maxLines]);
 
   return state;
 }

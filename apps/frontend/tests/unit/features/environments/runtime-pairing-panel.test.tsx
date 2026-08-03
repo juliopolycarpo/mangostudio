@@ -55,6 +55,19 @@ beforeEach(() => {
     .respondWithJson('GET', '/api/environments/wsl', {
       body: { available: false, distributions: [], reason: 'not-windows' },
     })
+    .respondWithJson('GET', '/api/environments/workshop/runtime', {
+      body: {
+        health: null,
+        readAt: null,
+        stale: true,
+        slotBytes: null,
+        actions: [],
+        manualCommands: {
+          install: 'curl …',
+          setup: 'mangostudio-runtime setup --slot remote --profile full --yes',
+        },
+      },
+    })
     .respondWithJson('GET', '/api/environments/workshop/pairing', {
       body: { endpoint: ENDPOINT, token: null },
     })

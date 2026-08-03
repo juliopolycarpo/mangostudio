@@ -10,6 +10,7 @@ import {
   useDisconnectEnvironmentMutation,
   useEnvironmentEntitiesQuery,
   useRemoveEnvironmentMutation,
+  useRuntimeLifecycleQuery,
   useUpdateEnvironmentMutation,
 } from '../queries';
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
@@ -17,6 +18,7 @@ import { CopyLine } from './CopyLine';
 import { DirectUrlPanel } from './DirectUrlPanel';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { InstallTrustToggle } from './InstallTrustToggle';
+import { RuntimeLifecyclePanel } from './RuntimeLifecyclePanel';
 import { RuntimePairingPanel } from './RuntimePairingPanel';
 import { SshPanel } from './SshPanel';
 
@@ -190,6 +192,8 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
 
         <PermissionsRow environment={environment} />
 
+        <RuntimeLifecyclePanel environment={environment} />
+
         {environment.transportKind === 'websocket' ? (
           <RuntimePairingPanel environmentId={environment.id} />
         ) : null}
@@ -347,6 +351,7 @@ function PermissionsRow({ environment }: { environment: Environment }) {
   const { t } = useI18n();
   const labels = t.environments.entities.permissions;
   const manifest = environment.status.manifest;
+  const lifecycle = useRuntimeLifecycleQuery(environment.id, Boolean(manifest));
   if (!manifest) return null;
 
   const denied = FEATURE_KEYS.filter((key) => isRefused(manifest, key));
@@ -355,6 +360,7 @@ function PermissionsRow({ environment }: { environment: Environment }) {
   if (!narrowed) return null;
 
   const setupCommand = `mangostudio-runtime setup --slot ${setupSlotFor(environment)}`;
+  const stale = lifecycle.data?.stale === true;
 
   return (
     <div
@@ -368,6 +374,11 @@ function PermissionsRow({ environment }: { environment: Environment }) {
         {profile ? (
           <span className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
             {labels.profile[profile]}
+          </span>
+        ) : null}
+        {stale ? (
+          <span className="rounded-md bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
+            {t.environments.entities.runtime.stale}
           </span>
         ) : null}
       </div>

@@ -2,10 +2,12 @@ import { type Static, Type } from '@sinclair/typebox';
 import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
 import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
 import { ProfileIdSchema } from '../profiles';
+import { RuntimeHealthReportSchema } from '../runtime-home/schemas';
 import {
   RuntimeCapabilityManifestSchema,
   RuntimeErrorCodeSchema,
 } from '../runtime-protocol/schemas';
+import { ReadonlyArraySchema } from '../schema-helpers';
 
 export const LOCAL_ENVIRONMENT_ID = 'local' as const;
 
@@ -752,3 +754,48 @@ export type InstallLogEvent = Static<typeof InstallLogEventSchema>;
 export type InstallProbeEvent = Static<typeof InstallProbeEventSchema>;
 export type InstallExitEvent = Static<typeof InstallExitEventSchema>;
 export type InstallStreamEvent = Static<typeof InstallStreamEventSchema>;
+
+/**
+ * Hub-driven runtime lifecycle actions on an environment card. The hub
+ * computes which ones apply per transport so the browser never renders a
+ * button it cannot honour.
+ */
+export const RuntimeLifecycleActionSchema = Type.Union([
+  Type.Literal('install'),
+  Type.Literal('reinstall'),
+  Type.Literal('upgrade'),
+  Type.Literal('setup'),
+  Type.Literal('remove'),
+]);
+export type RuntimeLifecycleAction = Static<typeof RuntimeLifecycleActionSchema>;
+
+export const RuntimeManualCommandsSchema = Type.Object(
+  {
+    install: Type.Optional(Type.String({ maxLength: 4_096 })),
+    setup: Type.Optional(Type.String({ maxLength: 4_096 })),
+    serviceInstall: Type.Optional(Type.String({ maxLength: 4_096 })),
+  },
+  { additionalProperties: Type.Never() }
+);
+export type RuntimeManualCommands = Static<typeof RuntimeManualCommandsSchema>;
+
+/**
+ * What the environment card needs to render runtime install/upgrade/setup/
+ * removal without re-deriving transport rules or inventing a second health
+ * payload. `health` is the last `runtime.health` the hub saw; a disconnected
+ * card keeps it with `stale: true` rather than blanking.
+ */
+export const RuntimeLifecycleViewSchema = Type.Object({
+  health: Type.Union([RuntimeHealthReportSchema, Type.Null()]),
+  readAt: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+  stale: Type.Boolean(),
+  slotBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  actions: ReadonlyArraySchema(RuntimeLifecycleActionSchema),
+  manualCommands: Type.Optional(RuntimeManualCommandsSchema),
+});
+export type RuntimeLifecycleView = Static<typeof RuntimeLifecycleViewSchema>;
+
+export const RuntimeLifecycleStartResponseSchema = Type.Object({
+  runId: Type.String({ minLength: 1 }),
+});
+export type RuntimeLifecycleStartResponse = Static<typeof RuntimeLifecycleStartResponseSchema>;
