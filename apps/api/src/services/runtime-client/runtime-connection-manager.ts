@@ -26,6 +26,7 @@ import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-pr
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { connectHttpRuntime } from './connect-http-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
+import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
 import { spawnRuntimeChild } from './spawn-runtime-child';
 
@@ -489,6 +490,36 @@ export class RuntimeConnectionManager {
       ...this.#cachedPeer(entry),
     };
     this.#publish(userId);
+  }
+
+  /**
+   * Re-reads `runtime.health` on a live connection, replaces the cached
+   * handshake manifest, and publishes so environment cards refresh. Consent
+   * changes mid-connection are invisible to the cosmetic filter until this
+   * runs; the runtime still refuses correctly in the meantime.
+   */
+  async refreshManifest(
+    userId: string,
+    environmentId: string
+  ): Promise<EnvironmentConnectionStatus> {
+    const key = connectionKey(userId, environmentId);
+    const entry = this.#entries.get(key);
+    const client = entry?.connection?.client;
+    if (!client || entry?.status.state !== 'connected') {
+      return this.getStatus(userId, environmentId);
+    }
+
+    const health = await client.health();
+    const manifest = capabilityManifestFromHealth(health);
+    client.replaceManifest(manifest);
+    entry.status = {
+      ...entry.status,
+      state: 'connected',
+      manifest,
+      ...peerRelease(client.runtimeVersion),
+    };
+    this.#publish(userId);
+    return entry.status;
   }
 
   /**

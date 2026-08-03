@@ -31,6 +31,7 @@ import type {
   McpToolDescriptor,
   McpTransport,
 } from '@mangostudio/shared/mcp';
+import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
 import type {
   ListDirectoryResponse,
@@ -944,6 +945,10 @@ export interface RuntimeMethodMap {
   'library.undo': {
     readonly params: RuntimeLibraryUndoParams;
     readonly result: RuntimeLibraryUndoResult;
+  };
+  'runtime.health': {
+    readonly params: Record<string, never>;
+    readonly result: RuntimeHealthReport;
   };
 }
 

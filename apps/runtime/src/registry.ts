@@ -1,4 +1,6 @@
+import type { RuntimeSlot } from '@mangostudio/shared/runtime-home';
 import { RuntimeToolArgumentError } from './errors';
+import { collectRuntimeHealth } from './health';
 import type { RuntimeEventInput, RuntimeHandlerContext, RuntimeMethodHandler } from './host';
 import type { RuntimeMethod, RuntimeMethodMap } from './methods';
 import { runtimeFsService } from './services/fs';
@@ -20,6 +22,11 @@ export interface RuntimeMethodRegistryOptions {
   readonly runtimeVersion: string;
   /** Publishes an `evt` frame; the MCP methods stream elicitations through it. */
   readonly emit: (event: RuntimeEventInput) => void;
+  /**
+   * Slot whose `runtime.json` this host answers for. Health reads it so a
+   * dialled-in peer reports the same consent the CLI's `health --json` would.
+   */
+  readonly slot?: RuntimeSlot;
 }
 
 export interface RuntimeMethodRegistry {
@@ -83,6 +90,12 @@ export function createRuntimeMethodHandlers(
       handler('library.apply', (params, context) => libraryService.apply(params, context.signal)),
       handler('library.remove', (params, context) => libraryService.remove(params, context.signal)),
       handler('library.undo', (params, context) => libraryService.undo(params, context.signal)),
+      handler('runtime.health', () =>
+        collectRuntimeHealth({
+          runtimeVersion: options.runtimeVersion,
+          ...(options.slot ? { slot: options.slot } : {}),
+        })
+      ),
     ]),
     close: async () => {
       install.close();

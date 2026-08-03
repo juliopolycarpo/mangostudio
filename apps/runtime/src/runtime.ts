@@ -34,14 +34,14 @@ export function createLocalRuntimeHost(options: {
   // emitter closes over the host rather than being handed it: events raised
   // before `attach` have nowhere to go anyway, and `emit` already drops them.
   let host: RuntimeHost | undefined;
-  const registry = createRuntimeMethodHandlers({
-    runtimeVersion: options.runtimeVersion,
-    emit: (event) => host?.emit(event),
-  });
-
   const consent =
     options.consent ??
     staticConsentSource(options.allow ?? RUNTIME_CONSENT_PRESETS.full, options.slot ?? 'host');
+  const registry = createRuntimeMethodHandlers({
+    runtimeVersion: options.runtimeVersion,
+    emit: (event) => host?.emit(event),
+    slot: consent.slot,
+  });
 
   host = new RuntimeHost({
     runtimeVersion: options.runtimeVersion,

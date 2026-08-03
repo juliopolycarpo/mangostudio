@@ -85,6 +85,15 @@ export class RuntimeProtocolClient {
     return this.#runtimeManifest;
   }
 
+  /**
+   * Replaces the handshake manifest after a consent change. Used when the hub
+   * re-reads `runtime.health` so the cosmetic filter and environment card see
+   * the new allow set without tearing down the connection.
+   */
+  replaceManifest(manifest: RuntimeCapabilityManifest): void {
+    this.#runtimeManifest = manifest;
+  }
+
   get runtimeVersion(): string {
     if (!this.#runtimeVersion) throw new Error('Runtime handshake has not completed.');
     return this.#runtimeVersion;

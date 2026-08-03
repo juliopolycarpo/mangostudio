@@ -88,6 +88,8 @@ export const RUNTIME_METHOD_CAPABILITIES: Readonly<
   'library.apply': ['library', 'fsWrite'],
   'library.remove': ['library', 'fsWrite'],
   'library.undo': ['library', 'fsWrite'],
+  // Intentionally empty: health must answer under every profile.
+  'runtime.health': [],
 };
 
 class RuntimeConsentDeniedError extends RuntimeServiceError {

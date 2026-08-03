@@ -390,6 +390,20 @@ export class RuntimeClient {
     return this.protocol.runtimeVersion;
   }
 
+  /** One health truth: same payload as `mangostudio-runtime health --json`. */
+  health(options?: RuntimeRequestOptions) {
+    return this.request('runtime.health', {}, options);
+  }
+
+  /**
+   * Replaces the handshake manifest after a consent change (see
+   * {@link RuntimeProtocolClient.replaceManifest}).
+   */
+  replaceManifest(manifest: RuntimeCapabilityManifest): void {
+    this.protocol.replaceManifest(manifest);
+    this.targetPaths = undefined;
+  }
+
   /**
    * Subscribes to the runtime's `evt` stream. Returns the unsubscribe; the
    * connection dropping clears every listener on its own, so a caller that
