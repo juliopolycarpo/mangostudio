@@ -17,6 +17,7 @@ import { basename, dirname, join } from 'node:path';
 import {
   type ResolvedRuntimeSlotConfig,
   RUNTIME_CONSENT_PRESETS,
+  type RuntimeCapabilityAllow,
   type RuntimeInstallSource,
   type RuntimeSlot,
   type RuntimeSlotConfig,
@@ -235,6 +236,11 @@ export interface RuntimeInvocationConsent {
   readonly granted: boolean;
   readonly recorded: boolean;
   readonly reason?: string;
+  /**
+   * What was granted, for the gate the host installs over its handlers. Empty
+   * on a refusal: nothing is served, so nothing is permitted.
+   */
+  readonly allow: RuntimeCapabilityAllow;
 }
 
 /**
@@ -264,11 +270,25 @@ export async function consentByInvocation(
 
   return await withSlotLock(slot, CONFIG_LOCK_FILE, env, async () => {
     const { config, stored, error } = await readRuntimeSlotState(slot, env);
-    if (error) return { granted: false, recorded: false, reason: error };
-    if (stored?.setup) {
-      return { granted: config.setup.state === 'configured', recorded: false };
+    if (error) {
+      return {
+        granted: false,
+        recorded: false,
+        reason: error,
+        allow: RUNTIME_CONSENT_PRESETS.none,
+      };
     }
-    if (config.setup.state === 'configured') return { granted: true, recorded: false };
+    if (stored?.setup) {
+      const granted = config.setup.state === 'configured';
+      return {
+        granted,
+        recorded: false,
+        allow: granted ? config.allow : RUNTIME_CONSENT_PRESETS.none,
+      };
+    }
+    if (config.setup.state === 'configured') {
+      return { granted: true, recorded: false, allow: config.allow };
+    }
 
     await mergeRuntimeSlotConfig(path, slot, {
       profile: 'full',
@@ -277,7 +297,7 @@ export async function consentByInvocation(
       source: resolveRuntimeSource(env),
       version: runtimeVersion,
     });
-    return { granted: true, recorded: true };
+    return { granted: true, recorded: true, allow: RUNTIME_CONSENT_PRESETS.full };
   });
 }
 

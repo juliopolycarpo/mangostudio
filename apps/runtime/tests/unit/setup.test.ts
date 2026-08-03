@@ -209,11 +209,11 @@ describe('runtime setup', () => {
   });
 
   it('answers for the slot it runs as and never for another', async () => {
-    const { stdioConsentRefusal } = await import('../../src/cli');
+    const { stdioConsent } = await import('../../src/cli');
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('remote', { setup: { state: 'pending' } }, env);
     const remoteBinary = join(env.MANGO_HOME as string, 'runtime', 'remote', 'current', 'x');
-    expect(await stdioConsentRefusal(env, [remoteBinary])).not.toBeNull();
+    expect((await stdioConsent(env, [remoteBinary])).refusal).not.toBeNull();
 
     await runRuntimeSetup(
       { profile: 'full', yes: true, json: false },
@@ -226,7 +226,7 @@ describe('runtime setup', () => {
 
     // The host slot is what this process resolves to, so the remote gate is
     // still closed: setup answers for the slot it runs as, never for another.
-    expect(await stdioConsentRefusal(env, [remoteBinary])).not.toBeNull();
+    expect((await stdioConsent(env, [remoteBinary])).refusal).not.toBeNull();
   });
 });
 

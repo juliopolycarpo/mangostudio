@@ -339,15 +339,15 @@ describe('slot and source resolution', () => {
 
 describe('stdio pending setup gate', () => {
   it('refuses a remote slot nobody has answered for', async () => {
-    const { stdioConsentRefusal } = await import('../../src/cli');
+    const { stdioConsent } = await import('../../src/cli');
     const env = await isolatedEnv();
 
     const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
-    expect(await stdioConsentRefusal(env, [remoteBinary])).not.toBeNull();
+    expect((await stdioConsent(env, [remoteBinary])).refusal).not.toBeNull();
   });
 
   it('serves a remote slot once setup has answered', async () => {
-    const { stdioConsentRefusal } = await import('../../src/cli');
+    const { stdioConsent } = await import('../../src/cli');
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig(
       'remote',
@@ -356,36 +356,42 @@ describe('stdio pending setup gate', () => {
     );
 
     const remoteBinary = join(runtimeSlotDir('remote', env), 'current', 'mangostudio-runtime');
-    expect(await stdioConsentRefusal(env, [remoteBinary])).toBeNull();
+    expect((await stdioConsent(env, [remoteBinary])).refusal).toBeNull();
   });
 
   it('does not gate a binary this machine installed for itself', async () => {
-    const { stdioConsentRefusal } = await import('../../src/cli');
+    const { stdioConsent } = await import('../../src/cli');
     const env = await isolatedEnv();
 
-    expect(await stdioConsentRefusal(env, ['/usr/local/bin/mangostudio-runtime'])).toBeNull();
+    expect((await stdioConsent(env, ['/usr/local/bin/mangostudio-runtime'])).refusal).toBeNull();
     expect(
-      await stdioConsentRefusal(env, [
-        join(runtimeSlotDir('wsl', env), 'current', 'mangostudio-runtime'),
-      ])
+      (
+        await stdioConsent(env, [
+          join(runtimeSlotDir('wsl', env), 'current', 'mangostudio-runtime'),
+        ])
+      ).refusal
     ).toBeNull();
   });
 
   it('refuses a host slot whose owner said no', async () => {
-    const { stdioConsentRefusal } = await import('../../src/cli');
+    const { stdioConsent } = await import('../../src/cli');
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('host', { setup: { state: 'pending' } }, env);
 
-    expect(await stdioConsentRefusal(env, ['/usr/local/bin/mangostudio-runtime'])).not.toBeNull();
+    expect(
+      (await stdioConsent(env, ['/usr/local/bin/mangostudio-runtime'])).refusal
+    ).not.toBeNull();
   });
 
   it('refuses a slot whose consent file cannot be read', async () => {
     // An unreadable answer is an unknown answer, and the file it replaced may
     // well have said no.
-    const { stdioConsentRefusal } = await import('../../src/cli');
+    const { stdioConsent } = await import('../../src/cli');
     const env = await isolatedEnv();
     await writeRawConfig('host', '{ truncated', env);
 
-    expect(await stdioConsentRefusal(env, ['/usr/local/bin/mangostudio-runtime'])).not.toBeNull();
+    expect(
+      (await stdioConsent(env, ['/usr/local/bin/mangostudio-runtime'])).refusal
+    ).not.toBeNull();
   });
 });

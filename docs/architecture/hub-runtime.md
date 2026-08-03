@@ -171,19 +171,50 @@ A runtime whose slot is pending refuses before serving anything and exits non-ze
 stable phrase (`RUNTIME_SETUP_PENDING_SIGNATURE`) that the ssh failure classifier keys on,
 so "not set up yet" is never reported as "no binary there".
 
+### Enforcement
+
+The gate above decides whether a runtime serves at all. `allow` decides what it serves,
+and it is enforced at dispatch: every protocol method names the capabilities it needs
+(`apps/runtime/src/consent-gate.ts`), and a host built from a narrowed `allow` answers the
+ones it lacks with a refusal instead of running them. The table is keyed by `RuntimeMethod`,
+so a new method with no capability decided for it is a type error.
+
+A denied method stays registered and refuses, rather than disappearing from the map. An
+absent method comes back as `METHOD_UNSUPPORTED`, which is also what an older runtime says
+about a method it has never heard of — a hub cannot tell those apart, and only one of them
+has a fix. The refusal instead carries `details.kind = "consent_denied"`, the capability
+that was missing, and the `setup` command that grants it. It goes in `details` because
+`RuntimeErrorCodeSchema` is a closed union that an older peer rejects outright, so a new
+top-level code would break the mixed-version pairing the compat window exists to protect.
+
+Some methods need two capabilities. `library.apply` is a library operation *and* a write to
+somebody's files; `readonly` grants the first and refuses the second, so listing only
+`library` would have let the profile whose whole promise is "no writes" write files.
+
+Local (in-process) is not exempt: it reads the `host` slot like any other runtime, so
+narrowing that slot gives a read-only Local.
+
 ### CLI
 
 ```text
-mangostudio-runtime setup  [--profile full|readonly|none] [--allow k=v,…] [--yes] [--json]
+mangostudio-runtime setup  [--profile full|readonly|none] [--allow k=v,…]
+                           [--slot host|wsl|remote] [--yes] [--json]
 mangostudio-runtime health [--json]
 mangostudio-runtime doctor [--json]
 ```
 
 `setup` asks when it can and takes flags when it cannot; `MANGOSTUDIO_RUNTIME_SETUP` is
 the same answer from the environment, which is how a container image supplies one at build
-time. `--yes` with nothing to say yes to is an error rather than a silent default. The
+time. Flags outrank the environment, so an unusable `MANGOSTUDIO_RUNTIME_SETUP` is only
+fatal when nothing overrode it — otherwise the command that repairs it could not run.
+`--yes` with nothing to say yes to is an error rather than a silent default. The
 non-interactive shape is what makes running `setup` over an ssh channel possible without
 the hub reaching around the CLI.
+
+`--slot` says which slot the answer is for. Without it, setup answers for the slot the
+binary sits in, which is right for an installed runtime and wrong for a downloaded one:
+`connect` and `serve` write `remote` wherever they run from, so those two — and every fix
+`doctor` prints — name the slot in the command they recommend.
 
 `health --json` is one payload — slot, source, version, binary, digest, profile, `allow`,
 shells, git, and any error reading the home — for a terminal on the machine and, from 019,

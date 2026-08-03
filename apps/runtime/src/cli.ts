@@ -10,7 +10,12 @@
 
 import { Console } from 'node:console';
 import { createInterface } from 'node:readline/promises';
-import { isRuntimeSlot } from '@mangostudio/shared/runtime-home';
+import {
+  isRuntimeSlot,
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeCapabilityAllow,
+  type RuntimeSlot,
+} from '@mangostudio/shared/runtime-home';
 import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
 import {
@@ -378,7 +383,8 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     const outcome = await connectToHub({
       hubUrl,
       token,
-      createHost: () => createLocalRuntimeHost({ runtimeVersion }),
+      createHost: () =>
+        createLocalRuntimeHost({ runtimeVersion, allow: consent.allow, slot: PAIRED_SLOT }),
       log,
       signal: controller.signal,
     });
@@ -448,7 +454,8 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
     const handle = serveRuntime({
       listen,
       token: resolved.token,
-      createHost: () => createLocalRuntimeHost({ runtimeVersion }),
+      createHost: () =>
+        createLocalRuntimeHost({ runtimeVersion, allow: consent.allow, slot: PAIRED_SLOT }),
       log,
       signal: controller.signal,
     });
@@ -503,13 +510,17 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
   // SSH (and any other hub launch) speaks stdio, not serve. The consent gate has
   // to live here too or a pending slot still starts a fully functional host and
   // the hub's setup-pending classifier never sees its signature.
-  const refusal = await stdioConsentRefusal();
-  if (refusal) {
-    process.stderr.write(`mangostudio-runtime: ${refusal}\n`);
+  const consent = await stdioConsent();
+  if (consent.refusal) {
+    process.stderr.write(`mangostudio-runtime: ${consent.refusal}\n`);
     return 1;
   }
 
-  const host = createLocalRuntimeHost({ runtimeVersion });
+  const host = createLocalRuntimeHost({
+    runtimeVersion,
+    allow: consent.allow,
+    slot: consent.slot,
+  });
   let stop: (closure: StdioFramePortClosure) => void = () => undefined;
   const finished = new Promise<StdioFramePortClosure>((resolve) => {
     stop = resolve;
@@ -538,6 +549,16 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
   return 0;
 }
 
+/** What a launched runtime may do here, and why it may not when it may not. */
+export interface StdioConsent {
+  readonly slot: RuntimeSlot;
+  /** The sentence to print and exit on, or null when the launch may serve. */
+  readonly refusal: string | null;
+  readonly allow: RuntimeCapabilityAllow;
+}
+
+const DENY_EVERYTHING = RUNTIME_CONSENT_PRESETS.none;
+
 /**
  * Why a hub-launched runtime must not serve, or null when it may.
  *
@@ -556,14 +577,19 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
  * A custom `remoteRuntimePath` outside the slot tree reads as `host` and is not
  * gated; giving a launch its slot is what closes that, and it is a follow-up.
  */
-export async function stdioConsentRefusal(
+export async function stdioConsent(
   env: NodeJS.ProcessEnv = process.env,
   executablePaths: readonly string[] = [process.execPath, process.argv[1] ?? '']
-): Promise<string | null> {
+): Promise<StdioConsent> {
   const slot = resolveRuntimeSlot(env, executablePaths);
   const { config, error } = await readRuntimeSlotState(slot, env);
-  if (error) return `${error} ${RUNTIME_SETUP_PENDING_MESSAGE}`;
-  return config.setup.state === 'pending' ? RUNTIME_SETUP_PENDING_MESSAGE : null;
+  if (error) {
+    return { slot, refusal: `${error} ${RUNTIME_SETUP_PENDING_MESSAGE}`, allow: DENY_EVERYTHING };
+  }
+  if (config.setup.state === 'pending') {
+    return { slot, refusal: RUNTIME_SETUP_PENDING_MESSAGE, allow: DENY_EVERYTHING };
+  }
+  return { slot, refusal: null, allow: config.allow };
 }
 
 async function runSetup(args: RuntimeSetupArgs, runtimeVersion: string): Promise<number> {

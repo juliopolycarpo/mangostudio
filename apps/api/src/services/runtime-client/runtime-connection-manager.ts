@@ -11,6 +11,7 @@ import type {
 import { LOCAL_ENVIRONMENT_ID, SshFailureReasonSchema } from '@mangostudio/shared/environments';
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 import { Value } from '@sinclair/typebox/value';
+import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
 import { getVersion } from '../../lib/config';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
@@ -532,7 +533,17 @@ async function connectLocalRuntime(
   onUnavailable: () => void
 ): Promise<ManagedRuntimeConnection> {
   const version = getVersion();
-  const host = createLocalRuntimeHost({ runtimeVersion: version });
+  // Local runs in this process, but it is still a runtime on somebody's
+  // machine: it answers to the `host` slot's consent like every other one. A
+  // user who narrows that slot gets a read-only Local, which is the point of
+  // being able to narrow it. Absence resolves to full, so the default is
+  // unchanged and no install has to have run.
+  const [probe] = (await probeRuntimeSlots()).filter((slot) => slot.slot === 'host');
+  const host = createLocalRuntimeHost({
+    runtimeVersion: version,
+    slot: 'host',
+    ...(probe && !probe.error ? { allow: probe.config.allow } : {}),
+  });
   const connection: InProcessRuntimeConnection = await connectInProcessRuntime(host, {
     hubVersion: version,
   });

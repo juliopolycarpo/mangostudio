@@ -1,6 +1,8 @@
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 
 export type RuntimeServiceErrorKind =
+  /** The machine's owner did not grant a capability the method needs. */
+  | 'consent_denied'
   | 'path_access'
   | 'tool_argument'
   | 'grep_pattern'
