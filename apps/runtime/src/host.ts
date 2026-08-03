@@ -22,9 +22,11 @@ export type RuntimeMethodHandler = (
 export interface RuntimeHostOptions {
   readonly runtimeVersion: string;
   /**
-   * Capability announcement for `hello`. May be a factory so the host can
-   * re-read consent at `start()` — between construction and connect a setup
-   * may have narrowed the slot.
+   * Capability announcement for `hello`. A factory is evaluated at `start()`
+   * rather than at construction, so a host built before its consent source was
+   * last read announces the newer snapshot. It is a snapshot either way: the
+   * factory is synchronous and cannot touch disk, so consent that changes after
+   * `hello` is caught by the dispatch gate and by `runtime.health`, not here.
    */
   readonly manifest: RuntimeCapabilityManifest | (() => RuntimeCapabilityManifest);
   readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
