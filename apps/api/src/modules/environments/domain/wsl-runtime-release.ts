@@ -19,6 +19,7 @@ import {
   mangoHomeDir,
   RUNTIME_BINARY_BASENAME,
   RUNTIME_CONFIG_FILE_NAME,
+  RUNTIME_CONFIG_LOCK_FILE_NAME,
   RUNTIME_CURRENT_LINK_NAME,
   type RuntimeSlotConfig,
   RuntimeSlotConfigSchema,
@@ -77,6 +78,7 @@ const CURRENT_LINK = distroPath(RUNTIME_CURRENT_LINK_NAME);
 const CURRENT_BINARY = distroPath(RUNTIME_CURRENT_LINK_NAME, RUNTIME_ARCHIVE_MEMBER);
 const CONFIG_PATH = distroPath(RUNTIME_CONFIG_FILE_NAME);
 const STAGED_CONFIG_PATH = distroPath(`${RUNTIME_CONFIG_FILE_NAME}.incoming`);
+const CONFIG_LOCK_PATH = distroPath(RUNTIME_CONFIG_LOCK_FILE_NAME);
 
 /**
  * Stages whatever `stage` writes from stdin, then publishes it with a rename
@@ -244,16 +246,38 @@ export function distroRuntimeConfigAfterInstall(params: {
   };
 }
 
+/** Exit status when the slot lock could not be taken. `EX_TEMPFAIL`. */
+export const CONFIG_LOCK_BUSY_EXIT = 75;
+
 /**
- * Replaces the distribution's `runtime.json` with whatever arrives on stdin.
+ * Replaces the distribution's `runtime.json` with whatever arrives on stdin,
+ * holding the same lock the runtime's own writers take.
  *
  * The document is JSON the hub built and serialized, piped in rather than
  * interpolated: a version string, a digest, and a host name have no business
  * being parsed by a shell.
+ *
+ * The lock is the point. This is the one writer of that file that is not the
+ * runtime, and the document it writes carries consent forward from a read the
+ * hub did earlier. A `setup` inside the distribution that lands between them
+ * completes under the runtime's lock and would then be overwritten by an answer
+ * taken before it ran. `set -C` is how POSIX sh spells an exclusive create, and
+ * the owner written into the lock is the same shape the runtime writes, so
+ * whichever side finds a lock left by a killed process can reclaim it.
+ *
+ * `trap … EXIT` releases it on every path out, including the ones that fail.
  */
 export const WRITE_CONFIG_SCRIPT =
   'set -e; ' +
   `mkdir -p ${distroPath()}; ` +
+  'attempt=0; ' +
+  `until (set -C; : > ${CONFIG_LOCK_PATH}) 2>/dev/null; do ` +
+  'attempt=$((attempt+1)); ' +
+  `if [ "$attempt" -ge 10 ]; then exit ${CONFIG_LOCK_BUSY_EXIT}; fi; ` +
+  'sleep 1; ' +
+  'done; ' +
+  `trap 'rm -f ${CONFIG_LOCK_PATH}' EXIT INT TERM HUP; ` +
+  `printf '{"pid":%s,"host":"%s"}' "$$" "$(uname -n)" > ${CONFIG_LOCK_PATH}; ` +
   `cat > ${STAGED_CONFIG_PATH}; ` +
   `mv -f ${STAGED_CONFIG_PATH} ${CONFIG_PATH}`;
 

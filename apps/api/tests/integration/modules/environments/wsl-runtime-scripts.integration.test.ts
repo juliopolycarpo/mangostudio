@@ -17,6 +17,7 @@ import { mkdir, mkdtemp, readlink, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  CONFIG_LOCK_BUSY_EXIT,
   INSTALL_ARCHIVE_SCRIPT,
   INSTALL_BINARY_SCRIPT,
   PROBE_SLOT_SCRIPT,
@@ -186,6 +187,39 @@ describe.skipIf(!hasPosixShell)('WSL config scripts against a real shell', () =>
     expect(probe.config).toBeNull();
     expect(probe.unreadable).toBe(false);
   });
+
+  it('takes the runtime lock, and leaves it released', async () => {
+    const home = await distroHome();
+    const run = await runScript(home, WRITE_CONFIG_SCRIPT, {
+      stdin: new TextEncoder().encode('{"schemaVersion":1,"slot":"wsl"}\n'),
+    });
+
+    expect(run.exitCode).toBe(0);
+    // Released on the way out, or the next write — and every `setup` inside the
+    // distribution — waits out a lock nobody holds.
+    expect(await Bun.file(slotPath(home, 'runtime.lock')).exists()).toBe(false);
+  });
+
+  it('refuses rather than overwriting a config somebody else is writing', async () => {
+    const home = await distroHome();
+    await Bun.write(
+      slotPath(home, 'runtime.json'),
+      '{"schemaVersion":1,"slot":"wsl","profile":"readonly"}'
+    );
+    // What a `setup` narrowing this distribution holds while it works. The hub's
+    // document was built from a read taken before that, so writing through the
+    // lock here would replace the narrower answer with the older one.
+    await Bun.write(slotPath(home, 'runtime.lock'), JSON.stringify({ pid: 1, host: 'elsewhere' }));
+
+    const run = await runScript(home, WRITE_CONFIG_SCRIPT, {
+      stdin: new TextEncoder().encode('{"schemaVersion":1,"slot":"wsl","profile":"full"}\n'),
+    });
+
+    expect(run.exitCode).toBe(CONFIG_LOCK_BUSY_EXIT);
+    expect(await Bun.file(slotPath(home, 'runtime.json')).text()).toContain('readonly');
+    // The other writer's lock is still theirs.
+    expect(await Bun.file(slotPath(home, 'runtime.lock')).exists()).toBe(true);
+  }, 20_000);
 
   it('tells a config it cannot read apart from one that is not there', async () => {
     const home = await distroHome();

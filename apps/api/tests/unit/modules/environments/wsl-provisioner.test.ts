@@ -87,14 +87,16 @@ function harness(
       });
       const override = options.respond?.(script);
       if (override) return Promise.resolve(override);
-      if (script.includes('printf')) {
-        return Promise.resolve(ok(`${DISTRO_HOME}\n${config ? JSON.stringify(config) : ''}`));
-      }
-      if (script.includes('uname -m')) return Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'));
+      // Before the `printf` arm: the config write prints a lock owner too, so
+      // the looser pattern would swallow it and record nothing.
       if (script.includes('runtime.json.incoming')) {
         config = JSON.parse(new TextDecoder().decode(runOptions?.stdin)) as RuntimeSlotConfig;
         return Promise.resolve(ok());
       }
+      if (script.startsWith('printf')) {
+        return Promise.resolve(ok(`${DISTRO_HOME}\n${config ? JSON.stringify(config) : ''}`));
+      }
+      if (script.includes('uname -m')) return Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'));
       if (script.includes('setup --profile')) {
         config = { ...(config as RuntimeSlotConfig), setup: { state: 'configured', by: 'cli' } };
         return Promise.resolve(ok());
@@ -203,7 +205,7 @@ describe('WslProvisioner', () => {
     // The file that could not be read may have narrowed this distribution, and
     // an unknown answer must not resolve to full.
     const { provisioner, calls, config } = harness({
-      respond: (script) => (script.includes('printf') ? ok('/home/dev\n{ truncated') : undefined),
+      respond: (script) => (script.startsWith('printf') ? ok('/home/dev\n{ truncated') : undefined),
     });
 
     await provisioner.ensure('Ubuntu');

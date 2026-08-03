@@ -27,6 +27,7 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
 import {
+  CONFIG_LOCK_BUSY_EXIT,
   DISTRO_RUNTIME_PATH,
   type DistroPlatformProbe,
   type DistroSlotProbe,
@@ -241,14 +242,22 @@ async function install(
  * Writes down what was installed, keeping whatever the distribution already
  * said about consent. Not fatal on its own: a distribution that holds the right
  * binary but could not record it still runs, it just re-provisions next time.
+ *
+ * The consent it carries forward is re-read here rather than taken from the
+ * probe `ensure` started with. That probe happened before a download and an
+ * extraction — minutes, on a first provision — and anything somebody answered
+ * inside the distribution in between would be written back out as the older
+ * answer. Re-reading costs one round trip and leaves a window of exactly that
+ * round trip, which the lock the write itself takes then covers.
  */
 async function recordInstall(
   deps: WslProvisionerDeps,
   distro: string,
   version: string,
-  slot: DistroSlotProbe,
+  installed: DistroSlotProbe,
   digest: string
 ): Promise<void> {
+  const slot = await reprobeSlot(deps, distro, installed);
   const config = distroRuntimeConfigAfterInstall({
     stored: slot.config,
     home: slot.home,
@@ -266,8 +275,38 @@ async function recordInstall(
   const result = await deps.runInDistro(distro, WRITE_CONFIG_SCRIPT, {
     stdin: new TextEncoder().encode(`${JSON.stringify(config, null, 2)}\n`),
   });
+  if (result.exitCode === CONFIG_LOCK_BUSY_EXIT) {
+    // Somebody inside the distribution is answering the consent question right
+    // now. Their answer is the one that matters; these install facts are
+    // rewritten on the next provision anyway.
+    logger.warn('config_write_locked', { distro });
+    return;
+  }
   if (result.exitCode !== 0) {
     logger.warn('config_write_failed', { distro, detail: describe(result) });
+  }
+}
+
+/**
+ * The slot as it stands now, falling back to the pre-install read.
+ *
+ * A probe that fails here must not be read as "no config": that is the state
+ * that lets the caller re-grant full consent, and the distribution demonstrably
+ * had a runtime a moment ago. The earlier read is the better guess, and an
+ * unreadable answer stays unreadable.
+ */
+async function reprobeSlot(
+  deps: WslProvisionerDeps,
+  distro: string,
+  installed: DistroSlotProbe
+): Promise<DistroSlotProbe> {
+  try {
+    const result = await deps.runInDistro(distro, PROBE_SLOT_SCRIPT);
+    if (result.exitCode !== 0) return installed;
+    const fresh = parseDistroSlotProbe(result.stdout);
+    return fresh.home ? fresh : installed;
+  } catch {
+    return installed;
   }
 }
 

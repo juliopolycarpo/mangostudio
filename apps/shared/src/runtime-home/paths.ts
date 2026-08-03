@@ -27,6 +27,13 @@ export const RUNTIME_HOME_DIR_NAME = 'runtime';
 export const RUNTIME_CURRENT_LINK_NAME = 'current';
 export const RUNTIME_CONFIG_FILE_NAME = 'runtime.json';
 export const RUNTIME_CREDENTIALS_FILE_NAME = 'credentials.json';
+/**
+ * The lock every writer of `runtime.json` takes, named here because a second
+ * workspace depends on it: a hub provisioning a WSL distribution writes that
+ * file from outside the runtime, and has to take the same lock the runtime's
+ * own writers do or it is not a lock.
+ */
+export const RUNTIME_CONFIG_LOCK_FILE_NAME = 'runtime.lock';
 export const RUNTIME_BINARY_BASENAME = 'mangostudio-runtime';
 
 export interface RuntimeHomeOptions {

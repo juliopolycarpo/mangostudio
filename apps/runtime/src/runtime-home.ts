@@ -16,6 +16,7 @@ import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
   type ResolvedRuntimeSlotConfig,
+  RUNTIME_CONFIG_LOCK_FILE_NAME,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
   type RuntimeInstallSource,
@@ -47,7 +48,7 @@ export type { RuntimeSlot } from '@mangostudio/shared/runtime-home';
 export const RUNTIME_SETUP_PENDING_SIGNATURE = 'runtime setup is pending on this machine';
 export const RUNTIME_SETUP_PENDING_MESSAGE = `${RUNTIME_SETUP_PENDING_SIGNATURE}. Run "mangostudio-runtime setup" there before connecting it.`;
 
-const CONFIG_LOCK_FILE = 'runtime.lock';
+const CONFIG_LOCK_FILE = RUNTIME_CONFIG_LOCK_FILE_NAME;
 const CREDENTIALS_LOCK_FILE = 'credentials.lock';
 const OWNER_ONLY = 0o600;
 /** How long a writer waits for another process before failing the lock. */
