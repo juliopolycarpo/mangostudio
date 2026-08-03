@@ -4,7 +4,7 @@ import type {
   Environment,
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID, LOCAL_ENVIRONMENT_NAME } from '@mangostudio/shared/environments';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import {
   getRuntimeConnectionManager,
@@ -53,7 +53,7 @@ function localRecord(userId: string): EnvironmentRecord {
   return {
     id: LOCAL_ENVIRONMENT_ID,
     userId,
-    name: 'Local',
+    name: LOCAL_ENVIRONMENT_NAME,
     transportKind: 'in-process',
     config: {},
     enabled: true,

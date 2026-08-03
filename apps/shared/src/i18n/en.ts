@@ -101,6 +101,8 @@ export const messages: Messages = {
         'skill-shadowed': 'shadowed by a higher-precedence source',
         'skill-tool-disabled': 'the skill tool is not active',
       },
+      /** Substituted for the hub's own machine, whose API name is not copy. */
+      localEnvironment: 'this machine',
       health: {
         connected: 'connected',
         connecting: 'connecting',

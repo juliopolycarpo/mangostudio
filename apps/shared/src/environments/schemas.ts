@@ -9,6 +9,14 @@ import {
 
 export const LOCAL_ENVIRONMENT_ID = 'local' as const;
 
+/**
+ * Name the hub reports for the machine it runs on. Not user copy: it is the
+ * environment's name in the API the same way a remote's stored name is, and
+ * surfaces that render it inside a translated sentence resolve it from
+ * {@link LOCAL_ENVIRONMENT_ID} through i18n instead of printing this.
+ */
+export const LOCAL_ENVIRONMENT_NAME = 'Local' as const;
+
 export const EnvironmentIdSchema = Type.String({
   minLength: 1,
   maxLength: 63,

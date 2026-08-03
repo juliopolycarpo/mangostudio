@@ -99,6 +99,8 @@ export const messages = {
         'skill-shadowed': 'sombreada por uma fonte de maior precedência',
         'skill-tool-disabled': 'a ferramenta de skills não está ativa',
       },
+      /** Substituted for the hub's own machine, whose API name is not copy. */
+      localEnvironment: 'esta máquina',
       health: {
         connected: 'conectado',
         connecting: 'conectando',

@@ -9,7 +9,11 @@ import type {
   EnvironmentConnectionStatus,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID, SshFailureReasonSchema } from '@mangostudio/shared/environments';
+import {
+  LOCAL_ENVIRONMENT_ID,
+  LOCAL_ENVIRONMENT_NAME,
+  SshFailureReasonSchema,
+} from '@mangostudio/shared/environments';
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 import { Value } from '@sinclair/typebox/value';
 import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
@@ -608,7 +612,7 @@ async function resolveEnvironment(
     return {
       id: LOCAL_ENVIRONMENT_ID,
       userId,
-      name: 'Local',
+      name: LOCAL_ENVIRONMENT_NAME,
       transportKind: 'in-process',
       config: {},
       enabled: true,

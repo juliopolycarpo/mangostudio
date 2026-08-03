@@ -120,6 +120,7 @@ export async function inspectChatCapabilities(
       toolsEnabled: profile.toolsEnabled,
       enabledToolNames,
       environmentName,
+      environmentId: ownedChat.environmentId,
     })
   );
 
@@ -174,6 +175,7 @@ function toToolEntry(
     ...(candidate.serverSlug ? { serverSlug: candidate.serverSlug } : {}),
     ...(candidate.serverName ? { serverName: candidate.serverName } : {}),
     ...(candidate.environmentName ? { environmentName: candidate.environmentName } : {}),
+    ...(candidate.environmentId ? { environmentId: candidate.environmentId } : {}),
   };
 
   // Mirror resolveTurnContext: an effective delegate tool is still withheld
@@ -209,6 +211,8 @@ interface McpServerEntryInput {
   readonly enabledToolNames: ReadonlySet<string>;
   /** Display name of the chat's environment; attached to runtime-denied. */
   readonly environmentName: string;
+  /** Id of that environment; travels with the name so the UI can translate it. */
+  readonly environmentId: string;
 }
 
 function toMcpServerEntry(input: McpServerEntryInput): CapabilityMcpServerEntry {
@@ -241,6 +245,7 @@ function toMcpServerEntry(input: McpServerEntryInput): CapabilityMcpServerEntry 
       reason: 'runtime-denied',
       health,
       environmentName: input.environmentName,
+      environmentId: input.environmentId,
     };
   }
   if (!snapshot?.listed) {

@@ -1,6 +1,7 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { AgentExecutionModeSchema, AgentIdSchema, AgentKindSchema } from '../agents/schemas';
 import { ContextInfoSchema } from '../chat/schemas';
+import { EnvironmentIdSchema } from '../environments/schemas';
 import { McpServerStatusSchema } from '../mcp/schemas';
 import { SkillSourceSchema } from '../skills/schemas';
 import { ToolSettingsCategorySchema } from '../tool-settings/schemas';
@@ -77,6 +78,13 @@ export const CapabilityToolEntrySchema = Type.Object({
   serverName: Type.Optional(Type.String({ minLength: 1 })),
   /** Environment that refused — present with `runtime-denied`. */
   environmentName: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * Which environment `environmentName` names. The hub reports its own machine
+   * under a fixed English name the way it reports any environment's name; a
+   * surface that renders it inside a translated sentence resolves this id
+   * through i18n instead.
+   */
+  environmentId: Type.Optional(EnvironmentIdSchema),
 });
 
 /** Last-known (passive) server health; never triggers a connect or probe. */
@@ -95,6 +103,8 @@ export const CapabilityMcpServerEntrySchema = Type.Object({
   effectiveToolCount: Type.Integer({ minimum: 0 }),
   /** Environment that refused — present with `runtime-denied`. */
   environmentName: Type.Optional(Type.String({ minLength: 1 })),
+  /** Which environment `environmentName` names; see the tool entry above. */
+  environmentId: Type.Optional(EnvironmentIdSchema),
 });
 
 export const CapabilitySkillEntrySchema = Type.Object({

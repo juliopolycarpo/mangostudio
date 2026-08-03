@@ -89,6 +89,7 @@ export async function resolveAgentRuntime(
     mcpServers: mcpServerSnapshots,
     runtimeManifest: input.runtimeManifest,
     environmentName: input.environmentName,
+    environmentId: input.environmentId,
   });
   const toolDefinitions = effectiveToolDefinitions(toolCandidates);
   const allowedToolNames = new Set(toolDefinitions.map((definition) => definition.name));

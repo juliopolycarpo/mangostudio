@@ -47,6 +47,8 @@ export interface ToolCapabilityCandidate {
   readonly reason?: ToolCandidateReason;
   /** Environment that refused the capability — set with `runtime-denied`. */
   readonly environmentName?: string;
+  /** Which environment that name belongs to; lets the UI translate its own. */
+  readonly environmentId?: string;
 }
 
 export interface ResolveToolCandidatesInput {
@@ -57,6 +59,8 @@ export interface ResolveToolCandidatesInput {
   readonly runtimeManifest: RuntimeCapabilityManifest;
   /** Display name of the chat's environment; attached to runtime-denied. */
   readonly environmentName?: string;
+  /** Id of that environment; travels with the name so the UI can translate it. */
+  readonly environmentId?: string;
 }
 
 /**
@@ -108,12 +112,12 @@ function resolveBuiltinCandidate(
   if (requiredShell && !input.runtimeManifest.shells.includes(requiredShell)) {
     // Consent clears the shells list; prefer naming the machine's refusal.
     if (!manifestFeatureAllowed(input.runtimeManifest.features, 'shell')) {
-      return runtimeDenied(base, input.environmentName);
+      return runtimeDenied(base, input);
     }
     return { ...base, reason: 'environment-unsupported' };
   }
   if (hasDeniedRequiredCapability(tool.settings.requiredCapabilities, input.runtimeManifest)) {
-    return runtimeDenied(base, input.environmentName);
+    return runtimeDenied(base, input);
   }
   return { ...base, definition: tool.buildDefinition?.(settings) ?? tool.definition };
 }
@@ -140,7 +144,7 @@ function resolveMcpCandidates(
     // no tools to reach. Kept as the fail-closed guard: a listed snapshot must
     // never hand the provider tools the machine would refuse to run.
     if (input.runtimeManifest.features.mcp === false) {
-      return runtimeDenied(base, input.environmentName);
+      return runtimeDenied(base, input);
     }
     if (!toolNameMatches(allowlist, tool.name)) return { ...base, reason: 'agent-allowlist' };
     if (!(input.toolSettings.get(tool.name)?.enabled ?? true)) {
@@ -162,13 +166,17 @@ function resolveMcpCandidates(
 }
 
 function runtimeDenied(
-  base: Omit<ToolCapabilityCandidate, 'reason' | 'environmentName' | 'definition'>,
-  environmentName: string | undefined
+  base: Omit<
+    ToolCapabilityCandidate,
+    'reason' | 'environmentName' | 'environmentId' | 'definition'
+  >,
+  input: ResolveToolCandidatesInput
 ): ToolCapabilityCandidate {
   return {
     ...base,
     reason: 'runtime-denied',
-    ...(environmentName ? { environmentName } : {}),
+    ...(input.environmentName ? { environmentName: input.environmentName } : {}),
+    ...(input.environmentId ? { environmentId: input.environmentId } : {}),
   };
 }
 

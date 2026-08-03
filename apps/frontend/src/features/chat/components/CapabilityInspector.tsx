@@ -14,6 +14,7 @@ import type {
   CapabilityToolEntry,
   ChatCapabilitiesResponse,
 } from '@mangostudio/shared/capabilities';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -186,7 +187,10 @@ function CapabilityPanel({
             labels={labels}
             title={tool.title}
             state={tool.state}
-            reasonText={reasonText(labels, tool.reason, tool.environmentName)}
+            reasonText={reasonText(labels, tool.reason, {
+              name: tool.environmentName,
+              id: tool.environmentId,
+            })}
             reasonManageTo={reasonManageTo(tool.reason)}
           />
         ))}
@@ -271,7 +275,10 @@ function McpServerRows({
         }
         subtitle={labels.health[server.health]}
         state={server.state}
-        reasonText={reasonText(labels, server.reason, server.environmentName)}
+        reasonText={reasonText(labels, server.reason, {
+          name: server.environmentName,
+          id: server.environmentId,
+        })}
         reasonManageTo={reasonManageTo(server.reason)}
       />
       {tools.map((tool) => (
@@ -280,7 +287,10 @@ function McpServerRows({
             labels={labels}
             title={tool.title}
             state={tool.state}
-            reasonText={reasonText(labels, tool.reason, tool.environmentName)}
+            reasonText={reasonText(labels, tool.reason, {
+              name: tool.environmentName,
+              id: tool.environmentId,
+            })}
             reasonManageTo={reasonManageTo(tool.reason)}
           />
         </div>
@@ -373,10 +383,16 @@ function CapabilityRow({
 function reasonText(
   labels: CapabilityLabels,
   reason: CapabilityReasonCode | undefined,
-  environmentName?: string
+  environment?: { name?: string; id?: string }
 ): string | undefined {
   if (!reason) return undefined;
   const template = labels.reasons[REASON_LABEL_KEY[reason]];
+  // The hub reports its own machine under a fixed English name, the same way
+  // it reports any environment's name. Printing it inside a translated
+  // sentence would leave "recusada por Local" for a pt-BR reader, so the one
+  // environment whose name the UI can speak for is resolved from its id.
+  const environmentName =
+    environment?.id === LOCAL_ENVIRONMENT_ID ? labels.localEnvironment : environment?.name;
   return environmentName ? formatMessage(template, { environmentName }) : template;
 }
 
