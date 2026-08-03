@@ -10,9 +10,16 @@
  * Pure string work — the callers that touch disk live in the runtime and the
  * hub. A Windows hub builds paths *inside a Linux distribution* here, so the
  * flavour is a parameter rather than this module's own platform.
+ *
+ * Deliberately free of `node:path`. This module is reachable from the
+ * `environments` barrel, so it ships in the frontend bundle, and Vite resolves
+ * a node builtin there to a stub rather than failing the build: the first
+ * module-level `posix.join` then throws on `undefined` and the whole app
+ * renders nothing while every other gate stays green. Joining for a named
+ * platform is a separator and no filesystem, so owning it costs less than the
+ * import did.
  */
 
-import { posix, win32 } from 'node:path';
 import type { RuntimeSlot } from './schemas';
 
 export const MANGO_HOME_DIR_NAME = '.mango';
@@ -33,34 +40,53 @@ export interface RuntimeHomeOptions {
   readonly platform?: string;
 }
 
-function pathFor(options: RuntimeHomeOptions) {
-  return options.platform === 'win32' ? win32 : posix;
+/** Windows treats both as separators; posix has only one, and `\` is a name. */
+function separatorFor(platform?: string): string {
+  return platform === 'win32' ? '\\' : '/';
+}
+
+/**
+ * Joins segments for the target platform, the way that platform spells paths.
+ *
+ * Only trailing separators are trimmed, and only the ones the target actually
+ * recognises — the rest of each segment is left exactly as given, because a
+ * name is the one thing this must never rewrite.
+ */
+function joinFor(platform: string | undefined, ...segments: readonly string[]): string {
+  const separator = separatorFor(platform);
+  const trailing = platform === 'win32' ? /[\\/]+$/ : /\/+$/;
+  const joined = segments.reduce((left, right) => {
+    if (!left) return right;
+    if (!right) return left;
+    return `${left.replace(trailing, '')}${separator}${right}`;
+  }, '');
+  return platform === 'win32' ? joined.replaceAll('/', separator) : joined;
 }
 
 /** `<home>/.mango`. Takes the home directory so this stays free of `node:os`. */
 export function mangoHomeDir(home: string, platform?: string): string {
-  return (platform === 'win32' ? win32 : posix).join(home, MANGO_HOME_DIR_NAME);
+  return joinFor(platform, home, MANGO_HOME_DIR_NAME);
 }
 
 export function runtimeHomeDir(options: RuntimeHomeOptions): string {
-  return pathFor(options).join(options.mangoHome, RUNTIME_HOME_DIR_NAME);
+  return joinFor(options.platform, options.mangoHome, RUNTIME_HOME_DIR_NAME);
 }
 
 export function runtimeSlotDir(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
-  return pathFor(options).join(runtimeHomeDir(options), slot);
+  return joinFor(options.platform, runtimeHomeDir(options), slot);
 }
 
 export function runtimeSlotConfigPath(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
-  return pathFor(options).join(runtimeSlotDir(slot, options), RUNTIME_CONFIG_FILE_NAME);
+  return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_CONFIG_FILE_NAME);
 }
 
 export function runtimeSlotCredentialsPath(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
-  return pathFor(options).join(runtimeSlotDir(slot, options), RUNTIME_CREDENTIALS_FILE_NAME);
+  return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_CREDENTIALS_FILE_NAME);
 }
 
 /** The link a launcher points at, which survives every upgrade. */
 export function runtimeSlotCurrentDir(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
-  return pathFor(options).join(runtimeSlotDir(slot, options), RUNTIME_CURRENT_LINK_NAME);
+  return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_CURRENT_LINK_NAME);
 }
 
 /** Where an install writes bytes before publishing them through `current`. */
@@ -69,7 +95,7 @@ export function runtimeSlotVersionDir(
   version: string,
   options: RuntimeHomeOptions
 ): string {
-  return pathFor(options).join(runtimeSlotDir(slot, options), version);
+  return joinFor(options.platform, runtimeSlotDir(slot, options), version);
 }
 
 export function runtimeBinaryName(platform?: string): string {
@@ -80,7 +106,8 @@ export function runtimeSlotCurrentBinaryPath(
   slot: RuntimeSlot,
   options: RuntimeHomeOptions
 ): string {
-  return pathFor(options).join(
+  return joinFor(
+    options.platform,
     runtimeSlotCurrentDir(slot, options),
     runtimeBinaryName(options.platform)
   );
@@ -91,7 +118,8 @@ export function runtimeSlotVersionBinaryPath(
   version: string,
   options: RuntimeHomeOptions
 ): string {
-  return pathFor(options).join(
+  return joinFor(
+    options.platform,
     runtimeSlotVersionDir(slot, version, options),
     runtimeBinaryName(options.platform)
   );
@@ -107,7 +135,7 @@ export function runtimeSlotVersionBinaryPath(
  * is not the `remote` slot.
  */
 export function runtimeSlotForPath(path: string, options: RuntimeHomeOptions): RuntimeSlot | null {
-  const separator = pathFor(options).sep;
+  const separator = separatorFor(options.platform);
   const normalize = (value: string): string =>
     value.replaceAll(options.platform === 'win32' ? '/' : '\\', separator).replace(/[\\/]+$/, '');
   const candidate = normalize(path);
