@@ -9,6 +9,7 @@ import {
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   getRuntimeClient,
@@ -83,6 +84,31 @@ afterEach(() => {
 /** Advances the clock past a backoff window without waiting for it. */
 function advanceSeconds(seconds: number): void {
   setSystemTime(new Date(Date.now() + seconds * 1_000));
+}
+
+/** Lets a background refresh settle; it is deliberately not awaited by its caller. */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** A connected client that counts how often the hub asked it for health. */
+function healthProbe(
+  manifest: RuntimeCapabilityManifest,
+  health: () => Promise<RuntimeHealthReport> = () => Promise.resolve(HEALTH_REPORT)
+): { client: RuntimeClient; calls: () => number } {
+  let calls = 0;
+  const client = {
+    manifest,
+    runtimeVersion: '0.0.0-test',
+    health: () => {
+      calls += 1;
+      return health();
+    },
+    replaceManifest: (next: RuntimeCapabilityManifest) => {
+      client.manifest = next;
+    },
+  };
+  return { client: client as unknown as RuntimeClient, calls: () => calls };
 }
 
 describe('RuntimeConnectionManager', () => {
@@ -499,6 +525,90 @@ describe('RuntimeConnectionManager', () => {
     setRuntimeConnectionManagerForTests(manager);
 
     expect(await getRuntimeClient('user-1', 'devbox')).toBe(expected);
+  });
+
+  it('re-reads a stale manifest in the background, once, without blocking the read', async () => {
+    const probe = healthProbe(TEST_MANIFEST);
+    let publishes = 0;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => Promise.resolve({ client: probe.client, close: () => undefined }),
+      },
+      publish: () => {
+        publishes += 1;
+      },
+    });
+
+    await manager.connect('user-1', 'devbox');
+    publishes = 0;
+
+    // The handshake manifest is a fresh read; nothing to ask about yet.
+    manager.refreshManifestIfStale('user-1', 'devbox');
+    await flushMicrotasks();
+    expect(probe.calls()).toBe(0);
+
+    advanceSeconds(20);
+    // Two reads arriving together are one round-trip, not two.
+    manager.refreshManifestIfStale('user-1', 'devbox');
+    manager.refreshManifestIfStale('user-1', 'devbox');
+    await flushMicrotasks();
+
+    expect(probe.calls()).toBe(1);
+    // The handshake said mcp was refused; the health report grants everything.
+    expect(manager.getStatus('user-1', 'devbox').manifest?.features.mcp).toBe(true);
+    expect(publishes).toBe(1);
+  });
+
+  it('publishes nothing when the machine answers exactly what was cached', async () => {
+    // A card polling this endpoint is woken by the invalidation a refresh
+    // publishes. Publishing an unchanged manifest would make every window
+    // produce a refetch that produces another refresh.
+    const probe = healthProbe(capabilityManifestFromHealth(HEALTH_REPORT));
+    let publishes = 0;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => Promise.resolve({ client: probe.client, close: () => undefined }),
+      },
+      publish: () => {
+        publishes += 1;
+      },
+    });
+
+    await manager.connect('user-1', 'devbox');
+    publishes = 0;
+
+    advanceSeconds(20);
+    manager.refreshManifestIfStale('user-1', 'devbox');
+    await flushMicrotasks();
+
+    expect(probe.calls()).toBe(1);
+    expect(publishes).toBe(0);
+  });
+
+  it('does not re-ask a peer that just failed to answer', async () => {
+    const probe = healthProbe(TEST_MANIFEST, () =>
+      Promise.reject(new RuntimeRemoteError('TIMEOUT', 'no answer'))
+    );
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => Promise.resolve({ client: probe.client, close: () => undefined }),
+      },
+    });
+
+    await manager.connect('user-1', 'devbox');
+    advanceSeconds(20);
+    manager.refreshManifestIfStale('user-1', 'devbox');
+    await flushMicrotasks();
+    // Within the window of the attempt, not of the last success: a peer that
+    // is failing slowly must not collect one round-trip per environment read.
+    manager.refreshManifestIfStale('user-1', 'devbox');
+    await flushMicrotasks();
+
+    expect(probe.calls()).toBe(1);
+    expect(manager.getStatus('user-1', 'devbox').manifest).toEqual(TEST_MANIFEST);
   });
 
   it('does not restore a released connection after a stale health refresh', async () => {

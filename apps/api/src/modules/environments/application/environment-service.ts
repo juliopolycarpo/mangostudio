@@ -71,6 +71,12 @@ async function toEnvironment(
   manager: RuntimeConnectionManager,
   secretStore: SecretStore
 ): Promise<Environment> {
+  // Consent is answered on the machine, so nothing here can invalidate the
+  // manifest cached at connect. Reading an environment is the moment someone
+  // is looking at what the machine permits, which makes it the moment worth
+  // re-asking: this returns immediately and publishes only if the answer moved.
+  manager.refreshManifestIfStale(record.userId, record.id);
+
   return {
     id: record.id,
     name: record.name,
