@@ -276,6 +276,11 @@ function createEventBuffer(): EventBuffer {
 async function defaultGuard(context: InstallRequestContext): Promise<InstallGuard> {
   const config = getConfig();
   const environmentId = environmentIdOf(context);
+  const status = getRuntimeConnectionManager().getStatus(context.userId, environmentId);
+  // Absent on older peers, and on a runtime nobody has connected to yet —
+  // treat as granted until consent is visible.
+  const runtimeShellAllowed = status.manifest?.features.shell !== false;
+
   if (environmentId === LOCAL_ENVIRONMENT_ID) {
     return evaluateInstallGuard({
       serverHost: config.server.host,
@@ -283,19 +288,17 @@ async function defaultGuard(context: InstallRequestContext): Promise<InstallGuar
       installsEnabled: config.environments.installsEnabled,
       standalone: isStandaloneExecutable(),
       container: config.environments.container,
+      runtimeShellAllowed,
     });
   }
 
   const environment = await environmentRepository.find(context.userId, environmentId);
-  const status = getRuntimeConnectionManager().getStatus(context.userId, environmentId);
-  const shellFeature = status.manifest?.features.shell;
   return evaluateRemoteInstallGuard({
     installsEnabled: config.environments.installsEnabled,
     // An environment that is not there cannot have been trusted, and saying so
     // is more useful than a not-found: the user asked to install somewhere.
     allowInstalls: environment?.allowInstalls === true,
-    // Absent on older peers — treat as granted until consent is visible.
-    runtimeShellAllowed: shellFeature !== false,
+    runtimeShellAllowed,
   });
 }
 

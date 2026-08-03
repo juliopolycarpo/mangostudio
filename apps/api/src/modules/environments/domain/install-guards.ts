@@ -12,6 +12,15 @@ export interface InstallGuardContext {
   readonly installsEnabled: boolean;
   readonly standalone: boolean;
   readonly container: boolean;
+  /**
+   * Whether the hub's own runtime advertises shell. The loopback checks ask who
+   * is driving; this asks what the machine agreed to. `setup --slot host
+   * --profile readonly` refuses `install.run` either way, so an install offered
+   * without it is one that fails after the user commits to it. Unknown (the
+   * local runtime is not connected yet, or an older peer without the flag)
+   * defaults to allowed.
+   */
+  readonly runtimeShellAllowed?: boolean;
 }
 
 /**
@@ -65,6 +74,7 @@ export function evaluateInstallGuard(context: InstallGuardContext): InstallGuard
   }
   if (!isLoopbackAddress(context.clientIp)) reasons.push('client-not-loopback');
   if (!context.installsEnabled) reasons.push('disabled');
+  if (context.runtimeShellAllowed === false) reasons.push('runtime-denied');
 
   return {
     allowed: reasons.length === 0,

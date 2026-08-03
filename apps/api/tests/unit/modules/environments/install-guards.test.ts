@@ -77,6 +77,21 @@ describe('install guards', () => {
     });
   });
 
+  it('treats an unknown local consent as granted', () => {
+    expect(evaluateInstallGuard(ALLOWED_CONTEXT)).toEqual({ allowed: true, reasons: [] });
+    expect(evaluateInstallGuard({ ...ALLOWED_CONTEXT, runtimeShellAllowed: true })).toEqual({
+      allowed: true,
+      reasons: [],
+    });
+  });
+
+  it('refuses when this machine consented away shell, loopback or not', () => {
+    expect(evaluateInstallGuard({ ...ALLOWED_CONTEXT, runtimeShellAllowed: false })).toEqual({
+      allowed: false,
+      reasons: ['runtime-denied'],
+    });
+  });
+
   it('reports every failed condition instead of hiding later guards', () => {
     expect(
       evaluateInstallGuard({
