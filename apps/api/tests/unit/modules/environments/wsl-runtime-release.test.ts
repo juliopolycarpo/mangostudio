@@ -129,15 +129,28 @@ describe('parseDistroSlotProbe', () => {
   });
 
   it('reports a distribution with no config yet', () => {
-    expect(parseDistroSlotProbe('/home/dev\n')).toEqual({ home: '/home/dev', config: null });
-    expect(parseDistroSlotProbe('/home/dev')).toEqual({ home: '/home/dev', config: null });
+    expect(parseDistroSlotProbe('/home/dev\n')).toEqual({
+      home: '/home/dev',
+      config: null,
+      unreadable: false,
+    });
+    expect(parseDistroSlotProbe('/home/dev')).toEqual({
+      home: '/home/dev',
+      config: null,
+      unreadable: false,
+    });
   });
 
-  it('treats a config it cannot read as absent, which re-provisions and rewrites it', () => {
-    expect(parseDistroSlotProbe('/home/dev\n{ truncated').config).toBeNull();
-    expect(
-      parseDistroSlotProbe('/home/dev\n{"schemaVersion":1,"slot":"nowhere"}').config
-    ).toBeNull();
+  it('tells a config it cannot read apart from one that is not there', () => {
+    // The install facts recover by being rewritten; consent does not, so the
+    // two cases must not collapse into one.
+    for (const output of ['/home/dev\n{ truncated', '/home/dev\n{"schemaVersion":1,"slot":"x"}']) {
+      expect(parseDistroSlotProbe(output)).toEqual({
+        home: '/home/dev',
+        config: null,
+        unreadable: true,
+      });
+    }
   });
 });
 

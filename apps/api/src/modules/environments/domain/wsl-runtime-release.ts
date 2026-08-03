@@ -161,23 +161,30 @@ export const PROBE_SLOT_SCRIPT = `printf '%s\\n' "$HOME"; cat ${CONFIG_PATH} 2>/
 export interface DistroSlotProbe {
   /** The distribution's `$HOME`, which no hub can guess. */
   readonly home: string;
-  /** Its `runtime.json`, or null when there is none or it is unreadable. */
+  /** Its `runtime.json`, or null when there is none or it could not be read. */
   readonly config: RuntimeSlotConfig | null;
+  /**
+   * True when a file was there and this hub could not read it, which is not the
+   * same as there being none. The install facts recover by being rewritten, but
+   * consent does not: the unreadable file may have narrowed this distribution,
+   * and an unknown answer must never resolve to yes.
+   */
+  readonly unreadable: boolean;
 }
 
 export function parseDistroSlotProbe(stdout: string): DistroSlotProbe {
   const newline = stdout.indexOf('\n');
   const home = (newline === -1 ? stdout : stdout.slice(0, newline)).trim();
   const rest = newline === -1 ? '' : stdout.slice(newline + 1).trim();
-  if (!rest) return { home, config: null };
+  if (!rest) return { home, config: null, unreadable: false };
 
   try {
     const parsed: unknown = JSON.parse(rest);
-    // A config this hub cannot read is one the next write replaces. Treating it
-    // as absent re-provisions and rewrites it, which is the recovery.
-    return { home, config: Value.Check(RuntimeSlotConfigSchema, parsed) ? parsed : null };
+    return Value.Check(RuntimeSlotConfigSchema, parsed)
+      ? { home, config: parsed, unreadable: false }
+      : { home, config: null, unreadable: true };
   } catch {
-    return { home, config: null };
+    return { home, config: null, unreadable: true };
   }
 }
 
@@ -189,6 +196,10 @@ export function parseDistroSlotProbe(stdout: string): DistroSlotProbe {
  * not in that list on purpose: upgrades replace bytes, never the answer
  * somebody gave about what a hub may do here. `setup` writes that, once, on the
  * first provision.
+ *
+ * `armGate` is the exception, and it is a refusal rather than an answer. A
+ * config this hub could not read may have narrowed the distribution, so the
+ * rewrite leaves the gate closed and somebody at the machine re-answers.
  */
 export function distroRuntimeConfigAfterInstall(params: {
   readonly stored: RuntimeSlotConfig | null;
@@ -198,6 +209,7 @@ export function distroRuntimeConfigAfterInstall(params: {
   readonly hubVersion: string;
   readonly hubHost: string;
   readonly at: string;
+  readonly armGate?: boolean;
 }): RuntimeSlotConfig {
   return {
     ...params.stored,
@@ -215,6 +227,7 @@ export function distroRuntimeConfigAfterInstall(params: {
       transport: 'wsl',
       at: params.at,
     },
+    ...(params.armGate ? { setup: { state: 'pending', at: params.at, by: 'install' } } : {}),
   };
 }
 

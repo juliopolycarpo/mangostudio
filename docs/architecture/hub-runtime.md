@@ -161,6 +161,11 @@ Who answers depends on who installed:
   logged rather than assumed, so `health` afterwards says what the machine allows. A file
   that already says `pending` is obeyed even there — somebody deliberately staged that
   machine for an answer.
+- A config that cannot be read refuses everywhere, in every slot. An unknown answer must
+  not resolve to the slot default, because the file it replaced may have said something
+  narrower — and for `host` and `wsl` the default is full. The same rule governs the hub
+  side of WSL provisioning: an unreadable `runtime.json` in a distribution is re-written
+  with the gate closed rather than re-granted.
 
 A runtime whose slot is pending refuses before serving anything and exits non-zero with a
 stable phrase (`RUNTIME_SETUP_PENDING_SIGNATURE`) that the ssh failure classifier keys on,

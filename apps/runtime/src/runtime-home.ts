@@ -12,7 +12,7 @@
  */
 
 import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   type ResolvedRuntimeSlotConfig,
   type RuntimeInstallSource,
@@ -44,11 +44,12 @@ export type { RuntimeSlot } from '@mangostudio/shared/runtime-home';
 export const RUNTIME_SETUP_PENDING_SIGNATURE = 'runtime setup is pending on this machine';
 export const RUNTIME_SETUP_PENDING_MESSAGE = `${RUNTIME_SETUP_PENDING_SIGNATURE}. Run "mangostudio-runtime setup" there before connecting it.`;
 
+const CONFIG_LOCK_FILE = 'runtime.lock';
 const CREDENTIALS_LOCK_FILE = 'credentials.lock';
 const OWNER_ONLY = 0o600;
 /** How long a writer waits for another process before failing the lock. */
-const CREDENTIALS_LOCK_TIMEOUT_MS = 5_000;
-const CREDENTIALS_LOCK_POLL_MS = 25;
+const SLOT_LOCK_TIMEOUT_MS = 5_000;
+const SLOT_LOCK_POLL_MS = 25;
 
 interface RuntimeSlotCredentials {
   readonly schemaVersion: 1;
@@ -185,6 +186,11 @@ export async function readRuntimeSlotConfig(
  * Only the fields named are touched. An installer writing `version` and
  * `digest` must not disturb the consent someone answered, and `setup` writing
  * consent must not disturb the hub URL a `connect` remembered.
+ *
+ * Locked for the same reason the credentials are: read-merge-rename loses the
+ * other writer's field when two of them interleave, and the field at stake here
+ * is `allow`. A `setup` narrowing a machine to `readonly` while a `connect`
+ * records a hub URL must not come back as full permissions.
  */
 export async function writeRuntimeSlotConfig(
   slot: RuntimeSlot,
@@ -192,9 +198,11 @@ export async function writeRuntimeSlotConfig(
   env?: NodeJS.ProcessEnv
 ): Promise<void> {
   const path = runtimeSlotConfigPath(slot, homeOptions(env));
-  const stored = await readStoredRuntimeSlotConfig(path);
-  const next: RuntimeSlotConfig = { ...stored, ...update, schemaVersion: 1, slot };
-  await writeFileAtomically(path, stripUndefined(next));
+  await withSlotLock(slot, CONFIG_LOCK_FILE, env, async () => {
+    const stored = await readStoredRuntimeSlotConfig(path);
+    const next: RuntimeSlotConfig = { ...stored, ...update, schemaVersion: 1, slot };
+    await writeFileAtomically(path, stripUndefined(next));
+  });
 }
 
 /** The file exactly as written, with no defaults applied — merge input only. */
@@ -235,7 +243,7 @@ export async function writePairingToken(
   env?: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform
 ): Promise<{ readonly restricted: boolean }> {
-  return await withCredentialsLock(slot, env, async () => {
+  return await withSlotLock(slot, CREDENTIALS_LOCK_FILE, env, async () => {
     const current = await readCredentials(slot, env);
     return await writeCredentials(
       slot,
@@ -268,7 +276,7 @@ export async function writeServeToken(
   env?: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform
 ): Promise<{ readonly restricted: boolean }> {
-  return await withCredentialsLock(slot, env, async () => {
+  return await withSlotLock(slot, CREDENTIALS_LOCK_FILE, env, async () => {
     const current = await readCredentials(slot, env);
     return await writeCredentials(
       slot,
@@ -313,19 +321,23 @@ async function readCredentials(
 }
 
 /**
- * Serializes credential writers across processes. `connect` and `serve` share
- * one credentials.json; without a lock each can read, merge one field, and
- * overwrite the other's token on rename.
+ * Serializes writers of one file in one slot across processes.
+ *
+ * Every writer here does read-merge-rename, which loses the other's field when
+ * two interleave: `connect` and `serve` share one credentials.json, and `setup`
+ * and an installer share one runtime.json. Each file gets its own lock, so a
+ * credential rotation never waits behind a consent write.
  */
-async function withCredentialsLock<T>(
+async function withSlotLock<T>(
   slot: RuntimeSlot,
+  lockFile: string,
   env: NodeJS.ProcessEnv | undefined,
   run: () => Promise<T>
 ): Promise<T> {
   const directory = runtimeSlotDir(slot, env);
   await mkdir(directory, { recursive: true });
-  const lockPath = `${directory}/${CREDENTIALS_LOCK_FILE}`;
-  const deadline = Date.now() + CREDENTIALS_LOCK_TIMEOUT_MS;
+  const lockPath = join(directory, lockFile);
+  const deadline = Date.now() + SLOT_LOCK_TIMEOUT_MS;
 
   while (true) {
     try {
@@ -340,9 +352,9 @@ async function withCredentialsLock<T>(
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST') throw error;
       if (Date.now() >= deadline) {
-        throw new Error(`Timed out waiting for the runtime credentials lock at ${lockPath}.`);
+        throw new Error(`Timed out waiting for the runtime slot lock at ${lockPath}.`);
       }
-      await sleepMs(CREDENTIALS_LOCK_POLL_MS);
+      await sleepMs(SLOT_LOCK_POLL_MS);
     }
   }
 }

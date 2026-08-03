@@ -321,6 +321,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
 
   const consent = await consentByInvocation('remote', runtimeVersion);
   if (!consent.granted) {
+    if (consent.reason) log(consent.reason);
     log(RUNTIME_SETUP_PENDING_MESSAGE);
     return 1;
   }
@@ -381,6 +382,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
   // thing between an unattended restart and a machine nobody consented for.
   const consent = await consentByInvocation('remote', runtimeVersion);
   if (!consent.granted) {
+    if (consent.reason) log(consent.reason);
     log(RUNTIME_SETUP_PENDING_MESSAGE);
     return 1;
   }
@@ -470,13 +472,12 @@ async function resolveServeToken(source: RuntimeServeArgs['tokenSource']): Promi
 async function serveStdio(runtimeVersion: string): Promise<number> {
   redirectConsoleToStderr();
 
-  // SSH (and any other launch of a remote-slot binary) speaks stdio, not serve.
-  // The consent gate has to live here too or a pending remote slot still starts
-  // a fully functional host and the hub's setup-pending classifier never sees
-  // its signature. Host/WSL binaries are unaffected: they do not live under the
-  // remote slot directory, and those slots are consented by installation.
-  if (await shouldRefuseStdioForPendingSetup()) {
-    process.stderr.write(`mangostudio-runtime: ${RUNTIME_SETUP_PENDING_MESSAGE}\n`);
+  // SSH (and any other hub launch) speaks stdio, not serve. The consent gate has
+  // to live here too or a pending slot still starts a fully functional host and
+  // the hub's setup-pending classifier never sees its signature.
+  const refusal = await stdioConsentRefusal();
+  if (refusal) {
+    process.stderr.write(`mangostudio-runtime: ${refusal}\n`);
     return 1;
   }
 
@@ -510,38 +511,52 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
 }
 
 /**
- * True when the slot this binary lives in is still awaiting `setup`.
+ * Why a hub-launched runtime must not serve, or null when it may.
  *
  * Unlike `connect` and `serve`, there is nobody here to take the invocation as
  * consent: a hub started this over ssh, and the account that owns the machine
  * may be asleep. So a `remote` slot with no answer refuses, while `host` and
  * `wsl` proceed — those were placed by an install somebody on this machine ran.
+ * A config that cannot be read refuses in every slot: an unknown answer must
+ * not resolve to the slot default, because the file it replaced may have said
+ * something narrower.
+ *
+ * Every refusal carries the setup-pending signature, because every one of them
+ * is fixed by the same command and the hub tells them apart from a missing
+ * binary by that phrase.
  *
  * A custom `remoteRuntimePath` outside the slot tree reads as `host` and is not
  * gated; giving a launch its slot is what closes that, and it is a follow-up.
  */
-export async function shouldRefuseStdioForPendingSetup(
+export async function stdioConsentRefusal(
   env: NodeJS.ProcessEnv = process.env,
   executablePaths: readonly string[] = [process.execPath, process.argv[1] ?? '']
-): Promise<boolean> {
+): Promise<string | null> {
   const slot = resolveRuntimeSlot(env, executablePaths);
-  const { config } = await readRuntimeSlotState(slot, env);
-  return config.setup.state === 'pending';
+  const { config, error } = await readRuntimeSlotState(slot, env);
+  if (error) return `${error} ${RUNTIME_SETUP_PENDING_MESSAGE}`;
+  return config.setup.state === 'pending' ? RUNTIME_SETUP_PENDING_MESSAGE : null;
 }
 
 /**
  * Consent for the two entry points a person starts by hand.
  *
- * Returns `granted: false` only when a config on disk says `pending` — somebody
- * staged this machine for an answer and has not given one. A slot with no
- * config at all is answered here and written down, so that `health` afterwards
- * says what this machine allows rather than leaving it to be inferred.
+ * Refuses when a config on disk says `pending` — somebody staged this machine
+ * for an answer and has not given one — and when the config cannot be read at
+ * all. An unreadable consent file is an unknown answer, and an unknown answer
+ * must never resolve to yes: the file it replaced may well have narrowed this
+ * machine to `readonly`, and rewriting it here would widen that silently.
+ *
+ * A slot with genuinely no config is answered here and written down, so that
+ * `health` afterwards says what this machine allows rather than leaving it to
+ * be inferred.
  */
 async function consentByInvocation(
   slot: RuntimeSlot,
   runtimeVersion: string
-): Promise<{ readonly granted: boolean; readonly recorded: boolean }> {
-  const { config, stored } = await readRuntimeSlotState(slot);
+): Promise<{ readonly granted: boolean; readonly recorded: boolean; readonly reason?: string }> {
+  const { config, stored, error } = await readRuntimeSlotState(slot);
+  if (error) return { granted: false, recorded: false, reason: error };
   if (stored?.setup) {
     return { granted: config.setup.state === 'configured', recorded: false };
   }

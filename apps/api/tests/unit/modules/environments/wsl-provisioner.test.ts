@@ -199,6 +199,19 @@ describe('WslProvisioner', () => {
     expect(requested).toHaveLength(2);
   });
 
+  it('arms the gate rather than re-granting when the distribution config is unreadable', async () => {
+    // The file that could not be read may have narrowed this distribution, and
+    // an unknown answer must not resolve to full.
+    const { provisioner, calls, config } = harness({
+      respond: (script) => (script.includes('printf') ? ok('/home/dev\n{ truncated') : undefined),
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(calls.some((call) => call.script.includes('setup --profile'))).toBe(false);
+    expect(config()).toMatchObject({ setup: { state: 'pending', by: 'install' } });
+  });
+
   it('leaves consent alone when it upgrades a distribution', async () => {
     const { provisioner, calls, config } = harness({
       installed: '1.0.0',

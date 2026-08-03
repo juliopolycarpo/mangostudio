@@ -120,16 +120,15 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       const version = deps.version();
       const slot = parseDistroSlotProbe((await deps.runInDistro(distro, PROBE_SLOT_SCRIPT)).stdout);
       const recorded = slot.config?.version === version;
+      // Asked at most once: the answer is deterministic, and every question put
+      // to a stopped distribution pays for booting it.
+      let runs: boolean | null = null;
+      const stillRuns = async (): Promise<boolean> =>
+        (runs ??= await runsVersion(deps, distro, version));
 
       // Version equality settles it for a release: a published tag's bytes
       // never change, so a distribution holding that version holds these bytes.
-      if (
-        recorded &&
-        !isDevelopmentVersion(version) &&
-        (await runsVersion(deps, distro, version))
-      ) {
-        return;
-      }
+      if (recorded && !isDevelopmentVersion(version) && (await stillRuns())) return;
 
       const platformId = resolvePlatformId(await probePlatform(deps, distro), distro);
       const source = await loadSource(deps, distro, version, platformId);
@@ -139,19 +138,15 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       // digest can tell one build from another — and that is the hole this
       // closes: a rebuilt runtime used to stay on the hub forever, because the
       // distribution's copy also called itself `dev`.
-      if (
-        recorded &&
-        slot.config?.digest === digest &&
-        (await runsVersion(deps, distro, version))
-      ) {
-        return;
-      }
+      if (recorded && slot.config?.digest === digest && (await stillRuns())) return;
 
       await install(deps, distro, version, platformId, source);
       await recordInstall(deps, distro, version, slot, digest);
       // First provision only: an upgrade replaces bytes, never the answer
-      // somebody gave about what a hub may do inside this distribution.
-      if (!slot.config?.setup) await grantConsent(deps, distro);
+      // somebody gave about what a hub may do inside this distribution. A
+      // config that could not be read is neither case — `recordInstall` left
+      // the gate closed, and somebody at the machine answers it again.
+      if (!(slot.config?.setup || slot.unreadable)) await grantConsent(deps, distro);
       await removeLegacyRuntime(deps, distro);
       logger.info('provisioned', { distro, version });
     },
@@ -262,7 +257,11 @@ async function recordInstall(
     hubVersion: deps.version(),
     hubHost: deps.hubHost(),
     at: new Date().toISOString(),
+    armGate: slot.unreadable,
   });
+  if (slot.unreadable) {
+    logger.warn('consent_unreadable', { distro });
+  }
 
   const result = await deps.runInDistro(distro, WRITE_CONFIG_SCRIPT, {
     stdin: new TextEncoder().encode(`${JSON.stringify(config, null, 2)}\n`),

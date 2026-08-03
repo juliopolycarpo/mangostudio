@@ -145,7 +145,7 @@ export const RuntimeInstallerSchema = Type.Object({
 });
 export type RuntimeInstaller = Static<typeof RuntimeInstallerSchema>;
 
-/** `sha256:<64 hex>` over the installed binary. */
+/** `sha256:<64 hex>` of the bytes an installer used. See `digest` below. */
 export const RuntimeBinaryDigestSchema = Type.String({
   pattern: '^sha256:[a-f0-9]{64}$',
   maxLength: 71,
@@ -167,9 +167,19 @@ export const RuntimeSlotConfigSchema = Type.Object({
   /** Resolved path of the binary this slot's config describes. */
   binaryPath: Type.Optional(Type.String({ maxLength: 4_096 })),
   /**
-   * Digest of those bytes. It exists because version equality cannot see a
-   * rebuilt `dev` binary: two different builds both report `dev`, so a hub
-   * comparing versions would never re-push the one that changed.
+   * Digest of the **source** an installer took these bytes from — the binary
+   * itself when one was pushed whole, the archive it was extracted from when it
+   * came out of a release.
+   *
+   * It answers one question: would this installer push something different from
+   * what it pushed last time? That is what re-provisioning needs, and it is why
+   * an archive digest is a correct answer rather than a sloppy one — the same
+   * archive cannot yield a different member. It is deliberately *not* a
+   * checksum of the file on disk, and nothing should verify one against it.
+   *
+   * It exists because version equality cannot see a rebuilt `dev` binary: two
+   * different builds both report `dev`, so a hub comparing versions alone would
+   * never re-push the one that changed.
    */
   digest: Type.Optional(RuntimeBinaryDigestSchema),
   profile: Type.Optional(RuntimeConsentProfileSchema),
