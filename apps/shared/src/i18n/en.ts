@@ -2138,6 +2138,19 @@ export const messages: Messages = {
       platform: '{platform} · {arch}',
       runtimeVersionDrift:
         'This machine runs runtime {version}, which is not the release this MangoStudio ships. It still connects; update the runtime there when you can.',
+      permissions: {
+        title: 'Permissions',
+        profile: {
+          full: 'Full',
+          readonly: 'Read-only',
+          none: 'None',
+          custom: 'Custom',
+        },
+        deniedIntro: 'Denied on this machine:',
+        setupCommand: 'Change consent on that machine',
+        allowShellHonesty:
+          'allow.shell grants everything a shell can reach — the capability list below it describes intent, not a sandbox.',
+      },
       pairing: {
         title: 'Pairing',
         description: 'The runtime on that machine dials MangoStudio with this credential.',

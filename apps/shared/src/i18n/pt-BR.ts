@@ -2157,6 +2157,19 @@ export const messages = {
       platform: '{platform} · {arch}',
       runtimeVersionDrift:
         'Esta máquina roda o runtime {version}, que não é a versão distribuída por este MangoStudio. A conexão continua funcionando; atualize o runtime lá quando possível.',
+      permissions: {
+        title: 'Permissões',
+        profile: {
+          full: 'Completo',
+          readonly: 'Somente leitura',
+          none: 'Nenhum',
+          custom: 'Personalizado',
+        },
+        deniedIntro: 'Negadas nesta máquina:',
+        setupCommand: 'Alterar o consentimento naquela máquina',
+        allowShellHonesty:
+          'allow.shell concede tudo o que um shell alcança — a lista de capacidades abaixo descreve a intenção, não um sandbox.',
+      },
       pairing: {
         title: 'Pareamento',
         description: 'O runtime naquela máquina disca para o MangoStudio com esta credencial.',

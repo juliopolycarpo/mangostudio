@@ -62,9 +62,24 @@ travels as a `cancel` frame and aborts the runtime handler's local `AbortSignal`
 part of the transport-neutral envelope for future streaming and liveness needs.
 
 Protocol errors use stable codes such as `RUNTIME_UNAVAILABLE`, `METHOD_UNSUPPORTED`,
-`PROTOCOL_MISMATCH`, `CANCELLED`, and `TIMEOUT`. Runtime service failures add a typed
-`details.kind`; the API facade translates those details back into its existing tool and
-checkpoint errors.
+`PROTOCOL_MISMATCH`, `CANCELLED`, `TIMEOUT`, and `RUNTIME_DENIED`. Runtime service failures
+add a typed `details.kind`; the API facade translates those details back into its existing
+tool and checkpoint errors.
+
+### Protocol evolution
+
+Additive protocol changes stay on major/minor `1.0` while the wire stays compatible:
+
+- **Tolerant manifest.** Feature keys beyond the original six are optional. An absent value
+  means the peer predates the key and should be treated as granted (`true`) so an older
+  runtime is not silently stripped of tools the hub already trusted.
+- **Open `err.code`.** Unknown error codes narrow to `INTERNAL` on decode so a newer peer
+  that invents a code (for example `RUNTIME_DENIED` before every hub learned it) still
+  produces a decodeable frame. Known codes stay typed.
+- **Hello features from consent.** The runtime derives advertised features from the slot
+  allow set intersected with what is present (shells, git), and may include an optional
+  `profile` field. `runtime.health` exposes the same report mid-session so a consent change
+  can refresh the cached hello manifest without reconnect.
 
 ## Transports
 
@@ -176,16 +191,24 @@ so "not set up yet" is never reported as "no binary there".
 The gate above decides whether a runtime serves at all. `allow` decides what it serves,
 and it is enforced at dispatch: every protocol method names the capabilities it needs
 (`apps/runtime/src/consent-gate.ts`), and a host built from a narrowed `allow` answers the
-ones it lacks with a refusal instead of running them. The table is keyed by `RuntimeMethod`,
-so a new method with no capability decided for it is a type error.
+ones it lacks with `RUNTIME_DENIED` instead of running them. The table is keyed by
+`RuntimeMethod`, so a new method with no capability decided for it is a type error.
 
 A denied method stays registered and refuses, rather than disappearing from the map. An
 absent method comes back as `METHOD_UNSUPPORTED`, which is also what an older runtime says
 about a method it has never heard of — a hub cannot tell those apart, and only one of them
-has a fix. The refusal instead carries `details.kind = "consent_denied"`, the capability
-that was missing, and the `setup` command that grants it. It goes in `details` because
-`RuntimeErrorCodeSchema` is a closed union that an older peer rejects outright, so a new
-top-level code would break the mixed-version pairing the compat window exists to protect.
+has a fix. The refusal carries `RUNTIME_DENIED`, `details.kind = "consent_denied"`, the
+capability that was missing, and the `setup` command that grants it.
+
+The allow set is re-read on every gated call through the consent source, so a mid-connection
+`setup` takes effect without reconnecting.
+
+**Two refusal points.** The runtime is authoritative: every method that needs a denied
+capability answers `RUNTIME_DENIED` even if the hub asked anyway. The hub is cosmetic: it
+withholds tools and install affordances that the connected manifest refuses
+(`runtime-denied` in chat capabilities and install guards) so the UI matches what the
+machine will do. A hub that offered a tool the runtime will refuse would be lying; a hub
+that silently dropped one without naming the machine would be opaque.
 
 Some methods need two capabilities. `library.apply` is a library operation *and* a write to
 somebody's files; `readonly` grants the first and refuses the second, so listing only
