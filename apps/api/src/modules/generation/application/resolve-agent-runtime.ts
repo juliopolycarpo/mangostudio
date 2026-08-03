@@ -75,7 +75,7 @@ export async function resolveAgentRuntime(
   const [savedProviderSettings, toolSettings, mcpServerSnapshots] = await Promise.all([
     getProviderSettings(input.db, input.userId, input.provider),
     listSavedToolSettings(input.db, input.userId),
-    profile.toolsEnabled && input.runtimeManifest.features.mcp
+    profile.toolsEnabled
       ? listMcpBridgeServers(input.db, input.userId, { environmentId: input.environmentId })
       : [],
   ]);

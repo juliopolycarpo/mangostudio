@@ -508,8 +508,16 @@ export class RuntimeConnectionManager {
     if (!client || entry?.status.state !== 'connected') {
       return this.getStatus(userId, environmentId);
     }
+    const revision = entry.revision;
 
     const health = await client.health();
+    if (
+      entry.revision !== revision ||
+      entry.connection?.client !== client ||
+      entry.status.state !== 'connected'
+    ) {
+      return this.getStatus(userId, environmentId);
+    }
     const manifest = capabilityManifestFromHealth(health);
     client.replaceManifest(manifest);
     entry.status = {

@@ -4,6 +4,10 @@ import type {
   EnvironmentConnectionState,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
+import {
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeHealthReport,
+} from '@mangostudio/shared/runtime-home';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
@@ -29,6 +33,25 @@ const TEST_MANIFEST: RuntimeCapabilityManifest = {
     library: false,
     checkpoints: true,
   },
+};
+
+const HEALTH_REPORT: RuntimeHealthReport = {
+  schemaVersion: 1,
+  slot: 'host',
+  source: 'provisioned',
+  runtimeVersion: '0.0.0-test',
+  version: null,
+  binaryPath: null,
+  digest: null,
+  profile: 'full',
+  allow: RUNTIME_CONSENT_PRESETS.full,
+  setup: { state: 'configured' },
+  platform: 'linux',
+  arch: 'x64',
+  homeDir: '/home/test',
+  shells: ['bash'],
+  git: { available: true, version: '2.51.0' },
+  lastError: null,
 };
 
 function definition(transportKind: EnvironmentTransportKind = 'stdio', config: unknown = {}) {
@@ -476,5 +499,37 @@ describe('RuntimeConnectionManager', () => {
     setRuntimeConnectionManagerForTests(manager);
 
     expect(await getRuntimeClient('user-1', 'devbox')).toBe(expected);
+  });
+
+  it('does not restore a released connection after a stale health refresh', async () => {
+    let resolveHealth: ((report: RuntimeHealthReport) => void) | undefined;
+    const healthPromise = new Promise<RuntimeHealthReport>((resolve) => {
+      resolveHealth = resolve;
+    });
+    let replaceCalls = 0;
+    const client = {
+      manifest: TEST_MANIFEST,
+      runtimeVersion: '0.0.0-test',
+      health: () => healthPromise,
+      replaceManifest: () => {
+        replaceCalls += 1;
+      },
+    } as unknown as RuntimeClient;
+
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => Promise.resolve({ client, close: () => undefined }),
+      },
+    });
+
+    await manager.connect('user-1', 'devbox');
+    const refresh = manager.refreshManifest('user-1', 'devbox');
+    manager.disconnect('user-1', 'devbox');
+    resolveHealth?.(HEALTH_REPORT);
+
+    const status = await refresh;
+    expect(status.state).toBe('disconnected');
+    expect(replaceCalls).toBe(0);
   });
 });

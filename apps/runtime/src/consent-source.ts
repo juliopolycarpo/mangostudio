@@ -82,7 +82,7 @@ export function createSlotConsentSource(options: {
       }
 
       const state = await readRuntimeSlotState(slot, env);
-      allow = state.config.allow;
+      allow = state.error ? RUNTIME_CONSENT_PRESETS.none : state.config.allow;
       fingerprint = nextFingerprint ?? 'read';
       return allow;
     },

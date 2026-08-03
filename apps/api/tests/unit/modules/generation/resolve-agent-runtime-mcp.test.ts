@@ -162,7 +162,7 @@ describe('resolveAgentRuntime with MCP tools', () => {
     expect(runtime.toolDefinitions).toEqual([]);
   });
 
-  it('skips MCP listing when the runtime manifest disables mcp', async () => {
+  it('lists MCP snapshots but withholds tools when the runtime manifest disables mcp', async () => {
     const userId = nextUserId();
     await insertServer(userId, 'srv');
     let connectCalls = 0;
@@ -181,10 +181,14 @@ describe('resolveAgentRuntime with MCP tools', () => {
         features: { ...RUNTIME_MANIFEST.features, mcp: false },
       },
       environmentId: LOCAL_ENVIRONMENT_ID,
+      environmentName: 'Local',
     });
 
-    expect(connectCalls).toBe(0);
-    expect(runtime.mcpServerSnapshots).toEqual([]);
+    expect(connectCalls).toBe(1);
+    expect(runtime.mcpServerSnapshots).toHaveLength(1);
+    const denied = runtime.toolCandidates.find((candidate) => candidate.name === 'mcp__srv__ping');
+    expect(denied?.reason).toBe('runtime-denied');
+    expect(denied?.environmentName).toBe('Local');
     expect(runtime.toolDefinitions.map((definition) => definition.name)).not.toContain(
       'mcp__srv__ping'
     );

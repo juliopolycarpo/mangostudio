@@ -48,7 +48,7 @@ export function createLocalRuntimeManifest(
       checkpoints: allow.checkpoints,
       fsRead: allow.fsRead,
       fsWrite: allow.fsWrite,
-      shell: allow.shell && shells.length > 0,
+      shell: allow.shell,
       update: allow.update,
     },
     profile: profileForAllow(allow),

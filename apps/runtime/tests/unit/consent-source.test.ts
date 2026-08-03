@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import { RUNTIME_CONSENT_PRESETS, runtimeSlotConfigPath } from '@mangostudio/shared/runtime-home';
+import { loadRuntimeConfig } from '../../src/config';
 import { createSlotConsentSource, staticConsentSource } from '../../src/consent-source';
 import { writeRuntimeSlotConfig } from '../../src/runtime-home';
 
@@ -68,5 +69,30 @@ describe('createSlotConsentSource', () => {
     // asserting — the returned object identity is not, because the source
     // stores the allow value by value.
     expect(await source.refresh()).toEqual(RUNTIME_CONSENT_PRESETS.full);
+  });
+
+  it('narrows to none when a previously trusted config becomes unreadable', async () => {
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig(
+      'host',
+      { allow: RUNTIME_CONSENT_PRESETS.readonly, profile: 'readonly' },
+      env
+    );
+    const source = createSlotConsentSource({
+      slot: 'host',
+      initial: RUNTIME_CONSENT_PRESETS.readonly,
+      env,
+    });
+
+    expect(await source.refresh()).toEqual(RUNTIME_CONSENT_PRESETS.readonly);
+
+    const path = runtimeSlotConfigPath('host', {
+      mangoHome: loadRuntimeConfig(env).mangoHome,
+      platform: process.platform,
+    });
+    await writeFile(path, '{not-json', 'utf8');
+
+    expect(await source.refresh()).toEqual(RUNTIME_CONSENT_PRESETS.none);
+    expect(source.current()).toEqual(RUNTIME_CONSENT_PRESETS.none);
   });
 });

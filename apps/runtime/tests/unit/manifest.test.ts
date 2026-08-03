@@ -8,7 +8,7 @@ describe('createLocalRuntimeManifest', () => {
     expect(manifest.profile).toBe('full');
     expect(manifest.features.fsRead).toBe(true);
     expect(manifest.features.fsWrite).toBe(true);
-    expect(manifest.features.shell).toBe(manifest.shells.length > 0);
+    expect(manifest.features.shell).toBe(true);
     expect(manifest.features.update).toBe(true);
     expect(manifest.features.tools).toBe(true);
   });
