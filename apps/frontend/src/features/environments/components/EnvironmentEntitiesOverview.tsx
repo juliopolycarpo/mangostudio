@@ -12,6 +12,7 @@ import {
   useEnvironmentEntitiesQuery,
   useRemoveEnvironmentMutation,
   useRuntimeLifecycleQuery,
+  useRuntimeSlotBytesQuery,
   useUpdateEnvironmentMutation,
 } from '../queries';
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
@@ -89,10 +90,9 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
   const [actionError, setActionError] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
   const [removeRuntime, setRemoveRuntime] = useState(false);
-  const lifecycle = useRuntimeLifecycleQuery(
-    environment.id,
-    environment.transportKind === 'wsl' || environment.transportKind === 'ssh'
-  );
+  const removableRuntime =
+    environment.transportKind === 'wsl' || environment.transportKind === 'ssh';
+  const slotBytes = useRuntimeSlotBytesQuery(environment.id, removing && removableRuntime);
   const busy = connect.isPending || disconnect.isPending || update.isPending || remove.isPending;
   const state = environment.status.state;
 
@@ -291,7 +291,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
           onCancel={() => setRemoving(false)}
           onConfirm={() => void removeEnvironment()}
         >
-          {environment.transportKind === 'wsl' || environment.transportKind === 'ssh' ? (
+          {removableRuntime ? (
             <label className="flex items-start gap-2 rounded-xl bg-surface-container-lowest px-3 py-2 text-left text-sm text-on-surface">
               <input
                 type="checkbox"
@@ -301,7 +301,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
               />
               <span>
                 {formatMessage(labels.removeRuntimeBytes, {
-                  bytes: formatSlotBytes(lifecycle.data?.slotBytes ?? null),
+                  bytes: formatSlotBytes(slotBytes.data ?? null),
                 })}
               </span>
             </label>

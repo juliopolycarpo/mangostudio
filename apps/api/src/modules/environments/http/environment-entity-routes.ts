@@ -273,15 +273,20 @@ export function createEnvironmentEntityRoutes(
       )
       .get(
         '/environments/:id/runtime',
-        async ({ params, user, set }) => {
+        async ({ params, query, user, set }) => {
           try {
-            return await lifecycle.getView(user?.id ?? '', params.id);
+            return await lifecycle.getView(user?.id ?? '', params.id, {
+              includeSlotBytes: query.slotBytes === true || query.slotBytes === 'true',
+            });
           } catch (error) {
             return environmentError(error, set);
           }
         },
         {
           params: environmentParams,
+          query: t.Object({
+            slotBytes: t.Optional(t.Union([t.Boolean(), t.Literal('true'), t.Literal('false')])),
+          }),
           response: {
             200: RuntimeLifecycleViewSchema,
             404: ApiErrorResponseSchema,

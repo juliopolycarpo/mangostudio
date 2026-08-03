@@ -45,6 +45,7 @@ export const environmentKeys = {
   all: ['environments'] as const,
   entities: () => [...environmentKeys.all, 'entities'] as const,
   runtimeLifecycle: (id: string) => [...environmentKeys.all, 'runtime-lifecycle', id] as const,
+  runtimeSlotBytes: (id: string) => [...environmentKeys.all, 'runtime-slot-bytes', id] as const,
   runtimes: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...environmentKeys.all, 'runtimes', environmentId] as const,
   versionManagers: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
@@ -247,6 +248,26 @@ export function useRuntimeLifecycleQuery(id: string, enabled = true) {
       const { data, error } = await client.api.environments({ id }).runtime.get();
       if (error) throw new ApiError(error.value);
       return data as RuntimeLifecycleView;
+    },
+  });
+}
+
+/**
+ * One-off byte count for the removal dialog. Unlike the polled lifecycle
+ * query above, a WSL read here boots a stopped distribution, so it is only
+ * fetched while the confirm dialog that needs it is open.
+ */
+export function useRuntimeSlotBytesQuery(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: environmentKeys.runtimeSlotBytes(id),
+    enabled,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data, error } = await client.api
+        .environments({ id })
+        .runtime.get({ query: { slotBytes: true } });
+      if (error) throw new ApiError(error.value);
+      return (data as RuntimeLifecycleView).slotBytes;
     },
   });
 }

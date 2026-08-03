@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RuntimeSlotConfig } from '@mangostudio/shared/runtime-home';
 import {
   createWslProvisioner,
@@ -54,6 +57,8 @@ function harness(
     readonly version?: string;
     /** Bytes at the local build path, standing in for a checkout that built one. */
     readonly localBuild?: Uint8Array | null;
+    /** Overrides the (otherwise fake) cache directory — used for real-fs GC tests. */
+    readonly cacheDirOverride?: (version: string) => string;
   } = {}
 ) {
   const version = options.version ?? VERSION;
@@ -67,7 +72,7 @@ function harness(
   const provisioner = createWslProvisioner({
     version: () => version,
     hubHost: () => 'win-desktop',
-    cacheDir: (cacheVersion) => `/cache/${cacheVersion}`,
+    cacheDir: options.cacheDirOverride ?? ((cacheVersion) => `/cache/${cacheVersion}`),
     localBuildPath: (platformId) => `/repo/.mango/out/${platformId}/mangostudio-runtime`,
     readBytes: (path) => {
       read.push(path);
@@ -444,5 +449,51 @@ describe('WslProvisioner', () => {
     // appear inside a script string where the shell would parse it.
     expect(calls.every((call) => !call.script.includes(hostile))).toBe(true);
     expect(calls.every((call) => !call.script.includes('rm -rf /'))).toBe(true);
+  });
+
+  // Regression: this provisioner's own `loadAsset` writes into the hub cache
+  // but used to never call `pruneRuntimeCache`, so `~/.mango/runtime-cache/`
+  // grew one directory per version forever — the exact "stranded bytes"
+  // problem the removal feature exists to fix, just on the hub side instead
+  // of the distro side. `pruneRuntimeCache` reads/writes the real filesystem
+  // (it is shared with the ssh fetch path), so this test uses a real temp
+  // directory rather than the harness's mocked cache; `writeCache` itself
+  // stays mocked, so the current version's own directory never lands on
+  // disk here — pruning older entries down to one survivor is what proves
+  // the call happened.
+  it('prunes the hub-side download cache after a fresh install', async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), 'mango-wsl-cache-'));
+    try {
+      await mkdir(join(cacheRoot, '0.9.0'), { recursive: true });
+      await mkdir(join(cacheRoot, '0.8.0'), { recursive: true });
+
+      const { provisioner } = harness({ cacheDirOverride: (version) => join(cacheRoot, version) });
+      await provisioner.ensure('Ubuntu');
+
+      // Only the most recent stale entry survives as "previous"; the older
+      // one is pruned. Left unfixed, both (and every future version) pile up.
+      expect(await readdir(cacheRoot)).toEqual(['0.9.0']);
+    } finally {
+      await rm(cacheRoot, { force: true, recursive: true });
+    }
+  });
+
+  it('reports the wsl slot byte size for the removal dialog', async () => {
+    const { provisioner } = harness({
+      respond: (script) => (script.includes('du -sb') ? ok('123456\n') : undefined),
+    });
+
+    await expect(provisioner.slotBytes('Ubuntu')).resolves.toBe(123456);
+  });
+
+  it('reports null when the byte-size probe fails', async () => {
+    const { provisioner } = harness({
+      respond: (script) =>
+        script.includes('du -sb')
+          ? { stdout: '', stderr: 'no such distro', exitCode: 1 }
+          : undefined,
+    });
+
+    await expect(provisioner.slotBytes('Ubuntu')).resolves.toBeNull();
   });
 });

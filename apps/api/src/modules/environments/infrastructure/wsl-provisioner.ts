@@ -34,7 +34,9 @@ import {
   type RuntimeCommandResult,
   RuntimePushError,
   runtimeRemoveSlotBytesScript,
+  runtimeSlotBytesScript,
 } from '../domain/runtime-push';
+import { pruneRuntimeCache } from '../domain/runtime-release-fetch';
 import {
   CONFIG_LOCK_BUSY_EXIT,
   DISTRO_RUNTIME_PATH,
@@ -118,6 +120,13 @@ export interface WslProvisioner {
   ensure(distro: string): Promise<void>;
   /** Removes version dirs and `current`; leaves consent (`runtime.json`) alone. */
   removeSlotBytes(distro: string): Promise<void>;
+  /**
+   * Approximate byte size of the `wsl` slot, for the removal dialog's byte
+   * count. Not called on every card poll — a cold distro boot is too
+   * expensive for that — only when a caller explicitly asks (018/020's
+   * removal confirmation).
+   */
+  slotBytes(distro: string): Promise<number | null>;
 }
 
 export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}): WslProvisioner {
@@ -165,6 +174,12 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
           `Could not remove the runtime from "${distro}": ${describe(result)}`
         );
       }
+    },
+    async slotBytes(distro: string): Promise<number | null> {
+      const result = await deps.runInDistro(distro, runtimeSlotBytesScript('wsl'));
+      if (result.exitCode !== 0) return null;
+      const parsed = Number.parseInt(result.stdout.trim(), 10);
+      return Number.isFinite(parsed) ? parsed : null;
     },
   };
 }
@@ -487,6 +502,9 @@ async function loadAsset(
   // here still provisions, it just pays for the download again next time.
   await deps.writeCache(cachePath, bytes).catch((error: unknown) => {
     logger.warn('cache_write_failed', { path: cachePath, error: String(error) });
+  });
+  await pruneRuntimeCache(deps.cacheDir(version), version).catch((error: unknown) => {
+    logger.warn('cache_prune_failed', { path: deps.cacheDir(version), error: String(error) });
   });
   return bytes;
 }

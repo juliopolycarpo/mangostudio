@@ -14,12 +14,14 @@ import type {
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
+  RUNTIME_BINARY_BASENAME,
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
+  RUNTIME_CURRENT_LINK_NAME,
   type RuntimeCapabilityAllow,
   resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
-import { getVersion } from '../../../lib/config';
+import { getVersion, isDevelopmentVersion } from '../../../lib/config';
 import {
   getRuntimeConnectionManager,
   type RuntimeConnectionManager,
@@ -29,8 +31,11 @@ import { environmentConfigFor } from '../domain/environment-config';
 import { buildRuntimeLifecycleView, healthHasRuntime } from '../domain/runtime-lifecycle-view';
 import {
   pushRuntimeBinary,
+  type RuntimeCommandRunner,
   RuntimePushError,
   runtimeSlotBytesScript,
+  runtimeSlotShellPath,
+  runtimeVersionScript,
 } from '../domain/runtime-push';
 import { loadRuntimeReleaseBytes, RuntimeAssetLoadError } from '../domain/runtime-release-fetch';
 import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
@@ -78,8 +83,22 @@ export class RuntimeLifecycleUnavailableError extends Error {
   }
 }
 
+interface RuntimeLifecycleViewOptions {
+  /**
+   * Reads the slot's byte size for the removal dialog's byte count. Off by
+   * default: a WSL read boots a stopped distribution, which is fine for a
+   * deliberate "how much would removing this free" click but not for the
+   * panel's 15s poll (`docs`: `readSlotBytes`).
+   */
+  readonly includeSlotBytes?: boolean;
+}
+
 export interface RuntimeLifecycleService {
-  getView(userId: string, environmentId: string): Promise<RuntimeLifecycleView>;
+  getView(
+    userId: string,
+    environmentId: string,
+    options?: RuntimeLifecycleViewOptions
+  ): Promise<RuntimeLifecycleView>;
   startInstall(userId: string, environmentId: string): Promise<RuntimeLifecycleStartResponse>;
   startSetup(
     userId: string,
@@ -221,7 +240,7 @@ export function createRuntimeLifecycleService(
   };
 
   return {
-    async getView(userId, environmentId) {
+    async getView(userId, environmentId, options) {
       if (environmentId !== LOCAL_ENVIRONMENT_ID) {
         const record = await environmentRepository.find(userId, environmentId);
         if (!record) {
@@ -249,7 +268,9 @@ export function createRuntimeLifecycleService(
           ? `${cached.health.platform}-${cached.health.arch}`
           : undefined;
 
-      const slotBytes = await readSlotBytes(userId, environmentId, transportKind).catch(() => null);
+      const slotBytes = options?.includeSlotBytes
+        ? await readSlotBytes(userId, environmentId, transportKind, provisioner).catch(() => null)
+        : null;
 
       return buildRuntimeLifecycleView({
         transportKind,
@@ -389,26 +410,8 @@ export function createRuntimeLifecycleService(
       const config = environmentConfigFor('ssh', record.config);
       const runner = createSshCommandRunner(config);
       const allow = resolveSetupAllow(body);
-
-      // Code-defined scripts; values travel as $1. `custom` is not a --profile
-      // value — the CLI derives that name from any non-preset allow set.
-      const result =
-        body.profile === 'custom'
-          ? await runner(
-              'exec "$HOME"/.mango/runtime/remote/current/mangostudio-runtime setup --slot remote --allow "$1" --yes --json',
-              {
-                args: [
-                  RUNTIME_CAPABILITY_KEYS.map(
-                    (key) => `${key}=${allow[key] ? 'true' : 'false'}`
-                  ).join(','),
-                ],
-                timeoutMs: 60_000,
-              }
-            )
-          : await runner(
-              'exec "$HOME"/.mango/runtime/remote/current/mangostudio-runtime setup --slot remote --profile "$1" --yes --json',
-              { args: [body.profile], timeoutMs: 60_000 }
-            );
+      const command = buildSetupCommand(body, allow);
+      const result = await runner(command.script, { args: command.args, timeoutMs: 60_000 });
       if (result.exitCode !== 0) {
         throw new RuntimeLifecycleUnavailableError(
           `Setup on "${config.host}" failed: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
@@ -453,10 +456,45 @@ async function pushOverSsh(
 ): Promise<void> {
   const config = environmentConfigFor('ssh', configUnknown);
   const runner = createSshCommandRunner(config);
+  await pushRuntimeOverSsh(runner, config.host, stream, signal);
+}
+
+/**
+ * The push logic on its own, taking a {@link RuntimeCommandRunner} rather than
+ * building one — lets tests exercise the version short-circuit and the
+ * probe/load/push sequence with a fake runner instead of a real ssh spawn.
+ */
+export async function pushRuntimeOverSsh(
+  runner: RuntimeCommandRunner,
+  host: string,
+  stream: EventBuffer,
+  signal: AbortSignal
+): Promise<void> {
+  const version = getVersion();
+
+  // A published release's bytes never change, so a remote already reporting
+  // this exact version needs nothing pushed — the same "version equality
+  // settles it for a release" fast path the WSL provisioner uses, without
+  // paying for a platform probe or a download first.
+  if (!isDevelopmentVersion(version)) {
+    const current = await runner(runtimeVersionScript('remote'), { timeoutMs: 15_000 }).catch(
+      () => null
+    );
+    if (current && current.exitCode === 0 && current.stdout.trim() === version) {
+      stream.publish({
+        type: 'log',
+        stream: 'system',
+        line: `Runtime on "${host}" already reports version ${version}; nothing to push.`,
+        done: false,
+      });
+      return;
+    }
+  }
+
   const probe = await runner(PLATFORM_PROBE_SCRIPT, { timeoutMs: 30_000 });
   if (probe.exitCode !== 0) {
     throw new RuntimePushError(
-      `Could not probe "${config.host}": ${probe.stderr.trim() || probe.stdout.trim() || `exit ${probe.exitCode}`}`
+      `Could not probe "${host}": ${probe.stderr.trim() || probe.stdout.trim() || `exit ${probe.exitCode}`}`
     );
   }
   const lines = probe.stdout.trim().split(/\r?\n/);
@@ -467,7 +505,7 @@ async function pushOverSsh(
   const platformId = resolveRuntimePlatformId(platformProbe);
   if (!platformId) {
     throw new RuntimePushError(
-      `Could not tell which runtime build "${config.host}" needs (${platformProbe.kernel} ${platformProbe.machine}).`
+      `Could not tell which runtime build "${host}" needs (${platformProbe.kernel} ${platformProbe.machine}).`
     );
   }
 
@@ -485,7 +523,7 @@ async function pushOverSsh(
   await pushRuntimeBinary({
     runner,
     slot: 'remote',
-    version: getVersion(),
+    version,
     bytes: asset.bytes,
     fromArchive: asset.fromArchive,
     timeoutMs: 600_000,
@@ -513,10 +551,46 @@ function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
   ) as RuntimeCapabilityAllow;
 }
 
+/**
+ * The `setup` invocation to run over ssh for a consent submission. Exported
+ * as a pure function so its shape is testable without spawning ssh.
+ *
+ * `custom` is not a `--profile` value the CLI accepts — `setup` requires a
+ * base preset whenever `--yes` is set (`apps/runtime/src/setup.ts`), so
+ * `custom` sends the narrowest preset (`none`) and lets `--allow` override
+ * every key explicitly; the CLI derives the `custom` name itself from the
+ * resulting non-preset allow set.
+ */
+export function buildSetupCommand(
+  body: RuntimeSetupBody,
+  allow: RuntimeCapabilityAllow
+): { readonly script: string; readonly args: readonly string[] } {
+  const remoteBinaryPath = runtimeSlotShellPath(
+    'remote',
+    RUNTIME_CURRENT_LINK_NAME,
+    RUNTIME_BINARY_BASENAME
+  );
+
+  if (body.profile === 'custom') {
+    return {
+      script: `exec ${remoteBinaryPath} setup --slot remote --profile none --allow "$1" --yes --json`,
+      args: [
+        RUNTIME_CAPABILITY_KEYS.map((key) => `${key}=${allow[key] ? 'true' : 'false'}`).join(','),
+      ],
+    };
+  }
+
+  return {
+    script: `exec ${remoteBinaryPath} setup --slot remote --profile "$1" --yes --json`,
+    args: [body.profile],
+  };
+}
+
 async function readSlotBytes(
   userId: string,
   environmentId: string,
-  transportKind: string
+  transportKind: string,
+  provisioner: WslProvisioner
 ): Promise<number | null> {
   if (environmentId === LOCAL_ENVIRONMENT_ID) return null;
   const record = await environmentRepository.find(userId, environmentId);
@@ -532,9 +606,7 @@ async function readSlotBytes(
   }
 
   if (transportKind === 'wsl') {
-    // Slot size for WSL is best-effort; a cold distro boot is too expensive for
-    // every card poll. Prefer health-derived size later; null is honest today.
-    return null;
+    return provisioner.slotBytes(environmentConfigFor('wsl', record.config).distro);
   }
 
   return null;

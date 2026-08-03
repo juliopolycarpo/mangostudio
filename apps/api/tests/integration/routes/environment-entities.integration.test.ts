@@ -72,6 +72,7 @@ function createTestApp(
           provisioner: {
             ensure: async () => undefined,
             removeSlotBytes: async () => undefined,
+            slotBytes: async () => null,
           },
         })
     )
@@ -485,6 +486,7 @@ describe('environment entity routes', () => {
             await Promise.resolve();
           },
           removeSlotBytes: async () => undefined,
+          slotBytes: async () => null,
         },
       })
     );
