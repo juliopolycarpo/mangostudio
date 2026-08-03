@@ -52,6 +52,8 @@ export const DEFAULT_MCP_TIMEOUT_MS = 30_000;
 
 interface QueuedToolCall {
   enqueuedAt: number;
+  /** Whether anything was ahead of this call; a 0 ms wait is not the same fact. */
+  contended: boolean;
   signal?: AbortSignal;
   onAbort: () => void;
   resolve: (slot: ToolCallSlot) => void;
@@ -73,6 +75,7 @@ class ToolCallQueue {
     return new Promise<ToolCallSlot>((resolve, reject) => {
       const entry: QueuedToolCall = {
         enqueuedAt: Date.now(),
+        contended: this.active || this.waiting.length > 0,
         signal,
         onAbort: () => {
           const index = this.waiting.indexOf(entry);
@@ -108,8 +111,7 @@ class ToolCallQueue {
     if (!next) return;
     this.active = true;
     next.signal?.removeEventListener('abort', next.onAbort);
-    const queueWaitMs = Date.now() - next.enqueuedAt;
-    next.resolve(this.createSlot(queueWaitMs > 0, queueWaitMs));
+    next.resolve(this.createSlot(next.contended, Date.now() - next.enqueuedAt));
   }
 }
 
