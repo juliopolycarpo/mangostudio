@@ -255,28 +255,63 @@ export function createMcpService(options: McpServiceOptions): McpService {
     },
 
     callTool(params, context) {
-      const session = requireSession(params.serverId);
       const serverId = params.serverId;
+      // Resolved once up front so a call for a server with no session fails
+      // immediately rather than after waiting out the queue.
+      requireSession(serverId);
+
+      // Abort has to win while this call is still queued behind an earlier
+      // one: an elicitation holds the head until somebody answers it, and a
+      // caller that gave up must not wait for that answer to arrive.
+      const signal = context.signal;
+      let onAbort: (() => void) | undefined;
+      const detachAbort = () => {
+        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+        onAbort = undefined;
+      };
+      const abortWhileQueued = signal
+        ? new Promise<never>((_, reject) => {
+            onAbort = () =>
+              reject(signal.reason ?? new DOMException('The operation was aborted.', 'AbortError'));
+            signal.addEventListener('abort', onAbort, { once: true });
+          })
+        : null;
+
       const previous = callToolChains.get(serverId) ?? Promise.resolve();
-      const run = previous
+      const queued = previous
         .catch(() => undefined)
-        .then(() =>
-          call(session, () =>
+        .then(() => {
+          detachAbort();
+          signal?.throwIfAborted();
+          // Re-read rather than closing over the session resolved above: a
+          // `disconnect` or a reconnect that replaced this server while the
+          // call sat in the queue would otherwise be answered by a handle
+          // that is already closed or superseded.
+          const session = requireSession(serverId);
+          return call(session, () =>
             session.handle.callTool(
               params.toolName,
               { ...params.args },
               {
-                signal: context.signal,
+                signal,
                 ...(params.toolCallId ? { toolCallId: params.toolCallId } : {}),
                 ...(params.timeoutMs !== undefined ? { timeoutMs: params.timeoutMs } : {}),
               }
             )
-          )
-        );
+          );
+        });
+
+      // Both the chain and its cleanup follow the queued work, never the abort
+      // race: a caller that walks away must not release the next call onto one
+      // that is still running.
+      const run = queued.catch(() => undefined);
       callToolChains.set(serverId, run);
-      return run.finally(() => {
+      void run.then(() => {
         if (callToolChains.get(serverId) === run) callToolChains.delete(serverId);
       });
+      return (abortWhileQueued ? Promise.race([queued, abortWhileQueued]) : queued).finally(
+        detachAbort
+      );
     },
 
     async listResources(params) {
