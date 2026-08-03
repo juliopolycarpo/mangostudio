@@ -266,6 +266,21 @@ function errorPayloadFor(error: unknown, signal: AbortSignal): RuntimeErrorPaylo
     };
   }
   if (error instanceof RuntimeServiceError) {
+    if (error.kind === 'consent_denied') {
+      const missing = Array.isArray(error.data.missing)
+        ? error.data.missing.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      return {
+        code: 'RUNTIME_DENIED',
+        message: error.message,
+        details: {
+          kind: error.kind,
+          ...error.data,
+          capability:
+            typeof error.data.capability === 'string' ? error.data.capability : missing[0],
+        },
+      };
+    }
     return {
       code: 'INTERNAL',
       message: error.message,

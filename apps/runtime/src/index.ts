@@ -1,8 +1,15 @@
 export type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 export { RuntimeProtocolClient, type RuntimeRequestOptions } from './client';
+export { CONSENT_DENIED_KIND, RUNTIME_METHOD_CAPABILITIES } from './consent-gate';
+export {
+  createSlotConsentSource,
+  type RuntimeConsentSource,
+  staticConsentSource,
+} from './consent-source';
 export {
   LIBRARY_BACKUP_MISSING_KIND,
   PathAccessError,
+  RuntimeConsentDeniedError,
   RuntimeRemoteError,
   RuntimeServiceError,
   RuntimeToolArgumentError,

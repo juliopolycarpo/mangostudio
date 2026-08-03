@@ -17,6 +17,8 @@ export const RuntimeErrorCodeSchema = Type.Union([
   Type.Literal('CANCELLED'),
   Type.Literal('TIMEOUT'),
   Type.Literal('INTERNAL'),
+  /** The machine's owner has not granted a capability the method needs. */
+  Type.Literal('RUNTIME_DENIED'),
 ]);
 export type RuntimeErrorCode = Static<typeof RuntimeErrorCodeSchema>;
 

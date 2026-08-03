@@ -139,8 +139,9 @@ describe('runtime protocol compatibility', () => {
 
     expect(Value.Check(RuntimeFrameSchema, frame)).toBe(true);
     expect(decodeRuntimeFrameLine(JSON.stringify(frame))).toEqual(frame);
-    expect(narrowRuntimeErrorCode(frame.err.code)).toBe('INTERNAL');
+    expect(narrowRuntimeErrorCode(frame.err.code)).toBe('RUNTIME_DENIED');
     expect(narrowRuntimeErrorCode('TIMEOUT')).toBe('TIMEOUT');
+    expect(narrowRuntimeErrorCode('SOMETHING_FROM_THE_FUTURE')).toBe('INTERNAL');
   });
 
   it('rejects a stale runtime with an actionable typed error', () => {

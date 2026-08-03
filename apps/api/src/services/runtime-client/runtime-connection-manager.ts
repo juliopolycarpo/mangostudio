@@ -1,6 +1,7 @@
 import {
   connectInProcessRuntime,
   createLocalRuntimeHost,
+  createSlotConsentSource,
   type InProcessRuntimeConnection,
   RuntimeRemoteError,
 } from '@mangostudio/runtime';
@@ -541,8 +542,10 @@ async function connectLocalRuntime(
   const [probe] = (await probeRuntimeSlots()).filter((slot) => slot.slot === 'host');
   const host = createLocalRuntimeHost({
     runtimeVersion: version,
-    slot: 'host',
-    ...(probe && !probe.error ? { allow: probe.config.allow } : {}),
+    consent: createSlotConsentSource({
+      slot: 'host',
+      ...(probe && !probe.error ? { initial: probe.config.allow } : {}),
+    }),
   });
   const connection: InProcessRuntimeConnection = await connectInProcessRuntime(host, {
     hubVersion: version,

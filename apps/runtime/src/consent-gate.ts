@@ -14,13 +14,15 @@
  * anyone can act on. So the method stays in the map and answers with the
  * capability it needed and the command that grants it.
  *
- * The refusal travels as a service-error kind inside `details`, which is an
- * open record on the wire. `RuntimeErrorCodeSchema` is a closed union that an
- * older peer rejects outright, so a new top-level code would break exactly the
- * mixed-version pairing the compat window exists to protect.
+ * The allow set is re-read on every call through {@link RuntimeConsentSource},
+ * so a mid-connection `setup` takes effect without reconnecting. The typed wire
+ * code is `RUNTIME_DENIED` (see `errorPayloadFor`); older peers that have not
+ * learned that literal still receive a decodeable frame because the protocol
+ * keeps `err.code` open and narrows unknowns to `INTERNAL`.
  */
 
 import type { RuntimeCapabilityAllow, RuntimeSlot } from '@mangostudio/shared/runtime-home';
+import type { RuntimeConsentSource } from './consent-source';
 import { RuntimeServiceError } from './errors';
 import type { RuntimeMethodHandler } from './host';
 import type { RuntimeMethod } from './methods';
@@ -97,7 +99,7 @@ class RuntimeConsentDeniedError extends RuntimeServiceError {
     super(
       CONSENT_DENIED_KIND,
       `"${method}" is refused: ${because}. Run "mangostudio-runtime setup --slot ${slot}" there to change what a hub may do.`,
-      { method, missing, slot }
+      { method, missing, slot, capability: missing[0] }
     );
     this.name = 'RuntimeConsentDeniedError';
   }
@@ -106,31 +108,27 @@ class RuntimeConsentDeniedError extends RuntimeServiceError {
 /**
  * Wraps a handler map so denied methods refuse before they run.
  *
- * Returns the map untouched when nothing is denied, which is the ordinary case:
- * `host` and `wsl` slots resolve to full consent, so the profile that costs
- * nothing is the one almost every runtime has.
+ * Every method is wrapped: the source re-reads consent on each call, so a map
+ * that looked fully granted at connect can refuse mid-connection after `setup`.
  */
 export function gateHandlersByConsent(
   handlers: ReadonlyMap<string, RuntimeMethodHandler>,
-  allow: RuntimeCapabilityAllow,
-  slot: RuntimeSlot
+  consent: RuntimeConsentSource
 ): ReadonlyMap<string, RuntimeMethodHandler> {
   const gated = new Map<string, RuntimeMethodHandler>();
-  let denied = false;
 
   for (const [method, handle] of handlers) {
-    const missing = missingCapabilities(method, allow);
-    if (missing?.length === 0) {
-      gated.set(method, handle);
-      continue;
-    }
-    denied = true;
-    gated.set(method, () => {
-      throw new RuntimeConsentDeniedError(method, missing ?? [], slot);
+    gated.set(method, async (params, context) => {
+      const allow = await consent.refresh();
+      const missing = missingCapabilities(method, allow);
+      if (missing?.length === 0) {
+        return await handle(params, context);
+      }
+      throw new RuntimeConsentDeniedError(method, missing ?? [], consent.slot);
     });
   }
 
-  return denied ? gated : handlers;
+  return gated;
 }
 
 /**

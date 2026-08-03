@@ -7,6 +7,7 @@ import {
   type RuntimeApplyPatchResult,
   type RuntimeBeforeSnapshot,
   type RuntimeCapabilityManifest,
+  RuntimeConsentDeniedError,
   type RuntimeCreateFileParams,
   type RuntimeCreateFileResult,
   type RuntimeDeleteFileParams,
@@ -432,6 +433,17 @@ function translateRuntimeError(error: unknown): Error {
   if (error.code === 'TIMEOUT') {
     return new ToolExecutionTimedOutError(error.message);
   }
+  if (error.code === 'RUNTIME_DENIED') {
+    const missing = error.details?.missing;
+    return new RuntimeConsentDeniedError(error.message, {
+      capability: detailString(error, 'capability'),
+      method: detailString(error, 'method'),
+      slot: detailString(error, 'slot'),
+      ...(Array.isArray(missing)
+        ? { missing: missing.filter((entry): entry is string => typeof entry === 'string') }
+        : {}),
+    });
+  }
 
   const kind = detailString(error, 'kind');
   const resolvedPath = detailString(error, 'resolvedPath') ?? error.message;
@@ -462,6 +474,13 @@ function translateRuntimeError(error: unknown): Error {
       return withMessage(new RuntimeSnapshotConflictError(resolvedPath), error.message);
     case 'mcp_connection':
       return new McpConnectionError(error.message, { cause: error });
+    case 'consent_denied':
+      // Older peers that still emit INTERNAL + details.kind=consent_denied.
+      return new RuntimeConsentDeniedError(error.message, {
+        capability: detailString(error, 'capability'),
+        method: detailString(error, 'method'),
+        slot: detailString(error, 'slot'),
+      });
     default:
       // `mcp_call` deliberately stays a RuntimeRemoteError: the turn pipeline
       // classifies it from the `mcpFailure` detail the runtime attached, and

@@ -5,6 +5,7 @@ import {
   gateHandlersByConsent,
   RUNTIME_METHOD_CAPABILITIES,
 } from '../../src/consent-gate';
+import { staticConsentSource } from '../../src/consent-source';
 import { RuntimeServiceError } from '../../src/errors';
 import type { RuntimeMethodHandler } from '../../src/host';
 import { createRuntimeMethodHandlers } from '../../src/registry';
@@ -59,16 +60,19 @@ describe('RUNTIME_METHOD_CAPABILITIES', () => {
 });
 
 describe('gateHandlersByConsent', () => {
-  it('returns the map untouched when everything is granted', () => {
-    const map = handlers('fs.read-file', 'shell.run');
-    expect(gateHandlersByConsent(map, RUNTIME_CONSENT_PRESETS.full, 'host')).toBe(map);
+  it('lets every method through when everything is granted', async () => {
+    const gated = gateHandlersByConsent(
+      handlers('fs.read-file', 'shell.run'),
+      staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'host')
+    );
+    expect(await call(gated, 'fs.read-file')).toBe(RAN);
+    expect(await call(gated, 'shell.run')).toBe(RAN);
   });
 
   it('refuses a denied method instead of dropping it from the map', async () => {
     const gated = gateHandlersByConsent(
       handlers('fs.read-file', 'shell.run'),
-      RUNTIME_CONSENT_PRESETS.readonly,
-      'remote'
+      staticConsentSource(RUNTIME_CONSENT_PRESETS.readonly, 'remote')
     );
 
     // Still registered: an absent method answers METHOD_UNSUPPORTED, which is
@@ -81,19 +85,17 @@ describe('gateHandlersByConsent', () => {
   it('names the capability, the slot, and the command that grants it', async () => {
     const gated = gateHandlersByConsent(
       handlers('shell.run'),
-      RUNTIME_CONSENT_PRESETS.readonly,
-      'wsl'
+      staticConsentSource(RUNTIME_CONSENT_PRESETS.readonly, 'wsl')
     );
 
     const error = await call(gated, 'shell.run').catch((thrown: unknown) => thrown);
     expect(error).toBeInstanceOf(RuntimeServiceError);
-    // The kind travels in `details`, an open record, rather than as a new
-    // top-level error code the closed union would make an older peer reject.
     expect((error as RuntimeServiceError).kind).toBe(CONSENT_DENIED_KIND);
     expect((error as RuntimeServiceError).message).toContain('setup --slot wsl');
     expect((error as RuntimeServiceError).data).toMatchObject({
       method: 'shell.run',
       missing: ['shell'],
+      capability: 'shell',
     });
   });
 
@@ -102,8 +104,7 @@ describe('gateHandlersByConsent', () => {
     // does not.
     const gated = gateHandlersByConsent(
       handlers('library.scan', 'library.apply'),
-      RUNTIME_CONSENT_PRESETS.readonly,
-      'host'
+      staticConsentSource(RUNTIME_CONSENT_PRESETS.readonly, 'host')
     );
 
     expect(await call(gated, 'library.scan')).toBe(RAN);
@@ -113,8 +114,7 @@ describe('gateHandlersByConsent', () => {
   it('refuses everything under the none profile', async () => {
     const gated = gateHandlersByConsent(
       handlers('fs.read-file', 'shell.run', 'library.scan', 'probing.runtimes'),
-      RUNTIME_CONSENT_PRESETS.none,
-      'remote'
+      staticConsentSource(RUNTIME_CONSENT_PRESETS.none, 'remote')
     );
 
     for (const method of gated.keys()) {
@@ -125,8 +125,7 @@ describe('gateHandlersByConsent', () => {
   it('refuses a method it has never heard of rather than waving it through', async () => {
     const gated = gateHandlersByConsent(
       handlers('something.new'),
-      RUNTIME_CONSENT_PRESETS.readonly,
-      'host'
+      staticConsentSource(RUNTIME_CONSENT_PRESETS.readonly, 'host')
     );
 
     // Reached only if a handler is registered under a name the protocol does
@@ -134,5 +133,19 @@ describe('gateHandlersByConsent', () => {
     // gate stops being one — and the refusal says that, rather than blaming a
     // capability that had nothing to do with it.
     await expect(call(gated, 'something.new')).rejects.toThrow(/no capability governs it/);
+  });
+
+  it('re-reads consent on every call so a mid-connection setup takes effect', async () => {
+    let allow = { ...RUNTIME_CONSENT_PRESETS.full };
+    const consent = {
+      slot: 'host' as const,
+      current: () => allow,
+      refresh: async () => allow,
+    };
+    const gated = gateHandlersByConsent(handlers('shell.run'), consent);
+
+    expect(await call(gated, 'shell.run')).toBe(RAN);
+    allow = { ...allow, shell: false };
+    await expect(call(gated, 'shell.run')).rejects.toThrow(/has not granted shell/);
   });
 });
