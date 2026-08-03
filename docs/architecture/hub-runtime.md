@@ -78,8 +78,18 @@ Additive protocol changes stay on major/minor `1.0` while the wire stays compati
   produces a decodeable frame. Known codes stay typed.
 - **Hello features from consent.** The runtime derives advertised features from the slot
   allow set intersected with what is present (shells, git), and may include an optional
-  `profile` field. `runtime.health` exposes the same report mid-session so a consent change
-  can refresh the cached hello manifest without reconnect.
+  `profile` field and the pre-intersection `allow` set. `features` alone cannot separate
+  "the owner refused this" from "the machine does not have it" — `git` is false either way
+  — so a surface that reports refusals reads `allow` and treats its absence (an older peer)
+  as "cannot tell", never as a refusal.
+- **Refreshing the cached manifest.** `runtime.health` exposes the same report mid-session.
+  Consent is answered on the machine, so the hub has nothing to invalidate on: reading an
+  environment re-asks in the background when the cached manifest is older than the
+  freshness window, and publishes an invalidation only when the answer actually moved.
+  Without it the card shows the profile the runtime had at connect until someone
+  reconnects. An unreadable config answers `none` here for the same reason the dispatch
+  gate does — the report is what the hub caches, so it must not advertise what every call
+  will refuse.
 
 ## Transports
 
