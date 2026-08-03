@@ -11,7 +11,8 @@
  * machine at once, and a reader must never see a half-written config.
  */
 
-import { chmod, mkdir, open, readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
   type ResolvedRuntimeSlotConfig,
@@ -50,6 +51,12 @@ const OWNER_ONLY = 0o600;
 /** How long a writer waits for another process before failing the lock. */
 const SLOT_LOCK_TIMEOUT_MS = 5_000;
 const SLOT_LOCK_POLL_MS = 25;
+/**
+ * When a lock whose owner cannot be identified counts as abandoned. Every
+ * holder writes one small document, so this is orders of magnitude past any
+ * honest hold; it only ever applies when the pid check cannot.
+ */
+const SLOT_LOCK_STALE_MS = 60_000;
 
 interface RuntimeSlotCredentials {
   readonly schemaVersion: 1;
@@ -337,6 +344,13 @@ async function readCredentials(
  * two interleave: `connect` and `serve` share one credentials.json, and `setup`
  * and an installer share one runtime.json. Each file gets its own lock, so a
  * credential rotation never waits behind a consent write.
+ *
+ * The lock is only removed by the `finally` below, so a holder that is killed —
+ * a SIGKILL, a lost machine, a container torn down mid-write — leaves the file
+ * behind and every later writer would wait out the timeout forever. Since
+ * consent writes now go through here, that would mean a slot nobody can repair
+ * without deleting a file they have no reason to know about. So a lock names
+ * its owner and is reclaimed when that owner is provably gone.
  */
 async function withSlotLock<T>(
   slot: RuntimeSlot,
@@ -353,6 +367,7 @@ async function withSlotLock<T>(
     try {
       const handle = await open(lockPath, 'wx');
       try {
+        await handle.write(JSON.stringify({ pid: process.pid, host: hostname() }));
         return await run();
       } finally {
         await handle.close().catch(() => undefined);
@@ -361,11 +376,58 @@ async function withSlotLock<T>(
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EEXIST') throw error;
+      if (await reclaimAbandonedLock(lockPath)) continue;
       if (Date.now() >= deadline) {
         throw new Error(`Timed out waiting for the runtime slot lock at ${lockPath}.`);
       }
       await sleepMs(SLOT_LOCK_POLL_MS);
     }
+  }
+}
+
+/**
+ * Removes a lock whose owner is gone, and says whether it did.
+ *
+ * Two questions, because neither alone is sound. A dead pid is the fast answer,
+ * but a pid means nothing unless it was recorded on this machine — a runtime
+ * home can sit on a mounted share — so it is only trusted when the hostnames
+ * agree. Age covers the rest, including a lock whose owner's pid has since been
+ * handed to something unrelated: every holder does one small write, so a lock
+ * that has survived far longer than any of them could is a leftover.
+ *
+ * Racing to reclaim is safe. Both callers unlink and both retry `wx`; exactly
+ * one of them creates the file, which is what the lock is.
+ */
+async function reclaimAbandonedLock(lockPath: string): Promise<boolean> {
+  let owner: { readonly pid?: number; readonly host?: string } = {};
+  let age = 0;
+  try {
+    const [raw, stats] = await Promise.all([readFile(lockPath, 'utf8'), stat(lockPath)]);
+    age = Date.now() - stats.mtimeMs;
+    // An empty file is a holder between `open` and its first write, not a
+    // leftover; a parse failure lands on the same answer as no owner at all.
+    owner = raw ? (JSON.parse(raw) as typeof owner) : {};
+  } catch {
+    // Gone already, or unreadable: either way this process has nothing to
+    // reclaim, and the caller retries the create.
+    return false;
+  }
+
+  const ownedHere = owner.host === hostname() && typeof owner.pid === 'number';
+  const abandoned = ownedHere ? !isProcessAlive(owner.pid as number) : age > SLOT_LOCK_STALE_MS;
+  if (!abandoned) return false;
+
+  await unlink(lockPath).catch(() => undefined);
+  return true;
+}
+
+/** Signal 0 tests for existence; `EPERM` means it exists and is not ours. */
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
   }
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
@@ -27,6 +27,13 @@ async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   const home = await mkdtemp(join(tmpdir(), 'mango-runtime-home-'));
   homes.push(home);
   return { MANGO_HOME: home };
+}
+
+/** A pid that certainly belongs to nothing: a process this test watched exit. */
+async function deadPid(): Promise<number> {
+  const child = Bun.spawn(['sh', '-c', 'exit 0'], { stdout: 'ignore', stderr: 'ignore' });
+  await child.exited;
+  return child.pid;
 }
 
 async function writeRawConfig(
@@ -239,6 +246,41 @@ describe('runtime home', () => {
     const config = await readRuntimeSlotConfig('wsl', env);
     expect(config.profile).toBe('readonly');
     expect(config.version).toBe('0.1.2');
+  });
+
+  it('reclaims a lock whose owner was killed before it could clean up', async () => {
+    const env = await isolatedEnv();
+    const directory = runtimeSlotDir('host', env);
+    await mkdir(directory, { recursive: true });
+    // What a SIGKILL mid-write leaves: a lock naming a process on this machine
+    // that no longer exists. Without reclaiming it, every later write to this
+    // slot times out and nobody can answer the consent question again.
+    await writeFile(
+      join(directory, 'runtime.lock'),
+      JSON.stringify({ pid: await deadPid(), host: hostname() })
+    );
+
+    await writeRuntimeSlotConfig('host', { version: '0.1.3' }, env);
+    expect((await readRuntimeSlotConfig('host', env)).version).toBe('0.1.3');
+  });
+
+  it('waits for a lock whose owner is still running instead of stealing it', async () => {
+    const env = await isolatedEnv();
+    const directory = runtimeSlotDir('host', env);
+    await mkdir(directory, { recursive: true });
+    const lock = join(directory, 'runtime.lock');
+    // A live owner on this machine, which is what reclaiming must never touch:
+    // stealing a held lock trades a slot nobody can write for one two writers
+    // corrupt.
+    await writeFile(lock, JSON.stringify({ pid: process.pid, host: hostname() }));
+
+    const write = writeRuntimeSlotConfig('host', { version: '0.1.4' }, env);
+    await Bun.sleep(100);
+    expect(await Bun.file(join(directory, 'runtime.json')).exists()).toBe(false);
+
+    await rm(lock);
+    await write;
+    expect((await readRuntimeSlotConfig('host', env)).version).toBe('0.1.4');
   });
 });
 
