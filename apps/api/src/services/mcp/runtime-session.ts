@@ -261,7 +261,7 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
       return [...result.tools];
     },
 
-    callTool(name, args, callOptions) {
+    async callTool(name, args, callOptions) {
       const toolCallId = callOptions?.toolCallId?.trim();
       const signal = callOptions?.signal;
       signal?.throwIfAborted();
@@ -270,7 +270,16 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
       // (elicitation holds the head of the queue). Without the race, abort
       // sits behind the blocked head and deadlocks the caller that needs to
       // answer that elicitation before the queue can move.
+      //
+      // The race is only for the wait. Once the call reaches the runtime the
+      // signal travels with it, and short-circuiting there would hand the
+      // caller an abort while the request was still unwinding — and while
+      // `activeCalls` still held the entry an elicitation routes through.
       let onAbort: (() => void) | undefined;
+      const detachAbort = () => {
+        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+        onAbort = undefined;
+      };
       const abortWhileQueued =
         signal === undefined
           ? null
@@ -287,6 +296,7 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
       const queued = previous
         .catch(() => undefined)
         .then(async () => {
+          detachAbort();
           signal?.throwIfAborted();
           if (toolCallId) activeCalls.set(toolCallId, signal);
           try {
@@ -313,9 +323,7 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
       // Keep the chain moving even when this call loses to abortWhileQueued.
       callToolChain = queued.catch(() => undefined);
       const run = abortWhileQueued ? Promise.race([queued, abortWhileQueued]) : queued;
-      return run.finally(() => {
-        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
-      });
+      return await run.finally(detachAbort);
     },
 
     async listResources(callOptions) {
