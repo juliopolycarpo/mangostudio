@@ -9,6 +9,8 @@ import {
   filterBinaryTargets,
   platformArchiveLayout,
   releaseArchiveFileName,
+  releaseRawHubBinaryFileName,
+  releaseRawRuntimeBinaryFileName,
   runtimeBinaryName,
 } from './release-targets';
 
@@ -39,11 +41,19 @@ export interface FrontendArchivePlan {
   readonly archivePath: string;
 }
 
+/** Uncompressed hub or runtime binary copied beside the platform archive. */
+interface RawBinaryAssetPlan {
+  readonly sourcePath: string;
+  readonly assetName: string;
+  readonly assetPath: string;
+}
+
 export interface ReleaseAssetPlan {
   readonly rootDir: string;
   readonly outDir: string;
   readonly assetsDir: string;
   readonly platformArchives: readonly PlatformArchivePlan[];
+  readonly rawBinaries: readonly RawBinaryAssetPlan[];
   readonly frontendArchive: FrontendArchivePlan;
   readonly checksummedAssetPaths: readonly string[];
   readonly checksumPath: string;
@@ -63,9 +73,13 @@ export function createReleaseAssetPlan(options: ReleaseAssetPlanOptions): Releas
   const platformArchives = targets.map((target) =>
     createPlatformArchivePlan(target, options.version, outDir, assetsDir)
   );
+  const rawBinaries = platformArchives.flatMap((archive) =>
+    createRawBinaryPlans(archive, options.version, assetsDir)
+  );
   const frontendArchive = createFrontendArchivePlan(rootDir, options.version, assetsDir);
   const checksummedAssetPaths = [
     ...platformArchives.map((asset) => asset.archivePath),
+    ...rawBinaries.map((asset) => asset.assetPath),
     frontendArchive.archivePath,
   ];
 
@@ -74,6 +88,7 @@ export function createReleaseAssetPlan(options: ReleaseAssetPlanOptions): Releas
     outDir,
     assetsDir,
     platformArchives,
+    rawBinaries,
     frontendArchive,
     checksummedAssetPaths,
     checksumPath: join(assetsDir, 'SHA256SUMS'),
@@ -98,6 +113,27 @@ function createPlatformArchivePlan(
     assetName,
     archivePath: join(assetsDir, assetName),
   };
+}
+
+function createRawBinaryPlans(
+  archive: PlatformArchivePlan,
+  version: string,
+  assetsDir: string
+): readonly RawBinaryAssetPlan[] {
+  const hubName = releaseRawHubBinaryFileName(version, archive.platform);
+  const runtimeName = releaseRawRuntimeBinaryFileName(version, archive.platform);
+  return [
+    {
+      sourcePath: archive.binaryPath,
+      assetName: hubName,
+      assetPath: join(assetsDir, hubName),
+    },
+    {
+      sourcePath: archive.runtimeBinaryPath,
+      assetName: runtimeName,
+      assetPath: join(assetsDir, runtimeName),
+    },
+  ];
 }
 
 /**

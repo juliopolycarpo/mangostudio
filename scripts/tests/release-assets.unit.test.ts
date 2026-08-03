@@ -6,6 +6,8 @@ import {
   ALL_BINARY_TARGETS,
   filterBinaryTargets,
   releaseArchiveFileName,
+  releaseRawHubBinaryFileName,
+  releaseRawRuntimeBinaryFileName,
 } from '../lib/release-targets';
 
 describe('release targets', () => {
@@ -40,8 +42,24 @@ describe('releaseArchiveFileName', () => {
   });
 });
 
+describe('releaseRawBinaryFileName', () => {
+  test('names raw hub and runtime assets without colliding with archives', () => {
+    const linux = filterBinaryTargets('linux-x64')[0];
+    const windows = filterBinaryTargets('windows-x64')[0];
+
+    expect(releaseRawHubBinaryFileName('1.2.3', linux)).toBe('mangostudio-1.2.3-linux-x64');
+    expect(releaseRawRuntimeBinaryFileName('1.2.3', linux)).toBe(
+      'mangostudio-runtime-1.2.3-linux-x64'
+    );
+    expect(releaseRawHubBinaryFileName('1.2.3', windows)).toBe('mangostudio-1.2.3-windows-x64.exe');
+    expect(releaseRawRuntimeBinaryFileName('1.2.3', windows)).toBe(
+      'mangostudio-runtime-1.2.3-windows-x64.exe'
+    );
+  });
+});
+
 describe('createReleaseAssetPlan', () => {
-  test('plans flat platform archives, frontend dist, and SHA256SUMS', () => {
+  test('plans flat platform archives, raw binaries, frontend dist, and SHA256SUMS', () => {
     const plan = createReleaseAssetPlan({ version: '1.2.3', rootDir: '/repo' });
 
     expect(plan.platformArchives.map((asset) => asset.assetName)).toEqual([
@@ -54,10 +72,35 @@ describe('createReleaseAssetPlan', () => {
       'mangostudio-1.2.3-linux-x64-musl.tar.gz',
       'mangostudio-1.2.3-linux-arm64-musl.tar.gz',
     ]);
+    expect(plan.rawBinaries).toHaveLength(16);
+    expect(plan.rawBinaries.map((asset) => asset.assetName)).toEqual([
+      'mangostudio-1.2.3-linux-x64',
+      'mangostudio-runtime-1.2.3-linux-x64',
+      'mangostudio-1.2.3-linux-arm64',
+      'mangostudio-runtime-1.2.3-linux-arm64',
+      'mangostudio-1.2.3-windows-x64.exe',
+      'mangostudio-runtime-1.2.3-windows-x64.exe',
+      'mangostudio-1.2.3-windows-arm64.exe',
+      'mangostudio-runtime-1.2.3-windows-arm64.exe',
+      'mangostudio-1.2.3-darwin-x64',
+      'mangostudio-runtime-1.2.3-darwin-x64',
+      'mangostudio-1.2.3-darwin-arm64',
+      'mangostudio-runtime-1.2.3-darwin-arm64',
+      'mangostudio-1.2.3-linux-x64-musl',
+      'mangostudio-runtime-1.2.3-linux-x64-musl',
+      'mangostudio-1.2.3-linux-arm64-musl',
+      'mangostudio-runtime-1.2.3-linux-arm64-musl',
+    ]);
+    expect(
+      plan.rawBinaries.every(
+        (asset) => asset.assetName.endsWith('.exe') === asset.assetName.includes('windows')
+      )
+    ).toBe(true);
     expect(plan.frontendArchive.assetName).toBe('mangostudio-1.2.3-frontend-dist.tar.gz');
     expect(plan.checksumPath).toBe(join('/repo', 'release-assets', 'SHA256SUMS'));
     expect(plan.checksummedAssetPaths.map((assetPath) => basename(assetPath))).toEqual([
       ...plan.platformArchives.map((asset) => asset.assetName),
+      ...plan.rawBinaries.map((asset) => asset.assetName),
       'mangostudio-1.2.3-frontend-dist.tar.gz',
     ]);
   });
@@ -77,6 +120,18 @@ describe('createReleaseAssetPlan', () => {
       join('/repo', '.mango', 'out', 'linux-x64', 'cursor-sidecar')
     );
     expect(archive.readmePath).toBe(join('/repo', '.mango', 'out', 'README.md'));
+    expect(plan.rawBinaries).toEqual([
+      {
+        sourcePath: join('/repo', '.mango', 'out', 'linux-x64', 'mangostudio'),
+        assetName: 'mangostudio-1.2.3-linux-x64',
+        assetPath: join('/repo', 'release-assets', 'mangostudio-1.2.3-linux-x64'),
+      },
+      {
+        sourcePath: join('/repo', '.mango', 'out', 'linux-x64', 'mangostudio-runtime'),
+        assetName: 'mangostudio-runtime-1.2.3-linux-x64',
+        assetPath: join('/repo', 'release-assets', 'mangostudio-runtime-1.2.3-linux-x64'),
+      },
+    ]);
   });
 
   test('rejects unknown platform filters', () => {
