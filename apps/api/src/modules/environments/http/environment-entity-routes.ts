@@ -153,9 +153,11 @@ export function createEnvironmentEntityRoutes(
       )
       .delete(
         '/environments/:id',
-        async ({ params, user, set }) => {
+        async ({ params, query, user, set }) => {
           try {
-            await service.remove(user?.id ?? '', params.id);
+            await service.remove(user?.id ?? '', params.id, {
+              removeRuntime: query.removeRuntime === true || query.removeRuntime === 'true',
+            });
             return { success: true as const };
           } catch (error) {
             return environmentError(error, set);
@@ -163,10 +165,16 @@ export function createEnvironmentEntityRoutes(
         },
         {
           params: environmentParams,
+          query: t.Object({
+            removeRuntime: t.Optional(
+              t.Union([t.Boolean(), t.Literal('true'), t.Literal('false')])
+            ),
+          }),
           response: {
             200: t.Object({ success: t.Literal(true) }),
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )

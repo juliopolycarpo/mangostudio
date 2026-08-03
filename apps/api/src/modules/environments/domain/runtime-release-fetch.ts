@@ -5,7 +5,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
@@ -127,7 +127,34 @@ async function loadAsset(
     );
   }
   await writeCache(cachePath, bytes).catch(() => undefined);
+  await pruneRuntimeCache(cacheDir(version), version).catch(() => undefined);
   return bytes;
+}
+
+/**
+ * Keeps the hub cache at current + previous version directories only — same rule
+ * as slot version GC in {@link pushRuntimeBinary}.
+ */
+export async function pruneRuntimeCache(
+  currentVersionDir: string,
+  currentVersion: string
+): Promise<void> {
+  const cacheRoot = dirname(currentVersionDir);
+  let entries: string[];
+  try {
+    entries = await readdir(cacheRoot);
+  } catch {
+    return;
+  }
+
+  const others = entries
+    .filter((name) => name !== currentVersion)
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  const keepPrevious = others[0];
+  for (const name of others) {
+    if (name === keepPrevious) continue;
+    await rm(join(cacheRoot, name), { force: true, recursive: true }).catch(() => undefined);
+  }
 }
 
 async function fetchExpectedChecksum(

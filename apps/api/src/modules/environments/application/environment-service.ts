@@ -17,12 +17,15 @@ import {
 } from '../../../services/runtime-client/runtime-token-secrets';
 import type { SecretStore } from '../../../services/secret-store/store';
 import { bunSecretStore } from '../../../services/secret-store/store';
-import { assertEnvironmentConfig } from '../domain/environment-config';
+import { assertEnvironmentConfig, environmentConfigFor } from '../domain/environment-config';
+import { runtimeRemoveSlotBytesScript } from '../domain/runtime-push';
 import {
   type EnvironmentRecord,
   type EnvironmentRepository,
   environmentRepository,
 } from '../infrastructure/environment-repository';
+import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
+import { wslProvisioner } from '../infrastructure/wsl-provisioner';
 
 export class EnvironmentServiceError extends Error {
   constructor(
@@ -44,7 +47,7 @@ export interface EnvironmentService {
   find(userId: string, id: string): Promise<Environment | null>;
   create(userId: string, input: CreateEnvironmentBody): Promise<Environment>;
   update(userId: string, id: string, input: UpdateEnvironmentBody): Promise<Environment>;
-  remove(userId: string, id: string): Promise<void>;
+  remove(userId: string, id: string, options?: { readonly removeRuntime?: boolean }): Promise<void>;
   connect(userId: string, id: string): Promise<Environment>;
   disconnect(userId: string, id: string): Promise<Environment>;
 }
@@ -243,10 +246,44 @@ export function createEnvironmentService(
       return await toEnvironment(updated, manager, secretStore);
     },
 
-    async remove(userId, id) {
+    async remove(userId, id, options = {}) {
       if (id === LOCAL_ENVIRONMENT_ID) {
         throw new EnvironmentServiceError('The Local environment cannot be removed.', 409);
       }
+      const existing = await repository.find(userId, id);
+      if (!existing) {
+        throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
+      }
+
+      // Disconnect before removing remote bytes so a live spawn is not holding
+      // the binary we are about to delete.
+      manager.disconnect(userId, id);
+
+      if (options.removeRuntime) {
+        try {
+          if (existing.transportKind === 'wsl') {
+            const config = environmentConfigFor('wsl', existing.config);
+            await wslProvisioner.removeSlotBytes(config.distro);
+          } else if (existing.transportKind === 'ssh') {
+            const config = environmentConfigFor('ssh', existing.config);
+            const runner = createSshCommandRunner(config);
+            const result = await runner(runtimeRemoveSlotBytesScript('remote'));
+            if (result.exitCode !== 0) {
+              throw new EnvironmentServiceError(
+                `Could not remove the runtime from "${config.host}": ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
+                503
+              );
+            }
+          }
+        } catch (error) {
+          if (error instanceof EnvironmentServiceError) throw error;
+          throw new EnvironmentServiceError(
+            error instanceof Error ? error.message : String(error),
+            503
+          );
+        }
+      }
+
       const result = await repository.remove(userId, id);
       if (result === 'referenced') {
         throw new EnvironmentServiceError(
@@ -257,7 +294,6 @@ export function createEnvironmentService(
       if (result === 'missing') {
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
-      manager.disconnect(userId, id);
       await removeRuntimeToken(userId, id, secretStore);
       publish(userId);
     },

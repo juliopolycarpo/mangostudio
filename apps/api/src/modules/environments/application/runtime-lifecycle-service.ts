@@ -27,7 +27,11 @@ import {
 import { generateId } from '../../../utils/id';
 import { environmentConfigFor } from '../domain/environment-config';
 import { buildRuntimeLifecycleView, healthHasRuntime } from '../domain/runtime-lifecycle-view';
-import { pushRuntimeBinary, RuntimePushError } from '../domain/runtime-push';
+import {
+  pushRuntimeBinary,
+  RuntimePushError,
+  runtimeSlotBytesScript,
+} from '../domain/runtime-push';
 import { loadRuntimeReleaseBytes, RuntimeAssetLoadError } from '../domain/runtime-release-fetch';
 import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
 import { environmentRepository } from '../infrastructure/environment-repository';
@@ -245,6 +249,8 @@ export function createRuntimeLifecycleService(
           ? `${cached.health.platform}-${cached.health.arch}`
           : undefined;
 
+      const slotBytes = await readSlotBytes(userId, environmentId, transportKind).catch(() => null);
+
       return buildRuntimeLifecycleView({
         transportKind,
         health: cached?.health ?? null,
@@ -252,6 +258,7 @@ export function createRuntimeLifecycleService(
         connected: status.state === 'connected',
         nowMs: now(),
         platformHint,
+        slotBytes,
       });
     },
 
@@ -504,4 +511,31 @@ function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
   return Object.fromEntries(
     RUNTIME_CAPABILITY_KEYS.map((key) => [key, body.allow?.[key] ?? base[key]])
   ) as RuntimeCapabilityAllow;
+}
+
+async function readSlotBytes(
+  userId: string,
+  environmentId: string,
+  transportKind: string
+): Promise<number | null> {
+  if (environmentId === LOCAL_ENVIRONMENT_ID) return null;
+  const record = await environmentRepository.find(userId, environmentId);
+  if (!record) return null;
+
+  if (transportKind === 'ssh') {
+    const config = environmentConfigFor('ssh', record.config);
+    const runner = createSshCommandRunner(config);
+    const result = await runner(runtimeSlotBytesScript('remote'), { timeoutMs: 15_000 });
+    if (result.exitCode !== 0) return null;
+    const parsed = Number.parseInt(result.stdout.trim(), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (transportKind === 'wsl') {
+    // Slot size for WSL is best-effort; a cold distro boot is too expensive for
+    // every card poll. Prefer health-derived size later; null is honest today.
+    return null;
+  }
+
+  return null;
 }

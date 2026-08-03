@@ -116,6 +116,34 @@ export function runtimeVersionScript(slot: RuntimeSlot): string {
   return `exec ${currentBinary} --version`;
 }
 
+/**
+ * Removes version directories and the `current` link from a slot, leaving
+ * `runtime.json` (and lock/credentials) so consent survives reinstall.
+ */
+export function runtimeRemoveSlotBytesScript(slot: RuntimeSlot): string {
+  const slotDir = runtimeSlotShellPath(slot);
+  return (
+    'set -e; ' +
+    `for d in ${slotDir}/*; do ` +
+    '[ -e "$d" ] || continue; ' +
+    'base=$(basename "$d"); ' +
+    'case "$base" in runtime.json|runtime.lock|credentials.json) continue ;; esac; ' +
+    'rm -rf "$d"; ' +
+    'done'
+  );
+}
+
+/**
+ * Reports approximate byte size of version dirs in the slot (excludes config).
+ */
+export function runtimeSlotBytesScript(slot: RuntimeSlot): string {
+  const slotDir = runtimeSlotShellPath(slot);
+  return (
+    `du -sb ${slotDir} 2>/dev/null | awk '{print $1}' || ` +
+    `du -sk ${slotDir} 2>/dev/null | awk '{print $1*1024}' || echo 0`
+  );
+}
+
 export class RuntimePushError extends Error {
   constructor(message: string) {
     super(message);

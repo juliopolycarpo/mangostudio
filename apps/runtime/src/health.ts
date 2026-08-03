@@ -152,6 +152,20 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
       'workspace entry (source checkout) — this runtime is not a compiled binary',
   });
 
+  if (report.binaryPath) {
+    findings.push({
+      severity: 'ok',
+      title: 'Slot',
+      detail: `bytes under ${report.slot} at ${report.binaryPath}`,
+    });
+  } else if (report.version) {
+    findings.push({
+      severity: 'warn',
+      title: 'Slot',
+      detail: `config records version ${report.version} but no binary path is set`,
+    });
+  }
+
   return findings;
 }
 

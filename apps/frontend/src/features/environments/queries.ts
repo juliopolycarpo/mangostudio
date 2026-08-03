@@ -169,12 +169,14 @@ export function useDisconnectEnvironmentMutation() {
 export function useRemoveEnvironmentMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { data, error } = await client.api.environments({ id }).delete();
+    mutationFn: async ({ id, removeRuntime = false }: { id: string; removeRuntime?: boolean }) => {
+      const { data, error } = await client.api.environments({ id }).delete({
+        query: removeRuntime ? { removeRuntime: true } : {},
+      });
       if (error) throw new ApiError(error.value);
       return data;
     },
-    onSuccess: (_, id) => {
+    onSuccess: (_, { id }) => {
       queryClient.setQueryData<Environment[]>(environmentKeys.entities(), (current) =>
         current?.filter((environment) => environment.id !== id)
       );

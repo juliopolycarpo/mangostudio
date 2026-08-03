@@ -2,6 +2,7 @@ import type { Environment, EnvironmentConnectionState } from '@mangostudio/share
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { Cable, Check, Pencil, Plus, Server, Trash2, Unplug, X } from 'lucide-react';
 import { useState } from 'react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -86,6 +87,12 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(environment.name);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeRuntime, setRemoveRuntime] = useState(false);
+  const lifecycle = useRuntimeLifecycleQuery(
+    environment.id,
+    environment.transportKind === 'wsl' || environment.transportKind === 'ssh'
+  );
   const busy = connect.isPending || disconnect.isPending || update.isPending || remove.isPending;
   const state = environment.status.state;
 
@@ -124,12 +131,10 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
   };
 
   const removeEnvironment = async () => {
-    if (!window.confirm(formatMessage(labels.removeConfirm, { name: environment.name }))) {
-      return;
-    }
     setActionError(null);
     try {
-      await remove.mutateAsync(environment.id);
+      await remove.mutateAsync({ id: environment.id, removeRuntime });
+      setRemoving(false);
     } catch (error) {
       setActionError(resolveApiErrorMessage(error, labels.removeFailed));
     }
@@ -260,7 +265,10 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
               </button>
               <button
                 type="button"
-                onClick={() => void removeEnvironment()}
+                onClick={() => {
+                  setRemoveRuntime(false);
+                  setRemoving(true);
+                }}
                 disabled={busy}
                 className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-error/80 hover:bg-error/10 hover:text-error disabled:opacity-45"
               >
@@ -271,8 +279,44 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
           ) : null}
         </div>
       </div>
+
+      {removing ? (
+        <ConfirmDialog
+          title={labels.removeDialogTitle}
+          description={formatMessage(labels.removeConfirm, { name: environment.name })}
+          entityName={environment.name}
+          confirmLabel={labels.remove}
+          cancelLabel={labels.cancel}
+          isPending={remove.isPending}
+          onCancel={() => setRemoving(false)}
+          onConfirm={() => void removeEnvironment()}
+        >
+          {environment.transportKind === 'wsl' || environment.transportKind === 'ssh' ? (
+            <label className="flex items-start gap-2 rounded-xl bg-surface-container-lowest px-3 py-2 text-left text-sm text-on-surface">
+              <input
+                type="checkbox"
+                checked={removeRuntime}
+                onChange={(event) => setRemoveRuntime(event.target.checked)}
+                className="mt-1 accent-primary"
+              />
+              <span>
+                {formatMessage(labels.removeRuntimeBytes, {
+                  bytes: formatSlotBytes(lifecycle.data?.slotBytes ?? null),
+                })}
+              </span>
+            </label>
+          ) : null}
+        </ConfirmDialog>
+      ) : null}
     </article>
   );
+}
+
+function formatSlotBytes(bytes: number | null): string {
+  if (bytes === null || bytes <= 0) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**

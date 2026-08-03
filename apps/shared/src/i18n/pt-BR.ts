@@ -2148,6 +2148,9 @@ export const messages = {
       cancel: 'Cancelar',
       nameLabel: 'Nome do ambiente',
       removeConfirm: 'Remover {name}? Chats que usam este ambiente precisam ser movidos antes.',
+      removeDialogTitle: 'Remover ambiente',
+      removeRuntimeBytes:
+        'Também apagar o binário do runtime naquela máquina ({bytes}). O consentimento em runtime.json permanece.',
       actionFailed: 'A ação do ambiente falhou.',
       updateFailed: 'Não foi possível atualizar o ambiente.',
       removeFailed: 'Não foi possível remover o ambiente.',

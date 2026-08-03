@@ -33,6 +33,7 @@ import {
   type RuntimeCommandOptions,
   type RuntimeCommandResult,
   RuntimePushError,
+  runtimeRemoveSlotBytesScript,
 } from '../domain/runtime-push';
 import {
   CONFIG_LOCK_BUSY_EXIT,
@@ -115,6 +116,8 @@ export interface WslProvisioner {
    * when it is absent and replacing one left behind by an older release.
    */
   ensure(distro: string): Promise<void>;
+  /** Removes version dirs and `current`; leaves consent (`runtime.json`) alone. */
+  removeSlotBytes(distro: string): Promise<void>;
 }
 
 export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}): WslProvisioner {
@@ -154,6 +157,14 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       if (!(slot.config?.setup || slot.unreadable)) await grantConsent(deps, distro);
       await removeLegacyRuntime(deps, distro);
       logger.info('provisioned', { distro, version });
+    },
+    async removeSlotBytes(distro: string): Promise<void> {
+      const result = await deps.runInDistro(distro, runtimeRemoveSlotBytesScript('wsl'));
+      if (result.exitCode !== 0) {
+        throw new WslProvisioningError(
+          `Could not remove the runtime from "${distro}": ${describe(result)}`
+        );
+      }
     },
   };
 }

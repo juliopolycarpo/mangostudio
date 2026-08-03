@@ -2129,6 +2129,9 @@ export const messages: Messages = {
       cancel: 'Cancel',
       nameLabel: 'Environment name',
       removeConfirm: 'Remove {name}? Chats using it must be moved first.',
+      removeDialogTitle: 'Remove environment',
+      removeRuntimeBytes:
+        'Also delete the runtime binary on that machine ({bytes}). Consent in runtime.json is left alone.',
       actionFailed: 'The environment action failed.',
       updateFailed: 'The environment could not be updated.',
       removeFailed: 'The environment could not be removed.',
