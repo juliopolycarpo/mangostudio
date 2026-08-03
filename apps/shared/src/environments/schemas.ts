@@ -9,6 +9,14 @@ import {
 
 export const LOCAL_ENVIRONMENT_ID = 'local' as const;
 
+/**
+ * Name the hub reports for the machine it runs on. Not user copy: it is the
+ * environment's name in the API the same way a remote's stored name is, and
+ * surfaces that render it inside a translated sentence resolve it from
+ * {@link LOCAL_ENVIRONMENT_ID} through i18n instead of printing this.
+ */
+export const LOCAL_ENVIRONMENT_NAME = 'Local' as const;
+
 export const EnvironmentIdSchema = Type.String({
   minLength: 1,
   maxLength: 63,
@@ -551,6 +559,12 @@ export const InstallGuardReasonSchema = Type.Union([
    * said no, or the person flipping settings cannot tell which one to flip.
    */
   Type.Literal('environment-not-trusted'),
+  /**
+   * The connected machine's consent refuses shell, which every install recipe
+   * needs. Distinct from trust: the environment may be trusted and still deny
+   * the capability that would run the installer.
+   */
+  Type.Literal('runtime-denied'),
 ]);
 
 export const InstallGuardSchema = Type.Object({

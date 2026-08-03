@@ -311,4 +311,23 @@ describe('runtime health', () => {
     expect(report.lastError).toContain('not valid JSON');
     expect(worstSeverity(diagnoseRuntimeHealth(report))).toBe('fail');
   });
+
+  it('refuses every capability in the report a config it cannot read produces', async () => {
+    // The slot default behind an unreadable `host` config is full consent, and
+    // this payload is what the hub caches as the machine's manifest. Reporting
+    // that default would advertise capabilities the dispatch gate — which
+    // applies `none` to the same failure — refuses on every call.
+    const env = await isolatedEnv();
+    await Bun.write(join(env.MANGO_HOME as string, 'runtime/host/runtime.json'), '{');
+
+    const report = await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env });
+    expect(report.profile).toBe('none');
+    expect(Object.values(report.allow).every((granted) => granted === false)).toBe(true);
+    expect(report.shells).toEqual([]);
+    expect(report.git.available).toBe(false);
+
+    const consent = diagnoseRuntimeHealth(report).find((finding) => finding.title === 'Consent');
+    expect(consent?.severity).toBe('fail');
+    expect(consent?.detail).toContain('could not be read');
+  });
 });

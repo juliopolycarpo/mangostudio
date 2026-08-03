@@ -3,6 +3,7 @@ import {
   assertRuntimeProtocolCompatible,
   decodeRuntimeFrameLine,
   encodeRuntimeFrame,
+  narrowRuntimeErrorCode,
   RUNTIME_PROTOCOL_VERSION,
   RuntimeFrameCodecError,
   RuntimeFrameDecoder,
@@ -84,20 +85,63 @@ describe('runtime protocol compatibility', () => {
     expect(() => assertRuntimeProtocolCompatible('1.2.0', '1.2.9')).not.toThrow();
   });
 
-  it('refuses a same-version peer that carries a field this build does not know', () => {
-    // The compat window a remote transport is supposed to have — same
-    // major/minor, one side newer, additive fields ignored — does not exist
-    // yet. Every frame schema is `additionalProperties: false`, so a peer at
-    // 1.0 that adds an optional field has its frame refused and its connection
-    // torn down. That is the safe direction to be wrong in, and it is fine
-    // while hub and runtime ship together; it stops being fine the moment a
-    // remote runtime can be a release behind. Pinned here so the protocol
-    // evolution rules land as a deliberate change to this line rather than as
-    // an assumption nobody checked.
+  it('refuses a same-version peer that carries a field this build does not know on a frame envelope', () => {
+    // Frame envelopes stay closed (`additionalProperties: false`). Additive
+    // evolution lands on the capability manifest and on open `err.code`, not
+    // on every frame picking up optional siblings — those would still drop the
+    // socket. Pinned so a future "just add a field to req" does not slip past.
     const skewed = { ...request, deadlineMs: 30_000 };
 
     expect(Value.Check(RuntimeFrameSchema, skewed)).toBe(false);
     expect(() => decodeRuntimeFrameLine(JSON.stringify(skewed))).toThrow(RuntimeFrameCodecError);
+  });
+
+  it("ignores unknown keys on a newer peer's capability manifest", () => {
+    const hello = {
+      type: 'hello' as const,
+      protocolVersion: RUNTIME_PROTOCOL_VERSION,
+      runtimeVersion: '0.1.1',
+      manifest: {
+        platform: 'linux',
+        arch: 'x64',
+        pathStyle: 'posix' as const,
+        homeDir: '/home/peer',
+        shells: ['bash' as const],
+        git: { available: true, version: '2.45.0', vendor: 'extra' },
+        features: {
+          tools: true,
+          git: true,
+          probing: true,
+          mcp: true,
+          library: true,
+          checkpoints: true,
+          fsRead: true,
+          futureFlag: false,
+        },
+        profile: 'readonly' as const,
+      },
+    };
+
+    expect(Value.Check(RuntimeFrameSchema, hello)).toBe(true);
+    expect(decodeRuntimeFrameLine(JSON.stringify(hello))).toEqual(hello);
+  });
+
+  it('decodes an unknown err.code and lets consumers narrow it to INTERNAL', () => {
+    const frame = {
+      type: 'res' as const,
+      id: 'request-1',
+      err: {
+        code: 'RUNTIME_DENIED',
+        message: 'shell is not granted on this machine',
+        details: { capability: 'shell' },
+      },
+    };
+
+    expect(Value.Check(RuntimeFrameSchema, frame)).toBe(true);
+    expect(decodeRuntimeFrameLine(JSON.stringify(frame))).toEqual(frame);
+    expect(narrowRuntimeErrorCode(frame.err.code)).toBe('RUNTIME_DENIED');
+    expect(narrowRuntimeErrorCode('TIMEOUT')).toBe('TIMEOUT');
+    expect(narrowRuntimeErrorCode('SOMETHING_FROM_THE_FUTURE')).toBe('INTERNAL');
   });
 
   it('rejects a stale runtime with an actionable typed error', () => {

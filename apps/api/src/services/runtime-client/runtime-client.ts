@@ -7,6 +7,7 @@ import {
   type RuntimeApplyPatchResult,
   type RuntimeBeforeSnapshot,
   type RuntimeCapabilityManifest,
+  RuntimeConsentDeniedError,
   type RuntimeCreateFileParams,
   type RuntimeCreateFileResult,
   type RuntimeDeleteFileParams,
@@ -389,6 +390,20 @@ export class RuntimeClient {
     return this.protocol.runtimeVersion;
   }
 
+  /** One health truth: same payload as `mangostudio-runtime health --json`. */
+  health(options?: RuntimeRequestOptions) {
+    return this.request('runtime.health', {}, options);
+  }
+
+  /**
+   * Replaces the handshake manifest after a consent change (see
+   * {@link RuntimeProtocolClient.replaceManifest}).
+   */
+  replaceManifest(manifest: RuntimeCapabilityManifest): void {
+    this.protocol.replaceManifest(manifest);
+    this.targetPaths = undefined;
+  }
+
   /**
    * Subscribes to the runtime's `evt` stream. Returns the unsubscribe; the
    * connection dropping clears every listener on its own, so a caller that
@@ -432,6 +447,17 @@ function translateRuntimeError(error: unknown): Error {
   if (error.code === 'TIMEOUT') {
     return new ToolExecutionTimedOutError(error.message);
   }
+  if (error.code === 'RUNTIME_DENIED') {
+    const missing = error.details?.missing;
+    return new RuntimeConsentDeniedError(error.message, {
+      capability: detailString(error, 'capability'),
+      method: detailString(error, 'method'),
+      slot: detailString(error, 'slot'),
+      ...(Array.isArray(missing)
+        ? { missing: missing.filter((entry): entry is string => typeof entry === 'string') }
+        : {}),
+    });
+  }
 
   const kind = detailString(error, 'kind');
   const resolvedPath = detailString(error, 'resolvedPath') ?? error.message;
@@ -462,6 +488,13 @@ function translateRuntimeError(error: unknown): Error {
       return withMessage(new RuntimeSnapshotConflictError(resolvedPath), error.message);
     case 'mcp_connection':
       return new McpConnectionError(error.message, { cause: error });
+    case 'consent_denied':
+      // Older peers that still emit INTERNAL + details.kind=consent_denied.
+      return new RuntimeConsentDeniedError(error.message, {
+        capability: detailString(error, 'capability'),
+        method: detailString(error, 'method'),
+        slot: detailString(error, 'slot'),
+      });
     default:
       // `mcp_call` deliberately stays a RuntimeRemoteError: the turn pipeline
       // classifies it from the `mcpFailure` detail the runtime attached, and

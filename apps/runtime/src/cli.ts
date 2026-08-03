@@ -18,6 +18,7 @@ import {
 } from '@mangostudio/shared/runtime-home';
 import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
+import { createSlotConsentSource } from './consent-source';
 import {
   collectRuntimeHealth,
   diagnoseRuntimeHealth,
@@ -384,7 +385,10 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
       hubUrl,
       token,
       createHost: () =>
-        createLocalRuntimeHost({ runtimeVersion, allow: consent.allow, slot: PAIRED_SLOT }),
+        createLocalRuntimeHost({
+          runtimeVersion,
+          consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
+        }),
       log,
       signal: controller.signal,
     });
@@ -455,7 +459,10 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
       listen,
       token: resolved.token,
       createHost: () =>
-        createLocalRuntimeHost({ runtimeVersion, allow: consent.allow, slot: PAIRED_SLOT }),
+        createLocalRuntimeHost({
+          runtimeVersion,
+          consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
+        }),
       log,
       signal: controller.signal,
     });
@@ -518,8 +525,7 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
 
   const host = createLocalRuntimeHost({
     runtimeVersion,
-    allow: consent.allow,
-    slot: consent.slot,
+    consent: createSlotConsentSource({ slot: consent.slot, initial: consent.allow }),
   });
   let stop: (closure: StdioFramePortClosure) => void = () => undefined;
   const finished = new Promise<StdioFramePortClosure>((resolve) => {

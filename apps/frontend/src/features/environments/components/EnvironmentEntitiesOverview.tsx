@@ -1,4 +1,5 @@
 import type { Environment, EnvironmentConnectionState } from '@mangostudio/shared/environments';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { Cable, Check, Pencil, Plus, Server, Trash2, Unplug, X } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
@@ -12,6 +13,7 @@ import {
   useUpdateEnvironmentMutation,
 } from '../queries';
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
+import { CopyLine } from './CopyLine';
 import { DirectUrlPanel } from './DirectUrlPanel';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { InstallTrustToggle } from './InstallTrustToggle';
@@ -186,6 +188,8 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
 
         <RuntimeRelease environment={environment} />
 
+        <PermissionsRow environment={environment} />
+
         {environment.transportKind === 'websocket' ? (
           <RuntimePairingPanel environmentId={environment.id} />
         ) : null}
@@ -319,4 +323,98 @@ function CapabilityChips({ environment }: { environment: Environment }) {
       ))}
     </ul>
   );
+}
+
+const FEATURE_KEYS = [
+  'tools',
+  'git',
+  'probing',
+  'mcp',
+  'library',
+  'checkpoints',
+  'fsRead',
+  'fsWrite',
+  'shell',
+  'update',
+] as const satisfies ReadonlyArray<keyof RuntimeCapabilityManifest['features']>;
+
+/**
+ * Consent the connected machine recorded. Shown when the profile is narrower
+ * than full, or when any feature flag is explicitly false — distinct from the
+ * disconnected `noManifest` copy above.
+ */
+function PermissionsRow({ environment }: { environment: Environment }) {
+  const { t } = useI18n();
+  const labels = t.environments.entities.permissions;
+  const manifest = environment.status.manifest;
+  if (!manifest) return null;
+
+  const denied = FEATURE_KEYS.filter((key) => isRefused(manifest, key));
+  const profile = manifest.profile;
+  const narrowed = (profile !== undefined && profile !== 'full') || denied.length > 0;
+  if (!narrowed) return null;
+
+  const setupCommand = `mangostudio-runtime setup --slot ${setupSlotFor(environment)}`;
+
+  return (
+    <div
+      className="space-y-2 rounded-lg border border-outline-variant/20 bg-surface-container-lowest/70 px-2.5 py-2"
+      data-testid="environment-permissions"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+          {labels.title}
+        </p>
+        {profile ? (
+          <span className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-on-surface-variant">
+            {labels.profile[profile]}
+          </span>
+        ) : null}
+      </div>
+
+      {denied.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-[11px] text-on-surface-variant/70">{labels.deniedIntro}</p>
+          <ul className="flex list-none flex-wrap gap-1.5">
+            {denied.map((capability) => (
+              <li
+                key={capability}
+                className="rounded-md border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 font-mono text-[10px] text-on-surface-variant"
+              >
+                {capability}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <p className="text-[11px] text-on-surface-variant/65">{labels.allowShellHonesty}</p>
+
+      <CopyLine label={labels.setupCommand} value={setupCommand} />
+    </div>
+  );
+}
+
+/**
+ * Whether the machine's owner refused a capability, as opposed to the machine
+ * not having it. `features` is the intersection of the two, so it cannot tell
+ * them apart on its own: a full-consent machine with no git binary reports
+ * `features.git === false` and would otherwise be listed here as denied.
+ * Peers that predate `allow` have only the intersection to offer.
+ */
+function isRefused(
+  manifest: RuntimeCapabilityManifest,
+  key: (typeof FEATURE_KEYS)[number]
+): boolean {
+  const allow = manifest.allow;
+  if (!allow) return manifest.features[key] === false;
+  // `tools` is a summary of the allow set rather than a member of it; it is
+  // false only when every capability below it already reads as denied.
+  return key in allow ? allow[key as keyof typeof allow] === false : false;
+}
+
+function setupSlotFor(environment: Environment): 'host' | 'wsl' | 'remote' {
+  if (environment.transportKind === 'in-process') return 'host';
+  if (environment.transportKind === 'wsl') return 'wsl';
+  return 'remote';
 }

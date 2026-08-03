@@ -5,4 +5,8 @@ describe('candidateState', () => {
   it('classifies editable agent allowlist exclusions as disabled', () => {
     expect(candidateState('agent-allowlist')).toBe('disabled');
   });
+
+  it('classifies runtime consent refusals as unavailable', () => {
+    expect(candidateState('runtime-denied')).toBe('unavailable');
+  });
 });

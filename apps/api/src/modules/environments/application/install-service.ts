@@ -25,7 +25,10 @@ import { getConfig } from '../../../lib/config';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
-import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
+import {
+  getRuntimeClient,
+  getRuntimeConnectionManager,
+} from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { evaluateInstallGuard, evaluateRemoteInstallGuard } from '../domain/install-guards';
 import { INSTALL_RECIPES, type InstallRecipe } from '../domain/install-recipes';
@@ -273,6 +276,11 @@ function createEventBuffer(): EventBuffer {
 async function defaultGuard(context: InstallRequestContext): Promise<InstallGuard> {
   const config = getConfig();
   const environmentId = environmentIdOf(context);
+  const status = getRuntimeConnectionManager().getStatus(context.userId, environmentId);
+  // Absent on older peers, and on a runtime nobody has connected to yet —
+  // treat as granted until consent is visible.
+  const runtimeShellAllowed = status.manifest?.features.shell !== false;
+
   if (environmentId === LOCAL_ENVIRONMENT_ID) {
     return evaluateInstallGuard({
       serverHost: config.server.host,
@@ -280,6 +288,7 @@ async function defaultGuard(context: InstallRequestContext): Promise<InstallGuar
       installsEnabled: config.environments.installsEnabled,
       standalone: isStandaloneExecutable(),
       container: config.environments.container,
+      runtimeShellAllowed,
     });
   }
 
@@ -289,6 +298,7 @@ async function defaultGuard(context: InstallRequestContext): Promise<InstallGuar
     // An environment that is not there cannot have been trusted, and saying so
     // is more useful than a not-found: the user asked to install somewhere.
     allowInstalls: environment?.allowInstalls === true,
+    runtimeShellAllowed,
   });
 }
 

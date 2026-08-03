@@ -4,7 +4,7 @@ import type {
   Environment,
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import { LOCAL_ENVIRONMENT_ID, LOCAL_ENVIRONMENT_NAME } from '@mangostudio/shared/environments';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import {
   getRuntimeConnectionManager,
@@ -53,7 +53,7 @@ function localRecord(userId: string): EnvironmentRecord {
   return {
     id: LOCAL_ENVIRONMENT_ID,
     userId,
-    name: 'Local',
+    name: LOCAL_ENVIRONMENT_NAME,
     transportKind: 'in-process',
     config: {},
     enabled: true,
@@ -71,6 +71,12 @@ async function toEnvironment(
   manager: RuntimeConnectionManager,
   secretStore: SecretStore
 ): Promise<Environment> {
+  // Consent is answered on the machine, so nothing here can invalidate the
+  // manifest cached at connect. Reading an environment is the moment someone
+  // is looking at what the machine permits, which makes it the moment worth
+  // re-asking: this returns immediately and publishes only if the answer moved.
+  manager.refreshManifestIfStale(record.userId, record.id);
+
   return {
     id: record.id,
     name: record.name,

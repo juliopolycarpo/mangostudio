@@ -18,6 +18,7 @@ export {
   RuntimeFrameDecoder,
 } from './codec';
 export {
+  narrowRuntimeErrorCode,
   RUNTIME_HEARTBEAT_TOPIC,
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeCancelFrame,
@@ -52,5 +53,7 @@ export {
   RuntimeShellKindSchema,
   type RuntimeSuccessResponseFrame,
   RuntimeSuccessResponseFrameSchema,
+  type RuntimeWireErrorCode,
+  RuntimeWireErrorCodeSchema,
 } from './schemas';
 export { assertRuntimeProtocolCompatible, RuntimeProtocolError } from './version';

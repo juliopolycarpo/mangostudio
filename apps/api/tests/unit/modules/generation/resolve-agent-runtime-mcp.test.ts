@@ -162,7 +162,7 @@ describe('resolveAgentRuntime with MCP tools', () => {
     expect(runtime.toolDefinitions).toEqual([]);
   });
 
-  it('skips MCP listing when the runtime manifest disables mcp', async () => {
+  it('snapshots servers as denied without connecting when the manifest disables mcp', async () => {
     const userId = nextUserId();
     await insertServer(userId, 'srv');
     let connectCalls = 0;
@@ -181,10 +181,15 @@ describe('resolveAgentRuntime with MCP tools', () => {
         features: { ...RUNTIME_MANIFEST.features, mcp: false },
       },
       environmentId: LOCAL_ENVIRONMENT_ID,
+      environmentName: 'Local',
     });
 
+    // The peer answers mcp.connect with RUNTIME_DENIED; spending the listing
+    // budget to rediscover that is the bug this pins.
     expect(connectCalls).toBe(0);
-    expect(runtime.mcpServerSnapshots).toEqual([]);
+    expect(runtime.mcpServerSnapshots).toMatchObject([
+      { slug: 'srv', listed: false, runtimeDenied: true, tools: [] },
+    ]);
     expect(runtime.toolDefinitions.map((definition) => definition.name)).not.toContain(
       'mcp__srv__ping'
     );

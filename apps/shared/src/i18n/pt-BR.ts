@@ -85,19 +85,22 @@ export const messages = {
       manageMcp: 'Configurar MCP',
       manageSkills: 'Configurar skills',
       reasons: {
-        agentToolsDisabled: 'o perfil do agente desativa ferramentas',
-        agentAllowlist: 'fora da lista de permissões do agente',
-        toolSettingDisabled: 'desativada nas configurações de ferramentas',
-        nameOverProviderLimit: 'nome excede o limite do provedor',
-        environmentUnsupported: 'não é compatível com o ambiente selecionado',
-        serverDisabled: 'servidor desativado',
-        serverUnavailable: 'servidor indisponível',
-        delegationDisabled: 'delegação desativada nas configurações multi-agente',
-        skillInvalid: 'skill inválida',
-        skillDisabled: 'desativada nas configurações de skills',
-        skillShadowed: 'sombreada por uma fonte de maior precedência',
-        skillToolDisabled: 'a ferramenta de skills não está ativa',
+        'agent-tools-disabled': 'o perfil do agente desativa ferramentas',
+        'agent-allowlist': 'fora da lista de permissões do agente',
+        'tool-setting-disabled': 'desativada nas configurações de ferramentas',
+        'name-over-provider-limit': 'nome excede o limite do provedor',
+        'environment-unsupported': 'não é compatível com o ambiente selecionado',
+        'runtime-denied': 'recusada por {environmentName}',
+        'server-disabled': 'servidor desativado',
+        'server-unavailable': 'servidor indisponível',
+        'delegation-disabled': 'delegação desativada nas configurações multi-agente',
+        'skill-invalid': 'skill inválida',
+        'skill-disabled': 'desativada nas configurações de skills',
+        'skill-shadowed': 'sombreada por uma fonte de maior precedência',
+        'skill-tool-disabled': 'a ferramenta de skills não está ativa',
       },
+      /** Substituted for the hub's own machine, whose API name is not copy. */
+      localEnvironment: 'esta máquina',
       health: {
         connected: 'conectado',
         connecting: 'conectando',
@@ -2156,6 +2159,19 @@ export const messages = {
       platform: '{platform} · {arch}',
       runtimeVersionDrift:
         'Esta máquina roda o runtime {version}, que não é a versão distribuída por este MangoStudio. A conexão continua funcionando; atualize o runtime lá quando possível.',
+      permissions: {
+        title: 'Permissões',
+        profile: {
+          full: 'Completo',
+          readonly: 'Somente leitura',
+          none: 'Nenhum',
+          custom: 'Personalizado',
+        },
+        deniedIntro: 'Negadas nesta máquina:',
+        setupCommand: 'Alterar o consentimento naquela máquina',
+        allowShellHonesty:
+          'allow.shell concede tudo o que um shell alcança — a lista de capacidades abaixo descreve a intenção, não um sandbox.',
+      },
       pairing: {
         title: 'Pareamento',
         description: 'O runtime naquela máquina disca para o MangoStudio com esta credencial.',
@@ -2434,6 +2450,8 @@ export const messages = {
         disabled: 'As instalações estão desativadas na configuração deste servidor.',
         'environment-not-trusted':
           'Este ambiente não foi autorizado a instalar. Ative essa opção para a máquina em questão, no cartão dela em Ambientes.',
+        'runtime-denied':
+          'Essa máquina recusa shell, e toda instalação precisa dele. Execute mangostudio-runtime setup lá e conceda shell, ou instale manualmente.',
       },
     },
   },

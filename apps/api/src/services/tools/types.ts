@@ -2,6 +2,7 @@
  * Core types for the tool registry.
  */
 
+import type { RuntimeCapabilityAllow } from '@mangostudio/shared/runtime-home';
 import type {
   ToolParameterDescriptor,
   ToolSettingsCategory,
@@ -67,6 +68,12 @@ interface ToolSettingsMetadata {
    * wrapper should not add a second, racing timeout layer.
    */
   managesOwnTimeout?: boolean;
+  /**
+   * Runtime consent features this tool needs. Absent means hub-only (no
+   * runtime call). Capability resolution withholds the tool when the
+   * connected machine's manifest denies any of these.
+   */
+  requiredCapabilities?: readonly (keyof RuntimeCapabilityAllow)[];
 }
 
 /** A fully registered tool: its schema definition + its executor. */

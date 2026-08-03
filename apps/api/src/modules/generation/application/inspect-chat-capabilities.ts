@@ -38,6 +38,7 @@ import { listMcpServerRows } from '../../mcp-servers/infrastructure/mcp-server-r
 import { listSkills } from '../../skills/application/skill-discovery';
 import { SKILL_TOOL_NAME } from '../../skills/domain/skill';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
+import { resolveEnvironmentDisplayName } from './environment-display-name';
 import { resolveAgentRuntime, resolveRuntimeAgentId } from './resolve-agent-runtime';
 import type { ToolCapabilityCandidate } from './resolve-capability-candidates';
 import { resolveModel } from './resolve-model';
@@ -71,7 +72,10 @@ export async function inspectChatCapabilities(
   const provider = resolvedModel.providerType
     ? getProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
-  const runtimeClient = await getRuntimeClient(input.userId, ownedChat.environmentId);
+  const [runtimeClient, environmentName] = await Promise.all([
+    getRuntimeClient(input.userId, ownedChat.environmentId),
+    resolveEnvironmentDisplayName(input.userId, ownedChat.environmentId),
+  ]);
 
   const [chat, agentRuntime, appSettings, serverRows, skills] = await Promise.all([
     getById(input.chatId, input.db),
@@ -84,6 +88,7 @@ export async function inspectChatCapabilities(
       profile,
       runtimeManifest: runtimeClient.manifest,
       environmentId: ownedChat.environmentId,
+      environmentName,
     }),
     getAppSettings(input.db, input.userId),
     listMcpServerRows(input.db, input.userId),
@@ -108,13 +113,15 @@ export async function inspectChatCapabilities(
     agentRuntime.mcpServerSnapshots.map((snapshot) => [snapshot.slug, snapshot])
   );
   const mcpServers = serverRows.map((row) =>
-    toMcpServerEntry(
+    toMcpServerEntry({
       row,
-      snapshotsBySlug.get(row.slug),
-      input.userId,
-      profile.toolsEnabled,
-      enabledToolNames
-    )
+      snapshot: snapshotsBySlug.get(row.slug),
+      userId: input.userId,
+      toolsEnabled: profile.toolsEnabled,
+      enabledToolNames,
+      environmentName,
+      environmentId: ownedChat.environmentId,
+    })
   );
 
   const skillEntries = skills.map((skill) =>
@@ -167,6 +174,8 @@ function toToolEntry(
     ...(candidate.category ? { category: candidate.category } : {}),
     ...(candidate.serverSlug ? { serverSlug: candidate.serverSlug } : {}),
     ...(candidate.serverName ? { serverName: candidate.serverName } : {}),
+    ...(candidate.environmentName ? { environmentName: candidate.environmentName } : {}),
+    ...(candidate.environmentId ? { environmentId: candidate.environmentId } : {}),
   };
 
   // Mirror resolveTurnContext: an effective delegate tool is still withheld
@@ -194,18 +203,25 @@ export function candidateState(reason: ToolCapabilityCandidate['reason']): Capab
     : 'unavailable';
 }
 
-function toMcpServerEntry(
-  row: McpServerSelect,
-  snapshot: McpBridgeServerSnapshot | undefined,
-  userId: string,
-  toolsEnabled: boolean,
-  enabledToolNames: ReadonlySet<string>
-): CapabilityMcpServerEntry {
+interface McpServerEntryInput {
+  readonly row: McpServerSelect;
+  readonly snapshot: McpBridgeServerSnapshot | undefined;
+  readonly userId: string;
+  readonly toolsEnabled: boolean;
+  readonly enabledToolNames: ReadonlySet<string>;
+  /** Display name of the chat's environment; attached to runtime-denied. */
+  readonly environmentName: string;
+  /** Id of that environment; travels with the name so the UI can translate it. */
+  readonly environmentId: string;
+}
+
+function toMcpServerEntry(input: McpServerEntryInput): CapabilityMcpServerEntry {
+  const { row, snapshot } = input;
   const base = {
     slug: row.slug,
     name: row.name,
     effectiveToolCount: snapshot
-      ? snapshot.tools.filter((tool) => enabledToolNames.has(tool.name)).length
+      ? snapshot.tools.filter((tool) => input.enabledToolNames.has(tool.name)).length
       : 0,
   };
 
@@ -216,9 +232,21 @@ function toMcpServerEntry(
   // Last-known status: reading it adds no probe of its own, and the runtime
   // listing above has already settled. Raw transport error text is never
   // surfaced — only the status code.
-  const health = getMcpRuntimeStatus(userId, row.id).status;
-  if (!toolsEnabled) {
+  const health = getMcpRuntimeStatus(input.userId, row.id).status;
+  if (!input.toolsEnabled) {
     return { ...base, state: 'disabled', reason: 'agent-tools-disabled', health };
+  }
+  // Checked before `listed`: the machine's refusal is why no listing was
+  // attempted, and naming it beats reporting a connection that never ran.
+  if (snapshot?.runtimeDenied) {
+    return {
+      ...base,
+      state: 'unavailable',
+      reason: 'runtime-denied',
+      health,
+      environmentName: input.environmentName,
+      environmentId: input.environmentId,
+    };
   }
   if (!snapshot?.listed) {
     return { ...base, state: 'unavailable', reason: 'server-unavailable', health };

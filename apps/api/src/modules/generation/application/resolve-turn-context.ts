@@ -28,6 +28,7 @@ import {
 } from '../../workspaces/application/workdir-policy';
 import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
+import { resolveEnvironmentDisplayName } from './environment-display-name';
 import {
   type ResolvedAgentRuntime,
   resolveAgentRuntime,
@@ -107,7 +108,10 @@ export async function resolveTurnContext(
   const provider = providerType
     ? getProvider(providerType)
     : await getProviderForModel(modelId, input.userId);
-  const runtimeClient = await getRuntimeClient(input.userId, chat.environmentId);
+  const [runtimeClient, environmentName] = await Promise.all([
+    getRuntimeClient(input.userId, chat.environmentId),
+    resolveEnvironmentDisplayName(input.userId, chat.environmentId),
+  ]);
 
   const [agentRuntime, appSettings] = await Promise.all([
     resolveAgentRuntime({
@@ -120,6 +124,7 @@ export async function resolveTurnContext(
       profile: resolvedAgentProfile,
       runtimeManifest: runtimeClient.manifest,
       environmentId: chat.environmentId,
+      environmentName,
     }),
     getAppSettings(db, input.userId),
   ]);

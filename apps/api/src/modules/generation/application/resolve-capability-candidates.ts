@@ -8,6 +8,7 @@
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { CapabilityReasonCode } from '@mangostudio/shared/capabilities';
+import type { RuntimeCapabilityAllow } from '@mangostudio/shared/runtime-home';
 import type {
   RuntimeCapabilityManifest,
   RuntimeShellKind,
@@ -27,6 +28,7 @@ type ToolCandidateReason = Extract<
   | 'tool-setting-disabled'
   | 'name-over-provider-limit'
   | 'environment-unsupported'
+  | 'runtime-denied'
 >;
 
 export interface ToolCapabilityCandidate {
@@ -43,6 +45,10 @@ export interface ToolCapabilityCandidate {
   /** Provider definition; present exactly when the candidate is effective. */
   readonly definition?: ToolDefinition;
   readonly reason?: ToolCandidateReason;
+  /** Environment that refused the capability — set with `runtime-denied`. */
+  readonly environmentName?: string;
+  /** Which environment that name belongs to; lets the UI translate its own. */
+  readonly environmentId?: string;
 }
 
 export interface ResolveToolCandidatesInput {
@@ -51,6 +57,10 @@ export interface ResolveToolCandidatesInput {
   readonly registeredTools: ReadonlyArray<RegisteredTool>;
   readonly mcpServers: ReadonlyArray<McpBridgeServerSnapshot>;
   readonly runtimeManifest: RuntimeCapabilityManifest;
+  /** Display name of the chat's environment; attached to runtime-denied. */
+  readonly environmentName?: string;
+  /** Id of that environment; travels with the name so the UI can translate it. */
+  readonly environmentId?: string;
 }
 
 /**
@@ -100,7 +110,14 @@ function resolveBuiltinCandidate(
   if (!settings.enabled) return { ...base, reason: 'tool-setting-disabled' };
   const requiredShell = requiredShellForTool(name);
   if (requiredShell && !input.runtimeManifest.shells.includes(requiredShell)) {
+    // Consent clears the shells list; prefer naming the machine's refusal.
+    if (!manifestFeatureAllowed(input.runtimeManifest.features, 'shell')) {
+      return runtimeDenied(base, input);
+    }
     return { ...base, reason: 'environment-unsupported' };
+  }
+  if (hasDeniedRequiredCapability(tool.settings.requiredCapabilities, input.runtimeManifest)) {
+    return runtimeDenied(base, input);
   }
   return { ...base, definition: tool.buildDefinition?.(settings) ?? tool.definition };
 }
@@ -123,8 +140,11 @@ function resolveMcpCandidates(
 
   const candidates = server.tools.map((tool): ToolCapabilityCandidate => {
     const base = { name: tool.name, title: tool.toolName, ...provenance };
-    if (!input.runtimeManifest.features.mcp) {
-      return { ...base, reason: 'environment-unsupported' };
+    // A refusing machine is snapshotted without a listing, so this normally has
+    // no tools to reach. Kept as the fail-closed guard: a listed snapshot must
+    // never hand the provider tools the machine would refuse to run.
+    if (input.runtimeManifest.features.mcp === false) {
+      return runtimeDenied(base, input);
     }
     if (!toolNameMatches(allowlist, tool.name)) return { ...base, reason: 'agent-allowlist' };
     if (!(input.toolSettings.get(tool.name)?.enabled ?? true)) {
@@ -143,4 +163,39 @@ function resolveMcpCandidates(
   );
 
   return [...candidates, ...overlong];
+}
+
+function runtimeDenied(
+  base: Omit<
+    ToolCapabilityCandidate,
+    'reason' | 'environmentName' | 'environmentId' | 'definition'
+  >,
+  input: ResolveToolCandidatesInput
+): ToolCapabilityCandidate {
+  return {
+    ...base,
+    reason: 'runtime-denied',
+    ...(input.environmentName ? { environmentName: input.environmentName } : {}),
+    ...(input.environmentId ? { environmentId: input.environmentId } : {}),
+  };
+}
+
+/**
+ * Optional feature keys absent on older peers are treated as granted. When the
+ * key is present, its boolean is authoritative.
+ */
+function manifestFeatureAllowed(
+  features: RuntimeCapabilityManifest['features'],
+  key: keyof RuntimeCapabilityAllow
+): boolean {
+  const value = features[key as keyof typeof features];
+  return value !== false;
+}
+
+function hasDeniedRequiredCapability(
+  required: RegisteredTool['settings']['requiredCapabilities'],
+  manifest: RuntimeCapabilityManifest
+): boolean {
+  if (!required || required.length === 0) return false;
+  return required.some((capability) => !manifestFeatureAllowed(manifest.features, capability));
 }

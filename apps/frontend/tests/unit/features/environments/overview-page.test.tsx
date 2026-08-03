@@ -194,6 +194,150 @@ describe('OverviewPage', () => {
     ).toHaveAttribute('href', '/environments/agents');
   });
 
+  it('shows a permissions row when the connected machine consents to readonly', async () => {
+    const localBase = ENVIRONMENTS.find((environment) => environment.id === 'local');
+    if (!localBase) throw new Error('expected local fixture');
+    const readonlyLocal: Environment = {
+      ...localBase,
+      status: {
+        state: 'connected',
+        manifest: {
+          platform: 'linux',
+          arch: 'x64',
+          pathStyle: 'posix',
+          homeDir: '/home/dev',
+          shells: [],
+          git: { available: true, version: '2.47.0' },
+          features: {
+            tools: true,
+            git: true,
+            probing: false,
+            mcp: false,
+            library: false,
+            checkpoints: true,
+            fsRead: true,
+            fsWrite: false,
+            shell: false,
+            update: false,
+          },
+          profile: 'readonly',
+        },
+      },
+    };
+    scenario
+      .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/environments', { body: [readonlyLocal, ENVIRONMENTS[1]] })
+      .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
+      .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
+      .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+      .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+      .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+      .install();
+
+    await renderWithRouter(<OverviewPage />);
+
+    const local = await waitFor(() => {
+      const card = screen
+        .getAllByTestId('environment-entity-card')
+        .find((candidate) => candidate.getAttribute('data-environment-id') === 'local');
+      expect(card).toBeDefined();
+      return card as HTMLElement;
+    });
+
+    const permissions = within(local).getByTestId('environment-permissions');
+    expect(
+      within(permissions).getByText(en.environments.entities.permissions.title)
+    ).toBeInTheDocument();
+    expect(
+      within(permissions).getByText(en.environments.entities.permissions.profile.readonly)
+    ).toBeInTheDocument();
+    expect(within(permissions).getByText('fsWrite')).toBeInTheDocument();
+    expect(within(permissions).getByText('shell')).toBeInTheDocument();
+    expect(
+      within(permissions).getByText('mangostudio-runtime setup --slot host')
+    ).toBeInTheDocument();
+    expect(
+      within(permissions).getByText(en.environments.entities.permissions.allowShellHonesty)
+    ).toBeInTheDocument();
+
+    const remote = screen
+      .getAllByTestId('environment-entity-card')
+      .find(
+        (candidate) => candidate.getAttribute('data-environment-id') === 'remote-dev'
+      ) as HTMLElement;
+    expect(within(remote).queryByTestId('environment-permissions')).not.toBeInTheDocument();
+    expect(within(remote).getByText(en.environments.entities.noManifest)).toBeInTheDocument();
+  });
+
+  it('does not read a refusal into a capability the machine simply lacks', async () => {
+    const localBase = ENVIRONMENTS.find((environment) => environment.id === 'local');
+    if (!localBase) throw new Error('expected local fixture');
+    // Full consent on a machine with no git binary. `features.git` is the
+    // intersection, so it is false here for a reason nobody chose — listing it
+    // as denied would tell the owner they refused something they granted.
+    const gitlessLocal: Environment = {
+      ...localBase,
+      status: {
+        state: 'connected',
+        manifest: {
+          platform: 'linux',
+          arch: 'x64',
+          pathStyle: 'posix',
+          homeDir: '/home/dev',
+          shells: ['bash'],
+          git: { available: false },
+          features: {
+            tools: true,
+            git: false,
+            probing: true,
+            mcp: true,
+            library: true,
+            checkpoints: true,
+            fsRead: true,
+            fsWrite: true,
+            shell: true,
+            update: true,
+          },
+          profile: 'full',
+          allow: {
+            fsRead: true,
+            fsWrite: true,
+            shell: true,
+            git: true,
+            probing: true,
+            mcp: true,
+            library: true,
+            checkpoints: true,
+            update: true,
+          },
+        },
+      },
+    };
+    scenario
+      .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/environments', { body: [gitlessLocal, ENVIRONMENTS[1]] })
+      .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
+      .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
+      .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+      .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+      .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+      .install();
+
+    await renderWithRouter(<OverviewPage />);
+
+    const local = await waitFor(() => {
+      const card = screen
+        .getAllByTestId('environment-entity-card')
+        .find((candidate) => candidate.getAttribute('data-environment-id') === 'local');
+      expect(card).toBeDefined();
+      return card as HTMLElement;
+    });
+
+    // Nothing was refused, so there is no permissions row to show at all.
+    expect(within(local).queryByTestId('environment-permissions')).not.toBeInTheDocument();
+    expect(within(local).queryByText('git')).not.toBeInTheDocument();
+  });
+
   it('renames a persisted execution environment inline', async () => {
     const user = userEvent.setup();
     const renamed = {

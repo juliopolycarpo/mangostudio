@@ -131,6 +131,7 @@ export function register(): void {
       category: 'system',
       enabledByDefault: true,
       canDisable: true,
+      requiredCapabilities: ['fsWrite'],
       defaultParameters: {
         allowedPaths: [],
         deniedPaths: [],

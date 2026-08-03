@@ -25,6 +25,7 @@ import { TODO_READ_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../../../services/too
 import type { EffectiveToolSettings, WorkdirPolicy } from '../../../services/tools/types';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
+import { resolveEnvironmentDisplayName } from './environment-display-name';
 import type { ResolvedAgentRuntime } from './resolve-agent-runtime';
 import { resolveAgentRuntime } from './resolve-agent-runtime';
 import type { ResolvedModel } from './resolve-model';
@@ -90,7 +91,10 @@ export async function prepareSubagentTurn(
   const provider = resolvedModel.providerType
     ? getRegisteredProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
-  const runtimeClient = await getRuntimeClient(input.userId, input.environmentId);
+  const [runtimeClient, environmentName] = await Promise.all([
+    getRuntimeClient(input.userId, input.environmentId),
+    resolveEnvironmentDisplayName(input.userId, input.environmentId),
+  ]);
   const runtime = await resolveAgentRuntime({
     db: input.db,
     userId: input.userId,
@@ -101,6 +105,7 @@ export async function prepareSubagentTurn(
     profile: input.targetProfile,
     runtimeManifest: runtimeClient.manifest,
     environmentId: input.environmentId,
+    environmentName,
   });
   // Subagents can neither delegate further nor ask the human: their turn
   // result flows to the parent model, not the UI, so a question card would

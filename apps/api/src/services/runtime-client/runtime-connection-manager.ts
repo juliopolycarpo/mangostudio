@@ -1,6 +1,7 @@
 import {
   connectInProcessRuntime,
   createLocalRuntimeHost,
+  createSlotConsentSource,
   type InProcessRuntimeConnection,
   RuntimeRemoteError,
 } from '@mangostudio/runtime';
@@ -8,7 +9,11 @@ import type {
   EnvironmentConnectionStatus,
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID, SshFailureReasonSchema } from '@mangostudio/shared/environments';
+import {
+  LOCAL_ENVIRONMENT_ID,
+  LOCAL_ENVIRONMENT_NAME,
+  SshFailureReasonSchema,
+} from '@mangostudio/shared/environments';
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 import { Value } from '@sinclair/typebox/value';
 import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
@@ -25,6 +30,7 @@ import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-pr
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { connectHttpRuntime } from './connect-http-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
+import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
 import { spawnRuntimeChild } from './spawn-runtime-child';
 
@@ -77,6 +83,10 @@ interface RuntimeConnectionEntry {
   failureCount: number;
   /** Epoch ms of the last successful handshake, used to judge that. */
   connectedAtMs?: number;
+  /** Epoch ms the cached manifest was last read from the peer. */
+  manifestReadAtMs?: number;
+  /** In-flight background refresh, so reads coalesce onto one round-trip. */
+  manifestRefresh?: Promise<void>;
   /**
    * Epoch ms before which a lazy connect fails fast instead of respawning.
    * `Infinity` latches the environment until someone connects it explicitly.
@@ -100,6 +110,18 @@ const MAX_RECONNECT_ATTEMPTS = 5;
  * asking — the crash loop the backoff exists to stop.
  */
 const HEALTHY_CONNECTION_MS = 10_000;
+
+/**
+ * How long the handshake manifest is trusted before an environment read asks
+ * the peer again. Consent changes on the machine, not through the hub, so
+ * there is nothing to invalidate on — the card would otherwise show the
+ * profile the runtime had at connect until someone reconnected it.
+ *
+ * The refresh is a `runtime.health` round-trip per connected environment, so
+ * it runs in the background and off the read path; the window is what keeps a
+ * polling card from making one per poll.
+ */
+const MANIFEST_FRESHNESS_MS = 15_000;
 
 /**
  * Transports where the hub cannot open the connection at all — the runtime
@@ -272,6 +294,7 @@ export class RuntimeConnectionManager {
         }
         entry.connection = connection;
         entry.connectedAtMs = Date.now();
+        entry.manifestReadAtMs = entry.connectedAtMs;
         // The failure count is not cleared here: a handshake only shows the
         // runtime started, and one that dies straight after every start is
         // exactly the case the cap has to catch. `#markUnavailable` clears it
@@ -372,6 +395,7 @@ export class RuntimeConnectionManager {
 
     entry.connection = connection;
     entry.connectedAtMs = Date.now();
+    entry.manifestReadAtMs = entry.connectedAtMs;
     entry.failureCount = 0;
     entry.retryAfterMs = 0;
     entry.status = {
@@ -491,6 +515,75 @@ export class RuntimeConnectionManager {
   }
 
   /**
+   * Re-reads `runtime.health` on a live connection, replaces the cached
+   * handshake manifest, and publishes so environment cards refresh. Consent
+   * changes mid-connection are invisible to the cosmetic filter until this
+   * runs; the runtime still refuses correctly in the meantime.
+   */
+  async refreshManifest(
+    userId: string,
+    environmentId: string
+  ): Promise<EnvironmentConnectionStatus> {
+    const key = connectionKey(userId, environmentId);
+    const entry = this.#entries.get(key);
+    const client = entry?.connection?.client;
+    if (!client || entry?.status.state !== 'connected') {
+      return this.getStatus(userId, environmentId);
+    }
+    const revision = entry.revision;
+    // Stamped before the round-trip, not after: a peer that is slow or failing
+    // to answer must not be asked again by every read that arrives meanwhile.
+    entry.manifestReadAtMs = Date.now();
+
+    const health = await client.health();
+    if (
+      entry.revision !== revision ||
+      entry.connection?.client !== client ||
+      entry.status.state !== 'connected'
+    ) {
+      return this.getStatus(userId, environmentId);
+    }
+    const manifest = capabilityManifestFromHealth(health);
+    client.replaceManifest(manifest);
+    const changed = !Value.Equal(entry.status.manifest, manifest);
+    entry.status = {
+      ...entry.status,
+      state: 'connected',
+      manifest,
+      ...peerRelease(client.runtimeVersion),
+    };
+    // Only a real change publishes. The environment read that triggers the
+    // background refresh is itself woken by this invalidation, so publishing
+    // an identical manifest would make the card refetch on every window.
+    if (changed) this.#publish(userId);
+    return entry.status;
+  }
+
+  /**
+   * Asks the peer for its manifest again when the cached one has aged past
+   * {@link MANIFEST_FRESHNESS_MS}, without making the caller wait for it.
+   *
+   * Environment reads call this. The read answers from cache, and a consent
+   * change that landed on the machine reaches the card through the
+   * invalidation {@link refreshManifest} publishes when the answer differs.
+   * A refusal is authoritative at the runtime either way; this is what keeps
+   * the hub's cosmetic view from contradicting it.
+   */
+  refreshManifestIfStale(userId: string, environmentId: string): void {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (entry?.status.state !== 'connected' || entry.manifestRefresh) return;
+    if (Date.now() - (entry.manifestReadAtMs ?? 0) < MANIFEST_FRESHNESS_MS) return;
+
+    entry.manifestRefresh = this.refreshManifest(userId, environmentId)
+      // A peer that cannot answer `runtime.health` is not a reason to fail the
+      // environment read; the connection's own failure handling owns that.
+      .catch(() => undefined)
+      .then(() => {
+        entry.manifestRefresh = undefined;
+      });
+  }
+
+  /**
    * What is still true about the peer once the connection to it is gone: what
    * it could do, and which release said so. Carried across states so a card
    * that just lost its runtime still describes the machine it lost, rather
@@ -519,7 +612,7 @@ async function resolveEnvironment(
     return {
       id: LOCAL_ENVIRONMENT_ID,
       userId,
-      name: 'Local',
+      name: LOCAL_ENVIRONMENT_NAME,
       transportKind: 'in-process',
       config: {},
       enabled: true,
@@ -541,8 +634,10 @@ async function connectLocalRuntime(
   const [probe] = (await probeRuntimeSlots()).filter((slot) => slot.slot === 'host');
   const host = createLocalRuntimeHost({
     runtimeVersion: version,
-    slot: 'host',
-    ...(probe && !probe.error ? { allow: probe.config.allow } : {}),
+    consent: createSlotConsentSource({
+      slot: 'host',
+      ...(probe && !probe.error ? { initial: probe.config.allow } : {}),
+    }),
   });
   const connection: InProcessRuntimeConnection = await connectInProcessRuntime(host, {
     hubVersion: version,

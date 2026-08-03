@@ -12,10 +12,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  connectInProcessRuntime,
+  createLocalRuntimeManifest,
+  createRuntimeMethodHandlers,
+  RuntimeHost,
+} from '@mangostudio/runtime';
 import { libraryLocationsFor, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ChatCapabilitiesResponseSchema } from '@mangostudio/shared/capabilities';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
+import {
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeCapabilityAllow,
+} from '@mangostudio/shared/runtime-home';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
@@ -45,6 +55,11 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
+import { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
+import {
+  RuntimeConnectionManager,
+  setRuntimeConnectionManagerForTests,
+} from '../../../../src/services/runtime-client/runtime-connection-manager';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../../support/factories';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
 
@@ -154,6 +169,55 @@ async function allowAllToolsForChatAgent(): Promise<void> {
     subagentIds: [],
     metadata: {},
   });
+}
+
+/**
+ * Runs `body` against a Local runtime that announces `allow` as its consent —
+ * what `mangostudio-runtime setup --slot host` on this machine would produce.
+ */
+async function withRuntimeConsent<T>(
+  allow: RuntimeCapabilityAllow,
+  body: () => Promise<T>
+): Promise<T> {
+  const manager = new RuntimeConnectionManager({
+    resolveEnvironment: (userId) =>
+      Promise.resolve({
+        id: LOCAL_ENVIRONMENT_ID,
+        userId,
+        name: 'Local',
+        transportKind: 'in-process' as const,
+        config: {},
+        enabled: true,
+      }),
+    connectors: {
+      'in-process': async (_definition, onUnavailable) => {
+        let host: RuntimeHost | undefined;
+        const registry = createRuntimeMethodHandlers({
+          runtimeVersion: 'test',
+          emit: (event) => host?.emit(event),
+        });
+        host = new RuntimeHost({
+          runtimeVersion: 'test',
+          manifest: createLocalRuntimeManifest(allow),
+          handlers: registry.handlers,
+          onClose: () => void registry.close(),
+        });
+        const connection = await connectInProcessRuntime(host, { hubVersion: 'test' });
+        return {
+          client: new RuntimeClient(connection.client, onUnavailable),
+          close: () => connection.close(),
+        };
+      },
+    },
+  });
+
+  setRuntimeConnectionManagerForTests(manager);
+  try {
+    return await body();
+  } finally {
+    await manager.closeAll();
+    setRuntimeConnectionManagerForTests(undefined);
+  }
 }
 
 function inspect(overrides: Partial<Parameters<typeof inspectChatCapabilities>[0]> = {}) {
@@ -275,6 +339,76 @@ describe('inspectChatCapabilities', () => {
     expect(beta?.state).toBe('disabled');
     expect(beta?.reason).toBe('server-disabled');
     expect(beta?.health).toBe('disabled');
+  });
+
+  it('names the refusing machine on servers a denied runtime would reject', async () => {
+    await insertServer('alpha', 1);
+    let connectCalls = 0;
+    setMcpClientConnectorForTest(() => {
+      connectCalls += 1;
+      return Promise.resolve(
+        makeFakeMcpHandle({
+          listTools: () =>
+            Promise.resolve([{ name: 'echo', description: '', inputSchema: { type: 'object' } }]),
+        })
+      );
+    });
+
+    const capabilities = await withRuntimeConsent(
+      { ...RUNTIME_CONSENT_PRESETS.full, mcp: false },
+      () => inspect()
+    );
+
+    const alpha = capabilities.mcpServers.find((server) => server.slug === 'alpha');
+    expect(alpha?.state).toBe('unavailable');
+    expect(alpha?.reason).toBe('runtime-denied');
+    expect(alpha?.environmentName).toBe('Local');
+    // The peer refuses mcp.connect; the inspector must not spend the listing
+    // budget rediscovering that, nor report it as a generic server failure.
+    expect(connectCalls).toBe(0);
+    expect(capabilities.tools.some((tool) => tool.source === 'mcp')).toBe(false);
+  });
+
+  it('shrinks the turn tool list on a readonly machine and explains every drop', async () => {
+    // The plan's regression bar for the cosmetic filter: a readonly machine
+    // must reach the provider with fewer tools than a full one, the inspector
+    // must name why for each, and the turn must still resolve — a refused
+    // capability is a state, not a failed turn.
+    const full = await resolveTurnContext(
+      { chatId, userId: user.id, prompt: 'full probe', model: MODEL_ID },
+      getDb()
+    );
+
+    const [capabilities, readonlyTurn] = await withRuntimeConsent(
+      RUNTIME_CONSENT_PRESETS.readonly,
+      async () =>
+        [
+          await inspect(),
+          await resolveTurnContext(
+            { chatId, userId: user.id, prompt: 'readonly probe', model: MODEL_ID },
+            getDb()
+          ),
+        ] as const
+    );
+
+    const fullNames = full.toolDefinitions.map((definition) => definition.name);
+    const readonlyNames = readonlyTurn.toolDefinitions.map((definition) => definition.name);
+    expect(readonlyNames.length).toBeLessThan(fullNames.length);
+    expect(fullNames).toContain('write_file');
+    expect(readonlyNames).not.toContain('write_file');
+    expect(readonlyNames).toContain('read_file');
+
+    // The inspector is the same projection the turn used, so parity holds
+    // under denial too — and every withheld tool carries the machine's name.
+    expect(effectiveToolNames(capabilities)).toEqual(readonlyNames);
+    const denied = capabilities.tools.filter((tool) => tool.reason === 'runtime-denied');
+    expect(denied.length).toBeGreaterThan(0);
+    expect(denied.every((tool) => tool.environmentName === 'Local')).toBe(true);
+    expect(denied.every((tool) => tool.state === 'unavailable')).toBe(true);
+    expect(capabilities.tools.find((tool) => tool.name === 'write_file')?.reason).toBe(
+      'runtime-denied'
+    );
+    expect(Value.Check(ChatCapabilitiesResponseSchema, capabilities)).toBe(true);
   });
 
   it('reports allowlist exclusions as disabled while preserving turn parity', async () => {

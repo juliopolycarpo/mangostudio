@@ -6,6 +6,7 @@
  */
 
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
 import type * as TanstackRouter from '@tanstack/react-router';
 import { screen, waitFor } from '@testing-library/react';
@@ -179,6 +180,68 @@ describe('CapabilityInspector', () => {
 
     // Shadowed skill copy is explicit rather than silently omitted.
     expect(screen.getByText('shadowed by a higher-precedence source')).toBeInTheDocument();
+  });
+
+  it("speaks for the hub's own machine instead of printing its API name", async () => {
+    // `environmentName` is the environment's name in the API — for the hub's
+    // own machine a fixed English literal. Interpolating it into a translated
+    // sentence would leave a pt-BR reader with "recusada por Local".
+    scenario.respondWithJson(
+      'GET',
+      '/api/chats/chat-1/capabilities?model=gpt-test&agentMode=chat',
+      {
+        body: {
+          ...RESPONSE,
+          tools: [
+            {
+              name: 'write_file',
+              title: 'Write file',
+              source: 'builtin',
+              state: 'unavailable',
+              reason: 'runtime-denied',
+              category: 'system',
+              environmentName: 'Local',
+              environmentId: LOCAL_ENVIRONMENT_ID,
+            },
+            {
+              name: 'read_file',
+              title: 'Read file',
+              source: 'builtin',
+              state: 'unavailable',
+              reason: 'runtime-denied',
+              category: 'system',
+              environmentName: 'Devbox',
+              environmentId: 'devbox',
+            },
+            {
+              // A remote a user chose to call "Local". Keying off the name
+              // rather than the id would silently rename their machine.
+              name: 'grep',
+              title: 'Grep',
+              source: 'builtin',
+              state: 'unavailable',
+              reason: 'runtime-denied',
+              category: 'system',
+              environmentName: 'Local',
+              environmentId: 'devbox-two',
+            },
+          ],
+        },
+      }
+    );
+
+    render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" agentMode="chat" />);
+    await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('refused by this machine')).toBeInTheDocument();
+    });
+    // A remote's name is the user's own text and travels through untouched —
+    // including a remote whose name happens to be the hub's own literal, which
+    // is what proves the substitution keys off the id and not the string.
+    expect(screen.getByText('refused by Devbox')).toBeInTheDocument();
+    expect(screen.getByText('refused by Local')).toBeInTheDocument();
+    expect(screen.getAllByText('refused by this machine')).toHaveLength(1);
   });
 
   it('asks for a chat before fetching when none is open', async () => {

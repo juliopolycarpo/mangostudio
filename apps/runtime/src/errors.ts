@@ -53,12 +53,16 @@ export class RuntimeToolArgumentError extends RuntimeServiceError {
  * The class does not survive the protocol boundary — `errorPayloadFor` flattens
  * every service error to code `INTERNAL` plus its kind — so this constant is
  * what lets the hub answer 404 instead of matching on the message text. It goes
- * in `details`, which is an open record on the wire, rather than in
- * `RuntimeErrorCodeSchema`, whose closed union an older peer would reject.
+ * in `details`, which is an open record on the wire. Consent refusals are the
+ * exception: they travel as the typed `RUNTIME_DENIED` code.
  */
 export const LIBRARY_BACKUP_MISSING_KIND =
   'library_backup_missing' satisfies RuntimeServiceErrorKind;
 
+/**
+ * Hub-side mirror of a remote `err` payload. `code` is always a known literal
+ * after the protocol client narrows the open wire form.
+ */
 export class RuntimeRemoteError extends Error {
   constructor(
     readonly code: RuntimeErrorCode,
@@ -67,5 +71,26 @@ export class RuntimeRemoteError extends Error {
   ) {
     super(message);
     this.name = 'RuntimeRemoteError';
+  }
+}
+
+/**
+ * The machine's owner has not granted a capability the method needs.
+ *
+ * Distinct from a crash so the turn pipeline can render a policy refusal
+ * instead of treating the call as an infrastructure failure.
+ */
+export class RuntimeConsentDeniedError extends Error {
+  constructor(
+    message: string,
+    readonly details: Readonly<{
+      readonly capability?: string;
+      readonly method?: string;
+      readonly slot?: string;
+      readonly missing?: readonly string[];
+    }> = {}
+  ) {
+    super(message);
+    this.name = 'RuntimeConsentDeniedError';
   }
 }

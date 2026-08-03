@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 
 import { ApiKeyScopeSchema } from '../../src/api-keys';
-import { LtsStatusSchema, RuntimeFindingCodeSchema } from '../../src/environments';
+import { CapabilityReasonCodeSchema } from '../../src/capabilities';
+import {
+  InstallGuardReasonSchema,
+  LtsStatusSchema,
+  RuntimeFindingCodeSchema,
+  SshFailureReasonSchema,
+} from '../../src/environments';
 import { en, ptBR } from '../../src/i18n';
 import {
   AdaptNoteSchema,
@@ -36,6 +42,11 @@ const PROPAGATION_OPERATION_MESSAGES = {
 
 const ENUM_COVERAGE = [
   {
+    path: 'chat.capabilities.reasons',
+    values: literalValues(CapabilityReasonCodeSchema),
+    blocks: [en.chat.capabilities.reasons, ptBR.chat.capabilities.reasons],
+  },
+  {
     path: 'environments.findings',
     values: literalValues(RuntimeFindingCodeSchema),
     blocks: [en.environments.findings, ptBR.environments.findings],
@@ -44,6 +55,16 @@ const ENUM_COVERAGE = [
     path: 'environments.lts',
     values: literalValues(LtsStatusSchema),
     blocks: [en.environments.lts, ptBR.environments.lts],
+  },
+  {
+    path: 'environments.entities.ssh.reason',
+    values: literalValues(SshFailureReasonSchema),
+    blocks: [en.environments.entities.ssh.reason, ptBR.environments.entities.ssh.reason],
+  },
+  {
+    path: 'environments.install.guardBlocked',
+    values: literalValues(InstallGuardReasonSchema),
+    blocks: [en.environments.install.guardBlocked, ptBR.environments.install.guardBlocked],
   },
   {
     path: 'library.coverage',

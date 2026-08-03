@@ -93,6 +93,7 @@ function makeSnapshot(
     }),
     overlongToolNames: [],
     listed: true,
+    runtimeDenied: false,
     ...overrides,
   };
 }
@@ -253,6 +254,7 @@ describe('resolveToolCandidates', () => {
       toolSettings: new Map(),
       registeredTools: [makeRegisteredTool('alpha')],
       mcpServers: [makeSnapshot('srv', ['ping'])],
+      environmentName: 'Remote box',
       runtimeManifest: {
         ...RUNTIME_MANIFEST,
         features: { ...RUNTIME_MANIFEST.features, mcp: false },
@@ -261,9 +263,78 @@ describe('resolveToolCandidates', () => {
 
     const byName = new Map(candidates.map((candidate) => [candidate.name, candidate]));
     expect(byName.get('alpha')?.definition).toBeDefined();
-    expect(byName.get('mcp__srv__ping')?.reason).toBe('environment-unsupported');
+    expect(byName.get('mcp__srv__ping')?.reason).toBe('runtime-denied');
+    expect(byName.get('mcp__srv__ping')?.environmentName).toBe('Remote box');
     expect(effectiveToolDefinitions(candidates).map((definition) => definition.name)).toEqual([
       'alpha',
+    ]);
+  });
+
+  it('rejects shell and write tools when the machine consents to readonly', () => {
+    const writeTool = makeRegisteredTool('write_file', {
+      settings: {
+        title: 'Write file',
+        description: '',
+        category: 'system',
+        enabledByDefault: true,
+        canDisable: true,
+        defaultParameters: {},
+        parameterDescriptors: [],
+        requiredCapabilities: ['fsWrite'],
+      },
+    });
+    const shellTool = makeRegisteredTool('bash', {
+      settings: {
+        title: 'Bash shell',
+        description: '',
+        category: 'system',
+        enabledByDefault: true,
+        canDisable: true,
+        defaultParameters: {},
+        parameterDescriptors: [],
+        requiredCapabilities: ['shell'],
+      },
+    });
+    const readTool = makeRegisteredTool('read_file', {
+      settings: {
+        title: 'Read file',
+        description: '',
+        category: 'system',
+        enabledByDefault: true,
+        canDisable: true,
+        defaultParameters: {},
+        parameterDescriptors: [],
+        requiredCapabilities: ['fsRead'],
+      },
+    });
+
+    const candidates = resolveCandidates({
+      profile: makeProfile(),
+      toolSettings: settingsMap({ bash: { enabled: true } }),
+      registeredTools: [readTool, writeTool, shellTool],
+      mcpServers: [],
+      environmentName: 'Laptop',
+      runtimeManifest: {
+        ...RUNTIME_MANIFEST,
+        shells: [],
+        features: {
+          ...RUNTIME_MANIFEST.features,
+          fsRead: true,
+          fsWrite: false,
+          shell: false,
+        },
+        profile: 'readonly',
+      },
+    });
+
+    const byName = new Map(candidates.map((candidate) => [candidate.name, candidate]));
+    expect(byName.get('read_file')?.definition).toBeDefined();
+    expect(byName.get('write_file')?.reason).toBe('runtime-denied');
+    expect(byName.get('write_file')?.environmentName).toBe('Laptop');
+    expect(byName.get('bash')?.reason).toBe('runtime-denied');
+    expect(byName.get('bash')?.environmentName).toBe('Laptop');
+    expect(effectiveToolDefinitions(candidates).map((definition) => definition.name)).toEqual([
+      'read_file',
     ]);
   });
 

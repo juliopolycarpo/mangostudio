@@ -218,7 +218,94 @@ describe('runtime MCP service', () => {
     });
     await service.close();
   });
+
+  it('answers a queued call from the session that is live when it runs', async () => {
+    const service = createService([]);
+    let releaseFirst: (() => void) | undefined;
+    const firstCallStarted = Promise.withResolvers<void>();
+    installFixture(() =>
+      createFixtureServer(async () => {
+        firstCallStarted.resolve();
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      })
+    );
+
+    await service.connect({ config: CONFIG });
+    const held = service.callTool(
+      { serverId: CONFIG.id, toolName: 'ask', args: {} },
+      idleContext()
+    );
+    await firstCallStarted.promise;
+    // Queued behind the call above, so it resolves its session after the
+    // disconnect below has already closed the one it was enqueued under.
+    const queued = service.callTool(
+      { serverId: CONFIG.id, toolName: 'ask', args: {} },
+      idleContext()
+    );
+
+    await service.disconnect({ serverId: CONFIG.id });
+    releaseFirst?.();
+    // The in-flight head goes down with the session it was already running on.
+    await expect(held).rejects.toMatchObject({ kind: 'mcp_call' });
+
+    // The queued one never started, so it is answered by the registry rather
+    // than by a closed handle — which would have surfaced as a transport error.
+    await expect(queued).rejects.toMatchObject({ kind: 'mcp_session_missing' });
+    await service.close();
+  });
+
+  it('lets an aborted caller go while the call ahead of it is still running', async () => {
+    const service = createService([]);
+    let releaseFirst: (() => void) | undefined;
+    const firstCallStarted = Promise.withResolvers<void>();
+    let calls = 0;
+    installFixture(() =>
+      createFixtureServer(async () => {
+        calls += 1;
+        if (calls > 1) return;
+        firstCallStarted.resolve();
+        await new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+      })
+    );
+
+    await service.connect({ config: CONFIG });
+    const held = service.callTool(
+      { serverId: CONFIG.id, toolName: 'ask', args: {} },
+      idleContext()
+    );
+    await firstCallStarted.promise;
+
+    const controller = new AbortController();
+    const queued = service.callTool(
+      { serverId: CONFIG.id, toolName: 'ask', args: {} },
+      { signal: controller.signal }
+    );
+    controller.abort();
+
+    // The abort is answered while the head is still blocked — waiting for the
+    // head would make every cancellation cost as long as the call ahead of it.
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await settles(held)).toBe(false);
+
+    releaseFirst?.();
+    await held;
+    // The abandoned call never reached the server, and the chain still moved.
+    expect(calls).toBe(1);
+    await expect(
+      service.callTool({ serverId: CONFIG.id, toolName: 'ask', args: {} }, idleContext())
+    ).resolves.toMatchObject({ content: [{ type: 'text', text: 'done' }] });
+    await service.close();
+  });
 });
+
+/** A handler context whose caller never cancels. */
+function idleContext(): { signal: AbortSignal } {
+  return { signal: new AbortController().signal };
+}
 
 /** Whether a promise reaches any terminal state inside a generous budget. */
 async function settles(promise: Promise<unknown> | undefined): Promise<boolean> {

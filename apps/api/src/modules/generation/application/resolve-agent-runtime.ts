@@ -5,6 +5,7 @@ import type { ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import {
+  listDeniedMcpBridgeServers,
   listMcpBridgeServers,
   type McpBridgeServerSnapshot,
 } from '../../../services/mcp/tool-bridge';
@@ -54,6 +55,8 @@ export interface ResolveAgentRuntimeInput {
   readonly runtimeManifest: RuntimeCapabilityManifest;
   /** The turn's environment; scopes which MCP servers can be offered. */
   readonly environmentId: string;
+  /** Display name of the chat's environment; attached to runtime-denied. */
+  readonly environmentName?: string;
 }
 
 export function resolveRuntimeAgentId(
@@ -73,9 +76,7 @@ export async function resolveAgentRuntime(
   const [savedProviderSettings, toolSettings, mcpServerSnapshots] = await Promise.all([
     getProviderSettings(input.db, input.userId, input.provider),
     listSavedToolSettings(input.db, input.userId),
-    profile.toolsEnabled && input.runtimeManifest.features.mcp
-      ? listMcpBridgeServers(input.db, input.userId, { environmentId: input.environmentId })
-      : [],
+    listTurnMcpServers(input, profile),
   ]);
   const runtimeSettings = mergeProviderRuntimeSettings(input.provider, savedProviderSettings, {
     ...input.requestRuntimeSettings,
@@ -87,6 +88,8 @@ export async function resolveAgentRuntime(
     registeredTools: getAllTools(),
     mcpServers: mcpServerSnapshots,
     runtimeManifest: input.runtimeManifest,
+    environmentName: input.environmentName,
+    environmentId: input.environmentId,
   });
   const toolDefinitions = effectiveToolDefinitions(toolCandidates);
   const allowedToolNames = new Set(toolDefinitions.map((definition) => definition.name));
@@ -109,6 +112,24 @@ export async function resolveAgentRuntime(
     toolCandidates,
     mcpServerSnapshots,
   };
+}
+
+/**
+ * The turn's MCP snapshots. A machine that refuses MCP is snapshotted without
+ * connecting: every `mcp.connect` would come back `RUNTIME_DENIED`, so the
+ * listing can only cost the per-server budget. The rows still travel so the
+ * inspector can attribute the refusal to the machine.
+ */
+function listTurnMcpServers(
+  input: ResolveAgentRuntimeInput,
+  profile: AgentProfile
+): Promise<McpBridgeServerSnapshot[]> | McpBridgeServerSnapshot[] {
+  if (!profile.toolsEnabled) return [];
+  const scope = { environmentId: input.environmentId };
+  if (input.runtimeManifest.features.mcp === false) {
+    return listDeniedMcpBridgeServers(input.db, input.userId, scope);
+  }
+  return listMcpBridgeServers(input.db, input.userId, scope);
 }
 
 function getAgentRuntimeSettings(profile: AgentProfile): Partial<ProviderRuntimeSettings> {

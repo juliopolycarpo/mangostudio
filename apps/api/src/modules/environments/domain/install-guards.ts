@@ -12,16 +12,33 @@ export interface InstallGuardContext {
   readonly installsEnabled: boolean;
   readonly standalone: boolean;
   readonly container: boolean;
+  /**
+   * Whether the hub's own runtime advertises shell. The loopback checks ask who
+   * is driving; this asks what the machine agreed to. `setup --slot host
+   * --profile readonly` refuses `install.run` either way, so an install offered
+   * without it is one that fails after the user commits to it. Unknown (the
+   * local runtime is not connected yet, or an older peer without the flag)
+   * defaults to allowed.
+   */
+  readonly runtimeShellAllowed?: boolean;
 }
 
 /**
  * The same question about someone else's machine. Nothing the hub can measure
- * locally says anything about it, so the only inputs are the global switch and
- * a per-environment opt-in that somebody had to turn on deliberately.
+ * locally says anything about it, so the only inputs are the global switch,
+ * a per-environment opt-in that somebody had to turn on deliberately, and —
+ * when known — whether that machine's consent still grants shell (installs
+ * spawn a command).
  */
 export interface RemoteInstallGuardContext {
   readonly installsEnabled: boolean;
   readonly allowInstalls: boolean;
+  /**
+   * Whether the connected runtime advertises shell. Unknown (disconnected, or
+   * an older peer without the flag) defaults to allowed so the trust toggle
+   * remains the only gate until consent is visible.
+   */
+  readonly runtimeShellAllowed?: boolean;
 }
 
 function normalizeAddress(value: string): string {
@@ -57,6 +74,7 @@ export function evaluateInstallGuard(context: InstallGuardContext): InstallGuard
   }
   if (!isLoopbackAddress(context.clientIp)) reasons.push('client-not-loopback');
   if (!context.installsEnabled) reasons.push('disabled');
+  if (context.runtimeShellAllowed === false) reasons.push('runtime-denied');
 
   return {
     allowed: reasons.length === 0,
@@ -80,6 +98,7 @@ export function evaluateRemoteInstallGuard(context: RemoteInstallGuardContext): 
 
   if (!context.allowInstalls) reasons.push('environment-not-trusted');
   if (!context.installsEnabled) reasons.push('disabled');
+  if (context.runtimeShellAllowed === false) reasons.push('runtime-denied');
 
   return {
     allowed: reasons.length === 0,

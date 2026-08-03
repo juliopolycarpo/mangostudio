@@ -21,7 +21,14 @@ export type RuntimeMethodHandler = (
 
 export interface RuntimeHostOptions {
   readonly runtimeVersion: string;
-  readonly manifest: RuntimeCapabilityManifest;
+  /**
+   * Capability announcement for `hello`. A factory is evaluated at `start()`
+   * rather than at construction, so a host built before its consent source was
+   * last read announces the newer snapshot. It is a snapshot either way: the
+   * factory is synchronous and cannot touch disk, so consent that changes after
+   * `hello` is caught by the dispatch gate and by `runtime.health`, not here.
+   */
+  readonly manifest: RuntimeCapabilityManifest | (() => RuntimeCapabilityManifest);
   readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
   readonly protocolVersion?: RuntimeProtocolVersion;
   /**
@@ -47,7 +54,7 @@ export class RuntimeHost {
   readonly #eventSequences = new Map<string, number>();
   readonly #pongListeners = new Set<() => void>();
   readonly #handlers: ReadonlyMap<string, RuntimeMethodHandler>;
-  readonly #manifest: RuntimeCapabilityManifest;
+  readonly #resolveManifest: () => RuntimeCapabilityManifest;
   readonly #protocolVersion: RuntimeProtocolVersion;
   readonly #runtimeVersion: string;
   readonly #onClose?: () => void;
@@ -59,7 +66,8 @@ export class RuntimeHost {
 
   constructor(options: RuntimeHostOptions) {
     this.#runtimeVersion = options.runtimeVersion;
-    this.#manifest = options.manifest;
+    const manifest = options.manifest;
+    this.#resolveManifest = typeof manifest === 'function' ? manifest : () => manifest;
     this.#handlers = options.handlers;
     this.#protocolVersion = options.protocolVersion ?? RUNTIME_PROTOCOL_VERSION;
     if (options.onClose) this.#onClose = options.onClose;
@@ -92,7 +100,7 @@ export class RuntimeHost {
         type: 'hello',
         protocolVersion: this.#protocolVersion,
         runtimeVersion: this.#runtimeVersion,
-        manifest: this.#manifest,
+        manifest: this.#resolveManifest(),
       });
     } catch (error) {
       // The transport can go away between attach and start — a hub that
@@ -266,6 +274,21 @@ function errorPayloadFor(error: unknown, signal: AbortSignal): RuntimeErrorPaylo
     };
   }
   if (error instanceof RuntimeServiceError) {
+    if (error.kind === 'consent_denied') {
+      const missing = Array.isArray(error.data.missing)
+        ? error.data.missing.filter((entry): entry is string => typeof entry === 'string')
+        : [];
+      return {
+        code: 'RUNTIME_DENIED',
+        message: error.message,
+        details: {
+          kind: error.kind,
+          ...error.data,
+          capability:
+            typeof error.data.capability === 'string' ? error.data.capability : missing[0],
+        },
+      };
+    }
     return {
       code: 'INTERNAL',
       message: error.message,

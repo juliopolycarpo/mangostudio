@@ -1,5 +1,6 @@
 import {
   assertRuntimeProtocolCompatible,
+  narrowRuntimeErrorCode,
   RUNTIME_PROTOCOL_VERSION,
   type RuntimeCapabilityManifest,
   type RuntimeEventFrame,
@@ -82,6 +83,15 @@ export class RuntimeProtocolClient {
   get manifest(): RuntimeCapabilityManifest {
     if (!this.#runtimeManifest) throw new Error('Runtime handshake has not completed.');
     return this.#runtimeManifest;
+  }
+
+  /**
+   * Replaces the handshake manifest after a consent change. Used when the hub
+   * re-reads `runtime.health` so the cosmetic filter and environment card see
+   * the new allow set without tearing down the connection.
+   */
+  replaceManifest(manifest: RuntimeCapabilityManifest): void {
+    this.#runtimeManifest = manifest;
   }
 
   get runtimeVersion(): string {
@@ -267,6 +277,12 @@ export class RuntimeProtocolClient {
       pending.resolve(frame.ok);
       return;
     }
-    pending.reject(new RuntimeRemoteError(frame.err.code, frame.err.message, frame.err.details));
+    pending.reject(
+      new RuntimeRemoteError(
+        narrowRuntimeErrorCode(frame.err.code),
+        frame.err.message,
+        frame.err.details
+      )
+    );
   }
 }

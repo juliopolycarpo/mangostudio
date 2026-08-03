@@ -87,19 +87,22 @@ export const messages: Messages = {
       manageMcp: 'MCP settings',
       manageSkills: 'Skill settings',
       reasons: {
-        agentToolsDisabled: 'the agent profile disables tools',
-        agentAllowlist: 'not in the agent tool allowlist',
-        toolSettingDisabled: 'disabled in tool settings',
-        nameOverProviderLimit: 'name exceeds the provider limit',
-        environmentUnsupported: 'not supported by the selected environment',
-        serverDisabled: 'server is disabled',
-        serverUnavailable: 'server is unavailable',
-        delegationDisabled: 'delegation is disabled in multi-agent settings',
-        skillInvalid: 'skill is invalid',
-        skillDisabled: 'disabled in skill settings',
-        skillShadowed: 'shadowed by a higher-precedence source',
-        skillToolDisabled: 'the skill tool is not active',
+        'agent-tools-disabled': 'the agent profile disables tools',
+        'agent-allowlist': 'not in the agent tool allowlist',
+        'tool-setting-disabled': 'disabled in tool settings',
+        'name-over-provider-limit': 'name exceeds the provider limit',
+        'environment-unsupported': 'not supported by the selected environment',
+        'runtime-denied': 'refused by {environmentName}',
+        'server-disabled': 'server is disabled',
+        'server-unavailable': 'server is unavailable',
+        'delegation-disabled': 'delegation is disabled in multi-agent settings',
+        'skill-invalid': 'skill is invalid',
+        'skill-disabled': 'disabled in skill settings',
+        'skill-shadowed': 'shadowed by a higher-precedence source',
+        'skill-tool-disabled': 'the skill tool is not active',
       },
+      /** Substituted for the hub's own machine, whose API name is not copy. */
+      localEnvironment: 'this machine',
       health: {
         connected: 'connected',
         connecting: 'connecting',
@@ -2137,6 +2140,19 @@ export const messages: Messages = {
       platform: '{platform} · {arch}',
       runtimeVersionDrift:
         'This machine runs runtime {version}, which is not the release this MangoStudio ships. It still connects; update the runtime there when you can.',
+      permissions: {
+        title: 'Permissions',
+        profile: {
+          full: 'Full',
+          readonly: 'Read-only',
+          none: 'None',
+          custom: 'Custom',
+        },
+        deniedIntro: 'Denied on this machine:',
+        setupCommand: 'Change consent on that machine',
+        allowShellHonesty:
+          'allow.shell grants everything a shell can reach — the capability list below it describes intent, not a sandbox.',
+      },
       pairing: {
         title: 'Pairing',
         description: 'The runtime on that machine dials MangoStudio with this credential.',
@@ -2410,6 +2426,8 @@ export const messages: Messages = {
         disabled: 'Installs are disabled in this server configuration.',
         'environment-not-trusted':
           'This environment has not been trusted with installs. Turn it on for that machine, on its card in Environments.',
+        'runtime-denied':
+          'That machine refuses shell, which every install needs. Run mangostudio-runtime setup there and grant shell, or install by hand.',
       },
     },
   },

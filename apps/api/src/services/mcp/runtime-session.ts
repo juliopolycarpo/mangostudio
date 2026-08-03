@@ -249,6 +249,8 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
   const deadline = (options?: McpRequestOptions) =>
     requestDeadline(options?.timeoutMs ?? config.timeoutMs);
 
+  let callToolChain: Promise<unknown> = Promise.resolve();
+
   return {
     getCapabilities: () => input.capabilities,
 
@@ -261,27 +263,67 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
 
     async callTool(name, args, callOptions) {
       const toolCallId = callOptions?.toolCallId?.trim();
-      if (toolCallId) activeCalls.set(toolCallId, callOptions?.signal);
-      try {
-        return await runtime.mcp
-          .callTool(
-            {
-              serverId,
-              toolName: name,
-              args,
-              ...(toolCallId ? { toolCallId } : {}),
-              ...(callOptions?.timeoutMs !== undefined
-                ? { timeoutMs: callOptions.timeoutMs }
-                : config.timeoutMs !== null
-                  ? { timeoutMs: config.timeoutMs }
-                  : {}),
-            },
-            requestOptions(callOptions, deadline(callOptions))
-          )
-          .catch(noteFailure);
-      } finally {
-        if (toolCallId) activeCalls.delete(toolCallId);
-      }
+      const signal = callOptions?.signal;
+      signal?.throwIfAborted();
+
+      // Abort must win while this call is still waiting behind an earlier one
+      // (elicitation holds the head of the queue). Without the race, abort
+      // sits behind the blocked head and deadlocks the caller that needs to
+      // answer that elicitation before the queue can move.
+      //
+      // The race is only for the wait. Once the call reaches the runtime the
+      // signal travels with it, and short-circuiting there would hand the
+      // caller an abort while the request was still unwinding — and while
+      // `activeCalls` still held the entry an elicitation routes through.
+      let onAbort: (() => void) | undefined;
+      const detachAbort = () => {
+        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+        onAbort = undefined;
+      };
+      const abortWhileQueued =
+        signal === undefined
+          ? null
+          : new Promise<never>((_, reject) => {
+              onAbort = () => {
+                reject(
+                  signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+                );
+              };
+              signal.addEventListener('abort', onAbort, { once: true });
+            });
+
+      const previous = callToolChain;
+      const queued = previous
+        .catch(() => undefined)
+        .then(async () => {
+          detachAbort();
+          signal?.throwIfAborted();
+          if (toolCallId) activeCalls.set(toolCallId, signal);
+          try {
+            return await runtime.mcp
+              .callTool(
+                {
+                  serverId,
+                  toolName: name,
+                  args,
+                  ...(toolCallId ? { toolCallId } : {}),
+                  ...(callOptions?.timeoutMs !== undefined
+                    ? { timeoutMs: callOptions.timeoutMs }
+                    : config.timeoutMs !== null
+                      ? { timeoutMs: config.timeoutMs }
+                      : {}),
+                },
+                requestOptions(callOptions, deadline(callOptions))
+              )
+              .catch(noteFailure);
+          } finally {
+            if (toolCallId) activeCalls.delete(toolCallId);
+          }
+        });
+      // Keep the chain moving even when this call loses to abortWhileQueued.
+      callToolChain = queued.catch(() => undefined);
+      const run = abortWhileQueued ? Promise.race([queued, abortWhileQueued]) : queued;
+      return await run.finally(detachAbort);
     },
 
     async listResources(callOptions) {
