@@ -21,7 +21,12 @@ export type RuntimeMethodHandler = (
 
 export interface RuntimeHostOptions {
   readonly runtimeVersion: string;
-  readonly manifest: RuntimeCapabilityManifest;
+  /**
+   * Capability announcement for `hello`. May be a factory so the host can
+   * re-read consent at `start()` — between construction and connect a setup
+   * may have narrowed the slot.
+   */
+  readonly manifest: RuntimeCapabilityManifest | (() => RuntimeCapabilityManifest);
   readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
   readonly protocolVersion?: RuntimeProtocolVersion;
   /**
@@ -47,7 +52,7 @@ export class RuntimeHost {
   readonly #eventSequences = new Map<string, number>();
   readonly #pongListeners = new Set<() => void>();
   readonly #handlers: ReadonlyMap<string, RuntimeMethodHandler>;
-  readonly #manifest: RuntimeCapabilityManifest;
+  readonly #resolveManifest: () => RuntimeCapabilityManifest;
   readonly #protocolVersion: RuntimeProtocolVersion;
   readonly #runtimeVersion: string;
   readonly #onClose?: () => void;
@@ -59,7 +64,8 @@ export class RuntimeHost {
 
   constructor(options: RuntimeHostOptions) {
     this.#runtimeVersion = options.runtimeVersion;
-    this.#manifest = options.manifest;
+    const manifest = options.manifest;
+    this.#resolveManifest = typeof manifest === 'function' ? manifest : () => manifest;
     this.#handlers = options.handlers;
     this.#protocolVersion = options.protocolVersion ?? RUNTIME_PROTOCOL_VERSION;
     if (options.onClose) this.#onClose = options.onClose;
@@ -92,7 +98,7 @@ export class RuntimeHost {
         type: 'hello',
         protocolVersion: this.#protocolVersion,
         runtimeVersion: this.#runtimeVersion,
-        manifest: this.#manifest,
+        manifest: this.#resolveManifest(),
       });
     } catch (error) {
       // The transport can go away between attach and start — a hub that

@@ -45,7 +45,7 @@ export function createLocalRuntimeHost(options: {
 
   host = new RuntimeHost({
     runtimeVersion: options.runtimeVersion,
-    manifest: createLocalRuntimeManifest(),
+    manifest: () => createLocalRuntimeManifest(consent.current()),
     handlers: gateHandlersByConsent(registry.handlers, consent),
     onClose: () => void registry.close(),
     ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),

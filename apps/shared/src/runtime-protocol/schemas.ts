@@ -58,6 +58,10 @@ export type RuntimeShellKind = Static<typeof RuntimeShellKindSchema>;
  * Capability announcement in `hello`. Manifest objects tolerate unknown keys
  * so an older hub can keep talking to a newer runtime that advertises extra
  * feature flags; frame envelopes themselves stay closed.
+ *
+ * Feature keys beyond the original six are optional: an absent value means the
+ * peer predates the key and should be treated as granted (`true`) so an older
+ * runtime is not silently stripped of tools the hub already trusted.
  */
 export const RuntimeCapabilityManifestSchema = Type.Object({
   platform: Type.String({ minLength: 1 }),
@@ -76,7 +80,21 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
     mcp: Type.Boolean(),
     library: Type.Boolean(),
     checkpoints: Type.Boolean(),
+    /** Absent on older peers — treat as true. */
+    fsRead: Type.Optional(Type.Boolean()),
+    fsWrite: Type.Optional(Type.Boolean()),
+    shell: Type.Optional(Type.Boolean()),
+    update: Type.Optional(Type.Boolean()),
   }),
+  /** Consent profile that produced `features`; absent on older peers. */
+  profile: Type.Optional(
+    Type.Union([
+      Type.Literal('full'),
+      Type.Literal('readonly'),
+      Type.Literal('none'),
+      Type.Literal('custom'),
+    ])
+  ),
 });
 export type RuntimeCapabilityManifest = Static<typeof RuntimeCapabilityManifestSchema>;
 

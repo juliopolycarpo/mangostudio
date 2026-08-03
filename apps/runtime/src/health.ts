@@ -39,7 +39,7 @@ export async function collectRuntimeHealth(
   const env = options.env;
   const slot = options.slot ?? resolveRuntimeSlot(env);
   const { config, error } = await readRuntimeSlotState(slot, env);
-  const manifest = createLocalRuntimeManifest();
+  const manifest = createLocalRuntimeManifest(config.allow);
 
   return {
     schemaVersion: config.schemaVersion,

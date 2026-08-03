@@ -118,7 +118,7 @@ describe('runtime protocol compatibility', () => {
           fsRead: true,
           futureFlag: false,
         },
-        profile: 'readonly',
+        profile: 'readonly' as const,
       },
     };
 
