@@ -60,17 +60,30 @@ Every downstream channel (Homebrew, Scoop, Cargo launcher, the mangostudio.dev
 install scripts) hardcodes these public asset names. Do not rename them without
 updating every template and installer in the same release.
 
-| Asset                                        | Notes                                                                                                                      |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `mangostudio-<version>-<platform>.tar.gz`    | Linux and macOS platforms (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `linux-arm64-musl`, `darwin-x64`, `darwin-arm64`) |
-| `mangostudio-<version>-<platform>.zip`       | Windows platforms (`windows-x64`, `windows-arm64`)                                                                         |
-| `mangostudio-<version>-frontend-dist.tar.gz` | Frontend bundle only (`apps/frontend/dist`)                                                                                |
-| `SHA256SUMS`                                 | Checksums for every asset above                                                                                            |
+| Asset                                            | Notes                                                                                                                      |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `mangostudio-<version>-<platform>.tar.gz`        | Linux and macOS platforms (`linux-x64`, `linux-arm64`, `linux-x64-musl`, `linux-arm64-musl`, `darwin-x64`, `darwin-arm64`) |
+| `mangostudio-<version>-<platform>.zip`           | Windows platforms (`windows-x64`, `windows-arm64`)                                                                         |
+| `mangostudio-<version>-<platform>[.exe]`         | Raw hub binary (no archive) for direct download / one-liner installs                                                       |
+| `mangostudio-runtime-<version>-<platform>[.exe]` | Raw runtime binary for WSL/SSH provisioning and remote one-liners                                                          |
+| `mangostudio-<version>-frontend-dist.tar.gz`     | Frontend bundle only (`apps/frontend/dist`)                                                                                |
+| `SHA256SUMS`                                     | Checksums for every asset above                                                                                            |
 
 Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`),
 `mangostudio-runtime` (or `mangostudio-runtime.exe`), and `README.md` — no nested
 platform directory. The main binary embeds the frontend UI; no sibling asset
 directory is required at runtime.
+
+The raw binaries are the preferred source for pairing/install one-liners and for
+hub-driven provisioning (WSL/SSH). Archives remain the fallback for older
+releases and for installers that still consume the bundled layout:
+
+```bash
+curl -fsSL "https://github.com/juliopolycarpo/mangostudio/releases/download/v<version>/mangostudio-runtime-<version>-linux-x64" \
+  -o mangostudio-runtime
+echo "<sha256>  mangostudio-runtime" | sha256sum -c -
+chmod +x mangostudio-runtime
+```
 
 The two binaries are one unit. MangoStudio resolves `mangostudio-runtime` as a
 sibling of its own executable to run environments out of process, and the protocol
