@@ -256,6 +256,28 @@ describe('mangostudio-runtime binary', () => {
   );
 
   it(
+    'refuses --stdio on a pending slot without writing a single byte to stdout',
+    async () => {
+      // The contract 013's stderr classifier and every stdio launcher depend on:
+      // a refusal exits non-zero carrying the signature, and stdout stays empty.
+      // One frame written before the refusal would leave the hub decoding a
+      // stream that is never going to answer, and it would wait out its
+      // handshake timeout instead of reporting a consent gate.
+      const home = await isolatedHome();
+      await Bun.write(
+        join(home, 'runtime/host/runtime.json'),
+        JSON.stringify({ schemaVersion: 1, slot: 'host', setup: { state: 'pending' } })
+      );
+
+      const run = await runCli(['--stdio'], { env: { MANGO_HOME: home } });
+      expect(run.exitCode).toBe(1);
+      expect(run.stdout).toBe('');
+      expect(run.stderr).toContain('runtime setup is pending on this machine');
+    },
+    SPAWN_TIMEOUT_MS
+  );
+
+  it(
     'serves a host slot with no setup step at all, which is what an image relies on',
     async () => {
       // The standing regression guard for containers: the runtime the Docker
