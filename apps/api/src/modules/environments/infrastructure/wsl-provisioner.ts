@@ -3,14 +3,16 @@
  *
  * The hub and the runtime ship from one release and the handshake refuses a
  * mismatched pair, so this is version-pinned by construction: it fetches the
- * archive for the hub's own version, verifies it against that release's
+ * raw runtime asset for the hub's own version (falling back to the platform
+ * archive for older releases), verifies it against that release's
  * `SHA256SUMS`, and caches it under `~/.mango/runtime-cache/<version>/` so a
  * second distribution — or a re-provision after the hub updates — costs one
  * spawn instead of another download.
  *
  * The bytes never touch the distribution's filesystem as an archive: they are
- * piped into `tar` on stdin, which avoids writing through the 9P share and
- * leaves nothing to clean up if the transfer dies halfway.
+ * piped into the install script on stdin, which avoids writing through the 9P
+ * share and leaves nothing to clean up if the transfer dies halfway. The
+ * stage-verify-publish sequence lives in `runtime-push.ts`.
  *
  * A hub running from a source checkout reports `dev`, which names no release
  * and never will, so it installs the Linux runtime the checkout built for
@@ -27,14 +29,18 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
 import {
+  pushRuntimeBinary,
+  type RuntimeCommandOptions,
+  type RuntimeCommandResult,
+  RuntimePushError,
+} from '../domain/runtime-push';
+import {
   CONFIG_LOCK_BUSY_EXIT,
   DISTRO_RUNTIME_PATH,
   type DistroPlatformProbe,
   type DistroSlotProbe,
   distroRuntimeConfigAfterInstall,
   findReleaseChecksum,
-  INSTALL_ARCHIVE_SCRIPT,
-  INSTALL_BINARY_SCRIPT,
   LEGACY_DISTRO_RUNTIME_PATH,
   type LinuxPlatformId,
   localRuntimeBuildCommand,
@@ -45,20 +51,24 @@ import {
   REMOVE_LEGACY_RUNTIME_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
+  releaseRuntimeBinaryName,
   resolveLinuxPlatformId,
   SETUP_FULL_SCRIPT,
   VERSION_SCRIPT,
   WRITE_CONFIG_SCRIPT,
 } from '../domain/wsl-runtime-release';
 
-/** Platform archives are tens of megabytes; the cap is generous but finite. */
+/** Platform archives / raw binaries are tens of megabytes; the cap is generous but finite. */
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const MAX_CHECKSUMS_BYTES = 64 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 300_000;
 const MAX_REDIRECTS = 5;
 /** Booting a stopped distribution is part of the first command's cost. */
 const DISTRO_COMMAND_TIMEOUT_MS = 120_000;
+/** A ~95 MB push to a cold distro needs more than the default probe timeout. */
+const DISTRO_INSTALL_TIMEOUT_MS = 600_000;
 const MAX_DISTRO_OUTPUT_BYTES = 64 * 1024;
+const STDIN_CHUNK_BYTES = 64 * 1024;
 
 const logger = createDiagnosticLogger('wsl-provisioner');
 
@@ -75,13 +85,7 @@ export class WslProvisioningError extends Error {
  */
 class WslDownloadError extends WslProvisioningError {}
 
-export interface DistroCommandResult {
-  readonly stdout: string;
-  readonly stderr: string;
-  readonly exitCode: number;
-  /** Set when the command was killed rather than exiting, which a timeout does. */
-  readonly signal?: string;
-}
+export type DistroCommandResult = RuntimeCommandResult;
 
 export interface WslProvisionerDeps extends SafeFetchDeps {
   /**
@@ -92,7 +96,7 @@ export interface WslProvisionerDeps extends SafeFetchDeps {
   runInDistro(
     distro: string,
     script: string,
-    options?: { readonly stdin?: Uint8Array; readonly args?: readonly string[] }
+    options?: RuntimeCommandOptions
   ): Promise<DistroCommandResult>;
   /** Reads a file the hub only hopes is there, hence the null rather than a throw. */
   readBytes(path: string): Promise<Uint8Array | null>;
@@ -165,7 +169,7 @@ function resolvePlatformId(probe: DistroPlatformProbe, distro: string): LinuxPla
 }
 
 /**
- * The bytes to push and the script that unpacks them.
+ * The bytes to push and whether they arrive as a raw binary or a platform archive.
  *
  * A checkout's version names no release, so asking one for assets can only
  * 404: the answer there is the build the developer already has, taken whole
@@ -176,13 +180,10 @@ async function loadSource(
   distro: string,
   version: string,
   platformId: LinuxPlatformId
-): Promise<{ readonly script: string; readonly bytes: Uint8Array }> {
+): Promise<{ readonly fromArchive: boolean; readonly bytes: Uint8Array }> {
   return isDevelopmentVersion(version)
-    ? { script: INSTALL_BINARY_SCRIPT, bytes: await loadLocalBuild(deps, distro, platformId) }
-    : {
-        script: INSTALL_ARCHIVE_SCRIPT,
-        bytes: await loadRelease(deps, distro, version, platformId),
-      };
+    ? { fromArchive: false, bytes: await loadLocalBuild(deps, distro, platformId) }
+    : await loadRelease(deps, distro, version, platformId);
 }
 
 /**
@@ -207,34 +208,38 @@ async function install(
   distro: string,
   version: string,
   platformId: LinuxPlatformId,
-  source: { readonly script: string; readonly bytes: Uint8Array }
+  source: { readonly fromArchive: boolean; readonly bytes: Uint8Array }
 ): Promise<void> {
-  const result = await deps.runInDistro(distro, source.script, {
-    stdin: source.bytes,
-    args: [version],
-  });
-  if (result.exitCode !== 0) {
-    throw new WslProvisioningError(
-      `Could not unpack the runtime inside "${distro}": ${describe(result)}`
-    );
-  }
-
-  const check = await deps.runInDistro(distro, VERSION_SCRIPT);
-  if (check.exitCode !== 0) {
-    throw new WslProvisioningError(
-      `The runtime was placed in "${distro}" but does not run there: ${describe(check)}`
-    );
-  }
-  if (check.stdout.trim() !== version) {
-    const mismatch = `The runtime installed in "${distro}" reports version ${check.stdout.trim()} rather than ${version}.`;
-    // The likely cause in a checkout is a runtime compiled by
-    // `bun run build:binary`, which stamps the package version into what it
-    // builds — right for a release, wrong for a hub that reports `dev`.
-    throw new WslProvisioningError(
-      isDevelopmentVersion(version)
-        ? `${mismatch} A checkout's runtime has to be compiled without a version stamp: \`${localRuntimeBuildCommand(platformId, deps.localBuildPath(platformId))}\`.`
-        : mismatch
-    );
+  try {
+    await pushRuntimeBinary({
+      runner: (script, options) => deps.runInDistro(distro, script, options),
+      slot: 'wsl',
+      version,
+      bytes: source.bytes,
+      fromArchive: source.fromArchive,
+      timeoutMs: DISTRO_INSTALL_TIMEOUT_MS,
+    });
+  } catch (error) {
+    if (error instanceof RuntimePushError) {
+      let message = error.message
+        .replace(
+          'Could not place the runtime in the wsl slot',
+          `Could not unpack the runtime inside "${distro}"`
+        )
+        .replace(
+          'The runtime was placed in the wsl slot but does not run',
+          `The runtime was placed in "${distro}" but does not run there`
+        )
+        .replace(
+          `The runtime in the wsl slot reports version`,
+          `The runtime installed in "${distro}" reports version`
+        );
+      if (isDevelopmentVersion(version) && message.includes('reports version')) {
+        message = `${message} A checkout's runtime has to be compiled without a version stamp: \`${localRuntimeBuildCommand(platformId, deps.localBuildPath(platformId))}\`.`;
+      }
+      throw new WslProvisioningError(message);
+    }
+    throw error;
   }
 }
 
@@ -338,25 +343,47 @@ async function removeLegacyRuntime(deps: WslProvisionerDeps, distro: string): Pr
   }
 }
 
+/**
+ * Prefers the raw runtime asset; falls back to the platform archive when the
+ * raw asset is missing from SHA256SUMS or 404s (older releases).
+ */
 async function loadRelease(
   deps: WslProvisionerDeps,
   distro: string,
   version: string,
   platformId: LinuxPlatformId
-): Promise<Uint8Array> {
-  const assetName = releaseArchiveName(version, platformId);
-  // Getting the bytes is the step that needs the network, so it is the step
-  // with an offline answer. A hub that cannot reach the release should say what
-  // to do about it rather than only what went wrong.
-  return await loadArchive(deps, version, assetName).catch((error: unknown) => {
-    if (error instanceof WslDownloadError) {
+): Promise<{ readonly fromArchive: boolean; readonly bytes: Uint8Array }> {
+  const rawName = releaseRuntimeBinaryName(version, platformId);
+  const archiveName = releaseArchiveName(version, platformId);
+
+  try {
+    const bytes = await loadAsset(deps, version, rawName);
+    return { fromArchive: false, bytes };
+  } catch (error) {
+    if (!(error instanceof WslAssetMissingError)) {
+      if (error instanceof WslDownloadError) {
+        throw new WslProvisioningError(
+          `${error.message} ${manualInstallHint(deps, distro, version, rawName)}`
+        );
+      }
+      throw error;
+    }
+  }
+
+  try {
+    const bytes = await loadAsset(deps, version, archiveName);
+    return { fromArchive: true, bytes };
+  } catch (error) {
+    if (error instanceof WslDownloadError || error instanceof WslAssetMissingError) {
       throw new WslProvisioningError(
-        `${error.message} ${manualInstallHint(deps, distro, version, assetName)}`
+        `${error.message} ${manualInstallHint(deps, distro, version, archiveName)}`
       );
     }
     throw error;
-  });
+  }
 }
+
+class WslAssetMissingError extends WslProvisioningError {}
 
 /**
  * The runtime a source checkout provides for itself. Compiling it is left to
@@ -417,10 +444,10 @@ async function probePlatform(
 }
 
 /**
- * Returns the verified archive bytes, downloading them only when the cache does
+ * Returns the verified asset bytes, downloading them only when the cache does
  * not already hold a copy whose digest matches the release.
  */
-async function loadArchive(
+async function loadAsset(
   deps: WslProvisionerDeps,
   version: string,
   assetName: string
@@ -459,7 +486,7 @@ async function fetchExpectedChecksum(
   );
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);
   if (!expected) {
-    throw new WslProvisioningError(
+    throw new WslAssetMissingError(
       `Release v${version} does not publish ${assetName}, so there is no Linux runtime to install. Update MangoStudio, or put a matching runtime at ${DISTRO_RUNTIME_PATH} in the distribution yourself.`
     );
   }
@@ -480,6 +507,9 @@ async function download(
     return result.bytes;
   } catch (error) {
     if (error instanceof SafeFetchError) {
+      if (error.message.includes('404') || /\b404\b/.test(error.message)) {
+        throw new WslAssetMissingError(`Could not download ${url}: ${error.message}.`);
+      }
       throw new WslDownloadError(`Could not download ${url}: ${error.message}.`);
     }
     throw error;
@@ -507,19 +537,24 @@ function describe(result: DistroCommandResult): string {
  * argv entry and the script is a constant, so nothing user-supplied is ever
  * parsed as shell. Positional arguments land as `$1`, `$2`, … after the `$0`
  * that names the runtime in anything the shell reports.
+ *
+ * Large stdin payloads are written in chunks that honour backpressure, with an
+ * optional progress callback — a ~95 MB push that does a single write stalls
+ * the event loop and has no progress to surface.
  */
 function runInDistroWithWsl(
   distro: string,
   script: string,
-  options: { readonly stdin?: Uint8Array; readonly args?: readonly string[] } = {}
+  options: RuntimeCommandOptions = {}
 ): Promise<DistroCommandResult> {
   return new Promise((resolve, reject) => {
     const argv = ['-d', distro, '--exec', 'sh', '-c', script];
     if (options.args?.length) argv.push('mangostudio-runtime', ...options.args);
+    const timeoutMs = options.timeoutMs ?? DISTRO_COMMAND_TIMEOUT_MS;
     const child = spawn('wsl.exe', argv, {
       stdio: 'pipe',
       windowsHide: true,
-      timeout: DISTRO_COMMAND_TIMEOUT_MS,
+      timeout: timeoutMs,
     });
 
     let stdout = '';
@@ -550,9 +585,31 @@ function runInDistroWithWsl(
     // waits for. An early exit surfaces as EPIPE and is already reported by the
     // exit code, so it must not also become an unhandled error.
     child.stdin.on('error', () => undefined);
-    if (options.stdin) child.stdin.write(options.stdin);
-    child.stdin.end();
+    void writeStdinChunked(child.stdin, options.stdin, options.onStdinProgress).then(
+      () => child.stdin.end(),
+      () => child.stdin.end()
+    );
   });
+}
+
+async function writeStdinChunked(
+  stdin: NodeJS.WritableStream,
+  bytes: Uint8Array | undefined,
+  onProgress: ((bytesWritten: number) => void) | undefined
+): Promise<void> {
+  if (!bytes || bytes.byteLength === 0) return;
+
+  let offset = 0;
+  while (offset < bytes.byteLength) {
+    const end = Math.min(offset + STDIN_CHUNK_BYTES, bytes.byteLength);
+    const chunk = bytes.subarray(offset, end);
+    const canContinue = stdin.write(chunk);
+    offset = end;
+    onProgress?.(offset);
+    if (!canContinue) {
+      await new Promise<void>((resolve) => stdin.once('drain', resolve));
+    }
+  }
 }
 
 function appendBounded(current: string, chunk: Buffer): string {

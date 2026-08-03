@@ -9,9 +9,10 @@ import {
 
 const VERSION = '1.2.3';
 const ASSET = `mangostudio-${VERSION}-linux-x64.tar.gz`;
+const RAW_ASSET = `mangostudio-runtime-${VERSION}-linux-x64`;
 const ARCHIVE = new TextEncoder().encode('pretend this is a tar.gz');
 const DIGEST = createHash('sha256').update(ARCHIVE).digest('hex');
-const CHECKSUMS = `${DIGEST}  ${ASSET}\n`;
+const CHECKSUMS = `${DIGEST}  ${RAW_ASSET}\n${DIGEST}  ${ASSET}\n`;
 const DISTRO_HOME = '/home/dev';
 
 interface DistroCall {
@@ -133,15 +134,33 @@ describe('WslProvisioner', () => {
 
     expect(requested).toEqual([
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${RAW_ASSET}`,
+    ]);
+    expect(written.get(`/cache/${VERSION}/${RAW_ASSET}`)).toEqual(ARCHIVE);
+    expect(calls.every((call) => call.distro === 'Ubuntu')).toBe(true);
+
+    const unpack = calls.find((call) => call.script.includes('cat > '));
+    expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
+    expect(unpack?.script).not.toContain('tar');
+    // The version is an argv entry, never text inside the script.
+    expect(unpack?.args).toEqual([VERSION]);
+  });
+
+  it('falls back to the platform archive when the raw asset is unpublished', async () => {
+    const { provisioner, calls, requested, written } = harness({
+      checksums: `${DIGEST}  ${ASSET}\n`,
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(requested).toEqual([
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${ASSET}`,
     ]);
     expect(written.get(`/cache/${VERSION}/${ASSET}`)).toEqual(ARCHIVE);
-    expect(calls.every((call) => call.distro === 'Ubuntu')).toBe(true);
-
     const unpack = calls.find((call) => call.script.includes('tar -xzf -'));
     expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
-    // The version is an argv entry, never text inside the script.
-    expect(unpack?.args).toEqual([VERSION]);
   });
 
   it('records what it installed and what the distribution may do', async () => {
@@ -287,10 +306,10 @@ describe('WslProvisioner', () => {
     });
 
     // An air-gapped or proxied hub has no other move, so both are spelled out:
-    // where the cache expects the archive, and where the binary belongs.
+    // where the cache expects the asset, and where the binary belongs.
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
       new RegExp(
-        `Could not download .*\\. Either download .*/${ASSET} to /cache/${VERSION}/${ASSET} ` +
+        `Could not download .*\\. Either download .*/${RAW_ASSET} to /cache/${VERSION}/${RAW_ASSET} ` +
           'on this host and connect again, or put the 1\\.2\\.3 runtime at ' +
           '~/\\.mango/runtime/wsl/current/mangostudio-runtime inside "Ubuntu" yourself\\.',
         's'
@@ -421,6 +440,9 @@ describe('WslProvisioner', () => {
     await provisioner.ensure(hostile);
 
     expect(calls.every((call) => call.distro === hostile)).toBe(true);
-    expect(calls.every((call) => !call.script.includes('rm -rf'))).toBe(true);
+    // The prune constant contains `rm -rf "$d"`; the hostile name must never
+    // appear inside a script string where the shell would parse it.
+    expect(calls.every((call) => !call.script.includes(hostile))).toBe(true);
+    expect(calls.every((call) => !call.script.includes('rm -rf /'))).toBe(true);
   });
 });
