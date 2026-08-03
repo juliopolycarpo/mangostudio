@@ -48,7 +48,11 @@ export function capabilityManifestFromHealth(
       checkpoints: allow.checkpoints,
       fsRead: allow.fsRead,
       fsWrite: allow.fsWrite,
-      shell: allow.shell && shells.length > 0,
+      // Consent, not availability — the same thing `hello` says. A machine that
+      // grants shell but has no bash/zsh/powershell is reported through the
+      // empty `shells` list, so a refresh cannot disagree with the handshake
+      // about whether the owner said yes.
+      shell: allow.shell,
       update: allow.update,
     },
     profile: report.profile,
