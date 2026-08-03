@@ -10,7 +10,6 @@
 
 import { Console } from 'node:console';
 import { createInterface } from 'node:readline/promises';
-import { RUNTIME_CONSENT_PRESETS, type RuntimeSlot } from '@mangostudio/shared/runtime-home';
 import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
 import {
@@ -22,13 +21,13 @@ import {
 import { createLocalRuntimeHost } from './runtime';
 import {
   bootstrapServeToken,
+  consentByInvocation,
   RUNTIME_SETUP_PENDING_MESSAGE,
   readPairingToken,
   readRuntimeSlotConfig,
   readRuntimeSlotState,
   readServeToken,
   resolveRuntimeSlot,
-  resolveRuntimeSource,
   runtimeSlotDir,
   writePairingToken,
   writeRuntimeSlotConfig,
@@ -536,40 +535,6 @@ export async function stdioConsentRefusal(
   const { config, error } = await readRuntimeSlotState(slot, env);
   if (error) return `${error} ${RUNTIME_SETUP_PENDING_MESSAGE}`;
   return config.setup.state === 'pending' ? RUNTIME_SETUP_PENDING_MESSAGE : null;
-}
-
-/**
- * Consent for the two entry points a person starts by hand.
- *
- * Refuses when a config on disk says `pending` — somebody staged this machine
- * for an answer and has not given one — and when the config cannot be read at
- * all. An unreadable consent file is an unknown answer, and an unknown answer
- * must never resolve to yes: the file it replaced may well have narrowed this
- * machine to `readonly`, and rewriting it here would widen that silently.
- *
- * A slot with genuinely no config is answered here and written down, so that
- * `health` afterwards says what this machine allows rather than leaving it to
- * be inferred.
- */
-async function consentByInvocation(
-  slot: RuntimeSlot,
-  runtimeVersion: string
-): Promise<{ readonly granted: boolean; readonly recorded: boolean; readonly reason?: string }> {
-  const { config, stored, error } = await readRuntimeSlotState(slot);
-  if (error) return { granted: false, recorded: false, reason: error };
-  if (stored?.setup) {
-    return { granted: config.setup.state === 'configured', recorded: false };
-  }
-  if (config.setup.state === 'configured') return { granted: true, recorded: false };
-
-  await writeRuntimeSlotConfig(slot, {
-    profile: 'full',
-    allow: RUNTIME_CONSENT_PRESETS.full,
-    setup: { state: 'configured', at: new Date().toISOString(), by: 'launch' },
-    source: resolveRuntimeSource(),
-    version: runtimeVersion,
-  });
-  return { granted: true, recorded: true };
 }
 
 async function runSetup(args: RuntimeSetupArgs, runtimeVersion: string): Promise<number> {

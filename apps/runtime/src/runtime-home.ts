@@ -16,6 +16,7 @@ import { hostname } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import {
   type ResolvedRuntimeSlotConfig,
+  RUNTIME_CONSENT_PRESETS,
   type RuntimeInstallSource,
   type RuntimeSlot,
   type RuntimeSlotConfig,
@@ -215,10 +216,68 @@ export async function writeRuntimeSlotConfig(
   env?: NodeJS.ProcessEnv
 ): Promise<void> {
   const path = runtimeSlotConfigPath(slot, homeOptions(env));
-  await withSlotLock(slot, CONFIG_LOCK_FILE, env, async () => {
-    const stored = await readStoredRuntimeSlotConfig(path);
-    const next: RuntimeSlotConfig = { ...stored, ...update, schemaVersion: 1, slot };
-    await writeFileAtomically(path, stripUndefined(next));
+  await withSlotLock(slot, CONFIG_LOCK_FILE, env, () => mergeRuntimeSlotConfig(path, slot, update));
+}
+
+/** The merge itself, for callers already holding the lock. */
+async function mergeRuntimeSlotConfig(
+  path: string,
+  slot: RuntimeSlot,
+  update: Partial<Omit<RuntimeSlotConfig, 'schemaVersion' | 'slot'>>
+): Promise<void> {
+  const stored = await readStoredRuntimeSlotConfig(path);
+  const next: RuntimeSlotConfig = { ...stored, ...update, schemaVersion: 1, slot };
+  await writeFileAtomically(path, stripUndefined(next));
+}
+
+/** Whether an invocation may serve, and whether answering it wrote anything. */
+export interface RuntimeInvocationConsent {
+  readonly granted: boolean;
+  readonly recorded: boolean;
+  readonly reason?: string;
+}
+
+/**
+ * Consent for the two entry points a person starts by hand.
+ *
+ * Refuses when a config on disk says `pending` — somebody staged this machine
+ * for an answer and has not given one — and when the config cannot be read at
+ * all. An unreadable consent file is an unknown answer, and an unknown answer
+ * must never resolve to yes: the file it replaced may well have narrowed this
+ * machine to `readonly`, and rewriting it here would widen that silently.
+ *
+ * A slot with genuinely no config is answered here and written down, so that
+ * `health` afterwards says what this machine allows rather than leaving it to
+ * be inferred.
+ *
+ * It lives beside the lock because reading, deciding and writing have to be one
+ * transaction. Split across the lock's edge, a `setup` narrowing this slot in
+ * the gap between the read and the write would complete, and then be overwritten
+ * with `full` by a decision taken before it ran.
+ */
+export async function consentByInvocation(
+  slot: RuntimeSlot,
+  runtimeVersion: string,
+  env?: NodeJS.ProcessEnv
+): Promise<RuntimeInvocationConsent> {
+  const path = runtimeSlotConfigPath(slot, homeOptions(env));
+
+  return await withSlotLock(slot, CONFIG_LOCK_FILE, env, async () => {
+    const { config, stored, error } = await readRuntimeSlotState(slot, env);
+    if (error) return { granted: false, recorded: false, reason: error };
+    if (stored?.setup) {
+      return { granted: config.setup.state === 'configured', recorded: false };
+    }
+    if (config.setup.state === 'configured') return { granted: true, recorded: false };
+
+    await mergeRuntimeSlotConfig(path, slot, {
+      profile: 'full',
+      allow: RUNTIME_CONSENT_PRESETS.full,
+      setup: { state: 'configured', at: new Date().toISOString(), by: 'launch' },
+      source: resolveRuntimeSource(env),
+      version: runtimeVersion,
+    });
+    return { granted: true, recorded: true };
   });
 }
 

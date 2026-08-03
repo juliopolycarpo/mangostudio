@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
   bootstrapServeToken,
+  consentByInvocation,
   readPairingToken,
   readRuntimeSlotConfig,
   readRuntimeSlotState,
@@ -246,6 +247,37 @@ describe('runtime home', () => {
     const config = await readRuntimeSlotConfig('wsl', env);
     expect(config.profile).toBe('readonly');
     expect(config.version).toBe('0.1.2');
+  });
+
+  it('does not widen a slot a setup narrowed while the launch was deciding', async () => {
+    const env = await isolatedEnv();
+    // `connect` on an unanswered slot takes the invocation as consent and
+    // records `full`. Deciding that outside the lock leaves a window: a setup
+    // that lands in it completes, and is then overwritten by an answer taken
+    // before it ran. Both orders are legitimate — what must not happen is a
+    // stored `readonly` coming back as `full`.
+    const [, consent] = await Promise.all([
+      writeRuntimeSlotConfig(
+        'remote',
+        {
+          profile: 'readonly',
+          allow: RUNTIME_CONSENT_PRESETS.readonly,
+          setup: { state: 'configured', by: 'cli' },
+        },
+        env
+      ),
+      consentByInvocation('remote', '0.1.1', env),
+    ]);
+
+    const config = await readRuntimeSlotConfig('remote', env);
+    if (consent.recorded) {
+      // The launch got there first; setup then narrowed it, and stuck.
+      expect(config.profile).toBe('readonly');
+    } else {
+      // Setup got there first, so the launch read a real answer and kept it.
+      expect(config.profile).toBe('readonly');
+      expect(consent.granted).toBe(true);
+    }
   });
 
   it('reclaims a lock whose owner was killed before it could clean up', async () => {
