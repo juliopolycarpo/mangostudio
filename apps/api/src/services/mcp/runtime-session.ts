@@ -263,11 +263,32 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
 
     callTool(name, args, callOptions) {
       const toolCallId = callOptions?.toolCallId?.trim();
+      const signal = callOptions?.signal;
+      signal?.throwIfAborted();
+
+      // Abort must win while this call is still waiting behind an earlier one
+      // (elicitation holds the head of the queue). Without the race, abort
+      // sits behind the blocked head and deadlocks the caller that needs to
+      // answer that elicitation before the queue can move.
+      let onAbort: (() => void) | undefined;
+      const abortWhileQueued =
+        signal === undefined
+          ? null
+          : new Promise<never>((_, reject) => {
+              onAbort = () => {
+                reject(
+                  signal.reason ?? new DOMException('The operation was aborted.', 'AbortError')
+                );
+              };
+              signal.addEventListener('abort', onAbort, { once: true });
+            });
+
       const previous = callToolChain;
-      const run = previous
+      const queued = previous
         .catch(() => undefined)
         .then(async () => {
-          if (toolCallId) activeCalls.set(toolCallId, callOptions?.signal);
+          signal?.throwIfAborted();
+          if (toolCallId) activeCalls.set(toolCallId, signal);
           try {
             return await runtime.mcp
               .callTool(
@@ -289,8 +310,12 @@ function createRuntimeMcpHandle(input: RuntimeMcpHandleInput): McpClientHandle {
             if (toolCallId) activeCalls.delete(toolCallId);
           }
         });
-      callToolChain = run;
-      return run;
+      // Keep the chain moving even when this call loses to abortWhileQueued.
+      callToolChain = queued.catch(() => undefined);
+      const run = abortWhileQueued ? Promise.race([queued, abortWhileQueued]) : queued;
+      return run.finally(() => {
+        if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+      });
     },
 
     async listResources(callOptions) {
