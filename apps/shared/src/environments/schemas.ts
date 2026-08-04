@@ -287,6 +287,13 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
      * `RUNTIME_UNAVAILABLE`, and they have nothing to do with each other.
      */
     sshFailureReason: Type.Optional(SshFailureReasonSchema),
+    /**
+     * Set while the hub is swapping this runtime's binary over its own
+     * connection. A live update ends with a deliberate disconnect, and without
+     * this the card would report the handoff as an outage — the one state where
+     * `disconnected` is the expected, healthy answer.
+     */
+    updating: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false }
 );

@@ -455,14 +455,25 @@ export class RuntimeConnectionManager {
     return true;
   }
 
+  /**
+   * Marks the coming transport loss as a binary handoff rather than a crash,
+   * and says so on the status so the card reads "updating" through the gap.
+   */
   expectUpdateDisconnect(userId: string, environmentId: string): void {
     const entry = this.#entries.get(connectionKey(userId, environmentId));
-    if (entry) entry.expectedUpdateDisconnect = true;
+    if (!entry) return;
+    entry.expectedUpdateDisconnect = true;
+    entry.status = { ...entry.status, updating: true };
+    this.#publish(userId);
   }
 
   clearExpectedUpdateDisconnect(userId: string, environmentId: string): void {
     const entry = this.#entries.get(connectionKey(userId, environmentId));
-    if (entry) entry.expectedUpdateDisconnect = false;
+    if (!entry) return;
+    entry.expectedUpdateDisconnect = false;
+    const { updating: _dropped, ...status } = entry.status;
+    entry.status = status;
+    this.#publish(userId);
   }
 
   /**
@@ -577,8 +588,12 @@ export class RuntimeConnectionManager {
       entry.connectedAtMs = undefined;
       entry.failureCount = 0;
       entry.retryAfterMs = 0;
+      // `updating` outlives the flag on purpose: the flag exists to classify
+      // this one loss, the field to keep the card honest across the whole gap
+      // until the restarted runtime hands over a fresh connected status.
       entry.status = {
         state: 'disconnected',
+        updating: true,
         ...this.#cachedPeer(entry),
       };
       this.#publish(userId);
