@@ -155,6 +155,25 @@ describe('RuntimeConnectionManager', () => {
     expect(publishedStates).toEqual(['connecting', 'connected', 'disconnected']);
   });
 
+  it('does not disconnect a replacement client on behalf of a stale caller', async () => {
+    const first = fakeConnection(() => undefined);
+    const second = fakeConnection(() => undefined);
+    let current = first;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(current) },
+    });
+
+    const firstClient = await manager.connect('user-1', 'devbox');
+    manager.disconnect('user-1', 'devbox');
+    current = second;
+    const secondClient = await manager.connect('user-1', 'devbox', { force: true });
+
+    expect(manager.disconnectIfCurrent('user-1', 'devbox', firstClient)).toBe(false);
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    expect(await manager.getClient('user-1', 'devbox')).toBe(secondClient);
+  });
+
   it('maps connector failures to RUNTIME_UNAVAILABLE without caching a rejection', async () => {
     let attempts = 0;
     const connector: RuntimeEnvironmentConnector = () => {

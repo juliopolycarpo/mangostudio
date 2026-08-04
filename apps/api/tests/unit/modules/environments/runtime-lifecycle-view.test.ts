@@ -145,7 +145,7 @@ describe('buildRuntimeLifecycleView', () => {
     const base = health({ slot: 'remote', runtimeVersion: '0.0.1-old' });
     const view = buildRuntimeLifecycleView({
       transportKind: 'websocket',
-      health: health({ allow: { ...base.allow, update: false } }),
+      health: { ...base, allow: { ...base.allow, update: false } },
       readAtMs: 1_000,
       connected: true,
       nowMs: 2_000,

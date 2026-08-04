@@ -83,9 +83,11 @@ export async function loadRuntimeReleaseBytes(
   try {
     const bytes = await loadAsset(
       deps,
-      version,
-      release.tagVersion,
-      release.runtimeAssetName,
+      {
+        cacheVersion: version,
+        tagVersion: release.tagVersion,
+        assetName: release.runtimeAssetName,
+      },
       cacheDir,
       readBytes,
       writeCache
@@ -97,9 +99,11 @@ export async function loadRuntimeReleaseBytes(
 
   const bytes = await loadAsset(
     deps,
-    version,
-    release.tagVersion,
-    releaseArchiveName(release.assetVersion, platformId),
+    {
+      cacheVersion: version,
+      tagVersion: release.tagVersion,
+      assetName: releaseArchiveName(release.assetVersion, platformId),
+    },
     cacheDir,
     readBytes,
     writeCache
@@ -111,14 +115,17 @@ class RuntimeAssetMissingError extends RuntimeAssetLoadError {}
 
 async function loadAsset(
   deps: SafeFetchDeps,
-  version: string,
-  tagVersion: string,
-  assetName: string,
+  identity: {
+    readonly cacheVersion: string;
+    readonly tagVersion: string;
+    readonly assetName: string;
+  },
   cacheDir: (version: string) => string,
   readBytes: (path: string) => Promise<Uint8Array | null>,
   writeCache: (path: string, bytes: Uint8Array) => Promise<void>
 ): Promise<Uint8Array> {
-  const cachePath = join(cacheDir(version), assetName);
+  const { assetName, cacheVersion, tagVersion } = identity;
+  const cachePath = join(cacheDir(cacheVersion), assetName);
   const expected = await fetchExpectedChecksum(deps, tagVersion, assetName);
   const cached = await readBytes(cachePath);
   if (cached && sha256(cached) === expected) return cached;
@@ -131,7 +138,7 @@ async function loadAsset(
     );
   }
   await writeCache(cachePath, bytes).catch(() => undefined);
-  await pruneRuntimeCache(cacheDir(version), version).catch(() => undefined);
+  await pruneRuntimeCache(cacheDir(cacheVersion), cacheVersion).catch(() => undefined);
   return bytes;
 }
 

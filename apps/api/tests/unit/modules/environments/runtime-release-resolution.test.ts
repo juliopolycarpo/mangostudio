@@ -22,6 +22,15 @@ describe('resolveRuntimeRelease', () => {
     });
   });
 
+  it('keeps an unrecognized prerelease on its exact stable release identity', () => {
+    expect(resolveRuntimeRelease('1.2.3-rc.1', 'linux-x64')).toEqual({
+      channel: 'stable',
+      tagVersion: '1.2.3-rc.1',
+      assetVersion: '1.2.3-rc.1',
+      runtimeAssetName: 'mangostudio-runtime-1.2.3-rc.1-linux-x64',
+    });
+  });
+
   it('fetches canary checksums and bytes from the rolling release identity', async () => {
     const bytes = new TextEncoder().encode('canary-runtime');
     const hash = createHash('sha256').update(bytes).digest('hex');

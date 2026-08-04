@@ -441,6 +441,20 @@ export class RuntimeConnectionManager {
     this.#publish(userId);
   }
 
+  /** Releases a connection only when it is still the one the caller observed. */
+  disconnectIfCurrent(
+    userId: string,
+    environmentId: string,
+    expectedClient: RuntimeClient
+  ): boolean {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (!entry?.connection || entry.connection.client !== expectedClient) return false;
+
+    this.#release(entry);
+    this.#publish(userId);
+    return true;
+  }
+
   expectUpdateDisconnect(userId: string, environmentId: string): void {
     const entry = this.#entries.get(connectionKey(userId, environmentId));
     if (entry) entry.expectedUpdateDisconnect = true;

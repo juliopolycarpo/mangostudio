@@ -13,6 +13,7 @@ import type {
 import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
+import { getVersion } from '../../../src/lib/config';
 import {
   createEnvironmentService,
   type EnvironmentRuntimeEffects,
@@ -605,6 +606,185 @@ describe('environment entity routes', () => {
     expect(
       await readFile(join(mangoHome, 'runtime', 'host', 'current', 'mangostudio-runtime'), 'utf8')
     ).toBe('verified-runtime-binary');
+  });
+
+  it('reconnects a supervised runtime and verifies the new handshake version', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-supervised-update-route-'));
+    tempHomes.push(mangoHome);
+    const env = { MANGO_HOME: mangoHome };
+    const bytes = new TextEncoder().encode('supervised-runtime-binary');
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const targetVersion = getVersion();
+    let connectionCount = 0;
+    let activeConnection: { close(): void } | undefined;
+
+    const { app, repository, manager } = createTestApp(
+      {
+        http: async (_definition, onUnavailable) => {
+          connectionCount += 1;
+          const firstConnection = connectionCount === 1;
+          const host = createLocalRuntimeHost({
+            runtimeVersion: firstConnection ? '0.0.1-old' : targetVersion,
+            ...(firstConnection
+              ? {
+                  slot: 'host' as const,
+                  update: {
+                    env,
+                    supervised: true,
+                    requestRestart: () => {
+                      activeConnection?.close();
+                      onUnavailable();
+                    },
+                  },
+                }
+              : {}),
+          });
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          activeConnection = connection;
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      undefined,
+      (runtimeManager) =>
+        createRuntimeLifecycleService({
+          manager: runtimeManager,
+          loadRuntimeAsset: () => Promise.resolve({ bytes, digest, fromArchive: false as const }),
+        })
+    );
+    await repository.create({
+      id: 'http-supervised-update',
+      userId: TEST_USER.id,
+      name: 'Supervised runtime',
+      transportKind: 'http',
+      config: { baseUrl: 'http://runtime.test' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'http-supervised-update');
+    await manager.refreshManifest(TEST_USER.id, 'http-supervised-update');
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/http-supervised-update/runtime/install',
+        jsonRequest('POST', { action: 'upgrade' })
+      )
+    );
+    const { runId } = (await started.json()) as { runId: string };
+    const log = await app.handle(
+      new Request(`http://localhost/environments/http-supervised-update/runtime/runs/${runId}/log`)
+    );
+    const body = await log.text();
+
+    expect(body).toContain(`Runtime reconnected on ${targetVersion}; version drift cleared.`);
+    expect(body).toContain('"status":"succeeded"');
+    expect(connectionCount).toBe(2);
+    expect(manager.getStatus(TEST_USER.id, 'http-supervised-update')).toMatchObject({
+      state: 'connected',
+      runtimeVersion: targetVersion,
+      runtimeVersionDrift: false,
+    });
+    await manager.closeAll();
+  });
+
+  it('cancels restart waiting without disconnecting a replacement client', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-cancelled-update-route-'));
+    tempHomes.push(mangoHome);
+    const env = { MANGO_HOME: mangoHome };
+    const bytes = new TextEncoder().encode('cancelled-update-runtime');
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const targetVersion = getVersion();
+    let replacement = false;
+    let restartRequested: (() => void) | undefined;
+    const restartRequest = new Promise<void>((resolve) => {
+      restartRequested = resolve;
+    });
+
+    const { app, repository, manager } = createTestApp(
+      {
+        http: async (_definition, onUnavailable) => {
+          const host = createLocalRuntimeHost({
+            runtimeVersion: replacement ? targetVersion : '0.0.1-old',
+            ...(!replacement
+              ? {
+                  slot: 'host' as const,
+                  update: {
+                    env,
+                    supervised: true,
+                    requestRestart: () => restartRequested?.(),
+                  },
+                }
+              : {}),
+          });
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      undefined,
+      (runtimeManager) =>
+        createRuntimeLifecycleService({
+          manager: runtimeManager,
+          loadRuntimeAsset: () => Promise.resolve({ bytes, digest, fromArchive: false as const }),
+        })
+    );
+    await repository.create({
+      id: 'http-cancelled-update',
+      userId: TEST_USER.id,
+      name: 'Cancelled runtime update',
+      transportKind: 'http',
+      config: { baseUrl: 'http://runtime.test' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'http-cancelled-update');
+    await manager.refreshManifest(TEST_USER.id, 'http-cancelled-update');
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/http-cancelled-update/runtime/install',
+        jsonRequest('POST', { action: 'upgrade' })
+      )
+    );
+    const { runId } = (await started.json()) as { runId: string };
+    const log = await app.handle(
+      new Request(`http://localhost/environments/http-cancelled-update/runtime/runs/${runId}/log`)
+    );
+    const logBody = log.text();
+    await restartRequest;
+
+    manager.disconnect(TEST_USER.id, 'http-cancelled-update');
+    replacement = true;
+    const replacementClient = await manager.connect(TEST_USER.id, 'http-cancelled-update', {
+      force: true,
+    });
+    const originalDisconnectIfCurrent = manager.disconnectIfCurrent.bind(manager);
+    let staleDisconnectAttempts = 0;
+    manager.disconnectIfCurrent = (...args) => {
+      staleDisconnectAttempts += 1;
+      return originalDisconnectIfCurrent(...args);
+    };
+
+    const cancelled = await app.handle(
+      new Request(
+        `http://localhost/environments/http-cancelled-update/runtime/runs/${runId}/cancel`,
+        jsonRequest('POST')
+      )
+    );
+    expect(cancelled.status).toBe(200);
+    for (let attempt = 0; attempt < 20 && staleDisconnectAttempts === 0; attempt += 1) {
+      await Bun.sleep(20);
+    }
+
+    expect(staleDisconnectAttempts).toBe(1);
+    expect(manager.getStatus(TEST_USER.id, 'http-cancelled-update').state).toBe('connected');
+    expect(await manager.getClient(TEST_USER.id, 'http-cancelled-update')).toBe(replacementClient);
+    expect(await logBody).toContain('"status":"cancelled"');
+    await manager.closeAll();
   });
 
   it('cancels an in-flight runtime install via the cancel route', async () => {

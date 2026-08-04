@@ -341,7 +341,7 @@ export function createRuntimeLifecycleService(
 
       if (!canPushOutOfBand && !canUpdateLive) {
         throw new RuntimeLifecycleUnavailableError(
-          `A connected, update-capable runtime is required to upgrade ${record.transportKind} environments.`,
+          `Runtime ${action} over the hub is not available for ${record.transportKind} environments. A connected, update-capable runtime can be upgraded in place.`,
           409
         );
       }
@@ -603,9 +603,15 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
       line: `Runtime ${version} is installed; waiting for the supervised restart…`,
       done: false,
     });
-    await waitForRuntimeDisconnect(input.manager, input.userId, input.environmentId);
+    await waitForRuntimeDisconnect(input.manager, input.userId, input.environmentId, input.signal);
     if (input.transportKind === 'websocket') {
-      await waitForRuntimeVersion(input.manager, input.userId, input.environmentId, version);
+      await waitForRuntimeVersion(
+        input.manager,
+        input.userId,
+        input.environmentId,
+        version,
+        input.signal
+      );
     } else {
       await input.manager.connect(input.userId, input.environmentId, { force: true });
     }
@@ -629,7 +635,7 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
     if (input.signal.aborted) {
       // There is deliberately no fourth protocol method. Dropping the
       // connection makes RuntimeHost.close discard the staged file.
-      input.manager.disconnect(input.userId, input.environmentId);
+      input.manager.disconnectIfCurrent(input.userId, input.environmentId, client);
     }
     throw error;
   }
@@ -639,10 +645,12 @@ async function waitForRuntimeDisconnect(
   manager: RuntimeConnectionManager,
   userId: string,
   environmentId: string,
+  signal: AbortSignal,
   timeoutMs = 10_000
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (manager.getStatus(userId, environmentId).state === 'connected') {
+    signal.throwIfAborted();
     if (Date.now() >= deadline) {
       throw new Error('Runtime published the update but did not exit for its supervised restart.');
     }
@@ -655,10 +663,12 @@ async function waitForRuntimeVersion(
   userId: string,
   environmentId: string,
   version: string,
+  signal: AbortSignal,
   timeoutMs = 60_000
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    signal.throwIfAborted();
     const status = manager.getStatus(userId, environmentId);
     if (status.state === 'connected' && status.runtimeVersion === version) return;
     await Bun.sleep(200);

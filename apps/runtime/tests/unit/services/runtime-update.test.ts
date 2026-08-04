@@ -196,6 +196,44 @@ describe('runtime self-update', () => {
     await service.close();
   });
 
+  it('serializes concurrent chunks so one sequence number is accepted once', async () => {
+    const { service } = await fixture();
+    const begun = await service.begin({
+      version: '1.1.0',
+      digest: digestOf('next'),
+      totalBytes: 4,
+    });
+    const chunk = {
+      sessionId: begun.sessionId,
+      seq: 0,
+      bytesBase64: Buffer.from('next').toString('base64'),
+    } as const;
+
+    const results = await Promise.allSettled([service.chunk(chunk), service.chunk(chunk)]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    await expect(service.commit({ sessionId: begun.sessionId })).resolves.toMatchObject({
+      version: '1.1.0',
+    });
+  });
+
+  it('serializes concurrent begins so only one stage becomes active', async () => {
+    const { service } = await fixture();
+    const begin = {
+      version: '1.1.0',
+      digest: digestOf('next'),
+      totalBytes: 4,
+    } as const;
+
+    const results = await Promise.allSettled([service.begin(begin), service.begin(begin)]);
+
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(service.active).toBe(true);
+    await service.close();
+  });
+
   it('refuses chunks without a session and malformed base64 without writing bytes', async () => {
     const { service } = await fixture();
     await expect(
