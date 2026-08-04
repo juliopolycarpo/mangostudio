@@ -347,18 +347,29 @@ describe('runtime health', () => {
     expect(consent?.detail).toContain('could not be read');
   });
 
+  it('names a missing audit field as an older binary rather than as off', async () => {
+    const env = await isolatedEnv();
+    await setup({ profile: 'readonly', yes: true }, { env });
+    const report = await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env });
+    const { audit: _omit, ...withoutAudit } = report;
+
+    const audit = diagnoseRuntimeHealth(withoutAudit).find((finding) => finding.title === 'Audit');
+    expect(audit?.severity).toBe('ok');
+    expect(audit?.detail).toContain('older binary');
+  });
+
   it('toggles audit alone once consent is recorded', async () => {
     const env = await isolatedEnv();
     await setup({ profile: 'full', yes: true }, { env });
     expect(
-      (await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env })).audit.enabled
+      (await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env })).audit?.enabled
     ).toBe(false);
 
     const flipped = await setup({ audit: true, yes: true }, { env });
     expect(flipped.code).toBe(0);
     expect(flipped.lines.some((line) => line.includes('Audit on'))).toBe(true);
     expect(
-      (await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env })).audit.enabled
+      (await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env })).audit?.enabled
     ).toBe(true);
   });
 
@@ -367,7 +378,7 @@ describe('runtime health', () => {
     await setup({ profile: 'full', slot: 'remote', yes: true }, { env });
     expect(
       (await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env, slot: 'remote' })).audit
-        .enabled
+        ?.enabled
     ).toBe(true);
   });
 });

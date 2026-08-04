@@ -280,8 +280,12 @@ export const RuntimeHealthReportSchema = Type.Object({
    * absent would turn a corrupt consent file into an open one.
    */
   lastError: Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()]),
-  /** Whether this slot appends protocol calls to `audit.log`. */
-  audit: RuntimeAuditConfigSchema,
+  /**
+   * Whether this slot appends protocol calls to `audit.log`. Optional so a
+   * hub on protocol 1.0 can still accept a health payload from a pre-audit
+   * runtime peer — required would 500 the lifecycle view on mixed releases.
+   */
+  audit: Type.Optional(RuntimeAuditConfigSchema),
   /**
    * Set when the audit log was enabled but a recent write failed (full disk,
    * permissions). The runtime keeps serving; the receipt is what degraded.

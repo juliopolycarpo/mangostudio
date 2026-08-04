@@ -202,7 +202,13 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
     });
   }
 
-  if (report.audit.enabled) {
+  if (report.audit === undefined) {
+    findings.push({
+      severity: 'ok',
+      title: 'Audit',
+      detail: 'not reported by this runtime (older binary)',
+    });
+  } else if (report.audit.enabled) {
     if (report.auditError) {
       findings.push({
         severity: 'warn',

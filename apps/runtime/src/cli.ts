@@ -764,7 +764,7 @@ async function runHealth(json: boolean, runtimeVersion: string): Promise<number>
       }`,
       `shells      ${report.shells.join(', ') || 'none'}`,
       `git         ${report.git.available ? (report.git.version ?? 'available') : 'not found'}`,
-      `audit       ${report.audit.enabled ? 'on' : 'off'}`,
+      `audit       ${report.audit === undefined ? '-' : report.audit.enabled ? 'on' : 'off'}`,
       ...(report.auditError ? [`audit error ${report.auditError}`] : []),
       ...(report.lastError ? [`error       ${report.lastError}`] : []),
       '',

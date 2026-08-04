@@ -147,7 +147,7 @@ export async function runRuntimeSetup(
       deps.write(JSON.stringify(report));
       return 0;
     }
-    deps.write(`Audit ${report.audit.enabled ? 'on' : 'off'} for the ${slot} runtime.`);
+    deps.write(`Audit ${report.audit?.enabled ? 'on' : 'off'} for the ${slot} runtime.`);
     deps.write(`  ${runtimeSlotDir(slot, env)}`);
     return 0;
   }
@@ -222,7 +222,7 @@ export async function runRuntimeSetup(
 
   deps.write(`Recorded ${report.profile} consent for the ${slot} runtime.`);
   deps.write(`  ${runtimeSlotDir(slot, env)}`);
-  deps.write(`  audit ${report.audit.enabled ? 'on' : 'off'}`);
+  deps.write(`  audit ${report.audit?.enabled ? 'on' : 'off'}`);
   if (allow.shell) deps.write(`  ${SHELL_TRUST_NOTICE}`);
   return 0;
 }

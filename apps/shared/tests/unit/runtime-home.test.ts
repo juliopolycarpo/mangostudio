@@ -8,6 +8,7 @@ import {
   profileForAllow,
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
+  RuntimeHealthReportSchema,
   RuntimeSlotConfigSchema,
   resolveRuntimeSlotConfig,
   runtimeBinaryName,
@@ -229,5 +230,36 @@ describe('RuntimeSlotConfigSchema', () => {
     expect(
       Value.Check(RuntimeSlotConfigSchema, { schemaVersion: 1, slot: 'host', digest: 'sha1:abc' })
     ).toBe(false);
+  });
+});
+
+describe('RuntimeHealthReportSchema', () => {
+  const baseReport = {
+    schemaVersion: 1,
+    slot: 'host',
+    source: 'source-checkout',
+    runtimeVersion: '0.1.0',
+    version: null,
+    binaryPath: null,
+    digest: null,
+    profile: 'none',
+    allow: RUNTIME_CONSENT_PRESETS.none,
+    setup: { state: 'pending' },
+    platform: 'linux',
+    arch: 'x64',
+    homeDir: '/home/j',
+    shells: [],
+    git: { available: false },
+    lastError: null,
+  } as const;
+
+  it('accepts a report that omits audit so a pre-audit peer stays valid', () => {
+    expect(Value.Check(RuntimeHealthReportSchema, baseReport)).toBe(true);
+  });
+
+  it('still accepts a report that includes audit', () => {
+    expect(
+      Value.Check(RuntimeHealthReportSchema, { ...baseReport, audit: { enabled: true } })
+    ).toBe(true);
   });
 });
