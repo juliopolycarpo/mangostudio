@@ -637,7 +637,7 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
     stop = resolve;
   });
   let updateCommitted = false;
-  const host = await createSlotRuntimeHost({
+  const { host, audit } = await createSlotRuntimeHost({
     runtimeVersion,
     consent: createSlotConsentSource({ slot: consent.slot, initial: consent.allow }),
     update: {
@@ -662,10 +662,14 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
   process.once('SIGINT', stopOnSignal);
   process.once('SIGTERM', stopOnSignal);
 
-  const closure = await finished.finally(() => {
+  const closure = await finished.finally(async () => {
     process.off('SIGINT', stopOnSignal);
     process.off('SIGTERM', stopOnSignal);
     host.close();
+    // `close` drains what `host.close()` only scheduled, so the last records
+    // of a session reach disk before the process leaves — the same guarantee
+    // `connect` and `serve` already give.
+    await audit.close();
   });
 
   if (closure.kind === 'protocol-error') {

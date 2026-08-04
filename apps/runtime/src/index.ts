@@ -34,7 +34,7 @@ export {
   type RuntimeMethodRegistry,
   type RuntimeMethodRegistryOptions,
 } from './registry';
-export { createLocalRuntimeHost, createSlotRuntimeHost } from './runtime';
+export { createLocalRuntimeHost, createSlotRuntimeHost, type SlotRuntimeHost } from './runtime';
 export {
   RUNTIME_SETUP_PENDING_MESSAGE,
   RUNTIME_SETUP_PENDING_SIGNATURE,

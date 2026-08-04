@@ -67,9 +67,19 @@ export function createLocalRuntimeHost(options: {
   return host;
 }
 
+/** A host and the sink it writes through, so the caller can drain it on exit. */
+export interface SlotRuntimeHost {
+  readonly host: RuntimeHost;
+  readonly audit: RuntimeAuditSink;
+}
+
 /**
  * Builds a host whose audit enablement follows the slot's `runtime.json`, so
  * `setup --audit` takes effect on the next process start.
+ *
+ * The sink comes back with the host because closing it is the caller's job:
+ * `RuntimeHost.close()` only flushes, since one process-scoped sink outlives
+ * every reconnect and supersede that passes through it.
  */
 export async function createSlotRuntimeHost(options: {
   readonly runtimeVersion: string;
@@ -78,7 +88,7 @@ export async function createSlotRuntimeHost(options: {
   readonly update?: Omit<RuntimeUpdateServiceOptions, 'slot'>;
   readonly env?: NodeJS.ProcessEnv;
   readonly audit?: RuntimeAuditSink;
-}): Promise<RuntimeHost> {
+}): Promise<SlotRuntimeHost> {
   const audit =
     options.audit ??
     createRuntimeAuditSink({
@@ -86,11 +96,12 @@ export async function createSlotRuntimeHost(options: {
       enabled: (await readRuntimeSlotState(options.consent.slot, options.env)).config.audit.enabled,
       env: options.env,
     });
-  return createLocalRuntimeHost({
+  const host = createLocalRuntimeHost({
     runtimeVersion: options.runtimeVersion,
     consent: options.consent,
     audit,
     ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
     ...(options.update ? { update: options.update } : {}),
   });
+  return { host, audit };
 }
