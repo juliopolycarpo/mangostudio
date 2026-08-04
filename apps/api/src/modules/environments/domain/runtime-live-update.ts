@@ -35,6 +35,8 @@ export interface StreamRuntimeUpdateOptions {
   readonly digest: string;
   readonly bytes: Uint8Array;
   readonly signal?: AbortSignal;
+  /** Fires once the peer holds a staged session, which only closing can release. */
+  readonly onSessionOpen?: (sessionId: string) => void;
   readonly onProgress?: (written: number, total: number) => void;
   readonly beforeCommit?: () => void;
 }
@@ -55,6 +57,7 @@ export async function streamRuntimeUpdate(
     },
     { signal: options.signal, timeoutMs: UPDATE_REQUEST_TIMEOUT_MS }
   );
+  options.onSessionOpen?.(begun.sessionId);
   if (!Number.isSafeInteger(begun.maxChunkBytes) || begun.maxChunkBytes <= 0) {
     throw new Error('Runtime update peer returned an invalid chunk-size limit.');
   }

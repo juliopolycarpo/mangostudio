@@ -716,6 +716,188 @@ describe('environment entity routes', () => {
     ).toBe('verified-runtime-binary');
   });
 
+  // An open session refuses every ordinary call until it expires, and there is
+  // deliberately no fourth protocol method to abandon one. Dropping the
+  // connection is the whole cleanup path, so a transfer that dies before the
+  // peer answered has to take it.
+  it('drops the connection when a live update dies mid-transfer', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-stalled-update-route-'));
+    tempHomes.push(mangoHome);
+    const env = { MANGO_HOME: mangoHome };
+    const bytes = new TextEncoder().encode('a'.repeat(96 * 1024));
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    let releaseWrite: (() => void) | undefined;
+    const writeBlocked = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let firstWrite: (() => void) | undefined;
+    const reachedTransfer = new Promise<void>((resolve) => {
+      firstWrite = resolve;
+    });
+    let stalled = false;
+
+    const host = createProvisionedRuntimeHost(
+      {
+        runtimeVersion: '0.0.1-old',
+        slot: 'host',
+        update: {
+          env,
+          writeChunk: async (handle, chunk) => {
+            if (!stalled) {
+              stalled = true;
+              firstWrite?.();
+              await writeBlocked;
+            }
+            return (await handle.write(chunk)).bytesWritten;
+          },
+        },
+      },
+      'linux-x64'
+    );
+    const { app, repository, manager } = createTestApp(
+      {
+        http: async (_definition, onUnavailable) => {
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      undefined,
+      (runtimeManager) =>
+        createRuntimeLifecycleService({
+          manager: runtimeManager,
+          loadRuntimeAsset: () => Promise.resolve({ bytes, digest, fromArchive: false as const }),
+        })
+    );
+    await repository.create({
+      id: 'http-stalled-update',
+      userId: TEST_USER.id,
+      name: 'Stalled runtime update',
+      transportKind: 'http',
+      config: { baseUrl: 'http://runtime.test' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'http-stalled-update');
+    await manager.refreshManifest(TEST_USER.id, 'http-stalled-update');
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/http-stalled-update/runtime/install',
+        jsonRequest('POST', { action: 'upgrade' })
+      )
+    );
+    const { runId } = (await started.json()) as { runId: string };
+    const log = await app.handle(
+      new Request(`http://localhost/environments/http-stalled-update/runtime/runs/${runId}/log`)
+    );
+    const logBody = log.text();
+    await reachedTransfer;
+
+    const cancelled = await app.handle(
+      new Request(
+        `http://localhost/environments/http-stalled-update/runtime/runs/${runId}/cancel`,
+        jsonRequest('POST')
+      )
+    );
+    expect(cancelled.status).toBe(200);
+    releaseWrite?.();
+    expect(await logBody).toContain('"status":"cancelled"');
+
+    // `cancel` closes the run stream up front and lets the transfer unwind on
+    // its own, so the release lands after the log has already said cancelled.
+    for (
+      let attempt = 0;
+      attempt < 50 && manager.getStatus(TEST_USER.id, 'http-stalled-update').state === 'connected';
+      attempt += 1
+    ) {
+      await Bun.sleep(20);
+    }
+    expect(manager.getStatus(TEST_USER.id, 'http-stalled-update').state).toBe('disconnected');
+    expect(
+      await readFile(join(mangoHome, 'runtime', 'host', 'current', 'mangostudio-runtime'), 'utf8')
+        .then(() => 'published')
+        .catch(() => 'absent')
+    ).toBe('absent');
+    await manager.closeAll();
+  });
+
+  // A runtime that answered is a runtime that is still serving. Dropping it
+  // would turn a refused upgrade into an outage, and leaving `updating` behind
+  // would let the card claim a handoff that is never coming.
+  it('keeps the connection and the old binary when a live update is refused', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-refused-update-route-'));
+    tempHomes.push(mangoHome);
+    const env = { MANGO_HOME: mangoHome };
+    const bytes = new TextEncoder().encode('tampered-runtime-binary');
+    const wrongDigest = `sha256:${'0'.repeat(64)}`;
+    const host = createProvisionedRuntimeHost(
+      { runtimeVersion: '0.0.1-old', slot: 'host', update: { env } },
+      'linux-x64'
+    );
+    const { app, repository, manager } = createTestApp(
+      {
+        http: async (_definition, onUnavailable) => {
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      undefined,
+      (runtimeManager) =>
+        createRuntimeLifecycleService({
+          manager: runtimeManager,
+          loadRuntimeAsset: () =>
+            Promise.resolve({ bytes, digest: wrongDigest, fromArchive: false as const }),
+        })
+    );
+    await repository.create({
+      id: 'http-refused-update',
+      userId: TEST_USER.id,
+      name: 'LAN runtime',
+      transportKind: 'http',
+      config: { baseUrl: 'http://runtime.test' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'http-refused-update');
+    await manager.refreshManifest(TEST_USER.id, 'http-refused-update');
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/http-refused-update/runtime/install',
+        jsonRequest('POST', { action: 'upgrade' })
+      )
+    );
+    expect(started.status).toBe(200);
+    const { runId } = (await started.json()) as { runId: string };
+    const log = await app.handle(
+      new Request(`http://localhost/environments/http-refused-update/runtime/runs/${runId}/log`)
+    );
+    const body = await log.text();
+
+    expect(body).toContain('"status":"failed"');
+    expect(body).toContain('digest mismatch');
+    // Nothing published: `current` never existed on this slot, so a swap would
+    // have created it.
+    expect(
+      await readFile(join(mangoHome, 'runtime', 'host', 'current', 'mangostudio-runtime'), 'utf8')
+        .then(() => 'published')
+        .catch(() => 'absent')
+    ).toBe('absent');
+    const status = manager.getStatus(TEST_USER.id, 'http-refused-update');
+    expect(status.state).toBe('connected');
+    expect(status.updating).toBeUndefined();
+
+    // The refusal ended the session too, so the runtime still answers.
+    const client = await manager.getClient(TEST_USER.id, 'http-refused-update');
+    await expect(client.health()).resolves.toMatchObject({ runtimeVersion: '0.0.1-old' });
+  });
+
   it('reconnects a supervised runtime and verifies the new handshake version', async () => {
     const mangoHome = await mkdtemp(join(tmpdir(), 'mango-supervised-update-route-'));
     tempHomes.push(mangoHome);
@@ -884,14 +1066,14 @@ describe('environment entity routes', () => {
       )
     );
     expect(cancelled.status).toBe(200);
-    for (let attempt = 0; attempt < 20 && staleDisconnectAttempts === 0; attempt += 1) {
-      await Bun.sleep(20);
-    }
+    expect(await logBody).toContain('"status":"cancelled"');
 
-    expect(staleDisconnectAttempts).toBe(1);
+    // The commit already landed and the runtime is restarting onto it, so there
+    // is no staged session left to free: cancelling here must not reach for the
+    // connection at all, least of all the replacement that took its place.
+    expect(staleDisconnectAttempts).toBe(0);
     expect(manager.getStatus(TEST_USER.id, 'http-cancelled-update').state).toBe('connected');
     expect(await manager.getClient(TEST_USER.id, 'http-cancelled-update')).toBe(replacementClient);
-    expect(await logBody).toContain('"status":"cancelled"');
     await manager.closeAll();
   });
 

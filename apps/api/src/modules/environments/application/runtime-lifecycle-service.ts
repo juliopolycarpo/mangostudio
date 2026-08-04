@@ -6,6 +6,7 @@
  * environment; progress bytes from {@link pushRuntimeBinary} land as log lines.
  */
 
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
   EnvironmentTransportKind,
   InstallStreamEvent,
@@ -580,6 +581,7 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
   const client = await input.manager.getClient(input.userId, input.environmentId);
   const progress = transferProgressPublisher(input.stream);
   let expectedDisconnect = false;
+  let transferStarted = false;
 
   try {
     const result = await streamRuntimeUpdate({
@@ -589,6 +591,9 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
       bytes: asset.bytes,
       signal: input.signal,
       onProgress: progress,
+      onSessionOpen: () => {
+        transferStarted = true;
+      },
       beforeCommit: () => {
         expectedDisconnect = true;
         input.manager.expectUpdateDisconnect(input.userId, input.environmentId);
@@ -638,12 +643,24 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
       done: false,
     });
   } catch (error) {
-    if (expectedDisconnect) {
+    // Only these two codes prove the peer both answered and kept no session:
+    // every `RUNTIME_UPDATE_REFUSED` path either never staged or discarded on
+    // its way out, and `RUNTIME_DENIED` refuses before the first byte. A
+    // cancel, a timeout or a dead transport all come back typed too, and none
+    // of them says what the far side did with the transfer.
+    const refused =
+      error instanceof RuntimeRemoteError &&
+      (error.code === 'RUNTIME_UPDATE_REFUSED' || error.code === 'RUNTIME_DENIED');
+    if (expectedDisconnect && refused) {
+      // The commit demonstrably did not land, so no handoff is coming and a
+      // stale expectation would swallow the next real crash's backoff.
       input.manager.clearExpectedUpdateDisconnect(input.userId, input.environmentId);
     }
-    if (input.signal.aborted) {
+    if (transferStarted && !refused && !expectedDisconnect) {
       // There is deliberately no fourth protocol method. Dropping the
-      // connection makes RuntimeHost.close discard the staged file.
+      // connection makes RuntimeHost.close discard the staged file, so a
+      // transfer that died mid-stream does not leave a session refusing every
+      // ordinary call until it expires. Dial-in runtimes redial on their own.
       input.manager.disconnectIfCurrent(input.userId, input.environmentId, client);
     }
     throw error;
