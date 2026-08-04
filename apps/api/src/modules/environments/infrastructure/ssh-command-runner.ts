@@ -144,13 +144,33 @@ async function writeStdin(
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
-    const fail = (error: Error) => {
+    // One `error` listener for the whole write, held in a promise the drain
+    // waits race against. Registering a fresh `once('error')` inside each drain
+    // wait would leak one listener per wait — a 95 MB push drains hundreds of
+    // times, which is a MaxListenersExceededWarning and a pile of retained
+    // closures, not a theoretical concern.
+    let failed: Error | null = null;
+    let raiseFailure: ((error: Error) => void) | undefined;
+    const failure = new Promise<never>((_, rejectFailure) => {
+      raiseFailure = (error: Error) => {
+        failed ??= error;
+        rejectFailure(error);
+      };
+    });
+    // Nothing else awaits `failure` when the write finishes cleanly.
+    failure.catch(() => undefined);
+
+    const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
       stdin.off('error', onError);
-      reject(error);
+      if (error) reject(error);
+      else resolve();
     };
-    const onError = (error: Error) => fail(error);
+    const onError = (error: Error) => {
+      raiseFailure?.(error);
+      finish(error);
+    };
     // Persistent for the whole write loop — EPIPE after a successful write()
     // would otherwise become an uncaught exception when only drain had a listener.
     stdin.on('error', onError);
@@ -160,7 +180,7 @@ async function writeStdin(
         let offset = 0;
         while (offset < bytes.byteLength) {
           if (options.signal?.aborted) {
-            fail(new Error('SSH stdin write cancelled.'));
+            finish(new Error('SSH stdin write cancelled.'));
             return;
           }
           const end = Math.min(offset + STDIN_CHUNK_BYTES, bytes.byteLength);
@@ -169,28 +189,20 @@ async function writeStdin(
           const canContinue = stdin.write(chunk);
           options.onStdinProgress?.(offset);
           if (!canContinue) {
-            await new Promise<void>((drainResolve, drainReject) => {
-              const onDrain = () => {
-                stdin.off('drain', onDrain);
-                drainResolve();
-              };
-              stdin.once('drain', onDrain);
-              // Outer onError also rejects the parent; reject this wait so the
-              // loop does not hang if drain never fires after EPIPE.
-              stdin.once('error', (error: Error) => {
-                stdin.off('drain', onDrain);
-                drainReject(error);
-              });
-            });
+            // Racing the shared failure promise keeps the loop from hanging if
+            // `drain` never arrives after EPIPE, without a per-wait listener.
+            await Promise.race([
+              new Promise<void>((drainResolve) => stdin.once('drain', drainResolve)),
+              failure,
+            ]);
           }
+          if (failed) return;
         }
         if (settled) return;
         stdin.end();
-        settled = true;
-        stdin.off('error', onError);
-        resolve();
+        finish();
       } catch (error) {
-        fail(error instanceof Error ? error : new Error(String(error)));
+        finish(error instanceof Error ? error : new Error(String(error)));
       }
     })();
   });
