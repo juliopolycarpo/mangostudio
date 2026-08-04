@@ -74,6 +74,8 @@ export interface RuntimeAuditSink {
 const DEFAULT_MAX_BYTES = 1_048_576;
 const DEFAULT_MAX_FILES = 3;
 const DEFAULT_FLUSH_INTERVAL_MS = 1_000;
+/** Cap on in-memory retry lines so a full disk cannot OOM the runtime. */
+export const MAX_BUFFERED_RECORDS = 1_024;
 const UNIDENTIFIED_HUB = 'unidentified hub';
 const ARGV_SUMMARY_LIMIT = 8;
 const STRING_SUMMARY_LIMIT = 256;
@@ -101,6 +103,7 @@ export function createRuntimeAuditSink(options: RuntimeAuditSinkOptions): Runtim
   let hubLabel = UNIDENTIFIED_HUB;
   let lastError: string | null = null;
   let buffer: string[] = [];
+  let dropped = 0;
   let flushing: Promise<void> | null = null;
   let closed = false;
   let timer: ReturnType<typeof setInterval> | undefined;
@@ -120,6 +123,13 @@ export function createRuntimeAuditSink(options: RuntimeAuditSinkOptions): Runtim
     }
   };
 
+  const trimBuffer = (): void => {
+    if (buffer.length <= MAX_BUFFERED_RECORDS) return;
+    const overflow = buffer.length - MAX_BUFFERED_RECORDS;
+    buffer.splice(0, overflow);
+    dropped += overflow;
+  };
+
   const schedule = () => {
     if (timer !== undefined || closed) return;
     timer = setInterval(() => {
@@ -136,13 +146,18 @@ export function createRuntimeAuditSink(options: RuntimeAuditSinkOptions): Runtim
     buffer = [];
     flushing = writeBatch(path, batch, maxBytes, maxFiles)
       .then(async () => {
+        dropped = 0;
         await setError(null);
       })
       .catch(async (error: unknown) => {
         const message = error instanceof Error ? error.message : String(error);
-        await setError(message);
         // Put the batch back so a transient failure can retry; drop if closed.
-        if (!closed) buffer = [...batch, ...buffer];
+        if (!closed) {
+          buffer = [...batch, ...buffer];
+          trimBuffer();
+        }
+        const suffix = dropped > 0 ? ` (${dropped} record(s) dropped)` : '';
+        await setError(`${message}${suffix}`);
       })
       .finally(() => {
         flushing = null;
@@ -173,6 +188,7 @@ export function createRuntimeAuditSink(options: RuntimeAuditSinkOptions): Runtim
         ...(args ? { args } : {}),
       };
       buffer.push(`${JSON.stringify(record)}\n`);
+      trimBuffer();
       schedule();
     },
     async flush() {
@@ -184,7 +200,11 @@ export function createRuntimeAuditSink(options: RuntimeAuditSinkOptions): Runtim
         clearInterval(timer);
         timer = undefined;
       }
-      await flush();
+      // Drain every line queued while an earlier flush was in flight. Once
+      // closed, a failed write does not requeue, so this loop always ends.
+      while (buffer.length > 0 || flushing !== null) {
+        await flush();
+      }
     },
   };
 }

@@ -6,6 +6,7 @@ import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
   auditLogRotatedPath,
   createRuntimeAuditSink,
+  MAX_BUFFERED_RECORDS,
   parseAuditSince,
   readRuntimeAuditError,
   readRuntimeAuditLog,
@@ -145,6 +146,65 @@ describe('createRuntimeAuditSink', () => {
     await sink.flush();
     expect(sink.lastError()).toBeTruthy();
     expect(await readRuntimeAuditError(path)).toBeTruthy();
+    await sink.close();
+  });
+
+  it('drains records added while a flush is in flight on close', async () => {
+    const { home, env } = await tempHome();
+    const path = join(home, 'audit.log');
+    const sink = createRuntimeAuditSink({
+      slot: 'remote',
+      enabled: true,
+      env,
+      path,
+      flushIntervalMs: 10_000,
+    });
+    sink.record({
+      method: 'fs.read-file',
+      outcome: 'ok',
+      durationMs: 1,
+      params: { path: '/tmp/a.txt' },
+    });
+    // Start a flush without awaiting so the second record lands mid-batch.
+    const inFlight = sink.flush();
+    sink.record({
+      method: 'fs.write-file',
+      outcome: 'ok',
+      durationMs: 2,
+      params: { path: '/tmp/b.txt' },
+    });
+    await inFlight;
+    await sink.close();
+
+    const records = await readRuntimeAuditLog({ path });
+    expect(records.map((record) => record.method)).toEqual(['fs.read-file', 'fs.write-file']);
+  });
+
+  it('caps the retry buffer after write failures and reports dropped records', async () => {
+    const { home, env } = await tempHome();
+    const blocker = join(home, 'blocked');
+    await writeFile(blocker, 'not-a-directory', 'utf8');
+    const path = join(blocker, 'audit.log');
+    const sink = createRuntimeAuditSink({
+      slot: 'remote',
+      enabled: true,
+      env,
+      path,
+      flushIntervalMs: 10_000,
+    });
+    const overflow = 50;
+    for (let i = 0; i < MAX_BUFFERED_RECORDS + overflow; i += 1) {
+      sink.record({
+        method: 'fs.read-file',
+        outcome: 'ok',
+        durationMs: 1,
+        params: { path: `/tmp/file-${i}.txt` },
+      });
+    }
+    await sink.flush();
+    const error = sink.lastError();
+    expect(error).toBeTruthy();
+    expect(error).toContain(`${overflow} record(s) dropped`);
     await sink.close();
   });
 });
