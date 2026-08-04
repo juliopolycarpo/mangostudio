@@ -18,6 +18,7 @@ import {
   type RuntimeServiceExecResult,
   renderLaunchdPlist,
   renderSystemdUnit,
+  resolveInstallMode,
   systemdUnitPath,
 } from '../../../src/services/runtime-service';
 
@@ -140,6 +141,78 @@ describe('runtime service install', () => {
       expect(deps.files.get(unitPath)).toContain('connect');
       const enableCalls = deps.argv.filter((row) => row.includes('enable'));
       expect(enableCalls.length).toBe(2);
+    } finally {
+      await rm(mangoHome, { recursive: true, force: true });
+    }
+  });
+
+  it('fails when systemctl enable returns a non-zero exit code', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-svc-'));
+    const env = { MANGO_HOME: mangoHome };
+    try {
+      await writeRuntimeSlotConfig(
+        'remote',
+        { hubUrl: 'wss://hub.test/api/runtime', setup: { state: 'configured' } },
+        env
+      );
+      await writePairingToken('remote', 'pairing-token', env);
+      const deps = makeDeps({
+        env,
+        onExec: (argv) => {
+          if (argv.includes('enable')) {
+            return { exitCode: 1, stdout: '', stderr: 'Failed to enable unit' };
+          }
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      });
+      await expect(createRuntimeServiceManager(deps).install('connect')).rejects.toMatchObject({
+        kind: 'runtime_service_unsupported',
+      });
+      expect(deps.argv.some((row) => row.includes('enable'))).toBe(true);
+    } finally {
+      await rm(mangoHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('resolveInstallMode', () => {
+  it('names neither mode when nothing is configured', () => {
+    expect(() =>
+      resolveInstallMode(undefined, {
+        schemaVersion: 1,
+        setup: { state: 'configured' },
+      } as Parameters<typeof resolveInstallMode>[1])
+    ).toThrow(/Neither connect nor serve is configured/);
+  });
+});
+
+describe('runtime service status mode', () => {
+  it('reads connect vs serve from the installed unit when both are configured', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-svc-'));
+    const env = { MANGO_HOME: mangoHome };
+    try {
+      await writeRuntimeSlotConfig(
+        'remote',
+        {
+          hubUrl: 'wss://hub.test/api/runtime',
+          serveListen: '0.0.0.0:8787',
+          setup: { state: 'configured' },
+        },
+        env
+      );
+      const deps = makeDeps({
+        env,
+        onExec: (argv) => {
+          if (argv.includes('is-enabled')) return { exitCode: 0, stdout: 'enabled', stderr: '' };
+          if (argv.includes('is-active')) return { exitCode: 0, stdout: 'active', stderr: '' };
+          if (argv[0] === 'loginctl') return { exitCode: 0, stdout: 'Linger=yes', stderr: '' };
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      });
+      deps.files.set(systemdUnitPath(deps.home), renderSystemdUnit(CURRENT, 'serve'));
+      const manager = createRuntimeServiceManager(deps);
+      const status = await manager.status();
+      expect(status.mode).toBe('serve');
     } finally {
       await rm(mangoHome, { recursive: true, force: true });
     }
@@ -269,8 +342,11 @@ describe('runtime service linger', () => {
           ? { exitCode: 1, stdout: '', stderr: 'Access denied' }
           : { exitCode: 0, stdout: '', stderr: '' },
     });
-    await attemptEnableLinger(deps);
-    process.stderr.write = original;
-    expect(stderr.join('')).toContain('sudo loginctl enable-linger test');
+    try {
+      await attemptEnableLinger(deps);
+      expect(stderr.join('')).toContain('sudo loginctl enable-linger test');
+    } finally {
+      process.stderr.write = original;
+    }
   });
 });

@@ -528,12 +528,13 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     );
   }
 
-  const audit = await slotAuditSink(PAIRED_SLOT);
-
   const controller = new AbortController();
   const stop = (): void => controller.abort();
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
+
+  const audit = await slotAuditSink(PAIRED_SLOT);
+  const supervisedRestart = supervisedUpdateSession(controller);
 
   try {
     const outcome = await connectToHub({
@@ -544,7 +545,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
           runtimeVersion,
           consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
           audit,
-          ...supervisedUpdateOptions(PAIRED_SLOT),
+          ...supervisedRestart.hostOptions,
         }),
       log,
       signal: controller.signal,
@@ -553,12 +554,12 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
       log(outcome.message ?? 'The hub refused this runtime.');
       return 1;
     }
-    return 0;
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
     await audit.close();
   }
+  return supervisedRestart.exitCodeAfterClose();
 }
 
 async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise<number> {
@@ -578,12 +579,6 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
     return 1;
   }
 
-  await writeRuntimeSlotConfig(PAIRED_SLOT, { serveListen: listenRaw });
-
-  // Same rule as `connect`: an armed gate is obeyed, an unanswered slot is
-  // answered by the person who started this. What is different is the blast
-  // radius — this opens a listening socket — so the recorded answer is the one
-  // thing between an unattended restart and a machine nobody consented for.
   const consent = await consentByInvocation(PAIRED_SLOT, runtimeVersion);
   if (!consent.granted) {
     if (consent.reason) log(consent.reason);
@@ -595,6 +590,8 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
       `Recorded full permissions for this machine. Run "mangostudio-runtime setup --slot ${PAIRED_SLOT}" to narrow them.`
     );
   }
+
+  await writeRuntimeSlotConfig(PAIRED_SLOT, { serveListen: listenRaw });
 
   const resolved = await resolveServeToken(args.tokenSource);
   if (!resolved) {
@@ -621,6 +618,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
   process.once('SIGTERM', stop);
 
   const audit = await slotAuditSink(PAIRED_SLOT);
+  const supervisedRestart = supervisedUpdateSession(controller);
 
   try {
     const handle = serveRuntime({
@@ -631,18 +629,18 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
           runtimeVersion,
           consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
           audit,
-          ...supervisedUpdateOptions(PAIRED_SLOT),
+          ...supervisedRestart.hostOptions,
         }),
       log,
       signal: controller.signal,
     });
     await handle.stopped;
-    return 0;
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
     await audit.close();
   }
+  return supervisedRestart.exitCodeAfterClose();
 }
 
 async function resolveToken(source: RuntimeConnectArgs['tokenSource']): Promise<string | null> {
@@ -947,20 +945,31 @@ async function runService(args: {
   }
 }
 
-function supervisedUpdateOptions(_slot: RuntimeSlot): {
-  readonly update?: {
-    readonly supervised: boolean;
-    readonly requestRestart: () => void;
+function supervisedUpdateSession(controller: AbortController): {
+  readonly hostOptions: {
+    readonly update?: {
+      readonly supervised: boolean;
+      readonly requestRestart: () => void;
+    };
   };
+  readonly exitCodeAfterClose: () => number;
 } {
-  if (resolveRuntimeSource() !== 'provisioned') return {};
+  let exitCode: number | undefined;
+  const hostOptions =
+    resolveRuntimeSource() !== 'provisioned'
+      ? {}
+      : {
+          update: {
+            supervised: true,
+            requestRestart: () => {
+              exitCode = RUNTIME_UPDATE_EXIT_CODE;
+              controller.abort();
+            },
+          },
+        };
   return {
-    update: {
-      supervised: true,
-      requestRestart: () => {
-        process.exit(RUNTIME_UPDATE_EXIT_CODE);
-      },
-    },
+    hostOptions,
+    exitCodeAfterClose: () => exitCode ?? 0,
   };
 }
 

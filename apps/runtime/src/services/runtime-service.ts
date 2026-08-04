@@ -152,6 +152,7 @@ function defaultRuntimeServiceExecDeps(
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
+        timeout: 30_000,
       });
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(),
@@ -255,6 +256,12 @@ export function resolveInstallMode(
   const canServe = Boolean(config.serveListen);
   if (canConnect && !canServe) return 'connect';
   if (canServe && !canConnect) return 'serve';
+  if (!canConnect && !canServe) {
+    throw new RuntimeServiceManagementError(
+      'runtime_service_unconfigured',
+      'Neither connect nor serve is configured. Run "mangostudio-runtime connect --hub <url>" or "mangostudio-runtime serve --listen <host:port>" once first.'
+    );
+  }
   throw new RuntimeServiceManagementError(
     'runtime_service_unconfigured',
     'Pass --mode connect or --mode serve. Both modes look configured; the service unit runs only one subcommand.'
@@ -297,8 +304,16 @@ export function createRuntimeServiceManager(
     const unitPath = systemdUnitPath(deps.home);
     await deps.mkdir(join(deps.home, '.config', 'systemd', 'user'));
     await deps.writeFile(unitPath, renderSystemdUnit(binaryPath, mode));
-    await runSystemctl(deps, ['--user', 'daemon-reload']);
-    await runSystemctl(deps, ['--user', 'enable', '--now', SYSTEMD_UNIT_BASENAME]);
+    await requireManagerCommand(
+      deps,
+      ['systemctl', '--user', 'daemon-reload'],
+      'systemctl daemon-reload'
+    );
+    await requireManagerCommand(
+      deps,
+      ['systemctl', '--user', 'enable', '--now', SYSTEMD_UNIT_BASENAME],
+      'systemctl enable --now'
+    );
     await attemptEnableLinger(deps);
   };
 
@@ -322,8 +337,16 @@ export function createRuntimeServiceManager(
     await runLaunchctl(deps, ['bootout', `gui/${deps.uid}/${LAUNCHD_LABEL}`]).catch(
       () => undefined
     );
-    await runLaunchctl(deps, ['bootstrap', `gui/${deps.uid}`, plistPath]);
-    await runLaunchctl(deps, ['kickstart', '-k', `gui/${deps.uid}/${LAUNCHD_LABEL}`]);
+    await requireManagerCommand(
+      deps,
+      ['launchctl', 'bootstrap', `gui/${deps.uid}`, plistPath],
+      'launchctl bootstrap'
+    );
+    await requireManagerCommand(
+      deps,
+      ['launchctl', 'kickstart', '-k', `gui/${deps.uid}/${LAUNCHD_LABEL}`],
+      'launchctl kickstart'
+    );
   };
 
   const darwinUninstall = async (): Promise<void> => {
@@ -358,10 +381,10 @@ export function createRuntimeServiceManager(
     async status() {
       const slotState = await readRuntimeSlotState(slot, deps.env);
       const currentDir = runtimeSlotCurrentDir(slot, options());
-      const mode = inferInstalledMode(slotState.config);
+      const configMode = inferConfiguredMode(slotState.config);
 
       if (deps.platform === 'win32') {
-        return baseStatus('win32', mode, {
+        return baseStatus('win32', configMode, {
           installed: false,
           enabled: false,
           running: false,
@@ -370,7 +393,7 @@ export function createRuntimeServiceManager(
 
       if (deps.platform === 'linux') {
         if (!(await deps.hasSystemd())) {
-          return baseStatus('unsupported', mode, {
+          return baseStatus('unsupported', configMode, {
             installed: false,
             enabled: false,
             running: false,
@@ -378,7 +401,7 @@ export function createRuntimeServiceManager(
           });
         }
         if (!sessionBusAvailable(deps.env)) {
-          return baseStatus('linux', mode, {
+          return baseStatus('linux', configMode, {
             installed: false,
             enabled: false,
             running: false,
@@ -402,6 +425,7 @@ export function createRuntimeServiceManager(
           : { exitCode: 1, stdout: 'inactive', stderr: '' };
         const running = active.exitCode === 0;
         const linger = await readLingerEnabled(deps);
+        const mode = installed ? (modeFromUnitBody(unitBody) ?? configMode) : configMode;
         return baseStatus('linux', mode, {
           installed,
           enabled,
@@ -430,6 +454,7 @@ export function createRuntimeServiceManager(
           : { exitCode: 1, stdout: '', stderr: '' };
         const running = print.exitCode === 0 && /state = running/i.test(print.stdout);
         const enabled = installed;
+        const mode = installed ? (modeFromUnitBody(plistBody) ?? configMode) : configMode;
         return baseStatus('darwin', mode, {
           installed,
           enabled,
@@ -443,7 +468,7 @@ export function createRuntimeServiceManager(
         });
       }
 
-      return baseStatus('unsupported', mode, {
+      return baseStatus('unsupported', configMode, {
         installed: false,
         enabled: false,
         running: false,
@@ -453,10 +478,19 @@ export function createRuntimeServiceManager(
   };
 }
 
-function inferInstalledMode(config: RuntimeSlotState['config']): RuntimeServiceMode | null {
+function modeFromUnitBody(body: string): RuntimeServiceMode | null {
+  const execStart = body.match(/^ExecStart=(.+)$/m)?.[1]?.trim();
+  if (execStart?.endsWith(' connect')) return 'connect';
+  if (execStart?.endsWith(' serve')) return 'serve';
+  const args = [...body.matchAll(/<string>(connect|serve)<\/string>/g)].map((match) => match[1]);
+  const last = args.at(-1);
+  if (last === 'connect' || last === 'serve') return last;
+  return null;
+}
+
+function inferConfiguredMode(config: RuntimeSlotState['config']): RuntimeServiceMode | null {
   if (config.hubUrl && !config.serveListen) return 'connect';
   if (config.serveListen && !config.hubUrl) return 'serve';
-  if (config.hubUrl && config.serveListen) return null;
   return null;
 }
 
@@ -466,6 +500,20 @@ function baseStatus(
   rest: Omit<RuntimeServiceStatus, 'schemaVersion' | 'platform' | 'mode'>
 ): RuntimeServiceStatus {
   return { schemaVersion: 1, platform, mode, ...rest };
+}
+
+async function requireManagerCommand(
+  deps: RuntimeServiceExecDeps,
+  argv: readonly string[],
+  label: string
+): Promise<void> {
+  const result = await deps.exec(argv, { env: deps.env });
+  if (result.exitCode === 0) return;
+  const detail = result.stderr.trim() || result.stdout.trim();
+  throw new RuntimeServiceManagementError(
+    'runtime_service_unsupported',
+    `${label} failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`
+  );
 }
 
 async function runSystemctl(
@@ -518,13 +566,11 @@ export function shouldCheckRuntimeService(report: {
   return Boolean(report.hubUrl || report.serveListen);
 }
 
-export async function collectServiceDoctorDetails(
-  deps: RuntimeServiceExecDeps = defaultRuntimeServiceExecDeps()
-): Promise<{
+export async function collectServiceDoctorDetails(env?: NodeJS.ProcessEnv): Promise<{
   readonly status: RuntimeServiceStatus;
   readonly currentBinaryPath: string;
 }> {
-  const manager = createRuntimeServiceManager(deps);
+  const manager = createRuntimeServiceManager(defaultRuntimeServiceExecDeps(env));
   const status = await manager.status();
-  return { status, currentBinaryPath: currentBinaryForService(PAIRED_SLOT, deps.env) };
+  return { status, currentBinaryPath: currentBinaryForService(PAIRED_SLOT, env) };
 }

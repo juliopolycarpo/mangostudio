@@ -240,9 +240,10 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
  * configured. Hub-spawned stdio/WSL/SSH runtimes are not expected to have a unit.
  */
 export async function diagnoseRuntimeServiceHealth(
-  report: RuntimeHealthReport
+  report: RuntimeHealthReport,
+  env?: NodeJS.ProcessEnv
 ): Promise<RuntimeDoctorFinding[]> {
-  const { config } = await readRuntimeSlotState(report.slot);
+  const { config } = await readRuntimeSlotState(report.slot, env);
   if (
     !shouldCheckRuntimeService({
       slot: report.slot,
@@ -253,7 +254,7 @@ export async function diagnoseRuntimeServiceHealth(
     return [];
   }
 
-  const { status } = await collectServiceDoctorDetails();
+  const { status } = await collectServiceDoctorDetails(env);
   const findings: RuntimeDoctorFinding[] = [];
   const installFixConnect = 'mangostudio-runtime service install --mode connect';
   const installFixServe = 'mangostudio-runtime service install --mode serve';
@@ -279,7 +280,7 @@ export async function diagnoseRuntimeServiceHealth(
       severity: 'warn',
       title: 'Service',
       detail: 'the service unit is installed but not enabled',
-      fix: 'mangostudio-runtime service install',
+      fix,
     });
   } else {
     findings.push({
@@ -294,7 +295,7 @@ export async function diagnoseRuntimeServiceHealth(
       severity: 'fail',
       title: 'Service',
       detail: 'the service unit is not running',
-      fix: 'mangostudio-runtime service install',
+      fix,
     });
   } else {
     findings.push({
