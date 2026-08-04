@@ -504,6 +504,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
+    await audit.close();
   }
 }
 
@@ -578,6 +579,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
+    await audit.close();
   }
 }
 

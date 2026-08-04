@@ -54,6 +54,35 @@ describe('summarizeAuditArgs', () => {
     });
   });
 
+  it('redacts credential-shaped tokens inside command and argv', () => {
+    expect(
+      summarizeAuditArgs('shell.run', {
+        command: 'tool --token=SECRET_TOKEN --password=SECRET_PASSWORD',
+      })
+    ).toEqual({
+      command: 'tool --token=*** --password=***',
+    });
+    expect(
+      summarizeAuditArgs('install.run', {
+        argv: [
+          'tool',
+          '--header',
+          'Authorization: Bearer SECRET_TOKEN',
+          '--password=SECRET_PASSWORD',
+        ],
+      })
+    ).toEqual({
+      argv: ['tool', '--header', 'Authorization: Bearer ***', '--password=***'],
+    });
+    expect(
+      summarizeAuditArgs('mcp.call', {
+        args: ['{"apiKey":"SECRET_API_KEY","password":"SECRET_PASSWORD"}'],
+      })
+    ).toEqual({
+      args: ['{"apiKey":"***","password":"***"}'],
+    });
+  });
+
   it('records update chunk length, not chunk bytes', () => {
     const payload = Buffer.from('not-on-disk');
     expect(
@@ -286,6 +315,40 @@ describe('dispatch audit hook', () => {
     }
   });
 
+  it('keeps the shared sink writable after the host closes', async () => {
+    const { home, env } = await tempHome();
+    const path = join(home, 'audit.log');
+    const sink = createRuntimeAuditSink({
+      slot: 'remote',
+      enabled: true,
+      env,
+      path,
+      flushIntervalMs: 10_000,
+    });
+    const host = createLocalRuntimeHost({
+      runtimeVersion: '0.0.0-test',
+      consent: staticConsentSource(RUNTIME_CONSENT_PRESETS.full, 'remote'),
+      audit: sink,
+    });
+    const connection = await connectInProcessRuntime(host, {
+      hubVersion: 'hub-test',
+      hub: { host: 'desk', user: 'bob' },
+    });
+    connection.close();
+    // Host teardown must flush, not close, so reconnect/supersede can keep
+    // writing through the process-scoped sink.
+    sink.setHub({ host: 'desk', user: 'carol' });
+    sink.record({
+      method: 'runtime.health',
+      outcome: 'ok',
+      durationMs: 1,
+    });
+    await sink.flush();
+    const lines = await readRuntimeAuditLog({ path });
+    expect(lines.some((line) => line.hub === 'carol@desk')).toBe(true);
+    await sink.close();
+  });
+
   it('never writes MCP secrets or pairing-shaped tokens into the log', async () => {
     const { home, env } = await tempHome();
     const path = join(home, 'audit.log');
@@ -328,5 +391,12 @@ describe('parseAuditSince', () => {
     const iso = parseAuditSince('2026-01-01T00:00:00.000Z');
     expect(iso).toBe('2026-01-01T00:00:00.000Z');
     expect(parseAuditSince('nope')).toMatchObject({ error: expect.any(String) });
+  });
+
+  it('rejects relative durations that overflow the date range', () => {
+    const overflow = parseAuditSince(`${'9'.repeat(400)}d`);
+    expect(overflow).toMatchObject({
+      error: expect.stringContaining('outside the supported date range'),
+    });
   });
 });

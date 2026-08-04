@@ -297,8 +297,28 @@ function summarizeArgv(argv: readonly unknown[]): readonly string[] {
     .map((entry) => truncate(entry, STRING_SUMMARY_LIMIT));
 }
 
+/**
+ * Best-effort scrub of credential-shaped tokens in free-form summaries.
+ * Nested `env` / `headers` / `secrets` keys are already omitted; this covers
+ * values that ride inside `command` or `argv` (e.g. `--token=…`).
+ */
+function redactCredentialShapes(value: string): string {
+  return value
+    .replace(
+      /((?:^|[\s,])(?:--?(?:password|passwd|pwd|token|secret|api-?key|access-?token|authorization|auth))\s*[=:]\s*)([^\s"'\\]+)/gi,
+      '$1***'
+    )
+    .replace(
+      /("(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token|authorization)"\s*:\s*")([^"]*)(")/gi,
+      '$1***$3'
+    )
+    .replace(/\b(Bearer)\s+\S+/gi, '$1 ***')
+    .replace(/\b(?:sk|ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]+\b/g, '***');
+}
+
 function truncate(value: string, limit: number): string {
-  return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`;
+  const scrubbed = redactCredentialShapes(value);
+  return scrubbed.length <= limit ? scrubbed : `${scrubbed.slice(0, limit - 1)}…`;
 }
 
 async function writeBatch(
@@ -458,7 +478,11 @@ export function parseAuditSince(value: string): string | { readonly error: strin
           : unit === 'h'
             ? amount * 3_600_000
             : amount * 86_400_000;
-    return new Date(Date.now() - ms).toISOString();
+    const timestamp = Date.now() - ms;
+    if (!Number.isFinite(amount) || !Number.isFinite(timestamp)) {
+      return { error: `--since "${trimmed}" is outside the supported date range.` };
+    }
+    return new Date(timestamp).toISOString();
   }
   const parsed = Date.parse(trimmed);
   if (!Number.isFinite(parsed)) {

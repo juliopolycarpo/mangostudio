@@ -177,7 +177,10 @@ export class RuntimeHost {
     // `onClose` tears down must only be released once.
     if (this.#closed) return;
     this.#closed = true;
-    void this.#audit?.close();
+    // Flush only — the sink is process-scoped and shared across reconnect /
+    // supersede hosts. Closing it here would silence audit for every later
+    // session. The CLI owns `audit.close()` at process end.
+    void this.#audit?.flush();
     this.#onClose?.();
   }
 
