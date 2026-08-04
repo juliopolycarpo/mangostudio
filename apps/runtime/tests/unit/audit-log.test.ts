@@ -82,7 +82,9 @@ describe('rotateIfNeeded', () => {
     await writeFile(path, 'x'.repeat(64), 'utf8');
     await rotateIfNeeded(path, 16, 2);
 
-    expect(await readFile(path, 'utf8')).toBe('');
+    // Rotation shifts the active file away; the next append recreates it. No
+    // check-then-create on the path (that is the CodeQL race this avoids).
+    await expect(readFile(path, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(auditLogRotatedPath(path, 1), 'utf8')).toBe('x'.repeat(64));
     expect(await readFile(auditLogRotatedPath(path, 2), 'utf8')).toBe('one\n');
   });

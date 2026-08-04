@@ -7,16 +7,7 @@
  * degrades the log, never the request path.
  */
 
-import {
-  appendFile,
-  mkdir,
-  open,
-  readFile,
-  rename,
-  stat,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { type RuntimeSlot, runtimeSlotAuditLogPath } from '@mangostudio/shared/runtime-home';
 import type { RuntimeHubIdentity } from '@mangostudio/shared/runtime-protocol';
@@ -360,11 +351,8 @@ export async function rotateIfNeeded(
       throw error;
     }
   }
-  // After shifting, the active path should be gone. Open with append mode so
-  // create-if-missing is a single syscall — no check-then-write race on the
-  // path, and no truncate if another writer already recreated it.
-  const handle = await open(path, 'a');
-  await handle.close();
+  // The active path is gone after the shift. The next appendFile creates a
+  // fresh generation — no check-then-create on the path name.
 }
 
 function isNotFound(error: unknown): boolean {
