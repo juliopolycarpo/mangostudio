@@ -177,8 +177,9 @@ function manualCommandsFor(
       ...identity,
       install: '# Build and place mangostudio-runtime on that machine from this checkout.',
       setup: 'mangostudio-runtime setup --slot remote --profile full --yes',
-      serviceInstall:
-        transportKind === 'http'
+      serviceInstall: isWindows
+        ? undefined
+        : transportKind === 'http'
           ? 'mangostudio-runtime service install --mode serve'
           : 'mangostudio-runtime service install --mode connect',
     };
@@ -215,7 +216,7 @@ function manualCommandsFor(
     serviceInstall: isWindows
       ? undefined
       : transportKind === 'http'
-        ? 'mangostudio-runtime service install --mode serve'
-        : 'mangostudio-runtime service install --mode connect',
+        ? `./${localName} service install --mode serve`
+        : `./${localName} service install --mode connect`,
   };
 }

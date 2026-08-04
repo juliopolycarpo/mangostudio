@@ -16,6 +16,7 @@ import { resolveApiErrorMessage } from '@/lib/utils';
 import {
   useIssueRuntimePairingMutation,
   useRevokeRuntimePairingMutation,
+  useRuntimeLifecycleQuery,
   useRuntimePairingQuery,
 } from '../queries';
 import { CopyLine } from './CopyLine';
@@ -87,7 +88,13 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
         <p className="text-[11px] text-on-surface-variant/70">{labels.noToken}</p>
       )}
 
-      {issuedToken ? <SetupSteps endpoint={status?.endpoint ?? null} token={issuedToken} /> : null}
+      {issuedToken ? (
+        <SetupSteps
+          endpoint={status?.endpoint ?? null}
+          token={issuedToken}
+          environmentId={environmentId}
+        />
+      ) : null}
 
       {error ? (
         <p className="text-[11px] text-error" role="alert">
@@ -140,12 +147,16 @@ export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps)
 function SetupSteps({
   endpoint,
   token,
+  environmentId,
 }: {
   readonly endpoint: string | null;
   readonly token: string;
+  readonly environmentId: string;
 }) {
   const { t } = useI18n();
   const labels = t.environments.entities.pairing;
+  const lifecycle = useRuntimeLifecycleQuery(environmentId, true);
+  const serviceInstall = lifecycle.data?.manualCommands?.serviceInstall;
   const target = endpoint ?? labels.endpointPlaceholder;
   const posix = `printf %s '${token}' | mangostudio-runtime connect --hub ${target} --token -`;
   const powershell = `$env:MANGOSTUDIO_RUNTIME_TOKEN='${token}'; mangostudio-runtime connect --hub ${target}`;
@@ -156,11 +167,12 @@ function SetupSteps({
       <p className="text-[11px] text-on-surface-variant/70">{labels.tokenOnce}</p>
       <CopyLine label={labels.stepConnect} value={posix} />
       <CopyLine label={labels.stepConnectPowerShell} value={powershell} />
-      <CopyLine
-        label={labels.stepService}
-        value="mangostudio-runtime service install --mode connect"
-      />
-      <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
+      {serviceInstall ? (
+        <>
+          <CopyLine label={labels.stepService} value={serviceInstall} />
+          <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
+        </>
+      ) : null}
     </div>
   );
 }

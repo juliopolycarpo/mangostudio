@@ -13,9 +13,10 @@ across logout and reboot without leaving a terminal open.
 ## Service commands
 
 ```bash
-mangostudio-runtime service install   --mode connect|serve
+mangostudio-runtime service install --mode connect
+mangostudio-runtime service install --mode serve
 mangostudio-runtime service uninstall
-mangostudio-runtime service status    [--json]
+mangostudio-runtime service status [--json]
 ```
 
 `install` writes a **user** unit (no root for the unit itself):
