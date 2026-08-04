@@ -17,12 +17,16 @@ import {
 } from '../../../services/runtime-client/runtime-token-secrets';
 import type { SecretStore } from '../../../services/secret-store/store';
 import { bunSecretStore } from '../../../services/secret-store/store';
-import { assertEnvironmentConfig } from '../domain/environment-config';
+import { assertEnvironmentConfig, environmentConfigFor } from '../domain/environment-config';
+import { runtimeRemoveSlotBytesScript } from '../domain/runtime-push';
 import {
   type EnvironmentRecord,
   type EnvironmentRepository,
   environmentRepository,
 } from '../infrastructure/environment-repository';
+import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
+import { wslProvisioner } from '../infrastructure/wsl-provisioner';
+import { runtimeLifecycleService } from './runtime-lifecycle-service';
 
 export class EnvironmentServiceError extends Error {
   constructor(
@@ -44,7 +48,7 @@ export interface EnvironmentService {
   find(userId: string, id: string): Promise<Environment | null>;
   create(userId: string, input: CreateEnvironmentBody): Promise<Environment>;
   update(userId: string, id: string, input: UpdateEnvironmentBody): Promise<Environment>;
-  remove(userId: string, id: string): Promise<void>;
+  remove(userId: string, id: string, options?: { readonly removeRuntime?: boolean }): Promise<void>;
   connect(userId: string, id: string): Promise<Environment>;
   disconnect(userId: string, id: string): Promise<Environment>;
 }
@@ -94,11 +98,47 @@ async function toEnvironment(
   };
 }
 
+/**
+ * The runtime-side effects `remove`/`update` need, behind an interface.
+ *
+ * These are the only calls in this service that write to another machine or
+ * read another module's in-memory state, and the default wiring reaches for
+ * module singletons — so they are injectable rather than imported at the call
+ * site. Without that, the one code path that runs `rm -rf` on a remote slot
+ * cannot be covered by a test that does not own a WSL distribution.
+ */
+export interface EnvironmentRuntimeEffects {
+  /** Whether a runtime install is mid-flight for this environment. */
+  hasActiveInstall(userId: string, id: string): boolean;
+  /** Deletes the runtime bytes this environment installed; leaves consent alone. */
+  removeRuntimeBytes(record: EnvironmentRecord): Promise<void>;
+}
+
+const defaultEnvironmentRuntimeEffects: EnvironmentRuntimeEffects = {
+  hasActiveInstall: (userId, id) => runtimeLifecycleService.hasActiveInstall(userId, id),
+  async removeRuntimeBytes(record) {
+    if (record.transportKind === 'wsl') {
+      await wslProvisioner.removeSlotBytes(environmentConfigFor('wsl', record.config).distro);
+      return;
+    }
+    if (record.transportKind !== 'ssh') return;
+    const config = environmentConfigFor('ssh', record.config);
+    const remote = await createSshCommandRunner(config)(runtimeRemoveSlotBytesScript('remote'));
+    if (remote.exitCode !== 0) {
+      throw new EnvironmentServiceError(
+        `Could not remove the runtime from "${config.host}": ${remote.stderr.trim() || remote.stdout.trim() || `exit ${remote.exitCode}`}`,
+        503
+      );
+    }
+  },
+};
+
 export function createEnvironmentService(
   repository: EnvironmentRepository = environmentRepository,
   manager: RuntimeConnectionManager = getRuntimeConnectionManager(),
   publish: (userId: string) => void = publishEnvironmentInvalidation,
-  secretStore: SecretStore = bunSecretStore
+  secretStore: SecretStore = bunSecretStore,
+  runtimeEffects: EnvironmentRuntimeEffects = defaultEnvironmentRuntimeEffects
 ): EnvironmentService {
   async function findRecord(userId: string, id: string): Promise<EnvironmentRecord | null> {
     if (id === LOCAL_ENVIRONMENT_ID) return localRecord(userId);
@@ -177,6 +217,12 @@ export function createEnvironmentService(
       if (id === LOCAL_ENVIRONMENT_ID) {
         throw new EnvironmentServiceError('The Local environment cannot be changed.', 409);
       }
+      if (runtimeEffects.hasActiveInstall(userId, id)) {
+        throw new EnvironmentServiceError(
+          `Environment "${id}" has a runtime install in progress. Cancel it or wait before editing.`,
+          409
+        );
+      }
       const current = await requireRecord(userId, id);
 
       if (input.token !== undefined && current.transportKind !== 'http') {
@@ -233,6 +279,11 @@ export function createEnvironmentService(
       // persisted config while every tool call keeps reaching the old endpoint.
       if (input.enabled === false || input.config !== undefined || token !== undefined) {
         manager.disconnect(userId, id);
+        // Disconnect keeps health for transient drops; a config repoint must
+        // not leave the card showing the previous host's version/digest.
+        if (input.config !== undefined) {
+          manager.clearHealth(userId, id);
+        }
       } else if (input.enabled === true) {
         // Calls that reached it while it was disabled each recorded a failure,
         // which can already have latched the backoff. Re-enabling is the answer
@@ -243,10 +294,52 @@ export function createEnvironmentService(
       return await toEnvironment(updated, manager, secretStore);
     },
 
-    async remove(userId, id) {
+    async remove(userId, id, options = {}) {
       if (id === LOCAL_ENVIRONMENT_ID) {
         throw new EnvironmentServiceError('The Local environment cannot be removed.', 409);
       }
+      if (runtimeEffects.hasActiveInstall(userId, id)) {
+        throw new EnvironmentServiceError(
+          `Environment "${id}" has a runtime install in progress. Cancel it or wait before deleting.`,
+          409
+        );
+      }
+      const existing = await repository.find(userId, id);
+      if (!existing) {
+        throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
+      }
+
+      // Preflight references before touching anything, so a delete that is
+      // going to be refused refuses cleanly: it must not disconnect a live
+      // runtime or wipe remote bytes on its way to a 409. Byte cleanup then
+      // stays before the DB delete so a failed cleanup remains retriable.
+      const gate = await repository.removable(userId, id);
+      if (gate === 'referenced') {
+        throw new EnvironmentServiceError(
+          `Environment "${id}" is still used by one or more chats or MCP servers.`,
+          409
+        );
+      }
+      if (gate === 'missing') {
+        throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
+      }
+
+      // Only now: disconnect before byte cleanup so a live spawn is not holding
+      // the binary being deleted.
+      manager.disconnect(userId, id);
+
+      if (options.removeRuntime) {
+        try {
+          await runtimeEffects.removeRuntimeBytes(existing);
+        } catch (error) {
+          if (error instanceof EnvironmentServiceError) throw error;
+          throw new EnvironmentServiceError(
+            error instanceof Error ? error.message : String(error),
+            503
+          );
+        }
+      }
+
       const result = await repository.remove(userId, id);
       if (result === 'referenced') {
         throw new EnvironmentServiceError(
@@ -257,7 +350,7 @@ export function createEnvironmentService(
       if (result === 'missing') {
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
-      manager.disconnect(userId, id);
+
       await removeRuntimeToken(userId, id, secretStore);
       publish(userId);
     },

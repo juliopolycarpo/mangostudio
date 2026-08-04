@@ -2,10 +2,12 @@ import { type Static, Type } from '@sinclair/typebox';
 import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
 import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
 import { ProfileIdSchema } from '../profiles';
+import { RuntimeCapabilityAllowSchema, RuntimeHealthReportSchema } from '../runtime-home/schemas';
 import {
   RuntimeCapabilityManifestSchema,
   RuntimeErrorCodeSchema,
 } from '../runtime-protocol/schemas';
+import { ReadonlyArraySchema } from '../schema-helpers';
 
 export const LOCAL_ENVIRONMENT_ID = 'local' as const;
 
@@ -752,3 +754,109 @@ export type InstallLogEvent = Static<typeof InstallLogEventSchema>;
 export type InstallProbeEvent = Static<typeof InstallProbeEventSchema>;
 export type InstallExitEvent = Static<typeof InstallExitEventSchema>;
 export type InstallStreamEvent = Static<typeof InstallStreamEventSchema>;
+
+/**
+ * Hub-driven runtime lifecycle actions on an environment card. The hub
+ * computes which ones apply per transport so the browser never renders a
+ * button it cannot honour. Removal is not one of these: it travels as the
+ * `removeRuntime` query param on `DELETE /environments/:id`, not as a
+ * lifecycle action.
+ */
+export const RuntimeLifecycleActionSchema = Type.Union([
+  Type.Literal('install'),
+  Type.Literal('reinstall'),
+  Type.Literal('upgrade'),
+  Type.Literal('setup'),
+]);
+export type RuntimeLifecycleAction = Static<typeof RuntimeLifecycleActionSchema>;
+
+/**
+ * Copyable commands for a machine the hub cannot reach (dial-in WS, Direct URL).
+ *
+ * `platformId` names the release build these commands are for. It is not
+ * decoration: the hub only knows a peer's platform once it has connected, and a
+ * machine that has never paired is exactly when this block is read — so the
+ * card has to say which build it just handed you rather than defaulting
+ * silently to Linux.
+ */
+export const RuntimeManualCommandsSchema = Type.Object(
+  {
+    platformId: Type.String({ minLength: 1, maxLength: 64 }),
+    /** True when `platformId` is a fallback guess rather than a peer-reported platform. */
+    platformAssumed: Type.Boolean(),
+    install: Type.Optional(Type.String({ maxLength: 4_096 })),
+    /** Checksum check against the release `SHA256SUMS`; separate line where one command cannot chain. */
+    verify: Type.Optional(Type.String({ maxLength: 4_096 })),
+    setup: Type.Optional(Type.String({ maxLength: 4_096 })),
+    serviceInstall: Type.Optional(Type.String({ maxLength: 4_096 })),
+  },
+  { additionalProperties: Type.Never() }
+);
+export type RuntimeManualCommands = Static<typeof RuntimeManualCommandsSchema>;
+
+/**
+ * What the environment card needs to render runtime install/upgrade/setup/
+ * removal without re-deriving transport rules or inventing a second health
+ * payload. `health` is the last `runtime.health` the hub saw; a disconnected
+ * card keeps it with `stale: true` rather than blanking.
+ */
+export const RuntimeLifecycleViewSchema = Type.Object({
+  health: Type.Union([RuntimeHealthReportSchema, Type.Null()]),
+  readAt: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]),
+  stale: Type.Boolean(),
+  slotBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
+  actions: ReadonlyArraySchema(RuntimeLifecycleActionSchema),
+  manualCommands: Type.Optional(RuntimeManualCommandsSchema),
+});
+export type RuntimeLifecycleView = Static<typeof RuntimeLifecycleViewSchema>;
+
+export const RuntimeLifecycleStartResponseSchema = Type.Object({
+  runId: Type.String({ minLength: 1 }),
+});
+export type RuntimeLifecycleStartResponse = Static<typeof RuntimeLifecycleStartResponseSchema>;
+
+/**
+ * Body for POST /environments/:id/runtime/install. Distinguishes install /
+ * reinstall / upgrade so the hub can force a byte replace on reinstall and
+ * refuse upgrade when the machine denied `allow.update`.
+ */
+export const RuntimeLifecycleInstallBodySchema = Type.Object(
+  {
+    action: Type.Union([
+      Type.Literal('install'),
+      Type.Literal('reinstall'),
+      Type.Literal('upgrade'),
+    ]),
+  },
+  { additionalProperties: Type.Never() }
+);
+export type RuntimeLifecycleInstallBody = Static<typeof RuntimeLifecycleInstallBodySchema>;
+
+export const RuntimeLifecycleCancelResponseSchema = Type.Object({
+  runId: Type.String({ minLength: 1 }),
+  cancellationRequested: Type.Boolean(),
+});
+export type RuntimeLifecycleCancelResponse = Static<typeof RuntimeLifecycleCancelResponseSchema>;
+
+/**
+ * Consent the hub asks an SSH machine to record via `setup --yes --json`.
+ * A preset profile carries no `allow`: the preset *is* the answer, and a body
+ * that could name both would let a request display one consent and record
+ * another. `custom` requires an explicit allow matrix with every capability key.
+ */
+export const RuntimeSetupBodySchema = Type.Union([
+  Type.Object(
+    {
+      profile: Type.Union([Type.Literal('full'), Type.Literal('readonly'), Type.Literal('none')]),
+    },
+    { additionalProperties: Type.Never() }
+  ),
+  Type.Object(
+    {
+      profile: Type.Literal('custom'),
+      allow: RuntimeCapabilityAllowSchema,
+    },
+    { additionalProperties: Type.Never() }
+  ),
+]);
+export type RuntimeSetupBody = Static<typeof RuntimeSetupBodySchema>;

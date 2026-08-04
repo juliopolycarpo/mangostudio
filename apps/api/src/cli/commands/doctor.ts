@@ -61,6 +61,7 @@ import {
   checkInstance,
   checkRuntime,
   checkRuntimeBinary,
+  checkRuntimeCache,
   checkRuntimeSlot,
   checkSshClient,
   collectBuildIdentityChecks,
@@ -75,6 +76,7 @@ import { collectMcpDoctorChecks } from '../mcp-doctor-checks';
 import { writeLine } from '../output';
 import { createProcessController, type ProcessController } from '../process-control';
 import { probeRuntimeBinary, type RuntimeBinaryProbe } from '../runtime-binary-probe';
+import { probeRuntimeCache } from '../runtime-cache-probe';
 import { probeRuntimeSlots, type RuntimeSlotProbe } from '../runtime-slot-probe';
 import { collectSkillsDoctorChecks } from '../skills-doctor-checks';
 import { probeSshClient, type SshClientProbe } from '../ssh-client-probe';
@@ -159,6 +161,7 @@ async function collectResults(
     checkRuntime(getVersion(), isStandaloneExecutable()),
     checkRuntimeBinary(await d.probeRuntimeBinary(), getVersion()),
     ...(await d.probeRuntimeSlots()).map(checkRuntimeSlot),
+    checkRuntimeCache(await probeRuntimeCache()),
     checkSshClient(await d.probeSshClient()),
     ...collectBuildIdentityChecks({
       serverBuild,

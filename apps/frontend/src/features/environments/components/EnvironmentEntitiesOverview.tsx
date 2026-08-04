@@ -2,6 +2,7 @@ import type { Environment, EnvironmentConnectionState } from '@mangostudio/share
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { Cable, Check, Pencil, Plus, Server, Trash2, Unplug, X } from 'lucide-react';
 import { useState } from 'react';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -10,6 +11,8 @@ import {
   useDisconnectEnvironmentMutation,
   useEnvironmentEntitiesQuery,
   useRemoveEnvironmentMutation,
+  useRuntimeLifecycleQuery,
+  useRuntimeSlotBytesQuery,
   useUpdateEnvironmentMutation,
 } from '../queries';
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
@@ -17,6 +20,7 @@ import { CopyLine } from './CopyLine';
 import { DirectUrlPanel } from './DirectUrlPanel';
 import { EnvironmentPageState } from './EnvironmentPageState';
 import { InstallTrustToggle } from './InstallTrustToggle';
+import { RuntimeLifecyclePanel } from './RuntimeLifecyclePanel';
 import { RuntimePairingPanel } from './RuntimePairingPanel';
 import { SshPanel } from './SshPanel';
 
@@ -84,6 +88,11 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(environment.name);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
+  const [removeRuntime, setRemoveRuntime] = useState(false);
+  const removableRuntime =
+    environment.transportKind === 'wsl' || environment.transportKind === 'ssh';
+  const slotBytes = useRuntimeSlotBytesQuery(environment.id, removing && removableRuntime);
   const busy = connect.isPending || disconnect.isPending || update.isPending || remove.isPending;
   const state = environment.status.state;
 
@@ -122,12 +131,10 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
   };
 
   const removeEnvironment = async () => {
-    if (!window.confirm(formatMessage(labels.removeConfirm, { name: environment.name }))) {
-      return;
-    }
     setActionError(null);
     try {
-      await remove.mutateAsync(environment.id);
+      await remove.mutateAsync({ id: environment.id, removeRuntime });
+      setRemoving(false);
     } catch (error) {
       setActionError(resolveApiErrorMessage(error, labels.removeFailed));
     }
@@ -189,6 +196,8 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
         <RuntimeRelease environment={environment} />
 
         <PermissionsRow environment={environment} />
+
+        <RuntimeLifecyclePanel environment={environment} />
 
         {environment.transportKind === 'websocket' ? (
           <RuntimePairingPanel environmentId={environment.id} />
@@ -256,7 +265,10 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
               </button>
               <button
                 type="button"
-                onClick={() => void removeEnvironment()}
+                onClick={() => {
+                  setRemoveRuntime(false);
+                  setRemoving(true);
+                }}
                 disabled={busy}
                 className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs text-error/80 hover:bg-error/10 hover:text-error disabled:opacity-45"
               >
@@ -267,8 +279,44 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
           ) : null}
         </div>
       </div>
+
+      {removing ? (
+        <ConfirmDialog
+          title={labels.removeDialogTitle}
+          description={formatMessage(labels.removeConfirm, { name: environment.name })}
+          entityName={environment.name}
+          confirmLabel={labels.remove}
+          cancelLabel={labels.cancel}
+          isPending={remove.isPending}
+          onCancel={() => setRemoving(false)}
+          onConfirm={() => void removeEnvironment()}
+        >
+          {removableRuntime ? (
+            <label className="flex items-start gap-2 rounded-xl bg-surface-container-lowest px-3 py-2 text-left text-sm text-on-surface">
+              <input
+                type="checkbox"
+                checked={removeRuntime}
+                onChange={(event) => setRemoveRuntime(event.target.checked)}
+                className="mt-1 accent-primary"
+              />
+              <span>
+                {formatMessage(labels.removeRuntimeBytes, {
+                  bytes: formatSlotBytes(slotBytes.data ?? null),
+                })}
+              </span>
+            </label>
+          ) : null}
+        </ConfirmDialog>
+      ) : null}
     </article>
   );
+}
+
+function formatSlotBytes(bytes: number | null): string {
+  if (bytes === null || bytes <= 0) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
@@ -347,6 +395,7 @@ function PermissionsRow({ environment }: { environment: Environment }) {
   const { t } = useI18n();
   const labels = t.environments.entities.permissions;
   const manifest = environment.status.manifest;
+  const lifecycle = useRuntimeLifecycleQuery(environment.id, Boolean(manifest));
   if (!manifest) return null;
 
   const denied = FEATURE_KEYS.filter((key) => isRefused(manifest, key));
@@ -355,6 +404,7 @@ function PermissionsRow({ environment }: { environment: Environment }) {
   if (!narrowed) return null;
 
   const setupCommand = `mangostudio-runtime setup --slot ${setupSlotFor(environment)}`;
+  const stale = lifecycle.data?.stale === true;
 
   return (
     <div
@@ -370,20 +420,32 @@ function PermissionsRow({ environment }: { environment: Environment }) {
             {labels.profile[profile]}
           </span>
         ) : null}
+        {stale ? (
+          <span className="rounded-md bg-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-warning">
+            {t.environments.entities.runtime.stale}
+          </span>
+        ) : null}
       </div>
 
       {denied.length > 0 ? (
         <div className="space-y-1">
           <p className="text-[11px] text-on-surface-variant/70">{labels.deniedIntro}</p>
           <ul className="flex list-none flex-wrap gap-1.5">
-            {denied.map((capability) => (
-              <li
-                key={capability}
-                className="rounded-md border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 font-mono text-[10px] text-on-surface-variant"
-              >
-                {capability}
-              </li>
-            ))}
+            {denied.map((capability) => {
+              const capabilityLabels = t.environments.entities.permissions.capabilities;
+              const label =
+                capability in capabilityLabels
+                  ? capabilityLabels[capability as keyof typeof capabilityLabels]
+                  : capability;
+              return (
+                <li
+                  key={capability}
+                  className="rounded-md border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 font-mono text-[10px] text-on-surface-variant"
+                >
+                  {label}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}

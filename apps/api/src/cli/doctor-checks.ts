@@ -177,6 +177,21 @@ export function checkRuntimeSlot(probe: RuntimeSlotProbe): CheckResult {
 }
 
 /**
+ * Hub-side cache of release runtime assets under `~/.mango/runtime-cache/`.
+ * Presence is informational; prune keeps current + previous after each push.
+ */
+export function checkRuntimeCache(input: {
+  readonly directory: string;
+  readonly versions: readonly string[];
+}): CheckResult {
+  const label = 'Runtime cache';
+  if (input.versions.length === 0) {
+    return ok(label, `empty  ${input.directory}`);
+  }
+  return ok(label, `${input.versions.join(', ')}  ${input.directory}`);
+}
+
+/**
  * A warning like the runtime binary above, and for the same reason: a hub with
  * no ssh client serves every other environment normally, it just cannot launch
  * an SSH one. Reported even where OpenSSH is usually present, because the case

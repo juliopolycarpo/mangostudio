@@ -739,6 +739,23 @@ jobs:
           retry_command 5 60 gh release download "v${VERSION}" --pattern "$archive" --dir verify-assets --clobber
           retry_command 5 60 gh release download "v${VERSION}" --pattern SHA256SUMS --dir verify-assets --clobber
           bun ./scripts/release/verify-checksum.ts verify-assets/SHA256SUMS "verify-assets/${archive}"
+          if [[ "$PLATFORM" == windows* ]]; then
+            raw_hub="mangostudio-${VERSION}-${PLATFORM}.exe"
+            raw_runtime="mangostudio-runtime-${VERSION}-${PLATFORM}.exe"
+          else
+            raw_hub="mangostudio-${VERSION}-${PLATFORM}"
+            raw_runtime="mangostudio-runtime-${VERSION}-${PLATFORM}"
+          fi
+          retry_command 5 60 gh release download "v${VERSION}" --pattern "$raw_hub" --dir verify-assets --clobber
+          retry_command 5 60 gh release download "v${VERSION}" --pattern "$raw_runtime" --dir verify-assets --clobber
+          bun ./scripts/release/verify-checksum.ts verify-assets/SHA256SUMS "verify-assets/${raw_hub}"
+          bun ./scripts/release/verify-checksum.ts verify-assets/SHA256SUMS "verify-assets/${raw_runtime}"
+          chmod +x "verify-assets/${raw_hub}" "verify-assets/${raw_runtime}" 2>/dev/null || true
+          raw_runtime_version="$("verify-assets/${raw_runtime}" --version)"
+          if [ "$raw_runtime_version" != "$VERSION" ]; then
+            echo "Expected raw runtime version ${VERSION}, got ${raw_runtime_version}"
+            exit 1
+          fi
           if [[ "$archive" == *.zip ]]; then
             # unzip is not guaranteed on the Windows runner's bash PATH; fall
             # back to PowerShell's Expand-Archive, which always ships with it.

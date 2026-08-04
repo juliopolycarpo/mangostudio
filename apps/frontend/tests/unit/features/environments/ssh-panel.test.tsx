@@ -51,6 +51,15 @@ function mount(environment: Environment): void {
     .respondWithJson('GET', '/api/environments/wsl', {
       body: { available: false, distributions: [], reason: 'not-windows' },
     })
+    .respondWithJson('GET', `/api/environments/${environment.id}/runtime`, {
+      body: {
+        health: null,
+        readAt: null,
+        stale: true,
+        slotBytes: null,
+        actions: ['install', 'reinstall', 'upgrade', 'setup'],
+      },
+    })
     .respondWithJson('PUT', '/api/environments/build-01', { body: environment })
     .install();
   render(<EnvironmentEntitiesOverview />);

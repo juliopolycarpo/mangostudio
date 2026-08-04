@@ -83,6 +83,22 @@ const createMuslReleasePlan = (options: {
       archivePath: join(assetsDir, assetName),
     };
   });
+  const rawBinaries = platformArchives.flatMap((archive) => {
+    const hubName = `mangostudio-${options.version}-${archive.platform.arch}`;
+    const runtimeName = `mangostudio-runtime-${options.version}-${archive.platform.arch}`;
+    return [
+      {
+        sourcePath: archive.binaryPath,
+        assetName: hubName,
+        assetPath: join(assetsDir, hubName),
+      },
+      {
+        sourcePath: archive.runtimeBinaryPath,
+        assetName: runtimeName,
+        assetPath: join(assetsDir, runtimeName),
+      },
+    ];
+  });
   const frontendArchive = {
     sourceDir: join(options.rootDir, 'apps', 'frontend', 'dist'),
     assetName: `mangostudio-${options.version}-frontend-dist.tar.gz`,
@@ -94,9 +110,11 @@ const createMuslReleasePlan = (options: {
     outDir,
     assetsDir,
     platformArchives,
+    rawBinaries,
     frontendArchive,
     checksummedAssetPaths: [
       ...platformArchives.map((archive) => archive.archivePath),
+      ...rawBinaries.map((asset) => asset.assetPath),
       frontendArchive.archivePath,
     ],
     checksumPath: join(assetsDir, 'SHA256SUMS'),
@@ -174,6 +192,9 @@ describe.serial('archiveReleaseAssets', () => {
     for (const archive of plan.platformArchives) {
       expect(existsSync(archive.archivePath)).toBe(true);
     }
+    for (const asset of plan.rawBinaries) {
+      expect(existsSync(asset.assetPath)).toBe(true);
+    }
     expect(existsSync(plan.frontendArchive.archivePath)).toBe(true);
     expect(existsSync(plan.checksumPath)).toBe(true);
 
@@ -181,6 +202,11 @@ describe.serial('archiveReleaseAssets', () => {
     expect(checksumLines.map((line) => line.split('  ')[1])).toEqual(
       plan.checksummedAssetPaths.map((assetPath) => basename(assetPath))
     );
+    expect(
+      plan.rawBinaries.every((asset) =>
+        checksumLines.some((line) => line.endsWith(`  ${asset.assetName}`))
+      )
+    ).toBe(true);
   });
 
   test('produces identical SHA256SUMS for serial and parallel archiving', async () => {

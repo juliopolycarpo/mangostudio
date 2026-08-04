@@ -1,0 +1,688 @@
+/**
+ * Runtime install/upgrade/reinstall runs with an SSE log stream.
+ *
+ * Mirrors {@link install-service}'s EventBuffer / recentStreams shape so the
+ * frontend can reuse the install console parser. One active run per
+ * environment; progress bytes from {@link pushRuntimeBinary} land as log lines.
+ */
+
+import type {
+  InstallStreamEvent,
+  RuntimeLifecycleInstallBody,
+  RuntimeLifecycleStartResponse,
+  RuntimeLifecycleView,
+  RuntimeSetupBody,
+} from '@mangostudio/shared/environments';
+import {
+  DEFAULT_SSH_RUNTIME_PATH,
+  LOCAL_ENVIRONMENT_ID,
+  sshRuntimePath,
+} from '@mangostudio/shared/environments';
+import {
+  RUNTIME_CAPABILITY_KEYS,
+  RUNTIME_CONSENT_PRESETS,
+  type RuntimeCapabilityAllow,
+  resolveRuntimePlatformId,
+} from '@mangostudio/shared/runtime-home';
+import { getVersion, isDevelopmentVersion } from '../../../lib/config';
+import {
+  getRuntimeConnectionManager,
+  type RuntimeConnectionManager,
+} from '../../../services/runtime-client/runtime-connection-manager';
+import { generateId } from '../../../utils/id';
+import { environmentConfigFor } from '../domain/environment-config';
+import { buildRuntimeLifecycleView } from '../domain/runtime-lifecycle-view';
+import {
+  pushRuntimeBinary,
+  type RuntimeCommandRunner,
+  RuntimePushError,
+  runtimeSlotBytesScript,
+  runtimeVersionScript,
+} from '../domain/runtime-push';
+import { loadRuntimeReleaseBytes, RuntimeAssetLoadError } from '../domain/runtime-release-fetch';
+import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
+import {
+  type EnvironmentRecord,
+  environmentRepository,
+} from '../infrastructure/environment-repository';
+import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
+import {
+  type WslProvisioner,
+  WslProvisioningError,
+  wslProvisioner,
+} from '../infrastructure/wsl-provisioner';
+
+const MAX_RECENT_STREAMS = 20;
+
+interface EventBuffer {
+  readonly events: InstallStreamEvent[];
+  readonly closed: boolean;
+  publish(event: InstallStreamEvent): void;
+  close(): void;
+  subscribe(): AsyncIterableIterator<InstallStreamEvent>;
+}
+
+interface ActiveRun {
+  readonly runId: string;
+  readonly userId: string;
+  readonly environmentId: string;
+  readonly startedAt: number;
+  readonly stream: EventBuffer;
+  readonly abort: AbortController;
+}
+
+export class RuntimeLifecycleConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeLifecycleConflictError';
+  }
+}
+
+export class RuntimeLifecycleUnavailableError extends Error {
+  constructor(
+    message: string,
+    readonly status: 404 | 409 | 400 = 404
+  ) {
+    super(message);
+    this.name = 'RuntimeLifecycleUnavailableError';
+  }
+}
+
+interface RuntimeLifecycleViewOptions {
+  /**
+   * Reads the slot's byte size for the removal dialog's byte count. Off by
+   * default: a WSL read boots a stopped distribution, which is fine for a
+   * deliberate "how much would removing this free" click but not for the
+   * panel's 15s poll (`docs`: `readSlotBytes`).
+   */
+  readonly includeSlotBytes?: boolean;
+}
+
+export interface RuntimeLifecycleService {
+  getView(
+    userId: string,
+    environmentId: string,
+    options?: RuntimeLifecycleViewOptions
+  ): Promise<RuntimeLifecycleView>;
+  startInstall(
+    userId: string,
+    environmentId: string,
+    body: RuntimeLifecycleInstallBody
+  ): Promise<RuntimeLifecycleStartResponse>;
+  startSetup(
+    userId: string,
+    environmentId: string,
+    body: RuntimeSetupBody
+  ): Promise<RuntimeLifecycleView>;
+  getRunStream(runId: string, userId: string): Promise<AsyncIterable<InstallStreamEvent> | null>;
+  cancel(runId: string, userId: string): Promise<boolean>;
+  hasActiveInstall(userId: string, environmentId: string): boolean;
+}
+
+export interface RuntimeLifecycleServiceDeps {
+  readonly manager?: RuntimeConnectionManager;
+  readonly provisioner?: WslProvisioner;
+  readonly now?: () => number;
+}
+
+function createEventBuffer(): EventBuffer {
+  const events: InstallStreamEvent[] = [];
+  const waiters = new Set<() => void>();
+  let closed = false;
+
+  const wake = () => {
+    const pending = [...waiters];
+    waiters.clear();
+    for (const waiter of pending) waiter();
+  };
+
+  return {
+    events,
+    get closed() {
+      return closed;
+    },
+    publish(event) {
+      if (closed) return;
+      events.push(event);
+      wake();
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      wake();
+    },
+    subscribe() {
+      let cursor = 0;
+      let ended = false;
+      const pending = new Map<() => void, (result: IteratorResult<InstallStreamEvent>) => void>();
+      const done = (): IteratorReturnResult<undefined> => ({ done: true, value: undefined });
+      const read = (): IteratorResult<InstallStreamEvent> | null => {
+        if (ended) return done();
+        if (cursor < events.length) {
+          const event = events[cursor] as InstallStreamEvent;
+          cursor += 1;
+          return { done: false, value: event };
+        }
+        if (!closed) return null;
+        ended = true;
+        return done();
+      };
+
+      const iterator: AsyncIterableIterator<InstallStreamEvent> = {
+        [Symbol.asyncIterator]() {
+          return iterator;
+        },
+        next() {
+          const result = read();
+          if (result) return Promise.resolve(result);
+
+          return new Promise((resolve) => {
+            const waiter = () => {
+              const pendingResolve = pending.get(waiter);
+              if (!pendingResolve) return;
+              const next = read();
+              if (!next) {
+                waiters.add(waiter);
+                return;
+              }
+              pending.delete(waiter);
+              pendingResolve(next);
+            };
+            pending.set(waiter, resolve);
+            waiters.add(waiter);
+          });
+        },
+        return() {
+          ended = true;
+          const result = done();
+          for (const [waiter, resolve] of pending) {
+            waiters.delete(waiter);
+            resolve(result);
+          }
+          pending.clear();
+          return Promise.resolve(result);
+        },
+      };
+      return iterator;
+    },
+  };
+}
+
+export function createRuntimeLifecycleService(
+  overrides: RuntimeLifecycleServiceDeps = {}
+): RuntimeLifecycleService {
+  const manager = overrides.manager ?? getRuntimeConnectionManager();
+  const provisioner = overrides.provisioner ?? wslProvisioner;
+  const now = overrides.now ?? Date.now;
+
+  const activeByEnvironment = new Map<string, ActiveRun>();
+  const activeByRun = new Map<string, ActiveRun>();
+  const recentStreams = new Map<string, { userId: string; stream: EventBuffer }>();
+
+  const installKey = (userId: string, environmentId: string): string =>
+    `${userId}:${environmentId}`;
+
+  const rememberStream = (runId: string, userId: string, stream: EventBuffer): void => {
+    recentStreams.set(runId, { userId, stream });
+    if (recentStreams.size <= MAX_RECENT_STREAMS) return;
+    for (const [candidateId, candidate] of recentStreams) {
+      if (!candidate.stream.closed || activeByRun.has(candidateId)) continue;
+      recentStreams.delete(candidateId);
+      if (recentStreams.size <= MAX_RECENT_STREAMS) break;
+    }
+  };
+
+  const finish = (
+    run: ActiveRun,
+    status: Extract<InstallStreamEvent, { type: 'exit' }>['status'],
+    code: number | null
+  ): void => {
+    if (run.stream.closed) return;
+    run.stream.publish({
+      type: 'exit',
+      code,
+      status,
+      truncated: false,
+      durationMs: Math.max(0, now() - run.startedAt),
+      done: true,
+    });
+    run.stream.close();
+    activeByEnvironment.delete(installKey(run.userId, run.environmentId));
+    activeByRun.delete(run.runId);
+    rememberStream(run.runId, run.userId, run.stream);
+  };
+
+  return {
+    async getView(userId, environmentId, options) {
+      const record =
+        environmentId === LOCAL_ENVIRONMENT_ID
+          ? null
+          : await environmentRepository.find(userId, environmentId);
+      if (environmentId !== LOCAL_ENVIRONMENT_ID && !record) {
+        throw new RuntimeLifecycleUnavailableError(`Environment "${environmentId}" was not found.`);
+      }
+
+      const status = manager.getStatus(userId, environmentId);
+      if (status.state === 'connected') {
+        // Prefer a fresh health read so the panel shows version/digest rather
+        // than waiting for the background freshness window.
+        await manager.refreshManifest(userId, environmentId).catch(() => undefined);
+      }
+
+      const cached = manager.getCachedHealth(userId, environmentId);
+      const transportKind =
+        environmentId === LOCAL_ENVIRONMENT_ID ? 'in-process' : (record?.transportKind ?? 'stdio');
+
+      const platformHint =
+        cached?.health.platform && cached.health.arch
+          ? `${cached.health.platform}-${cached.health.arch}`
+          : undefined;
+
+      const slotBytes =
+        options?.includeSlotBytes && record
+          ? await readSlotBytes(record, provisioner).catch(() => null)
+          : null;
+
+      const managedPush =
+        transportKind !== 'ssh'
+          ? true
+          : !environmentConfigFor('ssh', record?.config).remoteRuntimePath?.trim();
+
+      return buildRuntimeLifecycleView({
+        transportKind,
+        health: cached?.health ?? null,
+        readAtMs: cached?.readAtMs ?? null,
+        connected: status.state === 'connected',
+        nowMs: now(),
+        platformHint,
+        slotBytes,
+        managedPush,
+      });
+    },
+
+    async startInstall(userId, environmentId, body) {
+      if (environmentId === LOCAL_ENVIRONMENT_ID) {
+        throw new RuntimeLifecycleUnavailableError(
+          'The Local environment ships with MangoStudio; it cannot be installed from the card.',
+          409
+        );
+      }
+
+      const record = await environmentRepository.find(userId, environmentId);
+      if (!record) {
+        throw new RuntimeLifecycleUnavailableError(`Environment "${environmentId}" was not found.`);
+      }
+
+      if (record.transportKind !== 'wsl' && record.transportKind !== 'ssh') {
+        throw new RuntimeLifecycleUnavailableError(
+          `Runtime install from the card is not available for ${record.transportKind} environments.`,
+          409
+        );
+      }
+
+      if (
+        record.transportKind === 'ssh' &&
+        environmentConfigFor('ssh', record.config).remoteRuntimePath?.trim()
+      ) {
+        throw new RuntimeLifecycleUnavailableError(
+          `This SSH environment uses a custom runtime path (${DEFAULT_SSH_RUNTIME_PATH} is the managed slot). Install or upgrade that binary on the host, or clear remoteRuntimePath to use hub-managed push.`,
+          409
+        );
+      }
+
+      // Every action here writes the same bytes through the same helper, so the
+      // gate covers `install` too: leaving it open would make a machine's
+      // "no hub-driven updates" answer one button-click wide. The push runs on
+      // the user's own credentials out of band, where the runtime cannot refuse
+      // it — this check is the enforcement, not a hint.
+      const cached = manager.getCachedHealth(userId, environmentId);
+      if (cached?.health?.allow?.update === false) {
+        throw new RuntimeLifecycleUnavailableError(
+          'This machine denied hub-driven runtime updates (`allow.update`). Change consent with setup before installing, reinstalling or upgrading.',
+          409
+        );
+      }
+
+      if (activeByEnvironment.has(installKey(userId, environmentId))) {
+        throw new RuntimeLifecycleConflictError(
+          `A runtime install is already running for environment "${environmentId}".`
+        );
+      }
+
+      const runId = generateId();
+      const stream = createEventBuffer();
+      const abort = new AbortController();
+      const run: ActiveRun = {
+        runId,
+        userId,
+        environmentId,
+        startedAt: now(),
+        stream,
+        abort,
+      };
+      activeByEnvironment.set(installKey(userId, environmentId), run);
+      activeByRun.set(runId, run);
+      rememberStream(runId, userId, stream);
+
+      const action = body.action;
+      const forceReplace = action === 'reinstall';
+      const targetLabel =
+        record.transportKind === 'wsl'
+          ? environmentConfigFor('wsl', record.config).distro
+          : environmentConfigFor('ssh', record.config).host;
+
+      stream.publish({
+        type: 'log',
+        stream: 'system',
+        line: `Starting runtime ${action} for "${targetLabel}" (hub ${getVersion()}).`,
+        done: false,
+      });
+
+      void (async () => {
+        try {
+          if (abort.signal.aborted) {
+            finish(run, 'cancelled', null);
+            return;
+          }
+          if (record.transportKind === 'wsl') {
+            await provisioner.ensure(environmentConfigFor('wsl', record.config).distro, {
+              signal: abort.signal,
+              force: forceReplace,
+              onTransferProgress: transferProgressPublisher(stream),
+            });
+          } else {
+            await pushOverSsh(record.config, stream, abort.signal, { force: forceReplace });
+          }
+          if (abort.signal.aborted) {
+            finish(run, 'cancelled', null);
+            return;
+          }
+          stream.publish({
+            type: 'log',
+            stream: 'system',
+            line: `Runtime ${action} finished for "${targetLabel}".`,
+            done: false,
+          });
+          await manager
+            .connect(userId, environmentId, { force: true })
+            .then(() => manager.refreshManifest(userId, environmentId))
+            .catch(() => undefined);
+          finish(run, 'succeeded', 0);
+        } catch (error) {
+          if (abort.signal.aborted) {
+            finish(run, 'cancelled', null);
+            return;
+          }
+          const detail =
+            error instanceof WslProvisioningError ||
+            error instanceof RuntimePushError ||
+            error instanceof RuntimeAssetLoadError ||
+            error instanceof Error
+              ? error.message
+              : String(error);
+          stream.publish({
+            type: 'log',
+            stream: 'stderr',
+            line: detail,
+            done: false,
+          });
+          finish(run, 'failed', 1);
+        }
+      })();
+
+      return { runId };
+    },
+
+    async startSetup(userId, environmentId, body) {
+      if (environmentId === LOCAL_ENVIRONMENT_ID) {
+        throw new RuntimeLifecycleUnavailableError(
+          'Local consent is recorded on this machine with mangostudio-runtime setup.',
+          409
+        );
+      }
+      const record = await environmentRepository.find(userId, environmentId);
+      if (!record) {
+        throw new RuntimeLifecycleUnavailableError(`Environment "${environmentId}" was not found.`);
+      }
+      if (record.transportKind !== 'ssh') {
+        throw new RuntimeLifecycleUnavailableError(
+          'Setup-over-ssh is only available for SSH environments.',
+          409
+        );
+      }
+
+      const config = environmentConfigFor('ssh', record.config);
+      const runner = createSshCommandRunner(config);
+      const allow = resolveSetupAllow(body);
+      const command = buildSetupCommand(body, allow, sshRuntimePath(config));
+      const result = await runner(command.script, { args: command.args, timeoutMs: 60_000 });
+      if (result.exitCode !== 0) {
+        throw new RuntimeLifecycleUnavailableError(
+          `Setup on "${config.host}" failed: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
+          409
+        );
+      }
+
+      await manager
+        .connect(userId, environmentId, { force: true })
+        .then(() => manager.refreshManifest(userId, environmentId))
+        .catch(() => undefined);
+      return this.getView(userId, environmentId);
+    },
+
+    getRunStream(runId, userId) {
+      const active = activeByRun.get(runId);
+      if (active) {
+        if (active.userId !== userId) return Promise.resolve(null);
+        return Promise.resolve(active.stream.subscribe());
+      }
+      const recent = recentStreams.get(runId);
+      if (!recent || recent.userId !== userId) return Promise.resolve(null);
+      return Promise.resolve(recent.stream.subscribe());
+    },
+
+    cancel(runId, userId) {
+      const run = activeByRun.get(runId);
+      if (!run || run.userId !== userId) return Promise.resolve(false);
+      run.abort.abort();
+      finish(run, 'cancelled', null);
+      return Promise.resolve(true);
+    },
+
+    hasActiveInstall(userId, environmentId) {
+      return activeByEnvironment.has(installKey(userId, environmentId));
+    },
+  };
+}
+
+export const runtimeLifecycleService = createRuntimeLifecycleService();
+
+async function pushOverSsh(
+  configUnknown: unknown,
+  stream: EventBuffer,
+  signal: AbortSignal,
+  options: { readonly force?: boolean } = {}
+): Promise<void> {
+  const config = environmentConfigFor('ssh', configUnknown);
+  const runner = createSshCommandRunner(config);
+  await pushRuntimeOverSsh(runner, config.host, stream, signal, options);
+}
+
+/**
+ * The push logic on its own, taking a {@link RuntimeCommandRunner} rather than
+ * building one — lets tests exercise the version short-circuit and the
+ * probe/load/push sequence with a fake runner instead of a real ssh spawn.
+ */
+export async function pushRuntimeOverSsh(
+  runner: RuntimeCommandRunner,
+  host: string,
+  stream: EventBuffer,
+  signal: AbortSignal,
+  options: { readonly force?: boolean } = {}
+): Promise<void> {
+  const version = getVersion();
+
+  // A published release's bytes never change, so a remote already reporting
+  // this exact version needs nothing pushed — the same "version equality
+  // settles it for a release" fast path the WSL provisioner uses, without
+  // paying for a platform probe or a download first. Reinstall forces a
+  // replace even when the version already matches.
+  if (!options.force && !isDevelopmentVersion(version)) {
+    const current = await runner(runtimeVersionScript('remote'), {
+      timeoutMs: 15_000,
+      signal,
+    }).catch(() => null);
+    if (current && current.exitCode === 0 && current.stdout.trim() === version) {
+      stream.publish({
+        type: 'log',
+        stream: 'system',
+        line: `Runtime on "${host}" already reports version ${version}; nothing to push.`,
+        done: false,
+      });
+      return;
+    }
+  }
+
+  if (signal.aborted) return;
+
+  const probe = await runner(PLATFORM_PROBE_SCRIPT, { timeoutMs: 30_000, signal });
+  if (signal.aborted || probe.signal) return;
+  if (probe.exitCode !== 0) {
+    throw new RuntimePushError(
+      `Could not probe "${host}": ${probe.stderr.trim() || probe.stdout.trim() || `exit ${probe.exitCode}`}`
+    );
+  }
+  const lines = probe.stdout.trim().split(/\r?\n/);
+  const platformProbe =
+    lines.length >= 3
+      ? { kernel: lines[0] ?? '', machine: lines[1] ?? '', libc: lines[2] ?? '' }
+      : { kernel: 'Linux', machine: lines[0] ?? '', libc: lines[1] ?? '' };
+  const platformId = resolveRuntimePlatformId(platformProbe);
+  if (!platformId) {
+    throw new RuntimePushError(
+      `Could not tell which runtime build "${host}" needs (${platformProbe.kernel} ${platformProbe.machine}).`
+    );
+  }
+
+  stream.publish({
+    type: 'log',
+    stream: 'system',
+    line: `Resolved platform ${platformId}; loading release asset…`,
+    done: false,
+  });
+  if (signal.aborted) return;
+
+  const asset = await loadRuntimeReleaseBytes(platformId);
+  if (signal.aborted) return;
+  const onProgress = transferProgressPublisher(stream);
+  await pushRuntimeBinary({
+    runner,
+    slot: 'remote',
+    version,
+    bytes: asset.bytes,
+    fromArchive: asset.fromArchive,
+    timeoutMs: 600_000,
+    signal,
+    onStdinProgress: (written) => onProgress(written, asset.bytes.byteLength),
+  });
+}
+
+/**
+ * Turns byte counts into install-console log lines, throttled to every 5%.
+ *
+ * Shared by both push transports on purpose: a ~95 MB transfer that reports
+ * nothing is indistinguishable from a hang, and WSL — where the bytes cross a
+ * 9P share into a cold distribution — is the slower of the two, not the one
+ * that can afford to be a spinner.
+ */
+function transferProgressPublisher(stream: {
+  publish(event: InstallStreamEvent): void;
+}): (written: number, total: number) => void {
+  let lastPct = -1;
+  return (written, total) => {
+    if (total <= 0) return;
+    const pct = Math.min(100, Math.floor((written / total) * 100));
+    if (pct === lastPct || pct % 5 !== 0) return;
+    lastPct = pct;
+    stream.publish({
+      type: 'log',
+      stream: 'stdout',
+      line: `Transferred ${pct}% (${written}/${total} bytes)`,
+      done: false,
+    });
+  };
+}
+
+function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
+  if (body.profile !== 'custom') {
+    return RUNTIME_CONSENT_PRESETS[body.profile];
+  }
+  return body.allow;
+}
+
+/**
+ * Resolves the runtime path into `$1` and expands a leading `~/` the way the
+ * login shell would for an ssh launch. The path itself never enters the script
+ * text: a custom `remoteRuntimePath` is user input, and this module's rule is
+ * that values travel as argv while scripts stay constants.
+ */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion on the target, not a JS placeholder
+const RESOLVE_RUNTIME_PATH = 'p="$1"; case "$p" in "~/"*) p="$HOME/${p#"~/"}" ;; esac; ';
+
+/**
+ * The `setup` invocation to run over ssh for a consent submission. Exported
+ * as a pure function so its shape is testable without spawning ssh.
+ *
+ * `binaryPath` is the environment's own resolved runtime path
+ * ({@link sshRuntimePath}), not the managed slot: an environment pointed at a
+ * custom `remoteRuntimePath` gets no push actions, so `setup` is the only thing
+ * its card offers — running the managed-slot binary there would invoke
+ * something that need not exist. The slot whose consent is written stays
+ * `remote` either way; that is where the SSH transport reads it from.
+ *
+ * `custom` is not a `--profile` value the CLI accepts — `setup` requires a
+ * base preset whenever `--yes` is set (`apps/runtime/src/setup.ts`), so
+ * `custom` sends the narrowest preset (`none`) and lets `--allow` override
+ * every key explicitly; the CLI derives the `custom` name itself from the
+ * resulting non-preset allow set.
+ */
+export function buildSetupCommand(
+  body: RuntimeSetupBody,
+  allow: RuntimeCapabilityAllow,
+  binaryPath: string = DEFAULT_SSH_RUNTIME_PATH
+): { readonly script: string; readonly args: readonly string[] } {
+  if (body.profile === 'custom') {
+    return {
+      script: `${RESOLVE_RUNTIME_PATH}exec "$p" setup --slot remote --profile none --allow "$2" --yes --json`,
+      args: [
+        binaryPath,
+        RUNTIME_CAPABILITY_KEYS.map((key) => `${key}=${allow[key] ? 'true' : 'false'}`).join(','),
+      ],
+    };
+  }
+
+  return {
+    script: `${RESOLVE_RUNTIME_PATH}exec "$p" setup --slot remote --profile "$2" --yes --json`,
+    args: [binaryPath, body.profile],
+  };
+}
+
+async function readSlotBytes(
+  record: EnvironmentRecord,
+  provisioner: WslProvisioner
+): Promise<number | null> {
+  if (record.transportKind === 'ssh') {
+    const config = environmentConfigFor('ssh', record.config);
+    const runner = createSshCommandRunner(config);
+    const result = await runner(runtimeSlotBytesScript('remote'), { timeoutMs: 15_000 });
+    if (result.exitCode !== 0) return null;
+    const parsed = Number.parseInt(result.stdout.trim(), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (record.transportKind === 'wsl') {
+    return provisioner.slotBytes(environmentConfigFor('wsl', record.config).distro);
+  }
+
+  return null;
+}

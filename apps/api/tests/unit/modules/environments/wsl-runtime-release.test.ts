@@ -13,6 +13,7 @@ import {
   REMOVE_LEGACY_RUNTIME_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
+  releaseRuntimeBinaryName,
   resolveLinuxPlatformId,
   SETUP_FULL_SCRIPT,
   VERSION_SCRIPT,
@@ -52,6 +53,12 @@ describe('release asset naming', () => {
     expect(releaseArchiveName('1.2.3', 'linux-x64')).toBe('mangostudio-1.2.3-linux-x64.tar.gz');
     expect(releaseAssetUrl('1.2.3', 'mangostudio-1.2.3-linux-x64.tar.gz')).toBe(
       'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3/mangostudio-1.2.3-linux-x64.tar.gz'
+    );
+  });
+
+  it('names the raw runtime binary asset', () => {
+    expect(releaseRuntimeBinaryName('1.2.3', 'linux-x64')).toBe(
+      'mangostudio-runtime-1.2.3-linux-x64'
     );
   });
 });
@@ -97,6 +104,13 @@ describe('install scripts', () => {
     for (const script of [INSTALL_ARCHIVE_SCRIPT, INSTALL_BINARY_SCRIPT]) {
       expect(script).toContain('ln -sfn "$1" "$HOME/.mango/runtime/wsl/current"');
       expect(script.indexOf('ln -sfn')).toBeGreaterThan(script.indexOf('mv -f '));
+    }
+  });
+
+  it('prunes older version directories after publishing', () => {
+    for (const script of [INSTALL_ARCHIVE_SCRIPT, INSTALL_BINARY_SCRIPT]) {
+      expect(script).toContain('rm -rf "$d"');
+      expect(script).toContain('readlink');
     }
   });
 });

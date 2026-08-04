@@ -115,8 +115,8 @@ Which one to reach for:
   inbound connections.
 - **A machine you already reach with `ssh`** — SSH. It reuses the keys, agent, `~/.ssh/config`
   and `known_hosts` that are already set up, needs nothing on the hub beyond an ssh client, and
-  needs no credential of MangoStudio's own. The runtime has to be installed on that machine
-  already; nothing is pushed there yet.
+  needs no credential of MangoStudio's own. Nothing needs to be installed first: the
+  environment card can push the runtime binary and run `setup` over the same ssh channel.
 
 The shared NDJSON codec validates every frame, buffers partial lines, and rejects records
 larger than 16 MiB. Production in-process delivery uses structured cloning while retaining
@@ -339,10 +339,11 @@ Connect provisions on demand. The distribution is asked where its home is and wh
 `runtime.json` records, and when that names another version — or the binary it names does
 not run — the Linux build for this hub's own version is fetched from its release, verified
 against that release's `SHA256SUMS`, cached under `~/.mango/runtime-cache/<version>/`, and
-piped into the distribution's own `tar`. A hub update is therefore absorbed by
-reinstalling rather than by a handshake failure the user cannot act on. There is no
-standalone runtime asset in a release yet, so the platform archive is fetched and one
-member is extracted from it.
+piped into the distribution (raw asset preferred; archive fallback for older
+releases). A hub update is therefore absorbed by reinstalling rather than by a
+handshake failure the user cannot act on. Releases publish standalone
+`mangostudio-runtime-<version>-<platform>` binaries beside the platform archives
+for one-liner installs and hub-driven WSL/SSH push.
 
 What lands is written down: version, digest, and which hub installed it. The digest is
 what version equality cannot supply in a checkout — two `dev` builds are different

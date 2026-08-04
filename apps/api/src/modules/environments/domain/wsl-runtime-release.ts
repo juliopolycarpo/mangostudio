@@ -4,18 +4,19 @@
  *
  * A Windows hub cannot run its own runtime binary inside a Linux distribution,
  * so the matching Linux build is fetched from the release the hub was cut from.
- * There is no standalone runtime asset yet — the runtime ships inside the
- * platform archive beside the hub binary — so the archive is what gets fetched
- * and the distribution's own `tar` extracts the one member that matters. That
- * costs the hub binary's bytes once per version and needs nothing from the
- * release pipeline that is not already published.
+ * Raw `mangostudio-runtime-<version>-<platformId>` assets are preferred; the
+ * platform archive remains the fallback for older releases that only published
+ * archives. The distribution's own `tar` extracts the one member that matters
+ * when falling back.
  *
  * Every script here is a constant. Distribution names are user input and travel
- * as argv entries, never inside one of these strings.
+ * as argv entries, never inside one of these strings. The stage-verify-publish
+ * sequence lives in `runtime-push.ts` so SSH can reuse the same audited path.
  */
 
 import { join } from 'node:path';
 import {
+  type LinuxPlatformId,
   mangoHomeDir,
   RUNTIME_BINARY_BASENAME,
   RUNTIME_CONFIG_FILE_NAME,
@@ -23,12 +24,20 @@ import {
   RUNTIME_CURRENT_LINK_NAME,
   type RuntimeSlotConfig,
   RuntimeSlotConfigSchema,
+  resolveLinuxPlatformId as resolveLinuxPlatformIdShared,
   runtimeSlotCurrentBinaryPath,
-  runtimeSlotDir,
   runtimeSlotVersionBinaryPath,
 } from '@mangostudio/shared/runtime-home';
 import { Value } from '@sinclair/typebox/value';
 import type { RuntimeLaunchCommand } from '../../../lib/runtime-paths';
+import {
+  runtimePushArchiveScript,
+  runtimePushBinaryScript,
+  runtimeSlotShellPath,
+  runtimeVersionScript,
+} from './runtime-push';
+
+export type { LinuxPlatformId };
 
 const REPOSITORY = 'juliopolycarpo/mangostudio';
 
@@ -43,7 +52,7 @@ const RUNTIME_ARCHIVE_MEMBER = RUNTIME_BINARY_BASENAME;
  * writes into and the one a launcher reads from cannot drift.
  */
 function distroPath(...segments: readonly string[]): string {
-  return `"${[runtimeSlotDir('wsl', { mangoHome: mangoHomeDir('$HOME') }), ...segments].join('/')}"`;
+  return runtimeSlotShellPath('wsl', ...segments);
 }
 
 /** Where the runtime ends up, written the way someone would type it. */
@@ -54,9 +63,9 @@ export const DISTRO_RUNTIME_PATH = runtimeSlotCurrentBinaryPath('wsl', {
 /** The unversioned binary #771 shipped, kept only so it can be removed. */
 export const LEGACY_DISTRO_RUNTIME_PATH = '~/.mango/bin/mangostudio-runtime';
 
-export type LinuxPlatformId = 'linux-x64' | 'linux-arm64' | 'linux-x64-musl' | 'linux-arm64-musl';
-
 export interface DistroPlatformProbe {
+  /** `uname -s` output. Present once the probe script reports it. */
+  readonly kernel?: string;
   /** `uname -m` output. */
   readonly machine: string;
   /** First line of `ldd --version`, which names the C library. */
@@ -64,66 +73,26 @@ export interface DistroPlatformProbe {
 }
 
 /**
- * Reports both halves of the target triple in one round trip. Alpine on WSL is
- * a real configuration and needs the musl build, which `uname -m` alone cannot
- * distinguish from glibc.
+ * Reports kernel, machine, and libc in one round trip. Alpine on WSL is a real
+ * configuration and needs the musl build, which `uname -m` alone cannot
+ * distinguish from glibc. `uname -s` lets SSH targets resolve Darwin vs Linux.
  */
-export const PLATFORM_PROBE_SCRIPT = 'uname -m; (ldd --version 2>&1 || true) | head -n 1';
+export const PLATFORM_PROBE_SCRIPT = 'uname -s; uname -m; (ldd --version 2>&1 || true) | head -n 1';
 
-/** `$1` is the version, supplied as an argv entry rather than spliced in. */
-const VERSION_DIR = distroPath('$1');
-const LIVE_PATH = distroPath('$1', RUNTIME_ARCHIVE_MEMBER);
-const STAGED_PATH = distroPath('$1', `${RUNTIME_ARCHIVE_MEMBER}.incoming`);
-const CURRENT_LINK = distroPath(RUNTIME_CURRENT_LINK_NAME);
 const CURRENT_BINARY = distroPath(RUNTIME_CURRENT_LINK_NAME, RUNTIME_ARCHIVE_MEMBER);
 const CONFIG_PATH = distroPath(RUNTIME_CONFIG_FILE_NAME);
 const STAGED_CONFIG_PATH = distroPath(`${RUNTIME_CONFIG_FILE_NAME}.incoming`);
 const CONFIG_LOCK_PATH = distroPath(RUNTIME_CONFIG_LOCK_FILE_NAME);
 
-/**
- * Stages whatever `stage` writes from stdin, then publishes it with a rename
- * and points `current` at the version it belongs to.
- *
- * The version arrives as `$1` — an argv entry, never text spliced into this
- * string. Every script in this module is a constant for that reason.
- *
- * The rename is the point. A distribution can already be running a runtime when
- * it is provisioned again — a hub update drifts the version of every
- * distribution at once, and the second environment to reconnect reinstalls
- * while the first is still connected. Writing straight onto the live path would
- * open the file that process is executing from, which Linux refuses with
- * `ETXTBSY`, failing the install over something the user cannot act on.
- * Replacing the directory entry instead leaves the running process on the inode
- * it started with and gives the next launch the new binary.
- *
- * `current` is what keeps an ssh argument and a service unit's `ExecStart` from
- * embedding a version that dangles after the next upgrade. GNU `ln -sfn`
- * publishes it by creating a temporary link and renaming it over the old one,
- * so a launch never sees the link missing. Busybox's `ln` unlinks first and
- * leaves a window instead; a launch landing inside it reads as a runtime that
- * is not there, which retries away.
- */
-function installScript(stage: string): string {
-  return (
-    'set -e; ' +
-    `mkdir -p ${VERSION_DIR}; ` +
-    `${stage}; ` +
-    `chmod +x ${STAGED_PATH}; ` +
-    `mv -f ${STAGED_PATH} ${LIVE_PATH}; ` +
-    `ln -sfn "$1" ${CURRENT_LINK}`
-  );
-}
-
 /** Unpacks the one member that matters out of a release's platform archive. */
-export const INSTALL_ARCHIVE_SCRIPT = installScript(
-  `tar -xzf - -O ${RUNTIME_ARCHIVE_MEMBER} > ${STAGED_PATH}`
-);
+export const INSTALL_ARCHIVE_SCRIPT = runtimePushArchiveScript('wsl');
 
 /**
  * Takes the binary whole, which is what a source checkout has to offer: it
- * builds a runtime, not a release archive.
+ * builds a runtime, not a release archive. Also the preferred path for raw
+ * release assets.
  */
-export const INSTALL_BINARY_SCRIPT = installScript(`cat > ${STAGED_PATH}`);
+export const INSTALL_BINARY_SCRIPT = runtimePushBinaryScript('wsl');
 
 /**
  * Runs the installed runtime with whatever arguments follow. `"$@"` is what
@@ -133,7 +102,7 @@ export const INSTALL_BINARY_SCRIPT = installScript(`cat > ${STAGED_PATH}`);
 const LAUNCH_SCRIPT = `exec ${CURRENT_BINARY} "$@"`;
 
 /** Reports the installed runtime's version, and fails when there is not one. */
-export const VERSION_SCRIPT = `exec ${CURRENT_BINARY} --version`;
+export const VERSION_SCRIPT = runtimeVersionScript('wsl');
 
 /**
  * Records the consent a distribution gets by being one.
@@ -311,20 +280,16 @@ export function wslLaunchCommand(distro: string): RuntimeLaunchCommand {
 }
 
 export function resolveLinuxPlatformId(probe: DistroPlatformProbe): LinuxPlatformId | null {
-  const machine = probe.machine.trim().toLowerCase();
-  const architecture =
-    machine === 'x86_64' || machine === 'amd64'
-      ? 'linux-x64'
-      : machine === 'aarch64' || machine === 'arm64'
-        ? 'linux-arm64'
-        : null;
-  if (!architecture) return null;
-
-  return /musl/i.test(probe.libc) ? (`${architecture}-musl` as LinuxPlatformId) : architecture;
+  return resolveLinuxPlatformIdShared(probe);
 }
 
-export function releaseArchiveName(version: string, platformId: LinuxPlatformId): string {
+export function releaseArchiveName(version: string, platformId: string): string {
   return `mangostudio-${version}-${platformId}.tar.gz`;
+}
+
+/** Raw runtime binary asset name published beside the platform archive. */
+export function releaseRuntimeBinaryName(version: string, platformId: string): string {
+  return `mangostudio-runtime-${version}-${platformId}`;
 }
 
 export function releaseAssetUrl(version: string, assetName: string): string {

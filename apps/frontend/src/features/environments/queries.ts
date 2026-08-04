@@ -11,8 +11,11 @@ import type {
   CreateEnvironmentBody,
   Environment,
   InstallRecipePreview,
+  RuntimeLifecycleStartResponse,
+  RuntimeLifecycleView,
   RuntimePairingIssue,
   RuntimePairingStatus,
+  RuntimeSetupBody,
   RuntimeStatusList,
   UpdateEnvironmentBody,
   VersionManagerStatusList,
@@ -41,6 +44,8 @@ const STALE_TIME_MS = 30_000;
 export const environmentKeys = {
   all: ['environments'] as const,
   entities: () => [...environmentKeys.all, 'entities'] as const,
+  runtimeLifecycle: (id: string) => [...environmentKeys.all, 'runtime-lifecycle', id] as const,
+  runtimeSlotBytes: (id: string) => [...environmentKeys.all, 'runtime-slot-bytes', id] as const,
   runtimes: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...environmentKeys.all, 'runtimes', environmentId] as const,
   versionManagers: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
@@ -165,12 +170,14 @@ export function useDisconnectEnvironmentMutation() {
 export function useRemoveEnvironmentMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { data, error } = await client.api.environments({ id }).delete();
+    mutationFn: async ({ id, removeRuntime = false }: { id: string; removeRuntime?: boolean }) => {
+      const { data, error } = await client.api.environments({ id }).delete({
+        query: removeRuntime ? { removeRuntime: true } : {},
+      });
       if (error) throw new ApiError(error.value);
       return data;
     },
-    onSuccess: (_, id) => {
+    onSuccess: (_, { id }) => {
       queryClient.setQueryData<Environment[]>(environmentKeys.entities(), (current) =>
         current?.filter((environment) => environment.id !== id)
       );
@@ -226,6 +233,85 @@ export function useRevokeRuntimePairingMutation(id: string) {
     // status is stale too, not just the pairing panel's.
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: environmentKeys.pairing(id) });
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+    },
+  });
+}
+
+export function useRuntimeLifecycleQuery(id: string, enabled = true) {
+  return useQuery({
+    queryKey: environmentKeys.runtimeLifecycle(id),
+    enabled,
+    staleTime: 5_000,
+    refetchInterval: enabled ? 15_000 : false,
+    queryFn: async () => {
+      const { data, error } = await client.api.environments({ id }).runtime.get();
+      if (error) throw new ApiError(error.value);
+      return data as RuntimeLifecycleView;
+    },
+  });
+}
+
+/**
+ * One-off byte count for the removal dialog. Unlike the polled lifecycle
+ * query above, a WSL read here boots a stopped distribution, so it is only
+ * fetched while the confirm dialog that needs it is open.
+ */
+export function useRuntimeSlotBytesQuery(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: environmentKeys.runtimeSlotBytes(id),
+    enabled,
+    staleTime: 0,
+    queryFn: async () => {
+      const { data, error } = await client.api
+        .environments({ id })
+        .runtime.get({ query: { slotBytes: true } });
+      if (error) throw new ApiError(error.value);
+      return (data as RuntimeLifecycleView).slotBytes;
+    },
+  });
+}
+
+export function useStartRuntimeInstallMutation(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (action: 'install' | 'reinstall' | 'upgrade') => {
+      const { data, error } = await client.api
+        .environments({ id })
+        .runtime.install.post({ action });
+      if (error) throw new ApiError(error.value);
+      return data as RuntimeLifecycleStartResponse;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.runtimeLifecycle(id) });
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+    },
+  });
+}
+
+export function useCancelRuntimeInstallMutation(id: string) {
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const { data, error } = await client.api
+        .environments({ id })
+        .runtime.runs({ runId })
+        .cancel.post();
+      if (error) throw new ApiError(error.value);
+      return data as { runId: string; cancellationRequested: boolean };
+    },
+  });
+}
+
+export function useRuntimeSetupMutation(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RuntimeSetupBody) => {
+      const { data, error } = await client.api.environments({ id }).runtime.setup.post(body);
+      if (error) throw new ApiError(error.value);
+      return data as RuntimeLifecycleView;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.runtimeLifecycle(id) });
       await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
     },
   });

@@ -2,10 +2,20 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type {
   CreateEnvironmentBody,
   Environment,
+  RuntimeLifecycleView,
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
+import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
+import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
-import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
+import {
+  createEnvironmentService,
+  type EnvironmentRuntimeEffects,
+} from '../../../src/modules/environments/application/environment-service';
+import {
+  createRuntimeLifecycleService,
+  type RuntimeLifecycleService,
+} from '../../../src/modules/environments/application/runtime-lifecycle-service';
 import { createEnvironmentEntityRoutes } from '../../../src/modules/environments/http/environment-entity-routes';
 import {
   type CreateEnvironmentRecord,
@@ -41,7 +51,11 @@ afterEach(async () => {
   setRealtimeBusForTests(undefined);
 });
 
-function createTestApp(connectors: RuntimeConnectionManagerOptions['connectors'] = {}) {
+function createTestApp(
+  connectors: RuntimeConnectionManagerOptions['connectors'] = {},
+  lifecycle?: RuntimeLifecycleService,
+  runtimeEffects?: Partial<EnvironmentRuntimeEffects>
+) {
   const repository = createEnvironmentRepository(getDb());
   const manager = new RuntimeConnectionManager({
     resolveEnvironment: async (userId, environmentId) => {
@@ -50,10 +64,29 @@ function createTestApp(connectors: RuntimeConnectionManagerOptions['connectors']
     },
     connectors,
   });
-  const service = createEnvironmentService(repository, manager);
+  // Byte removal writes to another machine, so the default wiring is never what
+  // a test should reach: overriding it is how the removal matrix gets covered
+  // without owning a WSL distribution.
+  const service = createEnvironmentService(repository, manager, undefined, undefined, {
+    hasActiveInstall: () => false,
+    removeRuntimeBytes: async () => undefined,
+    ...runtimeEffects,
+  });
   const { app, restore } = createAuthenticatedApiTestApp(
     TEST_USER,
-    createEnvironmentEntityRoutes(service)
+    createEnvironmentEntityRoutes(
+      service,
+      undefined,
+      lifecycle ??
+        createRuntimeLifecycleService({
+          manager,
+          provisioner: {
+            ensure: async () => undefined,
+            removeSlotBytes: async () => undefined,
+            slotBytes: async () => null,
+          },
+        })
+    )
   );
   restoreAuth = restore;
   return { app, repository, manager };
@@ -427,5 +460,280 @@ describe('environment entity routes', () => {
     await app.handle(new Request('http://localhost/environments/event-box', jsonRequest('DELETE')));
 
     expect(events).toEqual(['environments', 'environments', 'environments']);
+  });
+
+  it('returns a runtime lifecycle view for Local and WSL', async () => {
+    const { app, repository } = createTestApp();
+    await repository.create({
+      id: 'wsl-box',
+      userId: TEST_USER.id,
+      name: 'WSL box',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+
+    const local = await app.handle(new Request('http://localhost/environments/local/runtime'));
+    expect(local.status).toBe(200);
+    const localView = (await local.json()) as RuntimeLifecycleView;
+    expect(Value.Check(RuntimeLifecycleViewSchema, localView)).toBe(true);
+    expect(localView.actions).toEqual([]);
+
+    const wsl = await app.handle(new Request('http://localhost/environments/wsl-box/runtime'));
+    expect(wsl.status).toBe(200);
+    const wslView = (await wsl.json()) as RuntimeLifecycleView;
+    expect(Value.Check(RuntimeLifecycleViewSchema, wslView)).toBe(true);
+    expect(wslView.actions).toEqual(['install', 'reinstall', 'upgrade']);
+  });
+
+  it('starts a WSL runtime install and streams SSE exit', async () => {
+    let ensured = false;
+    const { app, repository } = createTestApp(
+      {},
+      createRuntimeLifecycleService({
+        provisioner: {
+          ensure: async () => {
+            ensured = true;
+            await Promise.resolve();
+          },
+          removeSlotBytes: async () => undefined,
+          slotBytes: async () => null,
+        },
+      })
+    );
+    await repository.create({
+      id: 'wsl-install',
+      userId: TEST_USER.id,
+      name: 'WSL install',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-install/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
+    );
+    expect(started.status).toBe(200);
+    const { runId } = (await started.json()) as { runId: string };
+    expect(runId.length).toBeGreaterThan(0);
+
+    const log = await app.handle(
+      new Request(`http://localhost/environments/wsl-install/runtime/runs/${runId}/log`)
+    );
+    expect(log.status).toBe(200);
+    expect(log.headers.get('Content-Type')).toContain('text/event-stream');
+
+    const body = await log.text();
+    expect(body).toContain('"type":"exit"');
+    expect(body).toContain('"status":"succeeded"');
+    expect(ensured).toBe(true);
+  });
+
+  it('cancels an in-flight runtime install via the cancel route', async () => {
+    let releaseEnsure: (() => void) | undefined;
+    const blocked = new Promise<void>((resolve) => {
+      releaseEnsure = resolve;
+    });
+    const { app, repository, lifecycle } = (() => {
+      const lifecycle = createRuntimeLifecycleService({
+        provisioner: {
+          ensure: async (_distro, options) => {
+            await new Promise<void>((resolve, reject) => {
+              const onAbort = () => reject(new Error('cancelled'));
+              options?.signal?.addEventListener('abort', onAbort, { once: true });
+              void blocked.then(() => {
+                options?.signal?.removeEventListener('abort', onAbort);
+                resolve();
+              });
+            });
+          },
+          removeSlotBytes: async () => undefined,
+          slotBytes: async () => null,
+        },
+      });
+      const created = createTestApp({}, lifecycle);
+      return { ...created, lifecycle };
+    })();
+    await repository.create({
+      id: 'wsl-cancel',
+      userId: TEST_USER.id,
+      name: 'WSL cancel',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-cancel/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
+    );
+    expect(started.status).toBe(200);
+    const { runId } = (await started.json()) as { runId: string };
+
+    const cancelled = await app.handle(
+      new Request(
+        `http://localhost/environments/wsl-cancel/runtime/runs/${runId}/cancel`,
+        jsonRequest('POST')
+      )
+    );
+    expect(cancelled.status).toBe(200);
+    expect(await cancelled.json()).toEqual({ runId, cancellationRequested: true });
+    expect(lifecycle.hasActiveInstall(TEST_USER.id, 'wsl-cancel')).toBe(false);
+    releaseEnsure?.();
+  });
+
+  it('refuses card install for Local and stdio', async () => {
+    const { app, repository } = createTestApp();
+    await repository.create({
+      id: 'stdio-box',
+      userId: TEST_USER.id,
+      name: 'Stdio',
+      transportKind: 'stdio',
+      config: {},
+      enabled: true,
+    });
+
+    const local = await app.handle(
+      new Request(
+        'http://localhost/environments/local/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
+    );
+    expect(local.status).toBe(409);
+
+    const stdio = await app.handle(
+      new Request(
+        'http://localhost/environments/stdio-box/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
+    );
+    expect(stdio.status).toBe(409);
+  });
+
+  it('removes runtime bytes only when asked, and never for a 404', async () => {
+    const removed: string[] = [];
+    const { app, repository } = createTestApp({}, undefined, {
+      removeRuntimeBytes: (record) => {
+        removed.push(record.id);
+        return Promise.resolve();
+      },
+    });
+    for (const id of ['wsl-keep', 'wsl-wipe']) {
+      await repository.create({
+        id,
+        userId: TEST_USER.id,
+        name: id,
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      });
+    }
+
+    const kept = await app.handle(
+      new Request('http://localhost/environments/wsl-keep', jsonRequest('DELETE'))
+    );
+    expect(kept.status).toBe(200);
+    expect(removed).toEqual([]);
+
+    const wiped = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-wipe?removeRuntime=true',
+        jsonRequest('DELETE')
+      )
+    );
+    expect(wiped.status).toBe(200);
+    expect(removed).toEqual(['wsl-wipe']);
+
+    const missing = await app.handle(
+      new Request(
+        'http://localhost/environments/missing-env?removeRuntime=true',
+        jsonRequest('DELETE')
+      )
+    );
+    expect(missing.status).toBe(404);
+    expect(removed).toEqual(['wsl-wipe']);
+  });
+
+  it('surfaces a failed byte removal as 503 and keeps the environment', async () => {
+    const { app, repository } = createTestApp({}, undefined, {
+      removeRuntimeBytes: () => Promise.reject(new Error('distribution is not running')),
+    });
+    await repository.create({
+      id: 'wsl-fail',
+      userId: TEST_USER.id,
+      name: 'WSL fail',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+
+    const response = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-fail?removeRuntime=true',
+        jsonRequest('DELETE')
+      )
+    );
+
+    expect(response.status).toBe(503);
+    // Cleanup runs before the DB delete precisely so this stays retriable.
+    expect(await repository.find(TEST_USER.id, 'wsl-fail')).not.toBeNull();
+  });
+
+  // Regression: the reference preflight used to run *after* `manager.disconnect`,
+  // so a delete that was going to be refused tore down a live runtime on its way
+  // to the 409.
+  it('leaves a referenced environment connected when the delete is refused', async () => {
+    const removed: string[] = [];
+    const { app, repository, manager } = createTestApp({}, undefined, {
+      removeRuntimeBytes: (record) => {
+        removed.push(record.id);
+        return Promise.resolve();
+      },
+    });
+    await repository.create({
+      id: 'wsl-referenced',
+      userId: TEST_USER.id,
+      name: 'WSL referenced',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+    await insertTestUser(TEST_USER);
+    await getDb()
+      .insertInto('chats')
+      .values({
+        id: 'chat-holding-env',
+        title: 'holds the environment',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+        environmentId: 'wsl-referenced',
+      })
+      .execute();
+
+    let disconnected = false;
+    const realDisconnect = manager.disconnect.bind(manager);
+    manager.disconnect = (userId: string, id: string) => {
+      disconnected = true;
+      return realDisconnect(userId, id);
+    };
+
+    const response = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-referenced?removeRuntime=true',
+        jsonRequest('DELETE')
+      )
+    );
+
+    expect(response.status).toBe(409);
+    expect(disconnected).toBe(false);
+    expect(removed).toEqual([]);
+    expect(await repository.find(TEST_USER.id, 'wsl-referenced')).not.toBeNull();
   });
 });

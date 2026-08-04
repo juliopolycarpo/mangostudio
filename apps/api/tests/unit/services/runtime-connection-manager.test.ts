@@ -642,4 +642,27 @@ describe('RuntimeConnectionManager', () => {
     expect(status.state).toBe('disconnected');
     expect(replaceCalls).toBe(0);
   });
+
+  it('clears cached health and peer identity without requiring a reconnect', async () => {
+    const probe = healthProbe(TEST_MANIFEST);
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => Promise.resolve({ client: probe.client, close: () => undefined }),
+      },
+    });
+
+    await manager.connect('user-1', 'devbox');
+    await manager.refreshManifest('user-1', 'devbox');
+    expect(manager.getCachedHealth('user-1', 'devbox')?.health.platform).toBe('linux');
+
+    manager.disconnect('user-1', 'devbox');
+    expect(manager.getCachedHealth('user-1', 'devbox')?.health.platform).toBe('linux');
+    expect(manager.getStatus('user-1', 'devbox').manifest?.platform).toBe('linux');
+
+    manager.clearHealth('user-1', 'devbox');
+    expect(manager.getCachedHealth('user-1', 'devbox')).toBeNull();
+    expect(manager.getStatus('user-1', 'devbox').manifest).toBeUndefined();
+    expect(manager.getStatus('user-1', 'devbox').runtimeVersion).toBeUndefined();
+  });
 });

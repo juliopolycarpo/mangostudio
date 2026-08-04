@@ -3,8 +3,13 @@ import {
   EnvironmentIdSchema,
   EnvironmentListSchema,
   EnvironmentSchema,
+  RuntimeLifecycleCancelResponseSchema,
+  RuntimeLifecycleInstallBodySchema,
+  RuntimeLifecycleStartResponseSchema,
+  RuntimeLifecycleViewSchema,
   RuntimePairingIssueSchema,
   RuntimePairingStatusSchema,
+  RuntimeSetupBodySchema,
   UpdateEnvironmentBodySchema,
 } from '@mangostudio/shared/environments';
 import {
@@ -12,6 +17,7 @@ import {
   ApiErrorResponseSchema,
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
+import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -19,11 +25,28 @@ import {
   EnvironmentServiceError,
 } from '../application/environment-service';
 import {
+  RuntimeLifecycleConflictError,
+  type RuntimeLifecycleService,
+  RuntimeLifecycleUnavailableError,
+  runtimeLifecycleService,
+} from '../application/runtime-lifecycle-service';
+import {
   type RuntimePairingService,
   runtimePairingService,
 } from '../application/runtime-pairing-service';
 
 const environmentParams = t.Object({ id: EnvironmentIdSchema });
+const runIdParams = t.Object({
+  id: EnvironmentIdSchema,
+  runId: t.String({ minLength: 1 }),
+});
+
+const KEEPALIVE_INTERVAL_MS = 15_000;
+const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
+
+function sseEvent(data: object): Uint8Array {
+  return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
+}
 
 function environmentError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
   if (error instanceof EnvironmentServiceError) {
@@ -40,12 +63,29 @@ function environmentError(error: unknown, set: { status?: number | string }): Ap
               : ERROR_CODES.VALIDATION,
     };
   }
+  if (error instanceof RuntimeLifecycleUnavailableError) {
+    set.status = error.status;
+    return {
+      error: error.message,
+      code:
+        error.status === 404
+          ? ERROR_CODES.NOT_FOUND
+          : error.status === 409
+            ? ERROR_CODES.CONFLICT
+            : ERROR_CODES.VALIDATION,
+    };
+  }
+  if (error instanceof RuntimeLifecycleConflictError) {
+    set.status = 409;
+    return { error: error.message, code: ERROR_CODES.CONFLICT };
+  }
   throw error;
 }
 
 export function createEnvironmentEntityRoutes(
   service: EnvironmentService,
-  pairing: RuntimePairingService = runtimePairingService
+  pairing: RuntimePairingService = runtimePairingService,
+  lifecycle: RuntimeLifecycleService = runtimeLifecycleService
 ) {
   return (
     new Elysia()
@@ -115,9 +155,11 @@ export function createEnvironmentEntityRoutes(
       )
       .delete(
         '/environments/:id',
-        async ({ params, user, set }) => {
+        async ({ params, query, user, set }) => {
           try {
-            await service.remove(user?.id ?? '', params.id);
+            await service.remove(user?.id ?? '', params.id, {
+              removeRuntime: query.removeRuntime === true || query.removeRuntime === 'true',
+            });
             return { success: true as const };
           } catch (error) {
             return environmentError(error, set);
@@ -125,10 +167,16 @@ export function createEnvironmentEntityRoutes(
         },
         {
           params: environmentParams,
+          query: t.Object({
+            removeRuntime: t.Optional(
+              t.Union([t.Boolean(), t.Literal('true'), t.Literal('false')])
+            ),
+          }),
           response: {
             200: t.Object({ success: t.Literal(true) }),
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         }
       )
@@ -222,6 +270,153 @@ export function createEnvironmentEntityRoutes(
             200: t.Object({ success: t.Literal(true) }),
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
+          },
+        }
+      )
+      .get(
+        '/environments/:id/runtime',
+        async ({ params, query, user, set }) => {
+          try {
+            return await lifecycle.getView(user?.id ?? '', params.id, {
+              includeSlotBytes: query.slotBytes === true || query.slotBytes === 'true',
+            });
+          } catch (error) {
+            return environmentError(error, set);
+          }
+        },
+        {
+          params: environmentParams,
+          query: t.Object({
+            slotBytes: t.Optional(t.Union([t.Boolean(), t.Literal('true'), t.Literal('false')])),
+          }),
+          response: {
+            200: RuntimeLifecycleViewSchema,
+            404: ApiErrorResponseSchema,
+          },
+        }
+      )
+      .post(
+        '/environments/:id/runtime/install',
+        async ({ params, body, user, set }) => {
+          try {
+            return await lifecycle.startInstall(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
+        },
+        {
+          params: environmentParams,
+          body: RuntimeLifecycleInstallBodySchema,
+          response: {
+            200: RuntimeLifecycleStartResponseSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+          },
+        }
+      )
+      .post(
+        '/environments/:id/runtime/runs/:runId/cancel',
+        async ({ params, user, set }) => {
+          const cancelled = await lifecycle.cancel(params.runId, user?.id ?? '');
+          if (!cancelled) {
+            set.status = 404;
+            return { error: 'Runtime install run not found.', code: ERROR_CODES.NOT_FOUND };
+          }
+          return { runId: params.runId, cancellationRequested: true };
+        },
+        {
+          params: runIdParams,
+          response: {
+            200: RuntimeLifecycleCancelResponseSchema,
+            404: ApiErrorResponseSchema,
+          },
+        }
+      )
+      .post(
+        '/environments/:id/runtime/setup',
+        async ({ params, body, user, set }) => {
+          try {
+            return await lifecycle.startSetup(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
+        },
+        {
+          params: environmentParams,
+          body: RuntimeSetupBodySchema,
+          response: {
+            200: RuntimeLifecycleViewSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+          },
+        }
+      )
+      .get(
+        '/environments/:id/runtime/runs/:runId/log',
+        async ({ params, user, set }) => {
+          const source = await lifecycle.getRunStream(params.runId, user?.id ?? '');
+          if (!source) {
+            set.status = 404;
+            return { error: 'Runtime install run not found.', code: ERROR_CODES.NOT_FOUND };
+          }
+
+          const iterator = source[Symbol.asyncIterator]();
+          let disconnected = false;
+          const stream = new ReadableStream({
+            async start(controller) {
+              const heartbeat = setInterval(() => {
+                try {
+                  controller.enqueue(KEEPALIVE_BYTES);
+                } catch {
+                  // The client may already have disconnected.
+                }
+              }, KEEPALIVE_INTERVAL_MS);
+              try {
+                while (!disconnected) {
+                  const next = await iterator.next();
+                  if (next.done) break;
+                  controller.enqueue(sseEvent(next.value));
+                }
+              } catch (error) {
+                if (!disconnected) {
+                  const event: SSEErrorEvent = {
+                    type: 'error',
+                    error:
+                      error instanceof Error ? error.message : 'Runtime install log stream failed.',
+                    code: ERROR_CODES.INTERNAL,
+                    done: true,
+                  };
+                  controller.enqueue(sseEvent(event));
+                }
+              } finally {
+                clearInterval(heartbeat);
+                try {
+                  controller.close();
+                } catch {
+                  // The browser may have cancelled the stream.
+                }
+              }
+            },
+            async cancel() {
+              disconnected = true;
+              await iterator.return?.();
+            },
+          });
+
+          return new Response(stream, {
+            headers: {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              Connection: 'keep-alive',
+            },
+          });
+        },
+        {
+          params: runIdParams,
+          response: {
+            404: ApiErrorResponseSchema,
           },
         }
       )

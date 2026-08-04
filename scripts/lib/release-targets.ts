@@ -112,3 +112,24 @@ export function filterBinaryTargets(onlyPlatform?: string): BinaryTarget[] {
 export function releaseArchiveFileName(version: string, target: BinaryTarget): string {
   return `mangostudio-${version}-${target.arch}.${target.archiveFormat}`;
 }
+
+/**
+ * Raw (uncompressed) hub binary asset name for one platform. Distinct from the
+ * archive name so both can sit in SHA256SUMS without colliding.
+ * // Usage: releaseRawHubBinaryFileName('1.2.3', target)
+ */
+export function releaseRawHubBinaryFileName(version: string, target: BinaryTarget): string {
+  return target.name.endsWith('.exe')
+    ? `mangostudio-${version}-${target.arch}.exe`
+    : `mangostudio-${version}-${target.arch}`;
+}
+
+/**
+ * Raw (uncompressed) runtime binary asset name for one platform.
+ * // Usage: releaseRawRuntimeBinaryFileName('1.2.3', target)
+ */
+export function releaseRawRuntimeBinaryFileName(version: string, target: BinaryTarget): string {
+  return target.name.endsWith('.exe')
+    ? `mangostudio-runtime-${version}-${target.arch}.exe`
+    : `mangostudio-runtime-${version}-${target.arch}`;
+}

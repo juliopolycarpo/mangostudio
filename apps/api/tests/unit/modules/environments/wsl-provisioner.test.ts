@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { RuntimeSlotConfig } from '@mangostudio/shared/runtime-home';
 import {
   createWslProvisioner,
@@ -9,9 +12,10 @@ import {
 
 const VERSION = '1.2.3';
 const ASSET = `mangostudio-${VERSION}-linux-x64.tar.gz`;
+const RAW_ASSET = `mangostudio-runtime-${VERSION}-linux-x64`;
 const ARCHIVE = new TextEncoder().encode('pretend this is a tar.gz');
 const DIGEST = createHash('sha256').update(ARCHIVE).digest('hex');
-const CHECKSUMS = `${DIGEST}  ${ASSET}\n`;
+const CHECKSUMS = `${DIGEST}  ${RAW_ASSET}\n${DIGEST}  ${ASSET}\n`;
 const DISTRO_HOME = '/home/dev';
 
 interface DistroCall {
@@ -53,6 +57,8 @@ function harness(
     readonly version?: string;
     /** Bytes at the local build path, standing in for a checkout that built one. */
     readonly localBuild?: Uint8Array | null;
+    /** Overrides the (otherwise fake) cache directory — used for real-fs GC tests. */
+    readonly cacheDirOverride?: (version: string) => string;
   } = {}
 ) {
   const version = options.version ?? VERSION;
@@ -66,7 +72,7 @@ function harness(
   const provisioner = createWslProvisioner({
     version: () => version,
     hubHost: () => 'win-desktop',
-    cacheDir: (cacheVersion) => `/cache/${cacheVersion}`,
+    cacheDir: options.cacheDirOverride ?? ((cacheVersion) => `/cache/${cacheVersion}`),
     localBuildPath: (platformId) => `/repo/.mango/out/${platformId}/mangostudio-runtime`,
     readBytes: (path) => {
       read.push(path);
@@ -85,6 +91,11 @@ function harness(
         stdinBytes: runOptions?.stdin?.byteLength ?? 0,
         args: runOptions?.args ?? [],
       });
+      // The real runner reports as it writes; a fake that swallows the callback
+      // would let the progress plumbing rot without a test noticing.
+      if (runOptions?.stdin && runOptions.onStdinProgress) {
+        runOptions.onStdinProgress(runOptions.stdin.byteLength);
+      }
       const override = options.respond?.(script);
       if (override) return Promise.resolve(override);
       // Before the `printf` arm: the config write prints a lock owner too, so
@@ -96,7 +107,8 @@ function harness(
       if (script.startsWith('printf')) {
         return Promise.resolve(ok(`${DISTRO_HOME}\n${config ? JSON.stringify(config) : ''}`));
       }
-      if (script.includes('uname -m')) return Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'));
+      if (script.includes('uname -m'))
+        return Promise.resolve(ok('Linux\nx86_64\nldd (GNU libc) 2.35\n'));
       if (script.includes('setup --profile')) {
         config = { ...(config as RuntimeSlotConfig), setup: { state: 'configured', by: 'cli' } };
         return Promise.resolve(ok());
@@ -133,15 +145,33 @@ describe('WslProvisioner', () => {
 
     expect(requested).toEqual([
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${RAW_ASSET}`,
+    ]);
+    expect(written.get(`/cache/${VERSION}/${RAW_ASSET}`)).toEqual(ARCHIVE);
+    expect(calls.every((call) => call.distro === 'Ubuntu')).toBe(true);
+
+    const unpack = calls.find((call) => call.script.includes('cat > '));
+    expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
+    expect(unpack?.script).not.toContain('tar');
+    // The version is an argv entry, never text inside the script.
+    expect(unpack?.args).toEqual([VERSION]);
+  });
+
+  it('falls back to the platform archive when the raw asset is unpublished', async () => {
+    const { provisioner, calls, requested, written } = harness({
+      checksums: `${DIGEST}  ${ASSET}\n`,
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(requested).toEqual([
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/SHA256SUMS`,
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v${VERSION}/${ASSET}`,
     ]);
     expect(written.get(`/cache/${VERSION}/${ASSET}`)).toEqual(ARCHIVE);
-    expect(calls.every((call) => call.distro === 'Ubuntu')).toBe(true);
-
     const unpack = calls.find((call) => call.script.includes('tar -xzf -'));
     expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
-    // The version is an argv entry, never text inside the script.
-    expect(unpack?.args).toEqual([VERSION]);
   });
 
   it('records what it installed and what the distribution may do', async () => {
@@ -280,17 +310,17 @@ describe('WslProvisioner', () => {
       readBytes: () => Promise.resolve(null),
       runInDistro: (_distro, script) =>
         script.includes('uname -m')
-          ? Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'))
+          ? Promise.resolve(ok('Linux\nx86_64\nldd (GNU libc) 2.35\n'))
           : Promise.resolve({ stdout: '', stderr: 'not found', exitCode: 127 }),
       fetch: ((_input: string | URL): Promise<Response> =>
         Promise.reject(new Error('getaddrinfo ENOTFOUND'))) as typeof fetch,
     });
 
     // An air-gapped or proxied hub has no other move, so both are spelled out:
-    // where the cache expects the archive, and where the binary belongs.
+    // where the cache expects the asset, and where the binary belongs.
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
       new RegExp(
-        `Could not download .*\\. Either download .*/${ASSET} to /cache/${VERSION}/${ASSET} ` +
+        `Could not download .*\\. Either download .*/${RAW_ASSET} to /cache/${VERSION}/${RAW_ASSET} ` +
           'on this host and connect again, or put the 1\\.2\\.3 runtime at ' +
           '~/\\.mango/runtime/wsl/current/mangostudio-runtime inside "Ubuntu" yourself\\.',
         's'
@@ -421,6 +451,71 @@ describe('WslProvisioner', () => {
     await provisioner.ensure(hostile);
 
     expect(calls.every((call) => call.distro === hostile)).toBe(true);
-    expect(calls.every((call) => !call.script.includes('rm -rf'))).toBe(true);
+    // The prune constant contains `rm -rf "$d"`; the hostile name must never
+    // appear inside a script string where the shell would parse it.
+    expect(calls.every((call) => !call.script.includes(hostile))).toBe(true);
+    expect(calls.every((call) => !call.script.includes('rm -rf /'))).toBe(true);
+  });
+
+  // Regression: this provisioner's own `loadAsset` writes into the hub cache
+  // but used to never call `pruneRuntimeCache`, so `~/.mango/runtime-cache/`
+  // grew one directory per version forever — the exact "stranded bytes"
+  // problem the removal feature exists to fix, just on the hub side instead
+  // of the distro side. `pruneRuntimeCache` reads/writes the real filesystem
+  // (it is shared with the ssh fetch path), so this test uses a real temp
+  // directory rather than the harness's mocked cache; `writeCache` itself
+  // stays mocked, so the current version's own directory never lands on
+  // disk here — pruning older entries down to one survivor is what proves
+  // the call happened.
+  it('prunes the hub-side download cache after a fresh install', async () => {
+    const cacheRoot = await mkdtemp(join(tmpdir(), 'mango-wsl-cache-'));
+    try {
+      await mkdir(join(cacheRoot, '0.9.0'), { recursive: true });
+      await mkdir(join(cacheRoot, '0.8.0'), { recursive: true });
+
+      const { provisioner } = harness({ cacheDirOverride: (version) => join(cacheRoot, version) });
+      await provisioner.ensure('Ubuntu');
+
+      // Only the most recent stale entry survives as "previous"; the older
+      // one is pruned. Left unfixed, both (and every future version) pile up.
+      expect(await readdir(cacheRoot)).toEqual(['0.9.0']);
+    } finally {
+      await rm(cacheRoot, { force: true, recursive: true });
+    }
+  });
+
+  // Regression: `ensure` had no way to report transfer bytes, so a WSL install
+  // streamed two log lines and an exit event — a ~95 MB push across the 9P
+  // share into a cold distribution with nothing to show for the wait.
+  it('reports transfer progress while pushing bytes into the distro', async () => {
+    const { provisioner } = harness();
+    const progress: Array<{ written: number; total: number }> = [];
+
+    await provisioner.ensure('Ubuntu', {
+      onTransferProgress: (written, total) => progress.push({ written, total }),
+    });
+
+    expect(progress.length).toBeGreaterThan(0);
+    expect(progress.at(-1)?.written).toBe(ARCHIVE.byteLength);
+    expect(progress.every((entry) => entry.total === ARCHIVE.byteLength)).toBe(true);
+  });
+
+  it('reports the wsl slot byte size for the removal dialog', async () => {
+    const { provisioner } = harness({
+      respond: (script) => (script.includes('du -sb') ? ok('123456\n') : undefined),
+    });
+
+    await expect(provisioner.slotBytes('Ubuntu')).resolves.toBe(123456);
+  });
+
+  it('reports null when the byte-size probe fails', async () => {
+    const { provisioner } = harness({
+      respond: (script) =>
+        script.includes('du -sb')
+          ? { stdout: '', stderr: 'no such distro', exitCode: 1 }
+          : undefined,
+    });
+
+    await expect(provisioner.slotBytes('Ubuntu')).resolves.toBeNull();
   });
 });

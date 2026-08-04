@@ -19,7 +19,7 @@
  *   API_PORT      - Port for the smoke server (default: 13001).
  */
 
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
@@ -36,10 +36,13 @@ import {
   type BinaryTarget,
   filterBinaryTargets,
   releaseArchiveFileName,
+  releaseRawHubBinaryFileName,
+  releaseRawRuntimeBinaryFileName,
   runtimeBinaryName,
 } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
 import { waitForServerReady } from './lib/wait-for-health';
+import { findChecksum, sha256File } from './release/verify-checksum';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -80,6 +83,10 @@ const PLATFORM_DIR = join(OUT_DIR, PLATFORM.arch);
 const BINARY_PATH = join(PLATFORM_DIR, BINARY_NAME);
 const RUNTIME_BINARY_PATH = join(PLATFORM_DIR, RUNTIME_BINARY_NAME);
 const ARCHIVE_PATH = join(RELEASE_ASSETS_DIR, releaseArchiveFileName(VERSION, PLATFORM));
+const RAW_HUB_ASSET_NAME = releaseRawHubBinaryFileName(VERSION, PLATFORM);
+const RAW_RUNTIME_ASSET_NAME = releaseRawRuntimeBinaryFileName(VERSION, PLATFORM);
+const RAW_HUB_ASSET_PATH = join(RELEASE_ASSETS_DIR, RAW_HUB_ASSET_NAME);
+const RAW_RUNTIME_ASSET_PATH = join(RELEASE_ASSETS_DIR, RAW_RUNTIME_ASSET_NAME);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -226,6 +233,43 @@ async function validateReleaseArchive(): Promise<void> {
   } finally {
     removeTempDir(extractDir);
   }
+
+  validateRawReleaseAssets();
+}
+
+function validateRawReleaseAssets(): void {
+  console.log('\n📦 Validating raw release binaries...');
+  const checksumsPath = join(RELEASE_ASSETS_DIR, 'SHA256SUMS');
+  if (!existsSync(checksumsPath)) fail('SHA256SUMS is missing from release-assets/');
+
+  // Target distribution bundles ship archive + SHA256SUMS only. Under SKIP_BUILD,
+  // prove the published raw checksums match the binaries extracted from that
+  // archive instead of requiring duplicate uncompressed uploads in every target
+  // artifact. Local/rebuild smoke still requires the real release-assets copies.
+  const hubPath = existsSync(RAW_HUB_ASSET_PATH) ? RAW_HUB_ASSET_PATH : BINARY_PATH;
+  const runtimePath = existsSync(RAW_RUNTIME_ASSET_PATH)
+    ? RAW_RUNTIME_ASSET_PATH
+    : RUNTIME_BINARY_PATH;
+
+  if (!SKIP_BUILD) {
+    if (!existsSync(RAW_HUB_ASSET_PATH)) fail(`Raw hub asset missing: ${RAW_HUB_ASSET_NAME}`);
+    if (!existsSync(RAW_RUNTIME_ASSET_PATH)) {
+      fail(`Raw runtime asset missing: ${RAW_RUNTIME_ASSET_NAME}`);
+    }
+  } else if (!existsSync(hubPath) || !existsSync(runtimePath)) {
+    fail('Materialized hub/runtime binaries missing for raw checksum verification');
+  }
+
+  const manifest = readFileSync(checksumsPath, 'utf8');
+  for (const [name, path] of [
+    [RAW_HUB_ASSET_NAME, hubPath],
+    [RAW_RUNTIME_ASSET_NAME, runtimePath],
+  ] as const) {
+    const expected = findChecksum(manifest, name);
+    const actual = sha256File(path);
+    if (actual !== expected) fail(`Checksum mismatch for ${name}`);
+  }
+  pass(`Raw hub and runtime assets verify against SHA256SUMS`);
 }
 
 function validateExtractedArchive(extractDir: string): void {
@@ -275,24 +319,25 @@ async function validateInstalledBinary(tempHome: string): Promise<void> {
 }
 
 /**
- * Runs the runtime binary the way the hub does: one NDJSON handshake over its
+ * Runs a runtime binary the way the hub does: one NDJSON handshake over its
  * pipes. A binary that only answers `--version` can still be unable to serve.
  */
-async function smokeRuntimeBinary(): Promise<void> {
-  console.log('\n🔌 Running runtime binary smoke...');
+async function smokeRuntimeBinary(binaryPath: string = RUNTIME_BINARY_PATH): Promise<void> {
+  const label = binaryPath === RUNTIME_BINARY_PATH ? RUNTIME_BINARY_NAME : binaryPath;
+  console.log(`\n🔌 Running runtime binary smoke (${label})...`);
 
   const { stdout: versionOut, exitCode: versionExit } = await captureCommand([
-    RUNTIME_BINARY_PATH,
+    binaryPath,
     '--version',
   ]);
-  if (versionExit !== 0) fail(`${RUNTIME_BINARY_NAME} --version exited ${versionExit}`);
+  if (versionExit !== 0) fail(`${label} --version exited ${versionExit}`);
   if (versionOut.trim() !== VERSION) {
-    fail(`${RUNTIME_BINARY_NAME} reported ${versionOut.trim()}, expected ${VERSION}`);
+    fail(`${label} reported ${versionOut.trim()}, expected ${VERSION}`);
   }
-  pass(`${RUNTIME_BINARY_NAME} --version → ${VERSION}`);
+  pass(`${label} --version → ${VERSION}`);
 
   const child = Bun.spawn({
-    cmd: [RUNTIME_BINARY_PATH, '--stdio'],
+    cmd: [binaryPath, '--stdio'],
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -300,20 +345,20 @@ async function smokeRuntimeBinary(): Promise<void> {
 
   try {
     const hello = await readFirstLine(child.stdout, RUNTIME_HANDSHAKE_TIMEOUT_MS);
-    if (!hello) fail(`${RUNTIME_BINARY_NAME} --stdio sent no handshake frame`);
+    if (!hello) fail(`${label} --stdio sent no handshake frame`);
 
     let frame: { type?: string; runtimeVersion?: string; manifest?: { platform?: string } };
     try {
       frame = JSON.parse(hello) as typeof frame;
     } catch {
-      fail(`${RUNTIME_BINARY_NAME} --stdio wrote a non-JSON line to stdout: ${hello}`);
+      fail(`${label} --stdio wrote a non-JSON line to stdout: ${hello}`);
     }
     if (frame.type !== 'hello') fail(`Expected a hello frame, got: ${hello}`);
     if (frame.runtimeVersion !== VERSION) {
       fail(`Handshake reported runtime ${frame.runtimeVersion}, expected ${VERSION}`);
     }
     if (!frame.manifest?.platform) fail('Handshake carried no capability manifest');
-    pass(`${RUNTIME_BINARY_NAME} --stdio handshakes with a v${VERSION} manifest`);
+    pass(`${label} --stdio handshakes with a v${VERSION} manifest`);
   } finally {
     child.stdin.end();
     child.kill();
@@ -737,6 +782,9 @@ await smokeLocalInstaller();
 
 if (CAN_EXECUTE) {
   await smokeRuntimeBinary();
+  if (PLATFORM.arch === 'linux-x64' && existsSync(RAW_RUNTIME_ASSET_PATH)) {
+    await smokeRuntimeBinary(RAW_RUNTIME_ASSET_PATH);
+  }
   await smokeTest();
   console.log('\n✅ All runtime assertions passed.');
 } else {

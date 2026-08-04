@@ -1,4 +1,5 @@
 import { Trash2 } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { Button } from '@/components/ui/Button';
 
 interface ConfirmDialogProps {
@@ -8,6 +9,8 @@ interface ConfirmDialogProps {
   readonly confirmLabel: string;
   readonly cancelLabel: string;
   readonly isPending?: boolean;
+  /** Optional extra controls (e.g. a checkbox) between the copy and the buttons. */
+  readonly children?: ReactNode;
   readonly onConfirm: () => void;
   readonly onCancel: () => void;
 }
@@ -24,6 +27,7 @@ export function ConfirmDialog({
   confirmLabel,
   cancelLabel,
   isPending = false,
+  children,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -40,6 +44,8 @@ export function ConfirmDialog({
             <span className="text-on-surface font-bold">&ldquo;{entityName}&rdquo;</span>
           </p>
         </div>
+
+        {children}
 
         <div className="flex gap-3">
           <Button variant="secondary" onClick={onCancel} className="flex-1" disabled={isPending}>

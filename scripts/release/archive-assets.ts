@@ -26,7 +26,8 @@ import { assertNoUnexpectedArguments, error, header, parseArgs, success } from '
 const printHelp = (): never => {
   console.log(`Usage: bun ./scripts/release/archive-assets.ts [--platform <target>]
 
-Creates release-assets/ with platform archives, frontend dist, and SHA256SUMS.
+Creates release-assets/ with platform archives, raw hub and runtime binaries,
+frontend dist, and SHA256SUMS.
 
 Flags:
   --platform <id>  Limit platform archives to one target (example: linux-x64)
@@ -42,8 +43,21 @@ export async function archiveReleaseAssets(plan: ReleaseAssetPlan): Promise<void
   await mapWithConcurrency(plan.platformArchives, concurrency, (archive) =>
     archivePlatform(archive, plan.assetsDir)
   );
+  copyRawAssets(plan);
   await archiveFrontend(plan.frontendArchive);
   writeChecksumManifest(plan);
+}
+
+/**
+ * Copy uncompressed hub and runtime binaries into release-assets/. No
+ * compression: uploads already run at compression-level 0, so skipping gzip
+ * adds no time to the sequential critical path.
+ */
+function copyRawAssets(plan: ReleaseAssetPlan): void {
+  for (const asset of plan.rawBinaries) {
+    assertFile(asset.sourcePath, asset.assetName);
+    cpSync(asset.sourcePath, asset.assetPath);
+  }
 }
 
 function prepareAssetsDir(assetsDir: string): void {
