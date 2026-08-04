@@ -236,6 +236,11 @@ export function createEnvironmentService(
       // persisted config while every tool call keeps reaching the old endpoint.
       if (input.enabled === false || input.config !== undefined || token !== undefined) {
         manager.disconnect(userId, id);
+        // Disconnect keeps health for transient drops; a config repoint must
+        // not leave the card showing the previous host's version/digest.
+        if (input.config !== undefined) {
+          manager.clearHealth(userId, id);
+        }
       } else if (input.enabled === true) {
         // Calls that reached it while it was disabled each recorded a failure,
         // which can already have latched the backoff. Re-enabling is the answer
@@ -255,9 +260,22 @@ export function createEnvironmentService(
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
 
-      // Disconnect before removing remote bytes so a live spawn is not holding
-      // the binary we are about to delete.
+      // Disconnect before byte cleanup so a live spawn is not holding the binary.
       manager.disconnect(userId, id);
+
+      // Preflight references before deleting remote bytes so a 409 never leaves
+      // the environment referenced but its runtime already wiped. Byte cleanup
+      // stays before the DB delete so a failed cleanup remains retriable.
+      const gate = await repository.removable(userId, id);
+      if (gate === 'referenced') {
+        throw new EnvironmentServiceError(
+          `Environment "${id}" is still used by one or more chats or MCP servers.`,
+          409
+        );
+      }
+      if (gate === 'missing') {
+        throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
+      }
 
       if (options.removeRuntime) {
         try {
@@ -267,10 +285,10 @@ export function createEnvironmentService(
           } else if (existing.transportKind === 'ssh') {
             const config = environmentConfigFor('ssh', existing.config);
             const runner = createSshCommandRunner(config);
-            const result = await runner(runtimeRemoveSlotBytesScript('remote'));
-            if (result.exitCode !== 0) {
+            const remote = await runner(runtimeRemoveSlotBytesScript('remote'));
+            if (remote.exitCode !== 0) {
               throw new EnvironmentServiceError(
-                `Could not remove the runtime from "${config.host}": ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
+                `Could not remove the runtime from "${config.host}": ${remote.stderr.trim() || remote.stdout.trim() || `exit ${remote.exitCode}`}`,
                 503
               );
             }
@@ -294,6 +312,7 @@ export function createEnvironmentService(
       if (result === 'missing') {
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
+
       await removeRuntimeToken(userId, id, secretStore);
       publish(userId);
     },

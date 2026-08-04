@@ -135,12 +135,17 @@ export function runtimeRemoveSlotBytesScript(slot: RuntimeSlot): string {
 
 /**
  * Reports approximate byte size of version dirs in the slot (excludes config).
+ *
+ * GNU `du -sb` is preferred; the `-sk` fallback must run when `-b` fails.
+ * Piping `du | awk` alone cannot fall through — awk exits 0 on empty stdin —
+ * so each attempt captures `du`'s status in a command substitution first.
  */
 export function runtimeSlotBytesScript(slot: RuntimeSlot): string {
   const slotDir = runtimeSlotShellPath(slot);
   return (
-    `du -sb ${slotDir} 2>/dev/null | awk '{print $1}' || ` +
-    `du -sk ${slotDir} 2>/dev/null | awk '{print $1*1024}' || echo 0`
+    `if out=$(du -sb ${slotDir} 2>/dev/null); then echo "$out" | awk '{print $1}'; ` +
+    `elif out=$(du -sk ${slotDir} 2>/dev/null); then echo "$out" | awk '{print $1*1024}'; ` +
+    `else echo 0; fi`
   );
 }
 

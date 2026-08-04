@@ -6,6 +6,7 @@
  * reuses the single allowShellHonesty string.
  */
 
+import type { RuntimeSetupBody } from '@mangostudio/shared/environments';
 import type {
   RuntimeCapabilityAllow,
   RuntimeConsentProfile,
@@ -28,10 +29,7 @@ interface RuntimeConsentDialogProps {
   readonly initialProfile: RuntimeConsentProfile;
   readonly initialAllow?: RuntimeCapabilityAllow;
   readonly isPending?: boolean;
-  readonly onConfirm: (input: {
-    profile: RuntimeConsentProfile;
-    allow?: Partial<RuntimeCapabilityAllow>;
-  }) => void;
+  readonly onConfirm: (input: RuntimeSetupBody) => void;
   readonly onCancel: () => void;
 }
 
@@ -109,7 +107,7 @@ export function RuntimeConsentDialog({
                       }
                       className="accent-primary"
                     />
-                    {key}
+                    {t.environments.entities.permissions.capabilities[key]}
                   </label>
                 </li>
               ))}
@@ -130,10 +128,7 @@ export function RuntimeConsentDialog({
             loading={isPending}
             className="flex-1"
             onClick={() =>
-              onConfirm({
-                profile,
-                ...(profile === 'custom' ? { allow } : {}),
-              })
+              onConfirm(profile === 'custom' ? { profile: 'custom', allow } : { profile })
             }
           >
             {formatMessage(labels.confirm, { name: machineName })}

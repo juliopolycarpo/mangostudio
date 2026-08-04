@@ -5,6 +5,7 @@ import {
   InstallPreparationSchema,
   type InstallStreamEvent,
   InstallStreamEventSchema,
+  RuntimeSetupBodySchema,
   type RuntimeStatus,
   RuntimeStatusSchema,
   type VersionManagerStatus,
@@ -153,5 +154,28 @@ describe('environment install schemas', () => {
     ];
 
     expect(events.every((event) => Value.Check(InstallStreamEventSchema, event))).toBe(true);
+  });
+});
+
+describe('RuntimeSetupBodySchema', () => {
+  it('requires a full allow matrix when profile is custom', () => {
+    const fullAllow = {
+      fsRead: true,
+      fsWrite: false,
+      shell: false,
+      git: true,
+      probing: true,
+      mcp: false,
+      library: true,
+      checkpoints: false,
+      update: false,
+    };
+
+    expect(Value.Check(RuntimeSetupBodySchema, { profile: 'readonly' })).toBe(true);
+    expect(Value.Check(RuntimeSetupBodySchema, { profile: 'custom' })).toBe(false);
+    expect(Value.Check(RuntimeSetupBodySchema, { profile: 'custom', allow: { shell: true } })).toBe(
+      false
+    );
+    expect(Value.Check(RuntimeSetupBodySchema, { profile: 'custom', allow: fullAllow })).toBe(true);
   });
 });

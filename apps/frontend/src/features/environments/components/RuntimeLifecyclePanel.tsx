@@ -165,10 +165,7 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
           onConfirm={(input) => {
             setActionError(null);
             void setup
-              .mutateAsync({
-                profile: input.profile === 'custom' ? 'custom' : input.profile,
-                ...(input.allow ? { allow: input.allow } : {}),
-              })
+              .mutateAsync(input)
               .then(() => {
                 setConsentOpen(false);
                 void view.refetch();

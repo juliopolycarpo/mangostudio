@@ -2174,6 +2174,17 @@ export const messages = {
         setupCommand: 'Alterar o consentimento naquela máquina',
         allowShellHonesty:
           'allow.shell concede tudo o que um shell alcança — a lista de capacidades abaixo descreve a intenção, não um sandbox.',
+        capabilities: {
+          fsRead: 'Ler arquivos',
+          fsWrite: 'Escrever arquivos',
+          shell: 'Shell',
+          git: 'Git',
+          probing: 'Sondagem',
+          mcp: 'MCP',
+          library: 'Biblioteca',
+          checkpoints: 'Checkpoints',
+          update: 'Atualizar runtime',
+        },
       },
       runtime: {
         title: 'Runtime',

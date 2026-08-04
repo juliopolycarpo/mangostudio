@@ -431,14 +431,21 @@ function PermissionsRow({ environment }: { environment: Environment }) {
         <div className="space-y-1">
           <p className="text-[11px] text-on-surface-variant/70">{labels.deniedIntro}</p>
           <ul className="flex list-none flex-wrap gap-1.5">
-            {denied.map((capability) => (
-              <li
-                key={capability}
-                className="rounded-md border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 font-mono text-[10px] text-on-surface-variant"
-              >
-                {capability}
-              </li>
-            ))}
+            {denied.map((capability) => {
+              const capabilityLabels = t.environments.entities.permissions.capabilities;
+              const label =
+                capability in capabilityLabels
+                  ? capabilityLabels[capability as keyof typeof capabilityLabels]
+                  : capability;
+              return (
+                <li
+                  key={capability}
+                  className="rounded-md border border-outline-variant/20 bg-surface-container-high px-2 py-0.5 font-mono text-[10px] text-on-surface-variant"
+                >
+                  {label}
+                </li>
+              );
+            })}
           </ul>
         </div>
       ) : null}

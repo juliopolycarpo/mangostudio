@@ -7,6 +7,7 @@ import {
   RuntimePushError,
   runtimePushArchiveScript,
   runtimePushBinaryScript,
+  runtimeSlotBytesScript,
   runtimeSlotShellPath,
   runtimeVersionScript,
 } from '../../../../src/modules/environments/domain/runtime-push';
@@ -37,6 +38,16 @@ describe('runtime push scripts', () => {
     expect(runtimeVersionScript('remote')).toContain(
       '"$HOME/.mango/runtime/remote/current/mangostudio-runtime"'
     );
+  });
+
+  it('falls back from GNU du -sb to du -sk when -b is unavailable', () => {
+    const script = runtimeSlotBytesScript('remote');
+    expect(script).toContain('if out=$(du -sb');
+    expect(script).toContain('elif out=$(du -sk');
+    expect(script).toContain("awk '{print $1*1024}'");
+    expect(script).toContain('else echo 0; fi');
+    // Pipeline-only fallback would never run: awk exits 0 on empty stdin.
+    expect(script).not.toMatch(/du -sb[^|]*\|[^|]*awk[^|]*\|\|\s*du -sk/);
   });
 });
 

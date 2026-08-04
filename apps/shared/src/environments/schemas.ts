@@ -2,7 +2,7 @@ import { type Static, Type } from '@sinclair/typebox';
 import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
 import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
 import { ProfileIdSchema } from '../profiles';
-import { RuntimeHealthReportSchema } from '../runtime-home/schemas';
+import { RuntimeCapabilityAllowSchema, RuntimeHealthReportSchema } from '../runtime-home/schemas';
 import {
   RuntimeCapabilityManifestSchema,
   RuntimeErrorCodeSchema,
@@ -803,33 +803,23 @@ export type RuntimeLifecycleStartResponse = Static<typeof RuntimeLifecycleStartR
 
 /**
  * Consent the hub asks an SSH machine to record via `setup --yes --json`.
- * Profile presets fill `allow`; `custom` requires an explicit allow matrix.
+ * Profile presets fill `allow`; `custom` requires an explicit allow matrix
+ * with every capability key present.
  */
-export const RuntimeSetupBodySchema = Type.Object(
-  {
-    profile: Type.Union([
-      Type.Literal('full'),
-      Type.Literal('readonly'),
-      Type.Literal('none'),
-      Type.Literal('custom'),
-    ]),
-    allow: Type.Optional(
-      Type.Object(
-        {
-          fsRead: Type.Optional(Type.Boolean()),
-          fsWrite: Type.Optional(Type.Boolean()),
-          shell: Type.Optional(Type.Boolean()),
-          git: Type.Optional(Type.Boolean()),
-          probing: Type.Optional(Type.Boolean()),
-          mcp: Type.Optional(Type.Boolean()),
-          library: Type.Optional(Type.Boolean()),
-          checkpoints: Type.Optional(Type.Boolean()),
-          update: Type.Optional(Type.Boolean()),
-        },
-        { additionalProperties: Type.Never() }
-      )
-    ),
-  },
-  { additionalProperties: Type.Never() }
-);
+export const RuntimeSetupBodySchema = Type.Union([
+  Type.Object(
+    {
+      profile: Type.Union([Type.Literal('full'), Type.Literal('readonly'), Type.Literal('none')]),
+      allow: Type.Optional(Type.Partial(RuntimeCapabilityAllowSchema)),
+    },
+    { additionalProperties: Type.Never() }
+  ),
+  Type.Object(
+    {
+      profile: Type.Literal('custom'),
+      allow: RuntimeCapabilityAllowSchema,
+    },
+    { additionalProperties: Type.Never() }
+  ),
+]);
 export type RuntimeSetupBody = Static<typeof RuntimeSetupBodySchema>;

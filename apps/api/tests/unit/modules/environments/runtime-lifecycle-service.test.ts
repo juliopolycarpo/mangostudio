@@ -29,8 +29,8 @@ describe('buildSetupCommand', () => {
   // (apps/runtime/src/cli.ts) — the custom branch used to omit --profile
   // entirely, so every custom consent submission failed on a fresh remote.
   it('sends custom profiles through --profile none plus an explicit --allow set', () => {
-    const body: RuntimeSetupBody = { profile: 'custom', allow: { shell: true, fsWrite: false } };
     const allow = { ...RUNTIME_CONSENT_PRESETS.none, shell: true, fsWrite: false };
+    const body: RuntimeSetupBody = { profile: 'custom', allow };
     const command = buildSetupCommand(body, allow);
 
     expect(command.script).toContain('--profile none --allow "$1" --yes --json');

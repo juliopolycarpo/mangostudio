@@ -9,6 +9,7 @@
 
 import { spawn } from 'node:child_process';
 import {
+  quoteForRemoteShell,
   SSH_FORCED_OPTIONS,
   type SshEnvironmentConfig,
   sshDestination,
@@ -27,6 +28,17 @@ export function createSshCommandRunner(config: SshEnvironmentConfig): RuntimeCom
   return (script, options) => runOverSsh(config, script, options);
 }
 
+/**
+ * One remote command string for OpenSSH's login-shell join: `sh -c <script> sh
+ * <args…>`, with every word quoted so spaces/metacharacters in a multi-statement
+ * script stay one `-c` operand and positional `$1`… still arrive intact.
+ */
+export function buildSshRemoteCommand(script: string, args: readonly string[] = []): string {
+  return ['sh', '-c', quoteForRemoteShell(script), 'sh', ...args.map(quoteForRemoteShell)].join(
+    ' '
+  );
+}
+
 function runOverSsh(
   config: SshEnvironmentConfig,
   script: string,
@@ -39,12 +51,9 @@ function runOverSsh(
     '-T',
     '--',
     sshDestination(config),
-    // Remote login shell runs the constant script with positional args.
-    'sh',
-    '-c',
-    script,
-    'sh',
-    ...(options.args ?? []),
+    // OpenSSH joins argv after the destination into one remote command; pass a
+    // single already-quoted string the way {@link sshLaunchCommand} does.
+    buildSshRemoteCommand(script, options.args ?? []),
   ];
 
   return new Promise((resolve, reject) => {
@@ -120,27 +129,52 @@ async function writeStdin(
     return;
   }
 
-  let offset = 0;
-  while (offset < bytes.byteLength) {
-    const end = Math.min(offset + STDIN_CHUNK_BYTES, bytes.byteLength);
-    const chunk = bytes.subarray(offset, end);
-    offset = end;
-    const canContinue = stdin.write(chunk);
-    options.onStdinProgress?.(offset);
-    if (!canContinue) {
-      await new Promise<void>((resolve, reject) => {
-        const onDrain = () => {
-          stdin.off('error', onError);
-          resolve();
-        };
-        const onError = (error: Error) => {
-          stdin.off('drain', onDrain);
-          reject(error);
-        };
-        stdin.once('drain', onDrain);
-        stdin.once('error', onError);
-      });
-    }
-  }
-  stdin.end();
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      stdin.off('error', onError);
+      reject(error);
+    };
+    const onError = (error: Error) => fail(error);
+    // Persistent for the whole write loop — EPIPE after a successful write()
+    // would otherwise become an uncaught exception when only drain had a listener.
+    stdin.on('error', onError);
+
+    void (async () => {
+      try {
+        let offset = 0;
+        while (offset < bytes.byteLength) {
+          const end = Math.min(offset + STDIN_CHUNK_BYTES, bytes.byteLength);
+          const chunk = bytes.subarray(offset, end);
+          offset = end;
+          const canContinue = stdin.write(chunk);
+          options.onStdinProgress?.(offset);
+          if (!canContinue) {
+            await new Promise<void>((drainResolve, drainReject) => {
+              const onDrain = () => {
+                stdin.off('drain', onDrain);
+                drainResolve();
+              };
+              stdin.once('drain', onDrain);
+              // Outer onError also rejects the parent; reject this wait so the
+              // loop does not hang if drain never fires after EPIPE.
+              stdin.once('error', (error: Error) => {
+                stdin.off('drain', onDrain);
+                drainReject(error);
+              });
+            });
+          }
+        }
+        if (settled) return;
+        stdin.end();
+        settled = true;
+        stdin.off('error', onError);
+        resolve();
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)));
+      }
+    })();
+  });
 }

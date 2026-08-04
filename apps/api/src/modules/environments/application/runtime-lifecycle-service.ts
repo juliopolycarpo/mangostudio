@@ -209,6 +209,9 @@ export function createRuntimeLifecycleService(
   const activeByRun = new Map<string, ActiveRun>();
   const recentStreams = new Map<string, { userId: string; stream: EventBuffer }>();
 
+  const installKey = (userId: string, environmentId: string): string =>
+    `${userId}:${environmentId}`;
+
   const rememberStream = (runId: string, userId: string, stream: EventBuffer): void => {
     recentStreams.set(runId, { userId, stream });
     if (recentStreams.size <= MAX_RECENT_STREAMS) return;
@@ -234,7 +237,7 @@ export function createRuntimeLifecycleService(
       done: true,
     });
     run.stream.close();
-    activeByEnvironment.delete(run.environmentId);
+    activeByEnvironment.delete(installKey(run.userId, run.environmentId));
     activeByRun.delete(run.runId);
     rememberStream(run.runId, run.userId, run.stream);
   };
@@ -303,7 +306,7 @@ export function createRuntimeLifecycleService(
         );
       }
 
-      if (activeByEnvironment.has(environmentId)) {
+      if (activeByEnvironment.has(installKey(userId, environmentId))) {
         throw new RuntimeLifecycleConflictError(
           `A runtime install is already running for environment "${environmentId}".`
         );
@@ -320,7 +323,7 @@ export function createRuntimeLifecycleService(
         stream,
         abort,
       };
-      activeByEnvironment.set(environmentId, run);
+      activeByEnvironment.set(installKey(userId, environmentId), run);
       activeByRun.set(runId, run);
       rememberStream(runId, userId, stream);
 
@@ -545,10 +548,7 @@ function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
   if (body.profile !== 'custom') {
     return RUNTIME_CONSENT_PRESETS[body.profile];
   }
-  const base = RUNTIME_CONSENT_PRESETS.none;
-  return Object.fromEntries(
-    RUNTIME_CAPABILITY_KEYS.map((key) => [key, body.allow?.[key] ?? base[key]])
-  ) as RuntimeCapabilityAllow;
+  return body.allow;
 }
 
 /**

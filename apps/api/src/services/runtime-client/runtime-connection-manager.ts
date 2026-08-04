@@ -484,6 +484,30 @@ export class RuntimeConnectionManager {
     this.#publish(userId);
   }
 
+  /**
+   * Drops cached peer identity (health, manifest, runtime version) for this
+   * user/environment. Disconnect keeps those fields for transient drops; call
+   * this when the environment's transport config changes so the card cannot
+   * show the previous host.
+   */
+  clearHealth(userId: string, environmentId: string): void {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (!entry) return;
+    const hadPeer =
+      entry.health !== undefined ||
+      entry.healthReadAtMs !== undefined ||
+      entry.status.manifest !== undefined ||
+      entry.status.runtimeVersion !== undefined;
+    if (!hadPeer) return;
+    entry.health = undefined;
+    entry.healthReadAtMs = undefined;
+    entry.status = {
+      state: entry.status.state === 'connected' ? 'disconnected' : entry.status.state,
+      ...(entry.status.errorCode ? { errorCode: entry.status.errorCode } : {}),
+      ...(entry.status.sshFailureReason ? { sshFailureReason: entry.status.sshFailureReason } : {}),
+    };
+  }
+
   async #openConnection(
     definition: RuntimeEnvironmentDefinition,
     onUnavailable: () => void

@@ -74,6 +74,26 @@ export function lifecycleActions(
   }
 }
 
+/**
+ * Maps a health-style `platform-arch` hint (Node's `win32`, …) to a release
+ * platform id (`windows-x64`, `linux-x64-musl`, …).
+ */
+export function releasePlatformIdFromHint(platformHint: string): string {
+  const hint = platformHint.trim().toLowerCase();
+  if (hint.startsWith('win32-')) return `windows-${hint.slice('win32-'.length)}`;
+  return hint;
+}
+
+/**
+ * Raw runtime asset basename published for a release platform id — mirrors
+ * `releaseRawRuntimeBinaryFileName` (`.exe` on Windows).
+ */
+export function manualRuntimeReleaseAssetName(version: string, platformHint: string): string {
+  const platformId = releasePlatformIdFromHint(platformHint);
+  const suffix = platformId.startsWith('windows-') ? '.exe' : '';
+  return `mangostudio-runtime-${version}-${platformId}${suffix}`;
+}
+
 function manualCommandsFor(
   transportKind: EnvironmentTransportKind,
   platformHint?: string
@@ -90,14 +110,19 @@ function manualCommandsFor(
     };
   }
 
-  const platformId = platformHint && platformHint.length > 0 ? platformHint : 'linux-x64';
-  const asset = `mangostudio-runtime-${version}-${platformId}`;
+  const hint = platformHint && platformHint.length > 0 ? platformHint : 'linux-x64';
+  const asset = manualRuntimeReleaseAssetName(version, hint);
+  const platformId = releasePlatformIdFromHint(hint);
+  const isWindows = platformId.startsWith('windows-');
+  const localName = isWindows ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
   const url = releaseAssetUrl(version, asset);
   return {
-    install: [`curl -fsSL "${url}" -o mangostudio-runtime`, 'chmod +x mangostudio-runtime'].join(
-      ' && '
-    ),
-    setup: './mangostudio-runtime setup --slot remote --profile full --yes',
+    install: isWindows
+      ? `curl -fsSL "${url}" -o ${localName}`
+      : [`curl -fsSL "${url}" -o ${localName}`, `chmod +x ${localName}`].join(' && '),
+    setup: isWindows
+      ? `.\\${localName} setup --slot remote --profile full --yes`
+      : `./${localName} setup --slot remote --profile full --yes`,
     serviceInstall:
       '# Service install lands separately; keep `mangostudio-runtime connect` running for now.',
   };

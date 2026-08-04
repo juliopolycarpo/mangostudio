@@ -41,6 +41,8 @@ export interface UpdateEnvironmentRecord {
 }
 
 type RemoveEnvironmentResult = 'removed' | 'referenced' | 'missing';
+/** Preflight for delete: same gates as {@link EnvironmentRepository.remove} without deleting. */
+type RemovableEnvironmentResult = 'ok' | 'referenced' | 'missing';
 
 export interface EnvironmentRepository {
   list(userId: string): Promise<EnvironmentRecord[]>;
@@ -51,6 +53,8 @@ export interface EnvironmentRepository {
     id: string,
     input: UpdateEnvironmentRecord
   ): Promise<EnvironmentRecord | null>;
+  /** Whether the environment exists and is not referenced by chats or MCP servers. */
+  removable(userId: string, id: string): Promise<RemovableEnvironmentResult>;
   remove(userId: string, id: string): Promise<RemoveEnvironmentResult>;
 }
 
@@ -146,6 +150,34 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
         .where('id', '=', id)
         .executeTakeFirst();
       return result.numUpdatedRows === 0n ? null : await this.find(userId, id);
+    },
+
+    async removable(userId, id) {
+      const environment = await db
+        .selectFrom('environments')
+        .select('id')
+        .where('userId', '=', userId)
+        .where('id', '=', id)
+        .executeTakeFirst();
+      if (!environment) return 'missing';
+
+      const chat = await db
+        .selectFrom('chats')
+        .select('id')
+        .where('userId', '=', userId)
+        .where('environmentId', '=', id)
+        .executeTakeFirst();
+      if (chat) return 'referenced';
+
+      const mcpServer = await db
+        .selectFrom('mcp_servers')
+        .select('id')
+        .where('userId', '=', userId)
+        .where('environmentId', '=', id)
+        .executeTakeFirst();
+      if (mcpServer) return 'referenced';
+
+      return 'ok';
     },
 
     async remove(userId, id) {

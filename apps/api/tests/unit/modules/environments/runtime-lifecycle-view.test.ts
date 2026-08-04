@@ -3,6 +3,8 @@ import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import {
   buildRuntimeLifecycleView,
   lifecycleActions,
+  manualRuntimeReleaseAssetName,
+  releasePlatformIdFromHint,
 } from '../../../../src/modules/environments/domain/runtime-lifecycle-view';
 
 const health = (overrides: Partial<RuntimeHealthReport> = {}): RuntimeHealthReport => ({
@@ -94,5 +96,25 @@ describe('buildRuntimeLifecycleView', () => {
       nowMs: 1,
     });
     expect(wsl.manualCommands).toBeUndefined();
+  });
+});
+
+describe('manual release asset naming', () => {
+  it('maps Node win32 hints to windows-* release ids with .exe', () => {
+    expect(releasePlatformIdFromHint('win32-x64')).toBe('windows-x64');
+    expect(releasePlatformIdFromHint('win32-arm64')).toBe('windows-arm64');
+    expect(manualRuntimeReleaseAssetName('1.2.3', 'win32-x64')).toBe(
+      'mangostudio-runtime-1.2.3-windows-x64.exe'
+    );
+  });
+
+  it('passes through linux/darwin/musl release ids without an exe suffix', () => {
+    expect(releasePlatformIdFromHint('linux-x64-musl')).toBe('linux-x64-musl');
+    expect(manualRuntimeReleaseAssetName('1.2.3', 'linux-x64-musl')).toBe(
+      'mangostudio-runtime-1.2.3-linux-x64-musl'
+    );
+    expect(manualRuntimeReleaseAssetName('1.2.3', 'darwin-arm64')).toBe(
+      'mangostudio-runtime-1.2.3-darwin-arm64'
+    );
   });
 });
