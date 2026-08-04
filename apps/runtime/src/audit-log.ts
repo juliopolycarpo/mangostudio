@@ -99,15 +99,22 @@ export function createRuntimeAuditSink(options: RuntimeAuditSinkOptions): Runtim
   let closed = false;
   let timer: ReturnType<typeof setInterval> | undefined;
   const errorPath = `${path}.error`;
+  // Unknown at startup: a previous process may have left one behind, so the
+  // first healthy flush still clears it. Every flush after that skips the
+  // unlink — the happy path is one per second, forever.
+  let errorFileMayExist = true;
 
   const setError = async (message: string | null): Promise<void> => {
     lastError = message;
     try {
       if (message === null) {
+        if (!errorFileMayExist) return;
         await unlink(errorPath).catch(() => undefined);
+        errorFileMayExist = false;
       } else {
         await mkdir(dirname(errorPath), { recursive: true });
         await writeFile(errorPath, `${message}\n`, 'utf8');
+        errorFileMayExist = true;
       }
     } catch {
       // Persisting the failure must not itself take the runtime down.
@@ -290,30 +297,73 @@ function pickString(
   }
 }
 
+/**
+ * An argv entry that is nothing but a credential flag, so the entry after it
+ * is the credential. `--token=x` is one entry and is handled by the `=` rule
+ * in {@link redactCredentialShapes}; `--token x` is two, and no regex over a
+ * single entry can see across that boundary.
+ */
+const SECRET_ARGV_FLAG =
+  /^--?(?:password|passwd|pwd|token|secret|api-?key|access-?token|auth-?token|authorization|credentials?)$/i;
+
 function summarizeArgv(argv: readonly unknown[]): readonly string[] {
-  return argv
+  const entries = argv
     .filter((entry): entry is string => typeof entry === 'string')
-    .slice(0, ARGV_SUMMARY_LIMIT)
-    .map((entry) => truncate(entry, STRING_SUMMARY_LIMIT));
+    .slice(0, ARGV_SUMMARY_LIMIT);
+  const out: string[] = [];
+  let redactNext = false;
+  for (const entry of entries) {
+    if (redactNext) {
+      out.push('***');
+      redactNext = false;
+      continue;
+    }
+    redactNext = SECRET_ARGV_FLAG.test(entry);
+    out.push(truncate(entry, STRING_SUMMARY_LIMIT));
+  }
+  return out;
 }
 
 /**
  * Best-effort scrub of credential-shaped tokens in free-form summaries.
- * Nested `env` / `headers` / `secrets` keys are already omitted; this covers
- * values that ride inside `command` or `argv` (e.g. `--token=…`).
+ * Nested `env` / `headers` / `secrets` keys are already omitted structurally;
+ * this covers values that ride inside `command` or `argv`.
+ *
+ * Best-effort is the honest word: a shell command is arbitrary text and no
+ * pattern set catches every way a secret can be spelled in one. It is the
+ * structural omission above that keeps known secrets off disk — this only
+ * narrows what a hand-written command line leaks.
  */
 function redactCredentialShapes(value: string): string {
-  return value
-    .replace(
-      /((?:^|[\s,])(?:--?(?:password|passwd|pwd|token|secret|api-?key|access-?token|authorization|auth))\s*[=:]\s*)([^\s"'\\]+)/gi,
-      '$1***'
-    )
-    .replace(
-      /("(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token|authorization)"\s*:\s*")([^"]*)(")/gi,
-      '$1***$3'
-    )
-    .replace(/\b(Bearer)\s+\S+/gi, '$1 ***')
-    .replace(/\b(?:sk|ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]+\b/g, '***');
+  return (
+    value
+      .replace(
+        /((?:^|[\s,])(?:--?(?:password|passwd|pwd|token|secret|api-?key|access-?token|authorization|auth))\s*[=:]\s*)([^\s"'\\]+)/gi,
+        '$1***'
+      )
+      .replace(
+        /("(?:password|passwd|pwd|token|secret|api[_-]?key|access[_-]?token|authorization)"\s*:\s*")([^"]*)(")/gi,
+        '$1***$3'
+      )
+      // `export AWS_SECRET_ACCESS_KEY=…` and friends: a bare assignment whose
+      // name reads as a credential, with no flag prefix to key off.
+      .replace(
+        /\b([A-Za-z_][A-Za-z0-9_]*(?:password|passwd|token|secret|api_?key|access_?key|credentials?|auth)[A-Za-z0-9_]*)=([^\s"'\\]+)/gi,
+        '$1=***'
+      )
+      // `postgres://user:pw@host`, `https://user:pw@host` — the password sits
+      // in the userinfo, which no flag or assignment rule reaches.
+      .replace(/([A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s:/@]+):[^\s/@]+@/g, '$1:***@')
+      // Header-shaped `X-Api-Key: …`. `Authorization` is deliberately absent —
+      // the Bearer rule below keeps the scheme visible, which is the more
+      // useful line.
+      .replace(
+        /\b((?:x-)?(?:api[-_]?key|access[-_]?token|auth[-_]?token|private[-_]?token)\s*:\s*)([^\s"',]+)/gi,
+        '$1***'
+      )
+      .replace(/\b(Bearer)\s+\S+/gi, '$1 ***')
+      .replace(/\b(?:sk|ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]+\b/g, '***')
+  );
 }
 
 function truncate(value: string, limit: number): string {
@@ -328,34 +378,63 @@ async function writeBatch(
   maxFiles: number
 ): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  // One line at a time so a busy flush rotates between lines instead of
-  // parking an entire batch in a single oversized generation.
+  // One append per generation, not per line. The shell-tool loop is the
+  // benchmark case — many `fs.read-file` calls in one turn — and a per-line
+  // append/stat pair turns a single buffered flush into two syscall round
+  // trips per record, which is the write amplifier the buffer exists to avoid.
+  // Size is tracked in memory from one stat so the rotation points stay
+  // exactly where the per-line version put them: this writer owns the file
+  // between flushes.
+  let size = await fileSize(path);
+  let pending: string[] = [];
+  let pendingBytes = 0;
+
+  const commit = async (): Promise<void> => {
+    if (pending.length === 0) return;
+    await appendFile(path, pending.join(''), 'utf8');
+    size += pendingBytes;
+    pending = [];
+    pendingBytes = 0;
+  };
+
   for (const line of batch) {
-    await appendFile(path, line, 'utf8');
-    await rotateIfNeeded(path, maxBytes, maxFiles);
+    pending.push(line);
+    pendingBytes += Buffer.byteLength(line, 'utf8');
+    if (size + pendingBytes > maxBytes) {
+      await commit();
+      await rotateGenerations(path, maxFiles);
+      size = 0;
+    }
+  }
+  await commit();
+}
+
+async function fileSize(path: string): Promise<number> {
+  try {
+    return (await stat(path)).size;
+  } catch (error) {
+    if (isNotFound(error)) return 0;
+    throw error;
   }
 }
 
 /**
  * When the active file exceeds `maxBytes`, shift `audit.log.N` up and start a
- * fresh active file. Oldest beyond `maxFiles` is dropped. Size is checked after
- * append so a single oversized batch can still briefly exceed the cap; the next
- * flush brings the budget back.
+ * fresh active file. Oldest beyond `maxFiles` is dropped. A single record
+ * larger than the whole budget still lands whole — the cap bounds growth, it
+ * does not truncate a line — so a generation can exceed it by one record.
  */
 export async function rotateIfNeeded(
   path: string,
   maxBytes: number,
   maxFiles: number
 ): Promise<void> {
-  let size = 0;
-  try {
-    size = (await stat(path)).size;
-  } catch (error) {
-    if (isNotFound(error)) return;
-    throw error;
-  }
-  if (size <= maxBytes) return;
+  if ((await fileSize(path)) <= maxBytes) return;
+  await rotateGenerations(path, maxFiles);
+}
 
+/** The shift itself, for a caller that already knows the budget is spent. */
+async function rotateGenerations(path: string, maxFiles: number): Promise<void> {
   for (let index = maxFiles; index >= 1; index -= 1) {
     const from = index === 1 ? path : `${path}.${index - 1}`;
     const to = `${path}.${index}`;
