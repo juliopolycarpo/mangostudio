@@ -602,6 +602,33 @@ WSL is a launcher over that same transport, not a protocol of its own:
 - `apps/api/src/modules/environments/domain/wsl-runtime-release.ts` (argv, scripts, asset names)
 - `apps/api/src/modules/environments/infrastructure/wsl-provisioner.ts` (download, verify, install)
 
+SSH is a launcher too — the system `ssh` client, not a library — and shares one push path
+with WSL. Everything that puts runtime bytes on another machine goes through it:
+
+- `apps/shared/src/environments/ssh.ts` (forced options, destination, launch argv, the
+  quoting rules for the two shells that meet there)
+- `apps/api/src/services/runtime-client/connect-ssh-runtime.ts` (spawn + handshake)
+- `apps/api/src/modules/environments/infrastructure/ssh-command-runner.ts` (one-off command
+  spawns for push/probe/setup — never multiplexed onto the live protocol connection)
+- `apps/api/src/modules/environments/domain/runtime-push.ts` (**the only place that writes a
+  runtime into a slot**: stage-verify-publish, slot GC, removal, byte size. Every script is a
+  constant; versions and paths travel as argv)
+- `apps/api/src/modules/environments/domain/runtime-release-fetch.ts` (raw asset preferred,
+  archive fallback, checksum verified before any remote write, hub cache prune)
+- `apps/frontend/src/features/environments/components/SshPanel.tsx`
+
+The card's install/upgrade/setup/removal surface sits on top of both:
+
+- `apps/api/src/modules/environments/domain/runtime-lifecycle-view.ts` (which actions a
+  transport gets, and the consent gate that hides all three push actions when a machine
+  refuses `allow.update`)
+- `apps/api/src/modules/environments/application/runtime-lifecycle-service.ts` (SSE run
+  streams, SSH push, setup-over-ssh)
+- `apps/frontend/src/features/environments/components/RuntimeLifecyclePanel.tsx`,
+  `RuntimeConsentDialog.tsx`
+- Shell behaviour is covered by running the scripts, not by asserting their text:
+  `apps/api/tests/unit/modules/environments/runtime-slot-scripts.test.ts`
+
 A paired WebSocket inverts the direction — the runtime dials the hub — so nothing
 in the spawn path applies and the manager is entered through `adopt()` rather than
 `connect()`:
