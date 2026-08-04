@@ -118,10 +118,10 @@ describe('parseRuntimeCliArgs', () => {
     });
   });
 
-  it('requires --listen for serve', () => {
+  it('allows serve without --listen when a previous run stored the address', () => {
     expect(parseRuntimeCliArgs(['serve'])).toEqual({
-      command: 'unknown',
-      argument: '--listen',
+      command: 'serve',
+      args: { tokenSource: 'stored' },
     });
   });
 
@@ -192,6 +192,17 @@ describe('parseRuntimeCliArgs', () => {
     const allow = parseRuntimeCliArgs(['setup', '--allow', 'telepathy=true']);
     expect(allow).toMatchObject({ command: 'invalid' });
     expect(allow).toHaveProperty('reason', expect.stringContaining('telepathy'));
+  });
+
+  it('parses service install with mode and json status', () => {
+    expect(parseRuntimeCliArgs(['service', 'install', '--mode', 'connect'])).toEqual({
+      command: 'service',
+      args: { action: 'install', mode: 'connect', json: false },
+    });
+    expect(parseRuntimeCliArgs(['service', 'status', '--json'])).toEqual({
+      command: 'service',
+      args: { action: 'status', json: true },
+    });
   });
 
   it('parses health and doctor with their one flag', () => {

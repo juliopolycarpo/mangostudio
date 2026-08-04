@@ -31,6 +31,7 @@ import {
   resolveRuntimeSlot,
   resolveRuntimeSource,
 } from './runtime-home';
+import { collectServiceDoctorDetails, shouldCheckRuntimeService } from './services/runtime-service';
 
 export interface RuntimeHealthOptions {
   readonly runtimeVersion: string;
@@ -228,6 +229,105 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
       severity: 'ok',
       title: 'Audit',
       detail: 'off — run setup --audit on to record what a hub asks this machine to do',
+    });
+  }
+
+  return findings;
+}
+
+/**
+ * Service findings apply only to dial-in `remote` slots with connect or serve
+ * configured. Hub-spawned stdio/WSL/SSH runtimes are not expected to have a unit.
+ */
+export async function diagnoseRuntimeServiceHealth(
+  report: RuntimeHealthReport
+): Promise<RuntimeDoctorFinding[]> {
+  const { config } = await readRuntimeSlotState(report.slot);
+  if (
+    !shouldCheckRuntimeService({
+      slot: report.slot,
+      hubUrl: config.hubUrl,
+      serveListen: config.serveListen,
+    })
+  ) {
+    return [];
+  }
+
+  const { status } = await collectServiceDoctorDetails();
+  const findings: RuntimeDoctorFinding[] = [];
+  const installFixConnect = 'mangostudio-runtime service install --mode connect';
+  const installFixServe = 'mangostudio-runtime service install --mode serve';
+  const fix =
+    config.hubUrl && !config.serveListen
+      ? installFixConnect
+      : config.serveListen && !config.hubUrl
+        ? installFixServe
+        : 'mangostudio-runtime service install --mode connect|serve';
+
+  if (!status.installed) {
+    findings.push({
+      severity: 'warn',
+      title: 'Service',
+      detail: 'no user-level service keeps this runtime running across logout or reboot',
+      fix,
+    });
+    return findings;
+  }
+
+  if (!status.enabled) {
+    findings.push({
+      severity: 'warn',
+      title: 'Service',
+      detail: 'the service unit is installed but not enabled',
+      fix: 'mangostudio-runtime service install',
+    });
+  } else {
+    findings.push({
+      severity: 'ok',
+      title: 'Service',
+      detail: 'user-level unit is enabled',
+    });
+  }
+
+  if (!status.running) {
+    findings.push({
+      severity: 'fail',
+      title: 'Service',
+      detail: 'the service unit is not running',
+      fix: 'mangostudio-runtime service install',
+    });
+  } else {
+    findings.push({
+      severity: 'ok',
+      title: 'Service',
+      detail: 'user-level unit is running',
+    });
+  }
+
+  if (status.platform === 'linux' && status.linger === false) {
+    findings.push({
+      severity: 'warn',
+      title: 'Linger',
+      detail: 'loginctl linger is off — the user service stops when you log out',
+      fix: 'sudo loginctl enable-linger $USER',
+    });
+  } else if (status.platform === 'linux' && status.linger === true) {
+    findings.push({ severity: 'ok', title: 'Linger', detail: 'loginctl linger is on' });
+  }
+
+  if (status.execUsesCurrent === false) {
+    findings.push({
+      severity: 'warn',
+      title: 'Service',
+      detail:
+        'the unit does not point at the slot current symlink — upgrades may leave a stale path',
+      fix,
+    });
+  } else if (status.execUsesCurrent === true) {
+    findings.push({
+      severity: 'ok',
+      title: 'Service',
+      detail: 'unit ExecStart uses the current symlink',
     });
   }
 

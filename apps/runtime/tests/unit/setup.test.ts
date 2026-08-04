@@ -11,10 +11,12 @@ import { parseRuntimeCliArgs } from '../../src/cli';
 import {
   collectRuntimeHealth,
   diagnoseRuntimeHealth,
+  diagnoseRuntimeServiceHealth,
   resolveRunningRuntimePlatformId,
   worstSeverity,
 } from '../../src/health';
 import { readRuntimeSlotConfig, writeRuntimeSlotConfig } from '../../src/runtime-home';
+import { shouldCheckRuntimeService } from '../../src/services/runtime-service';
 import { parseAllowOverrides, type RuntimeSetupArgs, runRuntimeSetup } from '../../src/setup';
 
 const homes: string[] = [];
@@ -326,6 +328,16 @@ describe('runtime health', () => {
     const report = await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env });
     expect(report.lastError).toContain('not valid JSON');
     expect(worstSeverity(diagnoseRuntimeHealth(report))).toBe('fail');
+  });
+
+  it('does not treat a missing service on the host slot as a doctor defect', async () => {
+    const env = await isolatedEnv();
+    const report = await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env });
+    expect(report.slot).toBe('host');
+    expect(shouldCheckRuntimeService({ slot: report.slot, hubUrl: null, serveListen: null })).toBe(
+      false
+    );
+    expect(await diagnoseRuntimeServiceHealth(report)).toEqual([]);
   });
 
   it('refuses every capability in the report a config it cannot read produces', async () => {
