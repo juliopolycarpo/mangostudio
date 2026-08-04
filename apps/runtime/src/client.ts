@@ -266,11 +266,17 @@ export class RuntimeProtocolClient {
       }
       this.#runtimeManifest = frame.manifest;
       this.#runtimeVersion = frame.runtimeVersion;
+      // Only when the peer advertised that it decodes the field. `hello_ack`
+      // is a closed envelope: an unknown key there is not ignored by an older
+      // runtime, it fails the decode and takes the connection with it — which
+      // would strand every runtime nobody has updated yet, including from the
+      // live-update path that would have fixed them.
+      const hub = this.#hub && frame.manifest.acceptsHubIdentity === true ? this.#hub : undefined;
       this.#port.send({
         type: 'hello_ack',
         protocolVersion: this.#protocolVersion,
         hubVersion: this.#hubVersion,
-        ...(this.#hub ? { hub: this.#hub } : {}),
+        ...(hub ? { hub } : {}),
       });
       clearTimeout(this.#handshakeTimer);
       this.#resolveReady();
