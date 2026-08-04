@@ -16,6 +16,7 @@ export async function connectInProcessRuntime(
     readonly hubVersion: string;
     readonly validateFrames?: boolean;
     readonly handshakeTimeoutMs?: number;
+    readonly hub?: { readonly host: string; readonly user: string } | null;
   }
 ): Promise<InProcessRuntimeConnection> {
   const validateFrames = options.validateFrames ?? loadRuntimeConfig().validateInProcessFrames;
@@ -26,6 +27,7 @@ export async function connectInProcessRuntime(
     ...(options.handshakeTimeoutMs !== undefined
       ? { handshakeTimeoutMs: options.handshakeTimeoutMs }
       : {}),
+    ...(options.hub !== undefined ? { hub: options.hub } : {}),
   });
   host.start();
   try {

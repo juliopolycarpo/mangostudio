@@ -1,3 +1,4 @@
+import { hostname, userInfo } from 'node:os';
 import {
   assertRuntimeProtocolCompatible,
   narrowRuntimeErrorCode,
@@ -6,6 +7,7 @@ import {
   type RuntimeEventFrame,
   type RuntimeFrame,
   type RuntimeHelloFrame,
+  type RuntimeHubIdentity,
   RuntimeProtocolError,
   type RuntimeProtocolVersion,
   type RuntimeResponseFrame,
@@ -37,6 +39,13 @@ export interface RuntimeProtocolClientOptions {
    * version alone cannot catch that: it only changes when the wire format does.
    */
   readonly requireMatchingRelease?: boolean;
+  /**
+   * Who is speaking for this hub. Carried on `hello_ack` so the runtime's
+   * audit log can name the asking machine. Pass `null` to omit the field
+   * (older-hub shape). Omit the option entirely to use this process's host
+   * and user when available.
+   */
+  readonly hub?: RuntimeHubIdentity | null;
 }
 
 /** Hub-side request multiplexer for any runtime frame transport. */
@@ -51,6 +60,7 @@ export class RuntimeProtocolClient {
   readonly #protocolVersion: RuntimeProtocolVersion;
   readonly #ready: Promise<void>;
   readonly #requireMatchingRelease: boolean;
+  readonly #hub: RuntimeHubIdentity | undefined;
   #closed = false;
   #detach: () => void;
   #handshakeTimer?: ReturnType<typeof setTimeout>;
@@ -65,6 +75,7 @@ export class RuntimeProtocolClient {
     this.#hubVersion = options.hubVersion;
     this.#protocolVersion = options.protocolVersion ?? RUNTIME_PROTOCOL_VERSION;
     this.#requireMatchingRelease = options.requireMatchingRelease ?? false;
+    this.#hub = options.hub === null ? undefined : (options.hub ?? resolveLocalHubIdentity());
     this.#ready = new Promise<void>((resolve, reject) => {
       this.#resolveReady = resolve;
       this.#rejectReady = reject;
@@ -259,6 +270,7 @@ export class RuntimeProtocolClient {
         type: 'hello_ack',
         protocolVersion: this.#protocolVersion,
         hubVersion: this.#hubVersion,
+        ...(this.#hub ? { hub: this.#hub } : {}),
       });
       clearTimeout(this.#handshakeTimer);
       this.#resolveReady();
@@ -284,5 +296,17 @@ export class RuntimeProtocolClient {
         frame.err.details
       )
     );
+  }
+}
+
+/** Best-effort identity for this hub process; absent when the OS will not say. */
+function resolveLocalHubIdentity(): RuntimeHubIdentity | undefined {
+  try {
+    const host = hostname().trim();
+    const user = userInfo().username.trim();
+    if (!host || !user) return undefined;
+    return { host, user };
+  } catch {
+    return undefined;
   }
 }

@@ -136,11 +136,26 @@ export const RuntimeHelloFrameSchema = Type.Object(
 );
 export type RuntimeHelloFrame = Static<typeof RuntimeHelloFrameSchema>;
 
+/**
+ * Who is speaking for the hub on this connection. Additive-optional: older
+ * hubs omit it, and the runtime's audit log records those as an unidentified
+ * hub rather than refusing the handshake.
+ */
+export const RuntimeHubIdentitySchema = Type.Object(
+  {
+    host: Type.String({ minLength: 1, maxLength: 255 }),
+    user: Type.String({ minLength: 1, maxLength: 255 }),
+  },
+  { additionalProperties: false }
+);
+export type RuntimeHubIdentity = Static<typeof RuntimeHubIdentitySchema>;
+
 export const RuntimeHelloAckFrameSchema = Type.Object(
   {
     type: Type.Literal('hello_ack'),
     protocolVersion: RuntimeProtocolVersionSchema,
     hubVersion: Type.String({ minLength: 1, maxLength: 128 }),
+    hub: Type.Optional(RuntimeHubIdentitySchema),
   },
   { additionalProperties: false }
 );

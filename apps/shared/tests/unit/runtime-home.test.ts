@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
+  defaultAuditEnabledForSlot,
   defaultConsentForSlot,
   deniedCapabilities,
   mangoHomeDir,
@@ -10,6 +11,7 @@ import {
   RuntimeSlotConfigSchema,
   resolveRuntimeSlotConfig,
   runtimeBinaryName,
+  runtimeSlotAuditLogPath,
   runtimeSlotConfigPath,
   runtimeSlotCurrentBinaryPath,
   runtimeSlotDir,
@@ -25,6 +27,9 @@ describe('runtime home paths', () => {
     expect(runtimeSlotDir('wsl', POSIX_HOME)).toBe('/home/j/.mango/runtime/wsl');
     expect(runtimeSlotConfigPath('remote', POSIX_HOME)).toBe(
       '/home/j/.mango/runtime/remote/runtime.json'
+    );
+    expect(runtimeSlotAuditLogPath('remote', POSIX_HOME)).toBe(
+      '/home/j/.mango/runtime/remote/audit.log'
     );
     expect(runtimeSlotVersionBinaryPath('remote', '0.1.1', POSIX_HOME)).toBe(
       '/home/j/.mango/runtime/remote/0.1.1/mangostudio-runtime'
@@ -121,6 +126,28 @@ describe('resolveRuntimeSlotConfig', () => {
       expect(resolved.profile).toBe('full');
       expect(resolved.setup.state).toBe('configured');
     }
+  });
+
+  it('defaults audit off for host and on for wsl and remote', () => {
+    expect(defaultAuditEnabledForSlot('host')).toBe(false);
+    expect(defaultAuditEnabledForSlot('wsl')).toBe(true);
+    expect(defaultAuditEnabledForSlot('remote')).toBe(true);
+    expect(resolveRuntimeSlotConfig('host', null, { source: 'bundled' }).audit.enabled).toBe(false);
+    expect(resolveRuntimeSlotConfig('wsl', null, { source: 'provisioned' }).audit.enabled).toBe(
+      true
+    );
+    expect(resolveRuntimeSlotConfig('remote', null, { source: 'provisioned' }).audit.enabled).toBe(
+      true
+    );
+  });
+
+  it('keeps an explicit audit toggle from the stored file', () => {
+    const resolved = resolveRuntimeSlotConfig(
+      'host',
+      { schemaVersion: 1, slot: 'host', audit: { enabled: true } },
+      { source: 'bundled' }
+    );
+    expect(resolved.audit.enabled).toBe(true);
   });
 
   it("treats an absent config as pending for a slot somebody else's hub installed", () => {

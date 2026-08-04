@@ -4,11 +4,13 @@ import {
   type RuntimeSlot,
 } from '@mangostudio/shared/runtime-home';
 import type { RuntimeProtocolVersion } from '@mangostudio/shared/runtime-protocol';
+import { createRuntimeAuditSink, type RuntimeAuditSink } from './audit-log';
 import { gateHandlersByConsent } from './consent-gate';
 import { type RuntimeConsentSource, staticConsentSource } from './consent-source';
 import { RuntimeHost } from './host';
 import { createLocalRuntimeManifest } from './manifest';
 import { createRuntimeMethodHandlers } from './registry';
+import { readRuntimeSlotState } from './runtime-home';
 import type { RuntimeUpdateServiceOptions } from './services/runtime-update';
 
 export function createLocalRuntimeHost(options: {
@@ -32,6 +34,12 @@ export function createLocalRuntimeHost(options: {
   readonly slot?: RuntimeSlot;
   /** Live-update publication and restart behavior for this process mode. */
   readonly update?: Omit<RuntimeUpdateServiceOptions, 'slot'>;
+  /**
+   * Local audit receipt. Omitted in unit tests and in-process fixtures; the
+   * long-lived CLI modes use {@link createSlotRuntimeHost} so enablement
+   * follows `runtime.json` (off for `host`, on for `wsl`/`remote`).
+   */
+  readonly audit?: RuntimeAuditSink;
 }): RuntimeHost {
   // The registry needs an emitter and the host needs the registry, so the
   // emitter closes over the host rather than being handed it: events raised
@@ -54,6 +62,35 @@ export function createLocalRuntimeHost(options: {
     isUpdateActive: registry.updateActive,
     onClose: () => void registry.close(),
     ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
+    ...(options.audit ? { audit: options.audit } : {}),
   });
   return host;
+}
+
+/**
+ * Builds a host whose audit enablement follows the slot's `runtime.json`, so
+ * `setup --audit` takes effect on the next process start.
+ */
+export async function createSlotRuntimeHost(options: {
+  readonly runtimeVersion: string;
+  readonly protocolVersion?: RuntimeProtocolVersion;
+  readonly consent: RuntimeConsentSource;
+  readonly update?: Omit<RuntimeUpdateServiceOptions, 'slot'>;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly audit?: RuntimeAuditSink;
+}): Promise<RuntimeHost> {
+  const audit =
+    options.audit ??
+    createRuntimeAuditSink({
+      slot: options.consent.slot,
+      enabled: (await readRuntimeSlotState(options.consent.slot, options.env)).config.audit.enabled,
+      env: options.env,
+    });
+  return createLocalRuntimeHost({
+    runtimeVersion: options.runtimeVersion,
+    consent: options.consent,
+    audit,
+    ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
+    ...(options.update ? { update: options.update } : {}),
+  });
 }

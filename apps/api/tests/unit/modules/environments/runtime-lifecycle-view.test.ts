@@ -36,6 +36,7 @@ const health = (overrides: Partial<RuntimeHealthReport> = {}): RuntimeHealthRepo
   git: { available: true, version: '2.47.0' },
   lastError: null,
   ...overrides,
+  audit: overrides.audit ?? { enabled: true },
 });
 
 describe('lifecycleActions', () => {

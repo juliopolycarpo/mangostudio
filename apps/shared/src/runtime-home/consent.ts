@@ -80,6 +80,16 @@ export function defaultConsentForSlot(slot: RuntimeSlot): {
 }
 
 /**
+ * Whether an unanswered slot records protocol calls.
+ *
+ * Off for `host` — the machine's own hub is noise. On for `wsl` and `remote`,
+ * where another machine's hub reaches in and the receipt is the point.
+ */
+export function defaultAuditEnabledForSlot(slot: RuntimeSlot): boolean {
+  return slot !== 'host';
+}
+
+/**
  * Fills every default in, so callers reason about one fully-populated shape.
  *
  * A stored `allow` that is missing keys — written by an older runtime, or by a
@@ -112,6 +122,9 @@ export function resolveRuntimeSlotConfig(
     setup: stored?.setup ?? defaults.setup,
     installedBy: stored?.installedBy ?? null,
     hubUrl: stored?.hubUrl ?? null,
+    audit: {
+      enabled: stored?.audit?.enabled ?? defaultAuditEnabledForSlot(slot),
+    },
   };
 }
 
