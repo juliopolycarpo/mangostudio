@@ -8,7 +8,10 @@ import type {
 import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
-import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
+import {
+  createEnvironmentService,
+  type EnvironmentRuntimeEffects,
+} from '../../../src/modules/environments/application/environment-service';
 import {
   createRuntimeLifecycleService,
   type RuntimeLifecycleService,
@@ -50,7 +53,8 @@ afterEach(async () => {
 
 function createTestApp(
   connectors: RuntimeConnectionManagerOptions['connectors'] = {},
-  lifecycle?: RuntimeLifecycleService
+  lifecycle?: RuntimeLifecycleService,
+  runtimeEffects?: Partial<EnvironmentRuntimeEffects>
 ) {
   const repository = createEnvironmentRepository(getDb());
   const manager = new RuntimeConnectionManager({
@@ -60,7 +64,14 @@ function createTestApp(
     },
     connectors,
   });
-  const service = createEnvironmentService(repository, manager);
+  // Byte removal writes to another machine, so the default wiring is never what
+  // a test should reach: overriding it is how the removal matrix gets covered
+  // without owning a WSL distribution.
+  const service = createEnvironmentService(repository, manager, undefined, undefined, {
+    hasActiveInstall: () => false,
+    removeRuntimeBytes: async () => undefined,
+    ...runtimeEffects,
+  });
   const { app, restore } = createAuthenticatedApiTestApp(
     TEST_USER,
     createEnvironmentEntityRoutes(
@@ -604,33 +615,125 @@ describe('environment entity routes', () => {
     expect(stdio.status).toBe(409);
   });
 
-  it('accepts removeRuntime query on DELETE without requiring remote bytes', async () => {
-    const { app, repository } = createTestApp();
-    await repository.create({
-      id: 'wsl-remove',
-      userId: TEST_USER.id,
-      name: 'WSL remove',
-      transportKind: 'wsl',
-      config: { distro: 'Ubuntu' },
-      enabled: true,
+  it('removes runtime bytes only when asked, and never for a 404', async () => {
+    const removed: string[] = [];
+    const { app, repository } = createTestApp({}, undefined, {
+      removeRuntimeBytes: (record) => {
+        removed.push(record.id);
+        return Promise.resolve();
+      },
     });
+    for (const id of ['wsl-keep', 'wsl-wipe']) {
+      await repository.create({
+        id,
+        userId: TEST_USER.id,
+        name: id,
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      });
+    }
 
-    // removeRuntime triggers a provisioner call; inject a no-op via a service
-    // that already disconnected — for stdio-like absence of WSL we still want
-    // the query accepted. Use a lifecycle-free path: delete without remote work
-    // when the provisioner throws is covered by the 503 path; here we delete
-    // without the flag to keep the matrix green on Linux CI.
-    const removed = await app.handle(
-      new Request('http://localhost/environments/wsl-remove', jsonRequest('DELETE'))
+    const kept = await app.handle(
+      new Request('http://localhost/environments/wsl-keep', jsonRequest('DELETE'))
     );
-    expect(removed.status).toBe(200);
+    expect(kept.status).toBe(200);
+    expect(removed).toEqual([]);
 
-    const withFlag = await app.handle(
+    const wiped = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-wipe?removeRuntime=true',
+        jsonRequest('DELETE')
+      )
+    );
+    expect(wiped.status).toBe(200);
+    expect(removed).toEqual(['wsl-wipe']);
+
+    const missing = await app.handle(
       new Request(
         'http://localhost/environments/missing-env?removeRuntime=true',
         jsonRequest('DELETE')
       )
     );
-    expect(withFlag.status).toBe(404);
+    expect(missing.status).toBe(404);
+    expect(removed).toEqual(['wsl-wipe']);
+  });
+
+  it('surfaces a failed byte removal as 503 and keeps the environment', async () => {
+    const { app, repository } = createTestApp({}, undefined, {
+      removeRuntimeBytes: () => Promise.reject(new Error('distribution is not running')),
+    });
+    await repository.create({
+      id: 'wsl-fail',
+      userId: TEST_USER.id,
+      name: 'WSL fail',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+
+    const response = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-fail?removeRuntime=true',
+        jsonRequest('DELETE')
+      )
+    );
+
+    expect(response.status).toBe(503);
+    // Cleanup runs before the DB delete precisely so this stays retriable.
+    expect(await repository.find(TEST_USER.id, 'wsl-fail')).not.toBeNull();
+  });
+
+  // Regression: the reference preflight used to run *after* `manager.disconnect`,
+  // so a delete that was going to be refused tore down a live runtime on its way
+  // to the 409.
+  it('leaves a referenced environment connected when the delete is refused', async () => {
+    const removed: string[] = [];
+    const { app, repository, manager } = createTestApp({}, undefined, {
+      removeRuntimeBytes: (record) => {
+        removed.push(record.id);
+        return Promise.resolve();
+      },
+    });
+    await repository.create({
+      id: 'wsl-referenced',
+      userId: TEST_USER.id,
+      name: 'WSL referenced',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+    await insertTestUser(TEST_USER);
+    await getDb()
+      .insertInto('chats')
+      .values({
+        id: 'chat-holding-env',
+        title: 'holds the environment',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+        environmentId: 'wsl-referenced',
+      })
+      .execute();
+
+    let disconnected = false;
+    const realDisconnect = manager.disconnect.bind(manager);
+    manager.disconnect = (userId: string, id: string) => {
+      disconnected = true;
+      return realDisconnect(userId, id);
+    };
+
+    const response = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-referenced?removeRuntime=true',
+        jsonRequest('DELETE')
+      )
+    );
+
+    expect(response.status).toBe(409);
+    expect(disconnected).toBe(false);
+    expect(removed).toEqual([]);
+    expect(await repository.find(TEST_USER.id, 'wsl-referenced')).not.toBeNull();
   });
 });

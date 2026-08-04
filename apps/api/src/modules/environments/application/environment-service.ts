@@ -98,11 +98,47 @@ async function toEnvironment(
   };
 }
 
+/**
+ * The runtime-side effects `remove`/`update` need, behind an interface.
+ *
+ * These are the only calls in this service that write to another machine or
+ * read another module's in-memory state, and the default wiring reaches for
+ * module singletons — so they are injectable rather than imported at the call
+ * site. Without that, the one code path that runs `rm -rf` on a remote slot
+ * cannot be covered by a test that does not own a WSL distribution.
+ */
+export interface EnvironmentRuntimeEffects {
+  /** Whether a runtime install is mid-flight for this environment. */
+  hasActiveInstall(userId: string, id: string): boolean;
+  /** Deletes the runtime bytes this environment installed; leaves consent alone. */
+  removeRuntimeBytes(record: EnvironmentRecord): Promise<void>;
+}
+
+const defaultEnvironmentRuntimeEffects: EnvironmentRuntimeEffects = {
+  hasActiveInstall: (userId, id) => runtimeLifecycleService.hasActiveInstall(userId, id),
+  async removeRuntimeBytes(record) {
+    if (record.transportKind === 'wsl') {
+      await wslProvisioner.removeSlotBytes(environmentConfigFor('wsl', record.config).distro);
+      return;
+    }
+    if (record.transportKind !== 'ssh') return;
+    const config = environmentConfigFor('ssh', record.config);
+    const remote = await createSshCommandRunner(config)(runtimeRemoveSlotBytesScript('remote'));
+    if (remote.exitCode !== 0) {
+      throw new EnvironmentServiceError(
+        `Could not remove the runtime from "${config.host}": ${remote.stderr.trim() || remote.stdout.trim() || `exit ${remote.exitCode}`}`,
+        503
+      );
+    }
+  },
+};
+
 export function createEnvironmentService(
   repository: EnvironmentRepository = environmentRepository,
   manager: RuntimeConnectionManager = getRuntimeConnectionManager(),
   publish: (userId: string) => void = publishEnvironmentInvalidation,
-  secretStore: SecretStore = bunSecretStore
+  secretStore: SecretStore = bunSecretStore,
+  runtimeEffects: EnvironmentRuntimeEffects = defaultEnvironmentRuntimeEffects
 ): EnvironmentService {
   async function findRecord(userId: string, id: string): Promise<EnvironmentRecord | null> {
     if (id === LOCAL_ENVIRONMENT_ID) return localRecord(userId);
@@ -181,7 +217,7 @@ export function createEnvironmentService(
       if (id === LOCAL_ENVIRONMENT_ID) {
         throw new EnvironmentServiceError('The Local environment cannot be changed.', 409);
       }
-      if (runtimeLifecycleService.hasActiveInstall(userId, id)) {
+      if (runtimeEffects.hasActiveInstall(userId, id)) {
         throw new EnvironmentServiceError(
           `Environment "${id}" has a runtime install in progress. Cancel it or wait before editing.`,
           409
@@ -262,7 +298,7 @@ export function createEnvironmentService(
       if (id === LOCAL_ENVIRONMENT_ID) {
         throw new EnvironmentServiceError('The Local environment cannot be removed.', 409);
       }
-      if (runtimeLifecycleService.hasActiveInstall(userId, id)) {
+      if (runtimeEffects.hasActiveInstall(userId, id)) {
         throw new EnvironmentServiceError(
           `Environment "${id}" has a runtime install in progress. Cancel it or wait before deleting.`,
           409
@@ -273,11 +309,9 @@ export function createEnvironmentService(
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
 
-      // Disconnect before byte cleanup so a live spawn is not holding the binary.
-      manager.disconnect(userId, id);
-
-      // Preflight references before deleting remote bytes so a 409 never leaves
-      // the environment referenced but its runtime already wiped. Byte cleanup
+      // Preflight references before touching anything, so a delete that is
+      // going to be refused refuses cleanly: it must not disconnect a live
+      // runtime or wipe remote bytes on its way to a 409. Byte cleanup then
       // stays before the DB delete so a failed cleanup remains retriable.
       const gate = await repository.removable(userId, id);
       if (gate === 'referenced') {
@@ -290,22 +324,13 @@ export function createEnvironmentService(
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
       }
 
+      // Only now: disconnect before byte cleanup so a live spawn is not holding
+      // the binary being deleted.
+      manager.disconnect(userId, id);
+
       if (options.removeRuntime) {
         try {
-          if (existing.transportKind === 'wsl') {
-            const config = environmentConfigFor('wsl', existing.config);
-            await wslProvisioner.removeSlotBytes(config.distro);
-          } else if (existing.transportKind === 'ssh') {
-            const config = environmentConfigFor('ssh', existing.config);
-            const runner = createSshCommandRunner(config);
-            const remote = await runner(runtimeRemoveSlotBytesScript('remote'));
-            if (remote.exitCode !== 0) {
-              throw new EnvironmentServiceError(
-                `Could not remove the runtime from "${config.host}": ${remote.stderr.trim() || remote.stdout.trim() || `exit ${remote.exitCode}`}`,
-                503
-              );
-            }
-          }
+          await runtimeEffects.removeRuntimeBytes(existing);
         } catch (error) {
           if (error instanceof EnvironmentServiceError) throw error;
           throw new EnvironmentServiceError(
