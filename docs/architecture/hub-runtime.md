@@ -264,13 +264,36 @@ somebody's files; `readonly` grants the first and refuses the second, so listing
 Local (in-process) is not exempt: it reads the `host` slot like any other runtime, so
 narrowing that slot gives a read-only Local.
 
+### Audit log
+
+Each slot can append a local receipt of what a hub asked it to do. The file lives at
+`~/.mango/runtime/<slot>/audit.log` (rotated siblings beside it). One NDJSON line per
+protocol method records the method name, identifying arguments (paths, argv summaries,
+byte counts — never file contents, shell output, MCP secrets, or tokens), the hub
+identity when known, the outcome (`ok` / `denied` / `error`), and duration. Consent
+denials are logged the same way as successful calls.
+
+Defaults follow who reaches in: off for `host` (your machine, your hub — noise), on for
+`wsl` and `remote`. `setup --audit on|off` toggles the slot; `audit [--since] [--denied]
+[--json]` reads the local file.
+
+The hub never reads this file. There is no protocol method for it, and adding one would
+defeat the point. `hello_ack` may carry optional `hub: { host, user }` so lines can name
+the asking machine; an older hub that omits it is recorded as `unidentified hub`.
+
+A full disk or permissions failure degrades the log, not the runtime — requests keep
+serving and `doctor` warns. Honest limit: once `allow.shell` is granted, anything that
+shell reaches afterwards is outside the receipt.
+
 ### CLI
 
 ```text
 mangostudio-runtime setup  [--profile full|readonly|none] [--allow k=v,…]
-                           [--slot host|wsl|remote] [--yes] [--json]
+                           [--slot host|wsl|remote] [--audit on|off] [--yes] [--json]
 mangostudio-runtime health [--json]
 mangostudio-runtime doctor [--json]
+mangostudio-runtime audit  [--since <iso|duration>] [--denied] [--json]
+                           [--slot host|wsl|remote]
 ```
 
 `setup` asks when it can and takes flags when it cannot; `MANGOSTUDIO_RUNTIME_SETUP` is
@@ -287,10 +310,11 @@ binary sits in, which is right for an installed runtime and wrong for a download
 `doctor` prints — name the slot in the command they recommend.
 
 `health --json` is one payload — slot, source, version, binary, digest, profile, `allow`,
-shells, git, and any error reading the home — for a terminal on the machine and, from 019,
-for the `runtime.health` protocol method a hub calls on a runtime it cannot run commands
-on. `doctor` reads that payload and names the command that fixes each finding, because
-these machines are often reachable only through the thing that is failing.
+shells, git, audit on/off, any error reading the home, and any recent audit write failure —
+for a terminal on the machine and for the `runtime.health` protocol method a hub calls on
+a runtime it cannot run commands on. `doctor` reads that payload and names the command that
+fixes each finding, because these machines are often reachable only through the thing that
+is failing.
 
 `mango doctor` on the hub reports one row per slot present in its own runtime home, so a
 runtime that is installed, reachable, and refusing everything does not look identical to

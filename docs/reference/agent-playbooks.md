@@ -587,12 +587,13 @@ Where a runtime lives and what it is allowed to do — `~/.mango/runtime/<slot>/
 - `apps/shared/src/runtime-home/` (schemas, presets, path layout — the contract)
 - `apps/runtime/src/runtime-home.ts` (the half that touches disk), `src/setup.ts`, `src/health.ts`
 - `apps/runtime/src/consent-gate.ts`, `src/consent-source.ts` (dispatch refusal + per-call re-read)
+- `apps/runtime/src/audit-log.ts` (local NDJSON receipt; never on the wire)
 - `apps/api/src/modules/generation/application/resolve-capability-candidates.ts` (hub withholds
   tools the connected manifest refuses)
 - `apps/frontend/src/features/environments/components/EnvironmentEntitiesOverview.tsx`
   (permissions row on the environment card)
 - `apps/api/src/cli/runtime-slot-probe.ts` (what `mango doctor` reports per slot)
-- Reference: `docs/architecture/hub-runtime.md` — Enforcement and Protocol evolution
+- Reference: `docs/architecture/hub-runtime.md` — Enforcement, Audit log, and Protocol evolution
 
 WSL is a launcher over that same transport, not a protocol of its own:
 
