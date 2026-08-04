@@ -7,7 +7,7 @@ import {
   type RuntimeProtocolVersion,
   type RuntimeRequestFrame,
 } from '@mangostudio/shared/runtime-protocol';
-import { RuntimeServiceError } from './errors';
+import { RuntimeServiceError, RuntimeUpdateError } from './errors';
 import type { RuntimeFramePort } from './transport';
 
 export interface RuntimeHandlerContext {
@@ -37,6 +37,8 @@ export interface RuntimeHostOptions {
    * with state of its own has no other way to learn the host is going away.
    */
   readonly onClose?: () => void;
+  /** True between update.begin and update.commit; all other calls are refused. */
+  readonly isUpdateActive?: () => boolean;
 }
 
 export interface RuntimeEventInput {
@@ -58,6 +60,7 @@ export class RuntimeHost {
   readonly #protocolVersion: RuntimeProtocolVersion;
   readonly #runtimeVersion: string;
   readonly #onClose?: () => void;
+  readonly #isUpdateActive: () => boolean;
   #closed = false;
   #detach?: () => void;
   #handshake = deferredHandshake();
@@ -71,6 +74,7 @@ export class RuntimeHost {
     this.#handlers = options.handlers;
     this.#protocolVersion = options.protocolVersion ?? RUNTIME_PROTOCOL_VERSION;
     if (options.onClose) this.#onClose = options.onClose;
+    this.#isUpdateActive = options.isUpdateActive ?? (() => false);
   }
 
   attach(port: RuntimeFramePort): void {
@@ -225,6 +229,32 @@ export class RuntimeHost {
       return;
     }
 
+    const updateMethod = frame.method.startsWith('runtime.update.');
+    if (updateMethod && this.#activeRequests.size > 0) {
+      this.#sendError(
+        frame.id,
+        errorPayloadFor(
+          new RuntimeUpdateError('Runtime update refused while another call is in flight.', {
+            reason: 'call_in_flight',
+          }),
+          new AbortController().signal
+        )
+      );
+      return;
+    }
+    if (!updateMethod && this.#isUpdateActive()) {
+      this.#sendError(
+        frame.id,
+        errorPayloadFor(
+          new RuntimeUpdateError('Runtime call refused while a binary update is in progress.', {
+            reason: 'update_in_progress',
+          }),
+          new AbortController().signal
+        )
+      );
+      return;
+    }
+
     const controller = new AbortController();
     this.#activeRequests.set(frame.id, controller);
     try {
@@ -287,6 +317,13 @@ function errorPayloadFor(error: unknown, signal: AbortSignal): RuntimeErrorPaylo
           capability:
             typeof error.data.capability === 'string' ? error.data.capability : missing[0],
         },
+      };
+    }
+    if (error.kind === 'runtime_update_refused') {
+      return {
+        code: 'RUNTIME_UPDATE_REFUSED',
+        message: error.message,
+        details: { kind: error.kind, ...error.data },
       };
     }
     return {

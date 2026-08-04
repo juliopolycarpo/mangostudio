@@ -35,11 +35,13 @@ import {
   readRuntimeSlotState,
   readServeToken,
   resolveRuntimeSlot,
+  resolveRuntimeSource,
   runtimeSlotDir,
   writePairingToken,
   writeRuntimeSlotConfig,
 } from './runtime-home';
 import { parseListenAddress, serveRuntime } from './serve';
+import { RUNTIME_UPDATE_EXIT_CODE } from './services/runtime-update';
 import {
   isRuntimeSetupProfile,
   parseAllowOverrides,
@@ -523,13 +525,24 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
     return 1;
   }
 
-  const host = createLocalRuntimeHost({
-    runtimeVersion,
-    consent: createSlotConsentSource({ slot: consent.slot, initial: consent.allow }),
-  });
   let stop: (closure: StdioFramePortClosure) => void = () => undefined;
   const finished = new Promise<StdioFramePortClosure>((resolve) => {
     stop = resolve;
+  });
+  let updateCommitted = false;
+  const host = createLocalRuntimeHost({
+    runtimeVersion,
+    consent: createSlotConsentSource({ slot: consent.slot, initial: consent.allow }),
+    update: {
+      // A hub-spawned slot binary is relaunched through `current`; a custom
+      // stdio path would restart the same old path, so publish there but leave
+      // the restart to its owner.
+      supervised: resolveRuntimeSource() === 'provisioned',
+      requestRestart: () => {
+        updateCommitted = true;
+        stop({ kind: 'eof' });
+      },
+    },
   });
   // A hub shutdown signals the child before closing the pipe; unwind the same
   // way an EOF would so in-flight handlers see their abort.
@@ -552,6 +565,7 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
     process.stderr.write(`mangostudio-runtime: ${closure.error.message}\n`);
     return 1;
   }
+  if (updateCommitted) return RUNTIME_UPDATE_EXIT_CODE;
   return 0;
 }
 

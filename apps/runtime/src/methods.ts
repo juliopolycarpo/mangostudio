@@ -8,19 +8,14 @@ import type {
 } from '@mangostudio/shared/environments';
 import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
 import type {
-  AdapterStrategy,
-  AdaptNote,
-  AdaptProvenance,
   LibraryInstance,
   LibraryLocationId,
   LibraryLocationStatus,
   LibraryResourceRef,
   LibraryTargetId,
   PropagationApply,
-  PropagationSkipped,
   PropagationUndo,
   RemovalApply,
-  RemovalKept,
   ResourceKind,
 } from '@mangostudio/shared/library';
 import type {
@@ -785,6 +780,40 @@ export interface RuntimeLibraryUndoParams {
 
 export type RuntimeLibraryUndoResult = PropagationUndo;
 
+/** Opens one bounded runtime-binary transfer. Bytes travel in sequential calls. */
+export interface RuntimeUpdateBeginParams {
+  readonly version: string;
+  readonly digest: string;
+  readonly totalBytes: number;
+}
+
+export interface RuntimeUpdateBeginResult {
+  readonly sessionId: string;
+  readonly maxChunkBytes: number;
+}
+
+export interface RuntimeUpdateChunkParams {
+  readonly sessionId: string;
+  readonly seq: number;
+  readonly bytesBase64: string;
+}
+
+export interface RuntimeUpdateChunkResult {
+  readonly acceptedBytes: number;
+  readonly receivedBytes: number;
+}
+
+export interface RuntimeUpdateCommitParams {
+  readonly sessionId: string;
+}
+
+export interface RuntimeUpdateCommitResult {
+  readonly version: string;
+  readonly digest: string;
+  /** Manual means the new bytes are current but this process keeps serving the old inode. */
+  readonly restart: 'scheduled' | 'manual';
+}
+
 export interface RuntimeMethodMap {
   'fs.read-file': {
     readonly params: RuntimeReadFileParams;
@@ -949,6 +978,18 @@ export interface RuntimeMethodMap {
   'runtime.health': {
     readonly params: Record<string, never>;
     readonly result: RuntimeHealthReport;
+  };
+  'runtime.update.begin': {
+    readonly params: RuntimeUpdateBeginParams;
+    readonly result: RuntimeUpdateBeginResult;
+  };
+  'runtime.update.chunk': {
+    readonly params: RuntimeUpdateChunkParams;
+    readonly result: RuntimeUpdateChunkResult;
+  };
+  'runtime.update.commit': {
+    readonly params: RuntimeUpdateCommitParams;
+    readonly result: RuntimeUpdateCommitResult;
   };
 }
 
