@@ -1,6 +1,12 @@
 /** Channel-aware identity for the one raw runtime asset a hub needs. */
 
-const CANARY_VERSION = /^(\d+\.\d+\.\d+)-canary(?:\.[a-f0-9]{7,40})?$/;
+/**
+ * The sha identifier is optionally `g`-prefixed: a short sha that is all digits
+ * with a leading zero is an illegal semver numeric identifier, so the release
+ * scripts write it git-describe style. Missing that spelling would resolve the
+ * build onto a stable tag that was never published.
+ */
+const CANARY_VERSION = /^(\d+\.\d+\.\d+)-canary(?:\.g?[a-f0-9]{7,40})?$/;
 
 export interface RuntimeReleaseResolution {
   readonly channel: 'stable' | 'canary';

@@ -22,6 +22,18 @@ describe('resolveRuntimeRelease', () => {
     });
   });
 
+  // `canaryReleaseVersion` prefixes a short sha that is all digits with a
+  // leading zero, because that is an illegal semver numeric identifier. Reading
+  // it as stable would resolve a tag no release ever published.
+  it('maps a git-describe style canary sha onto the same rolling identity', () => {
+    expect(resolveRuntimeRelease('1.2.3-canary.g0123456', 'linux-x64')).toEqual({
+      channel: 'canary',
+      tagVersion: '1.2.3-canary',
+      assetVersion: '1.2.3-canary',
+      runtimeAssetName: 'mangostudio-runtime-1.2.3-canary-linux-x64',
+    });
+  });
+
   it('keeps an unrecognized prerelease on its exact stable release identity', () => {
     expect(resolveRuntimeRelease('1.2.3-rc.1', 'linux-x64')).toEqual({
       channel: 'stable',
