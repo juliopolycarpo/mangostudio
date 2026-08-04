@@ -176,6 +176,68 @@ describe('runtime self-update', () => {
     await service.close();
   });
 
+  // A refusal that kept the session would hold the whole host hostage: every
+  // ordinary call is refused while one is open, so an early commit has to end
+  // it rather than wait out the timeout.
+  it('ends the session when commit arrives before the last byte', async () => {
+    const { service, slotDir } = await fixture();
+    const begun = await service.begin({
+      version: '1.1.0',
+      digest: digestOf('complete-runtime'),
+      totalBytes: 16,
+    });
+    await service.chunk({
+      sessionId: begun.sessionId,
+      seq: 0,
+      bytesBase64: Buffer.from('partial').toString('base64'),
+    });
+
+    await expect(service.commit({ sessionId: begun.sessionId })).rejects.toThrow(
+      'received 7 of 16 bytes'
+    );
+    expect(service.active).toBe(false);
+    expect(
+      await stat(join(slotDir, '1.1.0', `${RUNTIME_BINARY_BASENAME}.incoming`)).catch(() => null)
+    ).toBeNull();
+    expect(await readlink(join(slotDir, 'current'))).toBe('1.0.0');
+
+    // The lock went with it, so the next attempt is not locked out.
+    const retry = await service.begin({
+      version: '1.1.0',
+      digest: digestOf('complete-runtime'),
+      totalBytes: 16,
+    });
+    expect(retry.sessionId).not.toBe(begun.sessionId);
+    await service.close();
+  });
+
+  it('keeps another process reclaim guard while pruning old slot versions', async () => {
+    const { service, slotDir } = await fixture();
+    const reclaimPath = join(slotDir, 'runtime-update.lock.reclaim');
+    await mkdir(join(slotDir, '0.9.0'), { recursive: true });
+    const nextBytes = new TextEncoder().encode('new-runtime');
+
+    const begun = await service.begin({
+      version: '1.1.0',
+      digest: digestOf(nextBytes),
+      totalBytes: nextBytes.byteLength,
+    });
+    // Another process starts weighing this lock only after ours is held; the
+    // guard is what stops two of them reclaiming it at once.
+    await writeFile(reclaimPath, '');
+    await service.chunk({
+      sessionId: begun.sessionId,
+      seq: 0,
+      bytesBase64: Buffer.from(nextBytes).toString('base64'),
+    });
+    await service.commit({ sessionId: begun.sessionId });
+
+    expect(await stat(reclaimPath).catch(() => null)).not.toBeNull();
+    // The version two releases back is still collected.
+    expect(await stat(join(slotDir, '0.9.0')).catch(() => null)).toBeNull();
+    await service.close();
+  });
+
   it('refuses concurrent sessions and out-of-sequence chunks', async () => {
     const { service } = await fixture();
     const begin = {

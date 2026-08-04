@@ -292,6 +292,10 @@ export function createRuntimeUpdateService(
       return serialize(async () => {
         const active = requireSession(params.sessionId);
         if (active.receivedBytes !== active.totalBytes) {
+          // Discarded rather than left open: there is no resume, so the session
+          // could only sit there refusing every ordinary call until it expires.
+          // Every typed commit refusal ends the session for the same reason.
+          await discard(active);
           throw fail(
             `Runtime update received ${active.receivedBytes} of ${active.totalBytes} bytes.`,
             {
@@ -417,7 +421,11 @@ async function pruneSlotVersions(
           entry !== previousVersion &&
           entry !== RUNTIME_CURRENT_LINK_NAME &&
           !entry.endsWith('.json') &&
-          !entry.endsWith('.lock')
+          !entry.endsWith('.lock') &&
+          // `runtime-update.lock.reclaim` ends in neither, and unlinking another
+          // process's reclaim guard mid-flight lets two of them reclaim the same
+          // lock. Prefix rather than suffix so every file the lock owns is kept.
+          !entry.startsWith(RUNTIME_UPDATE_LOCK_FILE)
       )
       .map((entry) => rm(join(slotDir, entry), { recursive: true, force: true }))
   );
