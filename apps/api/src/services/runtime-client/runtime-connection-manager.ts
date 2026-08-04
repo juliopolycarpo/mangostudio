@@ -106,6 +106,8 @@ interface RuntimeConnectionEntry {
    * `Infinity` latches the environment until someone connects it explicitly.
    */
   retryAfterMs: number;
+  /** The next transport loss is an intentional binary handoff, not a crash. */
+  expectedUpdateDisconnect?: boolean;
 }
 
 /**
@@ -439,6 +441,16 @@ export class RuntimeConnectionManager {
     this.#publish(userId);
   }
 
+  expectUpdateDisconnect(userId: string, environmentId: string): void {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (entry) entry.expectedUpdateDisconnect = true;
+  }
+
+  clearExpectedUpdateDisconnect(userId: string, environmentId: string): void {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (entry) entry.expectedUpdateDisconnect = false;
+  }
+
   /**
    * Releases every live connection and resolves once their processes are gone.
    * Runtime children are the hub's responsibility, so shutdown waits for them
@@ -462,6 +474,7 @@ export class RuntimeConnectionManager {
     entry.connectedAtMs = undefined;
     entry.failureCount = 0;
     entry.retryAfterMs = 0;
+    entry.expectedUpdateDisconnect = false;
     entry.status = { state: 'disconnected', ...this.#cachedPeer(entry) };
     return closed;
   }
@@ -545,6 +558,18 @@ export class RuntimeConnectionManager {
     // The child is already gone; nothing waits on the kill that confirms it.
     void entry.connection.close();
     entry.connection = undefined;
+    if (entry.expectedUpdateDisconnect) {
+      entry.expectedUpdateDisconnect = false;
+      entry.connectedAtMs = undefined;
+      entry.failureCount = 0;
+      entry.retryAfterMs = 0;
+      entry.status = {
+        state: 'disconnected',
+        ...this.#cachedPeer(entry),
+      };
+      this.#publish(userId);
+      return;
+    }
     // A connection that ran for a while and then died starts a fresh count; one
     // that died on arrival continues the old one toward the cap.
     const healthy = Date.now() - (entry.connectedAtMs ?? 0) >= HEALTHY_CONNECTION_MS;

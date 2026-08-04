@@ -9,6 +9,7 @@ import {
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import { getVersion } from '../../../src/lib/config';
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
@@ -94,12 +95,13 @@ function flushMicrotasks(): Promise<void> {
 /** A connected client that counts how often the hub asked it for health. */
 function healthProbe(
   manifest: RuntimeCapabilityManifest,
-  health: () => Promise<RuntimeHealthReport> = () => Promise.resolve(HEALTH_REPORT)
+  health: () => Promise<RuntimeHealthReport> = () => Promise.resolve(HEALTH_REPORT),
+  runtimeVersion = '0.0.0-test'
 ): { client: RuntimeClient; calls: () => number } {
   let calls = 0;
   const client = {
     manifest,
-    runtimeVersion: '0.0.0-test',
+    runtimeVersion,
     health: () => {
       calls += 1;
       return health();
@@ -408,6 +410,49 @@ describe('RuntimeConnectionManager', () => {
     advanceSeconds(60);
     await manager.getClient('user-1', 'devbox');
     expect(attempts).toBe(6);
+  });
+
+  it('adopts the restarted runtime without backoff and clears version drift', async () => {
+    let attempts = 0;
+    let dropConnection: (() => void) | undefined;
+    const targetVersion = getVersion();
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: (_definition, onUnavailable) => {
+          attempts += 1;
+          dropConnection = onUnavailable;
+          const probe = healthProbe(
+            TEST_MANIFEST,
+            () => Promise.resolve(HEALTH_REPORT),
+            attempts === 1 ? '0.0.1-old' : targetVersion
+          );
+          return Promise.resolve({ client: probe.client, close: () => undefined });
+        },
+      },
+    });
+
+    await manager.getClient('user-1', 'devbox');
+    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+      runtimeVersion: '0.0.1-old',
+      runtimeVersionDrift: true,
+    });
+    manager.expectUpdateDisconnect('user-1', 'devbox');
+    dropConnection?.();
+
+    expect(manager.getStatus('user-1', 'devbox')).toEqual({
+      state: 'disconnected',
+      manifest: TEST_MANIFEST,
+      runtimeVersion: '0.0.1-old',
+      runtimeVersionDrift: true,
+    });
+    await manager.getClient('user-1', 'devbox');
+    expect(attempts).toBe(2);
+    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+      state: 'connected',
+      runtimeVersion: targetVersion,
+      runtimeVersionDrift: false,
+    });
   });
 
   it('clears a latched backoff when the environment is enabled again', async () => {

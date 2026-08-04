@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { connectInProcessRuntime, createLocalRuntimeHost } from '@mangostudio/runtime';
 import type {
   CreateEnvironmentBody,
   Environment,
@@ -26,7 +31,7 @@ import {
   createRealtimeBus,
   setRealtimeBusForTests,
 } from '../../../src/services/realtime/realtime-bus';
-import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
+import { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
   RuntimeConnectionManager,
   type RuntimeConnectionManagerOptions,
@@ -41,6 +46,7 @@ const TEST_USER = {
 };
 
 let restoreAuth: (() => void) | null = null;
+const tempHomes: string[] = [];
 
 afterEach(async () => {
   restoreAuth?.();
@@ -49,12 +55,14 @@ afterEach(async () => {
   await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('user').where('id', '=', TEST_USER.id).execute();
   setRealtimeBusForTests(undefined);
+  await Promise.all(tempHomes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
 });
 
 function createTestApp(
   connectors: RuntimeConnectionManagerOptions['connectors'] = {},
   lifecycle?: RuntimeLifecycleService,
-  runtimeEffects?: Partial<EnvironmentRuntimeEffects>
+  runtimeEffects?: Partial<EnvironmentRuntimeEffects>,
+  lifecycleFactory?: (manager: RuntimeConnectionManager) => RuntimeLifecycleService
 ) {
   const repository = createEnvironmentRepository(getDb());
   const manager = new RuntimeConnectionManager({
@@ -78,6 +86,7 @@ function createTestApp(
       service,
       undefined,
       lifecycle ??
+        lifecycleFactory?.(manager) ??
         createRuntimeLifecycleService({
           manager,
           provisioner: {
@@ -530,6 +539,72 @@ describe('environment entity routes', () => {
     expect(body).toContain('"type":"exit"');
     expect(body).toContain('"status":"succeeded"');
     expect(ensured).toBe(true);
+  });
+
+  it('updates a connected runtime over its existing protocol connection', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-live-update-route-'));
+    tempHomes.push(mangoHome);
+    const env = { MANGO_HOME: mangoHome };
+    const bytes = new TextEncoder().encode('verified-runtime-binary');
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const host = createLocalRuntimeHost({
+      runtimeVersion: '0.0.1-old',
+      slot: 'host',
+      update: { env },
+    });
+    const { app, repository, manager } = createTestApp(
+      {
+        http: async (_definition, onUnavailable) => {
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      undefined,
+      (runtimeManager) =>
+        createRuntimeLifecycleService({
+          manager: runtimeManager,
+          loadRuntimeAsset: () => Promise.resolve({ bytes, digest, fromArchive: false as const }),
+        })
+    );
+    await repository.create({
+      id: 'http-live-update',
+      userId: TEST_USER.id,
+      name: 'LAN runtime',
+      transportKind: 'http',
+      config: { baseUrl: 'http://runtime.test' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'http-live-update');
+    await manager.refreshManifest(TEST_USER.id, 'http-live-update');
+
+    const viewResponse = await app.handle(
+      new Request('http://localhost/environments/http-live-update/runtime')
+    );
+    const view = (await viewResponse.json()) as RuntimeLifecycleView;
+    expect(view.actions).toEqual(['upgrade']);
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/http-live-update/runtime/install',
+        jsonRequest('POST', { action: 'upgrade' })
+      )
+    );
+    expect(started.status).toBe(200);
+    const { runId } = (await started.json()) as { runId: string };
+    const log = await app.handle(
+      new Request(`http://localhost/environments/http-live-update/runtime/runs/${runId}/log`)
+    );
+    const body = await log.text();
+
+    expect(body).toContain('"status":"succeeded"');
+    expect(body).toContain('Restart this manually launched runtime');
+    expect(
+      await readFile(join(mangoHome, 'runtime', 'host', 'current', 'mangostudio-runtime'), 'utf8')
+    ).toBe('verified-runtime-binary');
   });
 
   it('cancels an in-flight runtime install via the cancel route', async () => {

@@ -42,8 +42,11 @@ export function buildRuntimeLifecycleView(
   const readAt = input.readAtMs;
   const stale = !input.connected || readAt === null || now - readAt >= RUNTIME_HEALTH_FRESHNESS_MS;
 
+  const baseActions = lifecycleActions(input.transportKind);
   const actions = filterLifecycleActions(
-    lifecycleActions(input.transportKind),
+    canUpdateOverLiveConnection(input)
+      ? [...new Set<RuntimeLifecycleAction>([...baseActions, 'upgrade'])]
+      : baseActions,
     input.health,
     input.managedPush !== false
   );
@@ -57,6 +60,17 @@ export function buildRuntimeLifecycleView(
     actions,
     ...(manualCommands ? { manualCommands } : {}),
   };
+}
+
+function canUpdateOverLiveConnection(input: BuildRuntimeLifecycleViewInput): boolean {
+  return (
+    input.transportKind !== 'in-process' &&
+    input.connected &&
+    input.managedPush !== false &&
+    input.health !== null &&
+    input.health.platform !== 'win32' &&
+    input.health.runtimeVersion !== getVersion()
+  );
 }
 
 /**

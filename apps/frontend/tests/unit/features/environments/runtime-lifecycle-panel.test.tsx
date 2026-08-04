@@ -88,6 +88,33 @@ describe('RuntimeLifecyclePanel', () => {
     expect(screen.getByTestId('manual-platform')).toHaveTextContent('linux-x64');
   });
 
+  it('shows the live upgrade action for connected websocket and stdio runtimes', async () => {
+    for (const [id, transportKind] of [
+      ['dial-in-update', 'websocket'],
+      ['stdio-update', 'stdio'],
+    ] as const) {
+      const environment: Environment = {
+        ...WSL,
+        id,
+        transportKind,
+        config: {},
+        status: { state: 'connected' },
+      };
+      scenario
+        .respondWithJson('GET', `/api/environments/${id}/runtime`, {
+          body: { ...VIEW, actions: ['upgrade'] } satisfies RuntimeLifecycleView,
+        })
+        .install();
+      const rendered = render(<RuntimeLifecyclePanel environment={environment} />);
+
+      expect(
+        await screen.findByRole('button', { name: labels.actions.upgrade })
+      ).toBeInTheDocument();
+      rendered.unmount();
+      scenario.restore();
+    }
+  });
+
   // The block is read before a machine has ever paired, which is exactly when
   // the hub is guessing — so the copy has to say so rather than hand a Windows
   // user a Linux download.

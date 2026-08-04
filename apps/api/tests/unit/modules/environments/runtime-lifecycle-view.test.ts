@@ -108,6 +108,53 @@ describe('buildRuntimeLifecycleView', () => {
     expect(wsl.manualCommands).toBeUndefined();
   });
 
+  it('offers live upgrade only for a connected drifting POSIX runtime', () => {
+    const drifting = buildRuntimeLifecycleView({
+      transportKind: 'websocket',
+      health: health({ slot: 'remote', runtimeVersion: '0.0.1-old' }),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+    });
+    expect(drifting.actions).toEqual(['upgrade']);
+
+    const disconnected = buildRuntimeLifecycleView({
+      transportKind: 'websocket',
+      health: health({ slot: 'remote', runtimeVersion: '0.0.1-old' }),
+      readAtMs: 1_000,
+      connected: false,
+      nowMs: 2_000,
+    });
+    expect(disconnected.actions).toEqual([]);
+
+    const windows = buildRuntimeLifecycleView({
+      transportKind: 'http',
+      health: health({
+        slot: 'remote',
+        runtimeVersion: '0.0.1-old',
+        platform: 'win32',
+      }),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+    });
+    expect(windows.actions).toEqual([]);
+  });
+
+  it('falls back to manual commands when live update consent is denied', () => {
+    const base = health({ slot: 'remote', runtimeVersion: '0.0.1-old' });
+    const view = buildRuntimeLifecycleView({
+      transportKind: 'websocket',
+      health: health({ allow: { ...base.allow, update: false } }),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+    });
+
+    expect(view.actions).toEqual([]);
+    expect(view.manualCommands?.install).toBeDefined();
+  });
+
   // A machine that has never paired is exactly when this block is read, so the
   // hub has to say it is guessing rather than hand a Windows user Linux bytes.
   it('names the platform the manual commands are for and flags a guess', () => {
