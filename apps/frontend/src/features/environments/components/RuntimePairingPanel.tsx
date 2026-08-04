@@ -156,6 +156,10 @@ function SetupSteps({
       <p className="text-[11px] text-on-surface-variant/70">{labels.tokenOnce}</p>
       <CopyLine label={labels.stepConnect} value={posix} />
       <CopyLine label={labels.stepConnectPowerShell} value={powershell} />
+      <CopyLine
+        label={labels.stepService}
+        value="mangostudio-runtime service install --mode connect"
+      />
       <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
     </div>
   );

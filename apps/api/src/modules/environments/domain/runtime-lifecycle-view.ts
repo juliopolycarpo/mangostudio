@@ -178,7 +178,9 @@ function manualCommandsFor(
       install: '# Build and place mangostudio-runtime on that machine from this checkout.',
       setup: 'mangostudio-runtime setup --slot remote --profile full --yes',
       serviceInstall:
-        '# Service install lands separately; keep `mangostudio-runtime connect` running for now.',
+        transportKind === 'http'
+          ? 'mangostudio-runtime service install --mode serve'
+          : 'mangostudio-runtime service install --mode connect',
     };
   }
 
@@ -210,7 +212,10 @@ function manualCommandsFor(
     setup: isWindows
       ? `.\\${localName} setup --slot remote --profile full --yes`
       : `./${localName} setup --slot remote --profile full --yes`,
-    serviceInstall:
-      '# Service install lands separately; keep `mangostudio-runtime connect` running for now.',
+    serviceInstall: isWindows
+      ? undefined
+      : transportKind === 'http'
+        ? 'mangostudio-runtime service install --mode serve'
+        : 'mangostudio-runtime service install --mode connect',
   };
 }

@@ -2223,7 +2223,9 @@ export const messages: Messages = {
           'The token is shown once. Issue a new one if you lose it — that also retires this one.',
         stepConnect: 'Connect it to MangoStudio',
         stepConnectPowerShell: 'On Windows, in PowerShell',
-        serviceHint: 'Keep the connect command running; a service unit for it lands separately.',
+        stepService: 'Keep it running after you log out',
+        serviceHint:
+          'Run the service install command so connect survives reboot without a terminal session.',
       },
       directUrl: {
         title: 'Direct URL',
@@ -2231,6 +2233,11 @@ export const messages: Messages = {
           'MangoStudio dials this address. Run mangostudio-runtime serve on that machine first.',
         baseUrlLabel: 'Base URL',
         baseUrlHint: 'http://host:port or https://… — the runtime serves WebSocket on /.',
+        stepServe: 'Listen for MangoStudio on that machine',
+        stepService: 'Keep it running after you log out',
+        serviceInstallCommand: 'mangostudio-runtime service install --mode serve',
+        serviceHint:
+          'After serve has stored a listen address and token, install the user service so it survives reboot.',
         tokenLabel: 'Serve token',
         tokenHint: 'Write-only. Paste the token printed by serve, or rotate it here.',
         tokenSet: 'A token is stored in the secret store.',

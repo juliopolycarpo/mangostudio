@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useUpdateEnvironmentMutation } from '../queries';
+import { CopyLine } from './CopyLine';
 
 interface DirectUrlPanelProps {
   readonly environment: Environment;
@@ -123,6 +124,13 @@ export function DirectUrlPanel({ environment }: DirectUrlPanelProps) {
       >
         {environment.hasRuntimeToken && trimmedToken ? labels.tokenRotate : labels.tokenSave}
       </Button>
+
+      <div className="space-y-2 rounded-lg border border-outline-variant/25 bg-surface-container-low/40 p-2.5">
+        <p className="font-semibold text-[11px] text-on-surface">{labels.stepServe}</p>
+        <CopyLine label={labels.stepServe} value="mangostudio-runtime serve --listen 8787" />
+        <CopyLine label={labels.stepService} value={labels.serviceInstallCommand} />
+        <p className="text-[11px] text-on-surface-variant/60">{labels.serviceHint}</p>
+      </div>
     </section>
   );
 }
