@@ -73,6 +73,14 @@ Additive protocol changes stay on major/minor `1.0` while the wire stays compati
 - **Tolerant manifest.** Feature keys beyond the original six are optional. An absent value
   means the peer predates the key and should be treated as granted (`true`) so an older
   runtime is not silently stripped of tools the hub already trusted.
+- **A new frame field is gated on the manifest, never just added.** Frame envelopes are
+  `additionalProperties: false`, so an optional sibling on `req`, `hello` or `hello_ack` is
+  not ignored by a peer that predates it — it fails that peer's decode and drops the
+  socket, stranding exactly the runtimes nobody has updated yet, including from the live
+  update path that would have fixed them. The manifest is the tolerant surface and it
+  arrives on `hello` first, so the sender advertises support there and the other side
+  withholds the field until it sees the flag. `hello_ack.hub` behind `acceptsHubIdentity`
+  is the worked example.
 - **Open `err.code`.** Unknown error codes narrow to `INTERNAL` on decode so a newer peer
   that invents a code (for example `RUNTIME_DENIED` before every hub learned it) still
   produces a decodeable frame. Known codes stay typed.
@@ -269,9 +277,16 @@ narrowing that slot gives a read-only Local.
 Each slot can append a local receipt of what a hub asked it to do. The file lives at
 `~/.mango/runtime/<slot>/audit.log` (rotated siblings beside it). One NDJSON line per
 protocol method records the method name, identifying arguments (paths, argv summaries,
-byte counts — never file contents, shell output, MCP secrets, or tokens), the hub
-identity when known, the outcome (`ok` / `denied` / `error`), and duration. Consent
-denials are logged the same way as successful calls.
+byte counts), the hub identity when known, the outcome (`ok` / `denied` / `error`), and
+duration. Consent denials are logged the same way as successful calls.
+
+What never reaches the line is structural: file contents, shell output, and the `env`,
+`headers` and `secrets` members of a request are omitted because the summariser reads an
+allowlist of identifying keys rather than skipping a denylist. Credential-shaped text
+*inside* a command line or argv — `--token=…`, `--token …`, `KEY_SECRET=…`,
+`scheme://user:pw@host`, `Bearer …`, `X-Api-Key: …` — is scrubbed on a best-effort basis.
+Best-effort is the honest word there: a shell command is arbitrary text, and it is the
+structural omission, not the pattern set, that keeps known secrets off disk.
 
 Defaults follow who reaches in: off for `host` (your machine, your hub — noise), on for
 `wsl` and `remote`. `setup --audit on|off` toggles the slot; `audit [--since] [--denied]
@@ -279,7 +294,10 @@ Defaults follow who reaches in: off for `host` (your machine, your hub — noise
 
 The hub never reads this file. There is no protocol method for it, and adding one would
 defeat the point. `hello_ack` may carry optional `hub: { host, user }` so lines can name
-the asking machine; an older hub that omits it is recorded as `unidentified hub`.
+the asking machine — but only when the runtime advertised `acceptsHubIdentity` on its
+`hello` manifest, because frame envelopes are closed and an older peer would fail the
+decode rather than ignore the key (see Protocol evolution). A hub that stays silent, or
+one built before the field existed, is recorded as `unidentified hub`.
 
 A full disk or permissions failure degrades the log, not the runtime — requests keep
 serving and `doctor` warns. Honest limit: once `allow.shell` is granted, anything that
