@@ -770,9 +770,23 @@ export const RuntimeLifecycleActionSchema = Type.Union([
 ]);
 export type RuntimeLifecycleAction = Static<typeof RuntimeLifecycleActionSchema>;
 
+/**
+ * Copyable commands for a machine the hub cannot reach (dial-in WS, Direct URL).
+ *
+ * `platformId` names the release build these commands are for. It is not
+ * decoration: the hub only knows a peer's platform once it has connected, and a
+ * machine that has never paired is exactly when this block is read — so the
+ * card has to say which build it just handed you rather than defaulting
+ * silently to Linux.
+ */
 export const RuntimeManualCommandsSchema = Type.Object(
   {
+    platformId: Type.String({ minLength: 1, maxLength: 64 }),
+    /** True when `platformId` is a fallback guess rather than a peer-reported platform. */
+    platformAssumed: Type.Boolean(),
     install: Type.Optional(Type.String({ maxLength: 4_096 })),
+    /** Checksum check against the release `SHA256SUMS`; separate line where one command cannot chain. */
+    verify: Type.Optional(Type.String({ maxLength: 4_096 })),
     setup: Type.Optional(Type.String({ maxLength: 4_096 })),
     serviceInstall: Type.Optional(Type.String({ maxLength: 4_096 })),
   },
@@ -826,14 +840,14 @@ export type RuntimeLifecycleCancelResponse = Static<typeof RuntimeLifecycleCance
 
 /**
  * Consent the hub asks an SSH machine to record via `setup --yes --json`.
- * Profile presets fill `allow`; `custom` requires an explicit allow matrix
- * with every capability key present.
+ * A preset profile carries no `allow`: the preset *is* the answer, and a body
+ * that could name both would let a request display one consent and record
+ * another. `custom` requires an explicit allow matrix with every capability key.
  */
 export const RuntimeSetupBodySchema = Type.Union([
   Type.Object(
     {
       profile: Type.Union([Type.Literal('full'), Type.Literal('readonly'), Type.Literal('none')]),
-      allow: Type.Optional(Type.Partial(RuntimeCapabilityAllowSchema)),
     },
     { additionalProperties: Type.Never() }
   ),

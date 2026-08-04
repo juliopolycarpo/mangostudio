@@ -83,10 +83,19 @@ export function lifecycleActions(
   }
 }
 
+/** Actions that put new runtime bytes on the target machine. */
+const PUSH_ACTIONS: readonly RuntimeLifecycleAction[] = ['install', 'reinstall', 'upgrade'];
+
 /**
  * Apply consent and push-target gates on top of the transport action matrix.
- * `allow.update === false` hides upgrade/reinstall; a non-managed push target
- * hides install/reinstall/upgrade but keeps setup when the transport allows it.
+ *
+ * `allow.update === false` hides **every** push action, `install` included.
+ * All three run the same helper and write the same bytes, so gating only
+ * upgrade/reinstall would leave the machine's answer one button-click wide —
+ * and this gate is the only enforcement there is: the push travels over the
+ * user's own ssh/wsl credentials, out of band, where the runtime cannot refuse
+ * it the way {@link consent-gate} refuses a protocol call. A non-managed push
+ * target hides the same three but keeps setup when the transport allows it.
  */
 function filterLifecycleActions(
   actions: readonly RuntimeLifecycleAction[],
@@ -98,7 +107,7 @@ function filterLifecycleActions(
     next = next.filter((action) => action === 'setup');
   }
   if (health?.allow?.update === false) {
-    next = next.filter((action) => action !== 'upgrade' && action !== 'reinstall');
+    next = next.filter((action) => !PUSH_ACTIONS.includes(action));
   }
   return next;
 }
@@ -123,15 +132,26 @@ export function manualRuntimeReleaseAssetName(version: string, platformHint: str
   return `mangostudio-runtime-${version}-${platformId}${suffix}`;
 }
 
+/** Fallback when no peer has ever reported a platform. Always marked as assumed. */
+const ASSUMED_PLATFORM_HINT = 'linux-x64';
+
 function manualCommandsFor(
   transportKind: EnvironmentTransportKind,
   platformHint?: string
 ): RuntimeManualCommands | undefined {
   if (transportKind !== 'websocket' && transportKind !== 'http') return undefined;
 
+  const reported = platformHint !== undefined && platformHint.length > 0;
+  const hint = reported ? platformHint : ASSUMED_PLATFORM_HINT;
+  const platformId = releasePlatformIdFromHint(hint);
+  const isWindows = platformId.startsWith('windows-');
+  const localName = isWindows ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
+  const identity = { platformId, platformAssumed: !reported } as const;
+
   const version = getVersion();
   if (isDevelopmentVersion(version)) {
     return {
+      ...identity,
       install: '# Build and place mangostudio-runtime on that machine from this checkout.',
       setup: 'mangostudio-runtime setup --slot remote --profile full --yes',
       serviceInstall:
@@ -139,16 +159,31 @@ function manualCommandsFor(
     };
   }
 
-  const hint = platformHint && platformHint.length > 0 ? platformHint : 'linux-x64';
   const asset = manualRuntimeReleaseAssetName(version, hint);
-  const platformId = releasePlatformIdFromHint(hint);
-  const isWindows = platformId.startsWith('windows-');
-  const localName = isWindows ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
   const url = releaseAssetUrl(version, asset);
+  const sumsUrl = releaseAssetUrl(version, 'SHA256SUMS');
+
+  // A one-liner that downloads an executable and chmods it without checking the
+  // release checksum is the one shape this must not ship. Posix chains the three
+  // steps; PowerShell cannot chain the same way, so Windows gets a second line
+  // rather than a silently weaker command.
+  const install = isWindows
+    ? `curl.exe -fsSL "${url}" -o ${localName}`
+    : [
+        `curl -fsSL "${url}" -o ${localName}`,
+        `curl -fsSL "${sumsUrl}" | awk '$2=="${asset}"{print $1"  ${localName}"}' | sha256sum -c -`,
+        `chmod +x ${localName}`,
+      ].join(' && ');
+  const verify = isWindows
+    ? `curl.exe -fsSL "${sumsUrl}" -o SHA256SUMS; ` +
+      `$want = (Select-String -Path SHA256SUMS -Pattern ' ${asset}$').Line.Split(' ')[0]; ` +
+      `if ((Get-FileHash .\\${localName} -Algorithm SHA256).Hash -ne $want) { throw 'checksum mismatch' }`
+    : undefined;
+
   return {
-    install: isWindows
-      ? `curl -fsSL "${url}" -o ${localName}`
-      : [`curl -fsSL "${url}" -o ${localName}`, `chmod +x ${localName}`].join(' && '),
+    ...identity,
+    install,
+    ...(verify ? { verify } : {}),
     setup: isWindows
       ? `.\\${localName} setup --slot remote --profile full --yes`
       : `./${localName} setup --slot remote --profile full --yes`,

@@ -2184,7 +2184,11 @@ export const messages: Messages = {
           setup: 'Set up consent',
         },
         manual: {
+          platform: 'Commands for the {platform} build.',
+          platformAssumed:
+            'This machine has not connected yet, so these commands assume the {platform} build. Check it matches before running them.',
           install: 'Install on that machine',
+          verify: 'Verify the download',
           setup: 'Record consent',
           serviceInstall: 'Keep it running',
         },

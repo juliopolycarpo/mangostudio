@@ -6,6 +6,7 @@ import type { Environment, RuntimeLifecycleView } from '@mangostudio/shared/envi
 import { en } from '@mangostudio/shared/i18n';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RuntimeLifecyclePanel } from '../../../../src/features/environments/components/RuntimeLifecyclePanel';
+import { formatMessage } from '../../../../src/lib/i18n-format';
 import { render, screen, waitFor } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
@@ -68,6 +69,8 @@ describe('RuntimeLifecyclePanel', () => {
           slotBytes: null,
           actions: [],
           manualCommands: {
+            platformId: 'linux-x64',
+            platformAssumed: false,
             install: 'curl -fsSL https://example.test/runtime -o mangostudio-runtime',
             setup: './mangostudio-runtime setup --slot remote --profile full --yes',
           },
@@ -82,5 +85,43 @@ describe('RuntimeLifecyclePanel', () => {
     expect(
       screen.getByText('curl -fsSL https://example.test/runtime -o mangostudio-runtime')
     ).toBeInTheDocument();
+    expect(screen.getByTestId('manual-platform')).toHaveTextContent('linux-x64');
+  });
+
+  // The block is read before a machine has ever paired, which is exactly when
+  // the hub is guessing — so the copy has to say so rather than hand a Windows
+  // user a Linux download.
+  it('says so when the platform behind the manual commands is a guess', async () => {
+    const websocket: Environment = {
+      ...WSL,
+      id: 'never-paired',
+      transportKind: 'websocket',
+      config: {},
+    };
+    scenario
+      .respondWithJson('GET', '/api/environments/never-paired/runtime', {
+        body: {
+          health: null,
+          readAt: null,
+          stale: true,
+          slotBytes: null,
+          actions: [],
+          manualCommands: {
+            platformId: 'linux-x64',
+            platformAssumed: true,
+            install: 'curl -fsSL https://example.test/runtime -o mangostudio-runtime',
+            verify: 'sha256sum -c -',
+          },
+        } satisfies RuntimeLifecycleView,
+      })
+      .install();
+    render(<RuntimeLifecyclePanel environment={websocket} />);
+
+    const note = await screen.findByTestId('manual-platform');
+    expect(note).toHaveTextContent('linux-x64');
+    expect(note.textContent).toBe(
+      formatMessage(labels.manual.platformAssumed, { platform: 'linux-x64' })
+    );
+    expect(screen.getByText(labels.manual.verify)).toBeInTheDocument();
   });
 });

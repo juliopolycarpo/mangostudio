@@ -2203,7 +2203,11 @@ export const messages = {
           setup: 'Configurar consentimento',
         },
         manual: {
+          platform: 'Comandos para o build {platform}.',
+          platformAssumed:
+            'Esta máquina ainda não se conectou, então estes comandos assumem o build {platform}. Confira se corresponde antes de executá-los.',
           install: 'Instalar naquela máquina',
+          verify: 'Verificar o download',
           setup: 'Registrar consentimento',
           serviceInstall: 'Manter em execução',
         },

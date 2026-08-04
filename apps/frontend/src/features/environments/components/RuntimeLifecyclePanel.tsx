@@ -229,7 +229,16 @@ function ManualCommands({ view }: { view: RuntimeLifecycleView }) {
 
   return (
     <div className="space-y-2">
+      {/* Which build these commands fetch. A machine that has never paired is
+          exactly when this block is read, and that is also when the hub has to
+          guess — so the guess says so instead of quietly handing out Linux. */}
+      <p className="text-[11px] text-on-surface-variant/70" data-testid="manual-platform">
+        {formatMessage(commands.platformAssumed ? labels.platformAssumed : labels.platform, {
+          platform: commands.platformId,
+        })}
+      </p>
       {commands.install ? <CopyLine label={labels.install} value={commands.install} /> : null}
+      {commands.verify ? <CopyLine label={labels.verify} value={commands.verify} /> : null}
       {commands.setup ? <CopyLine label={labels.setup} value={commands.setup} /> : null}
       {commands.serviceInstall ? (
         <CopyLine label={labels.serviceInstall} value={commands.serviceInstall} />

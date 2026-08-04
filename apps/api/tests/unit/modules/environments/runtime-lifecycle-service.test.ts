@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import type { RuntimeSetupBody } from '@mangostudio/shared/environments';
+import { DEFAULT_SSH_RUNTIME_PATH, type RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { RUNTIME_CAPABILITY_KEYS, RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
   buildSetupCommand,
@@ -19,9 +19,35 @@ describe('buildSetupCommand', () => {
     const body: RuntimeSetupBody = { profile: 'readonly' };
     const command = buildSetupCommand(body, RUNTIME_CONSENT_PRESETS.readonly);
 
-    expect(command.script).toContain('setup --slot remote --profile "$1" --yes --json');
+    expect(command.script).toContain('setup --slot remote --profile "$2" --yes --json');
     expect(command.script).not.toContain('--allow');
-    expect(command.args).toEqual(['readonly']);
+    expect(command.args).toEqual([DEFAULT_SSH_RUNTIME_PATH, 'readonly']);
+  });
+
+  // Regression: the binary path used to be a hardcoded managed-slot constant,
+  // so the one action a custom-`remoteRuntimePath` card still offers ran a
+  // binary that environment does not use — and need not have.
+  it('runs the environment its own runtime path when one is configured', () => {
+    const command = buildSetupCommand(
+      { profile: 'full' },
+      RUNTIME_CONSENT_PRESETS.full,
+      '/opt/mango/bin/mangostudio-runtime'
+    );
+
+    expect(command.args[0]).toBe('/opt/mango/bin/mangostudio-runtime');
+    // The path travels as argv; the script itself stays a constant.
+    expect(command.script).not.toContain('/opt/mango');
+    expect(command.script).toContain('exec "$p"');
+    // Consent is still recorded in the slot the SSH transport reads.
+    expect(command.script).toContain('--slot remote');
+  });
+
+  it('leaves a path with shell metacharacters as one literal argv entry', () => {
+    const hostile = '/tmp/x; touch /tmp/pwned';
+    const command = buildSetupCommand({ profile: 'none' }, RUNTIME_CONSENT_PRESETS.none, hostile);
+
+    expect(command.args[0]).toBe(hostile);
+    expect(command.script).not.toContain('touch');
   });
 
   // Regression: the CLI's `setup --yes` refuses to run without a --profile
@@ -33,10 +59,10 @@ describe('buildSetupCommand', () => {
     const body: RuntimeSetupBody = { profile: 'custom', allow };
     const command = buildSetupCommand(body, allow);
 
-    expect(command.script).toContain('--profile none --allow "$1" --yes --json');
-    expect(command.args).toHaveLength(1);
+    expect(command.script).toContain('--profile none --allow "$2" --yes --json');
+    expect(command.args).toHaveLength(2);
     const parsed = Object.fromEntries(
-      (command.args[0] ?? '').split(',').map((entry) => {
+      (command.args[1] ?? '').split(',').map((entry) => {
         const [key, value] = entry.split('=');
         return [key, value === 'true'];
       })

@@ -178,4 +178,13 @@ describe('RuntimeSetupBodySchema', () => {
     );
     expect(Value.Check(RuntimeSetupBodySchema, { profile: 'custom', allow: fullAllow })).toBe(true);
   });
+
+  // A preset *is* the answer. Accepting an `allow` beside one meant the server
+  // silently ignored it — a body that displays one consent and records another.
+  it('refuses an allow matrix beside a preset profile', () => {
+    expect(Value.Check(RuntimeSetupBodySchema, { profile: 'full', allow: { shell: false } })).toBe(
+      false
+    );
+    expect(Value.Check(RuntimeSetupBodySchema, { profile: 'none', allow: {} })).toBe(false);
+  });
 });

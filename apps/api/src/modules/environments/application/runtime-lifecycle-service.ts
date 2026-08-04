@@ -13,12 +13,14 @@ import type {
   RuntimeLifecycleView,
   RuntimeSetupBody,
 } from '@mangostudio/shared/environments';
-import { DEFAULT_SSH_RUNTIME_PATH, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
-  RUNTIME_BINARY_BASENAME,
+  DEFAULT_SSH_RUNTIME_PATH,
+  LOCAL_ENVIRONMENT_ID,
+  sshRuntimePath,
+} from '@mangostudio/shared/environments';
+import {
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
-  RUNTIME_CURRENT_LINK_NAME,
   type RuntimeCapabilityAllow,
   resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
@@ -35,12 +37,14 @@ import {
   type RuntimeCommandRunner,
   RuntimePushError,
   runtimeSlotBytesScript,
-  runtimeSlotShellPath,
   runtimeVersionScript,
 } from '../domain/runtime-push';
 import { loadRuntimeReleaseBytes, RuntimeAssetLoadError } from '../domain/runtime-release-fetch';
 import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
-import { environmentRepository } from '../infrastructure/environment-repository';
+import {
+  type EnvironmentRecord,
+  environmentRepository,
+} from '../infrastructure/environment-repository';
 import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
 import {
   type WslProvisioner,
@@ -250,13 +254,12 @@ export function createRuntimeLifecycleService(
 
   return {
     async getView(userId, environmentId, options) {
-      if (environmentId !== LOCAL_ENVIRONMENT_ID) {
-        const record = await environmentRepository.find(userId, environmentId);
-        if (!record) {
-          throw new RuntimeLifecycleUnavailableError(
-            `Environment "${environmentId}" was not found.`
-          );
-        }
+      const record =
+        environmentId === LOCAL_ENVIRONMENT_ID
+          ? null
+          : await environmentRepository.find(userId, environmentId);
+      if (environmentId !== LOCAL_ENVIRONMENT_ID && !record) {
+        throw new RuntimeLifecycleUnavailableError(`Environment "${environmentId}" was not found.`);
       }
 
       const status = manager.getStatus(userId, environmentId);
@@ -267,10 +270,6 @@ export function createRuntimeLifecycleService(
       }
 
       const cached = manager.getCachedHealth(userId, environmentId);
-      const record =
-        environmentId === LOCAL_ENVIRONMENT_ID
-          ? null
-          : await environmentRepository.find(userId, environmentId);
       const transportKind =
         environmentId === LOCAL_ENVIRONMENT_ID ? 'in-process' : (record?.transportKind ?? 'stdio');
 
@@ -279,9 +278,10 @@ export function createRuntimeLifecycleService(
           ? `${cached.health.platform}-${cached.health.arch}`
           : undefined;
 
-      const slotBytes = options?.includeSlotBytes
-        ? await readSlotBytes(userId, environmentId, transportKind, provisioner).catch(() => null)
-        : null;
+      const slotBytes =
+        options?.includeSlotBytes && record
+          ? await readSlotBytes(record, provisioner).catch(() => null)
+          : null;
 
       const managedPush =
         transportKind !== 'ssh'
@@ -330,13 +330,15 @@ export function createRuntimeLifecycleService(
         );
       }
 
+      // Every action here writes the same bytes through the same helper, so the
+      // gate covers `install` too: leaving it open would make a machine's
+      // "no hub-driven updates" answer one button-click wide. The push runs on
+      // the user's own credentials out of band, where the runtime cannot refuse
+      // it — this check is the enforcement, not a hint.
       const cached = manager.getCachedHealth(userId, environmentId);
-      if (
-        (body.action === 'upgrade' || body.action === 'reinstall') &&
-        cached?.health?.allow?.update === false
-      ) {
+      if (cached?.health?.allow?.update === false) {
         throw new RuntimeLifecycleUnavailableError(
-          'This machine denied hub-driven runtime updates (`allow.update`). Change consent with setup before reinstalling or upgrading.',
+          'This machine denied hub-driven runtime updates (`allow.update`). Change consent with setup before installing, reinstalling or upgrading.',
           409
         );
       }
@@ -386,6 +388,7 @@ export function createRuntimeLifecycleService(
             await provisioner.ensure(environmentConfigFor('wsl', record.config).distro, {
               signal: abort.signal,
               force: forceReplace,
+              onTransferProgress: transferProgressPublisher(stream),
             });
           } else {
             await pushOverSsh(record.config, stream, abort.signal, { force: forceReplace });
@@ -451,7 +454,7 @@ export function createRuntimeLifecycleService(
       const config = environmentConfigFor('ssh', record.config);
       const runner = createSshCommandRunner(config);
       const allow = resolveSetupAllow(body);
-      const command = buildSetupCommand(body, allow);
+      const command = buildSetupCommand(body, allow, sshRuntimePath(config));
       const result = await runner(command.script, { args: command.args, timeoutMs: 60_000 });
       if (result.exitCode !== 0) {
         throw new RuntimeLifecycleUnavailableError(
@@ -571,8 +574,7 @@ export async function pushRuntimeOverSsh(
 
   const asset = await loadRuntimeReleaseBytes(platformId);
   if (signal.aborted) return;
-  const total = asset.bytes.byteLength;
-  let lastPct = -1;
+  const onProgress = transferProgressPublisher(stream);
   await pushRuntimeBinary({
     runner,
     slot: 'remote',
@@ -581,18 +583,34 @@ export async function pushRuntimeOverSsh(
     fromArchive: asset.fromArchive,
     timeoutMs: 600_000,
     signal,
-    onStdinProgress: (written) => {
-      const pct = Math.min(100, Math.floor((written / total) * 100));
-      if (pct === lastPct || pct % 5 !== 0) return;
-      lastPct = pct;
-      stream.publish({
-        type: 'log',
-        stream: 'stdout',
-        line: `Transferred ${pct}% (${written}/${total} bytes)`,
-        done: false,
-      });
-    },
+    onStdinProgress: (written) => onProgress(written, asset.bytes.byteLength),
   });
+}
+
+/**
+ * Turns byte counts into install-console log lines, throttled to every 5%.
+ *
+ * Shared by both push transports on purpose: a ~95 MB transfer that reports
+ * nothing is indistinguishable from a hang, and WSL — where the bytes cross a
+ * 9P share into a cold distribution — is the slower of the two, not the one
+ * that can afford to be a spinner.
+ */
+function transferProgressPublisher(stream: {
+  publish(event: InstallStreamEvent): void;
+}): (written: number, total: number) => void {
+  let lastPct = -1;
+  return (written, total) => {
+    if (total <= 0) return;
+    const pct = Math.min(100, Math.floor((written / total) * 100));
+    if (pct === lastPct || pct % 5 !== 0) return;
+    lastPct = pct;
+    stream.publish({
+      type: 'log',
+      stream: 'stdout',
+      line: `Transferred ${pct}% (${written}/${total} bytes)`,
+      done: false,
+    });
+  };
 }
 
 function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
@@ -603,8 +621,24 @@ function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
 }
 
 /**
+ * Resolves the runtime path into `$1` and expands a leading `~/` the way the
+ * login shell would for an ssh launch. The path itself never enters the script
+ * text: a custom `remoteRuntimePath` is user input, and this module's rule is
+ * that values travel as argv while scripts stay constants.
+ */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion on the target, not a JS placeholder
+const RESOLVE_RUNTIME_PATH = 'p="$1"; case "$p" in "~/"*) p="$HOME/${p#"~/"}" ;; esac; ';
+
+/**
  * The `setup` invocation to run over ssh for a consent submission. Exported
  * as a pure function so its shape is testable without spawning ssh.
+ *
+ * `binaryPath` is the environment's own resolved runtime path
+ * ({@link sshRuntimePath}), not the managed slot: an environment pointed at a
+ * custom `remoteRuntimePath` gets no push actions, so `setup` is the only thing
+ * its card offers — running the managed-slot binary there would invoke
+ * something that need not exist. The slot whose consent is written stays
+ * `remote` either way; that is where the SSH transport reads it from.
  *
  * `custom` is not a `--profile` value the CLI accepts — `setup` requires a
  * base preset whenever `--yes` is set (`apps/runtime/src/setup.ts`), so
@@ -614,40 +648,30 @@ function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
  */
 export function buildSetupCommand(
   body: RuntimeSetupBody,
-  allow: RuntimeCapabilityAllow
+  allow: RuntimeCapabilityAllow,
+  binaryPath: string = DEFAULT_SSH_RUNTIME_PATH
 ): { readonly script: string; readonly args: readonly string[] } {
-  const remoteBinaryPath = runtimeSlotShellPath(
-    'remote',
-    RUNTIME_CURRENT_LINK_NAME,
-    RUNTIME_BINARY_BASENAME
-  );
-
   if (body.profile === 'custom') {
     return {
-      script: `exec ${remoteBinaryPath} setup --slot remote --profile none --allow "$1" --yes --json`,
+      script: `${RESOLVE_RUNTIME_PATH}exec "$p" setup --slot remote --profile none --allow "$2" --yes --json`,
       args: [
+        binaryPath,
         RUNTIME_CAPABILITY_KEYS.map((key) => `${key}=${allow[key] ? 'true' : 'false'}`).join(','),
       ],
     };
   }
 
   return {
-    script: `exec ${remoteBinaryPath} setup --slot remote --profile "$1" --yes --json`,
-    args: [body.profile],
+    script: `${RESOLVE_RUNTIME_PATH}exec "$p" setup --slot remote --profile "$2" --yes --json`,
+    args: [binaryPath, body.profile],
   };
 }
 
 async function readSlotBytes(
-  userId: string,
-  environmentId: string,
-  transportKind: string,
+  record: EnvironmentRecord,
   provisioner: WslProvisioner
 ): Promise<number | null> {
-  if (environmentId === LOCAL_ENVIRONMENT_ID) return null;
-  const record = await environmentRepository.find(userId, environmentId);
-  if (!record) return null;
-
-  if (transportKind === 'ssh') {
+  if (record.transportKind === 'ssh') {
     const config = environmentConfigFor('ssh', record.config);
     const runner = createSshCommandRunner(config);
     const result = await runner(runtimeSlotBytesScript('remote'), { timeoutMs: 15_000 });
@@ -656,7 +680,7 @@ async function readSlotBytes(
     return Number.isFinite(parsed) ? parsed : null;
   }
 
-  if (transportKind === 'wsl') {
+  if (record.transportKind === 'wsl') {
     return provisioner.slotBytes(environmentConfigFor('wsl', record.config).distro);
   }
 

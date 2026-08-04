@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import {
   buildRuntimeLifecycleView,
@@ -108,16 +108,69 @@ describe('buildRuntimeLifecycleView', () => {
     expect(wsl.manualCommands).toBeUndefined();
   });
 
-  it('hides upgrade and reinstall when allow.update is false', () => {
+  // A machine that has never paired is exactly when this block is read, so the
+  // hub has to say it is guessing rather than hand a Windows user Linux bytes.
+  it('names the platform the manual commands are for and flags a guess', () => {
+    const guessed = buildRuntimeLifecycleView({
+      transportKind: 'websocket',
+      health: null,
+      readAtMs: null,
+      connected: false,
+      nowMs: 1,
+    });
+    expect(guessed.manualCommands?.platformId).toBe('linux-x64');
+    expect(guessed.manualCommands?.platformAssumed).toBe(true);
+
+    const reported = buildRuntimeLifecycleView({
+      transportKind: 'websocket',
+      health: null,
+      readAtMs: null,
+      connected: false,
+      nowMs: 1,
+      platformHint: 'win32-x64',
+    });
+    expect(reported.manualCommands?.platformId).toBe('windows-x64');
+    expect(reported.manualCommands?.platformAssumed).toBe(false);
+  });
+
+  // Regression: `install` used to survive this gate, which made a machine's
+  // "no hub-driven updates" answer one button-click wide — all three actions
+  // push the same bytes through the same helper, and the push runs out of band
+  // on the user's own credentials where the runtime cannot refuse it.
+  it('hides every push action when allow.update is false, keeping setup', () => {
     const base = health();
+    const denied = health({ allow: { ...base.allow, update: false } });
+
+    expect(
+      buildRuntimeLifecycleView({
+        transportKind: 'wsl',
+        health: denied,
+        readAtMs: 1_000,
+        connected: true,
+        nowMs: 2_000,
+      }).actions
+    ).toEqual([]);
+
+    expect(
+      buildRuntimeLifecycleView({
+        transportKind: 'ssh',
+        health: denied,
+        readAtMs: 1_000,
+        connected: true,
+        nowMs: 2_000,
+      }).actions
+    ).toEqual(['setup']);
+  });
+
+  it('keeps install available when no runtime has reported consent yet', () => {
     const view = buildRuntimeLifecycleView({
       transportKind: 'wsl',
-      health: health({ allow: { ...base.allow, update: false } }),
-      readAtMs: 1_000,
-      connected: true,
+      health: null,
+      readAtMs: null,
+      connected: false,
       nowMs: 2_000,
     });
-    expect(view.actions).toEqual(['install']);
+    expect(view.actions).toEqual(['install', 'reinstall', 'upgrade']);
   });
 
   it('hides managed push actions when managedPush is false', () => {
@@ -130,6 +183,54 @@ describe('buildRuntimeLifecycleView', () => {
       managedPush: false,
     });
     expect(view.actions).toEqual(['setup']);
+  });
+});
+
+describe('manual install commands on a released hub', () => {
+  const originalVersion = process.env.VERSION;
+
+  beforeEach(() => {
+    // A checkout reports `dev` and gets the "build it yourself" placeholder;
+    // the checksum contract only exists on a version that names a release.
+    process.env.VERSION = '9.9.9-test';
+  });
+
+  afterEach(() => {
+    if (originalVersion === undefined) delete process.env.VERSION;
+    else process.env.VERSION = originalVersion;
+  });
+
+  const manualFor = (platformHint: string) =>
+    buildRuntimeLifecycleView({
+      transportKind: 'websocket',
+      health: null,
+      readAtMs: null,
+      connected: false,
+      nowMs: 1,
+      platformHint,
+    }).manualCommands;
+
+  // Downloading an executable and chmod'ing it without checking the release
+  // checksum is the one shape this block must never hand a user.
+  it('checksums the download before chmod on posix', () => {
+    const manual = manualFor('linux-x64');
+    const install = manual?.install ?? '';
+
+    expect(install).toContain('sha256sum -c -');
+    expect(install).toContain('SHA256SUMS');
+    expect(install.indexOf('sha256sum -c -')).toBeLessThan(install.indexOf('chmod +x'));
+    expect(install).toContain('mangostudio-runtime-9.9.9-test-linux-x64');
+    // Posix chains all three, so there is no separate line to miss.
+    expect(manual?.verify).toBeUndefined();
+  });
+
+  it('gives Windows a separate verify line since PowerShell cannot chain it', () => {
+    const manual = manualFor('win32-x64');
+
+    expect(manual?.install).toContain('mangostudio-runtime.exe');
+    expect(manual?.verify).toContain('Get-FileHash');
+    expect(manual?.verify).toContain('SHA256SUMS');
+    expect(manual?.verify).toContain('checksum mismatch');
   });
 });
 
