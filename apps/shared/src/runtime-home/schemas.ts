@@ -222,6 +222,12 @@ export const RuntimeSlotConfigSchema = Type.Object({
    * `credentials.json`.
    */
   hubUrl: Type.Optional(Type.String({ maxLength: 2_048 })),
+  /**
+   * Bind address `serve` uses when no `--listen` is passed — same shape as the
+   * flag (`host:port` or a bare port for loopback). Remembered so a service
+   * unit needs no flags beyond the subcommand.
+   */
+  serveListen: Type.Optional(Type.String({ maxLength: 256 })),
   /** Whether protocol calls are appended to this slot's `audit.log`. */
   audit: Type.Optional(RuntimeAuditConfigSchema),
 });
@@ -243,8 +249,49 @@ export interface ResolvedRuntimeSlotConfig {
   readonly setup: RuntimeSetupRecord;
   readonly installedBy: RuntimeInstaller | null;
   readonly hubUrl: string | null;
+  readonly serveListen: string | null;
   readonly audit: RuntimeAuditConfig;
 }
+
+/** Long-lived supervisor mode for the `remote` slot. */
+export const RuntimeServiceModeSchema = Type.Union([
+  Type.Literal('connect'),
+  Type.Literal('serve'),
+]);
+export type RuntimeServiceMode = Static<typeof RuntimeServiceModeSchema>;
+
+/**
+ * `mangostudio-runtime service status --json` — stable shape for environment cards.
+ */
+export const RuntimeServiceStatusSchema = Type.Object({
+  schemaVersion: Type.Literal(1),
+  platform: Type.Union([
+    Type.Literal('linux'),
+    Type.Literal('darwin'),
+    Type.Literal('win32'),
+    Type.Literal('unsupported'),
+  ]),
+  mode: Type.Union([RuntimeServiceModeSchema, Type.Null()]),
+  installed: Type.Boolean(),
+  enabled: Type.Boolean(),
+  running: Type.Boolean(),
+  /** Linux only: whether loginctl linger is on for this user. */
+  linger: Type.Optional(Type.Boolean()),
+  /** Whether the unit's ExecStart points at the slot `current` symlink. */
+  execUsesCurrent: Type.Optional(Type.Boolean()),
+  /** Manager-specific detail (unit path, label, raw states). */
+  manager: Type.Optional(
+    Type.Object({
+      unitPath: Type.Optional(Type.String({ maxLength: 4_096 })),
+      label: Type.Optional(Type.String({ maxLength: 256 })),
+      activeState: Type.Optional(Type.String({ maxLength: 64 })),
+      subState: Type.Optional(Type.String({ maxLength: 64 })),
+    })
+  ),
+  /** Set when status could not be fully determined. */
+  error: Type.Optional(Type.String({ maxLength: 1_024 })),
+});
+export type RuntimeServiceStatus = Static<typeof RuntimeServiceStatusSchema>;
 
 /**
  * What `health --json` prints and what the `runtime.health` protocol method
