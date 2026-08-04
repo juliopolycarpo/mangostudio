@@ -358,6 +358,23 @@ describe('runtime health', () => {
     expect(audit?.detail).toContain('older binary');
   });
 
+  it('warns when the audit log is enabled but its last write failed', async () => {
+    const env = await isolatedEnv();
+    await setup({ profile: 'readonly', yes: true }, { env });
+    const report = await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env });
+
+    const audit = diagnoseRuntimeHealth({
+      ...report,
+      audit: { enabled: true },
+      auditError: 'ENOSPC: no space left on device',
+    }).find((finding) => finding.title === 'Audit');
+    expect(audit?.severity).toBe('warn');
+    expect(audit?.detail).toContain('ENOSPC');
+    // The machine is often reachable only through the thing that is failing,
+    // so the finding has to name the command that stops the bleeding.
+    expect(audit?.fix).toContain('--audit off');
+  });
+
   it('toggles audit alone once consent is recorded', async () => {
     const env = await isolatedEnv();
     await setup({ profile: 'full', yes: true }, { env });

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import {
   auditLogRotatedPath,
   createRuntimeAuditSink,
@@ -14,8 +15,27 @@ import {
   summarizeAuditArgs,
 } from '../../src/audit-log';
 import { staticConsentSource } from '../../src/consent-source';
+import { RuntimeHost } from '../../src/host';
 import { createLocalRuntimeHost } from '../../src/runtime';
 import { connectInProcessRuntime } from '../../src/transports/in-process';
+
+/** A peer built before `hello_ack` carried `hub` — no `acceptsHubIdentity`. */
+const PRE_AUDIT_MANIFEST: RuntimeCapabilityManifest = {
+  platform: 'linux',
+  arch: 'x64',
+  pathStyle: 'posix',
+  homeDir: '/home/peer',
+  shells: [],
+  git: { available: false },
+  features: {
+    tools: true,
+    git: false,
+    probing: false,
+    mcp: false,
+    library: false,
+    checkpoints: true,
+  },
+};
 
 const homes: string[] = [];
 
@@ -81,6 +101,30 @@ describe('summarizeAuditArgs', () => {
     ).toEqual({
       args: ['{"apiKey":"***","password":"***"}'],
     });
+  });
+
+  it('redacts a credential that sits in the argv entry after its flag', () => {
+    // No regex over one entry can see across the boundary, so the summariser
+    // carries the flag forward instead.
+    expect(
+      summarizeAuditArgs('install.run', {
+        argv: ['deploy', '--token', 'SECRET_TOKEN', '--verbose'],
+      })
+    ).toEqual({ argv: ['deploy', '--token', '***', '--verbose'] });
+  });
+
+  it('redacts bare assignments, URL credentials, and api-key headers', () => {
+    expect(
+      summarizeAuditArgs('shell.run', {
+        command: 'export AWS_SECRET_ACCESS_KEY=SECRET_VALUE && deploy',
+      })
+    ).toEqual({ command: 'export AWS_SECRET_ACCESS_KEY=*** && deploy' });
+    expect(
+      summarizeAuditArgs('shell.run', { command: 'psql postgres://user:SECRET_PW@db/app' })
+    ).toEqual({ command: 'psql postgres://user:***@db/app' });
+    expect(
+      summarizeAuditArgs('install.run', { argv: ['curl', '-H', 'X-Api-Key: SECRET_KEY'] })
+    ).toEqual({ argv: ['curl', '-H', 'X-Api-Key: ***'] });
   });
 
   it('records update chunk length, not chunk bytes', () => {
@@ -158,6 +202,37 @@ describe('createRuntimeAuditSink', () => {
     }
     // Active + two siblings, each capped roughly at maxBytes after rotation.
     expect(total).toBeLessThanOrEqual(200 * 3 + 200);
+  });
+
+  it('flushes on its own interval without anyone asking', async () => {
+    const { home, env } = await tempHome();
+    const path = join(home, 'audit.log');
+    const sink = createRuntimeAuditSink({
+      slot: 'remote',
+      enabled: true,
+      env,
+      path,
+      flushIntervalMs: 10,
+    });
+    try {
+      sink.record({
+        method: 'fs.read-file',
+        outcome: 'ok',
+        durationMs: 1,
+        params: { path: '/tmp/a.txt' },
+      });
+      // Poll rather than sleep a fixed span: the assertion is that the timer
+      // drains the buffer unaided, not that it does so within one tick.
+      const deadline = Date.now() + 5_000;
+      let records = await readRuntimeAuditLog({ path });
+      while (records.length === 0 && Date.now() < deadline) {
+        await Bun.sleep(10);
+        records = await readRuntimeAuditLog({ path });
+      }
+      expect(records.map((record) => record.method)).toEqual(['fs.read-file']);
+    } finally {
+      await sink.close();
+    }
   });
 
   it('degrades on write failure without throwing into the caller', async () => {
@@ -347,6 +422,75 @@ describe('dispatch audit hook', () => {
     const lines = await readRuntimeAuditLog({ path });
     expect(lines.some((line) => line.hub === 'carol@desk')).toBe(true);
     await sink.close();
+  });
+
+  it('withholds hub identity from a peer that does not advertise the field', async () => {
+    // `hello_ack` is a closed envelope: a runtime built before `hub` existed
+    // fails the decode and drops the socket rather than ignoring the key. So
+    // the hub reads the manifest — the tolerant surface, and it arrives first —
+    // and stays silent when the peer has not said it can read the field.
+    const { home, env } = await tempHome();
+    const path = join(home, 'audit.log');
+    const sink = createRuntimeAuditSink({
+      slot: 'remote',
+      enabled: true,
+      env,
+      path,
+      flushIntervalMs: 10_000,
+    });
+    const host = new RuntimeHost({
+      runtimeVersion: 'runtime-test',
+      manifest: PRE_AUDIT_MANIFEST,
+      handlers: new Map([['runtime.health', async () => ({})]]),
+      audit: sink,
+    });
+    const connection = await connectInProcessRuntime(host, {
+      hubVersion: 'hub-test',
+      hub: { host: 'desk', user: 'bob' },
+      validateFrames: true,
+    });
+    try {
+      await connection.client.request('runtime.health', {});
+      await sink.flush();
+      const lines = await readRuntimeAuditLog({ path });
+      expect(lines).not.toHaveLength(0);
+      expect(lines.every((line) => line.hub === 'unidentified hub')).toBe(true);
+    } finally {
+      connection.close();
+      await sink.close();
+    }
+  });
+
+  it('names the hub once the peer advertises that it reads the field', async () => {
+    const { home, env } = await tempHome();
+    const path = join(home, 'audit.log');
+    const sink = createRuntimeAuditSink({
+      slot: 'remote',
+      enabled: true,
+      env,
+      path,
+      flushIntervalMs: 10_000,
+    });
+    const host = new RuntimeHost({
+      runtimeVersion: 'runtime-test',
+      manifest: { ...PRE_AUDIT_MANIFEST, acceptsHubIdentity: true },
+      handlers: new Map([['runtime.health', async () => ({})]]),
+      audit: sink,
+    });
+    const connection = await connectInProcessRuntime(host, {
+      hubVersion: 'hub-test',
+      hub: { host: 'desk', user: 'bob' },
+      validateFrames: true,
+    });
+    try {
+      await connection.client.request('runtime.health', {});
+      await sink.flush();
+      const lines = await readRuntimeAuditLog({ path });
+      expect(lines.every((line) => line.hub === 'bob@desk')).toBe(true);
+    } finally {
+      connection.close();
+      await sink.close();
+    }
   });
 
   it('never writes MCP secrets or pairing-shaped tokens into the log', async () => {
