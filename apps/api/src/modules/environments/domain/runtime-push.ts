@@ -121,13 +121,18 @@ export function runtimeVersionScript(slot: RuntimeSlot): string {
 /**
  * Removes version directories and the `current` link from a slot, leaving
  * `runtime.json` (and lock/credentials) so consent survives reinstall.
+ *
+ * The `-L` test is why `current` actually goes: glob order reaches the version
+ * directories first (digits sort before letters), so by the time the loop sees
+ * `current` it is already dangling, and `-e` alone would skip it — leaving a
+ * slot that `doctor` reads as installed-but-broken rather than absent.
  */
 export function runtimeRemoveSlotBytesScript(slot: RuntimeSlot): string {
   const slotDir = runtimeSlotShellPath(slot);
   return (
     'set -e; ' +
     `for d in ${slotDir}/*; do ` +
-    '[ -e "$d" ] || continue; ' +
+    '[ -e "$d" ] || [ -L "$d" ] || continue; ' +
     'base=$(basename "$d"); ' +
     'case "$base" in runtime.json|runtime.lock|credentials.json) continue ;; esac; ' +
     'rm -rf "$d"; ' +

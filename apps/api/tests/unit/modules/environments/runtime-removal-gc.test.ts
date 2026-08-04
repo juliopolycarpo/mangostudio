@@ -11,6 +11,10 @@ describe('runtimeRemoveSlotBytesScript', () => {
     expect(script).toContain('credentials.json');
     expect(script).toContain('rm -rf');
     expect(script).toContain('"$HOME/.mango/runtime/wsl"');
+    // `current` dangles once the version dir it points at is gone, so `-e`
+    // alone would skip it. See runtime-slot-scripts.test.ts for the shell-level
+    // proof that it is actually removed.
+    expect(script).toContain('[ -L "$d" ]');
   });
 });
 

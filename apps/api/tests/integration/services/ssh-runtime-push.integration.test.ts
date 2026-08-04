@@ -108,9 +108,45 @@ describe('ssh runtime push over a real sshd', () => {
     });
   });
 
-  it.skipIf(!canReachLocalhost)('cancel path never starts when aborted before push', () => {
+  // Runs everywhere: cancellation is a property of the push helper, not of
+  // sshd, and asserting `controller.signal.aborted` after calling `abort()`
+  // would test AbortController rather than anything this repo ships.
+  it('refuses to run a single command once the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();
-    expect(controller.signal.aborted).toBe(true);
+    const calls: string[] = [];
+    const runner: RuntimeCommandRunner = (script) => {
+      calls.push(script);
+      return Promise.resolve({ stdout: '', stderr: '', exitCode: 0 });
+    };
+
+    await expect(
+      pushRuntimeBinary({
+        runner,
+        slot: 'remote',
+        version: 'dev',
+        bytes: fakeBinary,
+        signal: controller.signal,
+      })
+    ).rejects.toThrow(/cancelled/);
+    expect(calls).toEqual([]);
+  });
+
+  it.skipIf(!canReachLocalhost)('kills an in-flight transfer when the signal aborts', async () => {
+    if (!isolatedRunner) throw new Error('expected isolated runner');
+    const controller = new AbortController();
+    // Abort once the first chunk is on the wire, so the kill lands mid-write
+    // rather than on the pre-flight check the test above covers.
+    const push = pushRuntimeBinary({
+      runner: isolatedRunner,
+      slot: 'remote',
+      version: 'dev',
+      bytes: fakeBinary,
+      timeoutMs: 60_000,
+      signal: controller.signal,
+      onStdinProgress: () => controller.abort(),
+    });
+
+    await expect(push).rejects.toThrow();
   });
 });
