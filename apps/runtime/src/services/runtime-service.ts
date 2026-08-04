@@ -105,9 +105,9 @@ ${programArgs}
   <dict>
     <key>SuccessfulExit</key>
     <false/>
-    <key>ThrottleInterval</key>
-    <integer>30</integer>
   </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
 </dict>
 </plist>
 `;

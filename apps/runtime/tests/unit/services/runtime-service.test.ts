@@ -23,6 +23,20 @@ import {
 
 const CURRENT = '/home/test/.mango/runtime/remote/current/mangostudio-runtime';
 
+/** Inner XML of the KeepAlive dict only (first match). */
+function keepAliveDictBody(plist: string): string {
+  const match = plist.match(/<key>KeepAlive<\/key>\s*<dict>([\s\S]*?)<\/dict>/);
+  if (!match) throw new Error('KeepAlive dict not found');
+  return match[1];
+}
+
+/** Job plist fragment after the KeepAlive dict closes. */
+function plistAfterKeepAlive(plist: string): string {
+  const parts = plist.split(/<key>KeepAlive<\/key>\s*<dict>[\s\S]*?<\/dict>/);
+  if (parts.length < 2) throw new Error('KeepAlive dict not found');
+  return parts[1];
+}
+
 function makeDeps(
   options: {
     readonly platform?: NodeJS.Platform;
@@ -89,8 +103,21 @@ describe('runtime service templates', () => {
     const plist = renderLaunchdPlist(CURRENT, 'serve');
     expect(plist).toContain(`<string>${CURRENT}</string>`);
     expect(plist).toContain('<string>serve</string>');
-    expect(plist).toContain('KeepAlive');
     expect(plist).not.toMatch(/token|secret/i);
+  });
+
+  it('places ThrottleInterval at job top level, not inside KeepAlive', () => {
+    const plist = renderLaunchdPlist(CURRENT, 'connect');
+    const keepAlive = keepAliveDictBody(plist);
+    expect(keepAlive).toContain('<key>SuccessfulExit</key>');
+    expect(keepAlive).toContain('<false/>');
+    expect(keepAlive).not.toContain('ThrottleInterval');
+
+    const tail = plistAfterKeepAlive(plist);
+    expect(tail).toMatch(/<key>ThrottleInterval<\/key>\s*<integer>30<\/integer>/);
+    expect(plist.indexOf('<key>ThrottleInterval</key>')).toBeGreaterThan(
+      plist.indexOf('</dict>', plist.indexOf('<key>KeepAlive</key>'))
+    );
   });
 });
 
