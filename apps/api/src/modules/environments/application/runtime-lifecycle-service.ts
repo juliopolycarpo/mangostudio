@@ -35,7 +35,7 @@ import { generateId } from '../../../utils/id';
 import { environmentConfigFor } from '../domain/environment-config';
 import {
   buildRuntimeLifecycleView,
-  releasePlatformIdFromHint,
+  canUpdateOverLiveConnection,
 } from '../domain/runtime-lifecycle-view';
 import { streamRuntimeUpdate } from '../domain/runtime-live-update';
 import {
@@ -334,10 +334,13 @@ export function createRuntimeLifecycleService(
       const canPushOutOfBand = record.transportKind === 'wsl' || record.transportKind === 'ssh';
       const canUpdateLive =
         action === 'upgrade' &&
-        status.state === 'connected' &&
         cached !== null &&
-        cached.health.platform !== 'win32' &&
-        !sshCustomPath;
+        canUpdateOverLiveConnection({
+          transportKind: record.transportKind,
+          health: cached.health,
+          connected: status.state === 'connected',
+          managedPush: !sshCustomPath,
+        });
 
       if (!canPushOutOfBand && !canUpdateLive) {
         throw new RuntimeLifecycleUnavailableError(
@@ -555,7 +558,13 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
     );
   }
   const version = getVersion();
-  const platformId = releasePlatformIdFromHint(`${input.health.platform}-${input.health.arch}`);
+  const platformId = input.health.platformId;
+  if (!platformId) {
+    throw new RuntimeLifecycleUnavailableError(
+      'This runtime did not report an exact release platform identity. Upgrade it through its install path before using live updates.',
+      409
+    );
+  }
   input.stream.publish({
     type: 'log',
     stream: 'system',

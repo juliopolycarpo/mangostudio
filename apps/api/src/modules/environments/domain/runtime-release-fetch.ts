@@ -78,7 +78,10 @@ export async function loadRuntimeReleaseBytes(
     return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}` };
   }
 
-  const deps: SafeFetchDeps = { fetch: overrides.fetch ?? globalThis.fetch };
+  const deps: SafeFetchDeps = {
+    fetch: overrides.fetch ?? globalThis.fetch,
+    ...(overrides.resolveHostname ? { resolveHostname: overrides.resolveHostname } : {}),
+  };
   const release = resolveRuntimeRelease(version, platformId);
   try {
     const bytes = await loadAsset(

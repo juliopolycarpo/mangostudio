@@ -62,12 +62,21 @@ export function buildRuntimeLifecycleView(
   };
 }
 
-function canUpdateOverLiveConnection(input: BuildRuntimeLifecycleViewInput): boolean {
+export function canUpdateOverLiveConnection(
+  input: Pick<
+    BuildRuntimeLifecycleViewInput,
+    'transportKind' | 'health' | 'connected' | 'managedPush'
+  >
+): boolean {
   return (
     input.transportKind !== 'in-process' &&
+    input.transportKind !== 'wsl' &&
+    input.transportKind !== 'ssh' &&
     input.connected &&
     input.managedPush !== false &&
     input.health !== null &&
+    input.health.source === 'provisioned' &&
+    input.health.platformId !== undefined &&
     input.health.platform !== 'win32' &&
     input.health.runtimeVersion !== getVersion()
   );

@@ -35,6 +35,7 @@ describe('resolveRuntimeRelease', () => {
     const bytes = new TextEncoder().encode('canary-runtime');
     const hash = createHash('sha256').update(bytes).digest('hex');
     const calls: string[] = [];
+    let resolved = 0;
     const asset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
 
     const loaded = await loadRuntimeReleaseBytes('linux-x64', {
@@ -46,6 +47,10 @@ describe('resolveRuntimeRelease', () => {
           url.endsWith('/SHA256SUMS') ? new Response(`${hash}  ${asset}\n`) : new Response(bytes)
         );
       }) as unknown as typeof fetch,
+      resolveHostname: () => {
+        resolved += 1;
+        return Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]);
+      },
       cacheDir: () => '/unused',
       readBytes: () => Promise.resolve(null),
       writeCache: () => Promise.resolve(),
@@ -56,5 +61,6 @@ describe('resolveRuntimeRelease', () => {
       'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${asset}`,
     ]);
+    expect(resolved).toBe(2);
   });
 });

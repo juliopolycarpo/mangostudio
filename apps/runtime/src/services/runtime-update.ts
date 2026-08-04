@@ -13,12 +13,16 @@ import {
   type FileHandle,
   mkdir,
   open,
+  readFile,
   readlink,
   rename,
   rm,
   rmdir,
+  stat,
   symlink,
+  unlink,
 } from 'node:fs/promises';
+import { hostname } from 'node:os';
 import { join } from 'node:path';
 import {
   RUNTIME_BINARY_BASENAME,
@@ -39,6 +43,8 @@ import { runtimeSlotDir, writeRuntimeSlotConfig } from '../runtime-home';
 const RUNTIME_UPDATE_MAX_BYTES = 256 * 1024 * 1024;
 const RUNTIME_UPDATE_MAX_CHUNK_BYTES = 32 * 1024;
 const RUNTIME_UPDATE_SESSION_TIMEOUT_MS = 120_000;
+const RUNTIME_UPDATE_LOCK_FILE = 'runtime-update.lock';
+const RUNTIME_UPDATE_LOCK_STALE_FLOOR_MS = 5 * 60_000;
 /** Distinct from ordinary failure so a supervisor can identify an intentional restart. */
 export const RUNTIME_UPDATE_EXIT_CODE = 75;
 
@@ -54,6 +60,13 @@ export interface RuntimeUpdateServiceOptions {
   readonly requestRestart?: () => void;
   readonly sessionTimeoutMs?: number;
   readonly platform?: NodeJS.Platform;
+  /** Writes one bounded slice and reports only bytes confirmed by the filesystem. */
+  readonly writeChunk?: (handle: FileHandle, bytes: Uint8Array) => Promise<number>;
+}
+
+interface UpdateLock {
+  readonly path: string;
+  readonly token: string;
 }
 
 interface UpdateSession {
@@ -65,6 +78,7 @@ interface UpdateSession {
   readonly incomingPath: string;
   readonly livePath: string;
   readonly handle: FileHandle;
+  readonly lock: UpdateLock;
   readonly hash: ReturnType<typeof createHash>;
   nextSeq: number;
   receivedBytes: number;
@@ -123,6 +137,7 @@ export function createRuntimeUpdateService(
     await rm(active.incomingPath, { force: true }).catch(() => undefined);
     await rmdir(active.versionDir).catch(() => undefined);
     if (session === active) session = null;
+    await releaseUpdateLock(active.lock);
   };
 
   const touch = (active: UpdateSession): void => {
@@ -179,14 +194,29 @@ export function createRuntimeUpdateService(
         }
 
         const slotDir = runtimeSlotDir(options.slot, options.env);
+        await mkdir(slotDir, { recursive: true });
+        const id = randomUUID();
+        const lock = await acquireUpdateLock(
+          slotDir,
+          id,
+          options.sessionTimeoutMs ?? RUNTIME_UPDATE_SESSION_TIMEOUT_MS
+        );
         const versionDir = join(slotDir, params.version);
         const incomingPath = join(versionDir, `${RUNTIME_BINARY_BASENAME}.incoming`);
         const livePath = join(versionDir, RUNTIME_BINARY_BASENAME);
-        await mkdir(versionDir, { recursive: true });
-        await rm(incomingPath, { force: true });
-        const handle = await open(incomingPath, 'wx', 0o700);
+        let handle: FileHandle;
+        try {
+          await mkdir(versionDir, { recursive: true });
+          await rm(incomingPath, { force: true });
+          handle = await open(incomingPath, 'wx', 0o700);
+        } catch (error) {
+          await rm(incomingPath, { force: true }).catch(() => undefined);
+          await rmdir(versionDir).catch(() => undefined);
+          await releaseUpdateLock(lock);
+          throw error;
+        }
         session = {
-          id: randomUUID(),
+          id,
           version: params.version,
           expectedDigest: params.digest,
           totalBytes: params.totalBytes,
@@ -194,6 +224,7 @@ export function createRuntimeUpdateService(
           incomingPath,
           livePath,
           handle,
+          lock,
           hash: createHash('sha256'),
           nextSeq: 0,
           receivedBytes: 0,
@@ -227,9 +258,30 @@ export function createRuntimeUpdateService(
           });
         }
 
-        await active.handle.write(bytes);
-        active.hash.update(bytes);
-        active.receivedBytes += bytes.byteLength;
+        const writeChunk =
+          options.writeChunk ??
+          (async (handle: FileHandle, chunk: Uint8Array) =>
+            (await handle.write(chunk)).bytesWritten);
+        let offset = 0;
+        try {
+          while (offset < bytes.byteLength) {
+            const remaining = bytes.subarray(offset);
+            const written = await writeChunk(active.handle, remaining);
+            if (!Number.isSafeInteger(written) || written <= 0 || written > remaining.byteLength) {
+              throw fail('Runtime update write did not report a valid byte count.', {
+                reason: 'invalid_write_count',
+                written,
+                remainingBytes: remaining.byteLength,
+              });
+            }
+            active.hash.update(remaining.subarray(0, written));
+            active.receivedBytes += written;
+            offset += written;
+          }
+        } catch (error) {
+          await discard(active);
+          throw error;
+        }
         active.nextSeq += 1;
         touch(active);
         return { acceptedBytes: bytes.byteLength, receivedBytes: active.receivedBytes };
@@ -277,31 +329,34 @@ export function createRuntimeUpdateService(
         const nextLink = join(slotDir, `.${RUNTIME_CURRENT_LINK_NAME}.${active.id}`);
         let currentSwapped = false;
         try {
-          await chmod(active.incomingPath, 0o755);
-          await rename(active.incomingPath, active.livePath);
-          await symlink(active.version, nextLink);
-          await rename(nextLink, currentPath);
-          currentSwapped = true;
-          await writeRuntimeSlotConfig(
-            options.slot,
-            {
-              version: active.version,
-              binaryPath: active.livePath,
-              digest: active.expectedDigest,
-            },
-            options.env
-          );
-        } catch (error) {
-          if (currentSwapped) {
-            await restoreCurrentLink(currentPath, previous, active.id).catch(() => undefined);
+          try {
+            await chmod(active.incomingPath, 0o755);
+            await rename(active.incomingPath, active.livePath);
+            await symlink(active.version, nextLink);
+            await rename(nextLink, currentPath);
+            currentSwapped = true;
+            await writeRuntimeSlotConfig(
+              options.slot,
+              {
+                version: active.version,
+                binaryPath: active.livePath,
+                digest: active.expectedDigest,
+              },
+              options.env
+            );
+          } catch (error) {
+            if (currentSwapped) {
+              await restoreCurrentLink(currentPath, previous, active.id).catch(() => undefined);
+            }
+            await rm(nextLink, { force: true }).catch(() => undefined);
+            throw error;
           }
-          await rm(nextLink, { force: true }).catch(() => undefined);
-          throw error;
+          await pruneSlotVersions(slotDir, active.version, previous).catch(() => undefined);
         } finally {
           session = null;
+          await releaseUpdateLock(active.lock);
         }
 
-        await pruneSlotVersions(slotDir, active.version, previous).catch(() => undefined);
         const restart = options.supervised ? 'scheduled' : 'manual';
         if (restart === 'scheduled' && options.requestRestart) {
           const timer = setTimeout(options.requestRestart, 50);
@@ -366,4 +421,103 @@ async function pruneSlotVersions(
       )
       .map((entry) => rm(join(slotDir, entry), { recursive: true, force: true }))
   );
+}
+
+/**
+ * Claims a slot across runtime processes for the full transfer and publication.
+ *
+ * A host-local live pid is authoritative. Homes mounted across machines fall
+ * back to age, with a floor well beyond the normal session timeout. The token
+ * prevents an expired holder from unlinking a replacement holder's lock.
+ */
+async function acquireUpdateLock(
+  slotDir: string,
+  token: string,
+  sessionTimeoutMs: number
+): Promise<UpdateLock> {
+  const path = join(slotDir, RUNTIME_UPDATE_LOCK_FILE);
+  const reclaimPath = `${path}.reclaim`;
+  const staleMs = Math.max(RUNTIME_UPDATE_LOCK_STALE_FLOOR_MS, sessionTimeoutMs * 2);
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (
+      await stat(reclaimPath).then(
+        () => true,
+        () => false
+      )
+    ) {
+      throw new RuntimeUpdateError('Another slot update is already active.', {
+        reason: 'slot_update_active',
+      });
+    }
+    let handle: FileHandle;
+    try {
+      handle = await open(path, 'wx', 0o600);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      if (attempt === 0 && (await reclaimAbandonedUpdateLock(path, staleMs))) continue;
+      throw new RuntimeUpdateError('Another slot update is already active.', {
+        reason: 'slot_update_active',
+      });
+    }
+
+    try {
+      await handle.writeFile(JSON.stringify({ token, pid: process.pid, host: hostname() }));
+    } catch (error) {
+      await handle.close().catch(() => undefined);
+      await unlink(path).catch(() => undefined);
+      throw error;
+    }
+    await handle.close();
+    return { path, token };
+  }
+
+  throw new RuntimeUpdateError('Another slot update is already active.', {
+    reason: 'slot_update_active',
+  });
+}
+
+async function releaseUpdateLock(lock: UpdateLock): Promise<void> {
+  try {
+    const owner = JSON.parse(await readFile(lock.path, 'utf8')) as { readonly token?: string };
+    if (owner.token === lock.token) await unlink(lock.path);
+  } catch {
+    // Gone, replaced, or unreadable: never remove a lock we cannot identify.
+  }
+}
+
+async function reclaimAbandonedUpdateLock(path: string, staleMs: number): Promise<boolean> {
+  const reclaimPath = `${path}.reclaim`;
+  let reclaimHandle: FileHandle;
+  try {
+    reclaimHandle = await open(reclaimPath, 'wx', 0o600);
+  } catch {
+    return false;
+  }
+
+  try {
+    const [raw, stats] = await Promise.all([readFile(path, 'utf8'), stat(path)]);
+    const owner = raw ? (JSON.parse(raw) as { readonly pid?: number; readonly host?: string }) : {};
+    const ownedHere = owner.host === hostname() && typeof owner.pid === 'number';
+    const abandoned = ownedHere
+      ? !isProcessAlive(owner.pid as number)
+      : Date.now() - stats.mtimeMs > staleMs;
+    if (!abandoned) return false;
+    await unlink(path).catch(() => undefined);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  } finally {
+    await reclaimHandle.close().catch(() => undefined);
+    await unlink(reclaimPath).catch(() => undefined);
+  }
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }

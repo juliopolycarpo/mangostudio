@@ -53,6 +53,7 @@ export interface RuntimeEventInput {
 /** Dispatches protocol requests and owns the cancellation controller per call. */
 export class RuntimeHost {
   readonly #activeRequests = new Map<string, AbortController>();
+  readonly #activeUpdateRequests = new Set<string>();
   readonly #eventSequences = new Map<string, number>();
   readonly #pongListeners = new Set<() => void>();
   readonly #handlers: ReadonlyMap<string, RuntimeMethodHandler>;
@@ -242,7 +243,7 @@ export class RuntimeHost {
       );
       return;
     }
-    if (!updateMethod && this.#isUpdateActive()) {
+    if (!updateMethod && (this.#activeUpdateRequests.size > 0 || this.#isUpdateActive())) {
       this.#sendError(
         frame.id,
         errorPayloadFor(
@@ -257,6 +258,7 @@ export class RuntimeHost {
 
     const controller = new AbortController();
     this.#activeRequests.set(frame.id, controller);
+    if (updateMethod) this.#activeUpdateRequests.add(frame.id);
     try {
       const result = await handler(frame.params, { signal: controller.signal });
       // Inside the try on purpose: a result the transport cannot frame — one
@@ -267,6 +269,7 @@ export class RuntimeHost {
       this.#sendError(frame.id, errorPayloadFor(error, controller.signal));
     } finally {
       this.#activeRequests.delete(frame.id);
+      this.#activeUpdateRequests.delete(frame.id);
     }
   }
 

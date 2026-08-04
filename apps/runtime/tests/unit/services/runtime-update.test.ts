@@ -12,7 +12,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RUNTIME_BINARY_BASENAME } from '@mangostudio/shared/runtime-home';
 import {
@@ -232,6 +232,76 @@ describe('runtime self-update', () => {
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
     expect(service.active).toBe(true);
     await service.close();
+  });
+
+  it('holds one update lock across service instances for the whole slot session', async () => {
+    const { env, service } = await fixture();
+    const contender = createRuntimeUpdateService({ slot: 'remote', env });
+    const begin = {
+      version: '1.1.0',
+      digest: digestOf('next'),
+      totalBytes: 4,
+    } as const;
+
+    const begun = await service.begin(begin);
+    await expect(contender.begin(begin)).rejects.toThrow('slot update is already active');
+
+    await service.close();
+    await expect(contender.begin(begin)).resolves.toMatchObject({
+      sessionId: expect.any(String),
+    });
+    expect(begun.sessionId).not.toBe('');
+    await contender.close();
+  });
+
+  it('reclaims a slot update lock whose local owner process is gone', async () => {
+    const { service, slotDir } = await fixture();
+    const lockPath = join(slotDir, 'runtime-update.lock');
+    await writeFile(
+      lockPath,
+      JSON.stringify({ token: 'abandoned', pid: 2_147_483_647, host: hostname() })
+    );
+
+    await expect(
+      service.begin({ version: '1.1.0', digest: digestOf('next'), totalBytes: 4 })
+    ).resolves.toMatchObject({ sessionId: expect.any(String) });
+    await service.close();
+
+    expect(await stat(lockPath).catch(() => null)).toBeNull();
+  });
+
+  it('retries partial file writes until every confirmed byte is staged', async () => {
+    const { env, slotDir } = await fixture();
+    let writes = 0;
+    const service = createRuntimeUpdateService({
+      slot: 'remote',
+      env,
+      writeChunk: async (handle, bytes) => {
+        writes += 1;
+        const slice = bytes.subarray(0, Math.min(2, bytes.byteLength));
+        return (await handle.write(slice)).bytesWritten;
+      },
+    });
+    const bytes = new TextEncoder().encode('partial-write-runtime');
+    const begun = await service.begin({
+      version: '1.1.0',
+      digest: digestOf(bytes),
+      totalBytes: bytes.byteLength,
+    });
+
+    await expect(
+      service.chunk({
+        sessionId: begun.sessionId,
+        seq: 0,
+        bytesBase64: Buffer.from(bytes).toString('base64'),
+      })
+    ).resolves.toEqual({ acceptedBytes: bytes.byteLength, receivedBytes: bytes.byteLength });
+    await service.commit({ sessionId: begun.sessionId });
+
+    expect(writes).toBeGreaterThan(1);
+    expect(await readFile(join(slotDir, 'current', RUNTIME_BINARY_BASENAME), 'utf8')).toBe(
+      'partial-write-runtime'
+    );
   });
 
   it('refuses chunks without a session and malformed base64 without writing bytes', async () => {

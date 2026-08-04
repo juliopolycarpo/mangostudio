@@ -3,7 +3,13 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { connectInProcessRuntime, createLocalRuntimeHost } from '@mangostudio/runtime';
+import {
+  connectInProcessRuntime,
+  createLocalRuntimeHost,
+  createLocalRuntimeManifest,
+  createRuntimeMethodHandlers,
+  RuntimeHost,
+} from '@mangostudio/runtime';
 import type {
   CreateEnvironmentBody,
   Environment,
@@ -11,6 +17,7 @@ import type {
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
 import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
+import type { RuntimeHealthReport, RuntimePlatformId } from '@mangostudio/shared/runtime-home';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
@@ -100,6 +107,40 @@ function createTestApp(
   );
   restoreAuth = restore;
   return { app, repository, manager };
+}
+
+/** A real update-capable host whose health matches installed release bytes. */
+function createProvisionedRuntimeHost(
+  options: Parameters<typeof createLocalRuntimeHost>[0],
+  platformId?: RuntimePlatformId
+): RuntimeHost {
+  let host: RuntimeHost | undefined;
+  const registry = createRuntimeMethodHandlers({
+    runtimeVersion: options.runtimeVersion,
+    emit: (event) => host?.emit(event),
+    ...(options.slot ? { slot: options.slot } : {}),
+    ...(options.update ? { update: options.update } : {}),
+  });
+  const health = registry.handlers.get('runtime.health');
+  if (!health) throw new Error('runtime.health handler is missing');
+  const handlers = new Map(registry.handlers);
+  handlers.set('runtime.health', async (params, context) => {
+    const report = (await health(params, context)) as RuntimeHealthReport;
+    return {
+      ...report,
+      source: 'provisioned',
+      ...(platformId ? { platformId } : {}),
+    } satisfies RuntimeHealthReport;
+  });
+  host = new RuntimeHost({
+    runtimeVersion: options.runtimeVersion,
+    manifest: createLocalRuntimeManifest(options.allow),
+    handlers,
+    isUpdateActive: registry.updateActive,
+    onClose: () => void registry.close(),
+    ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
+  });
+  return host;
 }
 
 function jsonRequest(method: string, body?: unknown): RequestInit {
@@ -542,17 +583,80 @@ describe('environment entity routes', () => {
     expect(ensured).toBe(true);
   });
 
+  it('keeps a connected WSL upgrade on the out-of-band provisioner path', async () => {
+    let ensured = false;
+    const host = createLocalRuntimeHost({ runtimeVersion: '0.0.1-legacy', slot: 'wsl' });
+    const { app, repository, manager } = createTestApp(
+      {
+        wsl: async (_definition, onUnavailable) => {
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      undefined,
+      (runtimeManager) =>
+        createRuntimeLifecycleService({
+          manager: runtimeManager,
+          provisioner: {
+            ensure: () => {
+              ensured = true;
+              return Promise.resolve();
+            },
+            removeSlotBytes: async () => undefined,
+            slotBytes: async () => null,
+          },
+          loadRuntimeAsset: () => {
+            throw new Error('live update asset loading must not run for WSL');
+          },
+        })
+    );
+    await repository.create({
+      id: 'wsl-connected-upgrade',
+      userId: TEST_USER.id,
+      name: 'Connected WSL',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'wsl-connected-upgrade');
+    await manager.refreshManifest(TEST_USER.id, 'wsl-connected-upgrade');
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-connected-upgrade/runtime/install',
+        jsonRequest('POST', { action: 'upgrade' })
+      )
+    );
+    expect(started.status).toBe(200);
+    const { runId } = (await started.json()) as { runId: string };
+    const log = await app.handle(
+      new Request(`http://localhost/environments/wsl-connected-upgrade/runtime/runs/${runId}/log`)
+    );
+
+    expect(await log.text()).toContain('"status":"succeeded"');
+    expect(ensured).toBe(true);
+    await manager.closeAll();
+  });
+
   it('updates a connected runtime over its existing protocol connection', async () => {
     const mangoHome = await mkdtemp(join(tmpdir(), 'mango-live-update-route-'));
     tempHomes.push(mangoHome);
     const env = { MANGO_HOME: mangoHome };
     const bytes = new TextEncoder().encode('verified-runtime-binary');
     const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
-    const host = createLocalRuntimeHost({
-      runtimeVersion: '0.0.1-old',
-      slot: 'host',
-      update: { env },
-    });
+    let loadedPlatformId: string | undefined;
+    const host = createProvisionedRuntimeHost(
+      {
+        runtimeVersion: '0.0.1-old',
+        slot: 'host',
+        update: { env },
+      },
+      'linux-x64-musl'
+    );
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
@@ -568,7 +672,10 @@ describe('environment entity routes', () => {
       (runtimeManager) =>
         createRuntimeLifecycleService({
           manager: runtimeManager,
-          loadRuntimeAsset: () => Promise.resolve({ bytes, digest, fromArchive: false as const }),
+          loadRuntimeAsset: (platformId) => {
+            loadedPlatformId = platformId;
+            return Promise.resolve({ bytes, digest, fromArchive: false as const });
+          },
         })
     );
     await repository.create({
@@ -603,6 +710,7 @@ describe('environment entity routes', () => {
 
     expect(body).toContain('"status":"succeeded"');
     expect(body).toContain('Restart this manually launched runtime');
+    expect(loadedPlatformId).toBe('linux-x64-musl');
     expect(
       await readFile(join(mangoHome, 'runtime', 'host', 'current', 'mangostudio-runtime'), 'utf8')
     ).toBe('verified-runtime-binary');
@@ -623,7 +731,7 @@ describe('environment entity routes', () => {
         http: async (_definition, onUnavailable) => {
           connectionCount += 1;
           const firstConnection = connectionCount === 1;
-          const host = createLocalRuntimeHost({
+          const host = createProvisionedRuntimeHost({
             runtimeVersion: firstConnection ? '0.0.1-old' : targetVersion,
             ...(firstConnection
               ? {
@@ -705,7 +813,7 @@ describe('environment entity routes', () => {
     const { app, repository, manager } = createTestApp(
       {
         http: async (_definition, onUnavailable) => {
-          const host = createLocalRuntimeHost({
+          const host = createProvisionedRuntimeHost({
             runtimeVersion: replacement ? targetVersion : '0.0.1-old',
             ...(!replacement
               ? {

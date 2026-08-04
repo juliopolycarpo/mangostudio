@@ -30,6 +30,7 @@ const health = (overrides: Partial<RuntimeHealthReport> = {}): RuntimeHealthRepo
   setup: { state: 'configured', at: '2026-01-01T00:00:00.000Z', by: 'cli' },
   platform: 'linux',
   arch: 'x64',
+  platformId: 'linux-x64-musl',
   homeDir: '/home/u',
   shells: ['bash'],
   git: { available: true, version: '2.47.0' },
@@ -108,7 +109,7 @@ describe('buildRuntimeLifecycleView', () => {
     expect(wsl.manualCommands).toBeUndefined();
   });
 
-  it('offers live upgrade only for a connected drifting POSIX runtime', () => {
+  it('offers live upgrade only for a connected drifting provisioned POSIX runtime', () => {
     const drifting = buildRuntimeLifecycleView({
       transportKind: 'websocket',
       health: health({ slot: 'remote', runtimeVersion: '0.0.1-old' }),
@@ -139,6 +140,45 @@ describe('buildRuntimeLifecycleView', () => {
       nowMs: 2_000,
     });
     expect(windows.actions).toEqual([]);
+
+    const bundled = buildRuntimeLifecycleView({
+      transportKind: 'websocket',
+      health: health({
+        slot: 'remote',
+        source: 'bundled',
+        runtimeVersion: '0.0.1-old',
+      }),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+    });
+    expect(bundled.actions).toEqual([]);
+
+    const legacy = buildRuntimeLifecycleView({
+      transportKind: 'websocket',
+      health: health({
+        slot: 'remote',
+        runtimeVersion: '0.0.1-old',
+        platformId: undefined,
+      }),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+    });
+    expect(legacy.actions).toEqual([]);
+  });
+
+  it('keeps WSL and SSH upgrades on their out-of-band push paths', () => {
+    for (const transportKind of ['wsl', 'ssh'] as const) {
+      const view = buildRuntimeLifecycleView({
+        transportKind,
+        health: health({ slot: transportKind === 'wsl' ? 'wsl' : 'remote', runtimeVersion: 'old' }),
+        readAtMs: 1_000,
+        connected: true,
+        nowMs: 2_000,
+      });
+      expect(view.actions).toContain('upgrade');
+    }
   });
 
   it('falls back to manual commands when live update consent is denied', () => {

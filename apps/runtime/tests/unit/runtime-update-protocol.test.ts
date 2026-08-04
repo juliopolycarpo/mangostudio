@@ -125,4 +125,52 @@ describe('runtime update protocol policy', () => {
       connection.close();
     }
   });
+
+  it('refuses ordinary calls from the moment an update request starts dispatching', async () => {
+    let finishBegin: ((value: unknown) => void) | undefined;
+    const begin = new Promise<unknown>((resolve) => {
+      finishBegin = resolve;
+    });
+    const host = new RuntimeHost({
+      runtimeVersion: '1.0.0',
+      manifest: {
+        platform: 'linux',
+        arch: 'x64',
+        pathStyle: 'posix',
+        homeDir: '/tmp',
+        shells: [],
+        git: { available: false },
+        features: {
+          tools: true,
+          git: false,
+          probing: false,
+          mcp: false,
+          library: false,
+          checkpoints: false,
+        },
+      },
+      handlers: new Map<string, RuntimeMethodHandler>([
+        ['runtime.update.begin', () => begin],
+        ['test.read', async () => ({ ok: true })],
+      ]),
+      isUpdateActive: () => false,
+    });
+    const connection = await connectInProcessRuntime(host, { hubVersion: '1.1.0' });
+    const client = connection.client as unknown as {
+      request(method: string, params: unknown): Promise<unknown>;
+    };
+    const pending = client.request('runtime.update.begin', beginParams());
+    await Promise.resolve();
+
+    try {
+      await expect(client.request('test.read', {})).rejects.toMatchObject({
+        code: 'RUNTIME_UPDATE_REFUSED',
+        details: { reason: 'update_in_progress' },
+      });
+    } finally {
+      finishBegin?.({ sessionId: 'session', maxChunkBytes: 1 });
+      await pending;
+      connection.close();
+    }
+  });
 });
