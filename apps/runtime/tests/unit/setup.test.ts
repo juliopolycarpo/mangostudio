@@ -258,6 +258,8 @@ describe('runtime health', () => {
     // The test process is Bun running a workspace entry, so there is no binary.
     expect(report.binaryPath).toBeNull();
     expect(report.source).toBe('source-checkout');
+    // Host defaults audit off; setup without --audit leaves that default.
+    expect(report.audit).toEqual({ enabled: false });
   });
 
   it('fails doctor on a slot nobody has answered for, and names the fix', async () => {
@@ -343,5 +345,29 @@ describe('runtime health', () => {
     const consent = diagnoseRuntimeHealth(report).find((finding) => finding.title === 'Consent');
     expect(consent?.severity).toBe('fail');
     expect(consent?.detail).toContain('could not be read');
+  });
+
+  it('toggles audit alone once consent is recorded', async () => {
+    const env = await isolatedEnv();
+    await setup({ profile: 'full', yes: true }, { env });
+    expect(
+      (await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env })).audit.enabled
+    ).toBe(false);
+
+    const flipped = await setup({ audit: true, yes: true }, { env });
+    expect(flipped.code).toBe(0);
+    expect(flipped.lines.some((line) => line.includes('Audit on'))).toBe(true);
+    expect(
+      (await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env })).audit.enabled
+    ).toBe(true);
+  });
+
+  it('defaults audit on for a remote slot', async () => {
+    const env = await isolatedEnv();
+    await setup({ profile: 'full', slot: 'remote', yes: true }, { env });
+    expect(
+      (await collectRuntimeHealth({ runtimeVersion: RUNTIME_VERSION, env, slot: 'remote' })).audit
+        .enabled
+    ).toBe(true);
   });
 });

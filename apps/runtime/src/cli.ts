@@ -15,7 +15,9 @@ import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
   type RuntimeSlot,
+  runtimeSlotAuditLogPath,
 } from '@mangostudio/shared/runtime-home';
+import { createRuntimeAuditSink, parseAuditSince, readRuntimeAuditLog } from './audit-log';
 import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
 import { createSlotConsentSource } from './consent-source';
@@ -25,7 +27,7 @@ import {
   type RuntimeDoctorFinding,
   worstSeverity,
 } from './health';
-import { createLocalRuntimeHost } from './runtime';
+import { createLocalRuntimeHost, createSlotRuntimeHost } from './runtime';
 import {
   bootstrapServeToken,
   consentByInvocation,
@@ -75,6 +77,13 @@ export interface RuntimeServeArgs {
   readonly tokenSource: 'stdin' | 'env' | 'stored';
 }
 
+export interface RuntimeAuditArgs {
+  readonly since?: string;
+  readonly denied: boolean;
+  readonly json: boolean;
+  readonly slot?: RuntimeSlot;
+}
+
 export type RuntimeCliInvocation =
   | { readonly command: 'stdio' }
   | { readonly command: 'connect'; readonly args: RuntimeConnectArgs }
@@ -82,6 +91,7 @@ export type RuntimeCliInvocation =
   | { readonly command: 'setup'; readonly args: RuntimeSetupArgs }
   | { readonly command: 'health'; readonly args: { readonly json: boolean } }
   | { readonly command: 'doctor'; readonly args: { readonly json: boolean } }
+  | { readonly command: 'audit'; readonly args: RuntimeAuditArgs }
   | { readonly command: 'version' }
   | { readonly command: 'help' }
   | { readonly command: 'unknown'; readonly argument: string }
@@ -97,6 +107,7 @@ Commands:
   setup        Say what a hub may do on this machine
   health       Print this runtime's slot, version, and permissions
   doctor       health, plus what is wrong and the command that fixes it
+  audit        Print this slot's local receipt of what a hub asked for
   --version    Print the runtime version
   --help       Show this message
 
@@ -124,15 +135,28 @@ setup options:
   --allow k=v[,k=v]
                Adjust single capabilities over the preset, e.g.
                --profile readonly --allow shell=true
+  --audit on|off
+               Record (or stop recording) what a hub asks this machine to do.
+               Defaults: off for host, on for wsl and remote. Can be flipped
+               alone with --yes once consent is already recorded.
   --slot <host|wsl|remote>
                Which slot to answer for. Defaults to the one this binary sits
                in; pass "remote" for a runtime you downloaded onto a PATH and
                paired with "connect" or "serve".
-  --yes        Never prompt; requires --profile or the environment answer.
+  --yes        Never prompt; requires --profile or the environment answer
+               (or --audit alone when consent is already recorded).
   --json       Print the resulting health payload instead of prose.
 
 health / doctor options:
   --json       Machine-readable output.
+
+audit options:
+  --since <when>
+               ISO-8601 instant, or a relative duration like 24h / 30m / 7d.
+  --denied     Only lines where the machine refused the call.
+  --slot <host|wsl|remote>
+               Which slot's log to read. Defaults to the one this binary sits in.
+  --json       One JSON array on stdout.
 
 MangoStudio spawns this binary for stdio environments; it is not meant to be
 run interactively there. stdout carries protocol frames only — diagnostics go
@@ -149,6 +173,7 @@ export function parseRuntimeCliArgs(args: readonly string[]): RuntimeCliInvocati
   if (first === 'serve') return parseServeArgs(rest);
   if (first === 'setup') return parseSetupArgs(rest);
   if (first === 'health' || first === 'doctor') return parseReportArgs(first, rest);
+  if (first === 'audit') return parseAuditArgs(rest);
 
   const extra = rest[0];
   if (extra !== undefined) return { command: 'unknown', argument: extra };
@@ -176,6 +201,7 @@ function parseSetupArgs(args: readonly string[]): RuntimeCliInvocation {
     profile?: RuntimeSetupArgs['profile'];
     allow?: RuntimeSetupArgs['allow'];
     slot?: RuntimeSetupArgs['slot'];
+    audit?: boolean;
     yes: boolean;
     json: boolean;
   } = { yes: false, json: false };
@@ -201,6 +227,19 @@ function parseSetupArgs(args: readonly string[]): RuntimeCliInvocation {
       setup.allow = { ...setup.allow, ...parsed.allow };
       continue;
     }
+    if (flag === '--audit') {
+      const value = args[++index];
+      if (!value) return { command: 'invalid', reason: '--audit takes on or off.' };
+      const parsed = parseOnOff(value);
+      if (parsed === null) {
+        return {
+          command: 'invalid',
+          reason: `--audit takes on or off${value ? `, not "${value}"` : ''}.`,
+        };
+      }
+      setup.audit = parsed;
+      continue;
+    }
     if (flag === '--slot') {
       const value = args[++index];
       if (!value || !isRuntimeSlot(value)) {
@@ -224,6 +263,64 @@ function parseSetupArgs(args: readonly string[]): RuntimeCliInvocation {
   }
 
   return { command: 'setup', args: setup };
+}
+
+function parseOnOff(value: string): boolean | null {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'on' || normalized === 'true' || normalized === 'yes') return true;
+  if (normalized === 'off' || normalized === 'false' || normalized === 'no') return false;
+  return null;
+}
+
+function parseAuditArgs(args: readonly string[]): RuntimeCliInvocation {
+  let since: string | undefined;
+  let denied = false;
+  let json = false;
+  let slot: RuntimeSlot | undefined;
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index];
+    if (flag === '--since') {
+      const value = args[++index];
+      if (!value)
+        return {
+          command: 'invalid',
+          reason: '--since needs an ISO-8601 instant or a relative duration like 24h.',
+        };
+      const parsed = parseAuditSince(value);
+      if (typeof parsed === 'object') return { command: 'invalid', reason: parsed.error };
+      since = parsed;
+      continue;
+    }
+    if (flag === '--denied') {
+      denied = true;
+      continue;
+    }
+    if (flag === '--json') {
+      json = true;
+      continue;
+    }
+    if (flag === '--slot') {
+      const value = args[++index];
+      if (!value || !isRuntimeSlot(value)) {
+        return {
+          command: 'invalid',
+          reason: `--slot takes host, wsl, or remote${value ? `, not "${value}"` : ''}.`,
+        };
+      }
+      slot = value;
+      continue;
+    }
+    return { command: 'unknown', argument: flag ?? '--' };
+  }
+  return {
+    command: 'audit',
+    args: {
+      denied,
+      json,
+      ...(since ? { since } : {}),
+      ...(slot ? { slot } : {}),
+    },
+  };
 }
 
 function parseReportArgs(
@@ -308,6 +405,8 @@ export async function runRuntimeCli(args: readonly string[]): Promise<number> {
       return await runHealth(invocation.args.json, runtimeVersion);
     case 'doctor':
       return await runDoctor(invocation.args.json, runtimeVersion);
+    case 'audit':
+      return await runAudit(invocation.args);
     case 'version':
       process.stdout.write(`${runtimeVersion}\n`);
       return 0;
@@ -377,6 +476,8 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     );
   }
 
+  const audit = await slotAuditSink(PAIRED_SLOT);
+
   const controller = new AbortController();
   const stop = (): void => controller.abort();
   process.once('SIGINT', stop);
@@ -390,6 +491,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
         createLocalRuntimeHost({
           runtimeVersion,
           consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
+          audit,
         }),
       log,
       signal: controller.signal,
@@ -456,6 +558,8 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
 
+  const audit = await slotAuditSink(PAIRED_SLOT);
+
   try {
     const handle = serveRuntime({
       listen,
@@ -464,6 +568,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
         createLocalRuntimeHost({
           runtimeVersion,
           consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
+          audit,
         }),
       log,
       signal: controller.signal,
@@ -530,7 +635,7 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
     stop = resolve;
   });
   let updateCommitted = false;
-  const host = createLocalRuntimeHost({
+  const host = await createSlotRuntimeHost({
     runtimeVersion,
     consent: createSlotConsentSource({ slot: consent.slot, initial: consent.allow }),
     update: {
@@ -659,11 +764,49 @@ async function runHealth(json: boolean, runtimeVersion: string): Promise<number>
       }`,
       `shells      ${report.shells.join(', ') || 'none'}`,
       `git         ${report.git.available ? (report.git.version ?? 'available') : 'not found'}`,
+      `audit       ${report.audit.enabled ? 'on' : 'off'}`,
+      ...(report.auditError ? [`audit error ${report.auditError}`] : []),
       ...(report.lastError ? [`error       ${report.lastError}`] : []),
       '',
     ].join('\n')
   );
   return 0;
+}
+
+async function runAudit(args: RuntimeAuditArgs): Promise<number> {
+  const slot = args.slot ?? resolveRuntimeSlot();
+  const path = runtimeSlotAuditLogPath(slot, {
+    mangoHome: loadRuntimeConfig().mangoHome,
+    platform: process.platform,
+  });
+  const records = await readRuntimeAuditLog({
+    path,
+    ...(args.since ? { since: args.since } : {}),
+    deniedOnly: args.denied,
+  });
+  if (args.json) {
+    process.stdout.write(`${JSON.stringify(records)}\n`);
+    return 0;
+  }
+  if (records.length === 0) {
+    process.stdout.write(
+      `No audit lines for the ${slot} runtime${args.denied ? ' (denied only)' : ''}.\n`
+    );
+    return 0;
+  }
+  for (const record of records) {
+    const bits = [record.ts, record.outcome, record.method, record.hub, `${record.durationMs}ms`];
+    if (record.capability) bits.push(`capability=${record.capability}`);
+    if (record.code) bits.push(`code=${record.code}`);
+    if (record.args) bits.push(JSON.stringify(record.args));
+    process.stdout.write(`${bits.join(' ')}\n`);
+  }
+  return 0;
+}
+
+async function slotAuditSink(slot: RuntimeSlot) {
+  const { config } = await readRuntimeSlotState(slot);
+  return createRuntimeAuditSink({ slot, enabled: config.audit.enabled });
 }
 
 /** Exits non-zero on a failure so a provisioner can gate on it. */
