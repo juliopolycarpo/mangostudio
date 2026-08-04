@@ -31,6 +31,8 @@ export interface RuntimeCommandOptions {
   readonly args?: readonly string[];
   readonly timeoutMs?: number;
   readonly onStdinProgress?: (bytesWritten: number) => void;
+  /** When aborted, the runner should kill the in-flight child (e.g. SIGKILL). */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -165,6 +167,7 @@ export interface PushRuntimeBinaryParams {
   readonly fromArchive?: boolean;
   readonly timeoutMs?: number;
   readonly onStdinProgress?: (bytesWritten: number) => void;
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -173,6 +176,10 @@ export interface PushRuntimeBinaryParams {
  * the release manifest before calling this.
  */
 export async function pushRuntimeBinary(params: PushRuntimeBinaryParams): Promise<void> {
+  if (params.signal?.aborted) {
+    throw new RuntimePushError(`Runtime push into the ${params.slot} slot was cancelled.`);
+  }
+
   const script = params.fromArchive
     ? runtimePushArchiveScript(params.slot)
     : runtimePushBinaryScript(params.slot);
@@ -182,7 +189,11 @@ export async function pushRuntimeBinary(params: PushRuntimeBinaryParams): Promis
     args: [params.version],
     timeoutMs: params.timeoutMs,
     onStdinProgress: params.onStdinProgress,
+    signal: params.signal,
   });
+  if (params.signal?.aborted || result.signal) {
+    throw new RuntimePushError(`Runtime push into the ${params.slot} slot was cancelled.`);
+  }
   if (result.exitCode !== 0) {
     throw new RuntimePushError(
       `Could not place the runtime in the ${params.slot} slot: ${describeResult(result)}`
@@ -191,7 +202,11 @@ export async function pushRuntimeBinary(params: PushRuntimeBinaryParams): Promis
 
   const check = await params.runner(runtimeVersionScript(params.slot), {
     timeoutMs: params.timeoutMs,
+    signal: params.signal,
   });
+  if (params.signal?.aborted || check.signal) {
+    throw new RuntimePushError(`Runtime push into the ${params.slot} slot was cancelled.`);
+  }
   if (check.exitCode !== 0) {
     throw new RuntimePushError(
       `The runtime was placed in the ${params.slot} slot but does not run: ${describeResult(check)}`

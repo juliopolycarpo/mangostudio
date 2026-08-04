@@ -275,14 +275,29 @@ export function useRuntimeSlotBytesQuery(id: string, enabled: boolean) {
 export function useStartRuntimeInstallMutation(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => {
-      const { data, error } = await client.api.environments({ id }).runtime.install.post();
+    mutationFn: async (action: 'install' | 'reinstall' | 'upgrade') => {
+      const { data, error } = await client.api
+        .environments({ id })
+        .runtime.install.post({ action });
       if (error) throw new ApiError(error.value);
       return data as RuntimeLifecycleStartResponse;
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: environmentKeys.runtimeLifecycle(id) });
       await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+    },
+  });
+}
+
+export function useCancelRuntimeInstallMutation(id: string) {
+  return useMutation({
+    mutationFn: async (runId: string) => {
+      const { data, error } = await client.api
+        .environments({ id })
+        .runtime.runs({ runId })
+        .cancel.post();
+      if (error) throw new ApiError(error.value);
+      return data as { runId: string; cancellationRequested: boolean };
     },
   });
 }

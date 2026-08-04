@@ -117,7 +117,10 @@ export interface WslProvisioner {
    * Leaves `distro` holding a runtime that matches this hub, installing one
    * when it is absent and replacing one left behind by an older release.
    */
-  ensure(distro: string): Promise<void>;
+  ensure(
+    distro: string,
+    options?: { readonly signal?: AbortSignal; readonly force?: boolean }
+  ): Promise<void>;
   /** Removes version dirs and `current`; leaves consent (`runtime.json`) alone. */
   removeSlotBytes(distro: string): Promise<void>;
   /**
@@ -133,31 +136,43 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
   const deps: WslProvisionerDeps = { ...defaultDeps, ...overrides };
 
   return {
-    async ensure(distro: string): Promise<void> {
+    async ensure(distro, options = {}) {
+      const signal = options.signal;
+      if (signal?.aborted) {
+        throw new WslProvisioningError(`Runtime provision for "${distro}" was cancelled.`);
+      }
       const version = deps.version();
-      const slot = parseDistroSlotProbe((await deps.runInDistro(distro, PROBE_SLOT_SCRIPT)).stdout);
+      const slot = parseDistroSlotProbe(
+        (await deps.runInDistro(distro, PROBE_SLOT_SCRIPT, { signal })).stdout
+      );
       const recorded = slot.config?.version === version;
       // Asked at most once: the answer is deterministic, and every question put
       // to a stopped distribution pays for booting it.
       let runs: boolean | null = null;
       const stillRuns = async (): Promise<boolean> =>
-        (runs ??= await runsVersion(deps, distro, version));
+        (runs ??= await runsVersion(deps, distro, version, signal));
 
       // Version equality settles it for a release: a published tag's bytes
       // never change, so a distribution holding that version holds these bytes.
-      if (recorded && !isDevelopmentVersion(version) && (await stillRuns())) return;
+      // Reinstall forces a replace even when the version already matches.
+      if (!options.force && recorded && !isDevelopmentVersion(version) && (await stillRuns()))
+        return;
 
-      const platformId = resolvePlatformId(await probePlatform(deps, distro), distro);
+      const platformId = resolvePlatformId(await probePlatform(deps, distro, signal), distro);
       const source = await loadSource(deps, distro, version, platformId);
+      if (signal?.aborted) {
+        throw new WslProvisioningError(`Runtime provision for "${distro}" was cancelled.`);
+      }
       const digest = `sha256:${sha256(source.bytes)}`;
 
       // A checkout rebuilds under the same `dev` name, so nothing but the
       // digest can tell one build from another — and that is the hole this
       // closes: a rebuilt runtime used to stay on the hub forever, because the
       // distribution's copy also called itself `dev`.
-      if (recorded && slot.config?.digest === digest && (await stillRuns())) return;
+      if (!options.force && recorded && slot.config?.digest === digest && (await stillRuns()))
+        return;
 
-      await install(deps, distro, version, platformId, source);
+      await install(deps, distro, version, platformId, source, signal);
       await recordInstall(deps, distro, version, slot, digest);
       // First provision only: an upgrade replaces bytes, never the answer
       // somebody gave about what a hub may do inside this distribution. A
@@ -222,9 +237,10 @@ async function loadSource(
 async function runsVersion(
   deps: WslProvisionerDeps,
   distro: string,
-  version: string
+  version: string,
+  signal?: AbortSignal
 ): Promise<boolean> {
-  const present = await deps.runInDistro(distro, VERSION_SCRIPT);
+  const present = await deps.runInDistro(distro, VERSION_SCRIPT, { signal });
   return present.exitCode === 0 && present.stdout.trim() === version;
 }
 
@@ -234,16 +250,19 @@ async function install(
   distro: string,
   version: string,
   platformId: LinuxPlatformId,
-  source: { readonly fromArchive: boolean; readonly bytes: Uint8Array }
+  source: { readonly fromArchive: boolean; readonly bytes: Uint8Array },
+  signal?: AbortSignal
 ): Promise<void> {
   try {
     await pushRuntimeBinary({
-      runner: (script, options) => deps.runInDistro(distro, script, options),
+      runner: (script, options) =>
+        deps.runInDistro(distro, script, { ...options, signal: options?.signal ?? signal }),
       slot: 'wsl',
       version,
       bytes: source.bytes,
       fromArchive: source.fromArchive,
       timeoutMs: DISTRO_INSTALL_TIMEOUT_MS,
+      signal,
     });
   } catch (error) {
     if (error instanceof RuntimePushError) {
@@ -457,9 +476,10 @@ function manualInstallHint(
 
 async function probePlatform(
   deps: WslProvisionerDeps,
-  distro: string
+  distro: string,
+  signal?: AbortSignal
 ): Promise<DistroPlatformProbe> {
-  const result = await deps.runInDistro(distro, PLATFORM_PROBE_SCRIPT);
+  const result = await deps.runInDistro(distro, PLATFORM_PROBE_SCRIPT, { signal });
   if (result.exitCode !== 0) {
     throw new WslProvisioningError(
       `Could not start the "${distro}" distribution: ${describe(result)}`
@@ -583,6 +603,11 @@ function runInDistroWithWsl(
   options: RuntimeCommandOptions = {}
 ): Promise<DistroCommandResult> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      resolve({ stdout: '', stderr: '', exitCode: -1, signal: 'SIGKILL' });
+      return;
+    }
+
     const argv = ['-d', distro, '--exec', 'sh', '-c', script];
     if (options.args?.length) argv.push('mangostudio-runtime', ...options.args);
     const timeoutMs = options.timeoutMs ?? DISTRO_COMMAND_TIMEOUT_MS;
@@ -594,6 +619,11 @@ function runInDistroWithWsl(
 
     let stdout = '';
     let stderr = '';
+    const onAbort = () => {
+      child.kill('SIGKILL');
+    };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+
     child.stdout.on('data', (chunk: Buffer) => {
       stdout = appendBounded(stdout, chunk);
     });
@@ -604,6 +634,7 @@ function runInDistroWithWsl(
     // something the user can act on, and a host with WSL support but no
     // `wsl.exe` on the hub's PATH is the one spawn failure worth naming.
     child.on('error', (error: NodeJS.ErrnoException) => {
+      options.signal?.removeEventListener('abort', onAbort);
       reject(
         new WslProvisioningError(
           error.code === 'ENOENT'
@@ -612,15 +643,21 @@ function runInDistroWithWsl(
         )
       );
     });
-    child.on('close', (code, signal) =>
-      resolve({ stdout, stderr, exitCode: code ?? -1, ...(signal ? { signal } : {}) })
-    );
+    child.on('close', (code, signal) => {
+      options.signal?.removeEventListener('abort', onAbort);
+      resolve({ stdout, stderr, exitCode: code ?? -1, ...(signal ? { signal } : {}) });
+    });
 
     // The archive is written before stdin closes, which is the end-of-input tar
     // waits for. An early exit surfaces as EPIPE and is already reported by the
     // exit code, so it must not also become an unhandled error.
     child.stdin.on('error', () => undefined);
-    void writeStdinChunked(child.stdin, options.stdin, options.onStdinProgress).then(
+    void writeStdinChunked(
+      child.stdin,
+      options.stdin,
+      options.onStdinProgress,
+      options.signal
+    ).then(
       () => child.stdin.end(),
       () => child.stdin.end()
     );
@@ -630,12 +667,14 @@ function runInDistroWithWsl(
 async function writeStdinChunked(
   stdin: NodeJS.WritableStream,
   bytes: Uint8Array | undefined,
-  onProgress: ((bytesWritten: number) => void) | undefined
+  onProgress: ((bytesWritten: number) => void) | undefined,
+  signal?: AbortSignal
 ): Promise<void> {
   if (!bytes || bytes.byteLength === 0) return;
 
   let offset = 0;
   while (offset < bytes.byteLength) {
+    if (signal?.aborted) return;
     const end = Math.min(offset + STDIN_CHUNK_BYTES, bytes.byteLength);
     const chunk = bytes.subarray(offset, end);
     const canContinue = stdin.write(chunk);

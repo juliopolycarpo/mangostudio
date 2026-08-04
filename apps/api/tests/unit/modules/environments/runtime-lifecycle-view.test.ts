@@ -88,6 +88,16 @@ describe('buildRuntimeLifecycleView', () => {
     expect(ws.actions).toEqual([]);
     expect(ws.manualCommands?.setup).toContain('setup --slot remote');
 
+    const http = buildRuntimeLifecycleView({
+      transportKind: 'http',
+      health: null,
+      readAtMs: null,
+      connected: false,
+      nowMs: 1,
+      platformHint: 'linux-arm64',
+    });
+    expect(http.manualCommands?.install).toBeTruthy();
+
     const wsl = buildRuntimeLifecycleView({
       transportKind: 'wsl',
       health: null,
@@ -96,6 +106,30 @@ describe('buildRuntimeLifecycleView', () => {
       nowMs: 1,
     });
     expect(wsl.manualCommands).toBeUndefined();
+  });
+
+  it('hides upgrade and reinstall when allow.update is false', () => {
+    const base = health();
+    const view = buildRuntimeLifecycleView({
+      transportKind: 'wsl',
+      health: health({ allow: { ...base.allow, update: false } }),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+    });
+    expect(view.actions).toEqual(['install']);
+  });
+
+  it('hides managed push actions when managedPush is false', () => {
+    const view = buildRuntimeLifecycleView({
+      transportKind: 'ssh',
+      health: health({ slot: 'remote' }),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+      managedPush: false,
+    });
+    expect(view.actions).toEqual(['setup']);
   });
 });
 

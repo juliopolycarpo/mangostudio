@@ -28,6 +28,11 @@ export interface BuildRuntimeLifecycleViewInput {
   readonly slotBytes?: number | null;
   /** Platform id for copyable install URLs (websocket/http). */
   readonly platformHint?: string;
+  /**
+   * When false, omit hub-managed install/reinstall/upgrade (e.g. SSH with a
+   * custom `remoteRuntimePath` the push helper cannot target).
+   */
+  readonly managedPush?: boolean;
 }
 
 export function buildRuntimeLifecycleView(
@@ -37,7 +42,11 @@ export function buildRuntimeLifecycleView(
   const readAt = input.readAtMs;
   const stale = !input.connected || readAt === null || now - readAt >= RUNTIME_HEALTH_FRESHNESS_MS;
 
-  const actions = lifecycleActions(input.transportKind);
+  const actions = filterLifecycleActions(
+    lifecycleActions(input.transportKind),
+    input.health,
+    input.managedPush !== false
+  );
   const manualCommands = manualCommandsFor(input.transportKind, input.platformHint);
 
   return {
@@ -72,6 +81,26 @@ export function lifecycleActions(
       return _exhaustive;
     }
   }
+}
+
+/**
+ * Apply consent and push-target gates on top of the transport action matrix.
+ * `allow.update === false` hides upgrade/reinstall; a non-managed push target
+ * hides install/reinstall/upgrade but keeps setup when the transport allows it.
+ */
+function filterLifecycleActions(
+  actions: readonly RuntimeLifecycleAction[],
+  health: RuntimeHealthReport | null,
+  managedPush: boolean
+): readonly RuntimeLifecycleAction[] {
+  let next = actions;
+  if (!managedPush) {
+    next = next.filter((action) => action === 'setup');
+  }
+  if (health?.allow?.update === false) {
+    next = next.filter((action) => action !== 'upgrade' && action !== 'reinstall');
+  }
+  return next;
 }
 
 /**
@@ -126,9 +155,4 @@ function manualCommandsFor(
     serviceInstall:
       '# Service install lands separately; keep `mangostudio-runtime connect` running for now.',
   };
-}
-
-/** Whether health suggests a runtime binary is already present in the slot. */
-export function healthHasRuntime(health: RuntimeHealthReport | null): boolean {
-  return Boolean(health?.binaryPath || health?.version);
 }

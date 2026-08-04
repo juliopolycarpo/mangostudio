@@ -17,6 +17,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { useInstallStream } from '../hooks/use-install-stream';
 import {
+  useCancelRuntimeInstallMutation,
   useRuntimeLifecycleQuery,
   useRuntimeSetupMutation,
   useStartRuntimeInstallMutation,
@@ -45,6 +46,7 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
     environment.transportKind === 'http';
   const view = useRuntimeLifecycleQuery(environment.id, enabled);
   const install = useStartRuntimeInstallMutation(environment.id);
+  const cancelInstall = useCancelRuntimeInstallMutation(environment.id);
   const setup = useRuntimeSetupMutation(environment.id);
   const [runId, setRunId] = useState<string | null>(null);
   const [consentOpen, setConsentOpen] = useState(false);
@@ -116,7 +118,8 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
         <div className="flex flex-wrap gap-1.5">
           {data.actions
             .filter(
-              (action) => action === 'install' || action === 'reinstall' || action === 'upgrade'
+              (action): action is 'install' | 'reinstall' | 'upgrade' =>
+                action === 'install' || action === 'reinstall' || action === 'upgrade'
             )
             .map((action) => {
               const Icon = ACTION_ICONS[action] ?? Download;
@@ -128,7 +131,7 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
                   onClick={() => {
                     setActionError(null);
                     void install
-                      .mutateAsync()
+                      .mutateAsync(action)
                       .then((result) => setRunId(result.runId))
                       .catch((error) =>
                         setActionError(resolveApiErrorMessage(error, labels.actionFailed))
@@ -186,7 +189,10 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
       {runId ? (
         <InstallConsole
           stream={stream}
-          onCancel={() => setRunId(null)}
+          onCancel={() => {
+            void cancelInstall.mutateAsync(runId).catch(() => undefined);
+            setRunId(null);
+          }}
           onClose={() => {
             setRunId(null);
             void view.refetch();

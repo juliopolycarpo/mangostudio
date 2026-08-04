@@ -26,6 +26,7 @@ import {
 } from '../infrastructure/environment-repository';
 import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
 import { wslProvisioner } from '../infrastructure/wsl-provisioner';
+import { runtimeLifecycleService } from './runtime-lifecycle-service';
 
 export class EnvironmentServiceError extends Error {
   constructor(
@@ -180,6 +181,12 @@ export function createEnvironmentService(
       if (id === LOCAL_ENVIRONMENT_ID) {
         throw new EnvironmentServiceError('The Local environment cannot be changed.', 409);
       }
+      if (runtimeLifecycleService.hasActiveInstall(userId, id)) {
+        throw new EnvironmentServiceError(
+          `Environment "${id}" has a runtime install in progress. Cancel it or wait before editing.`,
+          409
+        );
+      }
       const current = await requireRecord(userId, id);
 
       if (input.token !== undefined && current.transportKind !== 'http') {
@@ -254,6 +261,12 @@ export function createEnvironmentService(
     async remove(userId, id, options = {}) {
       if (id === LOCAL_ENVIRONMENT_ID) {
         throw new EnvironmentServiceError('The Local environment cannot be removed.', 409);
+      }
+      if (runtimeLifecycleService.hasActiveInstall(userId, id)) {
+        throw new EnvironmentServiceError(
+          `Environment "${id}" has a runtime install in progress. Cancel it or wait before deleting.`,
+          409
+        );
       }
       const existing = await repository.find(userId, id);
       if (!existing) {

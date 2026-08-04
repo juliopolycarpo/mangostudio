@@ -260,8 +260,12 @@ describe('OverviewPage', () => {
     expect(
       within(permissions).getByText(en.environments.entities.permissions.profile.readonly)
     ).toBeInTheDocument();
-    expect(within(permissions).getByText('fsWrite')).toBeInTheDocument();
-    expect(within(permissions).getByText('shell')).toBeInTheDocument();
+    expect(
+      within(permissions).getByText(en.environments.entities.permissions.capabilities.fsWrite)
+    ).toBeInTheDocument();
+    expect(
+      within(permissions).getByText(en.environments.entities.permissions.capabilities.shell)
+    ).toBeInTheDocument();
     expect(
       within(permissions).getByText('mangostudio-runtime setup --slot host')
     ).toBeInTheDocument();

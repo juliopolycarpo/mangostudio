@@ -500,7 +500,10 @@ describe('environment entity routes', () => {
     });
 
     const started = await app.handle(
-      new Request('http://localhost/environments/wsl-install/runtime/install', jsonRequest('POST'))
+      new Request(
+        'http://localhost/environments/wsl-install/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
     );
     expect(started.status).toBe(200);
     const { runId } = (await started.json()) as { runId: string };
@@ -518,6 +521,61 @@ describe('environment entity routes', () => {
     expect(ensured).toBe(true);
   });
 
+  it('cancels an in-flight runtime install via the cancel route', async () => {
+    let releaseEnsure: (() => void) | undefined;
+    const blocked = new Promise<void>((resolve) => {
+      releaseEnsure = resolve;
+    });
+    const { app, repository, lifecycle } = (() => {
+      const lifecycle = createRuntimeLifecycleService({
+        provisioner: {
+          ensure: async (_distro, options) => {
+            await new Promise<void>((resolve, reject) => {
+              const onAbort = () => reject(new Error('cancelled'));
+              options?.signal?.addEventListener('abort', onAbort, { once: true });
+              void blocked.then(() => {
+                options?.signal?.removeEventListener('abort', onAbort);
+                resolve();
+              });
+            });
+          },
+          removeSlotBytes: async () => undefined,
+          slotBytes: async () => null,
+        },
+      });
+      const created = createTestApp({}, lifecycle);
+      return { ...created, lifecycle };
+    })();
+    await repository.create({
+      id: 'wsl-cancel',
+      userId: TEST_USER.id,
+      name: 'WSL cancel',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-cancel/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
+    );
+    expect(started.status).toBe(200);
+    const { runId } = (await started.json()) as { runId: string };
+
+    const cancelled = await app.handle(
+      new Request(
+        `http://localhost/environments/wsl-cancel/runtime/runs/${runId}/cancel`,
+        jsonRequest('POST')
+      )
+    );
+    expect(cancelled.status).toBe(200);
+    expect(await cancelled.json()).toEqual({ runId, cancellationRequested: true });
+    expect(lifecycle.hasActiveInstall(TEST_USER.id, 'wsl-cancel')).toBe(false);
+    releaseEnsure?.();
+  });
+
   it('refuses card install for Local and stdio', async () => {
     const { app, repository } = createTestApp();
     await repository.create({
@@ -530,12 +588,18 @@ describe('environment entity routes', () => {
     });
 
     const local = await app.handle(
-      new Request('http://localhost/environments/local/runtime/install', jsonRequest('POST'))
+      new Request(
+        'http://localhost/environments/local/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
     );
     expect(local.status).toBe(409);
 
     const stdio = await app.handle(
-      new Request('http://localhost/environments/stdio-box/runtime/install', jsonRequest('POST'))
+      new Request(
+        'http://localhost/environments/stdio-box/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
     );
     expect(stdio.status).toBe(409);
   });

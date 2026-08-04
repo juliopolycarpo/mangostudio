@@ -3,6 +3,8 @@ import {
   EnvironmentIdSchema,
   EnvironmentListSchema,
   EnvironmentSchema,
+  RuntimeLifecycleCancelResponseSchema,
+  RuntimeLifecycleInstallBodySchema,
   RuntimeLifecycleStartResponseSchema,
   RuntimeLifecycleViewSchema,
   RuntimePairingIssueSchema,
@@ -295,20 +297,39 @@ export function createEnvironmentEntityRoutes(
       )
       .post(
         '/environments/:id/runtime/install',
-        async ({ params, user, set }) => {
+        async ({ params, body, user, set }) => {
           try {
-            return await lifecycle.startInstall(user?.id ?? '', params.id);
+            return await lifecycle.startInstall(user?.id ?? '', params.id, body);
           } catch (error) {
             return environmentError(error, set);
           }
         },
         {
           params: environmentParams,
+          body: RuntimeLifecycleInstallBodySchema,
           response: {
             200: RuntimeLifecycleStartResponseSchema,
             400: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
+          },
+        }
+      )
+      .post(
+        '/environments/:id/runtime/runs/:runId/cancel',
+        async ({ params, user, set }) => {
+          const cancelled = await lifecycle.cancel(params.runId, user?.id ?? '');
+          if (!cancelled) {
+            set.status = 404;
+            return { error: 'Runtime install run not found.', code: ERROR_CODES.NOT_FOUND };
+          }
+          return { runId: params.runId, cancellationRequested: true };
+        },
+        {
+          params: runIdParams,
+          response: {
+            200: RuntimeLifecycleCancelResponseSchema,
+            404: ApiErrorResponseSchema,
           },
         }
       )

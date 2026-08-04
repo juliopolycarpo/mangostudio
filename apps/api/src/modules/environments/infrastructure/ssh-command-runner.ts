@@ -57,6 +57,11 @@ function runOverSsh(
   ];
 
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      resolve({ stdout: '', stderr: '', exitCode: 1, signal: 'SIGKILL' });
+      return;
+    }
+
     const child = spawn('ssh', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -72,10 +77,16 @@ function runOverSsh(
       child.kill('SIGKILL');
     }, timeoutMs);
 
+    const onAbort = () => {
+      child.kill('SIGKILL');
+    };
+    options.signal?.addEventListener('abort', onAbort, { once: true });
+
     const finish = (result: RuntimeCommandResult) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', onAbort);
       resolve(result);
     };
 
@@ -95,6 +106,7 @@ function runOverSsh(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      options.signal?.removeEventListener('abort', onAbort);
       reject(error);
     });
     child.on('close', (code, signal) => {
@@ -111,6 +123,7 @@ function runOverSsh(
       if (!settled) {
         settled = true;
         clearTimeout(timer);
+        options.signal?.removeEventListener('abort', onAbort);
         reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
@@ -146,6 +159,10 @@ async function writeStdin(
       try {
         let offset = 0;
         while (offset < bytes.byteLength) {
+          if (options.signal?.aborted) {
+            fail(new Error('SSH stdin write cancelled.'));
+            return;
+          }
           const end = Math.min(offset + STDIN_CHUNK_BYTES, bytes.byteLength);
           const chunk = bytes.subarray(offset, end);
           offset = end;

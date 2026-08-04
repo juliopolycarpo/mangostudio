@@ -802,6 +802,29 @@ export const RuntimeLifecycleStartResponseSchema = Type.Object({
 export type RuntimeLifecycleStartResponse = Static<typeof RuntimeLifecycleStartResponseSchema>;
 
 /**
+ * Body for POST /environments/:id/runtime/install. Distinguishes install /
+ * reinstall / upgrade so the hub can force a byte replace on reinstall and
+ * refuse upgrade when the machine denied `allow.update`.
+ */
+export const RuntimeLifecycleInstallBodySchema = Type.Object(
+  {
+    action: Type.Union([
+      Type.Literal('install'),
+      Type.Literal('reinstall'),
+      Type.Literal('upgrade'),
+    ]),
+  },
+  { additionalProperties: Type.Never() }
+);
+export type RuntimeLifecycleInstallBody = Static<typeof RuntimeLifecycleInstallBodySchema>;
+
+export const RuntimeLifecycleCancelResponseSchema = Type.Object({
+  runId: Type.String({ minLength: 1 }),
+  cancellationRequested: Type.Boolean(),
+});
+export type RuntimeLifecycleCancelResponse = Static<typeof RuntimeLifecycleCancelResponseSchema>;
+
+/**
  * Consent the hub asks an SSH machine to record via `setup --yes --json`.
  * Profile presets fill `allow`; `custom` requires an explicit allow matrix
  * with every capability key present.
