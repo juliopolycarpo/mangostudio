@@ -89,6 +89,17 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
     shell: Type.Optional(Type.Boolean()),
     update: Type.Optional(Type.Boolean()),
   }),
+  /**
+   * Whether this runtime's frame decoder knows the `hub` field on `hello_ack`.
+   *
+   * Frame envelopes are closed, so a hub that sends `hub` to a runtime built
+   * before the field existed fails that peer's decode and drops the socket.
+   * The manifest is the tolerant surface, and it arrives on `hello` before the
+   * hub answers — so the hub asks here first and stays silent when the answer
+   * is absent. Absent means **false** (an older peer), unlike the `features`
+   * keys, where absent means granted.
+   */
+  acceptsHubIdentity: Type.Optional(Type.Boolean()),
   /** Consent profile that produced `features`; absent on older peers. */
   profile: Type.Optional(
     Type.Union([
@@ -136,11 +147,26 @@ export const RuntimeHelloFrameSchema = Type.Object(
 );
 export type RuntimeHelloFrame = Static<typeof RuntimeHelloFrameSchema>;
 
+/**
+ * Who is speaking for the hub on this connection. Additive-optional: older
+ * hubs omit it, and the runtime's audit log records those as an unidentified
+ * hub rather than refusing the handshake.
+ */
+export const RuntimeHubIdentitySchema = Type.Object(
+  {
+    host: Type.String({ minLength: 1, maxLength: 255 }),
+    user: Type.String({ minLength: 1, maxLength: 255 }),
+  },
+  { additionalProperties: false }
+);
+export type RuntimeHubIdentity = Static<typeof RuntimeHubIdentitySchema>;
+
 export const RuntimeHelloAckFrameSchema = Type.Object(
   {
     type: Type.Literal('hello_ack'),
     protocolVersion: RuntimeProtocolVersionSchema,
     hubVersion: Type.String({ minLength: 1, maxLength: 128 }),
+    hub: Type.Optional(RuntimeHubIdentitySchema),
   },
   { additionalProperties: false }
 );

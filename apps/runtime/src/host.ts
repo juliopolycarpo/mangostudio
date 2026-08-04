@@ -7,6 +7,7 @@ import {
   type RuntimeProtocolVersion,
   type RuntimeRequestFrame,
 } from '@mangostudio/shared/runtime-protocol';
+import type { RuntimeAuditOutcome, RuntimeAuditSink } from './audit-log';
 import { RuntimeServiceError, RuntimeUpdateError } from './errors';
 import type { RuntimeFramePort } from './transport';
 
@@ -39,6 +40,12 @@ export interface RuntimeHostOptions {
   readonly onClose?: () => void;
   /** True between update.begin and update.commit; all other calls are refused. */
   readonly isUpdateActive?: () => boolean;
+  /**
+   * Local receipt of what this connection's hub asked for. Enforcement and
+   * evidence share this dispatch path so they cannot drift apart. Absent means
+   * the slot has auditing off (the `host` default).
+   */
+  readonly audit?: RuntimeAuditSink;
 }
 
 export interface RuntimeEventInput {
@@ -62,6 +69,7 @@ export class RuntimeHost {
   readonly #runtimeVersion: string;
   readonly #onClose?: () => void;
   readonly #isUpdateActive: () => boolean;
+  readonly #audit?: RuntimeAuditSink;
   #closed = false;
   #detach?: () => void;
   #handshake = deferredHandshake();
@@ -76,6 +84,7 @@ export class RuntimeHost {
     this.#protocolVersion = options.protocolVersion ?? RUNTIME_PROTOCOL_VERSION;
     if (options.onClose) this.#onClose = options.onClose;
     this.#isUpdateActive = options.isUpdateActive ?? (() => false);
+    if (options.audit) this.#audit = options.audit;
   }
 
   attach(port: RuntimeFramePort): void {
@@ -86,6 +95,7 @@ export class RuntimeHost {
     this.#handshake.reject(new Error('Runtime host was reattached to a new transport.'));
     this.#handshake = deferredHandshake();
     this.#ready = false;
+    this.#audit?.setHub(null);
     this.#detach = port.onFrame((frame) => this.#receive(frame));
   }
 
@@ -167,6 +177,10 @@ export class RuntimeHost {
     // `onClose` tears down must only be released once.
     if (this.#closed) return;
     this.#closed = true;
+    // Flush only — the sink is process-scoped and shared across reconnect /
+    // supersede hosts. Closing it here would silence audit for every later
+    // session. The CLI owns `audit.close()` at process end.
+    void this.#audit?.flush();
     this.#onClose?.();
   }
 
@@ -184,6 +198,7 @@ export class RuntimeHost {
           this.#handshake.reject(error instanceof Error ? error : new Error(String(error)));
           break;
         }
+        this.#audit?.setHub(frame.hub ?? null);
         this.#ready = true;
         this.#handshake.resolve();
         break;
@@ -205,54 +220,60 @@ export class RuntimeHost {
   }
 
   async #handleRequest(frame: RuntimeRequestFrame): Promise<void> {
+    const started = performance.now();
+
     if (!this.#ready) {
-      this.#sendError(frame.id, {
+      const err: RuntimeErrorPayload = {
         code: 'RUNTIME_UNAVAILABLE',
         message: 'Runtime handshake has not completed.',
-      });
+      };
+      this.#sendError(frame.id, err);
+      this.#recordAudit(frame, 'error', started, err);
       return;
     }
 
     const handler = this.#handlers.get(frame.method);
     if (!handler) {
-      this.#sendError(frame.id, {
+      const err: RuntimeErrorPayload = {
         code: 'METHOD_UNSUPPORTED',
         message: `Runtime method "${frame.method}" is not supported by this host.`,
         details: { method: frame.method },
-      });
+      };
+      this.#sendError(frame.id, err);
+      this.#recordAudit(frame, 'error', started, err);
       return;
     }
     if (this.#activeRequests.has(frame.id)) {
-      this.#sendError(frame.id, {
+      const err: RuntimeErrorPayload = {
         code: 'INTERNAL',
         message: `Runtime request id "${frame.id}" is already active.`,
-      });
+      };
+      this.#sendError(frame.id, err);
+      this.#recordAudit(frame, 'error', started, err);
       return;
     }
 
     const updateMethod = frame.method.startsWith('runtime.update.');
     if (updateMethod && this.#activeRequests.size > 0) {
-      this.#sendError(
-        frame.id,
-        errorPayloadFor(
-          new RuntimeUpdateError('Runtime update refused while another call is in flight.', {
-            reason: 'call_in_flight',
-          }),
-          new AbortController().signal
-        )
+      const err = errorPayloadFor(
+        new RuntimeUpdateError('Runtime update refused while another call is in flight.', {
+          reason: 'call_in_flight',
+        }),
+        new AbortController().signal
       );
+      this.#sendError(frame.id, err);
+      this.#recordAudit(frame, 'error', started, err);
       return;
     }
     if (!updateMethod && (this.#activeUpdateRequests.size > 0 || this.#isUpdateActive())) {
-      this.#sendError(
-        frame.id,
-        errorPayloadFor(
-          new RuntimeUpdateError('Runtime call refused while a binary update is in progress.', {
-            reason: 'update_in_progress',
-          }),
-          new AbortController().signal
-        )
+      const err = errorPayloadFor(
+        new RuntimeUpdateError('Runtime call refused while a binary update is in progress.', {
+          reason: 'update_in_progress',
+        }),
+        new AbortController().signal
       );
+      this.#sendError(frame.id, err);
+      this.#recordAudit(frame, 'error', started, err);
       return;
     }
 
@@ -265,12 +286,37 @@ export class RuntimeHost {
       // past the frame-size limit, say — becomes an error response for the
       // caller instead of a rejection nobody awaits.
       this.#send({ type: 'res', id: frame.id, ok: result });
+      this.#recordAudit(frame, 'ok', started);
     } catch (error) {
-      this.#sendError(frame.id, errorPayloadFor(error, controller.signal));
+      const err = errorPayloadFor(error, controller.signal);
+      this.#sendError(frame.id, err);
+      this.#recordAudit(frame, err.code === 'RUNTIME_DENIED' ? 'denied' : 'error', started, err);
     } finally {
       this.#activeRequests.delete(frame.id);
       this.#activeUpdateRequests.delete(frame.id);
     }
+  }
+
+  #recordAudit(
+    frame: RuntimeRequestFrame,
+    outcome: RuntimeAuditOutcome,
+    started: number,
+    err?: RuntimeErrorPayload
+  ): void {
+    const capability =
+      err?.details && typeof err.details === 'object' && !Array.isArray(err.details)
+        ? typeof (err.details as { capability?: unknown }).capability === 'string'
+          ? (err.details as { capability: string }).capability
+          : undefined
+        : undefined;
+    this.#audit?.record({
+      method: frame.method,
+      outcome,
+      durationMs: performance.now() - started,
+      params: frame.params,
+      ...(capability ? { capability } : {}),
+      ...(err?.code ? { code: err.code } : {}),
+    });
   }
 
   #sendError(id: string, err: RuntimeErrorPayload): void {

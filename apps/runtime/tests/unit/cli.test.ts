@@ -153,6 +153,24 @@ describe('parseRuntimeCliArgs', () => {
       command: 'setup',
       args: { slot: 'remote', profile: 'readonly', yes: true, json: false },
     });
+    expect(parseRuntimeCliArgs(['setup', '--audit', 'on', '--yes'])).toEqual({
+      command: 'setup',
+      args: { audit: true, yes: true, json: false },
+    });
+  });
+
+  it('parses audit filters', () => {
+    expect(parseRuntimeCliArgs(['audit', '--denied', '--json'])).toEqual({
+      command: 'audit',
+      args: { denied: true, json: true },
+    });
+    expect(parseRuntimeCliArgs(['audit', '--since', '24h', '--slot', 'remote'])).toMatchObject({
+      command: 'audit',
+      args: { denied: false, json: false, slot: 'remote' },
+    });
+    expect(parseRuntimeCliArgs(['audit', '--since', 'nope'])).toMatchObject({
+      command: 'invalid',
+    });
   });
 
   it('says why a slot cannot be acted on, and what a slot is', () => {

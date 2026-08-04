@@ -19,8 +19,11 @@ import {
   type RuntimePlatformId,
   type RuntimeSlot,
   resolveRuntimePlatformId,
+  runtimeSlotAuditLogPath,
   SHELL_TRUST_NOTICE,
 } from '@mangostudio/shared/runtime-home';
+import { readRuntimeAuditError } from './audit-log';
+import { loadRuntimeConfig } from './config';
 import { createLocalRuntimeManifest } from './manifest';
 import {
   readRuntimeSlotState,
@@ -52,6 +55,11 @@ export async function collectRuntimeHealth(
   const allow = denyEverything ? RUNTIME_CONSENT_PRESETS.none : config.allow;
   const manifest = createLocalRuntimeManifest(allow);
   const platformId = resolveRunningRuntimePlatformId(manifest.platform, manifest.arch);
+  const auditPath = runtimeSlotAuditLogPath(slot, {
+    mangoHome: loadRuntimeConfig(env).mangoHome,
+    platform: process.platform,
+  });
+  const auditError = config.audit.enabled ? await readRuntimeAuditError(auditPath) : null;
 
   return {
     schemaVersion: config.schemaVersion,
@@ -75,6 +83,8 @@ export async function collectRuntimeHealth(
     shells: [...manifest.shells],
     git: manifest.git,
     lastError: error,
+    audit: config.audit,
+    ...(auditError ? { auditError } : {}),
   };
 }
 
@@ -189,6 +199,35 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
       severity: 'warn',
       title: 'Slot',
       detail: `config records version ${report.version} but no binary path is set`,
+    });
+  }
+
+  if (report.audit === undefined) {
+    findings.push({
+      severity: 'ok',
+      title: 'Audit',
+      detail: 'not reported by this runtime (older binary)',
+    });
+  } else if (report.audit.enabled) {
+    if (report.auditError) {
+      findings.push({
+        severity: 'warn',
+        title: 'Audit',
+        detail: `enabled, but the last write failed: ${report.auditError}`,
+        fix: `mangostudio-runtime setup --slot ${report.slot} --audit off`,
+      });
+    } else {
+      findings.push({
+        severity: 'ok',
+        title: 'Audit',
+        detail: "recording protocol calls to this slot's audit.log",
+      });
+    }
+  } else {
+    findings.push({
+      severity: 'ok',
+      title: 'Audit',
+      detail: 'off — run setup --audit on to record what a hub asks this machine to do',
     });
   }
 

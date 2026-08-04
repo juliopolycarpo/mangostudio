@@ -26,6 +26,7 @@ import {
 import { loadRuntimeConfig } from './config';
 import { collectRuntimeHealth, type RuntimeHealthOptions } from './health';
 import {
+  readRuntimeSlotState,
   resolveRuntimeBinaryPath,
   resolveRuntimeSlot,
   resolveRuntimeSource,
@@ -47,6 +48,8 @@ export interface RuntimeSetupArgs {
    * live, so a runtime on a PATH needs to be able to say so.
    */
   readonly slot?: RuntimeSlot;
+  /** Explicit audit-log toggle; absent leaves the slot default (or prior value). */
+  readonly audit?: boolean;
   readonly yes: boolean;
   readonly json: boolean;
 }
@@ -108,6 +111,47 @@ export async function runRuntimeSetup(
 ): Promise<number> {
   const env = deps.env;
   const slot = args.slot ?? resolveRuntimeSlot(env);
+
+  // Audit-only: flip the receipt without re-answering consent, so doctor can
+  // print `setup --audit off` as a real fix and an owner can enable it later.
+  if (args.audit !== undefined && args.profile === undefined && args.allow === undefined) {
+    const { config, stored, error } = await readRuntimeSlotState(slot, env);
+    if (error) {
+      return fail(deps, args.json, error);
+    }
+    if (config.setup.state === 'pending' && !stored) {
+      return fail(
+        deps,
+        args.json,
+        'Nothing to answer with: pass --profile full|readonly|none before toggling audit, or set MANGOSTUDIO_RUNTIME_SETUP.'
+      );
+    }
+    if (!args.yes && !args.json && deps.ask === undefined) {
+      return fail(
+        deps,
+        args.json,
+        'Pass --yes with --audit on|off to change the audit log without re-answering consent.'
+      );
+    }
+    await writeRuntimeSlotConfig(
+      slot,
+      {
+        audit: { enabled: args.audit },
+        source: resolveRuntimeSource(env),
+        version: deps.runtimeVersion,
+      },
+      env
+    );
+    const report = await collectRuntimeHealth({ ...deps, slot });
+    if (args.json) {
+      deps.write(JSON.stringify(report));
+      return 0;
+    }
+    deps.write(`Audit ${report.audit?.enabled ? 'on' : 'off'} for the ${slot} runtime.`);
+    deps.write(`  ${runtimeSlotDir(slot, env)}`);
+    return 0;
+  }
+
   const fromEnvironment = loadRuntimeConfig(env).setupProfile;
   const environmentProfile =
     fromEnvironment !== null && isRuntimeSetupProfile(fromEnvironment) ? fromEnvironment : null;
@@ -151,6 +195,8 @@ export async function runRuntimeSetup(
   const by: RuntimeSetupAuthority =
     args.profile === undefined && environmentProfile !== null ? 'env' : 'cli';
   const binaryPath = resolveRuntimeBinaryPath(env);
+  const auditEnabled =
+    args.audit ?? (interactive ? await promptForAudit(deps, slot !== 'host') : undefined);
 
   // A merge, so answering the consent question leaves the hub URL a `connect`
   // remembered and the digest an installer recorded exactly where they were.
@@ -163,6 +209,7 @@ export async function runRuntimeSetup(
       source: resolveRuntimeSource(env),
       version: deps.runtimeVersion,
       ...(binaryPath ? { binaryPath } : {}),
+      ...(auditEnabled !== undefined ? { audit: { enabled: auditEnabled } } : {}),
     },
     env
   );
@@ -175,6 +222,7 @@ export async function runRuntimeSetup(
 
   deps.write(`Recorded ${report.profile} consent for the ${slot} runtime.`);
   deps.write(`  ${runtimeSlotDir(slot, env)}`);
+  deps.write(`  audit ${report.audit?.enabled ? 'on' : 'off'}`);
   if (allow.shell) deps.write(`  ${SHELL_TRUST_NOTICE}`);
   return 0;
 }
@@ -232,6 +280,13 @@ async function promptForProfile(
  */
 async function promptForUpdates(deps: RuntimeSetupDeps, fallback: boolean): Promise<boolean> {
   const question = `Let the hub update this runtime when it offers a new version? [${fallback ? 'Y/n' : 'y/N'}]: `;
+  const answer = (await deps.ask?.(question))?.trim().toLowerCase();
+  if (!answer) return fallback;
+  return parseBoolean(answer) ?? answer.startsWith('y');
+}
+
+async function promptForAudit(deps: RuntimeSetupDeps, fallback: boolean): Promise<boolean> {
+  const question = `Record what the hub asks this machine to do in audit.log? [${fallback ? 'Y/n' : 'y/N'}]: `;
   const answer = (await deps.ask?.(question))?.trim().toLowerCase();
   if (!answer) return fallback;
   return parseBoolean(answer) ?? answer.startsWith('y');

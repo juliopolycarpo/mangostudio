@@ -163,6 +163,18 @@ export const RuntimeInstallerSchema = Type.Object({
 });
 export type RuntimeInstaller = Static<typeof RuntimeInstallerSchema>;
 
+/**
+ * Whether this slot records protocol calls to `audit.log`.
+ *
+ * Absent on disk takes the slot default: off for `host` (your machine, your
+ * hub — pure noise), on for `wsl` and `remote` (every slot another machine's
+ * hub reaches into). The log itself is local and never exposed on the wire.
+ */
+export const RuntimeAuditConfigSchema = Type.Object({
+  enabled: Type.Boolean(),
+});
+export type RuntimeAuditConfig = Static<typeof RuntimeAuditConfigSchema>;
+
 /** `sha256:<64 hex>` of the bytes an installer used. See `digest` below. */
 export const RuntimeBinaryDigestSchema = Type.String({
   pattern: '^sha256:[a-f0-9]{64}$',
@@ -210,6 +222,8 @@ export const RuntimeSlotConfigSchema = Type.Object({
    * `credentials.json`.
    */
   hubUrl: Type.Optional(Type.String({ maxLength: 2_048 })),
+  /** Whether protocol calls are appended to this slot's `audit.log`. */
+  audit: Type.Optional(RuntimeAuditConfigSchema),
 });
 export type RuntimeSlotConfig = Static<typeof RuntimeSlotConfigSchema>;
 
@@ -229,6 +243,7 @@ export interface ResolvedRuntimeSlotConfig {
   readonly setup: RuntimeSetupRecord;
   readonly installedBy: RuntimeInstaller | null;
   readonly hubUrl: string | null;
+  readonly audit: RuntimeAuditConfig;
 }
 
 /**
@@ -265,5 +280,16 @@ export const RuntimeHealthReportSchema = Type.Object({
    * absent would turn a corrupt consent file into an open one.
    */
   lastError: Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()]),
+  /**
+   * Whether this slot appends protocol calls to `audit.log`. Optional so a
+   * hub on protocol 1.0 can still accept a health payload from a pre-audit
+   * runtime peer — required would 500 the lifecycle view on mixed releases.
+   */
+  audit: Type.Optional(RuntimeAuditConfigSchema),
+  /**
+   * Set when the audit log was enabled but a recent write failed (full disk,
+   * permissions). The runtime keeps serving; the receipt is what degraded.
+   */
+  auditError: Type.Optional(Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()])),
 });
 export type RuntimeHealthReport = Static<typeof RuntimeHealthReportSchema>;

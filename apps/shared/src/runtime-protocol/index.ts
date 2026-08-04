@@ -39,6 +39,8 @@ export {
   RuntimeHelloAckFrameSchema,
   type RuntimeHelloFrame,
   RuntimeHelloFrameSchema,
+  type RuntimeHubIdentity,
+  RuntimeHubIdentitySchema,
   type RuntimePingFrame,
   RuntimePingFrameSchema,
   type RuntimePongFrame,

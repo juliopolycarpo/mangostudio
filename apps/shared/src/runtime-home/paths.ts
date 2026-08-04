@@ -28,6 +28,12 @@ export const RUNTIME_CURRENT_LINK_NAME = 'current';
 export const RUNTIME_CONFIG_FILE_NAME = 'runtime.json';
 export const RUNTIME_CREDENTIALS_FILE_NAME = 'credentials.json';
 /**
+ * Local receipt of what a hub asked this slot to do. Never exposed over the
+ * protocol — a hub that could read or truncate its own audit log would not
+ * have one.
+ */
+export const RUNTIME_AUDIT_LOG_FILE_NAME = 'audit.log';
+/**
  * The lock every writer of `runtime.json` takes, named here because a second
  * workspace depends on it: a hub provisioning a WSL distribution writes that
  * file from outside the runtime, and has to take the same lock the runtime's
@@ -106,6 +112,10 @@ export function runtimeSlotConfigPath(slot: RuntimeSlot, options: RuntimeHomeOpt
 
 export function runtimeSlotCredentialsPath(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
   return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_CREDENTIALS_FILE_NAME);
+}
+
+export function runtimeSlotAuditLogPath(slot: RuntimeSlot, options: RuntimeHomeOptions): string {
+  return joinFor(options.platform, runtimeSlotDir(slot, options), RUNTIME_AUDIT_LOG_FILE_NAME);
 }
 
 /** The link a launcher points at, which survives every upgrade. */

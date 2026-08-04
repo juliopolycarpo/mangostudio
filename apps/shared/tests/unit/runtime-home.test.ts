@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
+  defaultAuditEnabledForSlot,
   defaultConsentForSlot,
   deniedCapabilities,
   mangoHomeDir,
   profileForAllow,
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
+  RuntimeHealthReportSchema,
   RuntimeSlotConfigSchema,
   resolveRuntimeSlotConfig,
   runtimeBinaryName,
+  runtimeSlotAuditLogPath,
   runtimeSlotConfigPath,
   runtimeSlotCurrentBinaryPath,
   runtimeSlotDir,
@@ -25,6 +28,9 @@ describe('runtime home paths', () => {
     expect(runtimeSlotDir('wsl', POSIX_HOME)).toBe('/home/j/.mango/runtime/wsl');
     expect(runtimeSlotConfigPath('remote', POSIX_HOME)).toBe(
       '/home/j/.mango/runtime/remote/runtime.json'
+    );
+    expect(runtimeSlotAuditLogPath('remote', POSIX_HOME)).toBe(
+      '/home/j/.mango/runtime/remote/audit.log'
     );
     expect(runtimeSlotVersionBinaryPath('remote', '0.1.1', POSIX_HOME)).toBe(
       '/home/j/.mango/runtime/remote/0.1.1/mangostudio-runtime'
@@ -123,6 +129,28 @@ describe('resolveRuntimeSlotConfig', () => {
     }
   });
 
+  it('defaults audit off for host and on for wsl and remote', () => {
+    expect(defaultAuditEnabledForSlot('host')).toBe(false);
+    expect(defaultAuditEnabledForSlot('wsl')).toBe(true);
+    expect(defaultAuditEnabledForSlot('remote')).toBe(true);
+    expect(resolveRuntimeSlotConfig('host', null, { source: 'bundled' }).audit.enabled).toBe(false);
+    expect(resolveRuntimeSlotConfig('wsl', null, { source: 'provisioned' }).audit.enabled).toBe(
+      true
+    );
+    expect(resolveRuntimeSlotConfig('remote', null, { source: 'provisioned' }).audit.enabled).toBe(
+      true
+    );
+  });
+
+  it('keeps an explicit audit toggle from the stored file', () => {
+    const resolved = resolveRuntimeSlotConfig(
+      'host',
+      { schemaVersion: 1, slot: 'host', audit: { enabled: true } },
+      { source: 'bundled' }
+    );
+    expect(resolved.audit.enabled).toBe(true);
+  });
+
   it("treats an absent config as pending for a slot somebody else's hub installed", () => {
     const resolved = resolveRuntimeSlotConfig('remote', null, { source: 'provisioned' });
     expect(resolved.profile).toBe('none');
@@ -202,5 +230,36 @@ describe('RuntimeSlotConfigSchema', () => {
     expect(
       Value.Check(RuntimeSlotConfigSchema, { schemaVersion: 1, slot: 'host', digest: 'sha1:abc' })
     ).toBe(false);
+  });
+});
+
+describe('RuntimeHealthReportSchema', () => {
+  const baseReport = {
+    schemaVersion: 1,
+    slot: 'host',
+    source: 'source-checkout',
+    runtimeVersion: '0.1.0',
+    version: null,
+    binaryPath: null,
+    digest: null,
+    profile: 'none',
+    allow: RUNTIME_CONSENT_PRESETS.none,
+    setup: { state: 'pending' },
+    platform: 'linux',
+    arch: 'x64',
+    homeDir: '/home/j',
+    shells: [],
+    git: { available: false },
+    lastError: null,
+  } as const;
+
+  it('accepts a report that omits audit so a pre-audit peer stays valid', () => {
+    expect(Value.Check(RuntimeHealthReportSchema, baseReport)).toBe(true);
+  });
+
+  it('still accepts a report that includes audit', () => {
+    expect(
+      Value.Check(RuntimeHealthReportSchema, { ...baseReport, audit: { enabled: true } })
+    ).toBe(true);
   });
 });

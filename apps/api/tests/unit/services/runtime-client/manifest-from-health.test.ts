@@ -18,6 +18,7 @@ const baseReport = {
   shells: ['bash'],
   git: { available: true, version: '2.45.0' },
   lastError: null,
+  audit: { enabled: true },
 } satisfies Omit<RuntimeHealthReport, 'profile' | 'allow'>;
 
 describe('capabilityManifestFromHealth', () => {

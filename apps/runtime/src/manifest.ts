@@ -52,6 +52,9 @@ export function createLocalRuntimeManifest(
       update: allow.update,
     },
     profile: profileForAllow(allow),
+    // This build decodes `hello_ack.hub`. Frame envelopes are closed, so the
+    // hub withholds that field until a runtime says it will not choke on it.
+    acceptsHubIdentity: true,
     // Sent beside the intersection so a reader can tell the two apart: `git`
     // false in `features` with `allow.git` true is a machine without git, not
     // an owner who refused it.

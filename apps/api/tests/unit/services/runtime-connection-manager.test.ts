@@ -54,6 +54,7 @@ const HEALTH_REPORT: RuntimeHealthReport = {
   shells: ['bash'],
   git: { available: true, version: '2.51.0' },
   lastError: null,
+  audit: { enabled: false },
 };
 
 function definition(transportKind: EnvironmentTransportKind = 'stdio', config: unknown = {}) {
