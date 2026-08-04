@@ -7,7 +7,16 @@
  * degrades the log, never the request path.
  */
 
-import { appendFile, mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { type RuntimeSlot, runtimeSlotAuditLogPath } from '@mangostudio/shared/runtime-home';
 import type { RuntimeHubIdentity } from '@mangostudio/shared/runtime-protocol';
@@ -331,17 +340,11 @@ export async function rotateIfNeeded(
       throw error;
     }
   }
-  // After shifting, the active path should be gone; ensure a clean empty file
-  // so the next append starts the new generation.
-  try {
-    await stat(path);
-  } catch (error) {
-    if (isNotFound(error)) {
-      await writeFile(path, '', 'utf8');
-    } else {
-      throw error;
-    }
-  }
+  // After shifting, the active path should be gone. Open with append mode so
+  // create-if-missing is a single syscall — no check-then-write race on the
+  // path, and no truncate if another writer already recreated it.
+  const handle = await open(path, 'a');
+  await handle.close();
 }
 
 function isNotFound(error: unknown): boolean {
