@@ -10,12 +10,12 @@ import { dirname, join } from 'node:path';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
+import { resolveRuntimeRelease } from './runtime-release-resolution';
 import {
   findReleaseChecksum,
   localRuntimeBuildPath,
   releaseArchiveName,
   releaseAssetUrl,
-  releaseRuntimeBinaryName,
 } from './wsl-runtime-release';
 
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
@@ -78,12 +78,19 @@ export async function loadRuntimeReleaseBytes(
     return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}` };
   }
 
-  const deps: SafeFetchDeps = { fetch: overrides.fetch ?? globalThis.fetch };
+  const deps: SafeFetchDeps = {
+    fetch: overrides.fetch ?? globalThis.fetch,
+    ...(overrides.resolveHostname ? { resolveHostname: overrides.resolveHostname } : {}),
+  };
+  const release = resolveRuntimeRelease(version, platformId);
   try {
     const bytes = await loadAsset(
       deps,
-      version,
-      releaseRuntimeBinaryName(version, platformId),
+      {
+        cacheVersion: version,
+        tagVersion: release.tagVersion,
+        assetName: release.runtimeAssetName,
+      },
       cacheDir,
       readBytes,
       writeCache
@@ -95,8 +102,11 @@ export async function loadRuntimeReleaseBytes(
 
   const bytes = await loadAsset(
     deps,
-    version,
-    releaseArchiveName(version, platformId),
+    {
+      cacheVersion: version,
+      tagVersion: release.tagVersion,
+      assetName: releaseArchiveName(release.assetVersion, platformId),
+    },
     cacheDir,
     readBytes,
     writeCache
@@ -108,18 +118,22 @@ class RuntimeAssetMissingError extends RuntimeAssetLoadError {}
 
 async function loadAsset(
   deps: SafeFetchDeps,
-  version: string,
-  assetName: string,
+  identity: {
+    readonly cacheVersion: string;
+    readonly tagVersion: string;
+    readonly assetName: string;
+  },
   cacheDir: (version: string) => string,
   readBytes: (path: string) => Promise<Uint8Array | null>,
   writeCache: (path: string, bytes: Uint8Array) => Promise<void>
 ): Promise<Uint8Array> {
-  const cachePath = join(cacheDir(version), assetName);
-  const expected = await fetchExpectedChecksum(deps, version, assetName);
+  const { assetName, cacheVersion, tagVersion } = identity;
+  const cachePath = join(cacheDir(cacheVersion), assetName);
+  const expected = await fetchExpectedChecksum(deps, tagVersion, assetName);
   const cached = await readBytes(cachePath);
   if (cached && sha256(cached) === expected) return cached;
 
-  const bytes = await download(deps, releaseAssetUrl(version, assetName), MAX_ARCHIVE_BYTES);
+  const bytes = await download(deps, releaseAssetUrl(tagVersion, assetName), MAX_ARCHIVE_BYTES);
   const actual = sha256(bytes);
   if (actual !== expected) {
     throw new RuntimeAssetLoadError(
@@ -127,7 +141,7 @@ async function loadAsset(
     );
   }
   await writeCache(cachePath, bytes).catch(() => undefined);
-  await pruneRuntimeCache(cacheDir(version), version).catch(() => undefined);
+  await pruneRuntimeCache(cacheDir(cacheVersion), cacheVersion).catch(() => undefined);
   return bytes;
 }
 

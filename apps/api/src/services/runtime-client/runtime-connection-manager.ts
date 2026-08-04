@@ -106,6 +106,8 @@ interface RuntimeConnectionEntry {
    * `Infinity` latches the environment until someone connects it explicitly.
    */
   retryAfterMs: number;
+  /** The next transport loss is an intentional binary handoff, not a crash. */
+  expectedUpdateDisconnect?: boolean;
 }
 
 /**
@@ -439,6 +441,41 @@ export class RuntimeConnectionManager {
     this.#publish(userId);
   }
 
+  /** Releases a connection only when it is still the one the caller observed. */
+  disconnectIfCurrent(
+    userId: string,
+    environmentId: string,
+    expectedClient: RuntimeClient
+  ): boolean {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (!entry?.connection || entry.connection.client !== expectedClient) return false;
+
+    this.#release(entry);
+    this.#publish(userId);
+    return true;
+  }
+
+  /**
+   * Marks the coming transport loss as a binary handoff rather than a crash,
+   * and says so on the status so the card reads "updating" through the gap.
+   */
+  expectUpdateDisconnect(userId: string, environmentId: string): void {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (!entry) return;
+    entry.expectedUpdateDisconnect = true;
+    entry.status = { ...entry.status, updating: true };
+    this.#publish(userId);
+  }
+
+  clearExpectedUpdateDisconnect(userId: string, environmentId: string): void {
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (!entry) return;
+    entry.expectedUpdateDisconnect = false;
+    const { updating: _dropped, ...status } = entry.status;
+    entry.status = status;
+    this.#publish(userId);
+  }
+
   /**
    * Releases every live connection and resolves once their processes are gone.
    * Runtime children are the hub's responsibility, so shutdown waits for them
@@ -462,6 +499,7 @@ export class RuntimeConnectionManager {
     entry.connectedAtMs = undefined;
     entry.failureCount = 0;
     entry.retryAfterMs = 0;
+    entry.expectedUpdateDisconnect = false;
     entry.status = { state: 'disconnected', ...this.#cachedPeer(entry) };
     return closed;
   }
@@ -545,6 +583,22 @@ export class RuntimeConnectionManager {
     // The child is already gone; nothing waits on the kill that confirms it.
     void entry.connection.close();
     entry.connection = undefined;
+    if (entry.expectedUpdateDisconnect) {
+      entry.expectedUpdateDisconnect = false;
+      entry.connectedAtMs = undefined;
+      entry.failureCount = 0;
+      entry.retryAfterMs = 0;
+      // `updating` outlives the flag on purpose: the flag exists to classify
+      // this one loss, the field to keep the card honest across the whole gap
+      // until the restarted runtime hands over a fresh connected status.
+      entry.status = {
+        state: 'disconnected',
+        updating: true,
+        ...this.#cachedPeer(entry),
+      };
+      this.#publish(userId);
+      return;
+    }
     // A connection that ran for a while and then died starts a fresh count; one
     // that died on arrival continues the old one toward the cap.
     const healthy = Date.now() - (entry.connectedAtMs ?? 0) >= HEALTHY_CONNECTION_MS;

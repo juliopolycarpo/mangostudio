@@ -9,6 +9,10 @@ import { createInstallService } from './services/install';
 import { libraryService } from './services/library/service';
 import { createMcpService } from './services/mcp/service';
 import { probingService } from './services/probing/service';
+import {
+  createRuntimeUpdateService,
+  type RuntimeUpdateServiceOptions,
+} from './services/runtime-update';
 import { runShellCommand } from './services/shell';
 import { captureFileSnapshot, hashFileAtPath, revertRuntimeSnapshots } from './services/snapshot';
 import {
@@ -27,10 +31,12 @@ export interface RuntimeMethodRegistryOptions {
    * dialled-in peer reports the same consent the CLI's `health --json` would.
    */
   readonly slot?: RuntimeSlot;
+  readonly update?: Omit<RuntimeUpdateServiceOptions, 'slot'>;
 }
 
 export interface RuntimeMethodRegistry {
   readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
+  readonly updateActive: () => boolean;
   /** Releases everything the handlers hold open — MCP sessions today. */
   close(): Promise<void>;
 }
@@ -41,6 +47,10 @@ export function createRuntimeMethodHandlers(
 ): RuntimeMethodRegistry {
   const mcp = createMcpService({ runtimeVersion: options.runtimeVersion, emit: options.emit });
   const install = createInstallService({ emit: options.emit });
+  const update = createRuntimeUpdateService({
+    slot: options.slot ?? 'host',
+    ...options.update,
+  });
 
   return {
     handlers: new Map<string, RuntimeMethodHandler>([
@@ -94,11 +104,17 @@ export function createRuntimeMethodHandlers(
         collectRuntimeHealth({
           runtimeVersion: options.runtimeVersion,
           ...(options.slot ? { slot: options.slot } : {}),
+          ...(options.update?.env ? { env: options.update.env } : {}),
         })
       ),
+      handler('runtime.update.begin', (params) => update.begin(params)),
+      handler('runtime.update.chunk', (params) => update.chunk(params)),
+      handler('runtime.update.commit', (params) => update.commit(params)),
     ]),
+    updateActive: () => update.active,
     close: async () => {
       install.close();
+      await update.close();
       await mcp.close();
     },
   };

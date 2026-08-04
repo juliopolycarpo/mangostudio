@@ -8,7 +8,12 @@ import {
   SHELL_TRUST_NOTICE,
 } from '@mangostudio/shared/runtime-home';
 import { parseRuntimeCliArgs } from '../../src/cli';
-import { collectRuntimeHealth, diagnoseRuntimeHealth, worstSeverity } from '../../src/health';
+import {
+  collectRuntimeHealth,
+  diagnoseRuntimeHealth,
+  resolveRunningRuntimePlatformId,
+  worstSeverity,
+} from '../../src/health';
 import { readRuntimeSlotConfig, writeRuntimeSlotConfig } from '../../src/runtime-home';
 import { parseAllowOverrides, type RuntimeSetupArgs, runRuntimeSetup } from '../../src/setup';
 
@@ -231,6 +236,14 @@ describe('runtime setup', () => {
 });
 
 describe('runtime health', () => {
+  it('reports the exact glibc or musl release asset identity', () => {
+    expect(resolveRunningRuntimePlatformId('linux', 'x64', '2.39')).toBe('linux-x64');
+    expect(resolveRunningRuntimePlatformId('linux', 'x64', null)).toBe('linux-x64-musl');
+    expect(resolveRunningRuntimePlatformId('linux', 'arm64', null)).toBe('linux-arm64-musl');
+    expect(resolveRunningRuntimePlatformId('darwin', 'arm64', null)).toBe('darwin-arm64');
+    expect(resolveRunningRuntimePlatformId('win32', 'x64', null)).toBeNull();
+  });
+
   it('reports the slot, its consent, and where the bytes are', async () => {
     const env = await isolatedEnv();
     await setup({ profile: 'readonly', yes: true }, { env });
@@ -240,6 +253,7 @@ describe('runtime health', () => {
     expect(report.profile).toBe('readonly');
     expect(report.setup.state).toBe('configured');
     expect(report.runtimeVersion).toBe(RUNTIME_VERSION);
+    expect(report.platformId).toMatch(/^(linux|darwin)-(x64|arm64)(-musl)?$/);
     expect(report.lastError).toBeNull();
     // The test process is Bun running a workspace entry, so there is no binary.
     expect(report.binaryPath).toBeNull();

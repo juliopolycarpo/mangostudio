@@ -127,13 +127,20 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           CARGO_VERSION: ${{ inputs.cargo_version }}
+        # Two globs, not one: `mangostudio-runtime-<version>-*` does not match
+        # `mangostudio-<version>-*`, so a single pattern silently drops every raw
+        # runtime binary. The hub streams that asset to a paired runtime during a
+        # live self-update and refuses to unpack an archive for it, so a canary
+        # release without it can never serve an upgrade.
         run: |
           mkdir -p github-canary-assets
-          for asset in release-assets/mangostudio-"${VERSION}"-*; do
+          for asset in release-assets/mangostudio-"${VERSION}"-* \
+                       release-assets/mangostudio-runtime-"${VERSION}"-*; do
+            [ -e "$asset" ] || continue
             target="$(basename "$asset")"
             cp "$asset" "github-canary-assets/${target/${VERSION}/${CARGO_VERSION}}"
           done
-          (cd github-canary-assets && sha256sum mangostudio-"${CARGO_VERSION}"-* > SHA256SUMS)
+          (cd github-canary-assets && sha256sum mangostudio-* > SHA256SUMS)
 
       - name: Publish rolling pre-release assets for the launcher
         # The cargo shim resolves .../releases/download/v<version>/, so existing

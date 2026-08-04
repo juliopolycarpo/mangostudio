@@ -17,6 +17,7 @@ export type RuntimeServiceErrorKind =
   | 'workdir_validation'
   | 'snapshot_conflict'
   | 'snapshot_too_large'
+  | 'runtime_update_refused'
   | 'library_backup_missing'
   | 'mcp_connection'
   | 'mcp_call'
@@ -44,6 +45,14 @@ export class RuntimeToolArgumentError extends RuntimeServiceError {
   constructor(message: string) {
     super('tool_argument', message);
     this.name = 'RuntimeToolArgumentError';
+  }
+}
+
+/** A live update was malformed, out of sequence, unsafe, or could not publish. */
+export class RuntimeUpdateError extends RuntimeServiceError {
+  constructor(message: string, data: Readonly<Record<string, unknown>> = {}) {
+    super('runtime_update_refused', message, data);
+    this.name = 'RuntimeUpdateError';
   }
 }
 

@@ -43,7 +43,8 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
     environment.transportKind === 'wsl' ||
     environment.transportKind === 'ssh' ||
     environment.transportKind === 'websocket' ||
-    environment.transportKind === 'http';
+    environment.transportKind === 'http' ||
+    environment.transportKind === 'stdio';
   const view = useRuntimeLifecycleQuery(environment.id, enabled);
   const install = useStartRuntimeInstallMutation(environment.id);
   const cancelInstall = useCancelRuntimeInstallMutation(environment.id);

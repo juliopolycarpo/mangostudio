@@ -20,6 +20,8 @@ export const RuntimeErrorCodeSchema = Type.Union([
   Type.Literal('INTERNAL'),
   /** The machine's owner has not granted a capability the method needs. */
   Type.Literal('RUNTIME_DENIED'),
+  /** A live binary transfer was unsafe, malformed, busy, or out of sequence. */
+  Type.Literal('RUNTIME_UPDATE_REFUSED'),
 ]);
 export type RuntimeErrorCode = Static<typeof RuntimeErrorCodeSchema>;
 

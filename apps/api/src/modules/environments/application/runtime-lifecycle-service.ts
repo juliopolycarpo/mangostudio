@@ -6,7 +6,9 @@
  * environment; progress bytes from {@link pushRuntimeBinary} land as log lines.
  */
 
+import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
+  EnvironmentTransportKind,
   InstallStreamEvent,
   RuntimeLifecycleInstallBody,
   RuntimeLifecycleStartResponse,
@@ -22,6 +24,7 @@ import {
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
+  type RuntimeHealthReport,
   resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
 import { getVersion, isDevelopmentVersion } from '../../../lib/config';
@@ -31,7 +34,11 @@ import {
 } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { environmentConfigFor } from '../domain/environment-config';
-import { buildRuntimeLifecycleView } from '../domain/runtime-lifecycle-view';
+import {
+  buildRuntimeLifecycleView,
+  canUpdateOverLiveConnection,
+} from '../domain/runtime-lifecycle-view';
+import { streamRuntimeUpdate } from '../domain/runtime-live-update';
 import {
   pushRuntimeBinary,
   type RuntimeCommandRunner,
@@ -39,7 +46,11 @@ import {
   runtimeSlotBytesScript,
   runtimeVersionScript,
 } from '../domain/runtime-push';
-import { loadRuntimeReleaseBytes, RuntimeAssetLoadError } from '../domain/runtime-release-fetch';
+import {
+  type LoadedRuntimeAsset,
+  loadRuntimeReleaseBytes,
+  RuntimeAssetLoadError,
+} from '../domain/runtime-release-fetch';
 import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
 import {
   type EnvironmentRecord,
@@ -123,6 +134,7 @@ export interface RuntimeLifecycleServiceDeps {
   readonly manager?: RuntimeConnectionManager;
   readonly provisioner?: WslProvisioner;
   readonly now?: () => number;
+  readonly loadRuntimeAsset?: (platformId: string) => Promise<LoadedRuntimeAsset>;
 }
 
 function createEventBuffer(): EventBuffer {
@@ -214,6 +226,7 @@ export function createRuntimeLifecycleService(
   const manager = overrides.manager ?? getRuntimeConnectionManager();
   const provisioner = overrides.provisioner ?? wslProvisioner;
   const now = overrides.now ?? Date.now;
+  const loadRuntimeAsset = overrides.loadRuntimeAsset ?? loadRuntimeReleaseBytes;
 
   const activeByEnvironment = new Map<string, ActiveRun>();
   const activeByRun = new Map<string, ActiveRun>();
@@ -313,17 +326,31 @@ export function createRuntimeLifecycleService(
         throw new RuntimeLifecycleUnavailableError(`Environment "${environmentId}" was not found.`);
       }
 
-      if (record.transportKind !== 'wsl' && record.transportKind !== 'ssh') {
+      const action = body.action;
+      const cached = manager.getCachedHealth(userId, environmentId);
+      const status = manager.getStatus(userId, environmentId);
+      const sshCustomPath =
+        record.transportKind === 'ssh' &&
+        Boolean(environmentConfigFor('ssh', record.config).remoteRuntimePath?.trim());
+      const canPushOutOfBand = record.transportKind === 'wsl' || record.transportKind === 'ssh';
+      const canUpdateLive =
+        action === 'upgrade' &&
+        cached !== null &&
+        canUpdateOverLiveConnection({
+          transportKind: record.transportKind,
+          health: cached.health,
+          connected: status.state === 'connected',
+          managedPush: !sshCustomPath,
+        });
+
+      if (!canPushOutOfBand && !canUpdateLive) {
         throw new RuntimeLifecycleUnavailableError(
-          `Runtime install from the card is not available for ${record.transportKind} environments.`,
+          `Runtime ${action} over the hub is not available for ${record.transportKind} environments. A connected, update-capable runtime can be upgraded in place.`,
           409
         );
       }
 
-      if (
-        record.transportKind === 'ssh' &&
-        environmentConfigFor('ssh', record.config).remoteRuntimePath?.trim()
-      ) {
+      if (sshCustomPath) {
         throw new RuntimeLifecycleUnavailableError(
           `This SSH environment uses a custom runtime path (${DEFAULT_SSH_RUNTIME_PATH} is the managed slot). Install or upgrade that binary on the host, or clear remoteRuntimePath to use hub-managed push.`,
           409
@@ -335,7 +362,6 @@ export function createRuntimeLifecycleService(
       // "no hub-driven updates" answer one button-click wide. The push runs on
       // the user's own credentials out of band, where the runtime cannot refuse
       // it — this check is the enforcement, not a hint.
-      const cached = manager.getCachedHealth(userId, environmentId);
       if (cached?.health?.allow?.update === false) {
         throw new RuntimeLifecycleUnavailableError(
           'This machine denied hub-driven runtime updates (`allow.update`). Change consent with setup before installing, reinstalling or upgrading.',
@@ -364,12 +390,13 @@ export function createRuntimeLifecycleService(
       activeByRun.set(runId, run);
       rememberStream(runId, userId, stream);
 
-      const action = body.action;
       const forceReplace = action === 'reinstall';
       const targetLabel =
         record.transportKind === 'wsl'
           ? environmentConfigFor('wsl', record.config).distro
-          : environmentConfigFor('ssh', record.config).host;
+          : record.transportKind === 'ssh'
+            ? environmentConfigFor('ssh', record.config).host
+            : record.name;
 
       stream.publish({
         type: 'log',
@@ -384,14 +411,30 @@ export function createRuntimeLifecycleService(
             finish(run, 'cancelled', null);
             return;
           }
-          if (record.transportKind === 'wsl') {
+          if (canUpdateLive) {
+            await updateOverLiveConnection({
+              userId,
+              environmentId,
+              transportKind: record.transportKind,
+              health: cached.health,
+              manager,
+              loadRuntimeAsset,
+              stream,
+              signal: abort.signal,
+            });
+          } else if (record.transportKind === 'wsl') {
             await provisioner.ensure(environmentConfigFor('wsl', record.config).distro, {
               signal: abort.signal,
               force: forceReplace,
               onTransferProgress: transferProgressPublisher(stream),
             });
-          } else {
+          } else if (record.transportKind === 'ssh') {
             await pushOverSsh(record.config, stream, abort.signal, { force: forceReplace });
+          } else {
+            throw new RuntimeLifecycleUnavailableError(
+              `Runtime ${action} is not available for ${record.transportKind} environments.`,
+              409
+            );
           }
           if (abort.signal.aborted) {
             finish(run, 'cancelled', null);
@@ -496,6 +539,168 @@ export function createRuntimeLifecycleService(
 }
 
 export const runtimeLifecycleService = createRuntimeLifecycleService();
+
+interface LiveUpdateInput {
+  readonly userId: string;
+  readonly environmentId: string;
+  readonly transportKind: EnvironmentTransportKind;
+  readonly health: RuntimeHealthReport;
+  readonly manager: RuntimeConnectionManager;
+  readonly loadRuntimeAsset: (platformId: string) => Promise<LoadedRuntimeAsset>;
+  readonly stream: EventBuffer;
+  readonly signal: AbortSignal;
+}
+
+async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
+  if (input.health.platform === 'win32') {
+    throw new RuntimeLifecycleUnavailableError(
+      'Live runtime update is currently available only for POSIX runtime slots.',
+      409
+    );
+  }
+  const version = getVersion();
+  const platformId = input.health.platformId;
+  if (!platformId) {
+    throw new RuntimeLifecycleUnavailableError(
+      'This runtime did not report an exact release platform identity. Upgrade it through its install path before using live updates.',
+      409
+    );
+  }
+  input.stream.publish({
+    type: 'log',
+    stream: 'system',
+    line: `Loading the checksummed ${platformId} runtime for ${version}…`,
+    done: false,
+  });
+  const asset = await input.loadRuntimeAsset(platformId);
+  if (asset.fromArchive) {
+    throw new RuntimeAssetLoadError(
+      `Release ${version} has no raw ${platformId} runtime binary. Live update never streams an archive as executable bytes.`
+    );
+  }
+  const client = await input.manager.getClient(input.userId, input.environmentId);
+  const progress = transferProgressPublisher(input.stream);
+  let expectedDisconnect = false;
+  let transferStarted = false;
+
+  try {
+    const result = await streamRuntimeUpdate({
+      client: client.update,
+      version,
+      digest: asset.digest,
+      bytes: asset.bytes,
+      signal: input.signal,
+      onProgress: progress,
+      onSessionOpen: () => {
+        transferStarted = true;
+      },
+      beforeCommit: () => {
+        expectedDisconnect = true;
+        input.manager.expectUpdateDisconnect(input.userId, input.environmentId);
+      },
+    });
+
+    if (result.restart === 'manual') {
+      input.manager.clearExpectedUpdateDisconnect(input.userId, input.environmentId);
+      input.stream.publish({
+        type: 'log',
+        stream: 'system',
+        line: `Runtime ${version} is installed. Restart this manually launched runtime to use it.`,
+        done: false,
+      });
+      return;
+    }
+
+    input.stream.publish({
+      type: 'log',
+      stream: 'system',
+      line: `Runtime ${version} is installed; waiting for the supervised restart…`,
+      done: false,
+    });
+    await waitForRuntimeDisconnect(input.manager, input.userId, input.environmentId, input.signal);
+    if (input.transportKind === 'websocket') {
+      await waitForRuntimeVersion(
+        input.manager,
+        input.userId,
+        input.environmentId,
+        version,
+        input.signal
+      );
+    } else {
+      await input.manager.connect(input.userId, input.environmentId, { force: true });
+    }
+    await input.manager.refreshManifest(input.userId, input.environmentId);
+    const status = input.manager.getStatus(input.userId, input.environmentId);
+    if (status.state !== 'connected' || status.runtimeVersion !== version) {
+      throw new Error(
+        `Runtime restart did not report version ${version}; it reported ${status.runtimeVersion ?? status.state}.`
+      );
+    }
+    input.stream.publish({
+      type: 'log',
+      stream: 'system',
+      line: `Runtime reconnected on ${version}; version drift cleared.`,
+      done: false,
+    });
+  } catch (error) {
+    // Only these two codes prove the peer both answered and kept no session:
+    // every `RUNTIME_UPDATE_REFUSED` path either never staged or discarded on
+    // its way out, and `RUNTIME_DENIED` refuses before the first byte. A
+    // cancel, a timeout or a dead transport all come back typed too, and none
+    // of them says what the far side did with the transfer.
+    const refused =
+      error instanceof RuntimeRemoteError &&
+      (error.code === 'RUNTIME_UPDATE_REFUSED' || error.code === 'RUNTIME_DENIED');
+    if (expectedDisconnect && refused) {
+      // The commit demonstrably did not land, so no handoff is coming and a
+      // stale expectation would swallow the next real crash's backoff.
+      input.manager.clearExpectedUpdateDisconnect(input.userId, input.environmentId);
+    }
+    if (transferStarted && !refused && !expectedDisconnect) {
+      // There is deliberately no fourth protocol method. Dropping the
+      // connection makes RuntimeHost.close discard the staged file, so a
+      // transfer that died mid-stream does not leave a session refusing every
+      // ordinary call until it expires. Dial-in runtimes redial on their own.
+      input.manager.disconnectIfCurrent(input.userId, input.environmentId, client);
+    }
+    throw error;
+  }
+}
+
+async function waitForRuntimeDisconnect(
+  manager: RuntimeConnectionManager,
+  userId: string,
+  environmentId: string,
+  signal: AbortSignal,
+  timeoutMs = 10_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (manager.getStatus(userId, environmentId).state === 'connected') {
+    signal.throwIfAborted();
+    if (Date.now() >= deadline) {
+      throw new Error('Runtime published the update but did not exit for its supervised restart.');
+    }
+    await Bun.sleep(100);
+  }
+}
+
+async function waitForRuntimeVersion(
+  manager: RuntimeConnectionManager,
+  userId: string,
+  environmentId: string,
+  version: string,
+  signal: AbortSignal,
+  timeoutMs = 60_000
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    signal.throwIfAborted();
+    const status = manager.getStatus(userId, environmentId);
+    if (status.state === 'connected' && status.runtimeVersion === version) return;
+    await Bun.sleep(200);
+  }
+  throw new Error(`Runtime did not reconnect on version ${version} after its update.`);
+}
 
 async function pushOverSsh(
   configUnknown: unknown,

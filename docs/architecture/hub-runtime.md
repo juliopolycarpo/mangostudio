@@ -196,6 +196,36 @@ A runtime whose slot is pending refuses before serving anything and exits non-ze
 stable phrase (`RUNTIME_SETUP_PENDING_SIGNATURE`) that the ssh failure classifier keys on,
 so "not set up yet" is never reported as "no binary there".
 
+### Live binary updates
+
+A connected, provisioned POSIX runtime can replace its own slot bytes through three paced
+protocol methods: `runtime.update.begin`, `runtime.update.chunk`, and `runtime.update.commit`.
+Bundled and source-checkout processes are not slot owners and therefore never adopt a
+downloaded binary. WSL and SSH keep using their out-of-band provision/push paths, which also
+lets a current hub upgrade peers from before the live-update methods existed. The hub first
+downloads the exact release asset identity reported by health — including glibc versus musl —
+and verifies it against the release `SHA256SUMS`; the runtime independently hashes the
+received bytes before making them current.
+Asset identity is channel-aware: stable uses the exact version tag and filename, while a
+SHA-stamped canary resolves the rolling `v<root>-canary` tag and rolling asset name.
+Chunks are sequential requests capped at 32 KiB, so the WebSocket frame queue supplies real
+backpressure instead of buffering an entire binary behind a slow peer.
+
+This is an intentional code-execution path and should be reviewed as a supply-chain surface,
+not as a convenience upload. Only the runtime binary is accepted, `allow.update` is checked
+before staging, one session may exist per slot across runtime processes, and ordinary tool
+calls are refused from update dispatch until the session commits or the connection drops.
+An interrupted or mismatched transfer removes the `.incoming` file and never changes
+`current`.
+
+Commit renames the verified file over the versioned binary and atomically swaps `current`.
+The old process keeps serving its old inode until restart. A hub-spawned slot runtime exits
+with a distinct update code and the hub reconnects it; a manually launched `connect` or
+`serve` runtime keeps running and the card asks its owner to restart it. A future service
+manager can supply that restart without changing the wire contract. Windows publication is
+deliberately refused until a Windows runtime slot exists and can implement rename-aside plus
+antivirus retry semantics safely.
+
 ### Enforcement
 
 The gate above decides whether a runtime serves at all. `allow` decides what it serves,

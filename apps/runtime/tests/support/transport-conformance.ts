@@ -27,6 +27,11 @@
  */
 
 import { expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { RUNTIME_BINARY_BASENAME, RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import {
   RUNTIME_HEARTBEAT_TOPIC,
   RUNTIME_MAX_FRAME_BYTES,
@@ -34,12 +39,14 @@ import {
   type RuntimeEventFrame,
 } from '@mangostudio/shared/runtime-protocol';
 import {
+  createLocalRuntimeHost,
   RuntimeHost,
   type RuntimeMethodHandler,
   type RuntimeProtocolClient,
   RuntimeRemoteError,
   type RuntimeRequestOptions,
 } from '../../src';
+import { runtimeSlotDir } from '../../src/runtime-home';
 
 const CONFORMANCE_MANIFEST: RuntimeCapabilityManifest = {
   platform: 'conformance',
@@ -267,6 +274,49 @@ export function itBehavesLikeARuntimeTransport(fixture: ConformanceFixture): voi
 
       await expect(pending).rejects.toMatchObject({ code: 'RUNTIME_UNAVAILABLE' });
     });
+  });
+
+  it('paces a live binary update without overrunning the transport', async () => {
+    const mangoHome = await mkdtemp(join(tmpdir(), 'mango-update-conformance-'));
+    const env = { MANGO_HOME: mangoHome };
+    const bytes = new Uint8Array(256 * 1024).fill(0xa5);
+    const digest = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    const host = createLocalRuntimeHost({
+      runtimeVersion: '1.0.0',
+      allow: RUNTIME_CONSENT_PRESETS.full,
+      update: { env },
+    });
+    const connection = await fixture.connect(host);
+
+    try {
+      const begun = await connection.client.request('runtime.update.begin', {
+        version: '1.1.0',
+        digest,
+        totalBytes: bytes.byteLength,
+      });
+      let offset = 0;
+      let seq = 0;
+      while (offset < bytes.byteLength) {
+        const end = Math.min(offset + begun.maxChunkBytes, bytes.byteLength);
+        await connection.client.request('runtime.update.chunk', {
+          sessionId: begun.sessionId,
+          seq,
+          bytesBase64: Buffer.from(bytes.subarray(offset, end)).toString('base64'),
+        });
+        offset = end;
+        seq += 1;
+      }
+
+      await expect(
+        connection.client.request('runtime.update.commit', { sessionId: begun.sessionId })
+      ).resolves.toMatchObject({ version: '1.1.0', digest });
+      expect(
+        await readFile(join(runtimeSlotDir('host', env), 'current', RUNTIME_BINARY_BASENAME))
+      ).toEqual(Buffer.from(bytes));
+    } finally {
+      await connection.close();
+      await rm(mangoHome, { recursive: true, force: true });
+    }
   });
 
   it('refuses a response past the frame limit without killing the connection', async () => {

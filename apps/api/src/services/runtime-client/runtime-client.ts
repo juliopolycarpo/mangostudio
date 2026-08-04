@@ -79,6 +79,12 @@ import {
   type RuntimeSnapshotHashResult,
   type RuntimeSnapshotRevertParams,
   type RuntimeSnapshotRevertResult,
+  type RuntimeUpdateBeginParams,
+  type RuntimeUpdateBeginResult,
+  type RuntimeUpdateChunkParams,
+  type RuntimeUpdateChunkResult,
+  type RuntimeUpdateCommitParams,
+  type RuntimeUpdateCommitResult,
   type RuntimeWorkspaceBrowseParams,
   type RuntimeWorkspaceBrowseResult,
   type RuntimeWorkspaceResolveContainedParams,
@@ -238,6 +244,21 @@ interface RuntimeInstallClient {
   ): Promise<{ readonly ok: true }>;
 }
 
+interface RuntimeUpdateClient {
+  begin(
+    params: RuntimeUpdateBeginParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeUpdateBeginResult>;
+  chunk(
+    params: RuntimeUpdateChunkParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeUpdateChunkResult>;
+  commit(
+    params: RuntimeUpdateCommitParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeUpdateCommitResult>;
+}
+
 /**
  * Toolchain detection on the target machine. Every method takes what the hub
  * decided — which ids to look for, which of them it could install, which Node
@@ -296,6 +317,7 @@ export class RuntimeClient {
   readonly shell: RuntimeShellClient;
   readonly git: RuntimeGitClient;
   readonly install: RuntimeInstallClient;
+  readonly update: RuntimeUpdateClient;
   readonly mcp: RuntimeMcpClient;
   readonly probing: RuntimeProbingClient;
   readonly library: RuntimeLibraryClient;
@@ -341,6 +363,11 @@ export class RuntimeClient {
     this.install = {
       run: (params, options) => this.request('install.run', params, options),
       cancel: (params, options) => this.request('install.cancel', params, options),
+    };
+    this.update = {
+      begin: (params, options) => this.request('runtime.update.begin', params, options),
+      chunk: (params, options) => this.request('runtime.update.chunk', params, options),
+      commit: (params, options) => this.request('runtime.update.commit', params, options),
     };
     this.probing = {
       runtimes: (params, options) => this.request('probing.runtimes', params, options),

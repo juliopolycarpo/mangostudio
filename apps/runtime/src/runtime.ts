@@ -9,6 +9,7 @@ import { type RuntimeConsentSource, staticConsentSource } from './consent-source
 import { RuntimeHost } from './host';
 import { createLocalRuntimeManifest } from './manifest';
 import { createRuntimeMethodHandlers } from './registry';
+import type { RuntimeUpdateServiceOptions } from './services/runtime-update';
 
 export function createLocalRuntimeHost(options: {
   readonly runtimeVersion: string;
@@ -29,6 +30,8 @@ export function createLocalRuntimeHost(options: {
   readonly allow?: RuntimeCapabilityAllow;
   /** @deprecated Prefer `consent`. */
   readonly slot?: RuntimeSlot;
+  /** Live-update publication and restart behavior for this process mode. */
+  readonly update?: Omit<RuntimeUpdateServiceOptions, 'slot'>;
 }): RuntimeHost {
   // The registry needs an emitter and the host needs the registry, so the
   // emitter closes over the host rather than being handed it: events raised
@@ -41,12 +44,14 @@ export function createLocalRuntimeHost(options: {
     runtimeVersion: options.runtimeVersion,
     emit: (event) => host?.emit(event),
     slot: consent.slot,
+    ...(options.update ? { update: options.update } : {}),
   });
 
   host = new RuntimeHost({
     runtimeVersion: options.runtimeVersion,
     manifest: () => createLocalRuntimeManifest(consent.current()),
     handlers: gateHandlersByConsent(registry.handlers, consent),
+    isUpdateActive: registry.updateActive,
     onClose: () => void registry.close(),
     ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
   });

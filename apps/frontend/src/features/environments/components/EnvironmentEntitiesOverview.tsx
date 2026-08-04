@@ -31,6 +31,9 @@ const STATUS_RAIL: Record<EnvironmentConnectionState, string> = {
   error: 'bg-error',
 };
 
+/** A binary handoff reads as a live operation, not as the outage it looks like. */
+const UPDATING_RAIL = 'bg-warning animate-pulse';
+
 export function EnvironmentEntitiesOverview() {
   const { t } = useI18n();
   const environments = useEnvironmentEntitiesQuery();
@@ -95,6 +98,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
   const slotBytes = useRuntimeSlotBytesQuery(environment.id, removing && removableRuntime);
   const busy = connect.isPending || disconnect.isPending || update.isPending || remove.isPending;
   const state = environment.status.state;
+  const updating = environment.status.updating === true;
 
   const runConnectionAction = async () => {
     setActionError(null);
@@ -146,7 +150,10 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
       data-testid="environment-entity-card"
       data-environment-id={environment.id}
     >
-      <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-1 ${STATUS_RAIL[state]}`} />
+      <span
+        aria-hidden="true"
+        className={`absolute inset-y-0 left-0 w-1 ${updating ? UPDATING_RAIL : STATUS_RAIL[state]}`}
+      />
       <div className="space-y-3 pl-1">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-2.5">
@@ -187,7 +194,7 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
             </div>
           </div>
           <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-            {labels.status[state]}
+            {updating ? labels.status.updating : labels.status[state]}
           </span>
         </div>
 

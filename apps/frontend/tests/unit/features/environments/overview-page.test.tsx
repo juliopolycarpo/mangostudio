@@ -194,6 +194,41 @@ describe('OverviewPage', () => {
     ).toHaveAttribute('href', '/environments/agents');
   });
 
+  // A live self-update ends with a deliberate disconnect. Reporting that as an
+  // outage would train an operator to treat the working case as a failure.
+  it('reads a binary handoff as updating rather than as a dropped connection', async () => {
+    const remoteBase = ENVIRONMENTS.find((environment) => environment.id === 'remote-dev');
+    if (!remoteBase) throw new Error('expected remote fixture');
+    const updating: Environment = {
+      ...remoteBase,
+      status: { state: 'disconnected', updating: true },
+    };
+    scenario
+      .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/environments', { body: [ENVIRONMENTS[0], updating] })
+      .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
+      .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
+      .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+      .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+      .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+      .install();
+
+    await renderWithRouter(<OverviewPage />);
+
+    const remote = await waitFor(() => {
+      const card = screen
+        .getAllByTestId('environment-entity-card')
+        .find((candidate) => candidate.getAttribute('data-environment-id') === 'remote-dev');
+      expect(card).toBeDefined();
+      return card as HTMLElement;
+    });
+
+    expect(within(remote).getByText(en.environments.entities.status.updating)).toBeInTheDocument();
+    expect(
+      within(remote).queryByText(en.environments.entities.status.disconnected)
+    ).not.toBeInTheDocument();
+  });
+
   it('shows a permissions row when the connected machine consents to readonly', async () => {
     const localBase = ENVIRONMENTS.find((environment) => environment.id === 'local');
     if (!localBase) throw new Error('expected local fixture');

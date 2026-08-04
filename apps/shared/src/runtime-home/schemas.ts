@@ -59,6 +59,15 @@ export const RuntimeInstallSourceSchema = Type.Union([
   /** A hub, an installer, or a person put it under the slot directory. */
   Type.Literal('provisioned'),
 ]);
+
+export const RuntimePlatformIdSchema = Type.Union([
+  Type.Literal('linux-x64'),
+  Type.Literal('linux-arm64'),
+  Type.Literal('linux-x64-musl'),
+  Type.Literal('linux-arm64-musl'),
+  Type.Literal('darwin-x64'),
+  Type.Literal('darwin-arm64'),
+]);
 export type RuntimeInstallSource = Static<typeof RuntimeInstallSourceSchema>;
 
 /**
@@ -241,6 +250,8 @@ export const RuntimeHealthReportSchema = Type.Object({
   setup: RuntimeSetupRecordSchema,
   platform: Type.String({ maxLength: 32 }),
   arch: Type.String({ maxLength: 32 }),
+  /** Exact release asset identity, including the Linux libc variant. */
+  platformId: Type.Optional(RuntimePlatformIdSchema),
   homeDir: Type.String({ maxLength: 4_096 }),
   /** Shells present on this machine, in the protocol's own vocabulary. */
   shells: Type.Array(Type.String({ maxLength: 32 })),

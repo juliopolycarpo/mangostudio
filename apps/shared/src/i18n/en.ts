@@ -2112,6 +2112,7 @@ export const messages: Messages = {
         connecting: 'Connecting',
         disconnected: 'Disconnected',
         error: 'Connection failed',
+        updating: 'Updating',
       },
       transport: {
         'in-process': 'In process',

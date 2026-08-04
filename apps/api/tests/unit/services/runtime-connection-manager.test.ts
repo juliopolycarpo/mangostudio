@@ -9,6 +9,7 @@ import {
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import { getVersion } from '../../../src/lib/config';
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
@@ -94,12 +95,13 @@ function flushMicrotasks(): Promise<void> {
 /** A connected client that counts how often the hub asked it for health. */
 function healthProbe(
   manifest: RuntimeCapabilityManifest,
-  health: () => Promise<RuntimeHealthReport> = () => Promise.resolve(HEALTH_REPORT)
+  health: () => Promise<RuntimeHealthReport> = () => Promise.resolve(HEALTH_REPORT),
+  runtimeVersion = '0.0.0-test'
 ): { client: RuntimeClient; calls: () => number } {
   let calls = 0;
   const client = {
     manifest,
-    runtimeVersion: '0.0.0-test',
+    runtimeVersion,
     health: () => {
       calls += 1;
       return health();
@@ -151,6 +153,25 @@ describe('RuntimeConnectionManager', () => {
       manifest: TEST_MANIFEST,
     });
     expect(publishedStates).toEqual(['connecting', 'connected', 'disconnected']);
+  });
+
+  it('does not disconnect a replacement client on behalf of a stale caller', async () => {
+    const first = fakeConnection(() => undefined);
+    const second = fakeConnection(() => undefined);
+    let current = first;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(current) },
+    });
+
+    const firstClient = await manager.connect('user-1', 'devbox');
+    manager.disconnect('user-1', 'devbox');
+    current = second;
+    const secondClient = await manager.connect('user-1', 'devbox', { force: true });
+
+    expect(manager.disconnectIfCurrent('user-1', 'devbox', firstClient)).toBe(false);
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    expect(await manager.getClient('user-1', 'devbox')).toBe(secondClient);
   });
 
   it('maps connector failures to RUNTIME_UNAVAILABLE without caching a rejection', async () => {
@@ -408,6 +429,79 @@ describe('RuntimeConnectionManager', () => {
     advanceSeconds(60);
     await manager.getClient('user-1', 'devbox');
     expect(attempts).toBe(6);
+  });
+
+  it('adopts the restarted runtime without backoff and clears version drift', async () => {
+    let attempts = 0;
+    let dropConnection: (() => void) | undefined;
+    const targetVersion = getVersion();
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: (_definition, onUnavailable) => {
+          attempts += 1;
+          dropConnection = onUnavailable;
+          const probe = healthProbe(
+            TEST_MANIFEST,
+            () => Promise.resolve(HEALTH_REPORT),
+            attempts === 1 ? '0.0.1-old' : targetVersion
+          );
+          return Promise.resolve({ client: probe.client, close: () => undefined });
+        },
+      },
+    });
+
+    await manager.getClient('user-1', 'devbox');
+    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+      runtimeVersion: '0.0.1-old',
+      runtimeVersionDrift: true,
+    });
+    manager.expectUpdateDisconnect('user-1', 'devbox');
+    // Said before the connection drops, so the card never renders the gap as an
+    // outage — this is the one disconnect that is the feature working.
+    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+      state: 'connected',
+      updating: true,
+    });
+    dropConnection?.();
+
+    expect(manager.getStatus('user-1', 'devbox')).toEqual({
+      state: 'disconnected',
+      updating: true,
+      manifest: TEST_MANIFEST,
+      runtimeVersion: '0.0.1-old',
+      runtimeVersionDrift: true,
+    });
+    await manager.getClient('user-1', 'devbox');
+    expect(attempts).toBe(2);
+    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({
+      state: 'connected',
+      runtimeVersion: targetVersion,
+      runtimeVersionDrift: false,
+    });
+    // The reconnect is the end of the handoff; nothing should still say updating.
+    expect(manager.getStatus('user-1', 'devbox').updating).toBeUndefined();
+  });
+
+  it('stops claiming an update when the runtime refuses one', async () => {
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => {
+          const probe = healthProbe(TEST_MANIFEST, () => Promise.resolve(HEALTH_REPORT));
+          return Promise.resolve({ client: probe.client, close: () => undefined });
+        },
+      },
+    });
+
+    await manager.getClient('user-1', 'devbox');
+    manager.expectUpdateDisconnect('user-1', 'devbox');
+    manager.clearExpectedUpdateDisconnect('user-1', 'devbox');
+
+    // A stale flag would swallow the next real crash's backoff, so a refusal
+    // has to put the status back exactly where it was.
+    expect(manager.getStatus('user-1', 'devbox').updating).toBeUndefined();
+    expect(manager.getStatus('user-1', 'devbox')).toMatchObject({ state: 'connected' });
   });
 
   it('clears a latched backoff when the environment is enabled again', async () => {

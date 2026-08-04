@@ -16,7 +16,9 @@ import {
   deniedCapabilities,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeHealthReport,
+  type RuntimePlatformId,
   type RuntimeSlot,
+  resolveRuntimePlatformId,
   SHELL_TRUST_NOTICE,
 } from '@mangostudio/shared/runtime-home';
 import { createLocalRuntimeManifest } from './manifest';
@@ -49,6 +51,7 @@ export async function collectRuntimeHealth(
   const denyEverything = error !== null;
   const allow = denyEverything ? RUNTIME_CONSENT_PRESETS.none : config.allow;
   const manifest = createLocalRuntimeManifest(allow);
+  const platformId = resolveRunningRuntimePlatformId(manifest.platform, manifest.arch);
 
   return {
     schemaVersion: config.schemaVersion,
@@ -67,11 +70,34 @@ export async function collectRuntimeHealth(
     setup: config.setup,
     platform: manifest.platform,
     arch: manifest.arch,
+    ...(platformId ? { platformId } : {}),
     homeDir: manifest.homeDir,
     shells: [...manifest.shells],
     git: manifest.git,
     lastError: error,
   };
+}
+
+/** Maps this process to the release binary identity the hub must download. */
+export function resolveRunningRuntimePlatformId(
+  platform: string = process.platform,
+  arch: string = process.arch,
+  glibcVersionRuntime: string | null | undefined = runningGlibcVersion()
+): RuntimePlatformId | null {
+  const kernel = platform === 'darwin' ? 'Darwin' : platform === 'linux' ? 'Linux' : platform;
+  const machine = arch === 'x64' ? 'x86_64' : arch === 'arm64' ? 'aarch64' : arch;
+  return resolveRuntimePlatformId({
+    kernel,
+    machine,
+    libc: platform === 'linux' && !glibcVersionRuntime ? 'musl' : 'glibc',
+  });
+}
+
+function runningGlibcVersion(): string | undefined {
+  const report = process.report?.getReport() as
+    | { readonly header?: { readonly glibcVersionRuntime?: string } }
+    | undefined;
+  return report?.header?.glibcVersionRuntime;
 }
 
 export type RuntimeFindingSeverity = 'ok' | 'warn' | 'fail';
