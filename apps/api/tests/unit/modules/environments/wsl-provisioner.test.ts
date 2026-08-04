@@ -91,6 +91,11 @@ function harness(
         stdinBytes: runOptions?.stdin?.byteLength ?? 0,
         args: runOptions?.args ?? [],
       });
+      // The real runner reports as it writes; a fake that swallows the callback
+      // would let the progress plumbing rot without a test noticing.
+      if (runOptions?.stdin && runOptions.onStdinProgress) {
+        runOptions.onStdinProgress(runOptions.stdin.byteLength);
+      }
       const override = options.respond?.(script);
       if (override) return Promise.resolve(override);
       // Before the `printf` arm: the config write prints a lock owner too, so
@@ -102,7 +107,8 @@ function harness(
       if (script.startsWith('printf')) {
         return Promise.resolve(ok(`${DISTRO_HOME}\n${config ? JSON.stringify(config) : ''}`));
       }
-      if (script.includes('uname -m')) return Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'));
+      if (script.includes('uname -m'))
+        return Promise.resolve(ok('Linux\nx86_64\nldd (GNU libc) 2.35\n'));
       if (script.includes('setup --profile')) {
         config = { ...(config as RuntimeSlotConfig), setup: { state: 'configured', by: 'cli' } };
         return Promise.resolve(ok());
@@ -304,7 +310,7 @@ describe('WslProvisioner', () => {
       readBytes: () => Promise.resolve(null),
       runInDistro: (_distro, script) =>
         script.includes('uname -m')
-          ? Promise.resolve(ok('x86_64\nldd (GNU libc) 2.35\n'))
+          ? Promise.resolve(ok('Linux\nx86_64\nldd (GNU libc) 2.35\n'))
           : Promise.resolve({ stdout: '', stderr: 'not found', exitCode: 127 }),
       fetch: ((_input: string | URL): Promise<Response> =>
         Promise.reject(new Error('getaddrinfo ENOTFOUND'))) as typeof fetch,
@@ -476,6 +482,22 @@ describe('WslProvisioner', () => {
     } finally {
       await rm(cacheRoot, { force: true, recursive: true });
     }
+  });
+
+  // Regression: `ensure` had no way to report transfer bytes, so a WSL install
+  // streamed two log lines and an exit event — a ~95 MB push across the 9P
+  // share into a cold distribution with nothing to show for the wait.
+  it('reports transfer progress while pushing bytes into the distro', async () => {
+    const { provisioner } = harness();
+    const progress: Array<{ written: number; total: number }> = [];
+
+    await provisioner.ensure('Ubuntu', {
+      onTransferProgress: (written, total) => progress.push({ written, total }),
+    });
+
+    expect(progress.length).toBeGreaterThan(0);
+    expect(progress.at(-1)?.written).toBe(ARCHIVE.byteLength);
+    expect(progress.every((entry) => entry.total === ARCHIVE.byteLength)).toBe(true);
   });
 
   it('reports the wsl slot byte size for the removal dialog', async () => {

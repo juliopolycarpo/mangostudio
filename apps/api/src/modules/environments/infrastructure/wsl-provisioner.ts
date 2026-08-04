@@ -119,7 +119,17 @@ export interface WslProvisioner {
    */
   ensure(
     distro: string,
-    options?: { readonly signal?: AbortSignal; readonly force?: boolean }
+    options?: {
+      readonly signal?: AbortSignal;
+      readonly force?: boolean;
+      /**
+       * Byte progress for the install stream. A ~95 MB push across the 9P share
+       * into a cold distribution is the slowest transfer this hub performs; a
+       * caller with a console to fill passes this so it is a progress bar
+       * rather than a silent minute.
+       */
+      readonly onTransferProgress?: (written: number, total: number) => void;
+    }
   ): Promise<void>;
   /** Removes version dirs and `current`; leaves consent (`runtime.json`) alone. */
   removeSlotBytes(distro: string): Promise<void>;
@@ -172,7 +182,7 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       if (!options.force && recorded && slot.config?.digest === digest && (await stillRuns()))
         return;
 
-      await install(deps, distro, version, platformId, source, signal);
+      await install(deps, distro, version, platformId, source, signal, options.onTransferProgress);
       await recordInstall(deps, distro, version, slot, digest);
       // First provision only: an upgrade replaces bytes, never the answer
       // somebody gave about what a hub may do inside this distribution. A
@@ -251,7 +261,8 @@ async function install(
   version: string,
   platformId: LinuxPlatformId,
   source: { readonly fromArchive: boolean; readonly bytes: Uint8Array },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onTransferProgress?: (written: number, total: number) => void
 ): Promise<void> {
   try {
     await pushRuntimeBinary({
@@ -263,6 +274,12 @@ async function install(
       fromArchive: source.fromArchive,
       timeoutMs: DISTRO_INSTALL_TIMEOUT_MS,
       signal,
+      ...(onTransferProgress
+        ? {
+            onStdinProgress: (written: number) =>
+              onTransferProgress(written, source.bytes.byteLength),
+          }
+        : {}),
     });
   } catch (error) {
     if (error instanceof RuntimePushError) {
@@ -485,14 +502,12 @@ async function probePlatform(
       `Could not start the "${distro}" distribution: ${describe(result)}`
     );
   }
-  const lines = result.stdout.trim().split(/\r?\n/);
-  // Older probe scripts printed only machine + libc; accept both shapes.
-  if (lines.length >= 3) {
-    const [kernel = '', machineLine = '', libcLine = ''] = lines;
-    return { kernel, machine: machineLine, libc: libcLine };
-  }
-  const [machine = '', libc = ''] = lines;
-  return { machine, libc };
+  // `PLATFORM_PROBE_SCRIPT` is a constant this hub just sent, so the shape is
+  // known: kernel, machine, libc. Guessing an older two-line shape instead
+  // would misread `uname -s` as the machine on any host whose `ldd` prints
+  // nothing at all — the resolver would then reject a perfectly good target.
+  const [kernel = '', machine = '', libc = ''] = result.stdout.trim().split(/\r?\n/);
+  return { kernel, machine, libc };
 }
 
 /**
@@ -672,18 +687,63 @@ async function writeStdinChunked(
 ): Promise<void> {
   if (!bytes || bytes.byteLength === 0) return;
 
-  let offset = 0;
-  while (offset < bytes.byteLength) {
-    if (signal?.aborted) return;
-    const end = Math.min(offset + STDIN_CHUNK_BYTES, bytes.byteLength);
-    const chunk = bytes.subarray(offset, end);
-    const canContinue = stdin.write(chunk);
-    offset = end;
-    onProgress?.(offset);
-    if (!canContinue) {
-      await new Promise<void>((resolve) => stdin.once('drain', resolve));
+  // One `error` listener for the whole loop, and a `close` listener beside it:
+  // a distribution that exits mid-transfer never emits `drain` again, so a wait
+  // that only listens for `drain` parks forever holding the payload.
+  const settled = waitForStdinEnd(stdin);
+  try {
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      if (signal?.aborted) return;
+      const end = Math.min(offset + STDIN_CHUNK_BYTES, bytes.byteLength);
+      const chunk = bytes.subarray(offset, end);
+      const canContinue = stdin.write(chunk);
+      offset = end;
+      onProgress?.(offset);
+      if (!canContinue) {
+        await Promise.race([
+          new Promise<void>((resolve) => stdin.once('drain', resolve)),
+          settled.promise,
+        ]);
+        if (settled.done) return;
+      }
     }
+  } finally {
+    settled.dispose();
   }
+}
+
+/**
+ * Resolves when the pipe can no longer take bytes, whichever way that happens.
+ * `dispose` is what keeps this from leaking a listener per drain wait.
+ */
+function waitForStdinEnd(stdin: NodeJS.WritableStream): {
+  readonly promise: Promise<void>;
+  readonly dispose: () => void;
+  readonly done: boolean;
+} {
+  const emitter = stdin as unknown as NodeJS.EventEmitter;
+  let done = false;
+  let settle: (() => void) | undefined;
+  const promise = new Promise<void>((resolve) => {
+    settle = () => {
+      done = true;
+      resolve();
+    };
+  });
+  const onEnd = () => settle?.();
+  emitter.on('error', onEnd);
+  emitter.on('close', onEnd);
+  return {
+    promise,
+    dispose: () => {
+      emitter.off('error', onEnd);
+      emitter.off('close', onEnd);
+    },
+    get done() {
+      return done;
+    },
+  };
 }
 
 function appendBounded(current: string, chunk: Buffer): string {
