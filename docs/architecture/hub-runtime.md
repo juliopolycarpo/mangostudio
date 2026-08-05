@@ -267,10 +267,45 @@ would surface as `server-unavailable` — a connection failure the user cannot a
 
 Some methods need two capabilities. `library.apply` is a library operation *and* a write to
 somebody's files; `readonly` grants the first and refuses the second, so listing only
-`library` would have let the profile whose whole promise is "no writes" write files.
+`library` would have let the profile whose whole promise is "no writes" write files. The
+split runs through the backup methods too: `library.backups` lists a machine's retained
+sets under `library` alone, because a machine downgraded to readonly still *has* a history
+and hiding it would say the backups are gone rather than that this hub may no longer write.
+`library.gc`, which deletes, needs `fsWrite`.
+
+A readonly machine is therefore a perfectly good propagation *source*: it is scanned, its
+copies compete to be the winner, and only writing to it is refused. The wizard says so while
+the user is still choosing, rather than letting them reach an apply that would be denied.
 
 Local (in-process) is not exempt: it reads the `host` slot like any other runtime, so
 narrowing that slot gives a read-only Local.
+
+### Library backups across machines
+
+Library backups are the one exception to "the runtime holds no durable user data" (006).
+They stay on the machine that owned the file, under `~/.mango/library-backups` resolved
+against *that* machine's home — for Local, the configured `library.backup_dir`, which stays
+user-overridable and test-redirectable. Retention bounds are hub policy and apply to each
+store separately: the bytes are on different disks, and one machine filling the budget must
+never evict another machine's history.
+
+The deliberate contrast is with checkpoints, which stream bytes to hub-owned blobs
+(`snapshot.capture` → `~/.mango/checkpoints`) and treat the runtime as disposable. Do not
+"unify" the two: a checkpoint is the hub's record of a turn, while a library backup is the
+only remaining copy of a file the machine owned, and it belongs where a restore can reach it
+without a hub.
+
+Because of that, listing backups by reading manifests only works for machines the hub can
+reach — so an offline machine's sets would silently vanish from the page that promises them.
+A hub-side index (`library_backups`) says *that* a set exists; the manifest on the machine
+says what is in it and remains the only thing a restore ever reads. Rows for a reachable
+machine are reconciled against it on every listing; rows for a machine that is away render
+with restore disabled and the reason stated.
+
+A propagation that spans machines produces one backup set per machine, so it has one undo
+per machine. There is deliberately no "undo everything": each is a separate conversation
+with a separate host, any of which can be offline, and a single button that half-worked
+would be the worst available outcome.
 
 ### Audit log
 

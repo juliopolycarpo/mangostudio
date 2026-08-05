@@ -163,8 +163,9 @@ Open these first:
   `PathEnv`)
 - `apps/runtime/src/services/library/` (scan + contained read + settings source
   reads + byte caps + write engines — `library.scan` / `library.read` /
-  `library.locations` / `library.settings-sources` / `library.apply` /
-  `library.remove` / `library.undo`; the FS engines that used to live under
+  `library.read-tree` / `library.locations` / `library.settings-sources` /
+  `library.apply` / `library.remove` / `library.undo` / `library.backups` /
+  `library.gc`; the FS engines that used to live under
   `apps/api/.../infrastructure`)
 - `apps/api/src/modules/library/application/library-discovery.ts` (groups a scan
   result; coverage and divergence stay hub-side)
@@ -174,11 +175,20 @@ Open these first:
 - `apps/api/src/modules/library/application/coverage-resolver.ts` (present /
   absent / shadowed — pure over scan results)
 - `apps/api/src/modules/library/application/propagation-preview.ts` (source
-  groups, outcomes)
+  groups, outcomes; one snapshot per machine in scope, and a machine that could
+  not be scanned still contributes destinations, blocked with a reason)
 - `apps/api/src/modules/library/application/propagation-apply.ts` (token,
   planning, adapters, acknowledgements — FS writes go through runtime
-  `library.apply` / `library.undo` with an explicit `backupRoot`; injected FS
-  deps keep unit tests in-process)
+  `library.apply` / `library.undo` with an explicit `backupRoot`; one batch per
+  destination machine, one backup handle each; injected FS deps keep unit tests
+  in-process)
+- `apps/api/src/modules/library/infrastructure/backup-roots.ts` (where each
+  machine's store lives: Local honours `library.backup_dir`, a remote store
+  resolves `~/.mango/library-backups` through the connection's `TargetPaths`)
+- `apps/api/src/modules/library/application/backup-inventory.ts` +
+  `infrastructure/backup-index-repository.ts` (the backups page: the hub index
+  keeps an offline machine's rows visible, the machine itself wins whenever it
+  can be asked, and the manifest on the machine stays the only restore source)
 - `apps/api/src/modules/library/application/removal-apply.ts` (token, planning,
   last-copy acknowledgement — FS removals go through `library.remove`)
 - `apps/api/src/modules/library/application/adapters/` (format conversion
