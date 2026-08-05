@@ -8,19 +8,26 @@
  */
 
 import { en } from '@mangostudio/shared/i18n';
-import type { RemovalApply } from '@mangostudio/shared/library';
+import type { PropagationUndo, RemovalApply } from '@mangostudio/shared/library';
 import { describe, expect, it } from 'vitest';
 import { RemovalResultPanel } from '../../../../src/features/library/components/RemovalResultPanel';
 import { render, screen } from '../../../support/harness/render';
 
-function panelOf(result: RemovalApply) {
+function panelOf(
+  result: RemovalApply,
+  undo: Partial<{
+    undoResult: (environmentId: string, backupId: string) => PropagationUndo | undefined;
+    isUndoing: (environmentId: string, backupId: string) => boolean;
+    undoError: (environmentId: string, backupId: string) => unknown;
+  }> = {}
+) {
   return render(
     <RemovalResultPanel
       environmentName={(id: string) => id}
       result={result}
-      undoResult={undefined}
-      isUndoing={false}
-      undoError={null}
+      undoResult={undo.undoResult ?? (() => undefined)}
+      isUndoing={undo.isUndoing ?? (() => false)}
+      undoError={undo.undoError ?? (() => null)}
       onUndo={() => undefined}
     />
   );
@@ -84,5 +91,39 @@ describe('RemovalResultPanel', () => {
 
     expect(screen.getByText(en.library.removal.resultNone)).toBeInTheDocument();
     expect(screen.queryByText(en.library.result.none)).not.toBeInTheDocument();
+  });
+
+  it('keeps one handle restored while another still fails', () => {
+    const twoMachines: RemovalApply = {
+      partial: false,
+      backups: [
+        { environmentId: 'local', backupId: 'backup-a' },
+        { environmentId: 'wsl-ubuntu', backupId: 'backup-b' },
+      ],
+      removed: [],
+      kept: [],
+      failed: [],
+    };
+    const restored: PropagationUndo = {
+      environmentId: 'local',
+      backupId: 'backup-a',
+      restored: [{ locationId: 'claude-skills', destinationPath: '/home/user/.claude/skills/gh' }],
+      removed: [],
+      skipped: [],
+    };
+
+    panelOf(twoMachines, {
+      undoResult: (environmentId, backupId) =>
+        environmentId === 'local' && backupId === 'backup-a' ? restored : undefined,
+      undoError: (environmentId, backupId) =>
+        environmentId === 'wsl-ubuntu' && backupId === 'backup-b' ? new Error('offline') : null,
+    });
+
+    // Machine A's confirmation stays up rather than resetting because machine
+    // B's mutation state changed.
+    expect(screen.getByTestId('removal-undo-result')).toBeInTheDocument();
+    // Machine B's error renders once, on its own handle, not on both.
+    expect(screen.getAllByText(en.library.result.undoError)).toHaveLength(1);
+    expect(screen.getAllByTestId('removal-undo-button')).toHaveLength(1);
   });
 });

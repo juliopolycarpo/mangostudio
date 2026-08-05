@@ -14,9 +14,10 @@ import { formatMessage } from '@/lib/i18n-format';
 
 interface RemovalResultPanelProps {
   readonly result: RemovalApply | undefined;
-  readonly undoResult: PropagationUndo | undefined;
-  readonly isUndoing: boolean;
-  readonly undoError: unknown;
+  /** One mutation now covers every machine's backup, so lookups are per handle. */
+  readonly undoResult: (environmentId: string, backupId: string) => PropagationUndo | undefined;
+  readonly isUndoing: (environmentId: string, backupId: string) => boolean;
+  readonly undoError: (environmentId: string, backupId: string) => unknown;
   readonly environmentName: (environmentId: string) => string;
   readonly onUndo: (environmentId: string, backupId: string) => void;
 }
@@ -150,51 +151,55 @@ export function RemovalResultPanel({
         restored some machines and not others would be the worst thing this
         panel could offer.
       */}
-      {result.backups.map((handle) => (
-        <div
-          key={`${handle.environmentId}:${handle.backupId}`}
-          className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container p-3"
-          data-testid="removal-backup-handle"
-          data-environment-id={handle.environmentId}
-        >
-          <p className="break-all font-mono text-[11px] text-on-surface-variant/70">
-            {environmentName(handle.environmentId)} ·{' '}
-            {formatMessage(l.result.backupId, { id: handle.backupId })}
-          </p>
-          {undoResult?.environmentId === handle.environmentId &&
-          undoResult.backupId === handle.backupId ? (
-            <div className="space-y-1" data-testid="removal-undo-result">
-              <p className="text-on-surface text-xs">
-                {formatMessage(l.result.undone, {
-                  restored: String(undoResult.restored.length),
-                  removed: String(undoResult.removed.length),
-                })}
-              </p>
-              {undoResult.skipped.length > 0 && (
-                <p className="text-[11px] text-tertiary">
-                  {formatMessage(l.result.undoSkipped, {
-                    count: String(undoResult.skipped.length),
+      {result.backups.map((handle) => {
+        const handleUndoResult = undoResult(handle.environmentId, handle.backupId);
+        const handleIsUndoing = isUndoing(handle.environmentId, handle.backupId);
+        const handleUndoError = undoError(handle.environmentId, handle.backupId);
+        return (
+          <div
+            key={`${handle.environmentId}:${handle.backupId}`}
+            className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container p-3"
+            data-testid="removal-backup-handle"
+            data-environment-id={handle.environmentId}
+          >
+            <p className="break-all font-mono text-[11px] text-on-surface-variant/70">
+              {environmentName(handle.environmentId)} ·{' '}
+              {formatMessage(l.result.backupId, { id: handle.backupId })}
+            </p>
+            {handleUndoResult ? (
+              <div className="space-y-1" data-testid="removal-undo-result">
+                <p className="text-on-surface text-xs">
+                  {formatMessage(l.result.undone, {
+                    restored: String(handleUndoResult.restored.length),
+                    removed: String(handleUndoResult.removed.length),
                   })}
                 </p>
-              )}
-            </div>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => onUndo(handle.environmentId, handle.backupId)}
-              loading={isUndoing}
-              data-testid="removal-undo-button"
-            >
-              <Undo2 size={13} />
-              {isUndoing ? l.result.undoing : l.removal.restore}
-            </Button>
-          )}
-          {undoError !== null && undoError !== undefined && (
-            <p className="text-error text-[11px]">{l.result.undoError}</p>
-          )}
-        </div>
-      ))}
+                {handleUndoResult.skipped.length > 0 && (
+                  <p className="text-[11px] text-tertiary">
+                    {formatMessage(l.result.undoSkipped, {
+                      count: String(handleUndoResult.skipped.length),
+                    })}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => onUndo(handle.environmentId, handle.backupId)}
+                loading={handleIsUndoing}
+                data-testid="removal-undo-button"
+              >
+                <Undo2 size={13} />
+                {handleIsUndoing ? l.result.undoing : l.removal.restore}
+              </Button>
+            )}
+            {handleUndoError !== null && handleUndoError !== undefined && (
+              <p className="text-error text-[11px]">{l.result.undoError}</p>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

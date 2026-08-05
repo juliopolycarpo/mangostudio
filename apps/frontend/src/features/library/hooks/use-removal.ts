@@ -53,9 +53,14 @@ export interface RemovalController {
   readonly result: RemovalApply | undefined;
   /** One backup set on one machine; a cross-machine removal produced several. */
   readonly undo: (environmentId: string, backupId: string) => void;
-  readonly isUndoing: boolean;
-  readonly undoError: unknown;
-  readonly undoResult: PropagationUndo | undefined;
+  /** Keyed per handle: a cross-machine removal has one mutation in flight per machine. */
+  readonly isUndoing: (environmentId: string, backupId: string) => boolean;
+  readonly undoError: (environmentId: string, backupId: string) => unknown;
+  readonly undoResult: (environmentId: string, backupId: string) => PropagationUndo | undefined;
+}
+
+function backupHandleKey(environmentId: string, backupId: string): string {
+  return `${environmentId}:${backupId}`;
 }
 
 export function useRemoval(request: RemovalPreviewRequest): RemovalController {
@@ -147,6 +152,15 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
     },
   });
 
+  // A cross-machine removal produces one backup handle per machine, so the
+  // mutation's own single result/error/pending would apply to every handle at
+  // once — restoring machine B would clear machine A's confirmation, and a
+  // failure on one machine would render on all of them. Track outcomes and
+  // in-flight state per handle instead.
+  const [undoingKey, setUndoingKey] = useState<string | undefined>(undefined);
+  const [undoResults, setUndoResults] = useState<ReadonlyMap<string, PropagationUndo>>(new Map());
+  const [undoErrors, setUndoErrors] = useState<ReadonlyMap<string, unknown>>(new Map());
+
   const undoMutation = useMutation({
     mutationFn: (target: { environmentId: string; backupId: string }) =>
       undoPropagation(target.backupId, target.environmentId),
@@ -197,12 +211,39 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
     result,
     undo: useCallback(
       (environmentId: string, backupId: string) => {
-        undoMutation.mutate({ environmentId, backupId });
+        const key = backupHandleKey(environmentId, backupId);
+        setUndoingKey(key);
+        setUndoErrors((current) => {
+          if (!current.has(key)) return current;
+          const next = new Map(current);
+          next.delete(key);
+          return next;
+        });
+        undoMutation.mutate(
+          { environmentId, backupId },
+          {
+            onSuccess: (data) => setUndoResults((current) => new Map(current).set(key, data)),
+            onError: (error) => setUndoErrors((current) => new Map(current).set(key, error)),
+            onSettled: () => setUndoingKey((current) => (current === key ? undefined : current)),
+          }
+        );
       },
       [undoMutation]
     ),
-    isUndoing: undoMutation.isPending,
-    undoError: undoMutation.error,
-    undoResult: undoMutation.data,
+    isUndoing: useCallback(
+      (environmentId: string, backupId: string) =>
+        undoingKey === backupHandleKey(environmentId, backupId),
+      [undoingKey]
+    ),
+    undoError: useCallback(
+      (environmentId: string, backupId: string) =>
+        undoErrors.get(backupHandleKey(environmentId, backupId)),
+      [undoErrors]
+    ),
+    undoResult: useCallback(
+      (environmentId: string, backupId: string) =>
+        undoResults.get(backupHandleKey(environmentId, backupId)),
+      [undoResults]
+    ),
   };
 }
