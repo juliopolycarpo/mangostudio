@@ -174,6 +174,49 @@ describe('WslProvisioner', () => {
     expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
   });
 
+  // A canary hub calls itself `<root>-canary.<sha7>` while its assets live on
+  // the rolling `v<root>-canary` tag under rolling names. Splicing the running
+  // version into the URL asked GitHub for a tag that has never existed, so
+  // hub-driven provisioning could not work on canary at all.
+  it('resolves canary assets onto the rolling tag, not the running version', async () => {
+    const canaryVersion = '1.2.3-canary.abcdef0';
+    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const { provisioner, requested, written } = harness({
+      version: canaryVersion,
+      checksums: `${DIGEST}  ${canaryAsset}\n`,
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(requested).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
+    ]);
+    // Cached under the hub's own sha-stamped version even though it was fetched
+    // from the rolling tag: two canary builds must not share a cache entry.
+    expect(written.get(`/cache/${canaryVersion}/${canaryAsset}`)).toEqual(ARCHIVE);
+  });
+
+  // Two canary builds resolve one filename on one tag, so the only thing that
+  // can tell yesterday's bytes from today's is a checksum fetched now. Serving
+  // a stale cache entry against a stale manifest would install the wrong pair.
+  it('re-downloads a rolling asset whose cached bytes no longer match the tag', async () => {
+    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const { provisioner, requested, written } = harness({
+      version: '1.2.3-canary.abcdef0',
+      checksums: `${DIGEST}  ${canaryAsset}\n`,
+      cached: new TextEncoder().encode('yesterday of the same rolling name'),
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(requested).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
+    ]);
+    expect(written.get(`/cache/1.2.3-canary.abcdef0/${canaryAsset}`)).toEqual(ARCHIVE);
+  });
+
   it('records what it installed and what the distribution may do', async () => {
     const { provisioner, calls, config } = harness();
 

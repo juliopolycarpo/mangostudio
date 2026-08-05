@@ -38,6 +38,10 @@ import {
 } from '../domain/runtime-push';
 import { pruneRuntimeCache } from '../domain/runtime-release-fetch';
 import {
+  type RuntimeReleaseResolution,
+  resolveRuntimeRelease,
+} from '../domain/runtime-release-resolution';
+import {
   CONFIG_LOCK_BUSY_EXIT,
   DISTRO_RUNTIME_PATH,
   type DistroPlatformProbe,
@@ -54,7 +58,6 @@ import {
   REMOVE_LEGACY_RUNTIME_SCRIPT,
   releaseArchiveName,
   releaseAssetUrl,
-  releaseRuntimeBinaryName,
   resolveLinuxPlatformId,
   SETUP_FULL_SCRIPT,
   VERSION_SCRIPT,
@@ -164,6 +167,9 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
 
       // Version equality settles it for a release: a published tag's bytes
       // never change, so a distribution holding that version holds these bytes.
+      // Canary counts as a release here — its version carries the source sha,
+      // so what the slot recorded still names one build, even though the tag
+      // those bytes came from has since been clobbered.
       // Reinstall forces a replace even when the version already matches.
       if (!options.force && recorded && !isDevelopmentVersion(version) && (await stillRuns()))
         return;
@@ -408,6 +414,12 @@ async function removeLegacyRuntime(deps: WslProvisionerDeps, distro: string): Pr
 /**
  * Prefers the raw runtime asset; falls back to the platform archive when the
  * raw asset is missing from SHA256SUMS or 404s (older releases).
+ *
+ * Names and tag both come from the channel resolver rather than the hub's own
+ * version string. A canary hub calls itself `<root>-canary.<sha7>` while the
+ * rolling pre-release is tagged `v<root>-canary` and carries assets named for
+ * the same rolling version — splicing the running version into either would
+ * ask GitHub for a tag and a filename that no release ever published.
  */
 async function loadRelease(
   deps: WslProvisionerDeps,
@@ -415,17 +427,18 @@ async function loadRelease(
   version: string,
   platformId: LinuxPlatformId
 ): Promise<{ readonly fromArchive: boolean; readonly bytes: Uint8Array }> {
-  const rawName = releaseRuntimeBinaryName(version, platformId);
-  const archiveName = releaseArchiveName(version, platformId);
+  const release = resolveRuntimeRelease(version, platformId);
+  const rawName = release.runtimeAssetName;
+  const archiveName = releaseArchiveName(release.assetVersion, platformId);
 
   try {
-    const bytes = await loadAsset(deps, version, rawName);
+    const bytes = await loadAsset(deps, version, release, rawName);
     return { fromArchive: false, bytes };
   } catch (error) {
     if (!(error instanceof WslAssetMissingError)) {
       if (error instanceof WslDownloadError) {
         throw new WslProvisioningError(
-          `${error.message} ${manualInstallHint(deps, distro, version, rawName)}`
+          `${error.message} ${manualInstallHint(deps, distro, version, release, rawName)}`
         );
       }
       throw error;
@@ -433,12 +446,12 @@ async function loadRelease(
   }
 
   try {
-    const bytes = await loadAsset(deps, version, archiveName);
+    const bytes = await loadAsset(deps, version, release, archiveName);
     return { fromArchive: true, bytes };
   } catch (error) {
     if (error instanceof WslDownloadError || error instanceof WslAssetMissingError) {
       throw new WslProvisioningError(
-        `${error.message} ${manualInstallHint(deps, distro, version, archiveName)}`
+        `${error.message} ${manualInstallHint(deps, distro, version, release, archiveName)}`
       );
     }
     throw error;
@@ -482,10 +495,11 @@ function manualInstallHint(
   deps: WslProvisionerDeps,
   distro: string,
   version: string,
+  release: RuntimeReleaseResolution,
   assetName: string
 ): string {
   return (
-    `Either download ${releaseAssetUrl(version, assetName)} to ` +
+    `Either download ${releaseAssetUrl(release.tagVersion, assetName)} to ` +
     `${join(deps.cacheDir(version), assetName)} on this host and connect again, ` +
     `or put the ${version} runtime at ${DISTRO_RUNTIME_PATH} inside "${distro}" yourself.`
   );
@@ -517,15 +531,27 @@ async function probePlatform(
 async function loadAsset(
   deps: WslProvisionerDeps,
   version: string,
+  release: RuntimeReleaseResolution,
   assetName: string
 ): Promise<Uint8Array> {
+  // Cached under the hub's own version, downloaded from the resolved tag. On a
+  // rolling channel those differ, and it is the difference that keeps two
+  // canary builds in separate cache directories while both read one tag.
   const cachePath = join(deps.cacheDir(version), assetName);
-  const expected = await fetchExpectedChecksum(deps, version, assetName);
+  // Never cached, on any channel: the manifest is what decides whether the
+  // bytes on disk are still the bytes this tag publishes. A rolling tag
+  // republishes under one filename, so a cached copy of yesterday's canary is
+  // only distinguishable from today's by failing this comparison.
+  const expected = await fetchExpectedChecksum(deps, release.tagVersion, assetName);
 
   const cached = await deps.readBytes(cachePath);
   if (cached && sha256(cached) === expected) return cached;
 
-  const bytes = await download(deps, releaseAssetUrl(version, assetName), MAX_ARCHIVE_BYTES);
+  const bytes = await download(
+    deps,
+    releaseAssetUrl(release.tagVersion, assetName),
+    MAX_ARCHIVE_BYTES
+  );
   const actual = sha256(bytes);
   if (actual !== expected) {
     throw new WslProvisioningError(
@@ -546,18 +572,18 @@ async function loadAsset(
 
 async function fetchExpectedChecksum(
   deps: WslProvisionerDeps,
-  version: string,
+  tagVersion: string,
   assetName: string
 ): Promise<string> {
   const checksums = await download(
     deps,
-    releaseAssetUrl(version, 'SHA256SUMS'),
+    releaseAssetUrl(tagVersion, 'SHA256SUMS'),
     MAX_CHECKSUMS_BYTES
   );
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);
   if (!expected) {
     throw new WslAssetMissingError(
-      `Release v${version} does not publish ${assetName}, so there is no Linux runtime to install. Update MangoStudio, or put a matching runtime at ${DISTRO_RUNTIME_PATH} in the distribution yourself.`
+      `Release v${tagVersion} does not publish ${assetName}, so there is no Linux runtime to install. Update MangoStudio, or put a matching runtime at ${DISTRO_RUNTIME_PATH} in the distribution yourself.`
     );
   }
   return expected;

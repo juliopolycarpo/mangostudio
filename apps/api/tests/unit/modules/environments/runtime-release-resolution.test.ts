@@ -10,6 +10,7 @@ describe('resolveRuntimeRelease', () => {
       tagVersion: '1.2.3',
       assetVersion: '1.2.3',
       runtimeAssetName: 'mangostudio-runtime-1.2.3-linux-x64',
+      rolling: false,
     });
   });
 
@@ -19,6 +20,7 @@ describe('resolveRuntimeRelease', () => {
       tagVersion: '1.2.3-canary',
       assetVersion: '1.2.3-canary',
       runtimeAssetName: 'mangostudio-runtime-1.2.3-canary-darwin-arm64',
+      rolling: true,
     });
   });
 
@@ -31,6 +33,7 @@ describe('resolveRuntimeRelease', () => {
       tagVersion: '1.2.3-canary',
       assetVersion: '1.2.3-canary',
       runtimeAssetName: 'mangostudio-runtime-1.2.3-canary-linux-x64',
+      rolling: true,
     });
   });
 
@@ -40,7 +43,25 @@ describe('resolveRuntimeRelease', () => {
       tagVersion: '1.2.3-rc.1',
       assetVersion: '1.2.3-rc.1',
       runtimeAssetName: 'mangostudio-runtime-1.2.3-rc.1-linux-x64',
+      rolling: false,
     });
+  });
+
+  // `releaseRawRuntimeBinaryFileName` writes `.exe` for the two Windows
+  // targets. Resolving a Windows platform to an extensionless name asks a
+  // release for an asset it never published — latent until something asks
+  // about a Windows target, which the copyable install one-liner does.
+  it.each([
+    ['windows-x64', 'mangostudio-runtime-1.2.3-windows-x64.exe'],
+    ['windows-arm64', 'mangostudio-runtime-1.2.3-windows-arm64.exe'],
+  ])('keeps the published .exe suffix for %s', (platformId, assetName) => {
+    expect(resolveRuntimeRelease('1.2.3', platformId).runtimeAssetName).toBe(assetName);
+  });
+
+  it('keeps the .exe suffix on the rolling canary asset too', () => {
+    expect(resolveRuntimeRelease('1.2.3-canary.abcdef0', 'windows-x64').runtimeAssetName).toBe(
+      'mangostudio-runtime-1.2.3-canary-windows-x64.exe'
+    );
   });
 
   it('fetches canary checksums and bytes from the rolling release identity', async () => {
