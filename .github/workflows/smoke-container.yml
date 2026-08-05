@@ -129,9 +129,19 @@ jobs:
 
       - name: Assert no container outlived the suite
         if: ${{ !cancelled() }}
+        # `--rm` reaping is asynchronous in both engines, so a container the
+        # suite already ended can still be listed for a moment. Poll rather
+        # than race it, or this gate fails on timing instead of on a leak.
         run: |
           set -euo pipefail
-          leftover="$("$CONTAINER_CLI" ps -a --format '{{.Names}}' --filter 'name=mango-rt-')"
+          leftover=""
+          for _ in $(seq 1 20); do
+            leftover="$("$CONTAINER_CLI" ps -a --format '{{.Names}}' --filter 'name=mango-rt-')"
+            if [ -z "$leftover" ]; then
+              break
+            fi
+            sleep 1
+          done
           if [ -n "$leftover" ]; then
             echo "::error::containers left behind: $leftover"
             exit 1
