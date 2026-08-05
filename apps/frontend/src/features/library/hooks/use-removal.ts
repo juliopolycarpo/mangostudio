@@ -74,11 +74,15 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
     () => [...request.locationIds].sort().join(','),
     [request.locationIds]
   );
+  const environmentKey = useMemo(
+    () => [...(request.environmentIds ?? [])].sort().join(','),
+    [request.environmentIds]
+  );
 
   const canPreview = request.resourceKeys.length > 0 && request.locationIds.length > 0;
 
   const previewQuery = useQuery({
-    queryKey: [...libraryKeys.all, 'removal-preview', requestKey, locationKey],
+    queryKey: [...libraryKeys.all, 'removal-preview', requestKey, locationKey, environmentKey],
     // A preview is a snapshot of the disk, never something to serve from cache.
     gcTime: 0,
     staleTime: 0,
