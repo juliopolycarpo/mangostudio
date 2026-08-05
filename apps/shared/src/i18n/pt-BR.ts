@@ -1817,6 +1817,9 @@ export const messages = {
         'A cópia que está aqui não pôde ser lida, então sobrescrevê-la não é seguro.',
       'no-source-content': 'Nenhuma cópia legível existe para copiar.',
       'no-adapter-strategy': 'Nenhum conversor sabe levar este formato até o do destino.',
+      'environment-offline': 'Esta máquina não está conectada no momento.',
+      'environment-unsupported': 'Esta máquina não oferece acesso à biblioteca.',
+      'environment-readonly': 'O dono desta máquina não permitiu escrever arquivos aqui.',
       // A remoção usa este mesmo catálogo; só o motivo abaixo é exclusivo dela.
       'invalid-instance':
         'Esta cópia não pôde ser lida por inteiro, então não dá para guardar um backup fiel dela. Remova você mesmo.',

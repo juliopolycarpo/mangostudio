@@ -361,6 +361,20 @@ export const PropagationBlockedReasonSchema = Type.Union([
   Type.Literal('no-source-content'),
   /** The destination's format differs and no adapter offers a conversion. */
   Type.Literal('no-adapter-strategy'),
+  /**
+   * The machine is not connected. Its locations cannot be inspected, so nothing
+   * can be said about what a write there would do — and a preview that guessed
+   * would be describing a disk nobody looked at.
+   */
+  Type.Literal('environment-offline'),
+  /** The machine's runtime does not advertise the library feature at all. */
+  Type.Literal('environment-unsupported'),
+  /**
+   * The machine's owner has not granted filesystem writes (019). Surfaced while
+   * reviewing rather than as a refusal mid-apply: a policy the user cannot
+   * change from here should never look like a failure they caused.
+   */
+  Type.Literal('environment-readonly'),
 ]);
 
 export const PropagationAdaptationSchema = Type.Object({
@@ -390,6 +404,18 @@ export const PropagationSourceGroupSchema = Type.Object({
   contentLocationId: LibraryLocationIdSchema,
   /** Absolute path of that copy — the source an apply reads from. */
   contentPath: Type.String({ minLength: 1 }),
+  /**
+   * Machines holding these bytes. Divergence across machines reads exactly like
+   * divergence across locations: there is no canonical copy, and any machine's
+   * version can be the one the user picks.
+   */
+  environmentIds: Type.Array(LibraryEnvironmentIdSchema),
+  /**
+   * Machine `contentPath` is on. Load-bearing rather than decorative — the path
+   * only means something on this machine, and reading it anywhere else would
+   * either miss or, worse, find a different file with the same name.
+   */
+  contentEnvironmentId: LibraryEnvironmentIdSchema,
 });
 
 /**
@@ -405,6 +431,8 @@ export const PropagationOutcomeSchema = Type.Object({
 });
 
 export const PropagationDestinationSchema = Type.Object({
+  /** Machine this location is on; a destination is the pair, never the location alone. */
+  environmentId: LibraryEnvironmentIdSchema,
   locationId: LibraryLocationIdSchema,
   /** Every target served by writing here — one write can cover several. */
   targetIds: Type.Array(LibraryTargetIdSchema),
@@ -438,6 +466,17 @@ export const PropagationPreviewRequestSchema = Type.Object({
     maxItems: PROPAGATION_PREVIEW_MAX_RESOURCES,
   }),
   targetLocationIds: Type.Array(LibraryLocationIdSchema, { minItems: 1, maxItems: 64 }),
+  /**
+   * Machines this propagation spans, as both sources and destinations.
+   *
+   * Every named machine contributes its copies as candidate winners and is
+   * offered as a destination for each requested location. Omitted means Local
+   * alone, which is what a client that predates cross-machine propagation could
+   * only have meant.
+   */
+  environmentIds: Type.Optional(
+    Type.Array(LibraryEnvironmentIdSchema, { minItems: 1, maxItems: 16 })
+  ),
   /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
   profileId: Type.Optional(ProfileIdSchema),
 });
@@ -467,6 +506,8 @@ export const PropagationResolutionSchema = Type.Union([
 ]);
 
 export const PropagationDestinationDecisionSchema = Type.Object({
+  /** Machine the destination is on; omitted means Local. */
+  environmentId: Type.Optional(LibraryEnvironmentIdSchema),
   locationId: LibraryLocationIdSchema,
   action: Type.Union([Type.Literal('apply'), Type.Literal('skip')]),
   strategy: Type.Optional(AdapterStrategySchema),
@@ -514,6 +555,7 @@ export const PropagationFailureReasonSchema = Type.Union([
 
 export const PropagationAppliedSchema = Type.Object({
   resourceKey: Type.String({ minLength: 1 }),
+  environmentId: LibraryEnvironmentIdSchema,
   locationId: LibraryLocationIdSchema,
   operation: PropagationOperationSchema,
   destinationPath: Type.String({ minLength: 1 }),
@@ -532,20 +574,42 @@ export const PropagationAppliedSchema = Type.Object({
 
 export const PropagationSkippedSchema = Type.Object({
   resourceKey: Type.String({ minLength: 1 }),
+  environmentId: LibraryEnvironmentIdSchema,
   locationId: Type.Optional(LibraryLocationIdSchema),
   reason: PropagationSkipReasonSchema,
 });
 
 export const PropagationFailureSchema = Type.Object({
   resourceKey: Type.String({ minLength: 1 }),
+  environmentId: LibraryEnvironmentIdSchema,
   locationId: LibraryLocationIdSchema,
   reason: PropagationFailureReasonSchema,
   message: Type.String(),
 });
 
+/** One machine's backup set, and the machine it is on — the pair `undo` takes. */
+export const PropagationBackupHandleSchema = Type.Object({
+  environmentId: LibraryEnvironmentIdSchema,
+  backupId: Type.String({ minLength: 1 }),
+});
+
 export const PropagationApplySchema = Type.Object({
-  /** Present when anything was written; the handle `undo` takes. */
+  /**
+   * The set on the machine this result describes. Present on a runtime's own
+   * answer, and on a hub answer that wrote to exactly one machine. A propagation
+   * spanning machines produces one set per machine and leaves this absent —
+   * `backups` is the handle that is always complete.
+   */
   backupId: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * Every set this apply produced, one per machine written to.
+   *
+   * A cross-machine apply has no single undo: each machine backed up its own
+   * files under its own root, and rolling back means asking each of them. One
+   * id could only ever name one of those, which is how a user ends up believing
+   * they undid something they undid half of.
+   */
+  backups: Type.Array(PropagationBackupHandleSchema),
   /**
    * False when the filesystem matches its pre-apply state — either everything
    * landed, or a failure was fully rolled back. True is the alarming case: a
@@ -1029,6 +1093,7 @@ export type PropagationFailureReason = Static<typeof PropagationFailureReasonSch
 export type PropagationApplied = Static<typeof PropagationAppliedSchema>;
 export type PropagationSkipped = Static<typeof PropagationSkippedSchema>;
 export type PropagationFailure = Static<typeof PropagationFailureSchema>;
+export type PropagationBackupHandle = Static<typeof PropagationBackupHandleSchema>;
 export type PropagationApply = Static<typeof PropagationApplySchema>;
 export type PropagationUndoRequest = Static<typeof PropagationUndoRequestSchema>;
 export type LibraryUndoResult = Static<typeof LibraryUndoResultSchema>;

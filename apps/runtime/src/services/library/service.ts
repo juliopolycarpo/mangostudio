@@ -30,6 +30,8 @@ import type {
   RuntimeLibraryLocationsResult,
   RuntimeLibraryReadParams,
   RuntimeLibraryReadResult,
+  RuntimeLibraryReadTreeParams,
+  RuntimeLibraryReadTreeResult,
   RuntimeLibraryRemoveParams,
   RuntimeLibraryRemoveResult,
   RuntimeLibraryScanParams,
@@ -43,7 +45,7 @@ import { executePropagationWrites } from './apply-writes';
 import { collectBackupGarbage, createBackupStoreDeps, listBackupSets } from './backup-store';
 import { type LibraryCache, libraryCache } from './cache';
 import { scanLibraryInstances } from './discovery';
-import type { ReadLibraryInstance } from './instance-reader';
+import { isPathWithin, type ReadLibraryInstance, readLibraryTree } from './instance-reader';
 import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
 import { executeRemovalWrites } from './remove-writes';
 import { type RuntimeSettingsSourcesResult, readSettingsSources } from './settings-sources';
@@ -79,6 +81,7 @@ const DEFAULT_ADAPTERS: LibraryHostAdapters = {
 export interface LibraryService {
   scan(params: RuntimeLibraryScanParams): Promise<RuntimeLibraryScanResult>;
   read(params: RuntimeLibraryReadParams): Promise<RuntimeLibraryReadResult>;
+  readTree(params: RuntimeLibraryReadTreeParams): Promise<RuntimeLibraryReadTreeResult>;
   locations(params: RuntimeLibraryLocationsParams): Promise<RuntimeLibraryLocationsResult>;
   settingsSources(
     params: RuntimeLibrarySettingsSourcesParams
@@ -144,31 +147,54 @@ function decodeApplyOperations(params: RuntimeLibraryApplyParams): PreparedPropa
   // shared `contents` map is that a fan-out across destinations carries the
   // bytes once, and decoding per operation would put every copy back in memory.
   const decoded = new Map<string, Uint8Array>();
+  const payload = (contentRef: string, what: string): Uint8Array => {
+    const encoded = params.contents?.[contentRef];
+    if (encoded === undefined) {
+      throw new RuntimeToolArgumentError(`library.apply ${what} names no content in this frame.`);
+    }
+    let bytes = decoded.get(contentRef);
+    if (!bytes) {
+      bytes = Buffer.from(encoded, 'base64');
+      decoded.set(contentRef, bytes);
+    }
+    return bytes;
+  };
+
   return params.operations.map((operation) => {
     if (operation.kind === 'directory') {
+      if (operation.files !== undefined) {
+        return {
+          ...operation,
+          files: operation.files.map((file) => ({
+            relativePath: file.relativePath,
+            contents: payload(
+              file.contentRef,
+              `directory operation "${operation.resourceKey}" file "${file.relativePath}"`
+            ),
+          })),
+        };
+      }
       if (typeof operation.sourceDir !== 'string' || operation.sourceDir.length === 0) {
         throw new RuntimeToolArgumentError(
-          `library.apply directory operation "${operation.resourceKey}" requires sourceDir.`
+          `library.apply directory operation "${operation.resourceKey}" requires sourceDir or files.`
         );
       }
+      const { files: _sameMachine, ...rest } = operation;
       return {
-        ...operation,
+        ...rest,
         sourceDir: operation.sourceDir,
       };
     }
-    const encoded =
-      operation.contentRef === undefined ? undefined : params.contents?.[operation.contentRef];
-    if (encoded === undefined) {
+    if (operation.contentRef === undefined) {
       throw new RuntimeToolArgumentError(
         `library.apply file operation "${operation.resourceKey}" names no content in this frame.`
       );
     }
-    let contents = decoded.get(operation.contentRef as string);
-    if (!contents) {
-      contents = Buffer.from(encoded, 'base64');
-      decoded.set(operation.contentRef as string, contents);
-    }
-    return { ...operation, contents };
+    const { files: _never, ...rest } = operation;
+    return {
+      ...rest,
+      contents: payload(operation.contentRef, `file operation "${operation.resourceKey}"`),
+    };
   });
 }
 
@@ -221,6 +247,43 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           };
         }
         throw error;
+      }
+    },
+
+    async readTree(params) {
+      const pathEnv = pathEnvFrom(adapters, params);
+      const root = libraryLocationRoot(params.locationId, pathEnv);
+      if (root === null) {
+        return {
+          files: [],
+          denied: true,
+          reason: `Library location "${params.locationId}" does not resolve on this machine.`,
+        };
+      }
+      // Containment is checked against the location root before the walk, so a
+      // hub-supplied path can never make this read a tree outside the agent
+      // homes; `readLibraryTree` re-checks every leaf after resolution.
+      if (!isPathWithin(root, params.path)) {
+        return {
+          files: [],
+          denied: true,
+          reason: `Library path "${params.path}" is outside its registered location.`,
+        };
+      }
+      try {
+        const files = await readLibraryTree(params.path);
+        return {
+          files: files.map((file) => ({
+            relativePath: file.relativePath,
+            contentBase64: Buffer.from(file.bytes).toString('base64'),
+          })),
+        };
+      } catch (error) {
+        return {
+          files: [],
+          denied: true,
+          reason: error instanceof Error ? error.message : String(error),
+        };
       }
     },
 

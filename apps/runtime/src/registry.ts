@@ -95,6 +95,7 @@ export function createRuntimeMethodHandlers(
       handler('install.cancel', (params) => install.cancel(params)),
       handler('library.scan', (params) => libraryService.scan(params)),
       handler('library.read', (params) => libraryService.read(params)),
+      handler('library.read-tree', (params) => libraryService.readTree(params)),
       handler('library.locations', (params) => libraryService.locations(params)),
       handler('library.settings-sources', (params) => libraryService.settingsSources(params)),
       handler('library.apply', (params, context) => libraryService.apply(params, context.signal)),

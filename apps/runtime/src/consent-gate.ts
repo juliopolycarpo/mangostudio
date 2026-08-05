@@ -83,6 +83,7 @@ export const RUNTIME_METHOD_CAPABILITIES: Readonly<
   'install.cancel': ['shell'],
   'library.scan': ['library'],
   'library.read': ['library'],
+  'library.read-tree': ['library'],
   'library.locations': ['library'],
   'library.settings-sources': ['library'],
   'library.apply': ['library', 'fsWrite'],

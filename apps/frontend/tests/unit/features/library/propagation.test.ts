@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applySummary,
   buildDecisions,
+  destinationKey,
   effectiveStrategy,
   initialDraft,
   isNoopApply,
@@ -22,8 +23,12 @@ import {
 } from '../../../../src/features/library/propagation';
 import { destination, preview, previewEntry, sourceGroup } from './fixtures';
 
+/** Every helper here targets Local; the machine dimension has its own cases. */
 function withDestinations(draft: WizardDraft, ...locationIds: string[]): WizardDraft {
-  return { ...draft, destinations: new Set(locationIds) };
+  return {
+    ...draft,
+    destinations: new Set(locationIds.map((locationId) => destinationKey('local', locationId))),
+  };
 }
 
 describe('initialDraft', () => {
@@ -137,8 +142,8 @@ describe('buildDecisions', () => {
     // A dropped destination would leave the response silent about a location
     // the user was shown, so the apply route rejects an incomplete list.
     expect(decision.destinations).toEqual([
-      { locationId: 'agents-skills', action: 'apply' },
-      { locationId: 'claude-skills', action: 'skip' },
+      { environmentId: 'local', locationId: 'agents-skills', action: 'apply' },
+      { environmentId: 'local', locationId: 'claude-skills', action: 'skip' },
     ]);
   });
 
@@ -159,7 +164,7 @@ describe('buildDecisions', () => {
     const [decision] = buildDecisions(blocked, draft);
 
     expect(decision.destinations).toEqual([
-      { locationId: 'cursor-skills-builtin', action: 'skip' },
+      { environmentId: 'local', locationId: 'cursor-skills-builtin', action: 'skip' },
     ]);
   });
 
@@ -215,6 +220,7 @@ describe('buildDecisions', () => {
     // An adaptation without an explicit strategy is rejected server-side, so the
     // preview's recommendation is what goes out when the user leaves it alone.
     expect(decision.destinations[0]).toEqual({
+      environmentId: 'local',
       locationId: 'cursor-skills',
       action: 'apply',
       strategy: 'mechanical',
@@ -336,7 +342,7 @@ describe('model-drafted conversions', () => {
 
     const acknowledged: WizardDraft = {
       ...draft,
-      acknowledged: new Set([operationKey('skill:gh', 'cursor-skills')]),
+      acknowledged: new Set([operationKey('skill:gh', 'local', 'cursor-skills')]),
     };
     expect(pendingAcknowledgements(agentAdaptation, acknowledged)).toEqual([]);
   });

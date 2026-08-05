@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { applyPropagation, previewPropagation, undoPropagation } from '../api';
 import {
   buildDecisions,
+  destinationKey,
   initialDraft,
   operationKey,
   type WizardDraft,
@@ -52,18 +53,24 @@ export interface PropagationController {
     resolution: PropagationResolution,
     detail?: { winnerContentHash?: string; editedContent?: string }
   ) => void;
-  readonly toggleDestination: (locationId: LibraryLocationId) => void;
+  readonly toggleDestination: (environmentId: string, locationId: LibraryLocationId) => void;
   readonly setStrategy: (
     resourceKey: string,
+    environmentId: string,
     locationId: LibraryLocationId,
     strategy: AdapterStrategy
   ) => void;
-  readonly toggleAcknowledgement: (resourceKey: string, locationId: LibraryLocationId) => void;
+  readonly toggleAcknowledgement: (
+    resourceKey: string,
+    environmentId: string,
+    locationId: LibraryLocationId
+  ) => void;
   readonly apply: () => void;
   readonly isApplying: boolean;
   readonly applyError: unknown;
   readonly result: PropagationApply | undefined;
-  readonly undo: () => void;
+  /** One backup set on one machine; a cross-machine apply produced several. */
+  readonly undo: (environmentId: string, backupId: string) => void;
   readonly isUndoing: boolean;
   readonly undoError: unknown;
   readonly undoResult: PropagationUndo | undefined;
@@ -84,12 +91,19 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
     () => [...request.targetLocationIds].sort().join(','),
     [request.targetLocationIds]
   );
+  // Part of the key: adding a machine changes what the preview describes, and
+  // serving the previous answer would offer destinations that were never looked
+  // at.
+  const environmentKey = useMemo(
+    () => [...(request.environmentIds ?? [])].sort().join(','),
+    [request.environmentIds]
+  );
 
   // Empty targets fail the contract with 422; the openers must not offer that.
   const canPreview = request.resourceKeys.length > 0 && request.targetLocationIds.length > 0;
 
   const previewQuery = useQuery({
-    queryKey: [...libraryKeys.all, 'preview', requestKey, locationKey],
+    queryKey: [...libraryKeys.all, 'preview', requestKey, locationKey, environmentKey],
     // A preview is a snapshot of the disk, never something to serve from cache.
     gcTime: 0,
     staleTime: 0,
@@ -140,7 +154,8 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
   });
 
   const undoMutation = useMutation({
-    mutationFn: (backupId: string) => undoPropagation(backupId),
+    mutationFn: (target: { environmentId: string; backupId: string }) =>
+      undoPropagation(target.backupId, target.environmentId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
   });
 
@@ -170,20 +185,26 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
     []
   );
 
-  const toggleDestination = useCallback((locationId: LibraryLocationId) => {
+  const toggleDestination = useCallback((environmentId: string, locationId: LibraryLocationId) => {
     setDraft((current) => {
       if (!current) return current;
       const destinations = new Set(current.destinations);
-      if (!destinations.delete(locationId)) destinations.add(locationId);
+      const key = destinationKey(environmentId, locationId);
+      if (!destinations.delete(key)) destinations.add(key);
       return { ...current, destinations };
     });
   }, []);
 
   const setStrategy = useCallback(
-    (resourceKey: string, locationId: LibraryLocationId, strategy: AdapterStrategy) => {
+    (
+      resourceKey: string,
+      environmentId: string,
+      locationId: LibraryLocationId,
+      strategy: AdapterStrategy
+    ) => {
       setDraft((current) => {
         if (!current) return current;
-        const key = operationKey(resourceKey, locationId);
+        const key = operationKey(resourceKey, environmentId, locationId);
         // Changing the strategy invalidates any sign-off: the draft the user
         // approved is not the draft the new strategy would produce.
         const acknowledged = new Set(current.acknowledged);
@@ -195,11 +216,11 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
   );
 
   const toggleAcknowledgement = useCallback(
-    (resourceKey: string, locationId: LibraryLocationId) => {
+    (resourceKey: string, environmentId: string, locationId: LibraryLocationId) => {
       setDraft((current) => {
         if (!current) return current;
         const acknowledged = new Set(current.acknowledged);
-        const key = operationKey(resourceKey, locationId);
+        const key = operationKey(resourceKey, environmentId, locationId);
         if (!acknowledged.delete(key)) acknowledged.add(key);
         return { ...current, acknowledged };
       });
@@ -224,9 +245,12 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
     isApplying: applyMutation.isPending,
     applyError: applyMutation.error,
     result,
-    undo: useCallback(() => {
-      if (result?.backupId) undoMutation.mutate(result.backupId);
-    }, [result?.backupId, undoMutation]),
+    undo: useCallback(
+      (environmentId: string, backupId: string) => {
+        undoMutation.mutate({ environmentId, backupId });
+      },
+      [undoMutation]
+    ),
     isUndoing: undoMutation.isPending,
     undoError: undoMutation.error,
     undoResult: undoMutation.data,

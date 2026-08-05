@@ -15,17 +15,26 @@ import { render, screen } from '../../../support/harness/render';
 
 const applied: PropagationApply = {
   backupId: 'backup-2026-07-27',
+  backups: [{ environmentId: 'local', backupId: 'backup-2026-07-27' }],
   partial: false,
   applied: [
     {
       resourceKey: 'skill:gh',
+      environmentId: 'local',
       locationId: 'claude-skills',
       operation: 'overwrite',
       destinationPath: '/home/dev/.claude/skills/gh',
       contentHash: 'a3f9c1',
     },
   ],
-  skipped: [{ resourceKey: 'skill:tdd', locationId: 'codex-skills', reason: 'already-in-sync' }],
+  skipped: [
+    {
+      resourceKey: 'skill:tdd',
+      environmentId: 'local',
+      locationId: 'codex-skills',
+      reason: 'already-in-sync',
+    },
+  ],
   failed: [],
 };
 
@@ -34,6 +43,7 @@ describe('ResultPanel', () => {
     const onUndo = vi.fn();
     render(
       <ResultPanel
+        environmentName={(id: string) => id}
         result={applied}
         undoResult={undefined}
         isUndoing={false}
@@ -65,6 +75,7 @@ describe('ResultPanel', () => {
 
     render(
       <ResultPanel
+        environmentName={(id: string) => id}
         result={applied}
         undoResult={undone}
         isUndoing={false}
@@ -85,12 +96,14 @@ describe('ResultPanel', () => {
   it('shouts when a failure could not be fully rolled back', () => {
     render(
       <ResultPanel
+        environmentName={(id: string) => id}
         result={{
           ...applied,
           partial: true,
           failed: [
             {
               resourceKey: 'skill:gh',
+              environmentId: 'local',
               locationId: 'codex-skills',
               reason: 'write-failed',
               message: 'EACCES',
@@ -113,13 +126,16 @@ describe('ResultPanel', () => {
   it('says nothing was written when a failure rolled back cleanly', () => {
     render(
       <ResultPanel
+        environmentName={(id: string) => id}
         result={{
           partial: false,
+          backups: [],
           applied: [],
           skipped: [],
           failed: [
             {
               resourceKey: 'skill:gh',
+              environmentId: 'local',
               locationId: 'codex-skills',
               reason: 'verification-failed',
               message: 'hash mismatch',
@@ -140,6 +156,7 @@ describe('ResultPanel', () => {
   it('names why each skipped destination was skipped', () => {
     render(
       <ResultPanel
+        environmentName={(id: string) => id}
         result={applied}
         undoResult={undefined}
         isUndoing={false}

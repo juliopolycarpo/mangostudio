@@ -39,9 +39,22 @@ export interface PreparedPropagationOperation {
   readonly expectedContentHash: string;
   /** Location root the preview showed, as resolved on the hub. */
   readonly destinationRoot: string;
+  /** Directory writes on the machine that holds the source. */
   readonly sourceDir?: string;
+  /**
+   * Directory writes whose source is on another machine: the tree travelled in
+   * the frame. Exactly one of this and `sourceDir` is ever set.
+   */
+  readonly files?: readonly PreparedPropagationFile[];
   readonly contents?: string | Uint8Array;
   readonly adaptation?: PreparedPropagationAdaptation;
+}
+
+/** One file of a transferred directory resource. */
+export interface PreparedPropagationFile {
+  /** Posix-separated, relative to the resource root. */
+  readonly relativePath: string;
+  readonly contents: Uint8Array;
 }
 
 export interface PreparedRemovalOperation {

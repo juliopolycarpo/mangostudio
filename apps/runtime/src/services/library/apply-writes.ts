@@ -11,6 +11,7 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   LibraryLocationId,
   PropagationApplied,
@@ -37,13 +38,14 @@ import {
   writeDirectoryResource,
   writeFileResource,
 } from './resource-writer';
-import type { PreparedPropagationOperation } from './write-shapes';
+import type { PreparedPropagationFile, PreparedPropagationOperation } from './write-shapes';
 
 export interface PropagationWriteEngineDeps {
   writeDirectory(input: {
     readonly locationId: LibraryLocationId;
     readonly slug: string;
-    readonly sourceDir: string;
+    readonly sourceDir?: string;
+    readonly files?: readonly PreparedPropagationFile[];
     readonly env: PathEnv;
     readonly backupId: string;
   }): Promise<ResourceWriteResult>;
@@ -103,6 +105,11 @@ export async function executePropagationWrites(
   })
 ): Promise<PropagationApply> {
   const env = params.pathEnv;
+  // Echoed onto every row rather than resolved here: the id is the hub's name
+  // for this connection, and a machine reachable from two hubs would answer with
+  // two different ones. Absent means Local — every write before machines were
+  // selectable was Local's.
+  const environmentId = params.environmentId ?? LOCAL_ENVIRONMENT_ID;
   const backupId = params.backupId ?? createBackupId(deps.backup);
   const written: BackupEntry[] = [];
   const applied: PropagationApplied[] = [];
@@ -111,11 +118,11 @@ export async function executePropagationWrites(
   for (const operation of params.operations) {
     try {
       assertNotCancelled(params.signal);
-      const result = await executeOperation(operation, env, backupId, deps);
+      const result = await executeOperation(operation, env, backupId, environmentId, deps);
       written.push(result.entry);
       applied.push(result.applied);
     } catch (error) {
-      failed.push(describeFailure(operation, error));
+      failed.push(describeFailure(operation, environmentId, error));
       break;
     }
   }
@@ -124,14 +131,21 @@ export async function executePropagationWrites(
     const rolledBack = await rollback(written, deps);
     if (rolledBack) {
       await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-      return { partial: false, applied: [], skipped: [], failed };
+      return { partial: false, applied: [], skipped: [], failed, backups: [] };
     }
     await persistBackupManifest(backupId, written, params.environmentId, deps);
-    return { partial: true, applied, skipped: [], failed, backupId };
+    return {
+      partial: true,
+      applied,
+      skipped: [],
+      failed,
+      backupId,
+      backups: [{ environmentId, backupId }],
+    };
   }
 
   if (written.length === 0) {
-    return { partial: false, applied, skipped: [], failed };
+    return { partial: false, applied, skipped: [], failed, backups: [] };
   }
 
   // Same contract as `executeRemovalWrites`: a successful write with no
@@ -143,18 +157,33 @@ export async function executePropagationWrites(
     const rolledBack = await rollback(written, deps);
     if (rolledBack) {
       await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-      return { partial: false, applied: [], skipped: [], failed };
+      return { partial: false, applied: [], skipped: [], failed, backups: [] };
     }
     failed.push({
       resourceKey: params.operations[0]?.resourceKey ?? '',
+      environmentId,
       locationId: params.operations[0]?.locationId ?? '',
       reason: 'write-failed',
       message: `Could not record the backup manifest, so this apply cannot be undone automatically; the previous copies are under backup set "${backupId}": ${error instanceof Error ? error.message : String(error)}`,
     });
-    return { partial: true, applied, skipped: [], failed, backupId };
+    return {
+      partial: true,
+      applied,
+      skipped: [],
+      failed,
+      backupId,
+      backups: [{ environmentId, backupId }],
+    };
   }
 
-  return { backupId, partial: false, applied, skipped: [], failed };
+  return {
+    backupId,
+    backups: [{ environmentId, backupId }],
+    partial: false,
+    applied,
+    skipped: [],
+    failed,
+  };
 }
 
 async function persistBackupManifest(
@@ -181,6 +210,7 @@ async function executeOperation(
   operation: PreparedPropagationOperation,
   env: PathEnv,
   backupId: string,
+  environmentId: string,
   deps: PropagationWriteEngineDeps
 ): Promise<{ entry: BackupEntry; applied: PropagationApplied }> {
   assertPreviewedRoot(operation, env);
@@ -205,6 +235,7 @@ async function executeOperation(
     },
     applied: {
       resourceKey: operation.resourceKey,
+      environmentId,
       locationId: operation.locationId,
       operation: operation.operation,
       destinationPath: result.destinationPath,
@@ -231,15 +262,19 @@ function performWrite(
   deps: PropagationWriteEngineDeps
 ): Promise<ResourceWriteResult> {
   if (operation.kind === 'directory') {
-    if (operation.sourceDir === undefined) {
+    // One or the other: a same-machine apply names a path here, a transferred
+    // one carries the bytes. Neither means the hub prepared an operation that
+    // cannot describe what to write.
+    if (operation.sourceDir === undefined && operation.files === undefined) {
       throw new VerificationError(
-        `"${operation.resourceKey}" is a directory write without a source directory.`
+        `"${operation.resourceKey}" is a directory write without a source directory or its files.`
       );
     }
     return deps.writeDirectory({
       locationId: operation.locationId,
       slug: operation.slug,
-      sourceDir: operation.sourceDir,
+      ...(operation.sourceDir !== undefined && { sourceDir: operation.sourceDir }),
+      ...(operation.files !== undefined && { files: operation.files }),
       env,
       backupId,
     });
@@ -307,6 +342,7 @@ class GuardError extends Error {}
 
 function describeFailure(
   operation: PreparedPropagationOperation,
+  environmentId: string,
   error: unknown
 ): PropagationFailure {
   const reason =
@@ -319,6 +355,7 @@ function describeFailure(
           : 'write-failed';
   return {
     resourceKey: operation.resourceKey,
+    environmentId,
     locationId: operation.locationId,
     reason,
     message: error instanceof Error ? error.message : String(error),

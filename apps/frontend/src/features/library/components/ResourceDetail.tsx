@@ -69,7 +69,10 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
     [locations]
   );
 
-  const groups = useMemo(() => (resource ? contentGroupsOf(resource) : []), [resource]);
+  const groups = useMemo(
+    () => (resource ? contentGroupsOf(resource, scope.environmentId) : []),
+    [resource, scope.environmentId]
+  );
   const candidates = useCandidateLocations(locations, resource?.ref.kind);
 
   // No description: the library section layout already renders the subtitle
@@ -162,33 +165,27 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
             {`${l.kinds[resource.ref.kind]} · ${l.divergence[resource.divergence]}`}
           </p>
         </div>
-        {/* Writes stay hub-local for now — remote preview/apply has no
-            environmentId seam yet, so these wizards must not open there. */}
         <div className="flex items-center gap-2">
+          {/* Removal still only offers this machine's copies; propagation is
+              what crosses machines. Threading removal is the follow-on. */}
           {isLocal ? (
-            <>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={() => setRemoving(true)}
-                disabled={!candidates.isResolved}
-                data-testid="remove-resource"
-              >
-                {l.detail.remove}
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => setPropagating(true)}
-                disabled={!candidates.isResolved}
-              >
-                {l.detail.propagate}
-              </Button>
-            </>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setRemoving(true)}
+              disabled={!candidates.isResolved}
+              data-testid="remove-resource"
+            >
+              {l.detail.remove}
+            </Button>
           ) : (
             <span className="text-on-surface-variant text-xs" data-testid="writes-local-only">
               {l.detail.writesLocalOnly}
             </span>
           )}
+          <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
+            {l.detail.propagate}
+          </Button>
         </div>
       </header>
 
@@ -312,6 +309,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         <PropagationWizard
           resourceKeys={[resource.key]}
           locationIds={candidates.locationIds}
+          environmentId={scope.environmentId}
           onClose={() => setPropagating(false)}
         />
       )}
@@ -348,7 +346,10 @@ function kindTab(resource: LibraryResource) {
  * readable copies join a group: an unreadable one has no content to compare and
  * is reported separately.
  */
-function contentGroupsOf(resource: LibraryResource): PropagationSourceGroup[] {
+function contentGroupsOf(
+  resource: LibraryResource,
+  environmentId: string
+): PropagationSourceGroup[] {
   const instances = validInstances(resource);
   return resource.contentGroups.flatMap((group) => {
     const members = instances.filter((instance) => instance.contentHash === group.contentHash);
@@ -363,6 +364,10 @@ function contentGroupsOf(resource: LibraryResource): PropagationSourceGroup[] {
         newestModifiedAtMs: Math.max(...members.map((instance) => instance.modifiedAtMs)),
         sizeBytes: members[0].sizeBytes,
         contentLocationId: locationIds[0],
+        // The detail view describes one machine, so every group on it is that
+        // machine's. The wizard is where copies from several machines meet.
+        environmentIds: [environmentId],
+        contentEnvironmentId: environmentId,
         contentPath: members[0].path,
       },
     ];

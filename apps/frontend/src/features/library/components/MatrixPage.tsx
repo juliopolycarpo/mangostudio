@@ -125,21 +125,13 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
               <Button variant="ghost" size="sm" onClick={matrix.clearSelection}>
                 {l.matrix.clearSelection}
               </Button>
-              {/* Writes stay hub-local for now — remote preview/apply has no
-                  environmentId seam yet, so Propagate must not open there. */}
-              {isLocal ? (
-                <Button
-                  size="sm"
-                  onClick={() => setWizardKeys([...matrix.selected])}
-                  disabled={!candidates.isResolved}
-                >
-                  {l.matrix.propagate}
-                </Button>
-              ) : (
-                <span className="text-on-surface-variant text-xs" data-testid="writes-local-only">
-                  {l.matrix.writesLocalOnly}
-                </span>
-              )}
+              <Button
+                size="sm"
+                onClick={() => setWizardKeys([...matrix.selected])}
+                disabled={!candidates.isResolved}
+              >
+                {l.matrix.propagate}
+              </Button>
             </>
           )}
         </div>
@@ -170,10 +162,11 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         />
       ) : null}
 
-      {isLocal && wizardKeys && wizardKeys.length > 0 && (
+      {wizardKeys && wizardKeys.length > 0 && (
         <PropagationWizard
           resourceKeys={wizardKeys}
           locationIds={candidates.locationIds}
+          environmentId={scope.environmentId}
           onClose={() => {
             setWizardKeys(null);
             matrix.clearSelection();

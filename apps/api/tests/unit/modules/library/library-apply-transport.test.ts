@@ -41,7 +41,9 @@ function agentsPreview(slugs: readonly string[]): PropagationPreview {
           contentHash: `winner-${slug}`,
           contentPath: `/tmp/source/${slug}`,
           contentLocationId: 'codex-agents',
+          contentEnvironmentId: 'local',
           locationIds: ['codex-agents'],
+          environmentIds: ['local'],
           instanceCount: 1,
           formats: ['markdown-frontmatter'],
           newestModifiedAtMs: 0,
@@ -50,6 +52,7 @@ function agentsPreview(slugs: readonly string[]): PropagationPreview {
       ],
       destinations: [
         {
+          environmentId: 'local',
           locationId: 'claude-agents',
           targetIds: ['claude'],
           toFormat: 'subagent-md',
@@ -95,7 +98,13 @@ describe('library.apply payload bounds', () => {
             Promise.resolve(new Uint8Array(2 * 1024 * 1024).fill(path.charCodeAt(path.length - 1))),
           runtimeApply: () => {
             sent = true;
-            return Promise.resolve({ partial: false, applied: [], skipped: [], failed: [] });
+            return Promise.resolve({
+              partial: false,
+              applied: [],
+              skipped: [],
+              failed: [],
+              backups: [],
+            });
           },
         }
       )
@@ -140,7 +149,9 @@ describe('library.apply transport failures', () => {
                     contentHash: 'winner',
                     contentPath: '/tmp/source',
                     contentLocationId: 'mango-skills',
+                    contentEnvironmentId: 'local',
                     locationIds: ['mango-skills'],
+                    environmentIds: ['local'],
                     instanceCount: 1,
                     formats: ['markdown-frontmatter'],
                     newestModifiedAtMs: 0,
@@ -149,6 +160,7 @@ describe('library.apply transport failures', () => {
                 ],
                 destinations: [
                   {
+                    environmentId: 'local',
                     locationId: 'claude-skills',
                     targetIds: ['claude'],
                     toFormat: 'skill-md',

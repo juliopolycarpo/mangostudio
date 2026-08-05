@@ -21,11 +21,23 @@ import { hashPrefix } from '../format';
 import { libraryContentQueryOptions } from '../queries';
 import { LibraryPageState } from './LibraryPageState';
 
+interface DiffSide {
+  readonly locationId: LibraryLocationId;
+  readonly contentHash: string;
+  /**
+   * Machine this copy is on. Falls back to the surrounding scope — the two
+   * sides of a within-machine comparison are both on it — but a cross-machine
+   * diff has to name each side, or one of them is read from a same-named file
+   * on the wrong host.
+   */
+  readonly environmentId?: string;
+}
+
 interface InstanceDiffProps {
   readonly resourceKey: string;
   readonly kind: ResourceKind;
-  readonly left: { readonly locationId: LibraryLocationId; readonly contentHash: string };
-  readonly right: { readonly locationId: LibraryLocationId; readonly contentHash: string };
+  readonly left: DiffSide;
+  readonly right: DiffSide;
   /** True when the two versions differ only in whitespace, per the scanner. */
   readonly whitespaceOnly: boolean;
   readonly environmentId?: string;
@@ -44,8 +56,12 @@ export function InstanceDiff({
 
   const [leftQuery, rightQuery] = useQueries({
     queries: [
-      libraryContentQueryOptions(resourceKey, left.locationId, environmentId),
-      libraryContentQueryOptions(resourceKey, right.locationId, environmentId),
+      libraryContentQueryOptions(resourceKey, left.locationId, left.environmentId ?? environmentId),
+      libraryContentQueryOptions(
+        resourceKey,
+        right.locationId,
+        right.environmentId ?? environmentId
+      ),
     ],
   });
 

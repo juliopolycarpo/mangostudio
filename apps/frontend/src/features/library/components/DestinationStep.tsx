@@ -5,6 +5,13 @@
  * two targets. Checking `agents-skills` already satisfies both MangoStudio and
  * Codex; a user who does not know that will also check `codex-skills` and walk
  * away with a second copy they now have to keep in sync.
+ *
+ * Machines come first in the hierarchy, targets second. `~/.claude/skills` names
+ * a different directory on every machine the user has, so a flat list of
+ * locations would put several distinct destinations under one label — and the
+ * one thing a cross-machine write must never be is ambiguous about where it
+ * lands. A machine that cannot be reached is listed and unselectable, with the
+ * reason, rather than omitted: absent reads as "you do not have that machine".
  */
 
 import type {
@@ -15,43 +22,48 @@ import type {
   PropagationPreview,
 } from '@mangostudio/shared/library';
 import { Link } from '@tanstack/react-router';
+import { Server } from 'lucide-react';
 import { useMemo } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { hashPrefix } from '../format';
-import { allDestinations, type WizardDraft } from '../propagation';
+import { destinationKey, destinationsByEnvironment, type WizardDraft } from '../propagation';
 import { BlockedReason } from './BlockedReason';
 
 interface DestinationStepProps {
   readonly preview: PropagationPreview;
   readonly draft: WizardDraft;
   readonly locations: readonly LibraryLocationStatus[];
-  readonly onToggle: (locationId: LibraryLocationId) => void;
+  readonly environmentName: (environmentId: string) => string;
+  readonly onToggle: (environmentId: string, locationId: LibraryLocationId) => void;
 }
 
-export function DestinationStep({ preview, draft, locations, onToggle }: DestinationStepProps) {
+function groupByTarget(
+  destinations: readonly PropagationDestination[]
+): [LibraryTargetId, PropagationDestination[]][] {
+  const groups = new Map<LibraryTargetId, PropagationDestination[]>();
+  for (const destination of destinations) {
+    const primary = destination.targetIds[0];
+    if (primary === undefined) continue;
+    const bucket = groups.get(primary);
+    if (bucket) bucket.push(destination);
+    else groups.set(primary, [destination]);
+  }
+  return [...groups];
+}
+
+export function DestinationStep({
+  preview,
+  draft,
+  locations,
+  environmentName,
+  onToggle,
+}: DestinationStepProps) {
   const { t } = useI18n();
   const l = t.library;
-  const destinations = useMemo(() => allDestinations(preview), [preview]);
+  const machines = useMemo(() => destinationsByEnvironment(preview), [preview]);
 
-  /**
-   * Grouped by the target that reads them. A destination serving two targets
-   * appears under the first, with the notice naming the rest — listing it twice
-   * would suggest two writes.
-   */
-  const byTarget = useMemo(() => {
-    const groups = new Map<LibraryTargetId, PropagationDestination[]>();
-    for (const destination of destinations) {
-      const primary = destination.targetIds[0];
-      if (primary === undefined) continue;
-      const bucket = groups.get(primary);
-      if (bucket) bucket.push(destination);
-      else groups.set(primary, [destination]);
-    }
-    return [...groups];
-  }, [destinations]);
-
-  if (destinations.length === 0) {
+  if (machines.length === 0) {
     return (
       <p className="text-on-surface-variant text-sm" data-testid="destination-none">
         {l.destination.none}
@@ -62,19 +74,41 @@ export function DestinationStep({ preview, draft, locations, onToggle }: Destina
   return (
     <div className="space-y-4" data-testid="destination-step">
       <p className="text-on-surface text-sm">{l.destination.description}</p>
-      {byTarget.map(([targetId, group]) => (
-        <section key={targetId} className="space-y-1.5">
-          <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
-            {l.targets[targetId]}
+      {machines.map(([environmentId, machineDestinations]) => (
+        <section
+          key={environmentId}
+          className="space-y-2"
+          data-testid="destination-machine"
+          data-environment-id={environmentId}
+        >
+          <h3 className="flex items-center gap-1.5 font-semibold text-on-surface text-xs">
+            <Server size={12} aria-hidden="true" />
+            {environmentName(environmentId)}
           </h3>
-          {group.map((destination) => (
-            <DestinationRow
-              key={destination.locationId}
-              destination={destination}
-              status={locations.find((candidate) => candidate.id === destination.locationId)}
-              checked={draft.destinations.has(destination.locationId)}
-              onToggle={onToggle}
-            />
+          {groupByTarget(machineDestinations).map(([targetId, group]) => (
+            <div key={targetId} className="space-y-1.5">
+              <h4 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+                {l.targets[targetId]}
+              </h4>
+              {group.map((destination) => (
+                <DestinationRow
+                  key={destinationKey(destination.environmentId, destination.locationId)}
+                  destination={destination}
+                  // Location health is per machine; the status list belongs to
+                  // the environment the wizard was opened in, so it only
+                  // describes that one.
+                  status={
+                    destination.environmentId === preview.entries[0]?.destinations[0]?.environmentId
+                      ? locations.find((candidate) => candidate.id === destination.locationId)
+                      : undefined
+                  }
+                  checked={draft.destinations.has(
+                    destinationKey(destination.environmentId, destination.locationId)
+                  )}
+                  onToggle={onToggle}
+                />
+              ))}
+            </div>
           ))}
         </section>
       ))}
@@ -96,7 +130,7 @@ function DestinationRow({
   readonly destination: PropagationDestination;
   readonly status: LibraryLocationStatus | undefined;
   readonly checked: boolean;
-  readonly onToggle: (locationId: LibraryLocationId) => void;
+  readonly onToggle: (environmentId: string, locationId: LibraryLocationId) => void;
 }) {
   const { t } = useI18n();
   const l = t.library;
@@ -111,6 +145,7 @@ function DestinationRow({
           : 'cursor-pointer border-outline-variant/15 bg-surface-container-high'
       }`}
       data-testid="destination-row"
+      data-environment-id={destination.environmentId}
       data-location-id={destination.locationId}
       data-blocked={blocked}
     >
@@ -120,7 +155,7 @@ function DestinationRow({
         // A blocked destination can never be applied — the apply route rejects
         // it outright — so the checkbox is disabled rather than merely warned about.
         disabled={blocked}
-        onChange={() => onToggle(destination.locationId)}
+        onChange={() => onToggle(destination.environmentId, destination.locationId)}
         className="mt-0.5 size-3.5 accent-primary"
       />
       <span className="min-w-0 flex-1 space-y-0.5">

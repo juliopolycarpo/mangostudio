@@ -33,6 +33,8 @@ import {
   type RuntimeLibraryLocationsResult,
   type RuntimeLibraryReadParams,
   type RuntimeLibraryReadResult,
+  type RuntimeLibraryReadTreeParams,
+  type RuntimeLibraryReadTreeResult,
   type RuntimeLibraryRemoveParams,
   type RuntimeLibraryRemoveResult,
   type RuntimeLibraryScanParams,
@@ -293,6 +295,10 @@ interface RuntimeLibraryClient {
     params: RuntimeLibraryReadParams,
     options?: RuntimeRequestOptions
   ): Promise<RuntimeLibraryReadResult>;
+  readTree(
+    params: RuntimeLibraryReadTreeParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryReadTreeResult>;
   locations(
     params?: RuntimeLibraryLocationsParams,
     options?: RuntimeRequestOptions
@@ -390,6 +396,7 @@ export class RuntimeClient {
     this.library = {
       scan: (params, options) => this.request('library.scan', params, options),
       read: (params, options) => this.request('library.read', params, options),
+      readTree: (params, options) => this.request('library.read-tree', params, options),
       locations: (params = {}, options) => this.request('library.locations', params, options),
       settingsSources: (params = {}, options) =>
         this.request('library.settings-sources', params, options),

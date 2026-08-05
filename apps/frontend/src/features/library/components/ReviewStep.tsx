@@ -34,10 +34,15 @@ interface ReviewStepProps {
   readonly draft: WizardDraft;
   readonly onSelectStrategy: (
     resourceKey: string,
+    environmentId: string,
     locationId: LibraryLocationId,
     strategy: AdapterStrategy
   ) => void;
-  readonly onToggleAcknowledged: (resourceKey: string, locationId: LibraryLocationId) => void;
+  readonly onToggleAcknowledged: (
+    resourceKey: string,
+    environmentId: string,
+    locationId: LibraryLocationId
+  ) => void;
 }
 
 type ReviewGroup = 'create' | 'overwrite' | 'adapt' | 'noop' | 'blocked';
@@ -141,7 +146,7 @@ function ReviewGroupSection({
     <ul className="space-y-2">
       {rows.map((write) => (
         <ReviewRow
-          key={operationKey(write.resourceKey, write.locationId)}
+          key={operationKey(write.resourceKey, write.environmentId, write.locationId)}
           write={write}
           preview={preview}
           draft={draft}
@@ -200,7 +205,7 @@ function ReviewRow({
       )
     : undefined;
   const current = write.destination.currentContentHash;
-  const key = operationKey(write.resourceKey, write.locationId);
+  const key = operationKey(write.resourceKey, write.environmentId, write.locationId);
 
   return (
     <li
@@ -208,6 +213,7 @@ function ReviewRow({
       data-testid="review-row"
       data-operation={write.operation}
       data-resource-key={write.resourceKey}
+      data-environment-id={write.environmentId}
       data-location-id={write.locationId}
     >
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -229,9 +235,11 @@ function ReviewRow({
           selected={effectiveStrategy(write, draft)}
           acknowledged={draft.acknowledged.has(key)}
           onSelectStrategy={(strategy) =>
-            onSelectStrategy(write.resourceKey, write.locationId, strategy)
+            onSelectStrategy(write.resourceKey, write.environmentId, write.locationId, strategy)
           }
-          onToggleAcknowledged={() => onToggleAcknowledged(write.resourceKey, write.locationId)}
+          onToggleAcknowledged={() =>
+            onToggleAcknowledged(write.resourceKey, write.environmentId, write.locationId)
+          }
         />
       )}
 
@@ -244,11 +252,25 @@ function ReviewRow({
           <p className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
             {l.review.overwriteDiff}
           </p>
+          {/*
+            Both sides are read from the machines they are on: the current
+            content from the destination, the winner from wherever it lives.
+            Reading either from the wrong machine would diff a file against a
+            same-named file somewhere else entirely.
+          */}
           <InstanceDiff
             resourceKey={write.resourceKey}
             kind={entry.ref.kind}
-            left={{ locationId: write.locationId, contentHash: current }}
-            right={{ locationId: winner.contentLocationId, contentHash: winner.contentHash }}
+            left={{
+              locationId: write.locationId,
+              contentHash: current,
+              environmentId: write.environmentId,
+            }}
+            right={{
+              locationId: winner.contentLocationId,
+              contentHash: winner.contentHash,
+              environmentId: winner.contentEnvironmentId,
+            }}
             whitespaceOnly={false}
           />
         </div>

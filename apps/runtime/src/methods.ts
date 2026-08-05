@@ -708,6 +708,34 @@ export interface RuntimeLibraryReadResult {
   readonly reason?: string;
 }
 
+/**
+ * Reads a whole directory resource so it can be written on another machine.
+ *
+ * `library.read` answers with one file's text for the detail view; a skill is a
+ * tree, and the destination's `library.apply` cannot reach a source directory
+ * that lives on a different host. The bytes travel base64 in the frame, bounded
+ * by the same caps a scan enforces.
+ */
+export interface RuntimeLibraryReadTreeParams {
+  /** Absolute directory path on this host, as the scan reported it. */
+  readonly path: string;
+  readonly locationId: LibraryLocationId;
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
+}
+
+export interface RuntimeLibraryTreeFile {
+  /** Posix-separated path relative to the resource root. */
+  readonly relativePath: string;
+  readonly contentBase64: string;
+}
+
+export interface RuntimeLibraryReadTreeResult {
+  readonly files: readonly RuntimeLibraryTreeFile[];
+  /** Set when the path is outside the location root or otherwise refused. */
+  readonly denied?: true;
+  readonly reason?: string;
+}
+
 export interface RuntimeLibraryLocationsParams {
   readonly pathEnv?: RuntimeLibraryPathEnvParams;
 }
@@ -750,9 +778,21 @@ export interface RuntimeLibraryBackupEnvelope {
  */
 export type RuntimeLibraryApplyAdaptation = PreparedPropagationAdaptation;
 
-export type RuntimeLibraryApplyOperation = Omit<PreparedPropagationOperation, 'contents'> & {
+export type RuntimeLibraryApplyOperation = Omit<
+  PreparedPropagationOperation,
+  'contents' | 'files'
+> & {
   /** Key into `RuntimeLibraryApplyParams.contents`. Absent for directories. */
   readonly contentRef?: string;
+  /**
+   * A transferred directory tree, each file naming its payload in `contents`.
+   *
+   * Present only when the source lives on another machine — a same-machine
+   * directory apply keeps naming `sourceDir`, so nothing about that path
+   * changed. Sharing the `contents` map means a skill fanned out to several
+   * destinations carries its files once, exactly as file resources do.
+   */
+  readonly files?: readonly { readonly relativePath: string; readonly contentRef: string }[];
 };
 
 export interface RuntimeLibraryApplyParams extends RuntimeLibraryBackupEnvelope {
@@ -1002,6 +1042,10 @@ export interface RuntimeMethodMap {
   'library.read': {
     readonly params: RuntimeLibraryReadParams;
     readonly result: RuntimeLibraryReadResult;
+  };
+  'library.read-tree': {
+    readonly params: RuntimeLibraryReadTreeParams;
+    readonly result: RuntimeLibraryReadTreeResult;
   };
   'library.locations': {
     readonly params: RuntimeLibraryLocationsParams;

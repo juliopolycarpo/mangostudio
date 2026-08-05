@@ -32,8 +32,25 @@ interface ResourceWriteInputBase {
   readonly backupId?: string;
 }
 
+/** One file of a directory resource that travelled in the frame. */
+interface DirectoryResourceFile {
+  /** Posix-separated, relative to the resource root. Never absolute, never `..`. */
+  readonly relativePath: string;
+  readonly contents: Uint8Array;
+}
+
+/**
+ * A directory resource is staged either from a path on this host or from bytes
+ * the hub carried.
+ *
+ * Exactly one, never both. `sourceDir` is how a same-machine apply works and
+ * stays byte-for-byte what it was; `files` exists because the source of a
+ * cross-machine propagation is a tree on a *different* host, which no path on
+ * this one can name.
+ */
 export interface DirectoryResourceWriteInput extends ResourceWriteInputBase {
-  readonly sourceDir: string;
+  readonly sourceDir?: string;
+  readonly files?: readonly DirectoryResourceFile[];
 }
 
 export interface FileResourceWriteInput extends ResourceWriteInputBase {
@@ -171,7 +188,13 @@ export async function writeDirectoryResource(
   const location = requireWritableLocation(input.locationId, 'directory-of-dirs');
   const destination = resolveResourceDestination(location, input.slug, input.env);
   assertExpectedResourceEntry(destination.resolvedPath, 'directory');
-  await assertSourceDirectory(input.sourceDir, deps.fs);
+  if ((input.sourceDir === undefined) === (input.files === undefined)) {
+    throw new LibraryWriteError(
+      'invalid-slug',
+      `Directory write for "${input.slug}" needs exactly one of a source directory or its files.`
+    );
+  }
+  if (input.sourceDir !== undefined) await assertSourceDirectory(input.sourceDir, deps.fs);
 
   const store = backupDeps(deps);
   const backupId = input.backupId ?? createBackupId(store);
@@ -188,7 +211,11 @@ export async function writeDirectoryResource(
   const previousPath = siblingPath(destination.resolvedPath, suffix, 'previous');
 
   try {
-    await deps.fs.copyTree(input.sourceDir, stagePath, 'stage');
+    if (input.sourceDir !== undefined) {
+      await deps.fs.copyTree(input.sourceDir, stagePath, 'stage');
+    } else {
+      await stageFiles(stagePath, input.files ?? [], deps);
+    }
     assertExpectedResourceEntry(destination.resolvedPath, 'directory');
     await swapStagedDirectory(stagePath, destination.resolvedPath, previousPath, existing, deps.fs);
   } catch (error) {
@@ -203,6 +230,40 @@ export async function writeDirectoryResource(
     backupId,
     ...(backupPath && { backupPath }),
   };
+}
+
+/**
+ * Materializes a transferred tree into the staging directory.
+ *
+ * Every relative path is validated before it becomes a path: the list arrives
+ * over the protocol, and a `../../.ssh/authorized_keys` entry would otherwise be
+ * written outside the staging directory — and therefore outside everything the
+ * swap and the backup protect. Rejected rather than sanitized: a name that had
+ * to be rewritten to be safe is not the name the source used, and quietly
+ * writing a different tree than the one reviewed is its own failure.
+ */
+async function stageFiles(
+  stagePath: string,
+  files: readonly DirectoryResourceFile[],
+  deps: ResourceWriterDeps
+): Promise<void> {
+  await deps.fs.mkdir(stagePath);
+  for (const file of files) {
+    const segments = file.relativePath.split('/');
+    if (
+      file.relativePath.length === 0 ||
+      file.relativePath.includes('\\') ||
+      segments.some((segment) => segment === '' || segment === '.' || segment === '..')
+    ) {
+      throw new LibraryWriteError(
+        'path-escape',
+        `Transferred library file "${file.relativePath}" is not a contained relative path.`
+      );
+    }
+    const target = join(stagePath, ...segments);
+    await deps.fs.mkdir(dirname(target));
+    deps.fs.writeFile(target, file.contents);
+  }
 }
 
 /**

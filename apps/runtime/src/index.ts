@@ -146,6 +146,7 @@ export {
   MAX_SKILL_ENTRYPOINT_BYTES,
   nodeTreeRemovalFs,
   type PreparedPropagationAdaptation,
+  type PreparedPropagationFile,
   type PreparedPropagationOperation,
   type PreparedRemovalOperation,
   type PropagationWriteEngineDeps,

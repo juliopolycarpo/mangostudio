@@ -1791,6 +1791,13 @@ export const messages: Messages = {
         'The copy already here could not be read, so overwriting it is not safe.',
       'no-source-content': 'No readable copy exists to copy from.',
       'no-adapter-strategy': "No converter knows how to reach the destination's format.",
+      // The machine, rather than the location. Ordered before the location's own
+      // problems because nothing can be said about a directory on a box nobody
+      // could reach — and telling the user to fix the location would send them
+      // after the wrong thing.
+      'environment-offline': 'This machine is not connected right now.',
+      'environment-unsupported': 'This machine does not offer library access.',
+      'environment-readonly': "This machine's owner has not allowed writing to files here.",
       // Removal shares this catalog; only the reason below is unique to it.
       'invalid-instance':
         'This copy could not be read end to end, so it cannot be backed up faithfully. Remove it yourself.',

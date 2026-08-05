@@ -11,6 +11,7 @@
  */
 
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   enabledLibraryLocations,
   type LibraryInstance,
@@ -110,7 +111,9 @@ export async function previewLibraryRemoval(
   const leftovers = await deps.staleStagedRemovals(locations, env);
 
   const entries = resources.map((resource) => buildRemovalEntry(resource, locations, statuses));
-  const stateHash = hashLibraryState(resources, statuses);
+  const stateHash = hashLibraryState([
+    { environmentId: LOCAL_ENVIRONMENT_ID, resources, statuses },
+  ]);
 
   return {
     previewToken: hashJson({
