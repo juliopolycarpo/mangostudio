@@ -10,6 +10,9 @@ name: Smoke — Container
 #
 # The matrix is the pairing that matters: `uname -m` cannot tell glibc from
 # musl, so both are exercised with the base image an ordinary user would pick.
+# Docker and Podman are exercised too — the connector builds an argv for
+# whichever engine a config names, and GitHub's ubuntu-latest runner ships
+# both, so there is no reason to prove only one of them here.
 
 on:
   workflow_call:
@@ -36,14 +39,17 @@ permissions:
 
 jobs:
   container:
-    name: Container ${{ matrix.variant }}
+    name: Container ${{ matrix.variant }} (${{ matrix.engine }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       DATABASE_PATH: /tmp/mangostudio-container-smoke.sqlite
+      CONTAINER_CLI: ${{ matrix.engine }}
     strategy:
       fail-fast: false
       matrix:
+        engine: [docker, podman]
+        variant: [glibc, musl]
         include:
           - variant: glibc
             binary_platform: linux-x64
@@ -90,11 +96,11 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "$PACKAGES" ]; then
-            docker pull "$BASE_IMAGE"
-            docker tag "$BASE_IMAGE" mango-container-smoke:test
+            "$CONTAINER_CLI" pull "$BASE_IMAGE"
+            "$CONTAINER_CLI" tag "$BASE_IMAGE" mango-container-smoke:test
           else
             printf 'FROM %s\nRUN apk add --no-cache %s\n' "$BASE_IMAGE" "$PACKAGES" \
-              | docker build -t mango-container-smoke:test -
+              | "$CONTAINER_CLI" build -t mango-container-smoke:test -
           fi
 
       - name: Run container transport smoke
@@ -102,6 +108,7 @@ jobs:
         env:
           MANGO_CONTAINER_E2E_IMAGE: mango-container-smoke:test
           MANGO_CONTAINER_E2E_RUNTIME: ${{ github.workspace }}/.mango/out/${{ matrix.binary_platform }}/mangostudio-runtime
+          MANGO_CONTAINER_E2E_ENGINE: ${{ matrix.engine }}
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
           # The container transport keeps `requireMatchingRelease` on, because
           # the binary it mounts is the hub's own. The runtime downloaded above
@@ -124,7 +131,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          leftover="$(docker ps -a --format '{{.Names}}' --filter 'name=mango-rt-')"
+          leftover="$("$CONTAINER_CLI" ps -a --format '{{.Names}}' --filter 'name=mango-rt-')"
           if [ -n "$leftover" ]; then
             echo "::error::containers left behind: $leftover"
             exit 1
