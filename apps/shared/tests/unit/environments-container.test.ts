@@ -154,11 +154,15 @@ describe('containerConfigRefusal', () => {
   });
 
   it.each([
-    ['/tmp/../proc', /\/proc/],
-    ['/tmp/../../var/run', /\/var\/run/],
-    ['/home/j/../../var/run/docker.sock', /control of the container engine/],
-  ])('refuses a denied path spelled with a traversal segment: %s', (hostPath, expected) => {
-    expect(refusalText({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })).toMatch(expected);
+    ['/tmp/../proc', 'denied-prefix', '/proc'],
+    ['/tmp/../../var/run', 'denied-prefix', '/var/run'],
+    ['/home/j/../../var/run/docker.sock', 'engine-control', undefined],
+  ] as const)('refuses a denied path spelled with a traversal segment: %s', (hostPath, code, prefix) => {
+    const refusal = containerConfigRefusal(
+      config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })
+    );
+    expect(refusal?.code).toBe(code);
+    if (prefix !== undefined) expect(refusal?.params.prefix).toBe(prefix);
   });
 
   it('allows a traversal that resolves to an ordinary path', () => {

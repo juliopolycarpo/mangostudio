@@ -19,7 +19,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, rename, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { LinuxPlatformId } from '@mangostudio/shared/runtime-home';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
@@ -68,11 +68,17 @@ async function exists(path: string): Promise<boolean> {
 async function writeExecutable(path: string, bytes: Uint8Array): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   const tmp = `${path}.tmp-${randomUUID()}`;
-  await writeFile(tmp, bytes, { mode: 0o755 });
-  // `writeFile`'s mode applies only when it creates the file, which `tmp`
-  // always is, but a restrictive umask can still strip the bit.
-  await chmod(tmp, 0o755);
-  await rename(tmp, path);
+  try {
+    await writeFile(tmp, bytes, { mode: 0o755 });
+    // `writeFile`'s mode applies only when it creates the file, which `tmp`
+    // always is, but a restrictive umask can still strip the bit.
+    await chmod(tmp, 0o755);
+    await rename(tmp, path);
+  } finally {
+    // Gone already after a successful rename; this is for the paths where it
+    // is not, so a failed write does not leave a sibling nothing will reap.
+    await rm(tmp, { force: true });
+  }
 }
 
 const defaultDeps: ContainerRuntimeSourceDeps = {
