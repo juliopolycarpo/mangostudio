@@ -15,6 +15,7 @@ import type {
   ContainerEngine,
   ContainerEnvironmentConfig,
   ContainerMount,
+  ContainerMountRefusal,
 } from '@mangostudio/shared/environments';
 import { containerConfigRefusal } from '@mangostudio/shared/environments';
 
@@ -97,14 +98,19 @@ function usableMounts(form: ContainerFormFields): ContainerMount[] {
     }));
 }
 
+/** Mirrors `ContainerEnvironmentConfigSchema.cpus`; the server is the authority. */
+const CPU_LIMIT_MIN = 0.01;
+const CPU_LIMIT_MAX = 1_024;
+
 export interface ContainerFormError {
   readonly field: 'image' | 'cpus' | 'memoryMib' | 'mounts';
   /**
-   * The refusal in words, when the field label does not already say it. Only
-   * mounts carry one: "not a valid image" is obvious beside an image box, and
-   * "this would be a way out of the container" is not obvious beside anything.
+   * Why a mount was refused, as shared's code and its interpolation params.
+   * Only mounts carry one: "not a valid image" is obvious beside an image box,
+   * and "this would be a way out of the container" is not obvious beside
+   * anything, so it needs a translated sentence built from this.
    */
-  readonly message?: string;
+  readonly refusal?: ContainerMountRefusal;
 }
 
 /**
@@ -119,7 +125,8 @@ export function validateContainerForm(form: ContainerFormFields): ContainerFormE
   if (image.length === 0 || image.length > 256 || !CONTAINER_IMAGE_PATTERN.test(image)) {
     return { field: 'image' };
   }
-  if (form.cpus.trim() && !(Number(form.cpus.trim()) > 0)) {
+  const cpus = form.cpus.trim();
+  if (cpus && !(Number(cpus) >= CPU_LIMIT_MIN && Number(cpus) <= CPU_LIMIT_MAX)) {
     return { field: 'cpus' };
   }
   const memory = form.memoryMib.trim();
@@ -133,7 +140,7 @@ export function validateContainerForm(form: ContainerFormFields): ContainerFormE
   if (incomplete) return { field: 'mounts' };
 
   const refusal = containerConfigRefusal(containerFormToConfig(form));
-  return refusal ? { field: 'mounts', message: refusal } : null;
+  return refusal ? { field: 'mounts', refusal } : null;
 }
 
 export function isContainerFormUsable(form: ContainerFormFields): boolean {

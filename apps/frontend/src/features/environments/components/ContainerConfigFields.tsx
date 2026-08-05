@@ -13,6 +13,7 @@ import { Plus, X } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import {
   type ContainerFormError,
   type ContainerFormFields,
@@ -188,7 +189,9 @@ export function ContainerConfigFields({
 
         {error?.field === 'mounts' ? (
           <p className="text-[11px] text-error" role="alert">
-            {error.message ?? labels.mountIncomplete}
+            {error.refusal
+              ? formatMessage(labels.mountRefusal[error.refusal.code], error.refusal.params)
+              : labels.mountIncomplete}
           </p>
         ) : null}
       </div>

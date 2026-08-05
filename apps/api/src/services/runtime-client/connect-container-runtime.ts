@@ -26,6 +26,7 @@ import {
   containerEngineOf,
   containerLaunchCommand,
   containerName,
+  describeContainerMountRefusal,
 } from '@mangostudio/shared/environments';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
@@ -94,7 +95,7 @@ export async function connectContainerRuntime(
   if (refusal) {
     throw new RuntimeRemoteError(
       'RUNTIME_UNAVAILABLE',
-      `Environment "${definition.id}" cannot be launched: ${refusal}`
+      `Environment "${definition.id}" cannot be launched: ${describeContainerMountRefusal(refusal)}`
     );
   }
 

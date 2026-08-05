@@ -2354,6 +2354,26 @@ export const messages = {
         mountReadonly: 'Somente leitura',
         mountRemove: 'Remover montagem',
         mountIncomplete: 'Informe um caminho dos dois lados de cada montagem, ou remova a linha.',
+        mountRefusal: {
+          'too-many-mounts': 'Um ambiente pode montar no máximo {max} caminhos em seu contêiner.',
+          whitespace: 'O caminho {host} tem espaços em branco no início ou no fim.',
+          'not-absolute':
+            'O caminho {host} não é absoluto. Um caminho relativo seria resolvido contra o diretório que o motor de contêineres herdou.',
+          'contains-colon':
+            'O caminho {host} contém dois-pontos, que separa os campos de uma especificação de montagem.',
+          'engine-control':
+            'Montar {host} daria ao contêiner controle do motor de contêineres, o que é uma forma de escapar do contêiner.',
+          'denied-prefix':
+            'Montar {host} exporia o {prefix} desta máquina, o que é uma forma de escapar do contêiner.',
+          'host-root':
+            'Montar {host} exporia todo o sistema de arquivos desta máquina, o que é uma forma de escapar do contêiner.',
+          'shadows-runtime':
+            '{runtimePath} é onde o runtime do MangoStudio é montado. Escolha outro caminho dentro do contêiner.',
+          'shadows-image-root':
+            'Montar sobre / substituiria a imagem da qual o contêiner é construído.',
+          'duplicate-target':
+            'Duas montagens miram {containerPath} dentro do contêiner. Dê a cada uma seu próprio caminho.',
+        },
         save: 'Salvar configurações do contêiner',
         saveFailed: 'Não foi possível salvar as configurações do contêiner.',
         reason: {

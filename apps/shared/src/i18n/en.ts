@@ -2344,6 +2344,26 @@ export const messages: Messages = {
         mountReadonly: 'Read only',
         mountRemove: 'Remove mount',
         mountIncomplete: 'Give each mount a path on both sides, or remove the row.',
+        mountRefusal: {
+          'too-many-mounts': 'An environment may mount at most {max} paths into its container.',
+          whitespace: 'The host path {host} has leading or trailing whitespace.',
+          'not-absolute':
+            'The host path {host} is not absolute. A relative path would be resolved against whatever directory the container engine inherited.',
+          'contains-colon':
+            'The host path {host} contains a colon, which separates the fields of a mount specification.',
+          'engine-control':
+            'Mounting {host} would give the container control of the container engine, which is a way out of the container.',
+          'denied-prefix':
+            "Mounting {host} would expose this machine's {prefix}, which is a way out of the container.",
+          'host-root':
+            "Mounting {host} would expose this machine's entire filesystem, which is a way out of the container.",
+          'shadows-runtime':
+            '{runtimePath} is where the MangoStudio runtime is mounted. Choose another path inside the container.',
+          'shadows-image-root':
+            'Mounting over / would replace the image the container is built from.',
+          'duplicate-target':
+            'Two mounts both target {containerPath} inside the container. Give each one its own path.',
+        },
         save: 'Save container settings',
         saveFailed: 'The container settings could not be saved.',
         reason: {

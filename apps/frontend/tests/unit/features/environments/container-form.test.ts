@@ -113,6 +113,7 @@ describe('validateContainerForm', () => {
   it('blocks resource limits that are not limits', () => {
     expect(validateContainerForm(form({ cpus: '0' }))?.field).toBe('cpus');
     expect(validateContainerForm(form({ cpus: 'lots' }))?.field).toBe('cpus');
+    expect(validateContainerForm(form({ cpus: '2000' }))?.field).toBe('cpus');
     expect(validateContainerForm(form({ memoryMib: '32' }))?.field).toBe('memoryMib');
     expect(validateContainerForm(form({ memoryMib: '1.5' }))?.field).toBe('memoryMib');
   });
@@ -127,7 +128,7 @@ describe('validateContainerForm', () => {
     );
 
     expect(error?.field).toBe('mounts');
-    expect(error?.message).toBeUndefined();
+    expect(error?.refusal).toBeUndefined();
   });
 
   it('carries the shared refusal for a mount that would break out', () => {
@@ -145,14 +146,14 @@ describe('validateContainerForm', () => {
 
     expect(error?.field).toBe('mounts');
     // The browser must reach the same conclusion as the connector, and say why.
-    expect(error?.message).toMatch(/way out of the container/);
+    expect(error?.refusal?.code).toBe('engine-control');
   });
 
   it('blocks a relative host path the same way the connector does', () => {
     expect(
       validateContainerForm(
         form({ mounts: [{ hostPath: 'project', containerPath: '/work', readonly: false }] })
-      )?.message
-    ).toMatch(/not absolute/);
+      )?.refusal?.code
+    ).toBe('not-absolute');
   });
 });
