@@ -31,6 +31,7 @@ function location(
   overrides: Partial<RemovalLocation> = {}
 ): RemovalLocation {
   return {
+    environmentId: 'local',
     locationId,
     targetIds: [],
     operation: 'remove',
@@ -49,7 +50,10 @@ function entry(overrides: Partial<RemovalPreviewEntry> = {}): RemovalPreviewEntr
     ref: { kind: 'skill', slug: 'gh' },
     divergence: 'uniform',
     locations,
-    instanceLocationIds: locations.map((row) => row.locationId),
+    instancePlacements: locations.map((row) => ({
+      environmentId: row.environmentId,
+      locationId: row.locationId,
+    })),
     wouldRemoveLastCopy: true,
     ...overrides,
   };
@@ -86,8 +90,8 @@ describe('plannedRemovals', () => {
       }),
     ]);
     const draft = removing(
-      removalKey('skill:gh', 'claude-skills'),
-      removalKey('skill:gh', 'cursor-skills-builtin')
+      removalKey('skill:gh', 'local', 'claude-skills'),
+      removalKey('skill:gh', 'local', 'cursor-skills-builtin')
     );
 
     expect(plannedRemovals(blocked, draft).map(({ location: row }) => row.locationId)).toEqual([
@@ -99,15 +103,15 @@ describe('plannedRemovals', () => {
 describe('lastCopyEntries', () => {
   it('reports a resource whose every copy is marked', () => {
     const draft = removing(
-      removalKey('skill:gh', 'agents-skills'),
-      removalKey('skill:gh', 'claude-skills')
+      removalKey('skill:gh', 'local', 'agents-skills'),
+      removalKey('skill:gh', 'local', 'claude-skills')
     );
 
     expect(lastCopyEntries(preview(), draft)).toHaveLength(1);
   });
 
   it('does not report one while a copy survives', () => {
-    const draft = removing(removalKey('skill:gh', 'claude-skills'));
+    const draft = removing(removalKey('skill:gh', 'local', 'claude-skills'));
 
     expect(lastCopyEntries(preview(), draft)).toEqual([]);
   });
@@ -117,10 +121,13 @@ describe('lastCopyEntries', () => {
     const scoped = preview([
       entry({
         locations: [location('claude-skills')],
-        instanceLocationIds: ['claude-skills', 'mango-skills'],
+        instancePlacements: [
+          { environmentId: 'local', locationId: 'claude-skills' },
+          { environmentId: 'local', locationId: 'mango-skills' },
+        ],
       }),
     ]);
-    const draft = removing(removalKey('skill:gh', 'claude-skills'));
+    const draft = removing(removalKey('skill:gh', 'local', 'claude-skills'));
 
     expect(lastCopyEntries(scoped, draft)).toEqual([]);
   });
@@ -130,8 +137,8 @@ describe('pendingAcknowledgements', () => {
   it('blocks until the last-copy removal is signed off', () => {
     const all = preview();
     const draft = removing(
-      removalKey('skill:gh', 'agents-skills'),
-      removalKey('skill:gh', 'claude-skills')
+      removalKey('skill:gh', 'local', 'agents-skills'),
+      removalKey('skill:gh', 'local', 'claude-skills')
     );
 
     expect(pendingAcknowledgements(all, draft)).toHaveLength(1);
@@ -141,7 +148,7 @@ describe('pendingAcknowledgements', () => {
   });
 
   it('needs no sign-off for an ordinary removal', () => {
-    const draft = removing(removalKey('skill:gh', 'claude-skills'));
+    const draft = removing(removalKey('skill:gh', 'local', 'claude-skills'));
 
     expect(pendingAcknowledgements(preview(), draft)).toEqual([]);
   });
@@ -160,7 +167,7 @@ describe('eliminatedGroups', () => {
         ],
       }),
     ]);
-    const draft = removing(removalKey('skill:gh', 'claude-skills'));
+    const draft = removing(removalKey('skill:gh', 'local', 'claude-skills'));
 
     expect(eliminatedGroups(divergent, draft)).toHaveLength(1);
   });
@@ -179,11 +186,16 @@ describe('eliminatedGroups', () => {
       }),
     ]);
 
-    expect(eliminatedGroups(twins, removing(removalKey('skill:gh', 'claude-skills')))).toEqual([]);
+    expect(
+      eliminatedGroups(twins, removing(removalKey('skill:gh', 'local', 'claude-skills')))
+    ).toEqual([]);
     expect(
       eliminatedGroups(
         twins,
-        removing(removalKey('skill:gh', 'claude-skills'), removalKey('skill:gh', 'agents-skills'))
+        removing(
+          removalKey('skill:gh', 'local', 'claude-skills'),
+          removalKey('skill:gh', 'local', 'agents-skills')
+        )
       )
     ).toHaveLength(2);
   });
@@ -191,14 +203,14 @@ describe('eliminatedGroups', () => {
 
 describe('buildRemovalDecisions', () => {
   it('decides every location the preview offered, removed or kept', () => {
-    const draft = removing(removalKey('skill:gh', 'claude-skills'));
+    const draft = removing(removalKey('skill:gh', 'local', 'claude-skills'));
 
     expect(buildRemovalDecisions(preview(), draft)).toEqual([
       {
         resourceKey: 'skill:gh',
         locations: [
-          { locationId: 'agents-skills', action: 'keep' },
-          { locationId: 'claude-skills', action: 'remove' },
+          { environmentId: 'local', locationId: 'agents-skills', action: 'keep' },
+          { environmentId: 'local', locationId: 'claude-skills', action: 'remove' },
         ],
       },
     ]);
@@ -215,10 +227,10 @@ describe('buildRemovalDecisions', () => {
         ],
       }),
     ]);
-    const draft = removing(removalKey('skill:gh', 'cursor-skills-builtin'));
+    const draft = removing(removalKey('skill:gh', 'local', 'cursor-skills-builtin'));
 
     expect(buildRemovalDecisions(blocked, draft)[0].locations).toEqual([
-      { locationId: 'cursor-skills-builtin', action: 'keep' },
+      { environmentId: 'local', locationId: 'cursor-skills-builtin', action: 'keep' },
     ]);
   });
 });
@@ -231,8 +243,8 @@ describe('acknowledgedLastCopyKeys', () => {
     expect(
       acknowledgedLastCopyKeys(all, {
         removing: new Set([
-          removalKey('skill:gh', 'agents-skills'),
-          removalKey('skill:gh', 'claude-skills'),
+          removalKey('skill:gh', 'local', 'agents-skills'),
+          removalKey('skill:gh', 'local', 'claude-skills'),
         ]),
         acknowledged,
       })
@@ -242,9 +254,66 @@ describe('acknowledgedLastCopyKeys', () => {
     // resource this request no longer zeroes, and rightly so.
     expect(
       acknowledgedLastCopyKeys(all, {
-        removing: new Set([removalKey('skill:gh', 'claude-skills')]),
+        removing: new Set([removalKey('skill:gh', 'local', 'claude-skills')]),
         acknowledged,
       })
     ).toEqual([]);
+  });
+});
+
+/*
+  The machine dimension in the wizard's own reasoning.
+
+  Marking `claude-skills` must mean one machine's copy, not every machine's —
+  and the last-copy sign-off has to count copies on machines whose rows the user
+  never touched, or it asks for the wrong thing.
+*/
+describe('removal across machines', () => {
+  const onTwoMachines = () =>
+    preview([
+      entry({
+        locations: [
+          location('claude-skills'),
+          location('claude-skills', { environmentId: 'wsl-ubuntu' }),
+        ],
+        instancePlacements: [
+          { environmentId: 'local', locationId: 'claude-skills' },
+          { environmentId: 'wsl-ubuntu', locationId: 'claude-skills' },
+        ],
+      }),
+    ]);
+
+  it('marks one copy on one machine, not the same location everywhere', () => {
+    const draft = removing(removalKey('skill:gh', 'local', 'claude-skills'));
+
+    const planned = plannedRemovals(onTwoMachines(), draft);
+    expect(planned).toHaveLength(1);
+    expect(planned[0].location.environmentId).toBe('local');
+  });
+
+  it('is not a last copy while another machine still has one', () => {
+    const draft = removing(removalKey('skill:gh', 'local', 'claude-skills'));
+
+    expect(lastCopyEntries(onTwoMachines(), draft)).toEqual([]);
+  });
+
+  it('is a last copy once every machine has its copy marked', () => {
+    const draft = removing(
+      removalKey('skill:gh', 'local', 'claude-skills'),
+      removalKey('skill:gh', 'wsl-ubuntu', 'claude-skills')
+    );
+
+    expect(lastCopyEntries(onTwoMachines(), draft)).toHaveLength(1);
+    expect(pendingAcknowledgements(onTwoMachines(), draft)).toHaveLength(1);
+  });
+
+  it('sends a decision per machine, so the API can tell the copies apart', () => {
+    const draft = removing(removalKey('skill:gh', 'wsl-ubuntu', 'claude-skills'));
+
+    const [decision] = buildRemovalDecisions(onTwoMachines(), draft);
+    expect(decision.locations).toEqual([
+      { environmentId: 'local', locationId: 'claude-skills', action: 'keep' },
+      { environmentId: 'wsl-ubuntu', locationId: 'claude-skills', action: 'remove' },
+    ]);
   });
 });

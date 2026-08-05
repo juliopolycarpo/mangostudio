@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'bun:test';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   AdapterStrategy,
   LibraryInstance,
   LibraryLocationId,
   LibraryLocationStatus,
   LibraryResource,
+  PropagationBlockedReason,
   PropagationDestination,
   PropagationPreviewEntry,
   ResourceFormat,
   ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
-import { previewLibraryPropagation } from '../../../../src/modules/library/application/propagation-preview';
+import {
+  type EnvironmentSnapshot,
+  previewLibraryPropagation,
+} from '../../../../src/modules/library/application/propagation-preview';
 import type { AdapterCatalog } from '../../../../src/modules/library/domain/format-adapters';
 import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
 
@@ -77,6 +82,35 @@ interface PreviewHarness {
   readonly onDiscover?: (kinds: readonly ResourceKind[]) => void;
   /** Defaults to "every requested location is enabled" so cases opt in explicitly. */
   readonly enabledLocationIds?: readonly LibraryLocationId[];
+  /** Machines beyond Local, each with its own resources and location states. */
+  readonly environments?: Record<
+    string,
+    {
+      readonly resources?: LibraryResource[];
+      readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
+      readonly blockedReason?: PropagationBlockedReason;
+    }
+  >;
+  readonly environmentIds?: string[];
+}
+
+function snapshotFor(
+  environmentId: string,
+  harness: PreviewHarness,
+  targetLocationIds: LibraryLocationId[]
+): EnvironmentSnapshot {
+  const machine =
+    environmentId === LOCAL_ENVIRONMENT_ID
+      ? { resources: harness.resources, statuses: harness.statuses, blockedReason: undefined }
+      : (harness.environments?.[environmentId] ?? {});
+  return {
+    environmentId,
+    ...(machine.blockedReason && { blockedReason: machine.blockedReason }),
+    resources: machine.resources ?? [],
+    statuses: new Map(
+      targetLocationIds.map((id) => [id, machine.statuses?.[id] ?? status(id)] as const)
+    ),
+  };
 }
 
 function preview(
@@ -86,13 +120,16 @@ function preview(
 ) {
   return previewLibraryPropagation(
     'user-1',
-    { resourceKeys, targetLocationIds },
     {
-      discover: (_userId, kinds) => {
-        harness.onDiscover?.(kinds);
-        return Promise.resolve(harness.resources ?? []);
+      resourceKeys,
+      targetLocationIds,
+      ...(harness.environmentIds && { environmentIds: harness.environmentIds }),
+    },
+    {
+      snapshot: (_userId, environmentId, kinds) => {
+        if (environmentId === LOCAL_ENVIRONMENT_ID) harness.onDiscover?.(kinds);
+        return Promise.resolve(snapshotFor(environmentId, harness, targetLocationIds));
       },
-      describeLocation: (id) => harness.statuses?.[id] ?? status(id),
       acknowledgedKeys: () => Promise.resolve(new Set(harness.acknowledged ?? [])),
       enabledLocationIds: () =>
         Promise.resolve(new Set(harness.enabledLocationIds ?? targetLocationIds)),
@@ -460,5 +497,145 @@ describe('previewLibraryPropagation — request validation', () => {
 
     expect(result.entries).toHaveLength(1);
     expect(firstEntry(result).destinations).toHaveLength(1);
+  });
+});
+
+/*
+  Propagation across machines. Divergence between two boxes reads exactly like
+  divergence between two directories — no canonical copy, the user picks the
+  winner — and a machine that cannot answer is still part of the answer, because
+  a picker that omits a machine looks like one that does not have it.
+*/
+describe('previewLibraryPropagation across machines', () => {
+  const ghOnLocal = resource('skill:gh', 'skill', 'gh', [instance('mango-skills', 'hash-local')]);
+  const ghOnRemote = resource('skill:gh', 'skill', 'gh', [instance('mango-skills', 'hash-remote')]);
+
+  it('offers every machine as a destination for the same location', async () => {
+    const result = await preview(['skill:gh'], ['mango-skills', 'claude-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: { 'wsl-ubuntu': { resources: [] } },
+    });
+
+    const destinations = result.entries[0].destinations.map(
+      (destination) => `${destination.environmentId}/${destination.locationId}`
+    );
+    expect(destinations).toEqual([
+      'local/mango-skills',
+      'local/claude-skills',
+      'wsl-ubuntu/mango-skills',
+      'wsl-ubuntu/claude-skills',
+    ]);
+  });
+
+  it('treats two machines holding different bytes as a divergence to settle', async () => {
+    const result = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: { 'wsl-ubuntu': { resources: [ghOnRemote] } },
+    });
+
+    const entry = result.entries[0];
+    expect(entry.requiresWinnerSelection).toBe(true);
+    expect(entry.divergence).toBe('divergent');
+    // Either machine's copy can win: there is no canonical one.
+    expect(entry.sourceGroups.map((group) => group.contentEnvironmentId).sort()).toEqual([
+      'local',
+      'wsl-ubuntu',
+    ]);
+  });
+
+  it('groups identical bytes from two machines into one candidate', async () => {
+    const result = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': {
+          resources: [
+            resource('skill:gh', 'skill', 'gh', [instance('mango-skills', 'hash-local')]),
+          ],
+        },
+      },
+    });
+
+    const entry = result.entries[0];
+    expect(entry.sourceGroups).toHaveLength(1);
+    expect(entry.sourceGroups[0].environmentIds).toEqual(['local', 'wsl-ubuntu']);
+    expect(entry.requiresWinnerSelection).toBe(false);
+    // The bytes are read from one machine, deterministically, so two previews of
+    // the same disks name the same copy.
+    expect(entry.sourceGroups[0].contentEnvironmentId).toBe('local');
+  });
+
+  it('lists a machine it could not reach, with every destination blocked', async () => {
+    const result = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'ssh-box'],
+      environments: { 'ssh-box': { blockedReason: 'environment-offline' } },
+    });
+
+    const offline = result.entries[0].destinations.find(
+      (destination) => destination.environmentId === 'ssh-box'
+    );
+    expect(offline?.blockedReason).toBe('environment-offline');
+    // Nothing can be said about a disk nobody looked at, so no outcome is
+    // offered rather than one being guessed.
+    expect(offline?.outcomes).toEqual([]);
+  });
+
+  it('blocks writing to a readonly machine while still using its copies', async () => {
+    const result = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [],
+      environmentIds: ['local', 'locked-box'],
+      environments: {
+        'locked-box': { resources: [ghOnRemote], blockedReason: 'environment-readonly' },
+      },
+    });
+
+    const entry = result.entries[0];
+    // The copy on the readonly machine is a perfectly good source.
+    expect(entry.sourceGroups[0].contentEnvironmentId).toBe('locked-box');
+    expect(
+      entry.destinations.find((destination) => destination.environmentId === 'locked-box')
+        ?.blockedReason
+    ).toBe('environment-readonly');
+  });
+
+  it('finds a resource that exists on only one of the machines in scope', async () => {
+    // The whole point of the feature is copying to a machine that lacks it, so
+    // requiring the resource everywhere would make the flow a 404.
+    const result = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: { 'wsl-ubuntu': { resources: [ghOnRemote] } },
+    });
+
+    expect(result.entries[0].sourceGroups).toHaveLength(1);
+  });
+
+  it('rejects a resource that exists on no machine in scope', async () => {
+    await expect(
+      preview(['skill:missing'], ['mango-skills'], {
+        resources: [],
+        environmentIds: ['local', 'wsl-ubuntu'],
+      })
+    ).rejects.toBeInstanceOf(LibraryRequestError);
+  });
+
+  it('binds the token to the machines that were looked at', async () => {
+    const oneMachine = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local'],
+    });
+    const twoMachines = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: { 'wsl-ubuntu': { resources: [] } },
+    });
+
+    // Adding a machine changes what an apply is allowed to touch, so the token
+    // from the narrower preview must not authorise the wider one.
+    expect(twoMachines.previewToken).not.toBe(oneMachine.previewToken);
+    expect(twoMachines.stateHash).not.toBe(oneMachine.stateHash);
   });
 });

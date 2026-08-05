@@ -40,6 +40,7 @@ import { fileCheckpointEnvironment } from './039_file_checkpoint_environment';
 import { runtimePairingTokens } from './040_runtime_pairing_tokens';
 import { mcpServerEnvironment } from './041_mcp_server_environment';
 import { environmentAllowInstalls } from './042_environment_allow_installs';
+import { libraryBackups } from './043_library_backups';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -84,4 +85,5 @@ export const allMigrations = {
   '040_runtime_pairing_tokens': runtimePairingTokens,
   '041_mcp_server_environment': mcpServerEnvironment,
   '042_environment_allow_installs': environmentAllowInstalls,
+  '043_library_backups': libraryBackups,
 };

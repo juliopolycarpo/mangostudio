@@ -8,10 +8,12 @@
  * with the safe one.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryLocationId, RemovalPreviewRequest } from '@mangostudio/shared/library';
 import { X } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { useRemoval } from '../hooks/use-removal';
@@ -24,18 +26,58 @@ import { RemovalResultPanel } from './RemovalResultPanel';
 interface RemovalWizardProps {
   readonly resourceKeys: readonly string[];
   readonly locationIds: readonly LibraryLocationId[];
+  /** Machine the wizard was opened on; it heads the list. */
+  readonly environmentId?: string;
   readonly onClose: () => void;
 }
 
 const STEP_ORDER: readonly RemovalStep[] = ['locations', 'confirm', 'result'];
 
-export function RemovalWizard({ resourceKeys, locationIds, onClose }: RemovalWizardProps) {
+export function RemovalWizard({
+  resourceKeys,
+  locationIds,
+  environmentId,
+  onClose,
+}: RemovalWizardProps) {
   const { t } = useI18n();
   const l = t.library;
 
+  const environmentsQuery = useEnvironmentEntitiesQuery();
+  const environments = environmentsQuery.data ?? [];
+  const scopeEnvironmentId = environmentId ?? LOCAL_ENVIRONMENT_ID;
+
+  /**
+   * Every enabled machine, the current one first.
+   *
+   * All of them, not just the one being viewed, because the last-copy guard is
+   * only honest when it can see every copy: a resource still present on another
+   * box is not about to disappear, and a scope that hid that machine would ask
+   * for an acknowledgement that misstates what is happening.
+   */
+  const environmentIds = useMemo(() => {
+    const ids = [scopeEnvironmentId];
+    for (const environment of environments) {
+      if (environment.enabled && !ids.includes(environment.id)) ids.push(environment.id);
+    }
+    return ids;
+  }, [environments, scopeEnvironmentId]);
+
+  const environmentName = useMemo(() => {
+    const names = new Map(environments.map((environment) => [environment.id, environment.name]));
+    return (id: string) => names.get(id) ?? id;
+  }, [environments]);
+
   const request = useMemo<RemovalPreviewRequest>(
-    () => ({ resourceKeys: [...resourceKeys], locationIds: [...locationIds] }),
-    [resourceKeys, locationIds]
+    () => ({
+      resourceKeys: [...resourceKeys],
+      // Empty until the environments query resolves: `environmentIds` below
+      // only reflects the full machine set once it does, and a preview taken
+      // before that would let an apply through having seen just this machine —
+      // exactly what the last-copy guard above depends on not happening.
+      locationIds: environmentsQuery.isSuccess ? [...locationIds] : [],
+      environmentIds,
+    }),
+    [resourceKeys, locationIds, environmentIds, environmentsQuery.isSuccess]
   );
   const wizard = useRemoval(request);
   const preview = wizard.preview;
@@ -133,6 +175,7 @@ export function RemovalWizard({ resourceKeys, locationIds, onClose }: RemovalWiz
           */}
           {wizard.step === 'result' ? (
             <RemovalResultPanel
+              environmentName={environmentName}
               result={wizard.result}
               undoResult={wizard.undoResult}
               isUndoing={wizard.isUndoing}
@@ -145,6 +188,11 @@ export function RemovalWizard({ resourceKeys, locationIds, onClose }: RemovalWiz
               title={l.removal.noLocations}
               hint={l.removal.noLocationsHint}
             />
+          ) : !environmentsQuery.isSuccess ? (
+            // The preview request above is deliberately held back until this
+            // resolves, so `isPreviewing` is still false here — without this
+            // branch that reads as a failed preview instead of one not yet asked.
+            <LibraryPageState variant="loading" />
           ) : wizard.isPreviewing && !preview ? (
             <LibraryPageState variant="loading" />
           ) : wizard.previewError || !preview ? (
@@ -155,6 +203,7 @@ export function RemovalWizard({ resourceKeys, locationIds, onClose }: RemovalWiz
             />
           ) : wizard.step === 'locations' ? (
             <RemovalLocationStep
+              environmentName={environmentName}
               preview={preview}
               draft={wizard.draft}
               onToggle={wizard.toggleLocation}

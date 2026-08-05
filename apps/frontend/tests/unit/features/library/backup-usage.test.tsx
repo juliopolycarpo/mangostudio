@@ -32,8 +32,12 @@ const usage: PropagationBackupUsage = {
       operation: 'removal',
       resourceKeys: ['skill:gh'],
       evictsNext: false,
+      manifestReadable: true,
+      environmentId: 'local',
+      availability: 'available',
     },
   ],
+  unreachableEnvironmentIds: [],
 };
 
 const scenario = createFetchScenario();

@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeLibraryApplyParams } from '@mangostudio/runtime';
@@ -154,15 +162,19 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
     'cursor-rules',
   ]);
   return previewLibraryPropagation(userId(), request, {
-    discover: (scanUserId, kinds) =>
-      discoverLibraryResources(getDb(), scanUserId, {
+    snapshot: async (scanUserId, environmentId, kinds) => ({
+      environmentId,
+      resources: await discoverLibraryResources(getDb(), scanUserId, {
         force: true,
         kinds,
         cache,
         pathEnv: env,
         settings: enabled,
       }),
-    describeLocation: (id) => describeLocation(id, env),
+      statuses: new Map(
+        request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
+      ),
+    }),
     enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
   });
 }
@@ -223,6 +235,7 @@ function adoptAll(
     resolution: 'adopt-group',
     winnerContentHash,
     destinations: entry.destinations.map((destination) => ({
+      environmentId: destination.environmentId,
       locationId: destination.locationId,
       action: skip.includes(destination.locationId) ? ('skip' as const) : ('apply' as const),
       ...(strategy && { strategy }),
@@ -540,7 +553,13 @@ describe('propagation apply — file-backed resources', () => {
         writeEngine: 'runtime',
         runtimeApply: (params) => {
           sent = params;
-          return Promise.resolve({ partial: false, applied: [], skipped: [], failed: [] });
+          return Promise.resolve({
+            partial: false,
+            applied: [],
+            skipped: [],
+            failed: [],
+            backups: [],
+          });
         },
       })
     );
@@ -778,15 +797,19 @@ describe('propagation apply — request validation', () => {
       userId(),
       { resourceKeys: ['instruction:global'], targetLocationIds: [...INSTRUCTION_LOCATIONS] },
       {
-        discover: (scanUserId, kinds) =>
-          discoverLibraryResources(getDb(), scanUserId, {
+        snapshot: async (scanUserId, environmentId, kinds) => ({
+          environmentId,
+          resources: await discoverLibraryResources(getDb(), scanUserId, {
             force: true,
             kinds,
             cache: new LibraryCache(),
             pathEnv: env,
             settings: settings([...INSTRUCTION_LOCATIONS]),
           }),
-        describeLocation: (id) => describeLocation(id, env),
+          statuses: new Map(
+            INSTRUCTION_LOCATIONS.map((id) => [id, describeLocation(id, env)] as const)
+          ),
+        }),
         enabledLocationIds: async () =>
           enabledLibraryLocations(libraryLocationsFor(settings(['claude-instructions'])), 'home'),
       }
@@ -910,6 +933,7 @@ describe('propagation apply — decisions', () => {
 
     expect(result.skipped).toContainEqual({
       resourceKey: 'skill:gh',
+      environmentId: 'local',
       locationId: 'cursor-skills',
       reason: 'user-skipped',
     });
@@ -1026,5 +1050,379 @@ describe('propagation end to end', () => {
     expect(after.entry.sourceGroups).toHaveLength(1);
     expect(after.entry.sourceGroups[0]?.instanceCount).toBe(4);
     expect(await listDivergenceAcks(userId())).toEqual([]);
+  });
+});
+
+/*
+  Two machines, two homes, one hub.
+
+  Both are driven in process against their own temp directory, which is exactly
+  what makes the interesting failures reachable: a write landing in the wrong
+  home, a backup on the wrong disk, or a second write to the same physical home
+  clobbering the first. The engine cannot tell these apart from a single-machine
+  apply on its own — only the hub's per-machine dispatch can.
+*/
+describe('propagation apply — across machines', () => {
+  let remoteHome: string;
+  let remoteBackupRoot: string;
+
+  beforeEach(() => {
+    remoteHome = mkdtempSync(join(tmpdir(), 'mango-apply-remote-'));
+    remoteBackupRoot = join(remoteHome, 'backups');
+  });
+
+  afterEach(() => {
+    rmSync(remoteHome, { recursive: true, force: true });
+  });
+
+  const homeOf = (environmentId: string) => (environmentId === 'local' ? home : remoteHome);
+
+  function envFor(environmentId: string) {
+    const machineHome = homeOf(environmentId);
+    return createLibraryPathEnv({
+      homeDir: machineHome,
+      env: { SKILLS_DIR: join(machineHome, '.mango', 'skills') },
+    });
+  }
+
+  function backupRootFor(environmentId: string): string {
+    return environmentId === 'local' ? backupRoot : remoteBackupRoot;
+  }
+
+  function writeSkillOn(environmentId: string, locationId: LibraryLocationId, body: string): void {
+    const dir = join(homeOf(environmentId), ...(LOCATION_DIRECTORIES[locationId] ?? []), 'gh');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), `---\nname: gh\ndescription: GitHub\n---\n${body}`);
+  }
+
+  function readSkillOn(environmentId: string, locationId: LibraryLocationId): string {
+    return readFileSync(
+      join(homeOf(environmentId), ...(LOCATION_DIRECTORIES[locationId] ?? []), 'gh', 'SKILL.md'),
+      'utf8'
+    );
+  }
+
+  /** Preview over both machines, each scanned against its own home. */
+  function previewAcross(
+    request: PropagationPreviewRequest,
+    environmentIds: readonly string[]
+  ): Promise<PropagationPreview> {
+    const enabled = settings([...SKILL_LOCATIONS]);
+    return previewLibraryPropagation(
+      userId(),
+      { ...request, environmentIds: [...environmentIds] },
+      {
+        snapshot: async (scanUserId, environmentId, kinds) => ({
+          environmentId,
+          resources: await discoverLibraryResources(getDb(), scanUserId, {
+            force: true,
+            kinds,
+            cache: new LibraryCache(),
+            pathEnv: envFor(environmentId),
+            settings: enabled,
+          }),
+          statuses: new Map(
+            SKILL_LOCATIONS.map((id) => [id, describeLocation(id, envFor(environmentId))] as const)
+          ),
+        }),
+        enabledLocationIds: async () =>
+          enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
+      }
+    );
+  }
+
+  function crossMachineDeps(
+    request: PropagationPreviewRequest,
+    environmentIds: readonly string[]
+  ): Partial<PropagationApplyDeps> {
+    return {
+      preview: () => previewAcross(request, environmentIds),
+      pathEnv: envFor,
+      writeEngine: 'in-process',
+      // Each machine keeps its own store under its own root — that is the whole
+      // point of resolving `backupRoot` per environment.
+      backup: {
+        ...defaultBackupStoreDeps,
+        backupDir: () => backupRootFor(currentEnvironmentId),
+        retentionCount: () => 10,
+        retentionBytes: () => 1024 ** 3,
+      },
+      writeDirectory: (input) =>
+        writeDirectoryResource(input, {
+          backupDir: () => backupRootFor(currentEnvironmentId),
+          backupRetentionCount: () => 10,
+          backupRetentionBytes: () => 1024 ** 3,
+        }),
+      writeFile: (input) =>
+        writeFileResource(input, {
+          backupDir: () => backupRootFor(currentEnvironmentId),
+          backupRetentionCount: () => 10,
+          backupRetentionBytes: () => 1024 ** 3,
+        }),
+      // The source tree is read off the machine that holds it, exactly as the
+      // protocol path does — just without a socket in the middle.
+      readRemoteSource: (_scanUserId, environmentId, input) =>
+        Promise.resolve(readTreeOn(environmentId, input.path)),
+      recordBackup: () => Promise.resolve(),
+    };
+  }
+
+  /** The engine batch currently running; the writer deps follow it. */
+  let currentEnvironmentId = 'local';
+
+  function readTreeOn(environmentId: string, path: string) {
+    const files: { relativePath: string; contents: Uint8Array }[] = [];
+    const walk = (directory: string, prefix: string): void => {
+      for (const entry of readdirSync(directory, { withFileTypes: true })) {
+        const child = join(directory, entry.name);
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isDirectory()) walk(child, relative);
+        else if (entry.isFile())
+          files.push({ relativePath: relative, contents: readFileSync(child) });
+      }
+    };
+    // Path is on the named machine; reading it from the hub's own home would
+    // silently copy the wrong file when both machines hold the same slug.
+    expect(path.startsWith(homeOf(environmentId))).toBe(true);
+    walk(path, '');
+    return files;
+  }
+
+  function applyAcross(
+    taken: PropagationPreview,
+    request: PropagationPreviewRequest,
+    environmentIds: readonly string[],
+    decisions: PropagationDecision[]
+  ): Promise<PropagationApply> {
+    const deps = crossMachineDeps(request, environmentIds);
+    return applyLibraryPropagation(userId(), toRequest(taken, request, decisions), {
+      ...deps,
+      writeDirectory: (input) => {
+        currentEnvironmentId = input.env.homeDir === remoteHome ? 'remote-box' : 'local';
+        return (deps.writeDirectory as NonNullable<typeof deps.writeDirectory>)(input);
+      },
+      writeFile: (input) => {
+        currentEnvironmentId = input.env.homeDir === remoteHome ? 'remote-box' : 'local';
+        return (deps.writeFile as NonNullable<typeof deps.writeFile>)(input);
+      },
+    });
+  }
+
+  it('copies a skill from one machine into another, leaving the source untouched', async () => {
+    writeSkillOn('local', 'mango-skills', 'winner\n');
+    mkdirSync(join(remoteHome, '.claude', 'skills'), { recursive: true });
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh'],
+      targetLocationIds: [...SKILL_LOCATIONS],
+    };
+    const taken = await previewAcross(request, ['local', 'remote-box']);
+    const entry = onlyEntry(taken);
+    const winner = entry.sourceGroups[0].contentHash;
+    const target = entry.destinations.find(
+      (destination) =>
+        destination.environmentId === 'remote-box' && destination.locationId === 'claude-skills'
+    );
+    expect(target?.blockedReason).toBeUndefined();
+
+    const result = await applyAcross(
+      taken,
+      request,
+      ['local', 'remote-box'],
+      [
+        {
+          resourceKey: 'skill:gh',
+          resolution: 'adopt-group',
+          winnerContentHash: winner,
+          destinations: entry.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action:
+              destination.environmentId === 'remote-box' &&
+              destination.locationId === 'claude-skills'
+                ? ('apply' as const)
+                : ('skip' as const),
+          })),
+        },
+      ]
+    );
+
+    expect(result.failed).toEqual([]);
+    expect(result.applied).toHaveLength(1);
+    expect(result.applied[0].environmentId).toBe('remote-box');
+    expect(readSkillOn('remote-box', 'claude-skills')).toContain('winner');
+    // The source machine is read from and never written to.
+    expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
+  });
+
+  it('backs up on the machine it wrote to, not on the hub', async () => {
+    writeSkillOn('local', 'mango-skills', 'winner\n');
+    writeSkillOn('remote-box', 'claude-skills', 'stale\n');
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh'],
+      targetLocationIds: [...SKILL_LOCATIONS],
+    };
+    const taken = await previewAcross(request, ['local', 'remote-box']);
+    const entry = onlyEntry(taken);
+    const winner = entry.sourceGroups.find((group) => group.environmentIds.includes('local'));
+    if (!winner) throw new Error('No source group on the local machine.');
+
+    const result = await applyAcross(
+      taken,
+      request,
+      ['local', 'remote-box'],
+      [
+        {
+          resourceKey: 'skill:gh',
+          resolution: 'adopt-group',
+          winnerContentHash: winner.contentHash,
+          destinations: entry.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action:
+              destination.environmentId === 'remote-box' &&
+              destination.locationId === 'claude-skills'
+                ? ('apply' as const)
+                : ('skip' as const),
+          })),
+        },
+      ]
+    );
+
+    expect(result.backups).toEqual([{ environmentId: 'remote-box', backupId: expect.any(String) }]);
+    // The bytes it replaced are on the machine that owned them, which is also
+    // the only machine that can put them back.
+    expect(existsSync(remoteBackupRoot)).toBe(true);
+    expect(existsSync(backupRoot)).toBe(false);
+  });
+
+  /*
+    Two environments can point at one physical home — Local plus an SSH
+    environment to the same host is the ordinary case, not an exotic one. Reads
+    tolerate it; writes make it sharp, because the second write has to see what
+    the first one did rather than overwrite a hash it verified a moment ago.
+  */
+  it('converges when two environments turn out to be the same machine', async () => {
+    writeSkillOn('local', 'mango-skills', 'winner\n');
+    writeSkillOn('local', 'claude-skills', 'stale\n');
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh'],
+      targetLocationIds: [...SKILL_LOCATIONS],
+    };
+    // Both ids resolve to the same home and the same store, which is exactly
+    // what a duplicate-addressing mistake looks like from the hub's seat.
+    const sameMachine = (): Partial<PropagationApplyDeps> => ({
+      preview: () => previewAcrossSameHome(request),
+      pathEnv: () => pathEnv(),
+      writeEngine: 'in-process',
+      backup: backupDeps(),
+      writeDirectory: (input) => writeDirectoryResource(input, writerOverrides()),
+      writeFile: (input) => writeFileResource(input, writerOverrides()),
+      readRemoteSource: (_scanUserId, _environmentId, input) =>
+        Promise.resolve(readTreeOn('local', input.path)),
+      recordBackup: () => Promise.resolve(),
+    });
+
+    const taken = await previewAcrossSameHome(request);
+    const entry = onlyEntry(taken);
+    const winner = entry.sourceGroups.find((group) => group.locationIds.includes('mango-skills'));
+    if (!winner) throw new Error('No source group in mango-skills.');
+
+    const result = await applyLibraryPropagation(
+      userId(),
+      toRequest(taken, request, [
+        {
+          resourceKey: 'skill:gh',
+          resolution: 'adopt-group',
+          winnerContentHash: winner.contentHash,
+          destinations: entry.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action:
+              destination.locationId === 'claude-skills' ? ('apply' as const) : ('skip' as const),
+          })),
+        },
+      ]),
+      sameMachine()
+    );
+
+    // The second write finds the first one's content, hash-verifies, and
+    // succeeds — rather than failing verification or corrupting the file.
+    expect(result.failed).toEqual([]);
+    expect(result.applied).toHaveLength(2);
+    expect(readSkill('claude-skills')).toContain('winner');
+    // One backup each, because each apply batch is its own set on the store.
+    expect(result.backups).toHaveLength(2);
+  });
+
+  /** Both ids scanned against the one home, so both see the same instances. */
+  function previewAcrossSameHome(request: PropagationPreviewRequest): Promise<PropagationPreview> {
+    const enabled = settings([...SKILL_LOCATIONS]);
+    return previewLibraryPropagation(
+      userId(),
+      { ...request, environmentIds: ['local', 'twin'] },
+      {
+        snapshot: async (scanUserId, environmentId, kinds) => ({
+          environmentId,
+          resources: await discoverLibraryResources(getDb(), scanUserId, {
+            force: true,
+            kinds,
+            cache: new LibraryCache(),
+            pathEnv: pathEnv(),
+            settings: enabled,
+          }),
+          statuses: new Map(
+            SKILL_LOCATIONS.map((id) => [id, describeLocation(id, pathEnv())] as const)
+          ),
+        }),
+        enabledLocationIds: async () =>
+          enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
+      }
+    );
+  }
+
+  it('produces one backup set per machine when a write spans both', async () => {
+    writeSkillOn('local', 'mango-skills', 'winner\n');
+    writeSkillOn('local', 'claude-skills', 'stale-local\n');
+    writeSkillOn('remote-box', 'claude-skills', 'stale-remote\n');
+
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh'],
+      targetLocationIds: [...SKILL_LOCATIONS],
+    };
+    const taken = await previewAcross(request, ['local', 'remote-box']);
+    const entry = onlyEntry(taken);
+    const winner = entry.sourceGroups.find((group) => group.locationIds.includes('mango-skills'));
+    if (!winner) throw new Error('No source group in mango-skills.');
+
+    const result = await applyAcross(
+      taken,
+      request,
+      ['local', 'remote-box'],
+      [
+        {
+          resourceKey: 'skill:gh',
+          resolution: 'adopt-group',
+          winnerContentHash: winner.contentHash,
+          destinations: entry.destinations.map((destination) => ({
+            environmentId: destination.environmentId,
+            locationId: destination.locationId,
+            action:
+              destination.locationId === 'claude-skills' ? ('apply' as const) : ('skip' as const),
+          })),
+        },
+      ]
+    );
+
+    expect(result.failed).toEqual([]);
+    // Two machines, two stores: there is no single undo handle, and offering
+    // one would name whichever set happened to be first.
+    expect(result.backups.map((handle) => handle.environmentId).sort()).toEqual([
+      'local',
+      'remote-box',
+    ]);
+    expect(result.backupId).toBeUndefined();
   });
 });

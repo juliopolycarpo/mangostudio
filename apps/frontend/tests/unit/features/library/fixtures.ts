@@ -128,6 +128,8 @@ export function sourceGroup(
     sizeBytes: 512,
     contentLocationId: 'agents-skills',
     contentPath: '/home/dev/.agents/skills/gh',
+    environmentIds: ['local'],
+    contentEnvironmentId: 'local',
     ...overrides,
   };
 }
@@ -136,6 +138,7 @@ export function destination(
   overrides: Partial<PropagationDestination> = {}
 ): PropagationDestination {
   return {
+    environmentId: 'local',
     locationId: 'agents-skills',
     targetIds: ['mangostudio', 'codex'],
     toFormat: 'markdown-frontmatter',

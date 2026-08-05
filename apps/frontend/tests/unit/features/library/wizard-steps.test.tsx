@@ -11,7 +11,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConflictStep } from '../../../../src/features/library/components/ConflictStep';
 import { DestinationStep } from '../../../../src/features/library/components/DestinationStep';
 import { ReviewStep } from '../../../../src/features/library/components/ReviewStep';
-import { initialDraft, unresolvedEntries } from '../../../../src/features/library/propagation';
+import {
+  destinationKey,
+  initialDraft,
+  unresolvedEntries,
+} from '../../../../src/features/library/propagation';
 import { screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { destination, location, preview, previewEntry, sourceGroup } from './fixtures';
@@ -121,6 +125,7 @@ describe('DestinationStep', () => {
 
     await renderWithRouter(
       <DestinationStep
+        environmentName={(id: string) => id}
         preview={shared}
         draft={initialDraft(shared)}
         locations={[location()]}
@@ -151,6 +156,7 @@ describe('DestinationStep', () => {
 
     await renderWithRouter(
       <DestinationStep
+        environmentName={(id: string) => id}
         preview={readOnly}
         draft={initialDraft(readOnly)}
         locations={[
@@ -182,6 +188,7 @@ describe('DestinationStep', () => {
 
     await renderWithRouter(
       <DestinationStep
+        environmentName={(id: string) => id}
         preview={unwritable}
         draft={initialDraft(unwritable)}
         locations={[location({ id: 'claude-skills', writable: false })]}
@@ -199,6 +206,7 @@ describe('DestinationStep', () => {
 
     await renderWithRouter(
       <DestinationStep
+        environmentName={(id: string) => id}
         preview={single}
         draft={initialDraft(single)}
         locations={[location()]}
@@ -212,7 +220,10 @@ describe('DestinationStep', () => {
 
 describe('ReviewStep', () => {
   function renderReview(previewValue: ReturnType<typeof preview>, ...checked: string[]) {
-    const draft = { ...initialDraft(previewValue), destinations: new Set(checked) };
+    const draft = {
+      ...initialDraft(previewValue),
+      destinations: new Set(checked.map((locationId) => destinationKey('local', locationId))),
+    };
     return renderWithRouter(
       <ReviewStep
         preview={previewValue}

@@ -1637,7 +1637,6 @@ export const messages = {
       selectedCount: '{count} selecionados',
       clearSelection: 'Limpar seleção',
       propagate: 'Propagar',
-      writesLocalOnly: 'Propagar e remover estão disponíveis apenas nesta máquina por enquanto.',
       loadError: 'Não foi possível carregar a biblioteca.',
       retry: 'Tentar novamente',
       rescan: 'Reler do disco',
@@ -1685,7 +1684,6 @@ export const messages = {
       alsoIn: 'também em {locations}, idêntico',
       propagate: 'Propagar',
       remove: 'Remover',
-      writesLocalOnly: 'Propagar e remover estão disponíveis apenas nesta máquina por enquanto.',
       notFound: 'Este recurso não existe mais na biblioteca.',
       invalidInstance: 'Cópia ilegível em {location}',
       // 001 não normaliza fim de linha de propósito, então CRLF contra LF é uma
@@ -1817,6 +1815,9 @@ export const messages = {
         'A cópia que está aqui não pôde ser lida, então sobrescrevê-la não é seguro.',
       'no-source-content': 'Nenhuma cópia legível existe para copiar.',
       'no-adapter-strategy': 'Nenhum conversor sabe levar este formato até o do destino.',
+      'environment-offline': 'Esta máquina não está conectada no momento.',
+      'environment-unsupported': 'Esta máquina não oferece acesso à biblioteca.',
+      'environment-readonly': 'O dono desta máquina não permitiu escrever arquivos aqui.',
       // A remoção usa este mesmo catálogo; só o motivo abaixo é exclusivo dela.
       'invalid-instance':
         'Esta cópia não pôde ser lida por inteiro, então não dá para guardar um backup fiel dela. Remova você mesmo.',
@@ -1887,6 +1888,7 @@ export const messages = {
       resultRolledBack: 'Uma remoção falhou, então todas as cópias voltaram para o lugar.',
       resultNone: 'Nada foi removido.',
       resultKeptHeading: 'Continuam no lugar',
+      restore: 'Devolver estas cópias',
     },
     result: {
       title: 'Resultado',
@@ -1947,6 +1949,13 @@ export const messages = {
       evictsNextHint:
         'A próxima aplicação vai apagar este backup para respeitar o limite de retenção.',
       bulkHint: 'Backups são restaurados e excluídos um conjunto por vez, de propósito.',
+      retentionPerMachine: 'Estes limites valem para cada máquina separadamente.',
+      machineUnknown: 'Máquina {id}',
+      unreachable:
+        'Não foi possível falar com estas máquinas, então os backups delas aparecem conforme o hub registrou por último: {machines}.',
+      unavailableOffline: 'Restaurar exige esta máquina conectada.',
+      unavailableManifest:
+        'Este conjunto perdeu o registro do que guarda, então nada pode ser restaurado dele. Excluir continua funcionando.',
     },
     settings: {
       title: 'Configurações lado a lado',

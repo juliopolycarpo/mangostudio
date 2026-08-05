@@ -22,10 +22,16 @@ import {
 import type {
   RuntimeLibraryApplyParams,
   RuntimeLibraryApplyResult,
+  RuntimeLibraryBackupsParams,
+  RuntimeLibraryBackupsResult,
+  RuntimeLibraryGcParams,
+  RuntimeLibraryGcResult,
   RuntimeLibraryLocationsParams,
   RuntimeLibraryLocationsResult,
   RuntimeLibraryReadParams,
   RuntimeLibraryReadResult,
+  RuntimeLibraryReadTreeParams,
+  RuntimeLibraryReadTreeResult,
   RuntimeLibraryRemoveParams,
   RuntimeLibraryRemoveResult,
   RuntimeLibraryScanParams,
@@ -36,9 +42,16 @@ import type {
 } from '../../methods';
 import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-env';
 import { executePropagationWrites } from './apply-writes';
+import { collectBackupGarbage, createBackupStoreDeps, listBackupSets } from './backup-store';
 import { type LibraryCache, libraryCache } from './cache';
 import { scanLibraryInstances } from './discovery';
-import type { ReadLibraryInstance } from './instance-reader';
+import {
+  InstanceTooLargeError,
+  isPathWithin,
+  PathEscapeError,
+  type ReadLibraryInstance,
+  readLibraryTree,
+} from './instance-reader';
 import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
 import { executeRemovalWrites } from './remove-writes';
 import { type RuntimeSettingsSourcesResult, readSettingsSources } from './settings-sources';
@@ -74,6 +87,7 @@ const DEFAULT_ADAPTERS: LibraryHostAdapters = {
 export interface LibraryService {
   scan(params: RuntimeLibraryScanParams): Promise<RuntimeLibraryScanResult>;
   read(params: RuntimeLibraryReadParams): Promise<RuntimeLibraryReadResult>;
+  readTree(params: RuntimeLibraryReadTreeParams): Promise<RuntimeLibraryReadTreeResult>;
   locations(params: RuntimeLibraryLocationsParams): Promise<RuntimeLibraryLocationsResult>;
   settingsSources(
     params: RuntimeLibrarySettingsSourcesParams
@@ -87,6 +101,8 @@ export interface LibraryService {
     signal?: AbortSignal
   ): Promise<RuntimeLibraryRemoveResult>;
   undo(params: RuntimeLibraryUndoParams, signal?: AbortSignal): Promise<RuntimeLibraryUndoResult>;
+  backups(params: RuntimeLibraryBackupsParams): Promise<RuntimeLibraryBackupsResult>;
+  gc(params: RuntimeLibraryGcParams): Promise<RuntimeLibraryGcResult>;
   /** Drops every memo this process holds; tests call this between fixtures. */
   resetCache(): void;
 }
@@ -137,31 +153,54 @@ function decodeApplyOperations(params: RuntimeLibraryApplyParams): PreparedPropa
   // shared `contents` map is that a fan-out across destinations carries the
   // bytes once, and decoding per operation would put every copy back in memory.
   const decoded = new Map<string, Uint8Array>();
+  const payload = (contentRef: string, what: string): Uint8Array => {
+    const encoded = params.contents?.[contentRef];
+    if (encoded === undefined) {
+      throw new RuntimeToolArgumentError(`library.apply ${what} names no content in this frame.`);
+    }
+    let bytes = decoded.get(contentRef);
+    if (!bytes) {
+      bytes = Buffer.from(encoded, 'base64');
+      decoded.set(contentRef, bytes);
+    }
+    return bytes;
+  };
+
   return params.operations.map((operation) => {
     if (operation.kind === 'directory') {
+      if (operation.files !== undefined) {
+        return {
+          ...operation,
+          files: operation.files.map((file) => ({
+            relativePath: file.relativePath,
+            contents: payload(
+              file.contentRef,
+              `directory operation "${operation.resourceKey}" file "${file.relativePath}"`
+            ),
+          })),
+        };
+      }
       if (typeof operation.sourceDir !== 'string' || operation.sourceDir.length === 0) {
         throw new RuntimeToolArgumentError(
-          `library.apply directory operation "${operation.resourceKey}" requires sourceDir.`
+          `library.apply directory operation "${operation.resourceKey}" requires sourceDir or files.`
         );
       }
+      const { files: _sameMachine, ...rest } = operation;
       return {
-        ...operation,
+        ...rest,
         sourceDir: operation.sourceDir,
       };
     }
-    const encoded =
-      operation.contentRef === undefined ? undefined : params.contents?.[operation.contentRef];
-    if (encoded === undefined) {
+    if (operation.contentRef === undefined) {
       throw new RuntimeToolArgumentError(
         `library.apply file operation "${operation.resourceKey}" names no content in this frame.`
       );
     }
-    let contents = decoded.get(operation.contentRef as string);
-    if (!contents) {
-      contents = Buffer.from(encoded, 'base64');
-      decoded.set(operation.contentRef as string, contents);
-    }
-    return { ...operation, contents };
+    const { files: _never, ...rest } = operation;
+    return {
+      ...rest,
+      contents: payload(operation.contentRef, `file operation "${operation.resourceKey}"`),
+    };
   });
 }
 
@@ -217,6 +256,55 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
       }
     },
 
+    async readTree(params) {
+      const pathEnv = pathEnvFrom(adapters, params);
+      const root = libraryLocationRoot(params.locationId, pathEnv);
+      if (root === null) {
+        return {
+          files: [],
+          denied: true,
+          reason: `Library location "${params.locationId}" does not resolve on this machine.`,
+        };
+      }
+      // Containment is checked against the location root before the walk; a
+      // hub-supplied path is rejected here if it is not even textually inside
+      // the location, and `readLibraryTree` re-checks every path — the root
+      // itself and every leaf — against the same root after symlink
+      // resolution.
+      if (!isPathWithin(root, params.path)) {
+        return {
+          files: [],
+          denied: true,
+          reason: `Library path "${params.path}" is outside its registered location.`,
+        };
+      }
+      try {
+        const files = await readLibraryTree(params.path, root);
+        return {
+          files: files.map((file) => ({
+            relativePath: file.relativePath,
+            contentBase64: Buffer.from(file.bytes).toString('base64'),
+          })),
+        };
+      } catch (error) {
+        if (error instanceof PathEscapeError) {
+          return {
+            files: [],
+            denied: true,
+            reason: `Library path "${params.path}" resolves outside its registered location.`,
+          };
+        }
+        if (error instanceof InstanceTooLargeError) {
+          return {
+            files: [],
+            denied: true,
+            reason: `Library resource at "${params.path}" exceeds the transfer limits.`,
+          };
+        }
+        throw error;
+      }
+    },
+
     locations(params) {
       const pathEnv = pathEnvFrom(adapters, params);
       return Promise.resolve({ locations: adapters.describeLocations(pathEnv) });
@@ -236,6 +324,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           retentionBytes: params.retentionBytes,
           pathEnv: pathEnvFrom(adapters, params),
           backupId: params.backupId,
+          environmentId: params.environmentId,
           operations: decodeApplyOperations(params),
           signal,
         })
@@ -251,6 +340,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           retentionBytes: params.retentionBytes,
           pathEnv: pathEnvFrom(adapters, params),
           backupId: params.backupId,
+          environmentId: params.environmentId,
           operations: params.operations,
           lastCopyResourceKeys: params.lastCopyResourceKeys,
           signal,
@@ -283,10 +373,45 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
       }
     },
 
+    async backups(params) {
+      assertBackupRoot(params.backupRoot, 'library.backups');
+      return { sets: await listBackupSets(backupStoreDepsFor(params)) };
+    },
+
+    gc(params) {
+      assertBackupRoot(params.backupRoot, 'library.gc');
+      // Serialized against writes on the same root: a prune racing an apply
+      // could evict the set that apply is still filling, and the caller would
+      // hold a backup id with nothing behind it.
+      return adapters.serializeWrite(params.backupRoot, () =>
+        collectBackupGarbage(
+          { ...(params.purgeBackupIds && { purgeBackupIds: params.purgeBackupIds }) },
+          backupStoreDepsFor(params)
+        )
+      );
+    },
+
     resetCache() {
       adapters.cache.clear();
     },
   };
+}
+
+/**
+ * Retention bounds are optional on the wire and default in the store, so a
+ * caller that only wants a listing never has to restate hub policy — and a
+ * malformed one cannot widen the budget past what the hub configured.
+ */
+function backupStoreDepsFor(params: {
+  readonly backupRoot: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+}) {
+  return createBackupStoreDeps({
+    backupRoot: params.backupRoot,
+    ...(params.retentionCount !== undefined && { retentionCount: params.retentionCount }),
+    ...(params.retentionBytes !== undefined && { retentionBytes: params.retentionBytes }),
+  });
 }
 
 export const libraryService = createLibraryService();

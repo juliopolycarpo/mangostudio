@@ -8,13 +8,14 @@ import type {
 } from '@mangostudio/shared/environments';
 import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
 import type {
+  LibraryBackupSet,
   LibraryInstance,
   LibraryLocationId,
   LibraryLocationStatus,
   LibraryResourceRef,
   LibraryTargetId,
+  LibraryUndoResult,
   PropagationApply,
-  PropagationUndo,
   RemovalApply,
   ResourceKind,
 } from '@mangostudio/shared/library';
@@ -707,6 +708,34 @@ export interface RuntimeLibraryReadResult {
   readonly reason?: string;
 }
 
+/**
+ * Reads a whole directory resource so it can be written on another machine.
+ *
+ * `library.read` answers with one file's text for the detail view; a skill is a
+ * tree, and the destination's `library.apply` cannot reach a source directory
+ * that lives on a different host. The bytes travel base64 in the frame, bounded
+ * by the same caps a scan enforces.
+ */
+export interface RuntimeLibraryReadTreeParams {
+  /** Absolute directory path on this host, as the scan reported it. */
+  readonly path: string;
+  readonly locationId: LibraryLocationId;
+  readonly pathEnv?: RuntimeLibraryPathEnvParams;
+}
+
+export interface RuntimeLibraryTreeFile {
+  /** Posix-separated path relative to the resource root. */
+  readonly relativePath: string;
+  readonly contentBase64: string;
+}
+
+export interface RuntimeLibraryReadTreeResult {
+  readonly files: readonly RuntimeLibraryTreeFile[];
+  /** Set when the path is outside the location root or otherwise refused. */
+  readonly denied?: true;
+  readonly reason?: string;
+}
+
 export interface RuntimeLibraryLocationsParams {
   readonly pathEnv?: RuntimeLibraryPathEnvParams;
 }
@@ -726,6 +755,16 @@ export interface RuntimeLibraryBackupEnvelope {
   readonly retentionBytes?: number;
   readonly pathEnv?: RuntimeLibraryPathEnvParams;
   readonly backupId?: string;
+  /**
+   * Which environment the hub is writing to, echoed back on every result row
+   * and stamped into the backup manifest.
+   *
+   * The id is a hub concept — this host has no way to know what it was filed
+   * under — so it travels with the request rather than being resolved here.
+   * Absent means Local, which is what every backup written before environments
+   * existed was.
+   */
+  readonly environmentId?: string;
 }
 
 /**
@@ -739,9 +778,21 @@ export interface RuntimeLibraryBackupEnvelope {
  */
 export type RuntimeLibraryApplyAdaptation = PreparedPropagationAdaptation;
 
-export type RuntimeLibraryApplyOperation = Omit<PreparedPropagationOperation, 'contents'> & {
+export type RuntimeLibraryApplyOperation = Omit<
+  PreparedPropagationOperation,
+  'contents' | 'files'
+> & {
   /** Key into `RuntimeLibraryApplyParams.contents`. Absent for directories. */
   readonly contentRef?: string;
+  /**
+   * A transferred directory tree, each file naming its payload in `contents`.
+   *
+   * Present only when the source lives on another machine — a same-machine
+   * directory apply keeps naming `sourceDir`, so nothing about that path
+   * changed. Sharing the `contents` map means a skill fanned out to several
+   * destinations carries its files once, exactly as file resources do.
+   */
+  readonly files?: readonly { readonly relativePath: string; readonly contentRef: string }[];
 };
 
 export interface RuntimeLibraryApplyParams extends RuntimeLibraryBackupEnvelope {
@@ -768,6 +819,43 @@ export interface RuntimeLibraryRemoveParams extends RuntimeLibraryBackupEnvelope
 
 export type RuntimeLibraryRemoveResult = RemovalApply;
 
+/**
+ * Reads this host's backup store. No bounds are enforced — the retention values
+ * only decide which sets `evictsNext` marks, so a listing never costs the user a
+ * backup it did not warn about first.
+ */
+export interface RuntimeLibraryBackupsParams {
+  readonly backupRoot: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+}
+
+export interface RuntimeLibraryBackupsResult {
+  readonly sets: readonly LibraryBackupSet[];
+}
+
+/**
+ * Deletes named sets and trims the store to its bounds, on the machine holding
+ * the bytes.
+ *
+ * Separate from `library.backups` because it is a write: the consent gate has
+ * to be able to refuse it on a readonly machine while still letting that
+ * machine's history be listed.
+ */
+export interface RuntimeLibraryGcParams {
+  readonly backupRoot: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+  /** Sets the user asked to delete by name. Purging a missing set is not an error. */
+  readonly purgeBackupIds?: readonly string[];
+}
+
+export interface RuntimeLibraryGcResult {
+  readonly purged: readonly string[];
+  /** Sets retention took, so the hub can drop their index rows in the same pass. */
+  readonly pruned: readonly string[];
+}
+
 export interface RuntimeLibraryUndoParams {
   readonly backupRoot: string;
   readonly backupId: string;
@@ -778,7 +866,7 @@ export interface RuntimeLibraryUndoParams {
   readonly pathEnv?: RuntimeLibraryPathEnvParams;
 }
 
-export type RuntimeLibraryUndoResult = PropagationUndo;
+export type RuntimeLibraryUndoResult = LibraryUndoResult;
 
 /** Opens one bounded runtime-binary transfer. Bytes travel in sequential calls. */
 export interface RuntimeUpdateBeginParams {
@@ -955,6 +1043,10 @@ export interface RuntimeMethodMap {
     readonly params: RuntimeLibraryReadParams;
     readonly result: RuntimeLibraryReadResult;
   };
+  'library.read-tree': {
+    readonly params: RuntimeLibraryReadTreeParams;
+    readonly result: RuntimeLibraryReadTreeResult;
+  };
   'library.locations': {
     readonly params: RuntimeLibraryLocationsParams;
     readonly result: RuntimeLibraryLocationsResult;
@@ -974,6 +1066,14 @@ export interface RuntimeMethodMap {
   'library.undo': {
     readonly params: RuntimeLibraryUndoParams;
     readonly result: RuntimeLibraryUndoResult;
+  };
+  'library.backups': {
+    readonly params: RuntimeLibraryBackupsParams;
+    readonly result: RuntimeLibraryBackupsResult;
+  };
+  'library.gc': {
+    readonly params: RuntimeLibraryGcParams;
+    readonly result: RuntimeLibraryGcResult;
   };
   'runtime.health': {
     readonly params: Record<string, never>;

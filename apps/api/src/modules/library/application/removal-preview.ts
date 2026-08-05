@@ -8,16 +8,23 @@
  * removal needs of its own is a different default posture, because the failure
  * mode is not symmetric: an overwrite's backup restores a path that still
  * exists, while a removal's backup is the only remaining copy.
+ *
+ * Machines matter here for one reason above all others: the last-copy guard. A
+ * copy surviving on another box is a surviving copy, and a guard that counted
+ * only locations would either demand an acknowledgement for a resource that is
+ * not disappearing, or — far worse — fail to demand one for a resource that is.
  */
 
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   enabledLibraryLocations,
   type LibraryInstance,
   type LibraryLocationId,
   type LibraryLocationStatus,
-  type LibraryResource,
   type LibraryResourceRef,
+  type LibraryStagedRemoval,
+  type PropagationBlockedReason,
   parseResourceKey,
   type RemovalBlockedReason,
   type RemovalLocation,
@@ -25,7 +32,6 @@ import {
   type RemovalPreviewEntry,
   type RemovalPreviewRequest,
   type ResourceKind,
-  type StagedRemovalLeftover,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
@@ -33,31 +39,45 @@ import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { LibraryRequestError } from '../domain/library-request-error';
-import { createLibraryPathEnv, describeLocation } from '../infrastructure/location-probe';
+import { createLibraryPathEnv } from '../infrastructure/location-probe';
 import { findStagedRemovalsForLocations } from '../infrastructure/tree-removal';
-import { discoverLibraryResources } from './library-discovery';
 import { compareText, hashJson, hashLibraryState } from './preview-state';
+import { type EnvironmentSnapshot, readEnvironmentSnapshot } from './propagation-preview';
 
 export interface RemovalPreviewDeps {
   /** Always a forced rescan: previewing a deletion against stale state is worse than not previewing. */
-  discover(userId: string, kinds: readonly ResourceKind[]): Promise<LibraryResource[]>;
-  describeLocation(id: LibraryLocationId): LibraryLocationStatus;
+  snapshot(
+    userId: string,
+    environmentId: string,
+    kinds: readonly ResourceKind[]
+  ): Promise<EnvironmentSnapshot>;
   /** The same set the scanner honours, so a copy is never removed unseen. */
   enabledLocationIds(userId: string): Promise<ReadonlySet<LibraryLocationId>>;
-  pathEnv(): PathEnv;
+  pathEnv(environmentId: string): PathEnv;
+  /**
+   * Interrupted-apply leftovers on one machine.
+   *
+   * Only Local can be walked from here — the hub shares its filesystem. A remote
+   * machine reports none rather than a wrong answer: an empty list understates
+   * the leftovers, while listing the hub's own would name paths that do not
+   * exist there at all.
+   */
   staleStagedRemovals(
+    environmentId: string,
     locations: readonly LocationDefinition[],
     env: PathEnv
-  ): Promise<readonly StagedRemovalLeftover[]>;
+  ): Promise<readonly LibraryStagedRemoval[]>;
 }
 
 const defaultRemovalPreviewDeps: RemovalPreviewDeps = {
-  discover: (userId, kinds) => discoverLibraryResources(getDb(), userId, { force: true, kinds }),
-  describeLocation: (id) => describeLocation(id, createLibraryPathEnv()),
+  snapshot: readEnvironmentSnapshot,
   enabledLocationIds: async (userId) =>
     enabledLibraryLocations(libraryLocationsFor(await getAppSettings(getDb(), userId)), 'home'),
   pathEnv: () => createLibraryPathEnv(),
-  staleStagedRemovals: findStagedRemovalsForLocations,
+  staleStagedRemovals: async (environmentId, locations, env) =>
+    environmentId === LOCAL_ENVIRONMENT_ID
+      ? await findStagedRemovalsForLocations(locations, env)
+      : [],
 };
 
 export async function previewLibraryRemoval(
@@ -78,6 +98,10 @@ export async function previewLibraryRemoval(
 
   const refs = parseRequestedResources(request.resourceKeys);
   const locations = parseRequestedLocations(request.locationIds);
+  const environmentIds =
+    request.environmentIds && request.environmentIds.length > 0
+      ? [...new Set(request.environmentIds)]
+      : [LOCAL_ENVIRONMENT_ID];
 
   // The scanner skips disabled locations, so their copies never appear in
   // `discovered`. Previewing one would report every copy there as `absent` —
@@ -93,24 +117,51 @@ export async function previewLibraryRemoval(
   }
 
   const kinds = [...new Set([...refs.values()].map((ref) => ref.kind))];
-  const discovered = await deps.discover(userId, kinds);
-  const byKey = new Map(discovered.map((resource) => [resource.key, resource]));
-  const resources = [...refs.keys()].map((key) => {
-    const resource = byKey.get(key);
-    if (!resource) {
+  const snapshots = await Promise.all(
+    environmentIds.map((environmentId) => deps.snapshot(userId, environmentId, kinds))
+  );
+
+  // Present *somewhere* in scope. Requiring it on every machine would make
+  // "remove this from the box that still has it" a 404.
+  const requested = [...refs.keys()];
+  const found = new Set(
+    snapshots.flatMap((snapshot) => snapshot.resources.map((resource) => resource.key))
+  );
+  for (const key of requested) {
+    if (!found.has(key)) {
       throw new LibraryRequestError(404, `Library resource "${key}" was not found.`);
     }
-    return resource;
-  });
+  }
 
-  const statuses = new Map(
-    locations.map((location) => [location.id, deps.describeLocation(location.id)] as const)
+  const leftovers = (
+    await Promise.all(
+      snapshots.map(async (snapshot) =>
+        (
+          await deps.staleStagedRemovals(
+            snapshot.environmentId,
+            locations,
+            deps.pathEnv(snapshot.environmentId)
+          )
+        ).map((leftover) => ({ ...leftover, environmentId: snapshot.environmentId }))
+      )
+    )
+  ).flat();
+
+  const entries = requested.map((key) =>
+    buildRemovalEntry(key, refs.get(key) as LibraryResourceRef, snapshots, locations)
   );
-  const env = deps.pathEnv();
-  const leftovers = await deps.staleStagedRemovals(locations, env);
-
-  const entries = resources.map((resource) => buildRemovalEntry(resource, locations, statuses));
-  const stateHash = hashLibraryState(resources, statuses);
+  const stateHash = hashLibraryState(
+    snapshots.map((snapshot) => ({
+      environmentId: snapshot.environmentId,
+      resources: snapshot.resources,
+      statuses: new Map(
+        locations.flatMap((location) => {
+          const status = snapshot.statuses.get(location.id);
+          return status ? [[location.id, status] as const] : [];
+        })
+      ),
+    }))
+  );
 
   return {
     previewToken: hashJson({
@@ -119,8 +170,9 @@ export async function previewLibraryRemoval(
       // about the two requests happens to match.
       operation: 'library-removal',
       profileId,
-      resourceKeys: [...refs.keys()].sort(compareText),
+      resourceKeys: [...requested].sort(compareText),
       locationIds: locations.map((location) => location.id).sort(compareText),
+      environmentIds: [...environmentIds].sort(compareText),
       stateHash,
       entries,
     }),
@@ -151,56 +203,133 @@ function parseRequestedLocations(ids: readonly LibraryLocationId[]): LocationDef
   return [...locations.values()];
 }
 
+interface ClassifiedRemoval {
+  readonly environmentId: string;
+  readonly location: LocationDefinition;
+  readonly instance: LibraryInstance | undefined;
+  readonly blockedReason: RemovalBlockedReason | undefined;
+}
+
+/** One copy on one machine — the unit everything in a removal is keyed by. */
+interface PlacedInstance {
+  readonly environmentId: string;
+  readonly instance: LibraryInstance;
+}
+
+function placementKey(environmentId: string, locationId: LibraryLocationId): string {
+  return `${environmentId}\u001f${locationId}`;
+}
+
 function buildRemovalEntry(
-  resource: LibraryResource,
-  locations: readonly LocationDefinition[],
-  statuses: ReadonlyMap<LibraryLocationId, LibraryLocationStatus>
+  resourceKey: string,
+  ref: LibraryResourceRef,
+  snapshots: readonly EnvironmentSnapshot[],
+  locations: readonly LocationDefinition[]
 ): RemovalPreviewEntry {
-  const instanceByLocation = new Map(
-    resource.instances.map((instance) => [instance.locationId, instance] as const)
-  );
+  const placed: PlacedInstance[] = snapshots.flatMap((snapshot) => {
+    const resource = snapshot.resources.find((candidate) => candidate.key === resourceKey);
+    return (resource?.instances ?? []).map((instance) => ({
+      environmentId: snapshot.environmentId,
+      instance,
+    }));
+  });
+
   // A location stores exactly one kind, so removing a skill never offers the
   // subagent directories as places to remove it from.
-  const candidates = locations.filter((location) => location.kind === resource.ref.kind);
-
-  const classified = candidates.map((location) => {
-    const instance = instanceByLocation.get(location.id);
-    const blockedReason = removalBlockedReason(location, statuses.get(location.id), instance);
-    return { location, instance, blockedReason };
+  const candidates = locations.filter((location) => location.kind === ref.kind);
+  const classified = snapshots.flatMap((snapshot) => {
+    const resource = snapshot.resources.find((candidate) => candidate.key === resourceKey);
+    const instanceByLocation = new Map(
+      (resource?.instances ?? []).map((instance) => [instance.locationId, instance] as const)
+    );
+    return candidates.map((location): ClassifiedRemoval => {
+      const instance = instanceByLocation.get(location.id);
+      return {
+        environmentId: snapshot.environmentId,
+        location,
+        instance,
+        // The machine's own state comes first: a location cannot be unwritable
+        // on a box nobody could reach, and naming the location's problem there
+        // sends the user after the wrong thing.
+        blockedReason:
+          environmentBlockedReason(snapshot.blockedReason) ??
+          removalBlockedReason(location, snapshot.statuses.get(location.id), instance),
+      };
+    });
   });
 
   const removing = new Set(
     classified
       .filter((row) => row.instance !== undefined && row.blockedReason === undefined)
-      .map((row) => row.location.id)
+      .map((row) => placementKey(row.environmentId, row.location.id))
   );
-  const surviving = resource.instances.filter((instance) => !removing.has(instance.locationId));
+  const surviving = placed.filter(
+    (candidate) =>
+      !removing.has(placementKey(candidate.environmentId, candidate.instance.locationId))
+  );
 
   return {
-    resourceKey: resource.key,
-    ref: resource.ref,
-    divergence: resource.divergence,
-    locations: classified.map((row) => describeRemovalLocation(row, removing, resource.instances)),
-    instanceLocationIds: resource.instances
-      .map((instance) => instance.locationId)
-      .sort(compareText),
+    resourceKey,
+    ref,
+    divergence: placed.length > 1 ? describeDivergence(placed) : 'single',
+    locations: classified.map((row) => describeRemovalLocation(row, removing, placed)),
+    instancePlacements: placed
+      .map((candidate) => ({
+        environmentId: candidate.environmentId,
+        locationId: candidate.instance.locationId,
+      }))
+      .sort(
+        (left, right) =>
+          compareText(left.environmentId, right.environmentId) ||
+          compareText(left.locationId, right.locationId)
+      ),
     // An entry offering nothing to remove cannot take a last copy with it, and
     // reporting `true` there would ask for an acknowledgement of nothing.
     wouldRemoveLastCopy: removing.size > 0 && surviving.length === 0,
   };
 }
 
+/**
+ * The machine-level reasons the two catalogs share.
+ *
+ * A snapshot can only ever carry one of these three — every other propagation
+ * reason describes a *write target*, which a removal does not have. Narrowing
+ * explicitly rather than casting keeps that true if either union grows.
+ */
+function environmentBlockedReason(
+  reason: PropagationBlockedReason | undefined
+): RemovalBlockedReason | undefined {
+  return reason === 'environment-offline' ||
+    reason === 'environment-unsupported' ||
+    reason === 'environment-readonly'
+    ? reason
+    : undefined;
+}
+
+/**
+ * The verdict over every machine in scope, derived here rather than taken from
+ * any one machine's `LibraryResource` — that field describes divergence *within*
+ * a machine, and reporting it would call a resource uniform while two boxes hold
+ * different bytes.
+ */
+function describeDivergence(placed: readonly PlacedInstance[]): RemovalPreviewEntry['divergence'] {
+  const hashes = new Set(
+    placed.flatMap((candidate) =>
+      candidate.instance.valid ? [candidate.instance.contentHash] : []
+    )
+  );
+  if (hashes.size === 0) return 'not-comparable';
+  return hashes.size > 1 ? 'divergent' : 'uniform';
+}
+
 function describeRemovalLocation(
-  row: {
-    readonly location: LocationDefinition;
-    readonly instance: LibraryInstance | undefined;
-    readonly blockedReason: RemovalBlockedReason | undefined;
-  },
-  removing: ReadonlySet<LibraryLocationId>,
-  instances: readonly LibraryInstance[]
+  row: ClassifiedRemoval,
+  removing: ReadonlySet<string>,
+  placed: readonly PlacedInstance[]
 ): RemovalLocation {
   const { location, instance, blockedReason } = row;
   const base = {
+    environmentId: row.environmentId,
     locationId: location.id,
     targetIds: [...location.readBy],
     path: instance?.path ?? null,
@@ -208,17 +337,17 @@ function describeRemovalLocation(
     ...(instance !== undefined && { modifiedAtMs: instance.modifiedAtMs }),
   };
 
-  if (!instance) {
-    return { ...base, operation: 'absent', eliminatesContentGroup: false };
-  }
   if (blockedReason) {
     return { ...base, operation: 'blocked', blockedReason, eliminatesContentGroup: false };
+  }
+  if (!instance) {
+    return { ...base, operation: 'absent', eliminatesContentGroup: false };
   }
 
   return {
     ...base,
     operation: 'remove',
-    eliminatesContentGroup: eliminatesContentGroup(instance, removing, instances),
+    eliminatesContentGroup: eliminatesContentGroup(instance, removing, placed),
   };
 }
 
@@ -230,15 +359,15 @@ function describeRemovalLocation(
  */
 function eliminatesContentGroup(
   instance: LibraryInstance,
-  removing: ReadonlySet<LibraryLocationId>,
-  instances: readonly LibraryInstance[]
+  removing: ReadonlySet<string>,
+  placed: readonly PlacedInstance[]
 ): boolean {
   if (!instance.valid) return false;
-  return !instances.some(
+  return !placed.some(
     (candidate) =>
-      candidate.valid &&
-      candidate.contentHash === instance.contentHash &&
-      !removing.has(candidate.locationId)
+      candidate.instance.valid &&
+      candidate.instance.contentHash === instance.contentHash &&
+      !removing.has(placementKey(candidate.environmentId, candidate.instance.locationId))
   );
 }
 

@@ -110,6 +110,7 @@ export {
 } from './undo-writes';
 export type {
   PreparedPropagationAdaptation,
+  PreparedPropagationFile,
   PreparedPropagationOperation,
   PreparedRemovalOperation,
 } from './write-shapes';

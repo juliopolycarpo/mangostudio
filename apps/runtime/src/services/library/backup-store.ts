@@ -17,8 +17,8 @@ import { cp, lstat, mkdir, readdir, readFile, rename, rm, stat, writeFile } from
 import { basename, dirname, join } from 'node:path';
 import type {
   BackupSetOperation,
+  LibraryBackupSet,
   LibraryLocationId,
-  PropagationBackupSet,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
 
@@ -44,10 +44,24 @@ export interface BackupEntry {
 }
 
 export interface BackupManifest {
-  readonly version: 1 | 2;
+  readonly version: 1 | 2 | 3;
   readonly backupId: string;
   readonly createdAtMs: number;
   readonly entries: BackupEntry[];
+  /**
+   * Manifest v3. Which environment the hub believed it was writing to.
+   *
+   * Recorded on the machine rather than only in the hub's index because the two
+   * answer different questions: the index says a set exists, the manifest says
+   * what is in it, and a store whose sets cannot name their own environment
+   * cannot be re-indexed after a hub loses its database. Absent on v1/v2, which
+   * read as `local` — before this field, every backup was Local's.
+   *
+   * A machine paired to two hubs would be told two different ids for one store.
+   * That is tolerable precisely because nothing reads this to *decide* anything:
+   * it is provenance for the listing, and restore always works off the entries.
+   */
+  readonly environmentId?: string;
   /**
    * Set holds the last remaining copy of a resource, so retention never evicts
    * it. Optional rather than a version bump: a manifest written before pinning
@@ -293,6 +307,9 @@ interface BackupSet {
   readonly lastCopyResourceKeys: string[];
   readonly operation: BackupSetOperation;
   readonly resourceKeys: string[];
+  readonly manifestReadable: boolean;
+  /** From a v3 manifest; absent on older ones, which predate environments. */
+  readonly environmentId?: string;
 }
 
 /**
@@ -333,6 +350,8 @@ async function describeBackupSet(
       // case where being wrong labels a delete as a restore.
       operation: manifest?.operation ?? 'unknown',
       resourceKeys: distinctResourceKeys(manifest),
+      manifestReadable: manifest !== null,
+      ...(manifest?.environmentId !== undefined && { environmentId: manifest.environmentId }),
     };
   } catch {
     return null;
@@ -480,7 +499,7 @@ function selectRetained(
  * worse answer than reporting every ordinary set as evicting, which is what a
  * budget of zero honestly means.
  */
-export async function listBackupSets(deps: BackupStoreDeps): Promise<PropagationBackupSet[]> {
+export async function listBackupSets(deps: BackupStoreDeps): Promise<LibraryBackupSet[]> {
   const backupSets = await collectBackupSets(deps);
   const retained = selectRetained(backupSets, null, deps.retentionCount(), deps);
   return backupSets.map((backup) => ({
@@ -493,22 +512,76 @@ export async function listBackupSets(deps: BackupStoreDeps): Promise<Propagation
     operation: backup.operation,
     resourceKeys: backup.resourceKeys,
     evictsNext: !retained.has(backup.id),
+    manifestReadable: backup.manifestReadable,
   }));
 }
 
 /**
- * Both versions read. A v1 manifest is one written before `operation` and
- * per-entry `resourceKey` existed, and its undo has to keep working exactly as
- * it did — backups are files on disk, so there is no migration and nothing to
- * backfill. Rejecting it would strand the copies it points at.
+ * Trims this store to its bounds and deletes sets the caller names, reporting
+ * exactly which ids went.
+ *
+ * Retention already runs inside every apply and removal, so this exists for the
+ * two things those cannot do: enforce a budget that changed since the last
+ * write, and delete a named set on a machine the hub does not share a disk with.
+ * The returned ids are what the hub's backup index deletes its rows from — an
+ * index row outliving its bytes is the one failure mode a listing cache is
+ * allowed to have, and only until the next time the machine can be asked.
+ */
+export async function collectBackupGarbage(
+  input: { readonly purgeBackupIds?: readonly string[] },
+  deps: BackupStoreDeps
+): Promise<{ purged: string[]; pruned: string[] }> {
+  const purged: string[] = [];
+  for (const backupId of input.purgeBackupIds ?? []) {
+    // Purge is explicit and idempotent: a set already gone is the state the
+    // caller asked for, and reporting it keeps the hub's index converging.
+    await purgeBackupSet(backupId, deps);
+    purged.push(backupId);
+  }
+
+  const before = await collectBackupSets(deps);
+  await pruneBackupSetsAgainstBounds(deps);
+  const after = new Set((await collectBackupSets(deps)).map((backup) => backup.id));
+  return {
+    purged,
+    pruned: before.map((backup) => backup.id).filter((id) => !after.has(id)),
+  };
+}
+
+/**
+ * Retention with no set to protect. `pruneBackupSets` always keeps the apply it
+ * was called from; a standalone sweep has no such set, and passing a
+ * non-existent id would silently reserve a slot in the count budget.
+ */
+async function pruneBackupSetsAgainstBounds(deps: BackupStoreDeps): Promise<void> {
+  const backupSets = await collectBackupSets(deps);
+  if (backupSets.length === 0) return;
+  const retentionCount = deps.retentionCount();
+  if (!Number.isSafeInteger(retentionCount) || retentionCount < 1) {
+    throw new TypeError('Library backup retention count must be a positive integer.');
+  }
+  const retained = selectRetained(backupSets, null, retentionCount, deps);
+  await Promise.all(
+    backupSets
+      .filter((backup) => !retained.has(backup.id))
+      .map((backup) => deps.fs.remove(backup.path))
+  );
+}
+
+/**
+ * Every version reads. A v1 manifest predates `operation` and per-entry
+ * `resourceKey`; a v2 predates `environmentId`. Their undo has to keep working
+ * exactly as it did — backups are files on disk, so there is no migration and
+ * nothing to backfill. Rejecting one would strand the copies it points at.
  */
 function isManifest(value: unknown): value is BackupManifest {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<BackupManifest>;
   return (
-    (candidate.version === 1 || candidate.version === 2) &&
+    (candidate.version === 1 || candidate.version === 2 || candidate.version === 3) &&
     typeof candidate.backupId === 'string' &&
     typeof candidate.createdAtMs === 'number' &&
+    (candidate.environmentId === undefined || typeof candidate.environmentId === 'string') &&
     (candidate.pinned === undefined || typeof candidate.pinned === 'boolean') &&
     (candidate.operation === undefined ||
       candidate.operation === 'propagation' ||

@@ -318,6 +318,26 @@ interface LibraryDivergenceAcksTable {
   acknowledgedAt: number;
 }
 
+/**
+ * Listing index for backup sets that physically live on the runtime machines.
+ *
+ * A cache with exactly one honest failure mode: a machine that wiped its store
+ * leaves rows here that degrade to "unavailable" until the hub can ask it again.
+ * It is never the restore source — that is always the manifest on the machine.
+ */
+interface LibraryBackupsTable {
+  id: string;
+  userId: string;
+  environmentId: string;
+  /** Store-local id; unique only together with `userId` and `environmentId`. */
+  backupId: string;
+  createdAtMs: number;
+  sizeBytes: number;
+  pinned: number;
+  /** `propagation` | `removal` | `unknown`, mirroring the on-machine manifest. */
+  operation: string;
+}
+
 interface UserToolIdentitiesTable {
   id: string;
   userId: string;
@@ -380,6 +400,7 @@ export interface Database {
   file_checkpoints: FileCheckpointsTable;
   environment_install_runs: EnvironmentInstallRunsTable;
   library_divergence_acks: LibraryDivergenceAcksTable;
+  library_backups: LibraryBackupsTable;
   user_tool_identities: UserToolIdentitiesTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
@@ -421,5 +442,8 @@ export type EnvironmentInstallRunInsert = Insertable<EnvironmentInstallRunsTable
 
 export type LibraryDivergenceAckSelect = Selectable<LibraryDivergenceAcksTable>;
 export type LibraryDivergenceAckInsert = Insertable<LibraryDivergenceAcksTable>;
+
+export type LibraryBackupSelect = Selectable<LibraryBackupsTable>;
+export type LibraryBackupInsert = Insertable<LibraryBackupsTable>;
 
 export type ToolIdentitySelect = Selectable<UserToolIdentitiesTable>;

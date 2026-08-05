@@ -15,6 +15,7 @@ import {
   executePropagationWrites,
   LIBRARY_BACKUP_MISSING_KIND,
   LibraryBackupMissingError,
+  type PreparedPropagationFile,
   type PreparedPropagationOperation,
   type PropagationWriteEngineDeps,
   RuntimeRemoteError,
@@ -24,10 +25,10 @@ import {
   type AdapterStrategy,
   hashLibraryFile,
   type LibraryDivergenceAckRequest,
+  type LibraryUndoResult,
   type PropagationApplied,
   type PropagationApply,
   type PropagationApplyRequest,
-  type PropagationBackupUsage,
   type PropagationDecision,
   type PropagationDestination,
   type PropagationFailure,
@@ -46,11 +47,8 @@ import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/pro
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
-import {
-  type BackupStoreDeps,
-  defaultBackupStoreDeps,
-  listBackupSets,
-} from '../infrastructure/backup-store';
+import { backupPolicyFor } from '../infrastructure/backup-roots';
+import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
 import { hashResourceAt, readResourceFile } from '../infrastructure/instance-reader';
 import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
 import {
@@ -61,6 +59,7 @@ import {
 import { defaultAdapterRegistry } from './adapters/registry';
 import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
 import { serializeLibraryWrite } from './apply-queue';
+import { recordWrittenBackup } from './backup-inventory';
 import { acknowledgeDivergence } from './conflict-resolution';
 import { previewLibraryPropagation } from './propagation-preview';
 
@@ -69,8 +68,32 @@ const LIBRARY_WRITE_TIMEOUT_MS = 60_000;
 
 export interface PropagationApplyDeps {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
-  pathEnv(): PathEnv;
+  /**
+   * Path layout of one machine.
+   *
+   * Only the in-process engine consults it — over the protocol the runtime
+   * resolves its own layout and is sent nothing but the MangoStudio directory
+   * overrides. The parameter exists so a test can stand up two machines with
+   * two homes; production answers with the hub's own env for every id, because
+   * the hub cannot know another machine's.
+   */
+  pathEnv(environmentId: string): PathEnv;
   readSourceFile(path: string): Promise<Uint8Array>;
+  /**
+   * Reads a resource off the machine that holds it, as bytes.
+   *
+   * Only used when the source is *not* Local: the hub shares a filesystem with
+   * the Local runtime, so reading there directly keeps every existing path and
+   * every existing test byte-for-byte what they were. A directory answers as its
+   * whole tree; a file as a single entry. Never text — the apply re-hashes what
+   * it wrote, and a UTF-8 round trip would drop a BOM and fail verification on
+   * content that was perfectly fine.
+   */
+  readRemoteSource(
+    userId: string,
+    environmentId: string,
+    input: { readonly locationId: string; readonly path: string }
+  ): Promise<readonly PreparedPropagationFile[]>;
   writeDirectory(input: DirectoryWrite): Promise<ResourceWriteResult>;
   writeFile(input: FileWrite): Promise<ResourceWriteResult>;
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
@@ -91,6 +114,24 @@ export interface PropagationApplyDeps {
   writeEngine: 'runtime' | 'in-process';
   /** Stands in for the RuntimeClient on the `runtime` engine; tests inject transport failures. */
   runtimeApply?: (params: RuntimeLibraryApplyParams) => Promise<PropagationApply>;
+  /**
+   * Which machine the writes land on. Every destination is Local until the
+   * wizards offer a second one; the field exists from the first commit so the
+   * backup set an apply produces can be filed under the machine that holds it
+   * rather than under an assumption.
+   */
+  environmentId: string;
+  /** Files the produced backup set in the hub-side listing index. */
+  recordBackup: (
+    userId: string,
+    input: {
+      readonly environmentId: string;
+      readonly backupId: string;
+      readonly operation: 'propagation' | 'removal';
+      readonly pinned: boolean;
+      readonly createdAtMs: number;
+    }
+  ) => Promise<void>;
 }
 
 interface DirectoryWrite {
@@ -114,6 +155,7 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
     preview: overrides.preview ?? previewLibraryPropagation,
     pathEnv: overrides.pathEnv ?? (() => createLibraryPathEnv()),
     readSourceFile: overrides.readSourceFile ?? readResourceFile,
+    readRemoteSource: overrides.readRemoteSource ?? readRemoteLibrarySource,
     writeDirectory:
       overrides.writeDirectory ??
       ((input) => writeDirectoryResource({ ...input, locationId: input.locationId })),
@@ -125,8 +167,35 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
     acknowledge: overrides.acknowledge ?? acknowledgeDivergence,
     backup: overrides.backup ?? defaultBackupStoreDeps,
     writeEngine: overrides.writeEngine ?? 'runtime',
+    environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
+    recordBackup: overrides.recordBackup ?? recordWrittenBackup,
     ...(overrides.runtimeApply && { runtimeApply: overrides.runtimeApply }),
   };
+}
+
+async function readRemoteLibrarySource(
+  userId: string,
+  environmentId: string,
+  input: { readonly locationId: string; readonly path: string }
+): Promise<readonly PreparedPropagationFile[]> {
+  const client = await getRuntimeClient(userId, environmentId);
+  const result = await client.library.readTree(
+    {
+      path: input.path,
+      locationId: input.locationId,
+      pathEnv: { env: configuredLibraryEnv() },
+    },
+    { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
+  );
+  if (result.denied) {
+    throw new SourceReadError(
+      result.reason ?? `"${input.path}" could not be read on environment "${environmentId}".`
+    );
+  }
+  return result.files.map((file) => ({
+    relativePath: file.relativePath,
+    contents: Buffer.from(file.contentBase64, 'base64'),
+  }));
 }
 
 export function applyLibraryPropagation(
@@ -165,13 +234,18 @@ async function runApply(
   }
 
   const plan = planApply(preview, request.decisions);
-  const env = deps.pathEnv();
-  const prepared: PreparedPropagationOperation[] = [];
+  // Grouped by destination machine, insertion-ordered: the plan is already
+  // sorted by resource then machine then location, so two identical applies
+  // write the same machines in the same order.
+  const batches = new Map<string, PreparedPropagationOperation[]>();
   const failed: PropagationFailure[] = [];
 
   for (const operation of plan.operations) {
     try {
-      prepared.push(await prepareOperation(operation, userId, deps));
+      const wire = await prepareOperation(operation, userId, deps);
+      const batch = batches.get(operation.environmentId);
+      if (batch) batch.push(wire);
+      else batches.set(operation.environmentId, [wire]);
     } catch (error) {
       failed.push(describePrepareFailure(operation, error));
       break;
@@ -179,10 +253,27 @@ async function runApply(
   }
 
   if (failed.length > 0) {
-    return { partial: false, applied: [], skipped: plan.skipped, failed };
+    return { partial: false, applied: [], skipped: plan.skipped, failed, backups: [] };
   }
 
-  const writeResult = await runPreparedWrites(userId, prepared, plan.skipped, env, deps);
+  const writeResult = await runPreparedWrites(userId, batches, plan.skipped, deps);
+
+  // Indexed even when the apply was partial: a partial apply is precisely the
+  // one whose backup handles the user needs to find again later, and a failure
+  // to file a row must not turn a completed write into a reported failure.
+  for (const handle of writeResult.backups) {
+    await deps
+      .recordBackup(userId, {
+        environmentId: handle.environmentId,
+        backupId: handle.backupId,
+        operation: 'propagation',
+        pinned: false,
+        createdAtMs: Date.now(),
+      })
+      .catch((error: unknown) => {
+        console.error('[library] Could not index the backup set for this apply:', error);
+      });
+  }
 
   if (writeResult.failed.length === 0) {
     for (const acknowledgement of plan.acknowledgements) {
@@ -201,17 +292,71 @@ async function runApply(
  */
 async function runPreparedWrites(
   userId: string,
-  prepared: readonly PreparedPropagationOperation[],
+  batches: ReadonlyMap<string, PreparedPropagationOperation[]>,
   skipped: readonly PropagationSkipped[],
-  env: PathEnv,
   deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
-  if (prepared.length === 0) {
-    return { partial: false, applied: [], skipped: [...skipped], failed: [] };
+  if (batches.size === 0) {
+    return { partial: false, applied: [], skipped: [...skipped], failed: [], backups: [] };
   }
 
-  const written = await runWriteEngine(userId, prepared, env, deps);
+  const written = await runWriteEngineAcrossEnvironments(userId, batches, deps);
   return { ...written, skipped: [...skipped, ...written.skipped] };
+}
+
+/**
+ * Runs one write batch per destination machine, in a fixed order.
+ *
+ * Each machine backs its own files up under its own root, so a cross-machine
+ * apply produces one backup set per machine rather than one for the whole thing.
+ * Machines are written one after another rather than in parallel: an apply that
+ * fails partway should leave as few machines touched as possible, and the
+ * per-machine engine already compensates its own writes.
+ */
+async function runWriteEngineAcrossEnvironments(
+  userId: string,
+  batches: ReadonlyMap<string, PreparedPropagationOperation[]>,
+  deps: PropagationApplyDeps
+): Promise<PropagationApply> {
+  const applied: PropagationApply['applied'] = [];
+  const skipped: PropagationApply['skipped'] = [];
+  const failed: PropagationApply['failed'] = [];
+  const backups: PropagationApply['backups'] = [];
+  let partial = false;
+
+  for (const [environmentId, operations] of batches) {
+    const batch = await runWriteEngine(userId, operations, deps.pathEnv(environmentId), {
+      ...deps,
+      environmentId,
+    });
+    applied.push(...batch.applied);
+    skipped.push(...batch.skipped);
+    failed.push(...batch.failed);
+    backups.push(...batch.backups);
+    partial ||= batch.partial;
+    // A machine that failed stops the rest. Carrying on would spread a
+    // half-applied change across more hosts and give the user more to undo,
+    // not less — and every machine already compensated its own writes. But a
+    // clean compensation only covers *that* machine's own disk: once an
+    // earlier machine already landed a backup, this failure still leaves the
+    // apply partially done overall.
+    if (batch.failed.length > 0) {
+      if (backups.length > batch.backups.length) partial = true;
+      break;
+    }
+  }
+
+  return {
+    partial,
+    applied,
+    skipped,
+    failed,
+    backups,
+    // Only when one machine was written to. A cross-machine apply has no single
+    // undo handle, and offering one would name whichever set happened to be
+    // first.
+    ...(backups.length === 1 && { backupId: backups[0].backupId }),
+  };
 }
 
 function runWriteEngine(
@@ -233,22 +378,52 @@ function runWriteEngine(
         retentionCount: deps.backup.retentionCount(),
         retentionBytes: deps.backup.retentionBytes(),
         pathEnv: env,
+        environmentId: deps.environmentId,
         operations: prepared,
       },
       engineDeps
     );
   }
 
-  const params = toRuntimeApplyParams(prepared, env, deps.backup);
-  return deps.runtimeApply ? deps.runtimeApply(params) : runtimeApply(userId, params);
+  if (deps.runtimeApply) {
+    return deps.runtimeApply(toRuntimeApplyParams(prepared, env, deps, backupEnvelopeFrom(deps)));
+  }
+  return runtimeApply(userId, prepared, env, deps);
 }
 
 async function runtimeApply(
   userId: string,
-  params: RuntimeLibraryApplyParams
+  prepared: readonly PreparedPropagationOperation[],
+  env: PathEnv,
+  deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
-  const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
+  const client = await getRuntimeClient(userId, deps.environmentId);
+  // Resolved from the connection rather than from hub config: a remote store
+  // roots at the *target's* home, and 017 made this a parameter precisely so the
+  // decision could be made here.
+  const policy = backupPolicyFor(client, deps.environmentId);
+  const params = toRuntimeApplyParams(prepared, env, deps, {
+    backupRoot: policy.backupRoot,
+    retentionCount: policy.retentionCount,
+    retentionBytes: policy.retentionBytes,
+  });
   return await client.library.apply(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
+}
+
+/**
+ * Bounds for an injected engine. Tests redirect `backup` to a temp root, and
+ * that override has to keep deciding where a write lands.
+ */
+function backupEnvelopeFrom(deps: PropagationApplyDeps): {
+  backupRoot: string;
+  retentionCount: number;
+  retentionBytes: number;
+} {
+  return {
+    backupRoot: deps.backup.backupDir(),
+    retentionCount: deps.backup.retentionCount(),
+    retentionBytes: deps.backup.retentionBytes(),
+  };
 }
 
 /**
@@ -266,7 +441,8 @@ const LIBRARY_APPLY_MAX_CONTENT_BYTES = 8 * 1024 * 1024;
 function toRuntimeApplyParams(
   prepared: readonly PreparedPropagationOperation[],
   env: PathEnv,
-  backup: BackupStoreDeps
+  deps: PropagationApplyDeps,
+  envelope: { backupRoot: string; retentionCount: number; retentionBytes: number }
 ): RuntimeLibraryApplyParams {
   // Keyed by content hash so a resource fanned out to many destinations travels
   // once. `expectedContentHash` is the hash of exactly these bytes by
@@ -274,31 +450,60 @@ function toRuntimeApplyParams(
   // edit changes them — so equal keys mean equal payloads.
   const contents: Record<string, string> = {};
   let contentBytes = 0;
-  for (const operation of prepared) {
-    if (operation.contents === undefined) continue;
-    if (contents[operation.expectedContentHash] !== undefined) continue;
-    const bytes = Buffer.from(operation.contents);
-    contentBytes += bytes.byteLength;
+  const carry = (key: string, bytes: Uint8Array): void => {
+    if (contents[key] !== undefined) return;
+    const buffer = Buffer.from(bytes);
+    contentBytes += buffer.byteLength;
     if (contentBytes > LIBRARY_APPLY_MAX_CONTENT_BYTES) {
       throw new LibraryRequestError(
         422,
         'This apply carries more content than one write can send. Apply fewer resources at a time.'
       );
     }
-    contents[operation.expectedContentHash] = bytes.toString('base64');
+    contents[key] = buffer.toString('base64');
+  };
+
+  for (const operation of prepared) {
+    if (operation.contents !== undefined) {
+      carry(
+        operation.expectedContentHash,
+        typeof operation.contents === 'string'
+          ? new TextEncoder().encode(operation.contents)
+          : operation.contents
+      );
+    }
+    for (const file of operation.files ?? []) {
+      carry(treeFileKey(operation.expectedContentHash, file.relativePath), file.contents);
+    }
   }
 
   return {
-    backupRoot: backup.backupDir(),
-    retentionCount: backup.retentionCount(),
-    retentionBytes: backup.retentionBytes(),
+    ...envelope,
+    environmentId: deps.environmentId,
     pathEnv: writePathEnvParams(env),
-    operations: prepared.map(({ contents: _bytes, ...operation }) => ({
+    operations: prepared.map(({ contents: _bytes, files, ...operation }) => ({
       ...operation,
       ...(operation.kind === 'file' && { contentRef: operation.expectedContentHash }),
+      ...(files && {
+        files: files.map((file) => ({
+          relativePath: file.relativePath,
+          contentRef: treeFileKey(operation.expectedContentHash, file.relativePath),
+        })),
+      }),
     })),
     contents,
   };
+}
+
+/**
+ * Payload key for one file of a transferred tree.
+ *
+ * Keyed by the resource's content hash plus the path inside it, so a skill
+ * fanned out to several destinations carries its files once — and two different
+ * skills that happen to contain an identically named file never collide.
+ */
+function treeFileKey(contentHash: string, relativePath: string): string {
+  return `${contentHash}:${relativePath}`;
 }
 
 /**
@@ -331,11 +536,17 @@ function narrowAppliedOperation(
 
 interface PlannedOperation {
   readonly resourceKey: string;
+  /** Machine the write lands on. */
+  readonly environmentId: string;
   readonly locationId: string;
   readonly slug: string;
   readonly operation: PropagationApplied['operation'];
   readonly kind: 'file' | 'directory';
   readonly sourcePath: string;
+  /** Machine the winning bytes are read from; empty for edited content. */
+  readonly sourceEnvironmentId: string;
+  /** Location the winning bytes are read from, needed to contain a remote read. */
+  readonly sourceLocationId: string;
   readonly editedContent?: string;
   readonly expectedContentHash: string;
   /** Location root the preview showed; the runtime refuses a different one. */
@@ -390,7 +601,13 @@ function planApply(
 
     if (decision.resolution === 'keep-per-location') {
       acknowledgements.push(planAcknowledgement(entry, decision));
-      skipped.push({ resourceKey: entry.resourceKey, reason: 'divergence-acknowledged' });
+      // No location and no machine: keeping a divergence is a decision about the
+      // resource everywhere, not about one copy of it.
+      skipped.push({
+        resourceKey: entry.resourceKey,
+        environmentId: LOCAL_ENVIRONMENT_ID,
+        reason: 'divergence-acknowledged',
+      });
       continue;
     }
 
@@ -398,17 +615,20 @@ function planApply(
     if (decision.resolution === 'edit-then-adopt') assertOneEditedFormat(entry, decision);
     assertEveryDestinationDecided(entry, decision);
     for (const target of decision.destinations) {
+      const environmentId = target.environmentId ?? LOCAL_ENVIRONMENT_ID;
       const destination = entry.destinations.find(
-        (candidate) => candidate.locationId === target.locationId
+        (candidate) =>
+          candidate.locationId === target.locationId && candidate.environmentId === environmentId
       );
       if (!destination) {
         throw validationError(
-          `Destination "${target.locationId}" was not offered for "${entry.resourceKey}".`
+          `Destination "${target.locationId}" on "${environmentId}" was not offered for "${entry.resourceKey}".`
         );
       }
       if (target.action === 'skip') {
         skipped.push({
           resourceKey: entry.resourceKey,
+          environmentId,
           locationId: target.locationId,
           reason: 'user-skipped',
         });
@@ -418,6 +638,7 @@ function planApply(
       if (planned === null) {
         skipped.push({
           resourceKey: entry.resourceKey,
+          environmentId,
           locationId: target.locationId,
           reason: 'already-in-sync',
         });
@@ -430,6 +651,7 @@ function planApply(
   operations.sort(
     (left, right) =>
       compareText(left.resourceKey, right.resourceKey) ||
+      compareText(left.environmentId, right.environmentId) ||
       compareText(left.locationId, right.locationId)
   );
   return { operations, skipped, acknowledgements };
@@ -448,17 +670,21 @@ function assertEveryDestinationDecided(
 ): void {
   const decided = new Set<string>();
   for (const target of decision.destinations) {
-    if (decided.has(target.locationId)) {
+    const key = destinationKey(target.environmentId ?? LOCAL_ENVIRONMENT_ID, target.locationId);
+    if (decided.has(key)) {
       throw validationError(
-        `Duplicate decision for destination "${target.locationId}" of "${entry.resourceKey}".`
+        `Duplicate decision for destination "${target.locationId}" on "${target.environmentId ?? LOCAL_ENVIRONMENT_ID}" of "${entry.resourceKey}".`
       );
     }
-    decided.add(target.locationId);
+    decided.add(key);
   }
 
   const missing = entry.destinations
-    .filter((destination) => !decided.has(destination.locationId))
-    .map((destination) => `"${destination.locationId}"`);
+    .filter(
+      (destination) =>
+        !decided.has(destinationKey(destination.environmentId, destination.locationId))
+    )
+    .map((destination) => `"${destination.locationId}" on "${destination.environmentId}"`);
   if (missing.length > 0) {
     throw validationError(
       `Apply must decide every destination the preview offered for "${entry.resourceKey}"; missing ${missing.join(', ')}.`
@@ -473,6 +699,11 @@ function assertEveryDestinationDecided(
  * reader there can parse — the very case `adopt-group` reports as
  * `blocked / no-adapter-strategy`.
  */
+/** A destination is the machine and the location; neither identifies one alone. */
+function destinationKey(environmentId: string, locationId: string): string {
+  return `${environmentId}\u001f${locationId}`;
+}
+
 function assertOneEditedFormat(
   entry: PropagationPreviewEntry,
   decision: PropagationDecision
@@ -481,7 +712,9 @@ function assertOneEditedFormat(
     decision.destinations.flatMap((target) => {
       if (target.action !== 'apply') return [];
       const destination = entry.destinations.find(
-        (candidate) => candidate.locationId === target.locationId
+        (candidate) =>
+          candidate.locationId === target.locationId &&
+          candidate.environmentId === (target.environmentId ?? LOCAL_ENVIRONMENT_ID)
       );
       return destination ? [destination.toFormat] : [];
     })
@@ -517,6 +750,8 @@ interface ResolvedWinner {
   readonly contentHash: string;
   readonly sourcePath: string;
   readonly sourceLocationId: string;
+  /** Machine `sourcePath` is on. A path only means something on its own host. */
+  readonly sourceEnvironmentId: string;
   readonly editedContent?: string;
 }
 
@@ -548,6 +783,7 @@ function resolveWinner(
       contentHash: '',
       sourcePath: '',
       sourceLocationId: '',
+      sourceEnvironmentId: '',
       editedContent: decision.editedContent,
     };
   }
@@ -585,6 +821,7 @@ function toWinner(group: PropagationSourceGroup): ResolvedWinner {
     contentHash: group.contentHash,
     sourcePath: group.contentPath,
     sourceLocationId: group.contentLocationId,
+    sourceEnvironmentId: group.contentEnvironmentId,
   };
 }
 
@@ -629,11 +866,14 @@ function planDestination(
     }
     return {
       resourceKey: entry.resourceKey,
+      environmentId: destination.environmentId,
       locationId: destination.locationId,
       slug: entry.ref.slug,
       operation: destination.currentContentHash === undefined ? 'create' : 'overwrite',
       kind: 'file',
       sourcePath: '',
+      sourceEnvironmentId: '',
+      sourceLocationId: '',
       editedContent: winner.editedContent,
       expectedContentHash: '',
       destinationRoot: destination.path,
@@ -668,11 +908,14 @@ function planDestination(
 
   return {
     resourceKey: entry.resourceKey,
+    environmentId: destination.environmentId,
     locationId: destination.locationId,
     slug: entry.ref.slug,
     operation: outcome.operation,
     kind: writeKindFor(location),
     sourcePath: winner.sourcePath,
+    sourceEnvironmentId: winner.sourceEnvironmentId,
+    sourceLocationId: winner.sourceLocationId,
     expectedContentHash: winner.contentHash,
     destinationRoot: destination.path,
     ...(outcome.adaptation &&
@@ -707,21 +950,30 @@ async function prepareOperation(
         `"${operation.resourceKey}" is a directory resource and cannot be adapted.`
       );
     }
-    return {
+    const base = {
       resourceKey: operation.resourceKey,
       locationId: operation.locationId,
       slug: operation.slug,
       operation: narrowAppliedOperation(operation.operation),
-      kind: 'directory',
+      kind: 'directory' as const,
       expectedContentHash: operation.expectedContentHash,
       destinationRoot: operation.destinationRoot,
-      sourceDir: operation.sourcePath,
+    };
+    // Same machine: the destination's own runtime can reach the source tree, so
+    // it copies rather than receiving what it already has. Different machines:
+    // the tree has to travel, because no path on the destination names it.
+    if (operation.sourceEnvironmentId === operation.environmentId) {
+      return { ...base, sourceDir: operation.sourcePath };
+    }
+    return {
+      ...base,
+      files: await readSourceTree(operation, userId, deps),
     };
   }
 
   let bytes =
     operation.editedContent === undefined
-      ? await deps.readSourceFile(operation.sourcePath)
+      ? await readSourceBytes(operation, userId, deps)
       : new TextEncoder().encode(operation.editedContent);
   let adaptation: PreparedPropagationOperation['adaptation'];
   if (operation.adaptation) {
@@ -773,31 +1025,21 @@ async function prepareOperation(
   };
 }
 
-/** Retained sets and what they cost, plus the bounds they are trimmed to. */
-export async function describeBackupUsage(
-  deps: BackupStoreDeps = defaultBackupStoreDeps
-): Promise<PropagationBackupUsage> {
-  const sets = await listBackupSets(deps);
-  return {
-    setCount: sets.length,
-    sizeBytes: sets.reduce((total, set) => total + set.sizeBytes, 0),
-    pinnedSizeBytes: sets
-      .filter((set) => set.pinned)
-      .reduce((total, set) => total + set.sizeBytes, 0),
-    retentionCount: deps.retentionCount(),
-    retentionBytes: deps.retentionBytes(),
-    sets,
-  };
-}
-
 export interface PropagationUndoDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
-  pathEnv(): PathEnv;
+  /** Layout of the machine holding the set; see `PropagationApplyDeps.pathEnv`. */
+  pathEnv(environmentId: string): PathEnv;
   backup: BackupStoreDeps;
   /** Which process performs the restore; see `PropagationApplyDeps.writeEngine`. */
   writeEngine: 'runtime' | 'in-process';
   /** Stands in for the RuntimeClient on the `runtime` engine. */
-  runtimeUndo?: (params: RuntimeLibraryUndoParams) => Promise<PropagationUndo>;
+  runtimeUndo?: (params: RuntimeLibraryUndoParams) => Promise<LibraryUndoResult>;
+  /**
+   * Which machine holds the backup set. Restoring reads the manifest where the
+   * bytes are, so this is not a preference — asking the wrong machine finds
+   * nothing and reports the set as pruned by retention.
+   */
+  environmentId: string;
 }
 
 /**
@@ -829,25 +1071,38 @@ async function runUndo(
     pathEnv: overrides.pathEnv ?? (() => createLibraryPathEnv()),
     backup: overrides.backup ?? defaultBackupStoreDeps,
     writeEngine: overrides.writeEngine ?? 'runtime',
+    environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     ...(overrides.runtimeUndo && { runtimeUndo: overrides.runtimeUndo }),
   };
 
-  const env = deps.pathEnv();
+  const env = deps.pathEnv(deps.environmentId);
+  // Stamped by the hub, not the machine: the environment id is the hub's own
+  // name for the connection, and a store reachable from two hubs would answer
+  // with two different ones.
+  const named = (result: LibraryUndoResult): PropagationUndo => ({
+    ...result,
+    environmentId: deps.environmentId,
+  });
 
   try {
     if (deps.writeEngine === 'in-process') {
-      return await executeLibraryUndo(
-        { backupRoot: deps.backup.backupDir(), backupId, pathEnv: env },
-        { hashAt: deps.hashAt, backup: deps.backup }
+      return named(
+        await executeLibraryUndo(
+          { backupRoot: deps.backup.backupDir(), backupId, pathEnv: env },
+          { hashAt: deps.hashAt, backup: deps.backup }
+        )
       );
     }
 
-    const params = {
-      backupRoot: deps.backup.backupDir(),
-      backupId,
-      pathEnv: writePathEnvParams(env),
-    };
-    if (deps.runtimeUndo) return await deps.runtimeUndo(params);
+    if (deps.runtimeUndo) {
+      return named(
+        await deps.runtimeUndo({
+          backupRoot: deps.backup.backupDir(),
+          backupId,
+          pathEnv: writePathEnvParams(env),
+        })
+      );
+    }
 
     // Never defaulted: the connection cache is keyed by user, so a stand-in id
     // would open a second Local runtime host owned by a user that does not
@@ -855,8 +1110,17 @@ async function runUndo(
     if (userId === undefined) {
       throw new TypeError('undoLibraryPropagation needs a userId to reach the Local runtime.');
     }
-    const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
-    return await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
+    const client = await getRuntimeClient(userId, deps.environmentId);
+    // Same root apply wrote to: `deps.backup.backupDir()` only covers the
+    // hub's own disk, and a remote apply backed its files up under the
+    // target's own home via `backupPolicyFor` — undoing it has to look there.
+    const policy = backupPolicyFor(client, deps.environmentId);
+    const params = {
+      backupRoot: policy.backupRoot,
+      backupId,
+      pathEnv: writePathEnvParams(env),
+    };
+    return named(await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }));
   } catch (error) {
     // Two shapes, one condition: the in-process engine throws the class, and
     // the RPC path flattens it to code INTERNAL carrying the kind in `details`.
@@ -878,7 +1142,57 @@ function isBackupMissingResponse(error: unknown): error is RuntimeRemoteError {
   return error instanceof RuntimeRemoteError && error.details?.kind === LIBRARY_BACKUP_MISSING_KIND;
 }
 
+/**
+ * The winning bytes, from wherever they are.
+ *
+ * Local reads go straight to the filesystem the hub shares with its in-process
+ * runtime — that is what every existing apply did, and routing it through the
+ * protocol would change nothing except what can break. A remote winner is read
+ * over the connection, contained by the location root on that machine.
+ */
+async function readSourceBytes(
+  operation: PlannedOperation,
+  userId: string,
+  deps: PropagationApplyDeps
+): Promise<Uint8Array> {
+  if (operation.sourceEnvironmentId === LOCAL_ENVIRONMENT_ID) {
+    return await deps.readSourceFile(operation.sourcePath);
+  }
+  const files = await deps.readRemoteSource(userId, operation.sourceEnvironmentId, {
+    locationId: operation.sourceLocationId,
+    path: operation.sourcePath,
+  });
+  const only = files[0];
+  if (files.length !== 1 || !only) {
+    throw new SourceReadError(
+      `"${operation.resourceKey}" is a single file, but "${operation.sourceEnvironmentId}" answered with ${files.length}.`
+    );
+  }
+  return only.contents;
+}
+
+/** The winning tree, read off the machine that holds it. */
+async function readSourceTree(
+  operation: PlannedOperation,
+  userId: string,
+  deps: PropagationApplyDeps
+): Promise<readonly PreparedPropagationFile[]> {
+  const files = await deps.readRemoteSource(userId, operation.sourceEnvironmentId, {
+    locationId: operation.sourceLocationId,
+    path: operation.sourcePath,
+  });
+  if (files.length === 0) {
+    throw new SourceReadError(
+      `"${operation.resourceKey}" has no files on "${operation.sourceEnvironmentId}", so there is nothing to copy.`
+    );
+  }
+  return files;
+}
+
 class AdaptationError extends Error {}
+
+/** The winning bytes could not be read off the machine that holds them. */
+class SourceReadError extends Error {}
 
 /**
  * Prefer curated copy for agent/provider failure codes so connector/provider
@@ -910,6 +1224,7 @@ function describePrepareFailure(operation: PlannedOperation, error: unknown): Pr
         : 'write-failed';
   return {
     resourceKey: operation.resourceKey,
+    environmentId: operation.environmentId,
     locationId: operation.locationId,
     reason,
     message: error instanceof Error ? error.message : String(error),

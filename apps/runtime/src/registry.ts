@@ -95,11 +95,14 @@ export function createRuntimeMethodHandlers(
       handler('install.cancel', (params) => install.cancel(params)),
       handler('library.scan', (params) => libraryService.scan(params)),
       handler('library.read', (params) => libraryService.read(params)),
+      handler('library.read-tree', (params) => libraryService.readTree(params)),
       handler('library.locations', (params) => libraryService.locations(params)),
       handler('library.settings-sources', (params) => libraryService.settingsSources(params)),
       handler('library.apply', (params, context) => libraryService.apply(params, context.signal)),
       handler('library.remove', (params, context) => libraryService.remove(params, context.signal)),
       handler('library.undo', (params, context) => libraryService.undo(params, context.signal)),
+      handler('library.backups', (params) => libraryService.backups(params)),
+      handler('library.gc', (params) => libraryService.gc(params)),
       handler('runtime.health', () =>
         collectRuntimeHealth({
           runtimeVersion: options.runtimeVersion,

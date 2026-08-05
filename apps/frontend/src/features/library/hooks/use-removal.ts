@@ -41,16 +41,26 @@ export interface RemovalController {
   /** Set when the API found a last copy the wizard did not; re-preview is the way out. */
   readonly needsLastCopyReview: boolean;
   readonly setStep: (step: RemovalStep) => void;
-  readonly toggleLocation: (resourceKey: string, locationId: LibraryLocationId) => void;
+  readonly toggleLocation: (
+    resourceKey: string,
+    environmentId: string,
+    locationId: LibraryLocationId
+  ) => void;
   readonly toggleAcknowledgement: (resourceKey: string) => void;
   readonly apply: () => void;
   readonly isApplying: boolean;
   readonly applyError: unknown;
   readonly result: RemovalApply | undefined;
-  readonly undo: () => void;
-  readonly isUndoing: boolean;
-  readonly undoError: unknown;
-  readonly undoResult: PropagationUndo | undefined;
+  /** One backup set on one machine; a cross-machine removal produced several. */
+  readonly undo: (environmentId: string, backupId: string) => void;
+  /** Keyed per handle: a cross-machine removal has one mutation in flight per machine. */
+  readonly isUndoing: (environmentId: string, backupId: string) => boolean;
+  readonly undoError: (environmentId: string, backupId: string) => unknown;
+  readonly undoResult: (environmentId: string, backupId: string) => PropagationUndo | undefined;
+}
+
+function backupHandleKey(environmentId: string, backupId: string): string {
+  return `${environmentId}:${backupId}`;
 }
 
 export function useRemoval(request: RemovalPreviewRequest): RemovalController {
@@ -69,11 +79,15 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
     () => [...request.locationIds].sort().join(','),
     [request.locationIds]
   );
+  const environmentKey = useMemo(
+    () => [...(request.environmentIds ?? [])].sort().join(','),
+    [request.environmentIds]
+  );
 
   const canPreview = request.resourceKeys.length > 0 && request.locationIds.length > 0;
 
   const previewQuery = useQuery({
-    queryKey: [...libraryKeys.all, 'removal-preview', requestKey, locationKey],
+    queryKey: [...libraryKeys.all, 'removal-preview', requestKey, locationKey, environmentKey],
     // A preview is a snapshot of the disk, never something to serve from cache.
     gcTime: 0,
     staleTime: 0,
@@ -138,24 +152,37 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
     },
   });
 
+  // A cross-machine removal produces one backup handle per machine, so the
+  // mutation's own single result/error/pending would apply to every handle at
+  // once — restoring machine B would clear machine A's confirmation, and a
+  // failure on one machine would render on all of them. Track outcomes and
+  // in-flight state per handle instead.
+  const [undoingKey, setUndoingKey] = useState<string | undefined>(undefined);
+  const [undoResults, setUndoResults] = useState<ReadonlyMap<string, PropagationUndo>>(new Map());
+  const [undoErrors, setUndoErrors] = useState<ReadonlyMap<string, unknown>>(new Map());
+
   const undoMutation = useMutation({
-    mutationFn: (backupId: string) => undoPropagation(backupId),
+    mutationFn: (target: { environmentId: string; backupId: string }) =>
+      undoPropagation(target.backupId, target.environmentId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
   });
 
-  const toggleLocation = useCallback((resourceKey: string, locationId: LibraryLocationId) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const removing = new Set(current.removing);
-      const key = removalKey(resourceKey, locationId);
-      if (!removing.delete(key)) removing.add(key);
-      // Unchecking a copy can turn a last-copy removal back into an ordinary
-      // one, so a sign-off given for the old selection must not survive it.
-      const acknowledged = new Set(current.acknowledged);
-      acknowledged.delete(resourceKey);
-      return { removing, acknowledged };
-    });
-  }, []);
+  const toggleLocation = useCallback(
+    (resourceKey: string, environmentId: string, locationId: LibraryLocationId) => {
+      setDraft((current) => {
+        if (!current) return current;
+        const removing = new Set(current.removing);
+        const key = removalKey(resourceKey, environmentId, locationId);
+        if (!removing.delete(key)) removing.add(key);
+        // Unchecking a copy can turn a last-copy removal back into an ordinary
+        // one, so a sign-off given for the old selection must not survive it.
+        const acknowledged = new Set(current.acknowledged);
+        acknowledged.delete(resourceKey);
+        return { removing, acknowledged };
+      });
+    },
+    []
+  );
 
   const toggleAcknowledgement = useCallback((resourceKey: string) => {
     setDraft((current) => {
@@ -182,11 +209,41 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
     isApplying: applyMutation.isPending,
     applyError: applyMutation.error,
     result,
-    undo: useCallback(() => {
-      if (result?.backupId) undoMutation.mutate(result.backupId);
-    }, [result?.backupId, undoMutation]),
-    isUndoing: undoMutation.isPending,
-    undoError: undoMutation.error,
-    undoResult: undoMutation.data,
+    undo: useCallback(
+      (environmentId: string, backupId: string) => {
+        const key = backupHandleKey(environmentId, backupId);
+        setUndoingKey(key);
+        setUndoErrors((current) => {
+          if (!current.has(key)) return current;
+          const next = new Map(current);
+          next.delete(key);
+          return next;
+        });
+        undoMutation.mutate(
+          { environmentId, backupId },
+          {
+            onSuccess: (data) => setUndoResults((current) => new Map(current).set(key, data)),
+            onError: (error) => setUndoErrors((current) => new Map(current).set(key, error)),
+            onSettled: () => setUndoingKey((current) => (current === key ? undefined : current)),
+          }
+        );
+      },
+      [undoMutation]
+    ),
+    isUndoing: useCallback(
+      (environmentId: string, backupId: string) =>
+        undoingKey === backupHandleKey(environmentId, backupId),
+      [undoingKey]
+    ),
+    undoError: useCallback(
+      (environmentId: string, backupId: string) =>
+        undoErrors.get(backupHandleKey(environmentId, backupId)),
+      [undoErrors]
+    ),
+    undoResult: useCallback(
+      (environmentId: string, backupId: string) =>
+        undoResults.get(backupHandleKey(environmentId, backupId)),
+      [undoResults]
+    ),
   };
 }

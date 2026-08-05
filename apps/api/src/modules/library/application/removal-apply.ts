@@ -32,11 +32,13 @@ import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/pro
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
+import { backupPolicyFor } from '../infrastructure/backup-roots';
 import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
 import { hashResourceAt } from '../infrastructure/instance-reader';
 import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
 import { nodeTreeRemovalFs, type TreeRemovalFs } from '../infrastructure/tree-removal';
 import { serializeLibraryWrite } from './apply-queue';
+import { recordWrittenBackup } from './backup-inventory';
 import { compareText } from './preview-state';
 import { previewLibraryRemoval } from './removal-preview';
 
@@ -45,7 +47,8 @@ const LIBRARY_WRITE_TIMEOUT_MS = 60_000;
 
 export interface RemovalApplyDeps {
   preview(userId: string, request: RemovalPreviewRequest): Promise<RemovalPreview>;
-  pathEnv(): PathEnv;
+  /** Layout of one machine; see `PropagationApplyDeps.pathEnv`. */
+  pathEnv(environmentId: string): PathEnv;
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   backup: BackupStoreDeps;
   treeFs: TreeRemovalFs;
@@ -53,6 +56,19 @@ export interface RemovalApplyDeps {
   writeEngine: 'runtime' | 'in-process';
   /** Stands in for the RuntimeClient on the `runtime` engine. */
   runtimeRemove?: (params: RuntimeLibraryRemoveParams) => Promise<RemovalApply>;
+  /** Which machine the copies are removed from; see `PropagationApplyDeps`. */
+  environmentId: string;
+  /** Files the produced backup set in the hub-side listing index. */
+  recordBackup: (
+    userId: string,
+    input: {
+      readonly environmentId: string;
+      readonly backupId: string;
+      readonly operation: 'propagation' | 'removal';
+      readonly pinned: boolean;
+      readonly createdAtMs: number;
+    }
+  ) => Promise<void>;
 }
 
 function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
@@ -63,6 +79,8 @@ function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
     backup: overrides.backup ?? defaultBackupStoreDeps,
     treeFs: overrides.treeFs ?? nodeTreeRemovalFs,
     writeEngine: overrides.writeEngine ?? 'runtime',
+    environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
+    recordBackup: overrides.recordBackup ?? recordWrittenBackup,
     ...(overrides.runtimeRemove && { runtimeRemove: overrides.runtimeRemove }),
   };
 }
@@ -105,22 +123,110 @@ async function runRemoval(
   }
 
   const plan = planRemoval(preview, request);
-  const env = deps.pathEnv();
-  const operations: PreparedRemovalOperation[] = plan.operations.map((operation) => ({
-    resourceKey: operation.resourceKey,
-    locationId: operation.locationId,
-    slug: operation.slug,
-    kind: operation.kind,
-    expectedPath: operation.expectedPath,
-    expectedContentHash: operation.expectedContentHash,
-    lastCopy: operation.lastCopy,
-  }));
+  // Grouped by the machine the copies are on, insertion-ordered so two
+  // identical removals touch the same machines in the same order.
+  const batches = new Map<string, PreparedRemovalOperation[]>();
+  for (const operation of plan.operations) {
+    const wire: PreparedRemovalOperation = {
+      resourceKey: operation.resourceKey,
+      locationId: operation.locationId,
+      slug: operation.slug,
+      kind: operation.kind,
+      expectedPath: operation.expectedPath,
+      expectedContentHash: operation.expectedContentHash,
+      lastCopy: operation.lastCopy,
+    };
+    const batch = batches.get(operation.environmentId);
+    if (batch) batch.push(wire);
+    else batches.set(operation.environmentId, [wire]);
+  }
 
   // The plan's own `kept` entries are merged here rather than shipped and
   // echoed: the hub decided them, and the engine returns only what it kept
   // itself — rolled back, or never attempted.
-  const removalResult = await runWriteEngine(userId, operations, plan, env, deps);
+  const removalResult = await runRemovalAcrossEnvironments(userId, batches, plan, deps);
+  // Pinned when it holds someone's last copy: the set is the only remaining
+  // instance of that resource, and the index has to know that before retention
+  // on the owning machine is ever asked about it.
+  for (const handle of removalResult.backups) {
+    await deps
+      .recordBackup(userId, {
+        environmentId: handle.environmentId,
+        backupId: handle.backupId,
+        operation: 'removal',
+        pinned: plan.lastCopyResourceKeys.length > 0,
+        createdAtMs: Date.now(),
+      })
+      .catch((error: unknown) => {
+        console.error('[library] Could not index the backup set for this removal:', error);
+      });
+  }
   return { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
+}
+
+/**
+ * One removal batch per machine, in a fixed order.
+ *
+ * A machine that fails stops the rest, and it matters more here than it does in
+ * propagation: every batch already gone is a set of files that only exist inside
+ * a backup, so the fewer machines a failed removal has touched, the less there
+ * is to put back.
+ */
+async function runRemovalAcrossEnvironments(
+  userId: string,
+  batches: ReadonlyMap<string, PreparedRemovalOperation[]>,
+  plan: RemovalPlan,
+  deps: RemovalApplyDeps
+): Promise<RemovalApply> {
+  const removed: RemovalApply['removed'] = [];
+  const kept: RemovalApply['kept'] = [];
+  const failed: RemovalApply['failed'] = [];
+  const backups: RemovalApply['backups'] = [];
+  let partial = false;
+
+  const pending = [...batches];
+  for (const [index, [environmentId, operations]] of pending.entries()) {
+    const batch = await runWriteEngine(userId, operations, plan, deps.pathEnv(environmentId), {
+      ...deps,
+      environmentId,
+    });
+    removed.push(...batch.removed);
+    kept.push(...batch.kept);
+    failed.push(...batch.failed);
+    backups.push(...batch.backups);
+    partial ||= batch.partial;
+    // A clean compensation only covers *that* machine's own disk: once an
+    // earlier machine already landed a backup, this failure still leaves the
+    // removal partially done overall.
+    if (batch.failed.length > 0) {
+      if (backups.length > batch.backups.length) partial = true;
+      // Machines after this one never ran: their placements still count as
+      // kept, the same way `notAttempted` reports a mid-machine stop.
+      for (const [skippedEnvironmentId, skipped] of pending.slice(index + 1)) {
+        for (const operation of skipped) {
+          kept.push({
+            resourceKey: operation.resourceKey,
+            environmentId: skippedEnvironmentId,
+            locationId: operation.locationId,
+            reason: 'not-attempted',
+          });
+        }
+      }
+      break;
+    }
+  }
+
+  return {
+    partial,
+    removed,
+    kept,
+    failed,
+    backups,
+    // Only when one machine was touched: a cross-machine removal has one
+    // irreplaceable set per machine, and naming one is how a user restores half
+    // of what they lost believing they restored all of it.
+    ...(backups.length === 1 && { backupId: backups[0].backupId }),
+  };
 }
 
 function runWriteEngine(
@@ -142,6 +248,7 @@ function runWriteEngine(
         retentionCount: deps.backup.retentionCount(),
         retentionBytes: deps.backup.retentionBytes(),
         pathEnv: env,
+        environmentId: deps.environmentId,
         operations,
         lastCopyResourceKeys: plan.lastCopyResourceKeys,
       },
@@ -149,28 +256,41 @@ function runWriteEngine(
     );
   }
 
-  const params = toRuntimeRemoveParams(operations, plan, env, deps.backup);
-  return deps.runtimeRemove ? deps.runtimeRemove(params) : runtimeRemove(userId, params);
+  const params = toRuntimeRemoveParams(operations, plan, env, deps);
+  return deps.runtimeRemove ? deps.runtimeRemove(params) : runtimeRemove(userId, params, deps);
 }
 
 async function runtimeRemove(
   userId: string,
-  params: RuntimeLibraryRemoveParams
+  params: RuntimeLibraryRemoveParams,
+  deps: RemovalApplyDeps
 ): Promise<RemovalApply> {
-  const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
-  return await client.library.remove(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
+  const client = await getRuntimeClient(userId, deps.environmentId);
+  // Resolved from the connection: a remote store roots at the target's home.
+  const policy = backupPolicyFor(client, deps.environmentId);
+  return await client.library.remove(
+    {
+      ...params,
+      backupRoot: policy.backupRoot,
+      retentionCount: policy.retentionCount,
+      retentionBytes: policy.retentionBytes,
+    },
+    { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
+  );
 }
 
 function toRuntimeRemoveParams(
   operations: readonly PreparedRemovalOperation[],
   plan: RemovalPlan,
   env: PathEnv,
-  backup: BackupStoreDeps
+  deps: RemovalApplyDeps
 ): RuntimeLibraryRemoveParams {
+  const backup = deps.backup;
   return {
     backupRoot: backup.backupDir(),
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
+    environmentId: deps.environmentId,
     pathEnv: {
       // Only the MangoStudio directories travel, matching `pathEnvParams` in
       // `environment-library-service.ts`; the runtime merges its own
@@ -184,8 +304,15 @@ function toRuntimeRemoveParams(
   };
 }
 
+/** A copy is the machine and the location; neither identifies one alone. */
+function placementKey(environmentId: string, locationId: string): string {
+  return `${environmentId}\u001f${locationId}`;
+}
+
 interface PlannedRemoval {
   readonly resourceKey: string;
+  /** Machine the copy is removed from. */
+  readonly environmentId: string;
   readonly locationId: string;
   readonly slug: string;
   readonly kind: 'file' | 'directory';
@@ -243,38 +370,43 @@ function planRemoval(preview: RemovalPreview, request: RemovalApplyRequest): Rem
 
     const decided = new Map<string, 'remove' | 'keep'>();
     for (const target of decision.locations) {
-      if (decided.has(target.locationId)) {
+      const key = placementKey(target.environmentId ?? LOCAL_ENVIRONMENT_ID, target.locationId);
+      if (decided.has(key)) {
         throw validationError(
-          `Duplicate decision for location "${target.locationId}" of "${entry.resourceKey}".`
+          `Duplicate decision for location "${target.locationId}" on "${target.environmentId ?? LOCAL_ENVIRONMENT_ID}" of "${entry.resourceKey}".`
         );
       }
-      decided.set(target.locationId, target.action);
+      decided.set(key, target.action);
     }
-    // The same rule propagation applies to destinations: every location the
-    // preview showed comes back explicitly removed or kept, so the response can
-    // never be silent about somewhere the user was shown.
+    // The same rule propagation applies to destinations: every copy the preview
+    // showed comes back explicitly removed or kept, so the response can never be
+    // silent about somewhere the user was shown.
+    const offered = new Set(
+      entry.locations.map((location) => placementKey(location.environmentId, location.locationId))
+    );
     const missing = entry.locations
-      .filter((location) => !decided.has(location.locationId))
-      .map((location) => `"${location.locationId}"`);
+      .filter((location) => !decided.has(placementKey(location.environmentId, location.locationId)))
+      .map((location) => `"${location.locationId}" on "${location.environmentId}"`);
     if (missing.length > 0) {
       throw validationError(
         `Apply must decide every location the preview offered for "${entry.resourceKey}"; missing ${missing.join(', ')}.`
       );
     }
-    for (const locationId of decided.keys()) {
-      if (!entry.locations.some((location) => location.locationId === locationId)) {
+    for (const key of decided.keys()) {
+      if (!offered.has(key)) {
         throw validationError(
-          `Location "${locationId}" was not offered for "${entry.resourceKey}".`
+          `Location "${key.split('\u001f')[1]}" was not offered for "${entry.resourceKey}".`
         );
       }
     }
 
     const removing = new Set<string>();
     for (const location of entry.locations) {
-      const action = decided.get(location.locationId);
+      const action = decided.get(placementKey(location.environmentId, location.locationId));
       if (action !== 'remove') {
         kept.push({
           resourceKey: entry.resourceKey,
+          environmentId: location.environmentId,
           locationId: location.locationId,
           reason: location.operation === 'remove' ? 'user-kept' : location.operation,
         });
@@ -294,9 +426,10 @@ function planRemoval(preview: RemovalPreview, request: RemovalApplyRequest): Rem
       if (!definition) {
         throw validationError(`Unknown library location: "${location.locationId}".`);
       }
-      removing.add(location.locationId);
+      removing.add(placementKey(location.environmentId, location.locationId));
       operations.push({
         resourceKey: entry.resourceKey,
+        environmentId: location.environmentId,
         locationId: location.locationId,
         slug: entry.ref.slug,
         // Layout, not kind: what is on disk at a destination is decided by the
@@ -310,8 +443,10 @@ function planRemoval(preview: RemovalPreview, request: RemovalApplyRequest): Rem
     }
 
     if (removing.size === 0) continue;
-    const zeroesResource = entry.instanceLocationIds.every((locationId) =>
-      removing.has(locationId)
+    // Against every copy that exists on every machine in scope, not against the
+    // rows on screen: a copy surviving on another box is a surviving copy.
+    const zeroesResource = entry.instancePlacements.every((placement) =>
+      removing.has(placementKey(placement.environmentId, placement.locationId))
     );
     if (!zeroesResource) continue;
 

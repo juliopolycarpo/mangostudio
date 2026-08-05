@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   LibraryInstance,
   LibraryLocationId,
   LibraryLocationStatus,
   LibraryResource,
+  PropagationBlockedReason,
   RemovalLocation,
   RemovalPreviewEntry,
   ResourceKind,
@@ -66,6 +68,16 @@ interface PreviewHarness {
   readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
   readonly enabledLocationIds?: readonly LibraryLocationId[];
   readonly staleStagedRemovals?: { locationId: string; path: string; modifiedAtMs: number }[];
+  /** Machines beyond Local, each with its own copies and location states. */
+  readonly environments?: Record<
+    string,
+    {
+      readonly resources?: LibraryResource[];
+      readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
+      readonly blockedReason?: PropagationBlockedReason;
+    }
+  >;
+  readonly environmentIds?: string[];
 }
 
 function preview(
@@ -75,10 +87,26 @@ function preview(
 ) {
   return previewLibraryRemoval(
     'user-1',
-    { resourceKeys, locationIds },
     {
-      discover: () => Promise.resolve(harness.resources ?? []),
-      describeLocation: (id) => harness.statuses?.[id] ?? status(id),
+      resourceKeys,
+      locationIds,
+      ...(harness.environmentIds && { environmentIds: harness.environmentIds }),
+    },
+    {
+      snapshot: (_userId, environmentId) => {
+        const machine =
+          environmentId === LOCAL_ENVIRONMENT_ID
+            ? { resources: harness.resources, statuses: harness.statuses, blockedReason: undefined }
+            : (harness.environments?.[environmentId] ?? {});
+        return Promise.resolve({
+          environmentId,
+          ...(machine.blockedReason && { blockedReason: machine.blockedReason }),
+          resources: machine.resources ?? [],
+          statuses: new Map(
+            locationIds.map((id) => [id, machine.statuses?.[id] ?? status(id)] as const)
+          ),
+        });
+      },
       enabledLocationIds: () => Promise.resolve(new Set(harness.enabledLocationIds ?? locationIds)),
       pathEnv: () => ({ homeDir: '/home/test', platform: 'linux', env: {} }),
       staleStagedRemovals: () => Promise.resolve(harness.staleStagedRemovals ?? []),
@@ -197,7 +225,10 @@ describe('previewLibraryRemoval last-copy detection', () => {
     const entry = firstEntry(result);
     expect(entry.wouldRemoveLastCopy).toBe(false);
     // The guard is decided against every copy, including ones not on offer.
-    expect(entry.instanceLocationIds).toEqual(['claude-skills', 'mango-skills']);
+    expect(entry.instancePlacements).toEqual([
+      { environmentId: 'local', locationId: 'claude-skills' },
+      { environmentId: 'local', locationId: 'mango-skills' },
+    ]);
   });
 
   it('does not report a last copy when a blocked instance survives', async () => {
@@ -272,5 +303,116 @@ describe('previewLibraryRemoval tokens', () => {
     });
 
     expect(result.staleStagedRemovals).toHaveLength(1);
+  });
+});
+
+/*
+  Removal across machines. The last-copy guard is why this matters more here
+  than anywhere else: a copy surviving on another box is a surviving copy, and
+  getting that wrong either nags about a resource that is not disappearing or —
+  far worse — stays silent about one that is.
+*/
+describe('previewLibraryRemoval across machines', () => {
+  it('offers each machine its own copies', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': { resources: [resource([instance('claude-skills', 'hash-a')])] },
+      },
+    });
+
+    const entry = firstEntry(result);
+    expect(entry.locations.map((row) => `${row.environmentId}/${row.locationId}`)).toEqual([
+      'local/claude-skills',
+      'wsl-ubuntu/claude-skills',
+    ]);
+    expect(entry.instancePlacements).toEqual([
+      { environmentId: 'local', locationId: 'claude-skills' },
+      { environmentId: 'wsl-ubuntu', locationId: 'claude-skills' },
+    ]);
+  });
+
+  it('does not call it a last copy while another machine still holds one', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        // Present on the second machine, but that machine's location was never
+        // offered for removal — so removing everything on screen leaves a copy.
+        'wsl-ubuntu': {
+          resources: [resource([instance('claude-skills', 'hash-a')])],
+          blockedReason: 'environment-readonly',
+        },
+      },
+    });
+
+    expect(firstEntry(result).wouldRemoveLastCopy).toBe(false);
+  });
+
+  it('calls it a last copy only when every machine in scope would lose it', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': { resources: [resource([instance('claude-skills', 'hash-a')])] },
+      },
+    });
+
+    expect(firstEntry(result).wouldRemoveLastCopy).toBe(true);
+  });
+
+  it('blocks copies on a machine it could not reach, and treats them as unknown', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      environmentIds: ['local', 'ssh-box'],
+      environments: {
+        'ssh-box': {
+          // An unreachable machine reports nothing, so its copies cannot be
+          // counted as survivors — see readEnvironmentSnapshot's offline branches.
+          resources: [],
+          blockedReason: 'environment-offline',
+        },
+      },
+    });
+
+    const entry = firstEntry(result);
+    const offline = entry.locations.find((row) => row.environmentId === 'ssh-box');
+    expect(offline?.operation).toBe('blocked');
+    expect(offline?.blockedReason).toBe('environment-offline');
+    // Nothing is known about that machine's copies, so the guard errs toward
+    // asking: removing the reachable copy may well be removing the last one.
+    expect(entry.wouldRemoveLastCopy).toBe(true);
+  });
+
+  it('reports two machines holding different bytes as divergent', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': { resources: [resource([instance('claude-skills', 'hash-b')])] },
+      },
+    });
+
+    expect(firstEntry(result).divergence).toBe('divergent');
+    // Neither copy is the last of its own version's group once both are marked,
+    // and each row says which of the two the user is doing.
+    expect(firstEntry(result).locations.every((row) => row.eliminatesContentGroup)).toBe(true);
+  });
+
+  it('names the machine a stale staged directory was left on', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      environmentIds: ['local'],
+      staleStagedRemovals: [
+        {
+          locationId: 'claude-skills',
+          path: '/home/test/.claude/skills/.gh.abc.removing',
+          modifiedAtMs: 1,
+        },
+      ],
+    });
+
+    expect(result.staleStagedRemovals[0]?.environmentId).toBe('local');
   });
 });

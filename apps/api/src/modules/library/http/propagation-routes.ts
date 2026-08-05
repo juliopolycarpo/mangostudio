@@ -1,3 +1,4 @@
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type ApiErrorResponse,
   ApiErrorResponseSchema,
@@ -13,6 +14,7 @@ import {
   type PropagationApplyRequest,
   PropagationApplyRequestSchema,
   PropagationApplySchema,
+  PropagationBackupPurgeQuerySchema,
   PropagationBackupPurgeRequestSchema,
   type PropagationBackupUsage,
   PropagationBackupUsageSchema,
@@ -28,27 +30,24 @@ import {
 import { Elysia, t } from 'elysia';
 import { ProfileMismatchError } from '../../../lib/profile-context';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { describeBackupUsage, purgeEnvironmentBackup } from '../application/backup-inventory';
 import {
   acknowledgeDivergence,
   forgetDivergenceAck,
   listDivergenceAcks,
 } from '../application/conflict-resolution';
-import {
-  applyLibraryPropagation,
-  describeBackupUsage,
-  undoLibraryPropagation,
-} from '../application/propagation-apply';
+import { applyLibraryPropagation, undoLibraryPropagation } from '../application/propagation-apply';
 import { previewLibraryPropagation } from '../application/propagation-preview';
 import { LibraryRequestError } from '../domain/library-request-error';
-import { assertBackupId, purgeBackupSet } from '../infrastructure/backup-store';
+import { assertBackupId } from '../infrastructure/backup-store';
 import { handleLibraryError } from './library-error';
 
 export interface PropagationRouteService {
   preview(userId: string, request: PropagationPreviewRequest): Promise<PropagationPreview>;
   apply(userId: string, request: PropagationApplyRequest): Promise<PropagationApply>;
-  undo(userId: string, backupId: string): Promise<PropagationUndo>;
-  backupUsage(): Promise<PropagationBackupUsage>;
-  purgeBackup(backupId: string): Promise<boolean>;
+  undo(userId: string, backupId: string, environmentId: string): Promise<PropagationUndo>;
+  backupUsage(userId: string): Promise<PropagationBackupUsage>;
+  purgeBackup(userId: string, environmentId: string, backupId: string): Promise<void>;
   listAcks(userId: string): Promise<LibraryDivergenceAck[]>;
   acknowledge(userId: string, request: LibraryDivergenceAckRequest): Promise<LibraryDivergenceAck>;
   forgetAck(userId: string, resourceKey: string): Promise<void>;
@@ -57,9 +56,11 @@ export interface PropagationRouteService {
 const defaultPropagationRouteService: PropagationRouteService = {
   preview: (userId, request) => previewLibraryPropagation(userId, request),
   apply: (userId, request) => applyLibraryPropagation(userId, request),
-  undo: (userId, backupId) => undoLibraryPropagation(backupId, {}, userId),
-  backupUsage: () => describeBackupUsage(),
-  purgeBackup: (backupId) => purgeBackupSet(backupId),
+  undo: (userId, backupId, environmentId) =>
+    undoLibraryPropagation(backupId, { environmentId }, userId),
+  backupUsage: (userId) => describeBackupUsage(userId),
+  purgeBackup: (userId, environmentId, backupId) =>
+    purgeEnvironmentBackup(userId, environmentId, backupId),
   listAcks: (userId) => listDivergenceAcks(userId),
   acknowledge: (userId, request) => acknowledgeDivergence(userId, request),
   forgetAck: (userId, resourceKey) => forgetDivergenceAck(userId, resourceKey),
@@ -144,7 +145,11 @@ export function createPropagationRoutes(
       '/library/propagate/undo',
       async ({ body, set, user }): Promise<PropagationUndo | ApiErrorResponse> => {
         try {
-          return await service.undo(user?.id ?? '', body.backupId);
+          return await service.undo(
+            user?.id ?? '',
+            body.backupId,
+            body.environmentId ?? LOCAL_ENVIRONMENT_ID
+          );
         } catch (error) {
           return mapPropagationError(error, set);
         }
@@ -164,9 +169,9 @@ export function createPropagationRoutes(
     )
     .get(
       '/library/propagate/backups',
-      async ({ set }): Promise<PropagationBackupUsage | ApiErrorResponse> => {
+      async ({ set, user }): Promise<PropagationBackupUsage | ApiErrorResponse> => {
         try {
-          return await service.backupUsage();
+          return await service.backupUsage(user?.id ?? '');
         } catch (error) {
           return mapPropagationError(error, set);
         }
@@ -180,7 +185,7 @@ export function createPropagationRoutes(
     )
     .delete(
       '/library/propagate/backups/:backupId',
-      async ({ params, set }): Promise<undefined | ApiErrorResponse> => {
+      async ({ params, query, set, user }): Promise<undefined | ApiErrorResponse> => {
         // Pinning keeps a set holding someone's only copy of a resource out of
         // every automatic eviction path, which only works if there is an
         // explicit way to say "yes, really, let it go". This is it.
@@ -192,8 +197,13 @@ export function createPropagationRoutes(
         }
         try {
           // Idempotent: purging a set that is already gone is the state the
-          // caller asked for, not an error.
-          await service.purgeBackup(params.backupId);
+          // caller asked for, not an error. Unreachable is not idempotent —
+          // the bytes are still there, so it stays a 503.
+          await service.purgeBackup(
+            user?.id ?? '',
+            query.environmentId ?? LOCAL_ENVIRONMENT_ID,
+            params.backupId
+          );
           set.status = 204;
           return undefined;
         } catch (error) {
@@ -202,10 +212,12 @@ export function createPropagationRoutes(
       },
       {
         params: PropagationBackupPurgeRequestSchema,
+        query: PropagationBackupPurgeQuerySchema,
         response: {
           204: t.Void(),
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       }
     )

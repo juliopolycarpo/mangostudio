@@ -6,13 +6,20 @@
  * lets a user spend effort on a request that would be refused: no continuing
  * past an unresolved divergence, no applying with nothing checked, no applying
  * a model-drafted conversion that has not been signed off.
+ *
+ * The preview spans every machine the user has that can answer, because the
+ * destination step has to be able to *offer* a machine before it can be picked —
+ * and a machine that is asleep is shown unselectable with its reason rather than
+ * left out, which would read as not having it at all.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { LibraryLocationId, PropagationPreviewRequest } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
+import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { usePropagation } from '../hooks/use-propagation';
@@ -32,21 +39,60 @@ import { ReviewStep } from './ReviewStep';
 interface PropagationWizardProps {
   readonly resourceKeys: readonly string[];
   readonly locationIds: readonly LibraryLocationId[];
+  /** Machine the wizard was opened on; its locations are the ones already loaded. */
+  readonly environmentId?: string;
   readonly onClose: () => void;
 }
 
 const STEP_ORDER: readonly WizardStep[] = ['conflict', 'destinations', 'review', 'result'];
 
-export function PropagationWizard({ resourceKeys, locationIds, onClose }: PropagationWizardProps) {
+export function PropagationWizard({
+  resourceKeys,
+  locationIds,
+  environmentId,
+  onClose,
+}: PropagationWizardProps) {
   const { t } = useI18n();
   const l = t.library;
+  const environmentsQuery = useEnvironmentEntitiesQuery();
+  const environments = environmentsQuery.data ?? [];
+  const scopeEnvironmentId = environmentId ?? LOCAL_ENVIRONMENT_ID;
+
+  /**
+   * The machine the wizard was opened on, plus every other enabled one.
+   *
+   * Ordered with the current machine first so the step the user reads opens on
+   * the box they were already looking at. Disabled machines are left out
+   * entirely — they are configuration the user has switched off, not a machine
+   * that happens to be unreachable, and the two need different answers.
+   */
+  const environmentIds = useMemo(() => {
+    const ids = [scopeEnvironmentId];
+    for (const environment of environments) {
+      if (environment.enabled && !ids.includes(environment.id)) ids.push(environment.id);
+    }
+    return ids;
+  }, [environments, scopeEnvironmentId]);
+
+  const environmentName = useMemo(() => {
+    const names = new Map(environments.map((environment) => [environment.id, environment.name]));
+    return (id: string) => names.get(id) ?? id;
+  }, [environments]);
 
   const request = useMemo<PropagationPreviewRequest>(
-    () => ({ resourceKeys: [...resourceKeys], targetLocationIds: [...locationIds] }),
-    [resourceKeys, locationIds]
+    () => ({
+      resourceKeys: [...resourceKeys],
+      // Empty until the environments query resolves: `environmentIds` below
+      // only reflects the full machine set once it does, and previewing
+      // before that would fire a second, more expensive preview the moment
+      // it lands.
+      targetLocationIds: environmentsQuery.isSuccess ? [...locationIds] : [],
+      environmentIds,
+    }),
+    [resourceKeys, locationIds, environmentIds, environmentsQuery.isSuccess]
   );
   const wizard = usePropagation(request);
-  const locationsQuery = useQuery(libraryLocationsQueryOptions());
+  const locationsQuery = useQuery(libraryLocationsQueryOptions(scopeEnvironmentId));
   const preview = wizard.preview;
 
   const unresolved = useMemo(
@@ -155,6 +201,7 @@ export function PropagationWizard({ resourceKeys, locationIds, onClose }: Propag
               preview={preview}
               draft={wizard.draft}
               locations={locationsQuery.data ?? []}
+              environmentName={environmentName}
               onToggle={wizard.toggleDestination}
             />
           ) : wizard.step === 'review' ? (
@@ -170,6 +217,7 @@ export function PropagationWizard({ resourceKeys, locationIds, onClose }: Propag
               undoResult={wizard.undoResult}
               isUndoing={wizard.isUndoing}
               undoError={wizard.undoError}
+              environmentName={environmentName}
               onUndo={wizard.undo}
             />
           )}

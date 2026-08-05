@@ -361,6 +361,54 @@ function assertWithinByteBudget(location: LocationDefinition, leaves: readonly L
   }
 }
 
+/**
+ * Every file under a directory instance, with its bytes, for shipping a
+ * resource to a machine that does not have it.
+ *
+ * Reuses the scanner's own walk so the caps that bound a scan bound a transfer
+ * too: same per-file ceiling, same total, same entry count, same depth, same
+ * symlink-escape refusal. A second walk with its own limits is how one of them
+ * ends up looser than the other on the path that reads user files.
+ *
+ * The whole tree or nothing. A partially transferred skill is not a skill, and
+ * writing one would leave the destination with a resource that looks present and
+ * is not — worse than the copy never arriving.
+ *
+ * A file-backed resource answers as a single entry named after itself. Its bytes
+ * have to travel exactly as they sit on disk — the apply re-hashes what it wrote
+ * and compares — so they never go through a text decode, which would drop a BOM
+ * and substitute anything undecodable.
+ */
+export async function readLibraryTree(
+  rootPath: string,
+  containmentRoot: string,
+  fs: LibraryInstanceReaderFs = nodeFs
+): Promise<{ relativePath: string; bytes: Uint8Array }[]> {
+  const canonicalRoot = await fs.realPath(rootPath);
+  // Re-checked after resolution: the caller's containment check ran against
+  // the unresolved path, so a symlinked location — a `CLAUDE.md` pointed at
+  // `/etc/passwd`, or a location directory pointed outside the agent home —
+  // would otherwise resolve past that check unnoticed.
+  const canonicalContainmentRoot = await fs.realPath(containmentRoot);
+  if (!isPathWithin(canonicalContainmentRoot, canonicalRoot)) throw new PathEscapeError();
+  const rootMetadata = await fs.stat(canonicalRoot);
+  if (rootMetadata.isFile) {
+    if (rootMetadata.size > MAX_LIBRARY_FILE_BYTES) throw new InstanceTooLargeError();
+    return [{ relativePath: basename(rootPath), bytes: await fs.readFile(canonicalRoot) }];
+  }
+  const leaves = await collectLeafFiles(rootPath, fs);
+  return await Promise.all(
+    leaves.map(async (leaf) => {
+      // Re-checked after resolution, exactly as the hash pass does: the walk
+      // proved containment for the directory it descended into, and a symlinked
+      // leaf pointing outside the tree is a different question.
+      const canonicalPath = await fs.realPath(leaf.absolutePath);
+      if (!isPathWithin(canonicalRoot, canonicalPath)) throw new PathEscapeError();
+      return { relativePath: leaf.relativePath, bytes: await fs.readFile(canonicalPath) };
+    })
+  );
+}
+
 async function collectLeafFiles(
   rootPath: string,
   fs: LibraryInstanceReaderFs
@@ -524,5 +572,5 @@ export function isPathWithin(rootPath: string, candidatePath: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${sep}`);
 }
 
-class PathEscapeError extends Error {}
-class InstanceTooLargeError extends Error {}
+export class PathEscapeError extends Error {}
+export class InstanceTooLargeError extends Error {}

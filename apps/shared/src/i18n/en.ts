@@ -1612,7 +1612,6 @@ export const messages: Messages = {
       selectedCount: '{count} selected',
       clearSelection: 'Clear selection',
       propagate: 'Propagate',
-      writesLocalOnly: 'Propagate and remove are available on this machine only for now.',
       loadError: 'The library could not be loaded.',
       retry: 'Try again',
       rescan: 'Re-read from disk',
@@ -1660,7 +1659,6 @@ export const messages: Messages = {
       alsoIn: 'also in {locations}, identical',
       propagate: 'Propagate',
       remove: 'Remove',
-      writesLocalOnly: 'Propagate and remove are available on this machine only for now.',
       notFound: 'This resource is no longer in the library.',
       invalidInstance: 'Unreadable copy in {location}',
       // 001 deliberately does not normalize line endings, so a CRLF/LF split is
@@ -1791,6 +1789,13 @@ export const messages: Messages = {
         'The copy already here could not be read, so overwriting it is not safe.',
       'no-source-content': 'No readable copy exists to copy from.',
       'no-adapter-strategy': "No converter knows how to reach the destination's format.",
+      // The machine, rather than the location. Ordered before the location's own
+      // problems because nothing can be said about a directory on a box nobody
+      // could reach — and telling the user to fix the location would send them
+      // after the wrong thing.
+      'environment-offline': 'This machine is not connected right now.',
+      'environment-unsupported': 'This machine does not offer library access.',
+      'environment-readonly': "This machine's owner has not allowed writing to files here.",
       // Removal shares this catalog; only the reason below is unique to it.
       'invalid-instance':
         'This copy could not be read end to end, so it cannot be backed up faithfully. Remove it yourself.',
@@ -1861,6 +1866,10 @@ export const messages: Messages = {
       resultRolledBack: 'A removal failed, so every copy was put back.',
       resultNone: 'Nothing was removed.',
       resultKeptHeading: 'Still there',
+      // One machine's copies at a time: a removal's backup is the only remaining
+      // copy of what it deleted, so the verb has to name what is being restored
+      // rather than promise a single undo across every machine touched.
+      restore: 'Put these copies back',
     },
     result: {
       title: 'Result',
@@ -1928,6 +1937,16 @@ export const messages: Messages = {
       evictsNext: 'Goes next',
       evictsNextHint: 'The next apply will delete this backup to stay inside the retention budget.',
       bulkHint: 'Backups are restored and deleted one set at a time, on purpose.',
+      // Backups stay on the machine that owned the file, so the list is grouped
+      // by machine rather than merged: two sets from two machines are two
+      // different disks, and the retention budget applies to each on its own.
+      retentionPerMachine: 'These bounds apply to each machine separately.',
+      machineUnknown: 'Machine {id}',
+      unreachable:
+        'These machines could not be reached, so their backups are listed from what the hub last recorded: {machines}.',
+      unavailableOffline: 'Restoring needs this machine connected.',
+      unavailableManifest:
+        'This set has lost the record of what it holds, so nothing can be restored from it. Deleting it still works.',
     },
     settings: {
       title: 'Settings side by side',

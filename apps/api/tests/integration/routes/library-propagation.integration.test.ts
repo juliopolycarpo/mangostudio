@@ -98,15 +98,19 @@ function previewSkills(
     userId,
     { resourceKeys: ['skill:gh'], targetLocationIds: [...targetLocationIds] },
     {
-      discover: (scanUserId, kinds) =>
-        discoverLibraryResources(getDb(), scanUserId, {
+      snapshot: async (scanUserId, environmentId, kinds) => ({
+        environmentId,
+        resources: await discoverLibraryResources(getDb(), scanUserId, {
           force: true,
           kinds,
           cache,
           pathEnv,
           settings: skillLocationSettings(),
         }),
-      describeLocation: (id) => describeLocation(id, pathEnv),
+        statuses: new Map(
+          [...targetLocationIds].map((id) => [id, describeLocation(id, pathEnv)] as const)
+        ),
+      }),
       enabledLocationIds: async () =>
         enabledLibraryLocations(libraryLocationsFor(skillLocationSettings()), 'home'),
     }
@@ -480,10 +484,12 @@ describe('divergence acknowledgement routes', () => {
 describe('propagation apply, undo, and backup routes', () => {
   const applyResult = {
     backupId: '2026-07-27T10-00-00.000Z-abc',
+    backups: [{ environmentId: 'local', backupId: '2026-07-27T10-00-00.000Z-abc' }],
     partial: false,
     applied: [
       {
         resourceKey: 'skill:gh',
+        environmentId: 'local',
         locationId: 'claude-skills' as LibraryLocationId,
         operation: 'create' as const,
         destinationPath: '/home/test/.claude/skills/gh',
@@ -558,6 +564,10 @@ describe('propagation apply, undo, and backup routes', () => {
   it('undoes an apply by backup id', async () => {
     const undone = {
       backupId: '2026-07-27T10-00-00.000Z-abc',
+      // The response names the machine as well as the set: backup ids are minted
+      // per store, so a client rendering by id alone would report an undo
+      // against the wrong machine's row.
+      environmentId: 'local',
       restored: [{ locationId: 'claude-skills' as LibraryLocationId, destinationPath: '/a/gh' }],
       removed: [],
       skipped: [],
@@ -622,8 +632,12 @@ describe('propagation apply, undo, and backup routes', () => {
           operation: 'removal',
           resourceKeys: ['skill:gh'],
           evictsNext: false,
+          manifestReadable: true,
+          environmentId: 'local',
+          availability: 'available',
         },
       ],
+      unreachableEnvironmentIds: [],
     } satisfies PropagationBackupUsage;
     const app = harness({ backupUsage: () => Promise.resolve(usage) });
 

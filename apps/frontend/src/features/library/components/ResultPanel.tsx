@@ -4,6 +4,11 @@
  * Undo is prominent because the realization usually arrives a minute later, not
  * immediately — and `partial: true` is called out loudly, since that is the one
  * case where a failure left writes on disk that compensation could not remove.
+ *
+ * An apply that spanned machines produced one backup set per machine, so it gets
+ * one Undo per machine. There is deliberately no "undo everything" button: each
+ * one is a separate conversation with a separate host, any of which can be
+ * offline, and a single button that half-worked would be the worst outcome here.
  */
 
 import type { PropagationApply, PropagationUndo } from '@mangostudio/shared/library';
@@ -17,7 +22,8 @@ interface ResultPanelProps {
   readonly undoResult: PropagationUndo | undefined;
   readonly isUndoing: boolean;
   readonly undoError: unknown;
-  readonly onUndo: () => void;
+  readonly environmentName: (environmentId: string) => string;
+  readonly onUndo: (environmentId: string, backupId: string) => void;
 }
 
 export function ResultPanel({
@@ -25,6 +31,7 @@ export function ResultPanel({
   undoResult,
   isUndoing,
   undoError,
+  environmentName,
   onUndo,
 }: ResultPanelProps) {
   const { t } = useI18n();
@@ -59,7 +66,7 @@ export function ResultPanel({
           <ul className="space-y-1">
             {result.applied.map((applied) => (
               <li
-                key={`${applied.resourceKey}:${applied.locationId}`}
+                key={`${applied.environmentId}:${applied.resourceKey}:${applied.locationId}`}
                 className="flex items-start gap-2 text-xs"
                 data-testid="applied-row"
               >
@@ -67,7 +74,7 @@ export function ResultPanel({
                 <span className="min-w-0">
                   <span className="text-on-surface">{applied.resourceKey}</span>
                   <span className="block break-all font-mono text-[11px] text-on-surface-variant/60">
-                    {applied.destinationPath}
+                    {environmentName(applied.environmentId)} · {applied.destinationPath}
                   </span>
                   {applied.adaptation && (
                     <span className="block text-[11px] text-tertiary">
@@ -103,7 +110,7 @@ export function ResultPanel({
           <ul className="space-y-1">
             {result.failed.map((failure) => (
               <li
-                key={`${failure.resourceKey}:${failure.locationId}`}
+                key={`${failure.environmentId}:${failure.resourceKey}:${failure.locationId}`}
                 className="flex items-start gap-2 text-xs"
                 data-testid="failed-row"
               >
@@ -111,7 +118,7 @@ export function ResultPanel({
                 <span className="min-w-0">
                   <span className="text-on-surface">{failure.resourceKey}</span>
                   <span className="block text-[11px] text-on-surface-variant/70">
-                    {l.failureReason[failure.reason]}
+                    {environmentName(failure.environmentId)} — {l.failureReason[failure.reason]}
                   </span>
                 </span>
               </li>
@@ -128,7 +135,7 @@ export function ResultPanel({
           <ul className="space-y-0.5">
             {result.skipped.map((skipped) => (
               <li
-                key={`${skipped.resourceKey}:${skipped.locationId ?? ''}`}
+                key={`${skipped.environmentId}:${skipped.resourceKey}:${skipped.locationId ?? ''}`}
                 className="text-[11px] text-on-surface-variant/70"
                 data-testid="skipped-row"
               >
@@ -143,12 +150,19 @@ export function ResultPanel({
         <p className="text-on-surface-variant text-xs">{l.result.none}</p>
       )}
 
-      {result.backupId && (
-        <div className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container p-3">
+      {result.backups.map((handle) => (
+        <div
+          key={`${handle.environmentId}:${handle.backupId}`}
+          className="space-y-2 rounded-lg border border-outline-variant/15 bg-surface-container p-3"
+          data-testid="backup-handle"
+          data-environment-id={handle.environmentId}
+        >
           <p className="break-all font-mono text-[11px] text-on-surface-variant/70">
-            {formatMessage(l.result.backupId, { id: result.backupId })}
+            {environmentName(handle.environmentId)} ·{' '}
+            {formatMessage(l.result.backupId, { id: handle.backupId })}
           </p>
-          {undoResult ? (
+          {undoResult?.environmentId === handle.environmentId &&
+          undoResult.backupId === handle.backupId ? (
             <div className="space-y-1" data-testid="undo-result">
               <p className="text-on-surface text-xs">
                 {formatMessage(l.result.undone, {
@@ -178,7 +192,7 @@ export function ResultPanel({
             <Button
               size="sm"
               variant="secondary"
-              onClick={onUndo}
+              onClick={() => onUndo(handle.environmentId, handle.backupId)}
               loading={isUndoing}
               data-testid="undo-button"
             >
@@ -190,7 +204,7 @@ export function ResultPanel({
             <p className="text-error text-[11px]">{l.result.undoError}</p>
           )}
         </div>
-      )}
+      ))}
     </div>
   );
 }
