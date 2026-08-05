@@ -10,6 +10,7 @@ import type {
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
 import {
+  ContainerFailureReasonSchema,
   LOCAL_ENVIRONMENT_ID,
   LOCAL_ENVIRONMENT_NAME,
   SshFailureReasonSchema,
@@ -29,6 +30,7 @@ import { wslLaunchCommand } from '../../modules/environments/domain/wsl-runtime-
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
 import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-provisioner';
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
+import { connectContainerRuntime } from './connect-container-runtime';
 import { connectHttpRuntime } from './connect-http-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
 import { capabilityManifestFromHealth } from './manifest-from-health';
@@ -68,9 +70,17 @@ export type RuntimeEnvironmentResolver = (
   environmentId: string
 ) => Promise<RuntimeEnvironmentDefinition | null>;
 
+/**
+ * A step long enough that the card has to name it, rather than showing
+ * `connecting` for minutes and reading as a hub that has stopped answering.
+ * Only container launches raise one so far — a cold image pull.
+ */
+export type RuntimeConnectPhase = 'pulling';
+
 export type RuntimeEnvironmentConnector = (
   definition: RuntimeEnvironmentDefinition,
-  onUnavailable: () => void
+  onUnavailable: () => void,
+  report: (phase: RuntimeConnectPhase) => void
 ) => Promise<ManagedRuntimeConnection>;
 
 export interface RuntimeConnectionManagerOptions {
@@ -225,9 +235,18 @@ function statusErrorCode(error: unknown): RuntimeErrorCode {
  * which need a different fix. Validated rather than trusted: the value comes
  * back through an untyped details bag.
  */
-function failureDetail(error: unknown): Pick<EnvironmentConnectionStatus, 'sshFailureReason'> {
-  const reason = error instanceof RuntimeRemoteError ? error.details?.sshFailureReason : undefined;
-  return Value.Check(SshFailureReasonSchema, reason) ? { sshFailureReason: reason } : {};
+function failureDetail(
+  error: unknown
+): Pick<EnvironmentConnectionStatus, 'sshFailureReason' | 'containerFailureReason'> {
+  const details = error instanceof RuntimeRemoteError ? error.details : undefined;
+  const ssh = details?.sshFailureReason;
+  const container = details?.containerFailureReason;
+  return {
+    ...(Value.Check(SshFailureReasonSchema, ssh) ? { sshFailureReason: ssh } : {}),
+    ...(Value.Check(ContainerFailureReasonSchema, container)
+      ? { containerFailureReason: container }
+      : {}),
+  };
 }
 
 export class RuntimeConnectionManager {
@@ -309,9 +328,15 @@ export class RuntimeConnectionManager {
           throw unavailable(`Environment "${environmentId}" was not found.`);
         }
         entry.transportKind = definition.transportKind;
-        return this.#openConnection(definition, () => {
-          this.#markUnavailable(key, userId, revision);
-        });
+        return this.#openConnection(
+          definition,
+          () => {
+            this.#markUnavailable(key, userId, revision);
+          },
+          (phase) => {
+            this.#reportPhase(entry, userId, revision, phase);
+          }
+        );
       })
       .then((connection) => {
         if (entry.revision !== revision) {
@@ -546,9 +571,31 @@ export class RuntimeConnectionManager {
     };
   }
 
+  /**
+   * Names what a still-connecting environment is waiting on.
+   *
+   * Only applied while this attempt is still the current one — a superseded
+   * connect must not repaint a status the next one already owns. Nothing clears
+   * the flag: every path out of `connect()` replaces the status wholesale, so
+   * it lives exactly as long as the attempt that set it.
+   */
+  #reportPhase(
+    entry: RuntimeConnectionEntry,
+    userId: string,
+    revision: number,
+    phase: RuntimeConnectPhase
+  ): void {
+    if (entry.revision !== revision || entry.status.state !== 'connecting') return;
+    if (phase === 'pulling' && entry.status.pullingImage) return;
+
+    entry.status = { ...entry.status, pullingImage: true };
+    this.#publish(userId);
+  }
+
   async #openConnection(
     definition: RuntimeEnvironmentDefinition,
-    onUnavailable: () => void
+    onUnavailable: () => void,
+    report: (phase: RuntimeConnectPhase) => void
   ): Promise<ManagedRuntimeConnection> {
     if (!definition.enabled) {
       throw unavailable(`Environment "${definition.id}" is disabled.`);
@@ -568,7 +615,7 @@ export class RuntimeConnectionManager {
     // A runtime whose path style differs from the hub's is addressed on its own
     // terms: tools resolve `~` and relative input through the connection's
     // manifest, and the runtime re-checks the result against its own filesystem.
-    return await connector(definition, onUnavailable);
+    return await connector(definition, onUnavailable, report);
   }
 
   /**
@@ -833,6 +880,8 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
       websocket: refuseDialInRuntime,
       http: connectHttpRuntime,
       ssh: connectSshRuntime,
+      container: (definition, onUnavailable, report) =>
+        connectContainerRuntime(definition, onUnavailable, report),
     },
     publish: publishEnvironmentInvalidation,
   });
