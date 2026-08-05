@@ -67,6 +67,7 @@ updating every template and installer in the same release.
 | `mangostudio-<version>-<platform>[.exe]`         | Raw hub binary (no archive) for direct download / one-liner installs                                                       |
 | `mangostudio-runtime-<version>-<platform>[.exe]` | Raw runtime binary for WSL/SSH provisioning and remote one-liners                                                          |
 | `mangostudio-<version>-frontend-dist.tar.gz`     | Frontend bundle only (`apps/frontend/dist`)                                                                                |
+| `canary-manifest.json`                           | **Canary only.** Source commit, build time, and pair digests for the rolling build (see below)                             |
 | `SHA256SUMS`                                     | Checksums for every asset above                                                                                            |
 
 Each platform archive has a **flat root**: `mangostudio` (or `mangostudio.exe`),
