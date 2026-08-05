@@ -9,7 +9,7 @@
 import { en } from '@mangostudio/shared/i18n';
 import type { RemovalPreview } from '@mangostudio/shared/library';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemovalWizard } from '../../../../src/features/library/components/RemovalWizard';
 import { screen } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
@@ -46,6 +46,7 @@ const preview: RemovalPreview = {
 };
 
 const scenario = createFetchScenario()
+  .respondWithJson('GET', '/api/environments', { body: [] })
   .respondWithJson('POST', '/api/library/removal/preview', { body: preview })
   .respondWithJson('POST', '/api/library/removal/apply', {
     status: 409,
@@ -80,5 +81,56 @@ describe('RemovalWizard after a stale rejection', () => {
     // Clicking again would send the same draft against the same refused
     // preview; "Preview again" beside the banner is the only way on.
     expect(screen.getByTestId('remove-button')).toBeDisabled();
+  });
+});
+
+describe('RemovalWizard while the environment scope is still loading', () => {
+  it('does not preview against a partial machine scope', async () => {
+    let resolveEnvironments!: () => void;
+    const pendingEnvironments = new Promise<Response>((resolve) => {
+      resolveEnvironments = () =>
+        resolve(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), 'http://localhost');
+      if (url.pathname === '/api/environments') return pendingEnvironments;
+      if (url.pathname === '/api/library/removal/preview') {
+        return Promise.resolve(
+          new Response(JSON.stringify(preview), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        );
+      }
+      return Promise.reject(new Error(`[test] Unhandled request: ${url.pathname}`));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await renderWithRouter(
+      <RemovalWizard
+        resourceKeys={['skill:gh']}
+        locationIds={['claude-skills']}
+        onClose={() => undefined}
+      />
+    );
+
+    // The environment scope is still one machine wide; a preview taken now
+    // would miss every other enabled machine's copies.
+    expect(await screen.findByTestId('library-loading')).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).includes('/library/removal/preview'))
+    ).toEqual([]);
+
+    resolveEnvironments();
+
+    await screen.findByTestId('removal-row');
+    expect(
+      fetchMock.mock.calls.filter(([input]) => String(input).includes('/library/removal/preview'))
+    ).not.toEqual([]);
   });
 });

@@ -42,7 +42,8 @@ export function RemovalWizard({
   const { t } = useI18n();
   const l = t.library;
 
-  const environments = useEnvironmentEntitiesQuery().data ?? [];
+  const environmentsQuery = useEnvironmentEntitiesQuery();
+  const environments = environmentsQuery.data ?? [];
   const scopeEnvironmentId = environmentId ?? LOCAL_ENVIRONMENT_ID;
 
   /**
@@ -69,10 +70,14 @@ export function RemovalWizard({
   const request = useMemo<RemovalPreviewRequest>(
     () => ({
       resourceKeys: [...resourceKeys],
-      locationIds: [...locationIds],
+      // Empty until the environments query resolves: `environmentIds` below
+      // only reflects the full machine set once it does, and a preview taken
+      // before that would let an apply through having seen just this machine —
+      // exactly what the last-copy guard above depends on not happening.
+      locationIds: environmentsQuery.isSuccess ? [...locationIds] : [],
       environmentIds,
     }),
-    [resourceKeys, locationIds, environmentIds]
+    [resourceKeys, locationIds, environmentIds, environmentsQuery.isSuccess]
   );
   const wizard = useRemoval(request);
   const preview = wizard.preview;
@@ -183,6 +188,11 @@ export function RemovalWizard({
               title={l.removal.noLocations}
               hint={l.removal.noLocationsHint}
             />
+          ) : !environmentsQuery.isSuccess ? (
+            // The preview request above is deliberately held back until this
+            // resolves, so `isPreviewing` is still false here — without this
+            // branch that reads as a failed preview instead of one not yet asked.
+            <LibraryPageState variant="loading" />
           ) : wizard.isPreviewing && !preview ? (
             <LibraryPageState variant="loading" />
           ) : wizard.previewError || !preview ? (
