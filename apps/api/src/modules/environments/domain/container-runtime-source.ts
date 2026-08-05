@@ -18,7 +18,8 @@
  * already reports it.
  */
 
-import { chmod, mkdir, stat, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { chmod, mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { LinuxPlatformId } from '@mangostudio/shared/runtime-home';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
@@ -57,13 +58,21 @@ async function exists(path: string): Promise<boolean> {
  * The mount is read-only inside the container, but the bit has to be set on the
  * host side: a file the hub wrote without it is mounted just as unexecutable,
  * and the container fails with a permission error that says nothing about why.
+ *
+ * Written to a sibling temp file and renamed into place rather than truncated
+ * in place: `path` may already be bind-mounted and running as another
+ * container's entrypoint, and truncating that inode fails the host-side write
+ * with `ETXTBSY`. A rename swaps the directory entry instead, so a container
+ * launched from the old bytes keeps them and a new launch sees the new ones.
  */
 async function writeExecutable(path: string, bytes: Uint8Array): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, bytes, { mode: 0o755 });
-  // `writeFile`'s mode applies only when it creates the file, so an existing
-  // one keeps whatever it had.
-  await chmod(path, 0o755);
+  const tmp = `${path}.tmp-${randomUUID()}`;
+  await writeFile(tmp, bytes, { mode: 0o755 });
+  // `writeFile`'s mode applies only when it creates the file, which `tmp`
+  // always is, but a restrictive umask can still strip the bit.
+  await chmod(tmp, 0o755);
+  await rename(tmp, path);
 }
 
 const defaultDeps: ContainerRuntimeSourceDeps = {
