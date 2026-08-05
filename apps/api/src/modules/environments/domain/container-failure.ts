@@ -102,7 +102,15 @@ export function describeContainerFailure(
   }
 }
 
+/** Bounds how much of a command's output a card can be asked to render. */
+const MAX_REPORTED_TAIL_CHARS = 4_000;
+
 function describeTail(stderr: string): string {
-  const tail = stderr.trim();
-  return tail ? `The engine reported:\n${tail}` : 'The engine reported nothing.';
+  const trimmed = stderr.trim();
+  if (!trimmed) return 'The engine reported nothing.';
+  const tail =
+    trimmed.length > MAX_REPORTED_TAIL_CHARS
+      ? `…${trimmed.slice(-MAX_REPORTED_TAIL_CHARS)}`
+      : trimmed;
+  return `The engine reported:\n${tail}`;
 }

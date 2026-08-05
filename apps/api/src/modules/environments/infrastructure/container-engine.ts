@@ -14,6 +14,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type {
   ContainerDetection,
   ContainerEngine,
@@ -22,6 +23,7 @@ import type {
   ContainerFailureReason,
 } from '@mangostudio/shared/environments';
 import {
+  CONTAINER_NAME_PREFIX,
   containerEngineOf,
   containerEngineVersionCommand,
   containerImageInspectCommand,
@@ -45,6 +47,14 @@ const PROBE_TIMEOUT_MS = 60_000;
  */
 const PULL_TIMEOUT_MS = 1_800_000;
 const MAX_OUTPUT_BYTES = 256 * 1024;
+/**
+ * A pull's own progress text is far chattier than any other command here, so it
+ * gets a cap of its own rather than sharing {@link MAX_OUTPUT_BYTES} and having
+ * a normal pull mistaken for a hung one.
+ */
+const MAX_PULL_OUTPUT_BYTES = 4 * 1024 * 1024;
+/** `execFile`'s error code when a command is killed for exceeding its buffer. */
+const MAXBUFFER_ERROR_CODE = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
 
 /**
  * How many image identities keep a probe. Small because it is one entry per
@@ -72,13 +82,20 @@ interface EngineResult {
   readonly stderr: string;
   readonly exitCode: number | null;
   readonly spawnErrorCode?: string;
+  /**
+   * Whether `execFile`'s own timeout is what ended this call. Killing the CLI
+   * this way does not stop a container it started on the daemon, so a caller
+   * that named the container has to reap it itself.
+   */
+  readonly timedOut?: boolean;
 }
 
 export interface ContainerEngineDeps {
   readonly run: (
     command: string,
     args: readonly string[],
-    timeoutMs: number
+    timeoutMs: number,
+    maxOutputBytes?: number
   ) => Promise<EngineResult>;
 }
 
@@ -100,15 +117,17 @@ export interface ContainerEngineService {
 function runWithExecFile(
   command: string,
   args: readonly string[],
-  timeoutMs: number
+  timeoutMs: number,
+  maxOutputBytes = MAX_OUTPUT_BYTES
 ): Promise<EngineResult> {
   return new Promise((resolve) => {
     execFile(
       command,
       [...args],
-      { timeout: timeoutMs, maxBuffer: MAX_OUTPUT_BYTES, windowsHide: true },
+      { timeout: timeoutMs, maxBuffer: maxOutputBytes, windowsHide: true },
       (error, stdout, stderr) => {
-        const code = (error as (Error & { code?: unknown }) | null)?.code;
+        const err = error as (Error & { code?: unknown; killed?: boolean }) | null;
+        const code = err?.code;
         resolve({
           stdout,
           stderr,
@@ -118,6 +137,10 @@ function runWithExecFile(
           // missing engine.
           exitCode: typeof code === 'number' ? code : error ? null : 0,
           ...(typeof code === 'string' ? { spawnErrorCode: code } : {}),
+          // `killed` is also set when `maxBuffer` cuts a command off; the
+          // string `code` in that case already identifies it, so timeout is
+          // only what is left once that case is excluded.
+          ...(err?.killed && typeof code !== 'string' ? { timedOut: true } : {}),
         });
       }
     );
@@ -143,8 +166,9 @@ export function createContainerEngineService(
 
   const run = (
     command: { readonly command: string; readonly args: readonly string[] },
-    timeoutMs: number
-  ): Promise<EngineResult> => deps.run(command.command, command.args, timeoutMs);
+    timeoutMs: number,
+    maxOutputBytes?: number
+  ): Promise<EngineResult> => deps.run(command.command, command.args, timeoutMs, maxOutputBytes);
 
   const refuse = (
     result: EngineResult,
@@ -205,8 +229,22 @@ export function createContainerEngineService(
         // The one long step, and the only one a user is asked to wait through.
         hooks.onPullStart?.();
         logger.info('image_pull_started', { engine, image: config.image });
-        const pull = await run(containerPullCommand(config), PULL_TIMEOUT_MS);
-        if (pull.exitCode !== 0) throw refuse(pull, context);
+        const pull = await run(
+          containerPullCommand(config),
+          PULL_TIMEOUT_MS,
+          MAX_PULL_OUTPUT_BYTES
+        );
+        if (pull.exitCode !== 0) {
+          // A pull this chatty is not a spawn failure; classifying it as one
+          // would report a rate limit or a slow registry as a missing engine.
+          if (pull.spawnErrorCode === MAXBUFFER_ERROR_CODE) {
+            throw new ContainerEngineError(
+              'image-pull-failed',
+              describeContainerFailure('image-pull-failed', { ...context, stderr: pull.stderr })
+            );
+          }
+          throw refuse(pull, context);
+        }
         id = await imageId(config);
         if (!id) {
           throw new ContainerEngineError(
@@ -220,11 +258,17 @@ export function createContainerEngineService(
       const cached = probeCache.get(cacheKey);
       if (cached) return cached;
 
+      const probeName = `${CONTAINER_NAME_PREFIX}-probe-${randomUUID()}`;
       const probe = await run(
-        containerProbeCommand(config, PLATFORM_PROBE_SCRIPT),
+        containerProbeCommand(config, PLATFORM_PROBE_SCRIPT, probeName),
         PROBE_TIMEOUT_MS
       );
-      if (probe.exitCode !== 0) throw refuse(probe, context);
+      if (probe.exitCode !== 0) {
+        // `execFile`'s timeout only kills the CLI; the container it started
+        // keeps running on the daemon until this backstop reaps it by name.
+        if (probe.timedOut) await run(containerKillCommand(engine, probeName), INSPECT_TIMEOUT_MS);
+        throw refuse(probe, context);
+      }
 
       const platformId = platformFromProbe(probe.stdout);
       if (!platformId) {

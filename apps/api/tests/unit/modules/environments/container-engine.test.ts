@@ -20,6 +20,7 @@ interface StubReply {
   readonly stderr?: string;
   readonly exitCode?: number | null;
   readonly spawnErrorCode?: string;
+  readonly timedOut?: boolean;
 }
 
 /**
@@ -45,6 +46,7 @@ function engineStub(replies: Record<string, StubReply | readonly StubReply[]>) {
       stderr: reply.stderr ?? '',
       exitCode: reply.exitCode === undefined ? 0 : reply.exitCode,
       ...(reply.spawnErrorCode ? { spawnErrorCode: reply.spawnErrorCode } : {}),
+      ...(reply.timedOut ? { timedOut: true } : {}),
     });
   };
 
@@ -218,6 +220,23 @@ describe('container image preparation', () => {
     );
   });
 
+  it('reaps a probe container that outlived execFile’s own timeout', async () => {
+    const stub = engineStub({
+      inspect: { stdout: 'sha256:eee' },
+      run: { exitCode: null, timedOut: true },
+    });
+
+    const attempt = createContainerEngineService({ run: stub.run }).prepare(config);
+    await expect(attempt).rejects.toBeInstanceOf(ContainerEngineError);
+
+    const probeCall = stub.calls.find((call) => call.args[0] === 'run');
+    const killCall = stub.calls.find((call) => call.args[0] === 'kill');
+    const probeName = probeCall?.args[probeCall.args.indexOf('--name') + 1];
+
+    expect(probeName).toMatch(/^mango-rt-probe-/);
+    expect(killCall?.args).toEqual(['kill', probeName as string]);
+  });
+
   it('reports a daemon that will not answer rather than a missing image', async () => {
     const stub = engineStub({
       inspect: {
@@ -241,6 +260,22 @@ describe('container image preparation', () => {
     await expect(createContainerEngineService({ run: stub.run }).prepare(config)).rejects.toThrow(
       /did not finish/
     );
+  });
+
+  it('reports a pull that overran its output buffer as unfinished, not as a missing engine', async () => {
+    const stub = engineStub({
+      inspect: { stderr: 'Error: node:22: image not known', exitCode: 1 },
+      pull: {
+        stderr: 'Downloading [=====>] 40%',
+        exitCode: null,
+        spawnErrorCode: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+      },
+    });
+
+    const attempt = createContainerEngineService({ run: stub.run }).prepare(config);
+    await expect(attempt).rejects.toBeInstanceOf(ContainerEngineError);
+    await expect(attempt).rejects.toMatchObject({ reason: 'image-pull-failed' });
+    await expect(attempt).rejects.toThrow(/did not finish/);
   });
 });
 
