@@ -73,11 +73,11 @@ export interface DistroPlatformProbe {
 }
 
 /**
- * Reports kernel, machine, and libc in one round trip. Alpine on WSL is a real
- * configuration and needs the musl build, which `uname -m` alone cannot
- * distinguish from glibc. `uname -s` lets SSH targets resolve Darwin vs Linux.
+ * Re-exported so this module stays the one import for WSL provisioning. The
+ * script itself lives beside the parser it feeds, because container and SSH
+ * targets answer the same one.
  */
-export const PLATFORM_PROBE_SCRIPT = 'uname -s; uname -m; (ldd --version 2>&1 || true) | head -n 1';
+export { PLATFORM_PROBE_SCRIPT } from '@mangostudio/shared/runtime-home';
 
 const CURRENT_BINARY = distroPath(RUNTIME_CURRENT_LINK_NAME, RUNTIME_ARCHIVE_MEMBER);
 const CONFIG_PATH = distroPath(RUNTIME_CONFIG_FILE_NAME);

@@ -2140,6 +2140,7 @@ export const messages: Messages = {
         websocket: 'WebSocket',
         http: 'Direct URL',
         ssh: 'SSH',
+        container: 'Container',
       },
       connect: 'Connect',
       disconnect: 'Disconnect',

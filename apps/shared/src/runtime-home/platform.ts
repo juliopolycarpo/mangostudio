@@ -22,6 +22,19 @@ export interface RuntimePlatformProbe {
   readonly libc: string;
 }
 
+/**
+ * Reports kernel, machine, and libc in one round trip, in the order
+ * {@link RuntimePlatformProbe} reads them.
+ *
+ * It lives beside the parser because a probe and the thing that interprets its
+ * output are one contract: WSL, SSH and container targets all answer this exact
+ * script, and a second copy would drift the day one of them needed another
+ * line. Alpine is a real target on all three and needs the musl build, which
+ * `uname -m` alone cannot distinguish from glibc; `uname -s` is what keeps a
+ * macOS SSH host from being handed a Linux binary.
+ */
+export const PLATFORM_PROBE_SCRIPT = 'uname -s; uname -m; (ldd --version 2>&1 || true) | head -n 1';
+
 function architectureSuffix(machine: string): 'x64' | 'arm64' | null {
   const normalized = machine.trim().toLowerCase();
   if (normalized === 'x86_64' || normalized === 'amd64') return 'x64';

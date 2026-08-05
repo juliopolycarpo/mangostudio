@@ -73,6 +73,10 @@ export function canUpdateOverLiveConnection(
     input.transportKind !== 'in-process' &&
     input.transportKind !== 'wsl' &&
     input.transportKind !== 'ssh' &&
+    // The container's binary is a read-only bind mount of the hub's own, so a
+    // live update has nothing to write to and nothing to fix: relaunching the
+    // container already picks up whatever version this hub now resolves.
+    input.transportKind !== 'container' &&
     input.connected &&
     input.managedPush !== false &&
     input.health !== null &&
@@ -95,6 +99,11 @@ export function lifecycleActions(
       return ['install', 'reinstall', 'upgrade'];
     case 'ssh':
       return ['install', 'reinstall', 'upgrade', 'setup'];
+    // A container mounts the hub's own runtime binary read-only, so there is
+    // nothing to install, upgrade or consent to on the far side: the bytes
+    // follow this hub's version by construction, and the slot they resolve to
+    // is `host`, which is already answered.
+    case 'container':
     case 'websocket':
     case 'http':
     case 'in-process':
