@@ -103,6 +103,13 @@ jobs:
           MANGO_CONTAINER_E2E_IMAGE: mango-container-smoke:test
           MANGO_CONTAINER_E2E_RUNTIME: ${{ github.workspace }}/.mango/out/${{ matrix.binary_platform }}/mangostudio-runtime
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
+          # The container transport keeps `requireMatchingRelease` on, because
+          # the binary it mounts is the hub's own. The runtime downloaded above
+          # is stamped with the distribution's version, so the hub has to report
+          # that same one — a checkout otherwise says `dev` and the handshake
+          # correctly refuses the pair. Setting it here is also what makes this
+          # job a real pairing check rather than two halves that never meet.
+          VERSION: ${{ inputs.version }}
         # The suite self-skips when the binary or the image is missing, which
         # would make this job green while proving nothing. Fail loudly instead.
         run: |
