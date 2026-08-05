@@ -71,6 +71,14 @@ async function survivingContainers(): Promise<string[]> {
   return stdout.split('\n').filter((line) => line.trim().length > 0);
 }
 
+/** `ls /sys/class/net` output, minus loopback — what the network flag controls. */
+function nonLoopbackInterfaces(lsOutput: string): string[] {
+  return lsOutput
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((name) => name.length > 0 && name !== 'lo');
+}
+
 function open(config: Partial<ContainerEnvironmentConfig> = {}) {
   return connectContainerRuntime(
     { id: 'e2e-sandbox', config: { image, engine, ...config } },
@@ -147,6 +155,11 @@ describe('connectContainerRuntime against a real engine', () => {
       // Reading the interface list rather than reaching for curl: the image is
       // the user's and need not ship a network tool, while /sys/class/net is
       // there in every Linux container and says exactly what the flag did.
+      // The name of the non-loopback interface is an engine networking detail
+      // rather than something this launcher controls — docker's default
+      // bridge calls it eth0, and podman's has called it tap0 or eth0
+      // depending on the backend — so only its presence or absence is
+      // asserted, never its name.
       const withNetwork = await open({ network: true });
       let interfaces: string;
       try {
@@ -156,7 +169,7 @@ describe('connectContainerRuntime against a real engine', () => {
       } finally {
         await withNetwork.close();
       }
-      expect(interfaces).toContain('eth0');
+      expect(nonLoopbackInterfaces(interfaces)).not.toEqual([]);
 
       const isolated = await open({ network: false });
       try {
@@ -165,7 +178,7 @@ describe('connectContainerRuntime against a real engine', () => {
           command: 'ls /sys/class/net',
         });
         expect(result.stdout).toContain('lo');
-        expect(result.stdout).not.toContain('eth0');
+        expect(nonLoopbackInterfaces(result.stdout)).toEqual([]);
       } finally {
         await isolated.close();
       }
