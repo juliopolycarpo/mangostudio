@@ -20,8 +20,20 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
-import { useCreateEnvironmentMutation, useWslDetectionQuery } from '../queries';
+import {
+  type ContainerFormFields,
+  containerFormToConfig,
+  defaultContainerForm,
+  isContainerFormUsable,
+  validateContainerForm,
+} from '../container-form';
+import {
+  useContainerDetectionQuery,
+  useCreateEnvironmentMutation,
+  useWslDetectionQuery,
+} from '../queries';
 import { isSshFormUsable, SSH_LEADING_DASH, sshFormToConfig, validateSshForm } from '../ssh-form';
+import { ContainerConfigFields } from './ContainerConfigFields';
 import { CopyLine } from './CopyLine';
 import { WslDistributionPicker } from './WslDistributionPicker';
 
@@ -31,7 +43,7 @@ const ENVIRONMENT_ID_MAX_LENGTH = 63;
 const ENVIRONMENT_NAME_MAX_LENGTH = 80;
 
 /** One answer to "how do you reach it", and the transport that answer implies. */
-type ReachabilityChoice = 'stdio' | 'wsl' | 'websocket' | 'http' | 'ssh';
+type ReachabilityChoice = 'stdio' | 'wsl' | 'container' | 'websocket' | 'http' | 'ssh';
 
 interface AddEnvironmentDialogProps {
   readonly onClose: () => void;
@@ -78,9 +90,12 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const [sshPort, setSshPort] = useState('');
   const [sshIdentityFile, setSshIdentityFile] = useState('');
   const [sshRuntimePath, setSshRuntimePath] = useState('');
+  const [container, setContainer] = useState<ContainerFormFields>(defaultContainerForm());
   const [error, setError] = useState<string | null>(null);
 
   const wsl = useWslDetectionQuery(true);
+  const containers = useContainerDetectionQuery(true);
+  const containerOffered = containers.data?.available === true;
   const distributions = wsl.data?.distributions ?? [];
   const wslOffered = wsl.data?.available === true;
   const offered = distributions.filter((distribution) => !distribution.environmentId);
@@ -97,6 +112,19 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
     if (kind !== 'wsl' || nameEdited || !selectedDistro) return;
     setName(selectedDistro);
   }, [kind, nameEdited, selectedDistro]);
+
+  // The engine field defaults to docker, which is wrong on a machine that only
+  // has podman. Detection moves it once, before anything is typed; after that
+  // the field is the user's.
+  const detectedEngine = containers.data?.engines.find((entry) => entry.available)?.engine;
+  useEffect(() => {
+    if (!detectedEngine) return;
+    setContainer((current) =>
+      current.image === '' && current.engine === 'docker'
+        ? { ...current, engine: detectedEngine }
+        : current
+    );
+  }, [detectedEngine]);
 
   const trimmedName = name.trim();
   const trimmedBaseUrl = baseUrl.trim();
@@ -115,17 +143,21 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const sshConfig = sshFormToConfig(sshForm);
   const sshFieldInvalid = validateSshForm(sshForm);
   const sshInvalid = kind === 'ssh' && !isSshFormUsable(sshForm);
+  const containerError = validateContainerForm(container);
+  const containerInvalid = kind === 'container' && !isContainerFormUsable(container);
   const blocked =
     trimmedName.length === 0 ||
     effectiveId.length === 0 ||
     idInvalid ||
     httpIncomplete ||
     sshInvalid ||
+    containerInvalid ||
     (kind === 'wsl' && !selectionOffered);
 
   const choices: { readonly value: ReachabilityChoice; readonly label: string }[] = [
     { value: 'stdio', label: labels.reachLocal },
     ...(wslOffered ? [{ value: 'wsl' as const, label: labels.reachWsl }] : []),
+    ...(containerOffered ? [{ value: 'container' as const, label: labels.reachContainer }] : []),
     { value: 'websocket', label: labels.reachPaired },
     { value: 'http', label: labels.reachDirect },
     { value: 'ssh', label: labels.reachSsh },
@@ -133,6 +165,7 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const hints: Record<ReachabilityChoice, string> = {
     stdio: labels.stdioHint,
     wsl: labels.wslHint,
+    container: labels.containerHint,
     websocket: labels.pairedHint,
     http: labels.directHint,
     ssh: labels.sshHint,
@@ -176,17 +209,24 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                   transportKind: 'ssh',
                   config: sshConfig,
                 }
-              : {
-                  id: effectiveId,
-                  name: trimmedName,
-                  transportKind: 'stdio',
-                  // An omitted field means "use the default"; an empty string would
-                  // be a path the launcher then tries to spawn.
-                  config: {
-                    ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
-                    ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
-                  },
-                };
+              : kind === 'container'
+                ? {
+                    id: effectiveId,
+                    name: trimmedName,
+                    transportKind: 'container',
+                    config: containerFormToConfig(container),
+                  }
+                : {
+                    id: effectiveId,
+                    name: trimmedName,
+                    transportKind: 'stdio',
+                    // An omitted field means "use the default"; an empty string would
+                    // be a path the launcher then tries to spawn.
+                    config: {
+                      ...(trimmedBinaryPath ? { binaryPath: trimmedBinaryPath } : {}),
+                      ...(trimmedCwd ? { cwd: trimmedCwd } : {}),
+                    },
+                  };
 
     try {
       await create.mutateAsync(body);
@@ -301,6 +341,16 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                 <p className="text-on-surface-variant/60 text-xs">{labels.cwdHint}</p>
               </div>
             </>
+          ) : null}
+
+          {kind === 'container' ? (
+            <ContainerConfigFields
+              idPrefix="add-environment-container"
+              form={container}
+              error={containerError}
+              detection={containers.data}
+              onChange={(patch) => setContainer((current) => ({ ...current, ...patch }))}
+            />
           ) : null}
 
           {kind === 'websocket' ? (

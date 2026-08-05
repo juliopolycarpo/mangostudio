@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { ApiKeyScopeSchema } from '../../src/api-keys';
 import { CapabilityReasonCodeSchema } from '../../src/capabilities';
 import {
+  ContainerFailureReasonSchema,
   InstallGuardReasonSchema,
   LtsStatusSchema,
   RuntimeFindingCodeSchema,
@@ -60,6 +61,14 @@ const ENUM_COVERAGE = [
     path: 'environments.entities.ssh.reason',
     values: literalValues(SshFailureReasonSchema),
     blocks: [en.environments.entities.ssh.reason, ptBR.environments.entities.ssh.reason],
+  },
+  {
+    path: 'environments.entities.container.reason',
+    values: literalValues(ContainerFailureReasonSchema),
+    blocks: [
+      en.environments.entities.container.reason,
+      ptBR.environments.entities.container.reason,
+    ],
   },
   {
     path: 'environments.install.guardBlocked',

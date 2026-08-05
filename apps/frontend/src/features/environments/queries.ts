@@ -8,6 +8,7 @@
 
 import type {
   AgentCliStatusList,
+  ContainerDetection,
   CreateEnvironmentBody,
   Environment,
   InstallRecipePreview,
@@ -55,6 +56,7 @@ export const environmentKeys = {
   installRecipes: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...environmentKeys.all, 'install-recipes', environmentId] as const,
   wsl: () => [...environmentKeys.all, 'wsl'] as const,
+  containers: () => [...environmentKeys.all, 'containers'] as const,
   pairings: () => [...environmentKeys.all, 'pairing'] as const,
   pairing: (id: string) => [...environmentKeys.pairings(), id] as const,
 };
@@ -372,6 +374,24 @@ export function useWslDetectionQuery(enabled: boolean) {
       const { data, error } = await client.api.environments.wsl.get();
       if (error) throw new ApiError(error.value);
       return data as WslDetection;
+    },
+  });
+}
+
+/**
+ * Which container engines this machine has. Asked only while the add dialog is
+ * open: it spawns two CLIs, and the answer changes when someone installs or
+ * starts an engine, not on a schedule.
+ */
+export function useContainerDetectionQuery(enabled: boolean) {
+  return useQuery({
+    queryKey: environmentKeys.containers(),
+    enabled,
+    staleTime: STALE_TIME_MS,
+    queryFn: async () => {
+      const { data, error } = await client.api.environments.containers.get();
+      if (error) throw new ApiError(error.value);
+      return data as ContainerDetection;
     },
   });
 }

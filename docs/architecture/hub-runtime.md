@@ -109,6 +109,7 @@ Additive protocol changes stay on major/minor `1.0` while the wire stays compati
 | Paired WebSocket          | Current | Runtime dials in | Chunked binary frames over one socket to `/api/runtime`, authenticated by a pairing token.   |
 | Direct URL                | Current | Hub dials out    | Same chunked WebSocket framing; the runtime listens and the hub presents a serve token.      |
 | SSH                       | Current | Hub spawns       | A launcher over stdio: the system `ssh` client, with the runtime on the far end of its pipe. |
+| Container                 | Current | Hub spawns       | A launcher over stdio: `docker`/`podman` run, with the runtime bind-mounted into the image.  |
 
 Which one to reach for:
 
@@ -125,6 +126,9 @@ Which one to reach for:
   and `known_hosts` that are already set up, needs nothing on the hub beyond an ssh client, and
   needs no credential of MangoStudio's own. Nothing needs to be installed first: the
   environment card can push the runtime binary and run `setup` over the same ssh channel.
+- **This machine, but the agent must not reach the rest of it** — Container. Tools run inside a
+  disposable container started from an image you already have. This is the one transport whose
+  purpose is what the agent *cannot* do, rather than where it runs.
 
 The shared NDJSON codec validates every frame, buffers partial lines, and rejects records
 larger than 16 MiB. Production in-process delivery uses structured cloning while retaining
@@ -727,6 +731,86 @@ and the protocol major/minor pair is what does. Drift is reported on the card.
 
 Provisioning is not part of this transport. The runtime has to be installed on the target
 already, and the card prints the commands that check what is there.
+
+## Container Transport
+
+`transportKind: 'container'` spawns `docker` or `podman` and runs the stdio transport through
+the pipe. A launcher, like WSL and SSH — no new protocol, and no daemon inside the container.
+
+The `engine` field selects a binary name and nothing else. Every flag this transport passes
+(`--rm -i --init --name --pull=never --network --cpus --memory -v --entrypoint`) is accepted by
+both CLIs; the moment one of them needed its own argv, the field would stop being a name and
+become a fork, which is not what it is for.
+
+### Nothing is baked into an image
+
+The image belongs to the user and is never modified. The runtime binary is bind-mounted
+read-only at `/opt/mangostudio-runtime` and run as the container's entrypoint, so the version
+inside the container follows the hub's without an image rebuild and without MangoStudio
+publishing images of its own.
+
+The bytes come from the same channel-aware resolver every other provisioning path uses, into
+the same `~/.mango/runtime-cache/<version>/`. A source checkout mounts the build it made for
+itself under `.mango/out/<platform>/` instead, and says which command produces one when there
+is none.
+
+Which build is needed is a question about the image, so it is asked of the image: one
+`sh -c 'uname -s; uname -m; ldd --version'` inside it, the same probe WSL and SSH targets
+answer. That is what distinguishes an Alpine image (musl) from a Debian one (glibc), which
+`uname -m` alone cannot. An image with no shell fails there with a typed error rather than at
+launch — using a shell-bearing image is a documented limit of this transport.
+
+The probe result is cached against the image *id* the engine reported, not the image name. A
+tag is a moving target, so keying on identity means a re-pulled image misses the cache by
+construction rather than by an invalidation rule.
+
+### Pulling is a phase, not a hang
+
+A missing image is pulled on demand. A cold pull of a large image runs for minutes, so it is
+reported as its own phase and the card says "Pulling image" instead of showing `connecting`
+long enough to read as a hub that has stopped answering. The launch itself passes
+`--pull=never`: by then the image is present, and a silent download inside the handshake window
+is the one shape this must not have.
+
+### Consent, and which direction the isolation points
+
+There is no setup step. The mounted binary lives outside the runtime home, so
+`resolveRuntimeSlot` resolves it to `host`, whose default is full consent — the same case the
+Docker image regression test pins. Nothing is written inside the container, and nothing needs
+to be: the container is gone at the end of the connection.
+
+The protection points at the agent, not at the hub. A container is what makes `allow.shell`
+safe to grant, because it bounds what a shell can reach to a filesystem that is discarded
+afterwards. It is **not** a boundary against whoever configures the environment: the engine
+runs as the hub's own user and is host-root-equivalent, so an environment that can start
+containers can already do anything on the machine.
+
+That is why the mount denylist is enforced rather than documented. A mount of the engine
+socket, `/proc`, `/sys`, `/var/run` or `/run` is refused by the shared validator that both the
+browser form and the connector run, because any of them would let a process inside step back
+out. Resource limits (`cpus`, `memoryMib`) bound consumption; they are not part of the
+boundary and no copy presents them as if they were.
+
+### Ephemeral by construction
+
+The container filesystem is discarded when the connection ends. Agent homes, package caches
+and any written file vanish with it, and library propagation into an unmounted container home
+is correct and pointless. Anything that has to survive is an explicit `mounts` entry.
+
+`--rm` plus the runtime exiting on EOF is the ordinary teardown. Killing the engine's client
+process does not stop the container it started, so the connector also kills by the name it
+generated for that launch — never by image, since two environments may share one.
+
+### Lifecycle
+
+Identical to stdio, because it is stdio. The handshake budget is twenty seconds rather than
+five, to cover creating the container and starting an init before the first frame.
+
+`requireMatchingRelease` stays **on**, unlike the remote transports: the binary in the container
+is this hub's own, mounted from its own cache, so a mismatch means the resolution is wrong
+rather than that a peer runs its own install. There are no install, upgrade or setup actions on
+the card for the same reason — there is nothing on the far side to install, and a read-only
+bind mount has nothing to write to.
 
 ## Paths Across Hosts
 

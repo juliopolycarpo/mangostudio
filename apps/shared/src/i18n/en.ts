@@ -2132,6 +2132,7 @@ export const messages: Messages = {
         disconnected: 'Disconnected',
         error: 'Connection failed',
         updating: 'Updating',
+        pulling: 'Pulling image',
       },
       transport: {
         'in-process': 'In process',
@@ -2305,6 +2306,63 @@ export const messages: Messages = {
           unknown: 'ssh could not start the runtime. Press Connect to see what it reported.',
         },
       },
+      container: {
+        badge: 'Isolated',
+        title: 'Container',
+        description:
+          'Tools, workspaces and Git run inside a container started from an image you already have.',
+        isolationNote:
+          'The sandbox constrains the agent, not MangoStudio: it keeps a tool call away from the rest of this machine. The container engine runs as MangoStudio\u2019s own user, so this is not a boundary against whoever configures this environment.',
+        ephemeralNote:
+          'The container filesystem is discarded when the connection ends. Anything that has to survive \u2014 a project, a package cache, an agent home \u2014 needs a mount below.',
+        imageLabel: 'Image',
+        imageHint:
+          'Any image that ships a shell. It is never modified: the MangoStudio runtime is mounted into it read-only at start.',
+        imageInvalid: 'Use a reference like name:tag, with no spaces and no leading dash.',
+        engineLabel: 'Engine',
+        engine: {
+          docker: 'Docker',
+          podman: 'Podman',
+        },
+        engineReady: 'Available',
+        engineUnavailable: 'Not available here',
+        networkOffLabel: 'Disconnect the network',
+        networkOffHint:
+          'Agents usually need the network to clone, fetch and install. Turn it off for a container that must not reach anything.',
+        cpusLabel: 'CPU limit',
+        cpusInvalid: 'Use a number greater than zero.',
+        memoryLabel: 'Memory limit (MiB)',
+        memoryInvalid: 'Use a whole number of at least 64.',
+        limitsHint:
+          'Limits bound what a runaway process consumes. They are not part of the isolation boundary.',
+        mountsLabel: 'Mounts',
+        mountsHint:
+          'Absolute paths, shared between this machine and the container. Paths that would give the container control of this machine are refused.',
+        mountAdd: 'Add mount',
+        mountHostLabel: 'Path on this machine',
+        mountContainerLabel: 'Path in the container',
+        mountReadonly: 'Read only',
+        mountRemove: 'Remove mount',
+        mountIncomplete: 'Give each mount a path on both sides, or remove the row.',
+        save: 'Save container settings',
+        saveFailed: 'The container settings could not be saved.',
+        reason: {
+          'engine-missing':
+            'This machine has no container engine on PATH. Install Docker or Podman here, or point this environment at the other one.',
+          'engine-unreachable':
+            'The engine is installed but did not answer. Start it, and make sure the account running MangoStudio may use it.',
+          'image-missing':
+            'The engine could not find that image. Check the name and tag, and that this machine may pull from that registry.',
+          'image-pull-failed':
+            'Pulling the image did not finish. Press Connect to see what the engine reported.',
+          'image-unsupported':
+            'That image has no shell, so MangoStudio cannot tell which runtime build it needs. Use an image that ships one.',
+          'runtime-unavailable':
+            'MangoStudio has no runtime build for the platform that image runs. Use an image built for a platform this release publishes.',
+          unknown:
+            'The engine could not start a runtime in that image. Press Connect to see what it reported.',
+        },
+      },
       add: {
         trigger: 'Add environment',
         title: 'Add an environment',
@@ -2312,6 +2370,9 @@ export const messages: Messages = {
         reachLabel: 'How do you reach this machine?',
         reachLocal: 'It is this machine',
         reachWsl: 'A Linux distribution on this machine',
+        reachContainer: 'In an isolated container on this machine',
+        containerHint:
+          'Runs tools, workspaces and Git inside a disposable container on this machine, so a tool call cannot reach the rest of it. Nothing is installed: MangoStudio mounts its runtime into an image you already have.',
         reachPaired: 'Another machine that can reach MangoStudio',
         reachDirect: 'I can reach it by URL',
         stdioHint:
