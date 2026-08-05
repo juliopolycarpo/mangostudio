@@ -31,6 +31,13 @@ import {
   resolveRuntimeSlot,
   resolveRuntimeSource,
 } from './runtime-home';
+import {
+  collectServiceDoctorDetails,
+  RUNTIME_SERVICE_DOCS_URL,
+  RUNTIME_SERVICE_NO_SESSION_BUS_ERROR,
+  type RuntimeServiceExecDeps,
+  shouldCheckRuntimeService,
+} from './services/runtime-service';
 
 export interface RuntimeHealthOptions {
   readonly runtimeVersion: string;
@@ -228,6 +235,154 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
       severity: 'ok',
       title: 'Audit',
       detail: 'off — run setup --audit on to record what a hub asks this machine to do',
+    });
+  }
+
+  return findings;
+}
+
+/**
+ * Service findings apply only to dial-in `remote` slots with connect or serve
+ * configured. Hub-spawned stdio/WSL/SSH runtimes are not expected to have a unit.
+ */
+export async function diagnoseRuntimeServiceHealth(
+  report: RuntimeHealthReport,
+  env?: NodeJS.ProcessEnv,
+  deps?: RuntimeServiceExecDeps
+): Promise<RuntimeDoctorFinding[]> {
+  const { config } = await readRuntimeSlotState(report.slot, env);
+  if (
+    !shouldCheckRuntimeService({
+      slot: report.slot,
+      hubUrl: config.hubUrl,
+      serveListen: config.serveListen,
+    })
+  ) {
+    return [];
+  }
+
+  const { status, currentBinaryPath } = await collectServiceDoctorDetails(env, deps);
+  const findings: RuntimeDoctorFinding[] = [];
+  const installFixConnect = 'mangostudio-runtime service install --mode connect';
+  const installFixServe = 'mangostudio-runtime service install --mode serve';
+  const fix =
+    config.hubUrl && !config.serveListen
+      ? installFixConnect
+      : config.serveListen && !config.hubUrl
+        ? installFixServe
+        : 'mangostudio-runtime service install --mode connect|serve';
+
+  // Where `service install` refuses, doctor must not name it as the fix — the
+  // one command it could suggest is the one command guaranteed to fail. Each of
+  // these reports what is true here and points at the manual alternative.
+  if (status.platform === 'win32') {
+    return [
+      {
+        severity: 'warn',
+        title: 'Service',
+        detail: `Windows has no service install — keep this runtime running with a Scheduled Task (${RUNTIME_SERVICE_DOCS_URL})`,
+      },
+    ];
+  }
+
+  if (status.platform === 'unsupported') {
+    return [
+      {
+        severity: 'warn',
+        title: 'Service',
+        detail: `${status.error ?? 'no user-level service manager here'} — supervise this runtime yourself (${RUNTIME_SERVICE_DOCS_URL})`,
+      },
+    ];
+  }
+
+  // A non-interactive `ssh host cmd` carries no session bus, so systemctl can
+  // be asked nothing at all. Reading that as "not installed" would call a
+  // healthy, running unit a defect on the one path 020 uses to reach it.
+  if (status.error === RUNTIME_SERVICE_NO_SESSION_BUS_ERROR) {
+    return [
+      {
+        severity: 'warn',
+        title: 'Service',
+        detail: 'cannot read the user service without a session bus',
+        fix: 'XDG_RUNTIME_DIR=/run/user/$(id -u) mangostudio-runtime doctor',
+      },
+    ];
+  }
+
+  if (!status.installed) {
+    findings.push({
+      severity: 'warn',
+      title: 'Service',
+      detail: 'no user-level service keeps this runtime running across logout or reboot',
+      fix,
+    });
+    return findings;
+  }
+
+  if (!status.enabled) {
+    findings.push({
+      severity: 'warn',
+      title: 'Service',
+      detail: 'the service unit is installed but not enabled',
+      fix,
+    });
+  } else {
+    findings.push({
+      severity: 'ok',
+      title: 'Service',
+      detail: 'user-level unit is enabled',
+    });
+  }
+
+  if (!status.running) {
+    findings.push({
+      severity: 'fail',
+      title: 'Service',
+      detail: 'the service unit is not running',
+      fix,
+    });
+  } else {
+    findings.push({
+      severity: 'ok',
+      title: 'Service',
+      detail: 'user-level unit is running',
+    });
+  }
+
+  if (status.platform === 'linux' && status.linger === false) {
+    findings.push({
+      severity: 'warn',
+      title: 'Linger',
+      detail: 'loginctl linger is off — the user service stops when you log out',
+      fix: 'sudo loginctl enable-linger $USER',
+    });
+  } else if (status.platform === 'linux' && status.linger === true) {
+    findings.push({ severity: 'ok', title: 'Linger', detail: 'loginctl linger is on' });
+  }
+
+  if (status.execUsesCurrent === false) {
+    findings.push({
+      severity: 'warn',
+      title: 'Service',
+      detail:
+        'the unit does not point at the slot current symlink — upgrades may leave a stale path',
+      fix,
+    });
+  } else if (status.execUsesCurrent === true) {
+    findings.push({
+      severity: 'ok',
+      title: 'Service',
+      detail: 'unit ExecStart uses the current symlink',
+    });
+  }
+
+  // No `fix` on purpose: nothing this machine can run puts the bytes there.
+  // The install comes from the hub, so the path is what a reader needs.
+  if (status.currentBinaryPresent === false) {
+    findings.push({
+      severity: 'fail',
+      title: 'Service',
+      detail: `no runtime binary at ${currentBinaryPath} — the unit cannot start until the slot is installed`,
     });
   }
 

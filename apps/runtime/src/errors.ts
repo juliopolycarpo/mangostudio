@@ -18,6 +18,11 @@ export type RuntimeServiceErrorKind =
   | 'snapshot_conflict'
   | 'snapshot_too_large'
   | 'runtime_update_refused'
+  | 'runtime_service_unsupported'
+  | 'runtime_service_no_session_bus'
+  | 'runtime_service_setup_pending'
+  | 'runtime_service_unconfigured'
+  | 'runtime_service_binary_missing'
   | 'library_backup_missing'
   | 'mcp_connection'
   | 'mcp_call'
@@ -53,6 +58,23 @@ export class RuntimeUpdateError extends RuntimeServiceError {
   constructor(message: string, data: Readonly<Record<string, unknown>> = {}) {
     super('runtime_update_refused', message, data);
     this.name = 'RuntimeUpdateError';
+  }
+}
+
+/** User-level service install/status refused or unsupported on this machine. */
+export class RuntimeServiceManagementError extends RuntimeServiceError {
+  constructor(
+    kind:
+      | 'runtime_service_unsupported'
+      | 'runtime_service_no_session_bus'
+      | 'runtime_service_setup_pending'
+      | 'runtime_service_unconfigured'
+      | 'runtime_service_binary_missing',
+    message: string,
+    data: Readonly<Record<string, unknown>> = {}
+  ) {
+    super(kind, message, data);
+    this.name = 'RuntimeServiceManagementError';
   }
 }
 

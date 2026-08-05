@@ -93,11 +93,12 @@ a disabled environment, a protocol version the hub will not serve, or another
 runtime that took the same environment over — two processes sharing one pairing
 token would otherwise trade it back and forth forever, so the loser stops and
 names the conflict. Keep it running under whatever supervises long-lived
-processes on that machine.
+processes on that machine, or install a user service:
 
 ```bash
 printf %s "$TOKEN" | mangostudio-runtime connect --hub wss://hub.example.com/api/runtime --token -
 mangostudio-runtime connect   # afterwards: reuses the stored hub URL and token
+mangostudio-runtime service install --mode connect
 ```
 
 `printf` and single quotes are neither `cmd.exe` nor PowerShell. On Windows, use
@@ -121,7 +122,7 @@ fallen behind is visible rather than merely tolerated.
 
 | Flag                   | Description                                                                      |
 | ---------------------- | -------------------------------------------------------------------------------- |
-| `--listen <host:port>` | Bind address. A bare port binds `127.0.0.1`. Required.                           |
+| `--listen <host:port>` | Bind address. A bare port binds `127.0.0.1`. Remembered after the first run.     |
 | `--token -`            | Read the serve token from stdin (`env` reads `MANGOSTUDIO_RUNTIME_SERVE_TOKEN`). |
 
 `serve` is the Direct URL half of a remote runtime: the hub dials this process instead of
@@ -138,7 +139,31 @@ supersedes the first.
 
 ```bash
 mangostudio-runtime serve --listen 8787
+mangostudio-runtime serve   # afterwards: reuses stored listen address and token
 printf %s "$TOKEN" | mangostudio-runtime serve --listen 0.0.0.0:8787 --token -
+```
+
+### `service`
+
+Install a user-level unit so `connect` or `serve` survives logout and reboot.
+`ExecStart` points at the slot's `current` link, so the runtime has to be
+installed into the slot first — `install` refuses rather than write a unit that
+cannot start. See
+[`docs/operations/remote-runtimes.md`](../operations/remote-runtimes.md) for
+that prerequisite, linger, SSH session-bus workarounds, macOS launchd verbs, and
+the Windows Scheduled Task snippet.
+
+| Subcommand / flag       | Description                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `install`               | Write and enable the unit (`systemd` user or `launchd` LaunchAgent).                        |
+| `uninstall`             | Disable and remove the unit.                                                                |
+| `status`                | Report installed, enabled, running, linger (Linux), and whether `ExecStart` uses `current`. |
+| `--mode connect\|serve` | Required when both modes are configured; otherwise inferred.                                |
+| `--json`                | Machine-readable output (`status` only).                                                    |
+
+```bash
+mangostudio-runtime service install --mode connect
+mangostudio-runtime service status --json
 ```
 
 ## Examples

@@ -319,6 +319,12 @@ describe('manual install commands on a released hub', () => {
     expect(manual?.verify).toContain('Get-FileHash');
     expect(manual?.verify).toContain('SHA256SUMS');
     expect(manual?.verify).toContain('checksum mismatch');
+    expect(manual?.serviceInstall).toBeUndefined();
+  });
+
+  it('uses the downloaded binary path for posix service install', () => {
+    const manual = manualFor('linux-x64');
+    expect(manual?.serviceInstall).toBe('./mangostudio-runtime service install --mode connect');
   });
 });
 

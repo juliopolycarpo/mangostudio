@@ -122,6 +122,7 @@ export function resolveRuntimeSlotConfig(
     setup: stored?.setup ?? defaults.setup,
     installedBy: stored?.installedBy ?? null,
     hubUrl: stored?.hubUrl ?? null,
+    serveListen: stored?.serveListen ?? null,
     audit: {
       enabled: stored?.audit?.enabled ?? defaultAuditEnabledForSlot(slot),
     },

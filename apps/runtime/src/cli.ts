@@ -14,6 +14,7 @@ import {
   isRuntimeSlot,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
+  type RuntimeServiceMode,
   type RuntimeSlot,
   runtimeSlotAuditLogPath,
 } from '@mangostudio/shared/runtime-home';
@@ -21,9 +22,11 @@ import { createRuntimeAuditSink, parseAuditSince, readRuntimeAuditLog } from './
 import { getRuntimeVersion, loadRuntimeConfig } from './config';
 import { connectToHub } from './connect';
 import { createSlotConsentSource } from './consent-source';
+import { RuntimeServiceManagementError } from './errors';
 import {
   collectRuntimeHealth,
   diagnoseRuntimeHealth,
+  diagnoseRuntimeServiceHealth,
   type RuntimeDoctorFinding,
   worstSeverity,
 } from './health';
@@ -43,6 +46,7 @@ import {
   writeRuntimeSlotConfig,
 } from './runtime-home';
 import { parseListenAddress, serveRuntime } from './serve';
+import { createRuntimeServiceManager, resolveInstallMode } from './services/runtime-service';
 import { RUNTIME_UPDATE_EXIT_CODE } from './services/runtime-update';
 import {
   isRuntimeSetupProfile,
@@ -71,8 +75,8 @@ export interface RuntimeConnectArgs {
 }
 
 export interface RuntimeServeArgs {
-  /** Raw `--listen` value; required, and must include a port. */
-  readonly listen: string;
+  /** Raw `--listen` value; omitted when a previous run stored one. */
+  readonly listen?: string;
   /** `stdin` / `env` override the stored serve token; otherwise stored or generated. */
   readonly tokenSource: 'stdin' | 'env' | 'stored';
 }
@@ -91,6 +95,14 @@ export type RuntimeCliInvocation =
   | { readonly command: 'setup'; readonly args: RuntimeSetupArgs }
   | { readonly command: 'health'; readonly args: { readonly json: boolean } }
   | { readonly command: 'doctor'; readonly args: { readonly json: boolean } }
+  | {
+      readonly command: 'service';
+      readonly args: {
+        readonly action: 'install' | 'uninstall' | 'status';
+        readonly mode?: RuntimeServiceMode;
+        readonly json: boolean;
+      };
+    }
   | { readonly command: 'audit'; readonly args: RuntimeAuditArgs }
   | { readonly command: 'version' }
   | { readonly command: 'help' }
@@ -107,6 +119,7 @@ Commands:
   setup        Say what a hub may do on this machine
   health       Print this runtime's slot, version, and permissions
   doctor       health, plus what is wrong and the command that fixes it
+  service      install, uninstall, or inspect a user-level connect/serve service
   audit        Print this slot's local receipt of what a hub asked for
   --version    Print the runtime version
   --help       Show this message
@@ -150,6 +163,14 @@ setup options:
 health / doctor options:
   --json       Machine-readable output.
 
+service options:
+  install      Write and enable a user-level unit (systemd or launchd).
+  uninstall    Disable and remove the unit.
+  status       Report installed, enabled, and running.
+  --mode connect|serve
+               Which subcommand the unit runs (required when both are configured).
+  --json       Machine-readable output (status only).
+
 audit options:
   --since <when>
                ISO-8601 instant, or a relative duration like 24h / 30m / 7d.
@@ -173,6 +194,7 @@ export function parseRuntimeCliArgs(args: readonly string[]): RuntimeCliInvocati
   if (first === 'serve') return parseServeArgs(rest);
   if (first === 'setup') return parseSetupArgs(rest);
   if (first === 'health' || first === 'doctor') return parseReportArgs(first, rest);
+  if (first === 'service') return parseServiceArgs(rest);
   if (first === 'audit') return parseAuditArgs(rest);
 
   const extra = rest[0];
@@ -335,6 +357,35 @@ function parseReportArgs(
   return { command, args: { json } };
 }
 
+function parseServiceArgs(args: readonly string[]): RuntimeCliInvocation {
+  const [action, ...rest] = args;
+  if (action !== 'install' && action !== 'uninstall' && action !== 'status') {
+    return { command: 'unknown', argument: action ?? 'service' };
+  }
+  let mode: RuntimeServiceMode | undefined;
+  let json = false;
+  for (let index = 0; index < rest.length; index += 1) {
+    const flag = rest[index];
+    if (flag === '--mode') {
+      const value = rest[++index];
+      if (value !== 'connect' && value !== 'serve') {
+        return {
+          command: 'invalid',
+          reason: `--mode takes connect or serve${value ? `, not "${value}"` : ''}.`,
+        };
+      }
+      mode = value;
+      continue;
+    }
+    if (flag === '--json') {
+      json = true;
+      continue;
+    }
+    return { command: 'unknown', argument: flag ?? '--' };
+  }
+  return { command: 'service', args: { action, ...(mode ? { mode } : {}), json } };
+}
+
 function parseConnectArgs(args: readonly string[]): RuntimeCliInvocation {
   let hubUrl: string | undefined;
   let tokenSource: RuntimeConnectArgs['tokenSource'] = 'stored';
@@ -383,8 +434,7 @@ function parseServeArgs(args: readonly string[]): RuntimeCliInvocation {
     return { command: 'unknown', argument: flag ?? '--' };
   }
 
-  if (!listen) return { command: 'unknown', argument: '--listen' };
-  return { command: 'serve', args: { listen, tokenSource } };
+  return { command: 'serve', args: { ...(listen ? { listen } : {}), tokenSource } };
 }
 
 /** Runs one CLI invocation and resolves with its process exit code. */
@@ -405,6 +455,8 @@ export async function runRuntimeCli(args: readonly string[]): Promise<number> {
       return await runHealth(invocation.args.json, runtimeVersion);
     case 'doctor':
       return await runDoctor(invocation.args.json, runtimeVersion);
+    case 'service':
+      return await runService(invocation.args);
     case 'audit':
       return await runAudit(invocation.args);
     case 'version':
@@ -476,12 +528,13 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
     );
   }
 
-  const audit = await slotAuditSink(PAIRED_SLOT);
-
   const controller = new AbortController();
   const stop = (): void => controller.abort();
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
+
+  const audit = await slotAuditSink(PAIRED_SLOT);
+  const supervisedRestart = supervisedUpdateSession(controller);
 
   try {
     const outcome = await connectToHub({
@@ -492,6 +545,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
           runtimeVersion,
           consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
           audit,
+          ...supervisedRestart.hostOptions,
         }),
       log,
       signal: controller.signal,
@@ -500,12 +554,12 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
       log(outcome.message ?? 'The hub refused this runtime.');
       return 1;
     }
-    return 0;
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
     await audit.close();
   }
+  return supervisedRestart.exitCodeAfterClose();
 }
 
 async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise<number> {
@@ -513,16 +567,18 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
     process.stderr.write(`mangostudio-runtime: ${message}\n`);
   };
 
-  const listen = parseListenAddress(args.listen);
+  const stored = await readRuntimeSlotConfig(PAIRED_SLOT);
+  const listenRaw = args.listen ?? stored.serveListen ?? undefined;
+  if (!listenRaw) {
+    log('No listen address. Pass --listen <host:port>, or run serve once to remember it.');
+    return 1;
+  }
+  const listen = parseListenAddress(listenRaw);
   if (!listen) {
     log('Invalid --listen value. Pass a port, or host:port.');
     return 1;
   }
 
-  // Same rule as `connect`: an armed gate is obeyed, an unanswered slot is
-  // answered by the person who started this. What is different is the blast
-  // radius — this opens a listening socket — so the recorded answer is the one
-  // thing between an unattended restart and a machine nobody consented for.
   const consent = await consentByInvocation(PAIRED_SLOT, runtimeVersion);
   if (!consent.granted) {
     if (consent.reason) log(consent.reason);
@@ -534,6 +590,8 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
       `Recorded full permissions for this machine. Run "mangostudio-runtime setup --slot ${PAIRED_SLOT}" to narrow them.`
     );
   }
+
+  await writeRuntimeSlotConfig(PAIRED_SLOT, { serveListen: listenRaw });
 
   const resolved = await resolveServeToken(args.tokenSource);
   if (!resolved) {
@@ -560,6 +618,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
   process.once('SIGTERM', stop);
 
   const audit = await slotAuditSink(PAIRED_SLOT);
+  const supervisedRestart = supervisedUpdateSession(controller);
 
   try {
     const handle = serveRuntime({
@@ -570,17 +629,18 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
           runtimeVersion,
           consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
           audit,
+          ...supervisedRestart.hostOptions,
         }),
       log,
       signal: controller.signal,
     });
     await handle.stopped;
-    return 0;
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
     await audit.close();
   }
+  return supervisedRestart.exitCodeAfterClose();
 }
 
 async function resolveToken(source: RuntimeConnectArgs['tokenSource']): Promise<string | null> {
@@ -818,7 +878,10 @@ async function slotAuditSink(slot: RuntimeSlot) {
 /** Exits non-zero on a failure so a provisioner can gate on it. */
 async function runDoctor(json: boolean, runtimeVersion: string): Promise<number> {
   const report = await collectRuntimeHealth({ runtimeVersion });
-  const findings = diagnoseRuntimeHealth(report);
+  const findings = [
+    ...diagnoseRuntimeHealth(report),
+    ...(await diagnoseRuntimeServiceHealth(report)),
+  ];
 
   if (json) {
     process.stdout.write(`${JSON.stringify({ health: report, findings })}\n`);
@@ -826,6 +889,88 @@ async function runDoctor(json: boolean, runtimeVersion: string): Promise<number>
     for (const finding of findings) process.stdout.write(`${renderFinding(finding)}\n`);
   }
   return worstSeverity(findings) === 'fail' ? 1 : 0;
+}
+
+async function runService(args: {
+  readonly action: 'install' | 'uninstall' | 'status';
+  readonly mode?: RuntimeServiceMode;
+  readonly json: boolean;
+}): Promise<number> {
+  const manager = createRuntimeServiceManager();
+  try {
+    if (args.action === 'install') {
+      const slotState = await readRuntimeSlotState(PAIRED_SLOT);
+      const mode = resolveInstallMode(args.mode, slotState.config);
+      await manager.install(mode);
+      if (!args.json) {
+        process.stdout.write(`Installed and started mangostudio-runtime ${mode} service.\n`);
+      }
+      return 0;
+    }
+    if (args.action === 'uninstall') {
+      await manager.uninstall();
+      if (!args.json) process.stdout.write('Removed mangostudio-runtime service.\n');
+      return 0;
+    }
+    const status = await manager.status();
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify(status)}\n`);
+    } else {
+      process.stdout.write(
+        [
+          `installed  ${status.installed}`,
+          `enabled    ${status.enabled}`,
+          `running    ${status.running}`,
+          ...(status.linger === undefined ? [] : [`linger     ${status.linger}`]),
+          ...(status.execUsesCurrent === undefined ? [] : [`current    ${status.execUsesCurrent}`]),
+          ...(status.manager?.unitPath ? [`unit       ${status.manager.unitPath}`] : []),
+          '',
+        ].join('\n')
+      );
+    }
+    return 0;
+  } catch (error) {
+    const message =
+      error instanceof RuntimeServiceManagementError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : String(error);
+    if (args.json) {
+      process.stdout.write(`${JSON.stringify({ error: message })}\n`);
+    } else {
+      process.stderr.write(`mangostudio-runtime: ${message}\n`);
+    }
+    return 1;
+  }
+}
+
+function supervisedUpdateSession(controller: AbortController): {
+  readonly hostOptions: {
+    readonly update?: {
+      readonly supervised: boolean;
+      readonly requestRestart: () => void;
+    };
+  };
+  readonly exitCodeAfterClose: () => number;
+} {
+  let exitCode: number | undefined;
+  const hostOptions =
+    resolveRuntimeSource() !== 'provisioned'
+      ? {}
+      : {
+          update: {
+            supervised: true,
+            requestRestart: () => {
+              exitCode = RUNTIME_UPDATE_EXIT_CODE;
+              controller.abort();
+            },
+          },
+        };
+  return {
+    hostOptions,
+    exitCodeAfterClose: () => exitCode ?? 0,
+  };
 }
 
 function renderFinding(finding: RuntimeDoctorFinding): string {
