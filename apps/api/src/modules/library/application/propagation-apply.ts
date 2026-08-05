@@ -336,8 +336,14 @@ async function runWriteEngineAcrossEnvironments(
     partial ||= batch.partial;
     // A machine that failed stops the rest. Carrying on would spread a
     // half-applied change across more hosts and give the user more to undo,
-    // not less — and every machine already compensated its own writes.
-    if (batch.failed.length > 0) break;
+    // not less — and every machine already compensated its own writes. But a
+    // clean compensation only covers *that* machine's own disk: once an
+    // earlier machine already landed a backup, this failure still leaves the
+    // apply partially done overall.
+    if (batch.failed.length > 0) {
+      if (backups.length > batch.backups.length) partial = true;
+      break;
+    }
   }
 
   return {

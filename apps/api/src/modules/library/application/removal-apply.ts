@@ -194,7 +194,13 @@ async function runRemovalAcrossEnvironments(
     failed.push(...batch.failed);
     backups.push(...batch.backups);
     partial ||= batch.partial;
-    if (batch.failed.length > 0) break;
+    // A clean compensation only covers *that* machine's own disk: once an
+    // earlier machine already landed a backup, this failure still leaves the
+    // removal partially done overall.
+    if (batch.failed.length > 0) {
+      if (backups.length > batch.backups.length) partial = true;
+      break;
+    }
   }
 
   return {
