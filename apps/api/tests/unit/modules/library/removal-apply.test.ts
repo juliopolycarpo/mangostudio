@@ -710,4 +710,104 @@ describe('applyLibraryRemoval across machines', () => {
       status: 422,
     });
   });
+
+  it('reports the machine a mid-run failure never reached', async () => {
+    const thirdHome = mkdtempSync(join(tmpdir(), 'mango-removal-third-'));
+    const thirdBackupRoot = join(thirdHome, 'backups');
+    try {
+      const homes: Record<string, string> = {
+        local: home,
+        'remote-box': remoteHome,
+        'third-box': thirdHome,
+      };
+      const seed = (environmentId: string) => {
+        const path = join(homes[environmentId], SKILL_LOCATION_ROOTS['claude-skills'], 'gh');
+        mkdirSync(path, { recursive: true });
+        writeFileSync(
+          join(path, 'SKILL.md'),
+          `---\nname: gh\ndescription: d\n---\n${environmentId}\n`
+        );
+        return path;
+      };
+      const localPath = seed('local');
+      const remotePath = seed('remote-box');
+      const thirdPath = seed('third-box');
+
+      const location = async (environmentId: string, contentHash?: string) => ({
+        environmentId,
+        locationId: 'claude-skills' as const,
+        targetIds: [],
+        operation: 'remove' as const,
+        path: join(homes[environmentId], SKILL_LOCATION_ROOTS['claude-skills'], 'gh'),
+        contentHash:
+          contentHash ??
+          (await hashResourceAt(
+            join(homes[environmentId], SKILL_LOCATION_ROOTS['claude-skills'], 'gh'),
+            'directory'
+          )),
+        modifiedAtMs: 1,
+        eliminatesContentGroup: false,
+      });
+
+      const preview = previewOf([
+        {
+          resourceKey: 'skill:gh',
+          ref: { kind: 'skill', slug: 'gh' },
+          divergence: 'divergent',
+          locations: [
+            await location('local'),
+            // A hash the disk no longer holds: this machine's batch fails its
+            // own guard check, and the run stops before reaching the next one.
+            await location('remote-box', 'stale-hash'),
+            await location('third-box'),
+          ],
+          instancePlacements: [
+            { environmentId: 'local', locationId: 'claude-skills' },
+            { environmentId: 'remote-box', locationId: 'claude-skills' },
+            { environmentId: 'third-box', locationId: 'claude-skills' },
+          ],
+          wouldRemoveLastCopy: true,
+        },
+      ]);
+
+      let currentEnvironmentId = 'local';
+      const result = await applyLibraryRemoval(
+        'user-1',
+        requestFor(preview, { acknowledgeLastCopy: ['skill:gh'] }),
+        {
+          preview: () => Promise.resolve(preview),
+          pathEnv: (environmentId) => {
+            currentEnvironmentId = environmentId;
+            return { homeDir: homes[environmentId], platform: 'linux', env: {} };
+          },
+          writeEngine: 'in-process',
+          backup: {
+            ...backupDeps(),
+            backupDir: () =>
+              currentEnvironmentId === 'local'
+                ? backupRoot
+                : currentEnvironmentId === 'remote-box'
+                  ? remoteBackupRoot
+                  : thirdBackupRoot,
+          },
+          recordBackup: () => Promise.resolve(),
+        }
+      );
+
+      expect(result.failed.map((row) => row.environmentId)).toEqual(['remote-box']);
+      // Local already committed before the failure; third-box was never
+      // reached — neither is something a cross-machine rollback undoes.
+      expect(existsSync(localPath)).toBe(false);
+      expect(existsSync(remotePath)).toBe(true);
+      expect(existsSync(thirdPath)).toBe(true);
+
+      // Without this, third-box's placement would appear in no result array at
+      // all — offered by the preview, decided by the user, and never mentioned.
+      const thirdBoxKept = result.kept.find((row) => row.environmentId === 'third-box');
+      expect(thirdBoxKept?.reason).toBe('not-attempted');
+      expect(thirdBoxKept?.locationId).toBe('claude-skills');
+    } finally {
+      rmSync(thirdHome, { recursive: true, force: true });
+    }
+  });
 });

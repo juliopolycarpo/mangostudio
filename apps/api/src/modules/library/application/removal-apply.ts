@@ -184,7 +184,8 @@ async function runRemovalAcrossEnvironments(
   const backups: RemovalApply['backups'] = [];
   let partial = false;
 
-  for (const [environmentId, operations] of batches) {
+  const pending = [...batches];
+  for (const [index, [environmentId, operations]] of pending.entries()) {
     const batch = await runWriteEngine(userId, operations, plan, deps.pathEnv(environmentId), {
       ...deps,
       environmentId,
@@ -199,6 +200,18 @@ async function runRemovalAcrossEnvironments(
     // removal partially done overall.
     if (batch.failed.length > 0) {
       if (backups.length > batch.backups.length) partial = true;
+      // Machines after this one never ran: their placements still count as
+      // kept, the same way `notAttempted` reports a mid-machine stop.
+      for (const [skippedEnvironmentId, skipped] of pending.slice(index + 1)) {
+        for (const operation of skipped) {
+          kept.push({
+            resourceKey: operation.resourceKey,
+            environmentId: skippedEnvironmentId,
+            locationId: operation.locationId,
+            reason: 'not-attempted',
+          });
+        }
+      }
       break;
     }
   }
