@@ -52,11 +52,33 @@ export const DEFAULT_CONTAINER_ENGINE: ContainerEngine = 'docker';
  *
  * Enforced, not documented: 026's own risk note is that container isolation is
  * strong rather than absolute, and this is the difference between the two.
+ *
+ * `/var/lib/docker` and `/var/lib/containers` are the engines' own state: image
+ * layers, volumes and container rootfs. Handing those over is not the socket,
+ * but it is write access to what every other container on this machine runs.
  */
-const DENIED_HOST_PATH_PREFIXES: readonly string[] = ['/proc', '/sys', '/var/run', '/run'];
+const DENIED_HOST_PATH_PREFIXES: readonly string[] = [
+  '/proc',
+  '/sys',
+  '/var/run',
+  '/run',
+  '/var/lib/docker',
+  '/var/lib/containers',
+];
 
 /** Socket basenames refused wherever they live, including a user's rootless path. */
 const DENIED_HOST_PATH_BASENAMES: readonly string[] = ['docker.sock', 'podman.sock'];
+
+/**
+ * Directory names refused wherever they appear in a host path.
+ *
+ * Naming the socket file is not enough: mounting the directory that holds it
+ * hands over the same socket one level up, and `~/.docker` is where a rootless
+ * Docker Desktop puts both its socket and `config.json` — the registry
+ * credentials. A prefix list cannot catch these because they hang off a home
+ * directory this code cannot know the path of.
+ */
+const DENIED_HOST_PATH_SEGMENTS: readonly string[] = ['.docker', '.podman'];
 
 /** `C:` or `c:/…` — the one colon the engines parse for themselves. */
 const WINDOWS_DRIVE_PREFIX = /^[A-Za-z]:[\\/]/;
@@ -161,11 +183,18 @@ export function describeContainerMountRefusal(refusal: ContainerMountRefusal): s
   }
 }
 
-/** Without a trailing slash, so `/work` and `/work/` collide as the same target. */
+/**
+ * The directory a mount actually lands on, collapsed the way an engine collapses
+ * it: without a trailing slash, and with `.`/`..` resolved lexically.
+ *
+ * Both engines clean a mount destination before using it, so `/work/` and
+ * `/work` are one target — and so are `/work/../opt/mangostudio-runtime` and
+ * `/opt/mangostudio-runtime`. Comparing the raw string would let a traversal
+ * spell its way past the shadowing checks below, exactly the way one could once
+ * spell its way past the host denylist.
+ */
 function normalizeContainerTarget(containerPath: string): string {
-  return containerPath.length > 1 && containerPath.endsWith('/')
-    ? containerPath.slice(0, -1)
-    : containerPath;
+  return collapseTraversal(containerPath);
 }
 
 function mountRefusal(mount: ContainerMount): ContainerMountRefusal | null {
@@ -186,11 +215,19 @@ function mountRefusal(mount: ContainerMount): ContainerMountRefusal | null {
   }
 
   const resolved = collapseTraversal(normalizeHostPath(host));
-  if (DENIED_HOST_PATH_BASENAMES.some((name) => resolved.endsWith(`/${name}`))) {
+  if (
+    DENIED_HOST_PATH_BASENAMES.some((name) => resolved.endsWith(`/${name}`)) ||
+    resolved.split('/').some((segment) => DENIED_HOST_PATH_SEGMENTS.includes(segment))
+  ) {
     return { code: 'engine-control', params: { host } };
   }
+  // Also refused when the mount is an *ancestor* of a denied path: mounting
+  // `/var` is mounting `/var/run` with an extra step, and the engine resolves
+  // it to the same socket. Root is left to `isHostRoot` below, which says
+  // something more useful about it than naming one directory it contains.
   const denied = DENIED_HOST_PATH_PREFIXES.find(
-    (prefix) => resolved === prefix || resolved.startsWith(`${prefix}/`)
+    (prefix) =>
+      resolved === prefix || resolved.startsWith(`${prefix}/`) || prefix.startsWith(`${resolved}/`)
   );
   if (denied) {
     return { code: 'denied-prefix', params: { host, prefix: denied } };
@@ -199,15 +236,18 @@ function mountRefusal(mount: ContainerMount): ContainerMountRefusal | null {
     return { code: 'host-root', params: { host } };
   }
 
-  // The runtime's own mount lands here; a user mount on the same path would
-  // shadow the binary the container is started to run.
+  // The runtime's own mount lands here; a user mount on the same path — or on
+  // any directory that contains it — would shadow the binary the container is
+  // started to run, or make the engine refuse the pair outright.
+  const target = normalizeContainerTarget(mount.containerPath);
   if (
-    mount.containerPath === CONTAINER_RUNTIME_MOUNT_PATH ||
-    mount.containerPath.startsWith(`${CONTAINER_RUNTIME_MOUNT_PATH}/`)
+    target === CONTAINER_RUNTIME_MOUNT_PATH ||
+    target.startsWith(`${CONTAINER_RUNTIME_MOUNT_PATH}/`) ||
+    CONTAINER_RUNTIME_MOUNT_PATH.startsWith(`${target}/`)
   ) {
     return { code: 'shadows-runtime', params: { runtimePath: CONTAINER_RUNTIME_MOUNT_PATH } };
   }
-  if (mount.containerPath === '/') {
+  if (target === '/') {
     return { code: 'shadows-image-root', params: {} };
   }
   return null;

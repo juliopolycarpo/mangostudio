@@ -145,6 +145,40 @@ describe('containerConfigRefusal', () => {
     ).toMatch(/control of the container engine/);
   });
 
+  it.each([
+    // The directory holding a socket hands over the same socket one level up.
+    ['/home/j/.docker/run', 'engine-control', undefined],
+    ['/home/j/.docker', 'engine-control', undefined],
+    ['/home/j/.podman/xdg', 'engine-control', undefined],
+    // An ancestor of a denied prefix reaches it with an extra step.
+    ['/var', 'denied-prefix', '/var/run'],
+    ['/var/lib', 'denied-prefix', '/var/lib/docker'],
+    // The engines' own state: every other container's rootfs and layers.
+    ['/var/lib/docker', 'denied-prefix', '/var/lib/docker'],
+    ['/var/lib/containers/storage', 'denied-prefix', '/var/lib/containers'],
+  ] as const)('refuses %s, which reaches an engine socket or its state', (hostPath, code, prefix) => {
+    const refusal = containerConfigRefusal(
+      config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })
+    );
+    expect(refusal?.code).toBe(code);
+    if (prefix !== undefined) expect(refusal?.params.prefix).toBe(prefix);
+  });
+
+  it('still calls the filesystem root a root rather than naming one denied child', () => {
+    const refusal = containerConfigRefusal(
+      config({ mounts: [{ hostPath: '/', containerPath: '/mnt/x' }] })
+    );
+    expect(refusal?.code).toBe('host-root');
+  });
+
+  it('allows a directory whose name merely contains a denied segment', () => {
+    expect(
+      containerConfigRefusal(
+        config({ mounts: [{ hostPath: '/home/j/.dockerignore-samples', containerPath: '/work' }] })
+      )
+    ).toBeNull();
+  });
+
   it('allows a path that merely starts with a denied prefix as a name', () => {
     expect(
       containerConfigRefusal(
