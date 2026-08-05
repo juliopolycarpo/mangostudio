@@ -14,6 +14,7 @@ import {
   containerName,
   containerProbeCommand,
   containerPullCommand,
+  describeContainerMountRefusal,
 } from '../../src/environments';
 import { PLATFORM_PROBE_SCRIPT } from '../../src/runtime-home';
 
@@ -35,6 +36,12 @@ function launchArgs(overrides: Partial<ContainerEnvironmentConfig> = {}): readon
 function valueAfter(args: readonly string[], flag: string): string | undefined {
   const index = args.indexOf(flag);
   return index === -1 ? undefined : args[index + 1];
+}
+
+/** The English sentence a refusal renders as, or null when the config is fine. */
+function refusalText(overrides: Partial<ContainerEnvironmentConfig>): string | null {
+  const refusal = containerConfigRefusal(config(overrides));
+  return refusal ? describeContainerMountRefusal(refusal) : null;
 }
 
 describe('container config schema', () => {
@@ -114,9 +121,9 @@ describe('containerConfigRefusal', () => {
   });
 
   it('refuses a relative host path', () => {
-    expect(
-      containerConfigRefusal(config({ mounts: [{ hostPath: 'project', containerPath: '/work' }] }))
-    ).toMatch(/not absolute/);
+    expect(refusalText({ mounts: [{ hostPath: 'project', containerPath: '/work' }] })).toMatch(
+      /not absolute/
+    );
   });
 
   it.each([
@@ -129,16 +136,12 @@ describe('containerConfigRefusal', () => {
     ['/var/run', /\/var\/run/],
     ['/run/user/1000', /\/run/],
   ])('refuses %s', (hostPath, expected) => {
-    expect(
-      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] }))
-    ).toMatch(expected);
+    expect(refusalText({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })).toMatch(expected);
   });
 
   it('refuses a denied path written in Windows separators', () => {
     expect(
-      containerConfigRefusal(
-        config({ mounts: [{ hostPath: 'C:\\var\\run\\docker.sock', containerPath: '/mnt/x' }] })
-      )
+      refusalText({ mounts: [{ hostPath: 'C:\\var\\run\\docker.sock', containerPath: '/mnt/x' }] })
     ).toMatch(/control of the container engine/);
   });
 
@@ -155,9 +158,7 @@ describe('containerConfigRefusal', () => {
     ['/tmp/../../var/run', /\/var\/run/],
     ['/home/j/../../var/run/docker.sock', /control of the container engine/],
   ])('refuses a denied path spelled with a traversal segment: %s', (hostPath, expected) => {
-    expect(
-      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] }))
-    ).toMatch(expected);
+    expect(refusalText({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })).toMatch(expected);
   });
 
   it('allows a traversal that resolves to an ordinary path', () => {
@@ -168,47 +169,59 @@ describe('containerConfigRefusal', () => {
     ).toBeNull();
   });
 
-  it.each(['/', 'C:\\foo\\..\\..'])('refuses the host filesystem root: %s', (hostPath) => {
-    expect(
-      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] }))
-    ).toMatch(/entire filesystem/);
+  it.each([
+    '/',
+    'C:\\foo\\..\\..',
+    'C:/',
+    'C:\\',
+    'c:/',
+  ])('refuses the host filesystem root: %s', (hostPath) => {
+    expect(refusalText({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })).toMatch(
+      /entire filesystem/
+    );
   });
 
   it('refuses a host path carrying its own mount separator', () => {
     expect(
-      containerConfigRefusal(
-        config({ mounts: [{ hostPath: '/home/j/p:/etc:ro', containerPath: '/work' }] })
-      )
+      refusalText({ mounts: [{ hostPath: '/home/j/p:/etc:ro', containerPath: '/work' }] })
     ).toMatch(/colon/);
   });
 
   it('refuses a mount that would shadow the runtime binary', () => {
     expect(
-      containerConfigRefusal(
-        config({
-          mounts: [{ hostPath: '/home/j/fake', containerPath: CONTAINER_RUNTIME_MOUNT_PATH }],
-        })
-      )
+      refusalText({
+        mounts: [{ hostPath: '/home/j/fake', containerPath: CONTAINER_RUNTIME_MOUNT_PATH }],
+      })
     ).toMatch(/where the MangoStudio runtime is mounted/);
   });
 
   it('refuses a mount over the container root', () => {
-    expect(
-      containerConfigRefusal(config({ mounts: [{ hostPath: '/home/j', containerPath: '/' }] }))
-    ).toMatch(/replace the image/);
+    expect(refusalText({ mounts: [{ hostPath: '/home/j', containerPath: '/' }] })).toMatch(
+      /replace the image/
+    );
   });
 
   it('refuses two mounts on one target', () => {
     expect(
-      containerConfigRefusal(
-        config({
-          mounts: [
-            { hostPath: '/home/j/a', containerPath: '/work' },
-            { hostPath: '/home/j/b', containerPath: '/work' },
-          ],
-        })
-      )
+      refusalText({
+        mounts: [
+          { hostPath: '/home/j/a', containerPath: '/work' },
+          { hostPath: '/home/j/b', containerPath: '/work' },
+        ],
+      })
     ).toMatch(/Two mounts/);
+  });
+
+  it('refuses two mounts on the same target spelled with a trailing slash', () => {
+    const refusal = containerConfigRefusal(
+      config({
+        mounts: [
+          { hostPath: '/home/j/a', containerPath: '/work' },
+          { hostPath: '/home/j/b', containerPath: '/work/' },
+        ],
+      })
+    );
+    expect(refusal?.code).toBe('duplicate-target');
   });
 });
 

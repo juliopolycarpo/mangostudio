@@ -78,62 +78,125 @@ export function containerName(environmentId: string, nonce: string): string {
 }
 
 /**
- * Whether this config can be launched at all, as a sentence, or null when it
- * can.
+ * Every distinct reason {@link containerConfigRefusal} can give, as a code a
+ * caller can map to its own translated copy instead of quoting English back.
+ */
+export type ContainerMountRefusalCode =
+  | 'too-many-mounts'
+  | 'whitespace'
+  | 'not-absolute'
+  | 'contains-colon'
+  | 'engine-control'
+  | 'denied-prefix'
+  | 'host-root'
+  | 'shadows-runtime'
+  | 'shadows-image-root'
+  | 'duplicate-target';
+
+/** A refusal reason plus whatever it needs interpolated into its sentence. */
+export interface ContainerMountRefusal {
+  readonly code: ContainerMountRefusalCode;
+  readonly params: Readonly<Record<string, string>>;
+}
+
+/**
+ * Whether this config can be launched at all, as a structured refusal, or
+ * null when it can.
  *
  * The schema settles shapes — an absolute container path, a bounded mount
  * count, an image that cannot start with a dash. What is left is the part a
  * JSON schema cannot say: that a host path is absolute in either style, that it
  * is not one of the paths that would undo the isolation, and that two mounts do
  * not land on the same target.
+ *
+ * The result is a code, not a sentence: the hub logs it through
+ * {@link describeContainerMountRefusal}, and the browser owns its own
+ * translated copy per code instead of rendering whichever language this ran in.
  */
-export function containerConfigRefusal(config: ContainerEnvironmentConfig): string | null {
+export function containerConfigRefusal(
+  config: ContainerEnvironmentConfig
+): ContainerMountRefusal | null {
   const mounts = config.mounts ?? [];
   if (mounts.length > CONTAINER_MAX_MOUNTS) {
-    return `An environment may mount at most ${CONTAINER_MAX_MOUNTS} paths into its container.`;
+    return { code: 'too-many-mounts', params: { max: String(CONTAINER_MAX_MOUNTS) } };
   }
 
   const targets = new Set<string>();
   for (const mount of mounts) {
     const refusal = mountRefusal(mount);
     if (refusal) return refusal;
-    if (targets.has(mount.containerPath)) {
-      return `Two mounts both target ${mount.containerPath} inside the container. Give each one its own path.`;
+    const target = normalizeContainerTarget(mount.containerPath);
+    if (targets.has(target)) {
+      return { code: 'duplicate-target', params: { containerPath: mount.containerPath } };
     }
-    targets.add(mount.containerPath);
+    targets.add(target);
   }
   return null;
 }
 
-function mountRefusal(mount: ContainerMount): string | null {
+/** English sentence for a refusal — what the hub logs and reports on launch failure. */
+export function describeContainerMountRefusal(refusal: ContainerMountRefusal): string {
+  const { host, prefix, containerPath, runtimePath, max } = refusal.params;
+  switch (refusal.code) {
+    case 'too-many-mounts':
+      return `An environment may mount at most ${max} paths into its container.`;
+    case 'whitespace':
+      return `The host path ${host} has leading or trailing whitespace.`;
+    case 'not-absolute':
+      return `The host path ${host} is not absolute. A relative path would be resolved against whatever directory the container engine inherited.`;
+    case 'contains-colon':
+      return `The host path ${host} contains a colon, which separates the fields of a mount specification.`;
+    case 'engine-control':
+      return `Mounting ${host} would give the container control of the container engine, which is a way out of the container.`;
+    case 'denied-prefix':
+      return `Mounting ${host} would expose this machine's ${prefix}, which is a way out of the container.`;
+    case 'host-root':
+      return `Mounting ${host} would expose this machine's entire filesystem, which is a way out of the container.`;
+    case 'shadows-runtime':
+      return `${runtimePath} is where the MangoStudio runtime is mounted. Choose another path inside the container.`;
+    case 'shadows-image-root':
+      return 'Mounting over / would replace the image the container is built from.';
+    case 'duplicate-target':
+      return `Two mounts both target ${containerPath} inside the container. Give each one its own path.`;
+  }
+}
+
+/** Without a trailing slash, so `/work` and `/work/` collide as the same target. */
+function normalizeContainerTarget(containerPath: string): string {
+  return containerPath.length > 1 && containerPath.endsWith('/')
+    ? containerPath.slice(0, -1)
+    : containerPath;
+}
+
+function mountRefusal(mount: ContainerMount): ContainerMountRefusal | null {
   const host = mount.hostPath.trim();
   if (host !== mount.hostPath) {
-    return `The host path ${mount.hostPath} has leading or trailing whitespace.`;
+    return { code: 'whitespace', params: { host: mount.hostPath } };
   }
   const windowsStyle = WINDOWS_DRIVE_PREFIX.test(host);
   if (!(host.startsWith('/') || windowsStyle)) {
-    return `The host path ${host} is not absolute. A relative path would be resolved against whatever directory the container engine inherited.`;
+    return { code: 'not-absolute', params: { host } };
   }
   // `-v` splits on colons, so one inside a path silently becomes a field
   // boundary and mounts something nobody asked for. A Windows drive letter is
   // the documented exception both engines parse themselves.
   const rest = windowsStyle ? host.slice(2) : host;
   if (rest.includes(':')) {
-    return `The host path ${host} contains a colon, which separates the fields of a mount specification.`;
+    return { code: 'contains-colon', params: { host } };
   }
 
   const resolved = collapseTraversal(normalizeHostPath(host));
   if (DENIED_HOST_PATH_BASENAMES.some((name) => resolved.endsWith(`/${name}`))) {
-    return `Mounting ${host} would give the container control of the container engine, which is a way out of the container.`;
+    return { code: 'engine-control', params: { host } };
   }
   const denied = DENIED_HOST_PATH_PREFIXES.find(
     (prefix) => resolved === prefix || resolved.startsWith(`${prefix}/`)
   );
   if (denied) {
-    return `Mounting ${host} would expose this machine's ${denied}, which is a way out of the container.`;
+    return { code: 'denied-prefix', params: { host, prefix: denied } };
   }
   if (isHostRoot(resolved)) {
-    return `Mounting ${host} would expose this machine's entire filesystem, which is a way out of the container.`;
+    return { code: 'host-root', params: { host } };
   }
 
   // The runtime's own mount lands here; a user mount on the same path would
@@ -142,10 +205,10 @@ function mountRefusal(mount: ContainerMount): string | null {
     mount.containerPath === CONTAINER_RUNTIME_MOUNT_PATH ||
     mount.containerPath.startsWith(`${CONTAINER_RUNTIME_MOUNT_PATH}/`)
   ) {
-    return `${CONTAINER_RUNTIME_MOUNT_PATH} is where the MangoStudio runtime is mounted. Choose another path inside the container.`;
+    return { code: 'shadows-runtime', params: { runtimePath: CONTAINER_RUNTIME_MOUNT_PATH } };
   }
   if (mount.containerPath === '/') {
-    return 'Mounting over / would replace the image the container is built from.';
+    return { code: 'shadows-image-root', params: {} };
   }
   return null;
 }
@@ -153,6 +216,10 @@ function mountRefusal(mount: ContainerMount): string | null {
 /** Lower-cased, forward-slashed, and without a trailing slash, for comparison. */
 function normalizeHostPath(host: string): string {
   const forward = host.replaceAll('\\', '/').toLowerCase();
+  // A bare drive root ("c:/") keeps its slash: stripping it would leave "c:",
+  // which no longer matches WINDOWS_DRIVE_PREFIX, so collapseTraversal below
+  // would stop treating it as a drive and misparse it as a relative segment.
+  if (/^[a-z]:\/$/.test(forward)) return forward;
   return forward.length > 1 && forward.endsWith('/') ? forward.slice(0, -1) : forward;
 }
 
