@@ -1088,12 +1088,15 @@ async function runUndo(
       );
     }
 
-    const params = {
-      backupRoot: deps.backup.backupDir(),
-      backupId,
-      pathEnv: writePathEnvParams(env),
-    };
-    if (deps.runtimeUndo) return named(await deps.runtimeUndo(params));
+    if (deps.runtimeUndo) {
+      return named(
+        await deps.runtimeUndo({
+          backupRoot: deps.backup.backupDir(),
+          backupId,
+          pathEnv: writePathEnvParams(env),
+        })
+      );
+    }
 
     // Never defaulted: the connection cache is keyed by user, so a stand-in id
     // would open a second Local runtime host owned by a user that does not
@@ -1102,6 +1105,15 @@ async function runUndo(
       throw new TypeError('undoLibraryPropagation needs a userId to reach the Local runtime.');
     }
     const client = await getRuntimeClient(userId, deps.environmentId);
+    // Same root apply wrote to: `deps.backup.backupDir()` only covers the
+    // hub's own disk, and a remote apply backed its files up under the
+    // target's own home via `backupPolicyFor` — undoing it has to look there.
+    const policy = backupPolicyFor(client, deps.environmentId);
+    const params = {
+      backupRoot: policy.backupRoot,
+      backupId,
+      pathEnv: writePathEnvParams(env),
+    };
     return named(await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }));
   } catch (error) {
     // Two shapes, one condition: the in-process engine throws the class, and
