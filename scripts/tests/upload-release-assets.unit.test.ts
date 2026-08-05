@@ -40,6 +40,7 @@ function runUploadReleaseAssets(options: {
   args: string[];
   assetRows?: string[];
   env?: Record<string, string | undefined>;
+  fn?: string;
 }): RunResult {
   const dir = mkdtempSync(join(tmpdir(), 'upload-release-assets-'));
   try {
@@ -54,17 +55,10 @@ function runUploadReleaseAssets(options: {
     const assetsPath = join(dir, 'assets.tsv');
     writeFileSync(assetsPath, (options.assetRows ?? []).map((row) => `${row}\n`).join(''));
 
+    const fn = options.fn ?? 'upload_release_assets';
     const quotedArgs = options.args.map((arg) => `'${arg}'`).join(' ');
     const proc = Bun.spawnSync({
-      cmd: [
-        'bash',
-        '-euo',
-        'pipefail',
-        '-c',
-        `source "$1" && upload_release_assets ${quotedArgs}`,
-        'bash',
-        SCRIPT,
-      ],
+      cmd: ['bash', '-euo', 'pipefail', '-c', `source "$1" && ${fn} ${quotedArgs}`, 'bash', SCRIPT],
       cwd: ROOT_DIR,
       env: {
         ...process.env,
@@ -160,5 +154,61 @@ describe('scripts/release/upload-release-assets.sh', () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).toContain('GH_REPO or GITHUB_REPOSITORY must be set');
     expect(result.log).toEqual([]);
+  });
+
+  describe('purge_stale_release_assets', () => {
+    test('deletes only assets absent from the kept file list', () => {
+      const result = runUploadReleaseAssets({
+        fn: 'purge_stale_release_assets',
+        args: ['v0.1.1-canary', 'assets/a.tar.gz', 'assets/b.zip'],
+        assetRows: [
+          '101\ta.tar.gz',
+          '102\tb.zip',
+          '103\tmangostudio-runtime-0.1.1-canary-linux-arm64',
+        ],
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.log).toEqual([
+        'api repos/juliopolycarpo/mangostudio/releases/tags/v0.1.1-canary --jq .assets[] | [(.id | tostring), .name] | @tsv',
+        'api --method DELETE repos/juliopolycarpo/mangostudio/releases/assets/103',
+      ]);
+    });
+
+    test('deletes nothing when every remote asset is still kept', () => {
+      const result = runUploadReleaseAssets({
+        fn: 'purge_stale_release_assets',
+        args: ['v1.2.3', 'assets/a.tar.gz'],
+        assetRows: ['101\ta.tar.gz'],
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.log.filter((line) => line.includes('DELETE'))).toEqual([]);
+    });
+
+    test('fails instead of silently leaving a stale asset when listing fails', () => {
+      const result = runUploadReleaseAssets({
+        fn: 'purge_stale_release_assets',
+        args: ['v1.2.3', 'assets/a.tar.gz'],
+        env: { FAIL_LIST: '1' },
+      });
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain('Failed to list existing assets for v1.2.3');
+    });
+
+    test('fails instead of continuing when a stale asset cannot be deleted', () => {
+      const result = runUploadReleaseAssets({
+        fn: 'purge_stale_release_assets',
+        args: ['v1.2.3', 'assets/a.tar.gz'],
+        assetRows: ['101\ta.tar.gz', '104\tmangostudio-runtime-0.1.1-canary-linux-arm64'],
+        env: { FAIL_DELETE: '1' },
+      });
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.stderr).toContain(
+        'Failed to delete stale release asset mangostudio-runtime-0.1.1-canary-linux-arm64 (id 104)'
+      );
+    });
   });
 });

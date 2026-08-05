@@ -120,6 +120,12 @@ type to the release plan therefore cannot widen a canary upload on its own; a
 unit test pins that. Widening the curated platform list is a one-line change to
 `CANARY_PAIR_PLATFORMS`.
 
+Narrowing it does not leave orphans on the rolling tag: after publishing,
+`purge_stale_release_assets` (`scripts/release/upload-release-assets.sh`) deletes
+any remote asset not in the run's staged set, so a platform dropped from
+`CANARY_PAIR_PLATFORMS` stops shipping instead of lingering under the old name
+forever.
+
 ### Rolling identity and `canary-manifest.json`
 
 Canary assets keep the **rolling name** on the **rolling tag** —

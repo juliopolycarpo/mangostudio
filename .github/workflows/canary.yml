@@ -154,6 +154,10 @@ jobs:
             --prerelease \
             --title "$tag" \
             --notes "$notes"
+          # The curated asset set can shrink between runs (a platform dropped
+          # from CANARY_PAIR_PLATFORMS); the rolling tag must not keep serving
+          # a stale binary the docs and manifest no longer promise.
+          purge_stale_release_assets "$tag" github-canary-assets/*
 
   canary-summary:
     name: Canary publish summary
