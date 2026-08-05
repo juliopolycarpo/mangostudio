@@ -362,13 +362,15 @@ describe('previewLibraryRemoval across machines', () => {
     expect(firstEntry(result).wouldRemoveLastCopy).toBe(true);
   });
 
-  it('blocks copies on a machine it could not reach, and still counts them', async () => {
+  it('blocks copies on a machine it could not reach, and treats them as unknown', async () => {
     const result = await preview(['skill:gh'], ['claude-skills'], {
       resources: [resource([instance('claude-skills', 'hash-a')])],
       environmentIds: ['local', 'ssh-box'],
       environments: {
         'ssh-box': {
-          resources: [resource([instance('claude-skills', 'hash-a')])],
+          // An unreachable machine reports nothing, so its copies cannot be
+          // counted as survivors — see readEnvironmentSnapshot's offline branches.
+          resources: [],
           blockedReason: 'environment-offline',
         },
       },
@@ -378,9 +380,9 @@ describe('previewLibraryRemoval across machines', () => {
     const offline = entry.locations.find((row) => row.environmentId === 'ssh-box');
     expect(offline?.operation).toBe('blocked');
     expect(offline?.blockedReason).toBe('environment-offline');
-    // Its copy is still a copy: removing the reachable one does not zero the
-    // resource, and demanding an acknowledgement would misstate what happens.
-    expect(entry.wouldRemoveLastCopy).toBe(false);
+    // Nothing is known about that machine's copies, so the guard errs toward
+    // asking: removing the reachable copy may well be removing the last one.
+    expect(entry.wouldRemoveLastCopy).toBe(true);
   });
 
   it('reports two machines holding different bytes as divergent', async () => {
