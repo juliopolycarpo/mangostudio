@@ -150,6 +150,30 @@ describe('containerConfigRefusal', () => {
     ).toBeNull();
   });
 
+  it.each([
+    ['/tmp/../proc', /\/proc/],
+    ['/tmp/../../var/run', /\/var\/run/],
+    ['/home/j/../../var/run/docker.sock', /control of the container engine/],
+  ])('refuses a denied path spelled with a traversal segment: %s', (hostPath, expected) => {
+    expect(
+      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] }))
+    ).toMatch(expected);
+  });
+
+  it('allows a traversal that resolves to an ordinary path', () => {
+    expect(
+      containerConfigRefusal(
+        config({ mounts: [{ hostPath: '/home/j/project/../project', containerPath: '/work' }] })
+      )
+    ).toBeNull();
+  });
+
+  it.each(['/', 'C:\\foo\\..\\..'])('refuses the host filesystem root: %s', (hostPath) => {
+    expect(
+      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] }))
+    ).toMatch(/entire filesystem/);
+  });
+
   it('refuses a host path carrying its own mount separator', () => {
     expect(
       containerConfigRefusal(

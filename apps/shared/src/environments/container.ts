@@ -122,15 +122,18 @@ function mountRefusal(mount: ContainerMount): string | null {
     return `The host path ${host} contains a colon, which separates the fields of a mount specification.`;
   }
 
-  const normalized = normalizeHostPath(host);
-  if (DENIED_HOST_PATH_BASENAMES.some((name) => normalized.endsWith(`/${name}`))) {
+  const resolved = collapseTraversal(normalizeHostPath(host));
+  if (DENIED_HOST_PATH_BASENAMES.some((name) => resolved.endsWith(`/${name}`))) {
     return `Mounting ${host} would give the container control of the container engine, which is a way out of the container.`;
   }
   const denied = DENIED_HOST_PATH_PREFIXES.find(
-    (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`)
+    (prefix) => resolved === prefix || resolved.startsWith(`${prefix}/`)
   );
   if (denied) {
     return `Mounting ${host} would expose this machine's ${denied}, which is a way out of the container.`;
+  }
+  if (isHostRoot(resolved)) {
+    return `Mounting ${host} would expose this machine's entire filesystem, which is a way out of the container.`;
   }
 
   // The runtime's own mount lands here; a user mount on the same path would
@@ -151,6 +154,32 @@ function mountRefusal(mount: ContainerMount): string | null {
 function normalizeHostPath(host: string): string {
   const forward = host.replaceAll('\\', '/').toLowerCase();
   return forward.length > 1 && forward.endsWith('/') ? forward.slice(0, -1) : forward;
+}
+
+/**
+ * Collapses `.` and `..` segments lexically, without touching the filesystem.
+ *
+ * The denylist below is a string prefix check, and a prefix check does not
+ * know that `/tmp/../proc` and `/proc` name the same directory. This is what
+ * lets it see that they do, so a traversal cannot spell its way past a denied
+ * prefix.
+ */
+function collapseTraversal(normalized: string): string {
+  const windowsStyle = WINDOWS_DRIVE_PREFIX.test(normalized);
+  const anchor = windowsStyle ? normalized.slice(0, 2) : '';
+  const rest = windowsStyle ? normalized.slice(2) : normalized;
+  const segments: string[] = [];
+  for (const segment of rest.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') segments.pop();
+    else segments.push(segment);
+  }
+  return `${anchor}/${segments.join('/')}`;
+}
+
+/** Whether a resolved path names the top of its filesystem (or drive). */
+function isHostRoot(resolved: string): boolean {
+  return resolved === '/' || /^[a-z]:\/$/.test(resolved);
 }
 
 /**
@@ -184,16 +213,22 @@ export function containerEngineVersionCommand(engine: ContainerEngine): Containe
  * An image with no shell fails here rather than at launch, which is the whole
  * point of probing: "use a shell-bearing image" is an answer, and a runtime
  * that never handshakes is not.
+ *
+ * `name`, when given, is what a caller kills the probe by if it has to give up
+ * on it: `execFile`'s own timeout only kills the CLI, and the daemon-owned
+ * container it started keeps running past that.
  */
 export function containerProbeCommand(
   config: ContainerEnvironmentConfig,
-  script: string
+  script: string,
+  name?: string
 ): ContainerCommand {
   return {
     command: containerEngineOf(config),
     args: [
       'run',
       '--rm',
+      ...(name === undefined ? [] : ['--name', name]),
       '--pull=never',
       '--network',
       'none',
