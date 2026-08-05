@@ -17,12 +17,19 @@
  * across every location the app writes into, and the sets on this list are the
  * last copies of things — the deliberate cost is that reclaiming a lot of disk
  * takes a lot of clicks.
+ *
+ * Rows are grouped by machine because that is where the bytes are. Two sets from
+ * two machines sit on two disks under two separate retention budgets, and a flat
+ * list would invite reading one machine's history as the whole picture. A
+ * machine that is away keeps its rows — from the hub's index — with restore
+ * disabled and the reason stated, which is the whole point of having an index.
  */
 
 import type { PropagationBackupSet, PropagationUndo } from '@mangostudio/shared/library';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pin, Timer, Trash2, Undo2 } from 'lucide-react';
+import { Pin, Server, Timer, Trash2, Undo2 } from 'lucide-react';
 import { useState } from 'react';
+import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { purgeBackup, undoPropagation } from '../api';
@@ -30,18 +37,53 @@ import { formatBytes, formatRelativeTime } from '../format';
 import { backupUsageQueryOptions, libraryKeys } from '../queries';
 import { LibraryPageState } from './LibraryPageState';
 
+/** One set on one machine. Backup ids are minted per store, so neither half identifies a row. */
+interface BackupTarget {
+  readonly backupId: string;
+  readonly environmentId: string;
+}
+
+function targetKey(target: BackupTarget): string {
+  return `${target.environmentId}\u001f${target.backupId}`;
+}
+
+/**
+ * Sets per machine, in the order the response put them.
+ *
+ * The API already sorts newest first across every machine, so preserving
+ * insertion order here means the machine with the most recent activity heads the
+ * page — which is almost always the one the user just did something on.
+ */
+function groupByEnvironment(
+  sets: readonly PropagationBackupSet[]
+): [string, PropagationBackupSet[]][] {
+  const grouped = new Map<string, PropagationBackupSet[]>();
+  for (const set of sets) {
+    const existing = grouped.get(set.environmentId);
+    if (existing) existing.push(set);
+    else grouped.set(set.environmentId, [set]);
+  }
+  return [...grouped];
+}
+
 export function BackupList() {
   const { t, locale } = useI18n();
   const l = t.library;
   const queryClient = useQueryClient();
   const query = useQuery(backupUsageQueryOptions());
+  // Names only. A row whose machine has since been deleted still lists — the
+  // bytes outlive the configuration — and falls back to naming the id.
+  const environments = useEnvironmentEntitiesQuery().data ?? [];
+  const nameOf = (environmentId: string) =>
+    environments.find((environment) => environment.id === environmentId)?.name ??
+    formatMessage(l.backups.machineUnknown, { id: environmentId });
   // Two clicks on every row, pinned or not. Ordinary sets are purgeable here for
   // the first time, and the asymmetry that used to exist — a confirm only where
   // rows happened to be pinned — was an accident of pinned rows being the only
   // rows, not a considered rule about which copies deserve one.
   const [confirming, setConfirming] = useState<string | null>(null);
   const purge = useMutation({
-    mutationFn: (backupId: string) => purgeBackup(backupId),
+    mutationFn: (target: BackupTarget) => purgeBackup(target.backupId, target.environmentId),
     onSettled: () => setConfirming(null),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: libraryKeys.backups() }),
   });
@@ -50,7 +92,7 @@ export function BackupList() {
   // reports. Restoring does not consume the set — the copy stays retained until
   // the user purges it.
   const restore = useMutation({
-    mutationFn: (backupId: string) => undoPropagation(backupId),
+    mutationFn: (target: BackupTarget) => undoPropagation(target.backupId, target.environmentId),
     // Resources are back on disk, so the matrix that said they were gone is now
     // wrong; each set's size and pinning can move with it.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
@@ -63,6 +105,11 @@ export function BackupList() {
 
   const usage = query.data;
   const pinnedCount = usage.sets.filter((set) => set.pinned).length;
+  const machines = groupByEnvironment(usage.sets);
+  const pending = (target: BackupTarget) =>
+    purge.variables !== undefined && targetKey(purge.variables) === targetKey(target);
+  const restoring = (target: BackupTarget) =>
+    restore.variables !== undefined && targetKey(restore.variables) === targetKey(target);
 
   return (
     <div className="space-y-4" data-testid="backup-list">
@@ -77,8 +124,16 @@ export function BackupList() {
           {formatMessage(l.backups.retention, {
             count: String(usage.retentionCount),
             size: formatBytes(usage.retentionBytes),
-          })}
+          })}{' '}
+          {l.backups.retentionPerMachine}
         </p>
+        {usage.unreachableEnvironmentIds.length > 0 && (
+          <p className="text-[11px] text-on-surface-variant/60" data-testid="backup-unreachable">
+            {formatMessage(l.backups.unreachable, {
+              machines: usage.unreachableEnvironmentIds.map(nameOf).join(', '),
+            })}
+          </p>
+        )}
         {/*
           Pinned bytes are charged against the budget first and never evicted,
           so they are why retention can feel tighter than the numbers above
@@ -101,30 +156,57 @@ export function BackupList() {
         </p>
       )}
 
-      {usage.sets.length > 0 && (
-        <ul className="space-y-2">
-          {usage.sets.map((set) => (
-            <BackupRow
-              key={set.backupId}
-              set={set}
-              locale={locale}
-              confirming={confirming === set.backupId}
-              onConfirm={() => setConfirming(set.backupId)}
-              onCancelConfirm={() => setConfirming(null)}
-              onPurge={() => purge.mutate(set.backupId)}
-              onRestore={() => restore.mutate(set.backupId)}
-              purgePending={purge.isPending && purge.variables === set.backupId}
-              purgeFailed={purge.isError && purge.variables === set.backupId}
-              restorePending={restore.isPending && restore.variables === set.backupId}
-              restoreFailed={restore.isError && restore.variables === set.backupId}
-              // Keyed to the set the manifest names, not to the last row
-              // clicked: the response carries the id it acted on, and a restore
-              // reported against the wrong row is worse than none at all.
-              result={restore.data?.backupId === set.backupId ? restore.data : undefined}
-            />
-          ))}
-        </ul>
-      )}
+      {machines.map(([environmentId, sets]) => (
+        <section
+          key={environmentId}
+          className="space-y-2"
+          data-testid="backup-machine"
+          data-environment-id={environmentId}
+        >
+          <h3 className="flex items-center gap-1.5 font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
+            <Server size={11} aria-hidden="true" />
+            {nameOf(environmentId)}
+            <span className="font-normal normal-case tracking-normal text-on-surface-variant/50">
+              {formatMessage(l.backups.usage, {
+                count: String(sets.length),
+                size: formatBytes(sets.reduce((total, set) => total + set.sizeBytes, 0)),
+              })}
+            </span>
+          </h3>
+          <ul className="space-y-2">
+            {sets.map((set) => {
+              const target = { backupId: set.backupId, environmentId };
+              return (
+                <BackupRow
+                  key={targetKey(target)}
+                  set={set}
+                  locale={locale}
+                  confirming={confirming === targetKey(target)}
+                  onConfirm={() => setConfirming(targetKey(target))}
+                  onCancelConfirm={() => setConfirming(null)}
+                  onPurge={() => purge.mutate(target)}
+                  onRestore={() => restore.mutate(target)}
+                  purgePending={purge.isPending && pending(target)}
+                  purgeFailed={purge.isError && pending(target)}
+                  restorePending={restore.isPending && restoring(target)}
+                  restoreFailed={restore.isError && restoring(target)}
+                  // Keyed to the set the response names, not to the last row
+                  // clicked: the answer carries the machine and the id it acted
+                  // on, and a restore reported against the wrong row is worse
+                  // than none at all. Both halves are needed — backup ids are
+                  // minted per store, so two machines can hold the same one.
+                  result={
+                    restore.data?.backupId === set.backupId &&
+                    restore.data.environmentId === environmentId
+                      ? restore.data
+                      : undefined
+                  }
+                />
+              );
+            })}
+          </ul>
+        </section>
+      ))}
 
       <p className="text-[11px] text-on-surface-variant/50">{l.backups.bulkHint}</p>
     </div>
@@ -162,6 +244,16 @@ function BackupRow({
 }: BackupRowProps) {
   const { t } = useI18n();
   const l = t.library;
+  // Stated up front rather than discovered on click. A restore reads the
+  // manifest on the machine that holds the bytes, so a machine that is away and
+  // a set that lost its manifest are both "this button cannot work", and a
+  // button that fails on click teaches users their backups are unreliable.
+  const blockedReason =
+    set.availability === 'environment-offline'
+      ? l.backups.unavailableOffline
+      : set.availability === 'manifest-missing'
+        ? l.backups.unavailableManifest
+        : null;
 
   return (
     <li
@@ -169,23 +261,31 @@ function BackupRow({
       data-testid="backup-row"
       data-backup-id={set.backupId}
       data-operation={set.operation}
+      data-availability={set.availability}
     >
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
         <span className="text-on-surface" data-testid="backup-created">
           <span className="text-on-surface-variant/50">{l.backups.columnCreated} </span>
           {formatRelativeTime(set.createdAtMs, locale)}
         </span>
-        <span className="text-on-surface" data-testid="backup-contents">
-          <span className="text-on-surface-variant/50">{l.backups.columnContents} </span>
-          {/*
-            A v1 manifest carries no resource keys, so the row falls back to the
-            entry count rather than printing an empty cell that reads as "this
-            backup holds nothing".
-          */}
-          {set.resourceKeys.length > 0
-            ? set.resourceKeys.join(', ')
-            : formatMessage(l.backups.contentsUnknown, { count: String(set.entryCount) })}
-        </span>
+        {/*
+          Only the machine knows what a set holds, so a row assembled from the
+          hub's index omits the cell entirely. Printing "0 entries" there would
+          state as fact the one thing an index row cannot know.
+        */}
+        {set.availability === 'available' && (
+          <span className="text-on-surface" data-testid="backup-contents">
+            <span className="text-on-surface-variant/50">{l.backups.columnContents} </span>
+            {/*
+              A v1 manifest carries no resource keys, so the row falls back to the
+              entry count rather than printing an empty cell that reads as "this
+              backup holds nothing".
+            */}
+            {set.resourceKeys.length > 0
+              ? set.resourceKeys.join(', ')
+              : formatMessage(l.backups.contentsUnknown, { count: String(set.entryCount) })}
+          </span>
+        )}
         <span className="text-on-surface-variant/70" data-testid="backup-size">
           <span className="text-on-surface-variant/50">{l.backups.columnSize} </span>
           {formatBytes(set.sizeBytes)}
@@ -228,10 +328,12 @@ function BackupRow({
         <button
           type="button"
           onClick={onRestore}
-          disabled={restorePending}
+          disabled={restorePending || blockedReason !== null}
           className="inline-flex items-center gap-1 text-primary hover:underline disabled:opacity-50"
           data-testid="restore-backup"
-          {...(set.operation === 'unknown' && { title: l.backups.undoUnknownHint })}
+          title={
+            blockedReason ?? (set.operation === 'unknown' ? l.backups.undoUnknownHint : undefined)
+          }
         >
           <Undo2 size={11} />
           {restorePending ? l.backups.restoring : undoLabel(set.operation, l.backups)}
@@ -305,7 +407,13 @@ function BackupRow({
         )}
       </div>
 
-      {set.operation === 'unknown' && (
+      {blockedReason !== null && (
+        <p className="text-[11px] text-on-surface-variant/70" data-testid="backup-unavailable">
+          {blockedReason}
+        </p>
+      )}
+
+      {set.operation === 'unknown' && blockedReason === null && (
         <p className="text-[11px] text-on-surface-variant/50" data-testid="backup-unknown-hint">
           {l.backups.undoUnknownHint}
         </p>

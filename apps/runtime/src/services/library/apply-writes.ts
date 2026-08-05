@@ -65,6 +65,8 @@ export interface ExecutePropagationWritesParams {
   readonly pathEnv: PathEnv;
   readonly backupId?: string;
   readonly operations: readonly PreparedPropagationOperation[];
+  /** Stamped into the manifest so a store can name the environment it serves. */
+  readonly environmentId?: string;
   /**
    * Aborts between operations. The hub's RPC deadline sends a cancel that ends
    * up here; without it the hub reports a failure while this loop keeps writing
@@ -124,7 +126,7 @@ export async function executePropagationWrites(
       await discardBackupSet(backupId, deps.backup).catch(() => undefined);
       return { partial: false, applied: [], skipped: [], failed };
     }
-    await persistBackupManifest(backupId, written, deps);
+    await persistBackupManifest(backupId, written, params.environmentId, deps);
     return { partial: true, applied, skipped: [], failed, backupId };
   }
 
@@ -136,7 +138,7 @@ export async function executePropagationWrites(
   // recorded manifest leaves the user unable to undo, so roll back when we can
   // and otherwise return a partial result that still names the backup set.
   try {
-    await persistBackupManifest(backupId, written, deps);
+    await persistBackupManifest(backupId, written, params.environmentId, deps);
   } catch (error) {
     const rolledBack = await rollback(written, deps);
     if (rolledBack) {
@@ -158,15 +160,17 @@ export async function executePropagationWrites(
 async function persistBackupManifest(
   backupId: string,
   written: readonly BackupEntry[],
+  environmentId: string | undefined,
   deps: PropagationWriteEngineDeps
 ): Promise<void> {
   await writeBackupManifest(
     {
-      version: 2,
+      version: 3,
       backupId,
       createdAtMs: deps.backup.now().getTime(),
       entries: [...written],
       operation: 'propagation',
+      ...(environmentId !== undefined && { environmentId }),
     },
     deps.backup
   );

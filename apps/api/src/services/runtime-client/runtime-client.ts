@@ -25,6 +25,10 @@ import {
   type RuntimeInstallRunResult,
   type RuntimeLibraryApplyParams,
   type RuntimeLibraryApplyResult,
+  type RuntimeLibraryBackupsParams,
+  type RuntimeLibraryBackupsResult,
+  type RuntimeLibraryGcParams,
+  type RuntimeLibraryGcResult,
   type RuntimeLibraryLocationsParams,
   type RuntimeLibraryLocationsResult,
   type RuntimeLibraryReadParams,
@@ -309,6 +313,14 @@ interface RuntimeLibraryClient {
     params: RuntimeLibraryUndoParams,
     options?: RuntimeRequestOptions
   ): Promise<RuntimeLibraryUndoResult>;
+  backups(
+    params: RuntimeLibraryBackupsParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryBackupsResult>;
+  gc(
+    params: RuntimeLibraryGcParams,
+    options?: RuntimeRequestOptions
+  ): Promise<RuntimeLibraryGcResult>;
 }
 
 /** Typed API-side facade over the transport-level runtime request multiplexer. */
@@ -385,6 +397,8 @@ export class RuntimeClient {
       apply: (params, options) => this.request('library.apply', params, options),
       remove: (params, options) => this.request('library.remove', params, options),
       undo: (params, options) => this.request('library.undo', params, options),
+      backups: (params, options) => this.request('library.backups', params, options),
+      gc: (params, options) => this.request('library.gc', params, options),
     };
     this.snapshot = {
       capture: (params, options) => this.request('snapshot.capture', params, options),

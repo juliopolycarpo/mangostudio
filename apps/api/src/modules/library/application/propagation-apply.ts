@@ -24,10 +24,10 @@ import {
   type AdapterStrategy,
   hashLibraryFile,
   type LibraryDivergenceAckRequest,
+  type LibraryUndoResult,
   type PropagationApplied,
   type PropagationApply,
   type PropagationApplyRequest,
-  type PropagationBackupUsage,
   type PropagationDecision,
   type PropagationDestination,
   type PropagationFailure,
@@ -46,11 +46,7 @@ import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/pro
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
 import { LibraryRequestError } from '../domain/library-request-error';
-import {
-  type BackupStoreDeps,
-  defaultBackupStoreDeps,
-  listBackupSets,
-} from '../infrastructure/backup-store';
+import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
 import { hashResourceAt, readResourceFile } from '../infrastructure/instance-reader';
 import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
 import {
@@ -61,6 +57,7 @@ import {
 import { defaultAdapterRegistry } from './adapters/registry';
 import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
 import { serializeLibraryWrite } from './apply-queue';
+import { recordWrittenBackup } from './backup-inventory';
 import { acknowledgeDivergence } from './conflict-resolution';
 import { previewLibraryPropagation } from './propagation-preview';
 
@@ -91,6 +88,24 @@ export interface PropagationApplyDeps {
   writeEngine: 'runtime' | 'in-process';
   /** Stands in for the RuntimeClient on the `runtime` engine; tests inject transport failures. */
   runtimeApply?: (params: RuntimeLibraryApplyParams) => Promise<PropagationApply>;
+  /**
+   * Which machine the writes land on. Every destination is Local until the
+   * wizards offer a second one; the field exists from the first commit so the
+   * backup set an apply produces can be filed under the machine that holds it
+   * rather than under an assumption.
+   */
+  environmentId: string;
+  /** Files the produced backup set in the hub-side listing index. */
+  recordBackup: (
+    userId: string,
+    input: {
+      readonly environmentId: string;
+      readonly backupId: string;
+      readonly operation: 'propagation' | 'removal';
+      readonly pinned: boolean;
+      readonly createdAtMs: number;
+    }
+  ) => Promise<void>;
 }
 
 interface DirectoryWrite {
@@ -125,6 +140,8 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
     acknowledge: overrides.acknowledge ?? acknowledgeDivergence,
     backup: overrides.backup ?? defaultBackupStoreDeps,
     writeEngine: overrides.writeEngine ?? 'runtime',
+    environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
+    recordBackup: overrides.recordBackup ?? recordWrittenBackup,
     ...(overrides.runtimeApply && { runtimeApply: overrides.runtimeApply }),
   };
 }
@@ -184,6 +201,23 @@ async function runApply(
 
   const writeResult = await runPreparedWrites(userId, prepared, plan.skipped, env, deps);
 
+  if (writeResult.backupId !== undefined) {
+    // Indexed even when the apply was partial: a partial apply is precisely the
+    // one whose backup handle the user needs to find again later, and a failure
+    // to file the row must not turn a completed write into a reported failure.
+    await deps
+      .recordBackup(userId, {
+        environmentId: deps.environmentId,
+        backupId: writeResult.backupId,
+        operation: 'propagation',
+        pinned: false,
+        createdAtMs: Date.now(),
+      })
+      .catch((error: unknown) => {
+        console.error('[library] Could not index the backup set for this apply:', error);
+      });
+  }
+
   if (writeResult.failed.length === 0) {
     for (const acknowledgement of plan.acknowledgements) {
       await deps.acknowledge(userId, acknowledgement);
@@ -233,21 +267,23 @@ function runWriteEngine(
         retentionCount: deps.backup.retentionCount(),
         retentionBytes: deps.backup.retentionBytes(),
         pathEnv: env,
+        environmentId: deps.environmentId,
         operations: prepared,
       },
       engineDeps
     );
   }
 
-  const params = toRuntimeApplyParams(prepared, env, deps.backup);
-  return deps.runtimeApply ? deps.runtimeApply(params) : runtimeApply(userId, params);
+  const params = toRuntimeApplyParams(prepared, env, deps);
+  return deps.runtimeApply ? deps.runtimeApply(params) : runtimeApply(userId, params, deps);
 }
 
 async function runtimeApply(
   userId: string,
-  params: RuntimeLibraryApplyParams
+  params: RuntimeLibraryApplyParams,
+  deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
-  const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
+  const client = await getRuntimeClient(userId, deps.environmentId);
   return await client.library.apply(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
 }
 
@@ -266,8 +302,9 @@ const LIBRARY_APPLY_MAX_CONTENT_BYTES = 8 * 1024 * 1024;
 function toRuntimeApplyParams(
   prepared: readonly PreparedPropagationOperation[],
   env: PathEnv,
-  backup: BackupStoreDeps
+  deps: PropagationApplyDeps
 ): RuntimeLibraryApplyParams {
+  const backup = deps.backup;
   // Keyed by content hash so a resource fanned out to many destinations travels
   // once. `expectedContentHash` is the hash of exactly these bytes by
   // construction — `prepareOperation` recomputes it whenever adaptation or an
@@ -292,6 +329,7 @@ function toRuntimeApplyParams(
     backupRoot: backup.backupDir(),
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
+    environmentId: deps.environmentId,
     pathEnv: writePathEnvParams(env),
     operations: prepared.map(({ contents: _bytes, ...operation }) => ({
       ...operation,
@@ -773,23 +811,6 @@ async function prepareOperation(
   };
 }
 
-/** Retained sets and what they cost, plus the bounds they are trimmed to. */
-export async function describeBackupUsage(
-  deps: BackupStoreDeps = defaultBackupStoreDeps
-): Promise<PropagationBackupUsage> {
-  const sets = await listBackupSets(deps);
-  return {
-    setCount: sets.length,
-    sizeBytes: sets.reduce((total, set) => total + set.sizeBytes, 0),
-    pinnedSizeBytes: sets
-      .filter((set) => set.pinned)
-      .reduce((total, set) => total + set.sizeBytes, 0),
-    retentionCount: deps.retentionCount(),
-    retentionBytes: deps.retentionBytes(),
-    sets,
-  };
-}
-
 export interface PropagationUndoDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   pathEnv(): PathEnv;
@@ -797,7 +818,13 @@ export interface PropagationUndoDeps {
   /** Which process performs the restore; see `PropagationApplyDeps.writeEngine`. */
   writeEngine: 'runtime' | 'in-process';
   /** Stands in for the RuntimeClient on the `runtime` engine. */
-  runtimeUndo?: (params: RuntimeLibraryUndoParams) => Promise<PropagationUndo>;
+  runtimeUndo?: (params: RuntimeLibraryUndoParams) => Promise<LibraryUndoResult>;
+  /**
+   * Which machine holds the backup set. Restoring reads the manifest where the
+   * bytes are, so this is not a preference — asking the wrong machine finds
+   * nothing and reports the set as pruned by retention.
+   */
+  environmentId: string;
 }
 
 /**
@@ -829,16 +856,26 @@ async function runUndo(
     pathEnv: overrides.pathEnv ?? (() => createLibraryPathEnv()),
     backup: overrides.backup ?? defaultBackupStoreDeps,
     writeEngine: overrides.writeEngine ?? 'runtime',
+    environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     ...(overrides.runtimeUndo && { runtimeUndo: overrides.runtimeUndo }),
   };
 
   const env = deps.pathEnv();
+  // Stamped by the hub, not the machine: the environment id is the hub's own
+  // name for the connection, and a store reachable from two hubs would answer
+  // with two different ones.
+  const named = (result: LibraryUndoResult): PropagationUndo => ({
+    ...result,
+    environmentId: deps.environmentId,
+  });
 
   try {
     if (deps.writeEngine === 'in-process') {
-      return await executeLibraryUndo(
-        { backupRoot: deps.backup.backupDir(), backupId, pathEnv: env },
-        { hashAt: deps.hashAt, backup: deps.backup }
+      return named(
+        await executeLibraryUndo(
+          { backupRoot: deps.backup.backupDir(), backupId, pathEnv: env },
+          { hashAt: deps.hashAt, backup: deps.backup }
+        )
       );
     }
 
@@ -847,7 +884,7 @@ async function runUndo(
       backupId,
       pathEnv: writePathEnvParams(env),
     };
-    if (deps.runtimeUndo) return await deps.runtimeUndo(params);
+    if (deps.runtimeUndo) return named(await deps.runtimeUndo(params));
 
     // Never defaulted: the connection cache is keyed by user, so a stand-in id
     // would open a second Local runtime host owned by a user that does not
@@ -855,8 +892,8 @@ async function runUndo(
     if (userId === undefined) {
       throw new TypeError('undoLibraryPropagation needs a userId to reach the Local runtime.');
     }
-    const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
-    return await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
+    const client = await getRuntimeClient(userId, deps.environmentId);
+    return named(await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }));
   } catch (error) {
     // Two shapes, one condition: the in-process engine throws the class, and
     // the RPC path flattens it to code INTERNAL carrying the kind in `details`.

@@ -209,6 +209,18 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
           .executeTakeFirst();
         if (mcpServer) return 'referenced';
 
+        // The library backup index is a listing cache for a machine that is
+        // going away. Left behind, its rows would sit on the backups page
+        // forever as an offline environment nobody can connect — the bytes are
+        // still on that machine's disk, but nothing here can reach them again.
+        // Chats and MCP servers block the delete instead; a cache does not get
+        // to.
+        await transaction
+          .deleteFrom('library_backups')
+          .where('userId', '=', userId)
+          .where('environmentId', '=', id)
+          .execute();
+
         await transaction
           .deleteFrom('environments')
           .where('userId', '=', userId)

@@ -35,6 +35,7 @@ import {
   createEnvironmentRepository,
   type UpdateEnvironmentRecord,
 } from '../../../src/modules/environments/infrastructure/environment-repository';
+import { createLibraryBackupIndex } from '../../../src/modules/library/infrastructure/backup-index-repository';
 import {
   createRealtimeBus,
   setRealtimeBusForTests,
@@ -60,6 +61,7 @@ afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
   await getDb().deleteFrom('chats').where('userId', '=', TEST_USER.id).execute();
+  await getDb().deleteFrom('library_backups').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('environments').where('userId', '=', TEST_USER.id).execute();
   await getDb().deleteFrom('user').where('id', '=', TEST_USER.id).execute();
   setRealtimeBusForTests(undefined);
@@ -226,6 +228,44 @@ describe('environment entity routes', () => {
 
     const missing = await app.handle(new Request('http://localhost/environments/dev-box'));
     expect(missing.status).toBe(404);
+  });
+
+  /*
+    Chats and MCP servers block a delete because they address the machine and
+    would be left pointing at nothing. The library backup index is a listing
+    cache, not a reference: it goes with the environment, or the backups page
+    keeps a machine nobody can ever connect again.
+  */
+  it('drops the library backup index rows of a machine it removes', async () => {
+    const { app } = createTestApp();
+    await app.handle(
+      new Request(
+        'http://localhost/environments',
+        jsonRequest('POST', {
+          id: 'cache-box',
+          name: 'Cache box',
+          transportKind: 'stdio',
+          config: { binaryPath: '/opt/mango-runtime' },
+        } satisfies CreateEnvironmentBody)
+      )
+    );
+    await createLibraryBackupIndex().record(TEST_USER.id, [
+      {
+        environmentId: 'cache-box',
+        backupId: '2026-08-05T10-00-00.000Z-abcdef',
+        createdAtMs: 1,
+        sizeBytes: 10,
+        pinned: false,
+        operation: 'propagation',
+      },
+    ]);
+
+    const removed = await app.handle(
+      new Request('http://localhost/environments/cache-box', jsonRequest('DELETE'))
+    );
+
+    expect(removed.status).toBe(200);
+    expect(await createLibraryBackupIndex().list(TEST_USER.id)).toEqual([]);
   });
 
   it('validates transport config on create and update', async () => {

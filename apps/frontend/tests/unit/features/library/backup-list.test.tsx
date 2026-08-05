@@ -35,11 +35,17 @@ function set(overrides: Partial<PropagationBackupSet> = {}): PropagationBackupSe
     operation: 'removal',
     resourceKeys: ['skill:gh'],
     evictsNext: false,
+    manifestReadable: true,
+    environmentId: 'local',
+    availability: 'available',
     ...overrides,
   };
 }
 
-function usageOf(sets: PropagationBackupSet[]): PropagationBackupUsage {
+function usageOf(
+  sets: PropagationBackupSet[],
+  unreachableEnvironmentIds: string[] = []
+): PropagationBackupUsage {
   return {
     setCount: sets.length,
     sizeBytes: sets.reduce((total, item) => total + item.sizeBytes, 0),
@@ -49,11 +55,13 @@ function usageOf(sets: PropagationBackupSet[]): PropagationBackupUsage {
       .filter((item) => item.pinned)
       .reduce((total, item) => total + item.sizeBytes, 0),
     sets,
+    unreachableEnvironmentIds,
   };
 }
 
 const undone: PropagationUndo = {
   backupId: REMOVAL_ID,
+  environmentId: 'local',
   restored: [{ locationId: 'claude-skills', destinationPath: '~/.claude/skills/gh' }],
   removed: [],
   skipped: [],
@@ -70,10 +78,13 @@ async function renderList(
   responses: {
     undo?: { body?: unknown; status?: number };
     purge?: { body?: unknown; status?: number };
+    unreachable?: string[];
   } = {}
 ) {
   scenario
-    .respondWithJson('GET', '/api/library/propagate/backups', { body: usageOf(sets) })
+    .respondWithJson('GET', '/api/library/propagate/backups', {
+      body: usageOf(sets, responses.unreachable ?? []),
+    })
     .respondWithJson('POST', '/api/library/propagate/undo', responses.undo ?? { body: undone })
     .respondWithJson(
       'DELETE',
@@ -312,5 +323,82 @@ describe('BackupList', () => {
     expect(screen.getByTestId('backup-list')).toHaveTextContent(en.library.backups.bulkHint);
     expect(screen.getAllByTestId('purge-backup')).toHaveLength(2);
     expect(screen.getAllByTestId('restore-backup')).toHaveLength(2);
+  });
+});
+
+/*
+  Backups live on the machine that owned the file, so the page is grouped by
+  machine rather than merged. A flat list would invite reading one machine's
+  history as the whole picture, and — since the retention budget applies to each
+  store on its own — as one budget when it is several.
+*/
+describe('BackupList across machines', () => {
+  it('groups rows by the machine that holds them', async () => {
+    await renderList([
+      set(),
+      set({ backupId: PROPAGATION_ID, environmentId: 'wsl-ubuntu', operation: 'propagation' }),
+    ]);
+
+    const machines = screen.getAllByTestId('backup-machine');
+    expect(machines.map((machine) => machine.dataset.environmentId)).toEqual([
+      'local',
+      'wsl-ubuntu',
+    ]);
+  });
+
+  it('keeps an offline machine listed with restore disabled and the reason stated', async () => {
+    await renderList(
+      [
+        set({
+          backupId: PROPAGATION_ID,
+          environmentId: 'wsl-ubuntu',
+          availability: 'environment-offline',
+          manifestReadable: false,
+        }),
+      ],
+      { unreachable: ['wsl-ubuntu'] }
+    );
+
+    const row = rowFor(PROPAGATION_ID);
+    expect(within(row).getByTestId('restore-backup')).toBeDisabled();
+    expect(within(row).getByTestId('backup-unavailable')).toHaveTextContent(
+      en.library.backups.unavailableOffline
+    );
+    // The index knows a set exists, never what is in it: printing "0 entries"
+    // would state as fact the one thing an index row cannot know.
+    expect(within(row).queryByTestId('backup-contents')).not.toBeInTheDocument();
+    expect(screen.getByTestId('backup-unreachable')).toBeInTheDocument();
+  });
+
+  it('refuses to offer a restore for a set that lost its manifest', async () => {
+    await renderList([set({ availability: 'manifest-missing', manifestReadable: false })]);
+
+    const row = rowFor(REMOVAL_ID);
+    expect(within(row).getByTestId('restore-backup')).toBeDisabled();
+    expect(within(row).getByTestId('backup-unavailable')).toHaveTextContent(
+      en.library.backups.unavailableManifest
+    );
+    // Purge still works — the bytes are real and still cost disk.
+    expect(within(row).getByTestId('purge-backup')).toBeEnabled();
+  });
+
+  it('reports a restore against the machine the response names', async () => {
+    // Same backup id on two machines: ids are minted per store, so keying the
+    // result on the id alone would render it on the wrong machine's row.
+    await renderList([set(), set({ environmentId: 'wsl-ubuntu' })]);
+
+    const remote = screen
+      .getAllByTestId('backup-row')
+      .find((candidate) => candidate.closest('[data-environment-id="wsl-ubuntu"]'));
+    if (!remote) throw new Error('No row rendered for the remote machine.');
+    await userEvent.click(within(remote).getByTestId('restore-backup'));
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId('restore-backup-result')).toHaveLength(1);
+    });
+    const local = screen
+      .getAllByTestId('backup-row')
+      .find((candidate) => candidate.closest('[data-environment-id="local"]'));
+    expect(within(local as HTMLElement).getByTestId('restore-backup-result')).toBeInTheDocument();
   });
 });

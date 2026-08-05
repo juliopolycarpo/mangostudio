@@ -7,7 +7,7 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import type { PropagationUndo } from '@mangostudio/shared/library';
+import type { LibraryUndoResult } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { isPathPrefix, resolvePathThroughExistingAncestor } from '../path-containment';
@@ -56,7 +56,7 @@ export function createLibraryUndoEngineDeps(
 export async function executeLibraryUndo(
   params: ExecuteLibraryUndoParams,
   deps: LibraryUndoEngineDeps = createLibraryUndoEngineDeps({ backupRoot: params.backupRoot })
-): Promise<PropagationUndo> {
+): Promise<LibraryUndoResult> {
   // `readBackupManifest` returns null for a genuinely absent set (ENOENT) and
   // for an unparseable manifest. I/O failures other than ENOENT propagate so a
   // permission error is not reported as "pruned by retention". Malformed ids
@@ -75,9 +75,9 @@ export async function executeLibraryUndo(
   }
 
   const backupRoot = resolvePath(deps.backup.backupDir());
-  const restored: PropagationUndo['restored'] = [];
-  const removed: PropagationUndo['removed'] = [];
-  const skipped: PropagationUndo['skipped'] = [];
+  const restored: LibraryUndoResult['restored'] = [];
+  const removed: LibraryUndoResult['removed'] = [];
+  const skipped: LibraryUndoResult['skipped'] = [];
 
   for (const entry of [...manifest.entries].reverse()) {
     assertNotCancelled(params.signal);

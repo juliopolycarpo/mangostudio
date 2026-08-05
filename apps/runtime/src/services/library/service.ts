@@ -22,6 +22,10 @@ import {
 import type {
   RuntimeLibraryApplyParams,
   RuntimeLibraryApplyResult,
+  RuntimeLibraryBackupsParams,
+  RuntimeLibraryBackupsResult,
+  RuntimeLibraryGcParams,
+  RuntimeLibraryGcResult,
   RuntimeLibraryLocationsParams,
   RuntimeLibraryLocationsResult,
   RuntimeLibraryReadParams,
@@ -36,6 +40,7 @@ import type {
 } from '../../methods';
 import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-env';
 import { executePropagationWrites } from './apply-writes';
+import { collectBackupGarbage, createBackupStoreDeps, listBackupSets } from './backup-store';
 import { type LibraryCache, libraryCache } from './cache';
 import { scanLibraryInstances } from './discovery';
 import type { ReadLibraryInstance } from './instance-reader';
@@ -87,6 +92,8 @@ export interface LibraryService {
     signal?: AbortSignal
   ): Promise<RuntimeLibraryRemoveResult>;
   undo(params: RuntimeLibraryUndoParams, signal?: AbortSignal): Promise<RuntimeLibraryUndoResult>;
+  backups(params: RuntimeLibraryBackupsParams): Promise<RuntimeLibraryBackupsResult>;
+  gc(params: RuntimeLibraryGcParams): Promise<RuntimeLibraryGcResult>;
   /** Drops every memo this process holds; tests call this between fixtures. */
   resetCache(): void;
 }
@@ -236,6 +243,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           retentionBytes: params.retentionBytes,
           pathEnv: pathEnvFrom(adapters, params),
           backupId: params.backupId,
+          environmentId: params.environmentId,
           operations: decodeApplyOperations(params),
           signal,
         })
@@ -251,6 +259,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           retentionBytes: params.retentionBytes,
           pathEnv: pathEnvFrom(adapters, params),
           backupId: params.backupId,
+          environmentId: params.environmentId,
           operations: params.operations,
           lastCopyResourceKeys: params.lastCopyResourceKeys,
           signal,
@@ -283,10 +292,45 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
       }
     },
 
+    async backups(params) {
+      assertBackupRoot(params.backupRoot, 'library.backups');
+      return { sets: await listBackupSets(backupStoreDepsFor(params)) };
+    },
+
+    gc(params) {
+      assertBackupRoot(params.backupRoot, 'library.gc');
+      // Serialized against writes on the same root: a prune racing an apply
+      // could evict the set that apply is still filling, and the caller would
+      // hold a backup id with nothing behind it.
+      return adapters.serializeWrite(params.backupRoot, () =>
+        collectBackupGarbage(
+          { ...(params.purgeBackupIds && { purgeBackupIds: params.purgeBackupIds }) },
+          backupStoreDepsFor(params)
+        )
+      );
+    },
+
     resetCache() {
       adapters.cache.clear();
     },
   };
+}
+
+/**
+ * Retention bounds are optional on the wire and default in the store, so a
+ * caller that only wants a listing never has to restate hub policy — and a
+ * malformed one cannot widen the budget past what the hub configured.
+ */
+function backupStoreDepsFor(params: {
+  readonly backupRoot: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+}) {
+  return createBackupStoreDeps({
+    backupRoot: params.backupRoot,
+    ...(params.retentionCount !== undefined && { retentionCount: params.retentionCount }),
+    ...(params.retentionBytes !== undefined && { retentionBytes: params.retentionBytes }),
+  });
 }
 
 export const libraryService = createLibraryService();

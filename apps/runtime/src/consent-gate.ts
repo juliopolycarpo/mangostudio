@@ -88,6 +88,11 @@ export const RUNTIME_METHOD_CAPABILITIES: Readonly<
   'library.apply': ['library', 'fsWrite'],
   'library.remove': ['library', 'fsWrite'],
   'library.undo': ['library', 'fsWrite'],
+  // Listing is a read even though the sets it lists were written: a machine
+  // downgraded to readonly still has a history, and hiding it would tell the
+  // user their backups are gone rather than that this hub may no longer write.
+  'library.backups': ['library'],
+  'library.gc': ['library', 'fsWrite'],
   // Intentionally empty: health must answer under every profile.
   'runtime.health': [],
   'runtime.update.begin': ['update'],

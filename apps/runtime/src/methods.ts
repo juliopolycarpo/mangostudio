@@ -8,13 +8,14 @@ import type {
 } from '@mangostudio/shared/environments';
 import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
 import type {
+  LibraryBackupSet,
   LibraryInstance,
   LibraryLocationId,
   LibraryLocationStatus,
   LibraryResourceRef,
   LibraryTargetId,
+  LibraryUndoResult,
   PropagationApply,
-  PropagationUndo,
   RemovalApply,
   ResourceKind,
 } from '@mangostudio/shared/library';
@@ -726,6 +727,16 @@ export interface RuntimeLibraryBackupEnvelope {
   readonly retentionBytes?: number;
   readonly pathEnv?: RuntimeLibraryPathEnvParams;
   readonly backupId?: string;
+  /**
+   * Which environment the hub is writing to, echoed back on every result row
+   * and stamped into the backup manifest.
+   *
+   * The id is a hub concept — this host has no way to know what it was filed
+   * under — so it travels with the request rather than being resolved here.
+   * Absent means Local, which is what every backup written before environments
+   * existed was.
+   */
+  readonly environmentId?: string;
 }
 
 /**
@@ -768,6 +779,43 @@ export interface RuntimeLibraryRemoveParams extends RuntimeLibraryBackupEnvelope
 
 export type RuntimeLibraryRemoveResult = RemovalApply;
 
+/**
+ * Reads this host's backup store. No bounds are enforced — the retention values
+ * only decide which sets `evictsNext` marks, so a listing never costs the user a
+ * backup it did not warn about first.
+ */
+export interface RuntimeLibraryBackupsParams {
+  readonly backupRoot: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+}
+
+export interface RuntimeLibraryBackupsResult {
+  readonly sets: readonly LibraryBackupSet[];
+}
+
+/**
+ * Deletes named sets and trims the store to its bounds, on the machine holding
+ * the bytes.
+ *
+ * Separate from `library.backups` because it is a write: the consent gate has
+ * to be able to refuse it on a readonly machine while still letting that
+ * machine's history be listed.
+ */
+export interface RuntimeLibraryGcParams {
+  readonly backupRoot: string;
+  readonly retentionCount?: number;
+  readonly retentionBytes?: number;
+  /** Sets the user asked to delete by name. Purging a missing set is not an error. */
+  readonly purgeBackupIds?: readonly string[];
+}
+
+export interface RuntimeLibraryGcResult {
+  readonly purged: readonly string[];
+  /** Sets retention took, so the hub can drop their index rows in the same pass. */
+  readonly pruned: readonly string[];
+}
+
 export interface RuntimeLibraryUndoParams {
   readonly backupRoot: string;
   readonly backupId: string;
@@ -778,7 +826,7 @@ export interface RuntimeLibraryUndoParams {
   readonly pathEnv?: RuntimeLibraryPathEnvParams;
 }
 
-export type RuntimeLibraryUndoResult = PropagationUndo;
+export type RuntimeLibraryUndoResult = LibraryUndoResult;
 
 /** Opens one bounded runtime-binary transfer. Bytes travel in sequential calls. */
 export interface RuntimeUpdateBeginParams {
@@ -974,6 +1022,14 @@ export interface RuntimeMethodMap {
   'library.undo': {
     readonly params: RuntimeLibraryUndoParams;
     readonly result: RuntimeLibraryUndoResult;
+  };
+  'library.backups': {
+    readonly params: RuntimeLibraryBackupsParams;
+    readonly result: RuntimeLibraryBackupsResult;
+  };
+  'library.gc': {
+    readonly params: RuntimeLibraryGcParams;
+    readonly result: RuntimeLibraryGcResult;
   };
   'runtime.health': {
     readonly params: Record<string, never>;

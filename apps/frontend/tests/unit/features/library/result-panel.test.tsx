@@ -51,6 +51,7 @@ describe('ResultPanel', () => {
   it('reports what the undo restored and what it left alone', () => {
     const undone: PropagationUndo = {
       backupId: 'backup-2026-07-27',
+      environmentId: 'local',
       restored: [{ locationId: 'claude-skills', destinationPath: '/home/dev/.claude/skills/gh' }],
       removed: [],
       skipped: [

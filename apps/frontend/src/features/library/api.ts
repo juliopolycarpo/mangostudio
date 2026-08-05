@@ -78,8 +78,14 @@ export async function applyPropagation(
   return { outcome: 'applied', result: data as PropagationApply };
 }
 
-export async function undoPropagation(backupId: string): Promise<PropagationUndo> {
-  const { data, error } = await client.api.library.propagate.undo.post({ backupId });
+export async function undoPropagation(
+  backupId: string,
+  environmentId?: string
+): Promise<PropagationUndo> {
+  const { data, error } = await client.api.library.propagate.undo.post({
+    backupId,
+    ...(environmentId !== undefined && { environmentId }),
+  });
   if (error) throw new ApiError(error.value);
   return data as PropagationUndo;
 }
@@ -108,7 +114,9 @@ export async function applyRemoval(request: RemovalApplyRequest): Promise<Remova
  * holding someone's only copy of a resource is never evicted automatically, so
  * reclaiming that disk has to be something the user asks for by name.
  */
-export async function purgeBackup(backupId: string): Promise<void> {
-  const { error } = await client.api.library.propagate.backups({ backupId }).delete();
+export async function purgeBackup(backupId: string, environmentId?: string): Promise<void> {
+  const { error } = await client.api.library.propagate.backups({ backupId }).delete(undefined, {
+    query: environmentId === undefined ? {} : { environmentId },
+  });
   if (error) throw new ApiError(error.value);
 }

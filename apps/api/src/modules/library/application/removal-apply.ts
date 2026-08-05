@@ -37,6 +37,7 @@ import { hashResourceAt } from '../infrastructure/instance-reader';
 import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
 import { nodeTreeRemovalFs, type TreeRemovalFs } from '../infrastructure/tree-removal';
 import { serializeLibraryWrite } from './apply-queue';
+import { recordWrittenBackup } from './backup-inventory';
 import { compareText } from './preview-state';
 import { previewLibraryRemoval } from './removal-preview';
 
@@ -53,6 +54,19 @@ export interface RemovalApplyDeps {
   writeEngine: 'runtime' | 'in-process';
   /** Stands in for the RuntimeClient on the `runtime` engine. */
   runtimeRemove?: (params: RuntimeLibraryRemoveParams) => Promise<RemovalApply>;
+  /** Which machine the copies are removed from; see `PropagationApplyDeps`. */
+  environmentId: string;
+  /** Files the produced backup set in the hub-side listing index. */
+  recordBackup: (
+    userId: string,
+    input: {
+      readonly environmentId: string;
+      readonly backupId: string;
+      readonly operation: 'propagation' | 'removal';
+      readonly pinned: boolean;
+      readonly createdAtMs: number;
+    }
+  ) => Promise<void>;
 }
 
 function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
@@ -63,6 +77,8 @@ function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
     backup: overrides.backup ?? defaultBackupStoreDeps,
     treeFs: overrides.treeFs ?? nodeTreeRemovalFs,
     writeEngine: overrides.writeEngine ?? 'runtime',
+    environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
+    recordBackup: overrides.recordBackup ?? recordWrittenBackup,
     ...(overrides.runtimeRemove && { runtimeRemove: overrides.runtimeRemove }),
   };
 }
@@ -120,6 +136,22 @@ async function runRemoval(
   // echoed: the hub decided them, and the engine returns only what it kept
   // itself — rolled back, or never attempted.
   const removalResult = await runWriteEngine(userId, operations, plan, env, deps);
+  if (removalResult.backupId !== undefined) {
+    // Pinned when it holds someone's last copy: the set is the only remaining
+    // instance of that resource, and the index has to know that before
+    // retention on the owning machine is ever asked about it.
+    await deps
+      .recordBackup(userId, {
+        environmentId: deps.environmentId,
+        backupId: removalResult.backupId,
+        operation: 'removal',
+        pinned: plan.lastCopyResourceKeys.length > 0,
+        createdAtMs: Date.now(),
+      })
+      .catch((error: unknown) => {
+        console.error('[library] Could not index the backup set for this removal:', error);
+      });
+  }
   return { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
 }
 
@@ -142,6 +174,7 @@ function runWriteEngine(
         retentionCount: deps.backup.retentionCount(),
         retentionBytes: deps.backup.retentionBytes(),
         pathEnv: env,
+        environmentId: deps.environmentId,
         operations,
         lastCopyResourceKeys: plan.lastCopyResourceKeys,
       },
@@ -149,15 +182,16 @@ function runWriteEngine(
     );
   }
 
-  const params = toRuntimeRemoveParams(operations, plan, env, deps.backup);
-  return deps.runtimeRemove ? deps.runtimeRemove(params) : runtimeRemove(userId, params);
+  const params = toRuntimeRemoveParams(operations, plan, env, deps);
+  return deps.runtimeRemove ? deps.runtimeRemove(params) : runtimeRemove(userId, params, deps);
 }
 
 async function runtimeRemove(
   userId: string,
-  params: RuntimeLibraryRemoveParams
+  params: RuntimeLibraryRemoveParams,
+  deps: RemovalApplyDeps
 ): Promise<RemovalApply> {
-  const client = await getRuntimeClient(userId, LOCAL_ENVIRONMENT_ID);
+  const client = await getRuntimeClient(userId, deps.environmentId);
   return await client.library.remove(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS });
 }
 
@@ -165,12 +199,14 @@ function toRuntimeRemoveParams(
   operations: readonly PreparedRemovalOperation[],
   plan: RemovalPlan,
   env: PathEnv,
-  backup: BackupStoreDeps
+  deps: RemovalApplyDeps
 ): RuntimeLibraryRemoveParams {
+  const backup = deps.backup;
   return {
     backupRoot: backup.backupDir(),
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
+    environmentId: deps.environmentId,
     pathEnv: {
       // Only the MangoStudio directories travel, matching `pathEnvParams` in
       // `environment-library-service.ts`; the runtime merges its own

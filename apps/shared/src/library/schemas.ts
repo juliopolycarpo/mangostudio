@@ -21,6 +21,21 @@ export const LibraryTargetIdSchema = Type.Union([
 export const LibraryLocationIdSchema = Type.String({ minLength: 1, maxLength: 64 });
 
 /**
+ * Which machine a library instance, destination, or backup set lives on.
+ *
+ * Structurally `EnvironmentIdSchema`, restated here rather than imported:
+ * `shared/environments` already imports this module for location and target
+ * shapes, so the dependency cannot invert without a cycle. The two are kept in
+ * step by the parity test over the environments contract — a divergence would
+ * mean an id the environments API accepts and the library API refuses.
+ */
+export const LibraryEnvironmentIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 63,
+  pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$',
+});
+
+/**
  * Where a location is rooted. `home` resolves under the user's home directory.
  * `workspace` resolves under a repository root and is **reserved**: v1 defines
  * no workspace-scoped location, so nothing resolves under it yet.
@@ -558,6 +573,12 @@ const BackupIdRequestSchema = Type.String({
 
 export const PropagationUndoRequestSchema = Type.Object({
   backupId: BackupIdRequestSchema,
+  /**
+   * Which machine holds the set. Omitted means Local, which is where every
+   * backup written before environments existed lives — and the only place a
+   * client that predates this field could have meant.
+   */
+  environmentId: Type.Optional(LibraryEnvironmentIdSchema),
 });
 
 export const PropagationUndoEntrySchema = Type.Object({
@@ -575,12 +596,30 @@ export const PropagationUndoSkippedSchema = Type.Object({
   ]),
 });
 
-export const PropagationUndoSchema = Type.Object({
+/**
+ * What one undo did, as the machine that performed it reports.
+ *
+ * Stops short of naming an environment for the same reason
+ * {@link LibraryBackupSetSchema} does: the id is the hub's, not the machine's.
+ */
+export const LibraryUndoResultSchema = Type.Object({
   backupId: Type.String({ minLength: 1 }),
   restored: Type.Array(PropagationUndoEntrySchema),
   removed: Type.Array(PropagationUndoEntrySchema),
   skipped: Type.Array(PropagationUndoSkippedSchema),
 });
+
+/**
+ * The hub's answer, which names the machine as well as the set.
+ *
+ * Backup ids are minted per store, so two machines can hold the same id — and a
+ * client rendering a result against "the row with this backupId" would report an
+ * undo on the wrong machine's row without this.
+ */
+export const PropagationUndoSchema = Type.Composite([
+  LibraryUndoResultSchema,
+  Type.Object({ environmentId: LibraryEnvironmentIdSchema }),
+]);
 
 /**
  * Which flow wrote a backup set, and therefore what undoing it does.
@@ -603,10 +642,14 @@ export const BackupSetOperationSchema = Type.Union([
 ]);
 
 /**
- * One retained backup set. Listed rather than only counted so a pinned set —
- * which no retention rule will ever evict — can be seen, sized, and purged.
+ * One retained backup set as the machine holding it describes itself.
+ *
+ * Everything here is read off that machine's disk, which is why it stops short
+ * of naming an environment: a runtime does not know the id its hub filed it
+ * under, and a machine reachable from two hubs would answer with two different
+ * ones. {@link PropagationBackupSetSchema} adds the hub's view on top.
  */
-export const PropagationBackupSetSchema = Type.Object({
+export const LibraryBackupSetSchema = Type.Object({
   backupId: Type.String({ minLength: 1 }),
   createdAtMs: Type.Integer({ minimum: 0 }),
   sizeBytes: Type.Integer({ minimum: 0 }),
@@ -632,11 +675,55 @@ export const PropagationBackupSetSchema = Type.Object({
    * any budget.
    */
   evictsNext: Type.Boolean(),
+  /**
+   * False when the set directory is there but its manifest is missing or
+   * unparseable. Reported rather than hidden: the bytes still cost disk and can
+   * still be purged, but nothing can be restored from them, and a row that
+   * offers Undo anyway is a button that fails on click.
+   */
+  manifestReadable: Type.Boolean(),
 });
+
+/**
+ * Whether a listed backup set can be restored right now, and if not, why.
+ *
+ * A code rather than a boolean because the two failures need different copy and
+ * different fixes: an offline machine is a "connect it and try again", while a
+ * lost manifest is permanent and the only remaining action is purge. Both are
+ * rendered as a disabled action with a reason — never as an error on click,
+ * which is the shape that teaches users their backups are unreliable.
+ */
+export const BackupAvailabilitySchema = Type.Union([
+  Type.Literal('available'),
+  Type.Literal('environment-offline'),
+  Type.Literal('manifest-missing'),
+]);
+
+/**
+ * One retained backup set, as the hub lists it.
+ *
+ * Backups live on the machine that owned the file (006's one exception to
+ * "runtime holds no durable user data"), so a listing that reads manifests can
+ * only enumerate machines it can reach — and an offline environment's backups
+ * would silently vanish from the page that promises them. The hub-side index is
+ * what makes the row survive the machine being away; `availability` is what
+ * keeps the row honest about what can be done with it.
+ */
+export const PropagationBackupSetSchema = Type.Composite([
+  LibraryBackupSetSchema,
+  Type.Object({
+    environmentId: LibraryEnvironmentIdSchema,
+    availability: BackupAvailabilitySchema,
+  }),
+]);
 
 /**
  * What retained backups currently cost. Surfaced so a directory holding copies
  * of skill trees is never a mystery disk consumer the user has to discover.
+ *
+ * Retention bounds are hub policy and apply to **each** environment's store
+ * rather than to their sum: the bytes sit on different disks, and one machine
+ * filling the budget must never evict another machine's history.
  */
 export const PropagationBackupUsageSchema = Type.Object({
   setCount: Type.Integer({ minimum: 0 }),
@@ -646,10 +733,27 @@ export const PropagationBackupUsageSchema = Type.Object({
   /** Bytes held by pinned sets, which count against the budget but never evict. */
   pinnedSizeBytes: Type.Integer({ minimum: 0 }),
   sets: Type.Array(PropagationBackupSetSchema),
+  /**
+   * Environments whose store could not be read on this request, so the rows
+   * they contributed came from the index alone. Named so the page can say which
+   * machine it is out of touch with instead of quietly under-reporting bytes.
+   */
+  unreachableEnvironmentIds: Type.Array(LibraryEnvironmentIdSchema),
 });
 
 export const PropagationBackupPurgeRequestSchema = Type.Object({
   backupId: BackupIdRequestSchema,
+});
+
+/**
+ * Purge names the machine as well as the set.
+ *
+ * Backup ids are minted per store, so the same id can exist on two machines,
+ * and a purge that only names the id would delete whichever one the hub
+ * happened to look at first.
+ */
+export const PropagationBackupPurgeQuerySchema = Type.Object({
+  environmentId: Type.Optional(LibraryEnvironmentIdSchema),
 });
 
 /**
@@ -927,8 +1031,11 @@ export type PropagationSkipped = Static<typeof PropagationSkippedSchema>;
 export type PropagationFailure = Static<typeof PropagationFailureSchema>;
 export type PropagationApply = Static<typeof PropagationApplySchema>;
 export type PropagationUndoRequest = Static<typeof PropagationUndoRequestSchema>;
+export type LibraryUndoResult = Static<typeof LibraryUndoResultSchema>;
 export type PropagationUndo = Static<typeof PropagationUndoSchema>;
 export type BackupSetOperation = Static<typeof BackupSetOperationSchema>;
+export type LibraryBackupSet = Static<typeof LibraryBackupSetSchema>;
+export type BackupAvailability = Static<typeof BackupAvailabilitySchema>;
 export type PropagationBackupSet = Static<typeof PropagationBackupSetSchema>;
 export type PropagationBackupUsage = Static<typeof PropagationBackupUsageSchema>;
 export type RemovalOperation = Static<typeof RemovalOperationSchema>;

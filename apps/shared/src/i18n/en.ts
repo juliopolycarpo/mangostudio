@@ -1928,6 +1928,16 @@ export const messages: Messages = {
       evictsNext: 'Goes next',
       evictsNextHint: 'The next apply will delete this backup to stay inside the retention budget.',
       bulkHint: 'Backups are restored and deleted one set at a time, on purpose.',
+      // Backups stay on the machine that owned the file, so the list is grouped
+      // by machine rather than merged: two sets from two machines are two
+      // different disks, and the retention budget applies to each on its own.
+      retentionPerMachine: 'These bounds apply to each machine separately.',
+      machineUnknown: 'Machine {id}',
+      unreachable:
+        'These machines could not be reached, so their backups are listed from what the hub last recorded: {machines}.',
+      unavailableOffline: 'Restoring needs this machine connected.',
+      unavailableManifest:
+        'This set has lost the record of what it holds, so nothing can be restored from it. Deleting it still works.',
     },
     settings: {
       title: 'Settings side by side',

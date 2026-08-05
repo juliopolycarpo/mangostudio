@@ -1947,6 +1947,13 @@ export const messages = {
       evictsNextHint:
         'A próxima aplicação vai apagar este backup para respeitar o limite de retenção.',
       bulkHint: 'Backups são restaurados e excluídos um conjunto por vez, de propósito.',
+      retentionPerMachine: 'Estes limites valem para cada máquina separadamente.',
+      machineUnknown: 'Máquina {id}',
+      unreachable:
+        'Não foi possível falar com estas máquinas, então os backups delas aparecem conforme o hub registrou por último: {machines}.',
+      unavailableOffline: 'Restaurar exige esta máquina conectada.',
+      unavailableManifest:
+        'Este conjunto perdeu o registro do que guarda, então nada pode ser restaurado dele. Excluir continua funcionando.',
     },
     settings: {
       title: 'Configurações lado a lado',

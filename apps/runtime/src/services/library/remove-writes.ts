@@ -53,6 +53,8 @@ export interface ExecuteRemovalWritesParams {
   readonly backupId?: string;
   readonly operations: readonly PreparedRemovalOperation[];
   readonly lastCopyResourceKeys?: readonly string[];
+  /** Stamped into the manifest so a store can name the environment it serves. */
+  readonly environmentId?: string;
   /**
    * Aborts between operations, so the hub's RPC deadline actually stops the
    * staging loop instead of leaving it to remove every remaining copy after the
@@ -112,7 +114,7 @@ export async function executeRemovalWrites(
       await discardBackupSet(backupId, deps.backup).catch(() => undefined);
       return { partial: false, removed: [], kept: keptAll, failed };
     }
-    await persistManifest(backupId, entries, lastCopyResourceKeys, deps);
+    await persistManifest(backupId, entries, lastCopyResourceKeys, params.environmentId, deps);
     return {
       partial: true,
       removed: stillRemoved(results, unrestored),
@@ -127,7 +129,7 @@ export async function executeRemovalWrites(
   }
 
   try {
-    await persistManifest(backupId, entries, lastCopyResourceKeys, deps);
+    await persistManifest(backupId, entries, lastCopyResourceKeys, params.environmentId, deps);
   } catch (error) {
     const unrestored = await rollback(staged);
     if (unrestored.size === 0) await discardBackupSet(backupId, deps.backup).catch(() => undefined);
@@ -162,15 +164,17 @@ async function persistManifest(
   backupId: string,
   entries: readonly BackupEntry[],
   lastCopyResourceKeys: readonly string[],
+  environmentId: string | undefined,
   deps: RemovalWriteEngineDeps
 ): Promise<void> {
   await writeBackupManifest(
     {
-      version: 2,
+      version: 3,
       backupId,
       createdAtMs: deps.backup.now().getTime(),
       entries: [...entries],
       operation: 'removal',
+      ...(environmentId !== undefined && { environmentId }),
       ...(lastCopyResourceKeys.length > 0 && {
         pinned: true,
         lastCopyResourceKeys: [...lastCopyResourceKeys],

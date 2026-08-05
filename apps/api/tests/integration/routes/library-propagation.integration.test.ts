@@ -558,6 +558,10 @@ describe('propagation apply, undo, and backup routes', () => {
   it('undoes an apply by backup id', async () => {
     const undone = {
       backupId: '2026-07-27T10-00-00.000Z-abc',
+      // The response names the machine as well as the set: backup ids are minted
+      // per store, so a client rendering by id alone would report an undo
+      // against the wrong machine's row.
+      environmentId: 'local',
       restored: [{ locationId: 'claude-skills' as LibraryLocationId, destinationPath: '/a/gh' }],
       removed: [],
       skipped: [],
@@ -622,8 +626,12 @@ describe('propagation apply, undo, and backup routes', () => {
           operation: 'removal',
           resourceKeys: ['skill:gh'],
           evictsNext: false,
+          manifestReadable: true,
+          environmentId: 'local',
+          availability: 'available',
         },
       ],
+      unreachableEnvironmentIds: [],
     } satisfies PropagationBackupUsage;
     const app = harness({ backupUsage: () => Promise.resolve(usage) });
 
