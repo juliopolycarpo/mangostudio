@@ -195,7 +195,7 @@ describe('connectContainerRuntime against a real engine', () => {
   it.skipIf(!ready)(
     'leaves no container behind when the connection ends',
     async () => {
-      const before = await survivingContainers();
+      const before = (await survivingContainers()).sort();
 
       const connection = await open();
       await connection.client.shell.run({ ...SHELL_DEFAULTS, command: 'true' });
@@ -207,7 +207,7 @@ describe('connectContainerRuntime against a real engine', () => {
         if ((await survivingContainers()).length <= before.length) break;
         await Bun.sleep(250);
       }
-      expect(await survivingContainers()).toEqual(before);
+      expect((await survivingContainers()).sort()).toEqual(before);
     },
     180_000
   );
