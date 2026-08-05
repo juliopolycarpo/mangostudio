@@ -101,6 +101,9 @@ function usableMounts(form: ContainerFormFields): ContainerMount[] {
 /** Mirrors `ContainerEnvironmentConfigSchema.cpus`; the server is the authority. */
 const CPU_LIMIT_MIN = 0.01;
 const CPU_LIMIT_MAX = 1_024;
+/** Mirrors `ContainerEnvironmentConfigSchema.memoryMib`, bound included. */
+const MEMORY_LIMIT_MIN = 64;
+const MEMORY_LIMIT_MAX = 1_048_576;
 
 export interface ContainerFormError {
   readonly field: 'image' | 'cpus' | 'memoryMib' | 'mounts';
@@ -130,7 +133,14 @@ export function validateContainerForm(form: ContainerFormFields): ContainerFormE
     return { field: 'cpus' };
   }
   const memory = form.memoryMib.trim();
-  if (memory && !(Number.isInteger(Number(memory)) && Number(memory) >= 64)) {
+  if (
+    memory &&
+    !(
+      Number.isInteger(Number(memory)) &&
+      Number(memory) >= MEMORY_LIMIT_MIN &&
+      Number(memory) <= MEMORY_LIMIT_MAX
+    )
+  ) {
     return { field: 'memoryMib' };
   }
 
