@@ -381,9 +381,16 @@ function assertWithinByteBudget(location: LocationDefinition, leaves: readonly L
  */
 export async function readLibraryTree(
   rootPath: string,
+  containmentRoot: string,
   fs: LibraryInstanceReaderFs = nodeFs
 ): Promise<{ relativePath: string; bytes: Uint8Array }[]> {
   const canonicalRoot = await fs.realPath(rootPath);
+  // Re-checked after resolution: the caller's containment check ran against
+  // the unresolved path, so a symlinked location — a `CLAUDE.md` pointed at
+  // `/etc/passwd`, or a location directory pointed outside the agent home —
+  // would otherwise resolve past that check unnoticed.
+  const canonicalContainmentRoot = await fs.realPath(containmentRoot);
+  if (!isPathWithin(canonicalContainmentRoot, canonicalRoot)) throw new PathEscapeError();
   const rootMetadata = await fs.stat(canonicalRoot);
   if (rootMetadata.isFile) {
     if (rootMetadata.size > MAX_LIBRARY_FILE_BYTES) throw new InstanceTooLargeError();
@@ -565,5 +572,5 @@ export function isPathWithin(rootPath: string, candidatePath: string): boolean {
   return candidate === root || candidate.startsWith(`${root}${sep}`);
 }
 
-class PathEscapeError extends Error {}
-class InstanceTooLargeError extends Error {}
+export class PathEscapeError extends Error {}
+export class InstanceTooLargeError extends Error {}

@@ -45,7 +45,13 @@ import { executePropagationWrites } from './apply-writes';
 import { collectBackupGarbage, createBackupStoreDeps, listBackupSets } from './backup-store';
 import { type LibraryCache, libraryCache } from './cache';
 import { scanLibraryInstances } from './discovery';
-import { isPathWithin, type ReadLibraryInstance, readLibraryTree } from './instance-reader';
+import {
+  InstanceTooLargeError,
+  isPathWithin,
+  PathEscapeError,
+  type ReadLibraryInstance,
+  readLibraryTree,
+} from './instance-reader';
 import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
 import { executeRemovalWrites } from './remove-writes';
 import { type RuntimeSettingsSourcesResult, readSettingsSources } from './settings-sources';
@@ -260,9 +266,11 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           reason: `Library location "${params.locationId}" does not resolve on this machine.`,
         };
       }
-      // Containment is checked against the location root before the walk, so a
-      // hub-supplied path can never make this read a tree outside the agent
-      // homes; `readLibraryTree` re-checks every leaf after resolution.
+      // Containment is checked against the location root before the walk; a
+      // hub-supplied path is rejected here if it is not even textually inside
+      // the location, and `readLibraryTree` re-checks every path — the root
+      // itself and every leaf — against the same root after symlink
+      // resolution.
       if (!isPathWithin(root, params.path)) {
         return {
           files: [],
@@ -271,7 +279,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
         };
       }
       try {
-        const files = await readLibraryTree(params.path);
+        const files = await readLibraryTree(params.path, root);
         return {
           files: files.map((file) => ({
             relativePath: file.relativePath,
@@ -279,11 +287,21 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
           })),
         };
       } catch (error) {
-        return {
-          files: [],
-          denied: true,
-          reason: error instanceof Error ? error.message : String(error),
-        };
+        if (error instanceof PathEscapeError) {
+          return {
+            files: [],
+            denied: true,
+            reason: `Library path "${params.path}" resolves outside its registered location.`,
+          };
+        }
+        if (error instanceof InstanceTooLargeError) {
+          return {
+            files: [],
+            denied: true,
+            reason: `Library resource at "${params.path}" exceeds the transfer limits.`,
+          };
+        }
+        throw error;
       }
     },
 
