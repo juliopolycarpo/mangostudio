@@ -262,7 +262,7 @@ async function stageFiles(
     }
     const target = join(stagePath, ...segments);
     await deps.fs.mkdir(dirname(target));
-    deps.fs.writeFile(target, file.contents);
+    await deps.fs.writeFile(target, file.contents);
   }
 }
 
