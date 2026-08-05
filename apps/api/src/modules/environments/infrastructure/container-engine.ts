@@ -256,7 +256,14 @@ export function createContainerEngineService(
 
       const cacheKey = `${engine}|${id}`;
       const cached = probeCache.get(cacheKey);
-      if (cached) return cached;
+      if (cached) {
+        // Re-inserted, not just read: a Map orders by insertion, so the
+        // eviction below only drops the image nobody has launched recently if
+        // a hit moves the entry back to the young end.
+        probeCache.delete(cacheKey);
+        probeCache.set(cacheKey, cached);
+        return cached;
+      }
 
       const probeName = `${CONTAINER_NAME_PREFIX}-probe-${randomUUID()}`;
       const probe = await run(
@@ -278,9 +285,9 @@ export function createContainerEngineService(
         );
       }
 
-      // Oldest-first eviction: the map preserves insertion order, and the entry
-      // a hub is actively using is re-read rather than re-inserted, so this
-      // drops images nobody has launched recently.
+      // Oldest-first eviction: the map preserves insertion order and a hit
+      // re-inserts above, so the entry this drops is the one least recently
+      // launched.
       if (probeCache.size >= PROBE_CACHE_MAX_ENTRIES) {
         const oldest = probeCache.keys().next();
         if (!oldest.done) probeCache.delete(oldest.value);
