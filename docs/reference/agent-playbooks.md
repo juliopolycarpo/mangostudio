@@ -189,8 +189,12 @@ Open these first:
   `infrastructure/backup-index-repository.ts` (the backups page: the hub index
   keeps an offline machine's rows visible, the machine itself wins whenever it
   can be asked, and the manifest on the machine stays the only restore source)
+- `apps/api/src/modules/library/application/removal-preview.ts` (per-machine
+  snapshots, shared with propagation; the last-copy guard counts copies on every
+  machine in scope, which is the whole reason removal needs the dimension)
 - `apps/api/src/modules/library/application/removal-apply.ts` (token, planning,
-  last-copy acknowledgement — FS removals go through `library.remove`)
+  last-copy acknowledgement — FS removals go through `library.remove`, one batch
+  per machine, one backup handle each)
 - `apps/api/src/modules/library/application/adapters/` (format conversion
   strategies)
 - `apps/api/src/modules/library/application/settings-inspection.ts` (pure: turns

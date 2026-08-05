@@ -16,6 +16,7 @@ import { render, screen } from '../../../support/harness/render';
 function panelOf(result: RemovalApply) {
   return render(
     <RemovalResultPanel
+      environmentName={(id: string) => id}
       result={result}
       undoResult={undefined}
       isUndoing={false}
@@ -27,15 +28,32 @@ function panelOf(result: RemovalApply) {
 
 const stoppedShort: RemovalApply = {
   partial: false,
+  backups: [],
   removed: [],
   kept: [
-    { resourceKey: 'skill:gh', locationId: 'agents-skills', reason: 'rolled-back' },
-    { resourceKey: 'skill:gh', locationId: 'mango-skills', reason: 'not-attempted' },
-    { resourceKey: 'skill:gh', locationId: 'codex-skills', reason: 'user-kept' },
+    {
+      resourceKey: 'skill:gh',
+      environmentId: 'local',
+      locationId: 'agents-skills',
+      reason: 'rolled-back',
+    },
+    {
+      resourceKey: 'skill:gh',
+      environmentId: 'local',
+      locationId: 'mango-skills',
+      reason: 'not-attempted',
+    },
+    {
+      resourceKey: 'skill:gh',
+      environmentId: 'local',
+      locationId: 'codex-skills',
+      reason: 'user-kept',
+    },
   ],
   failed: [
     {
       resourceKey: 'skill:gh',
+      environmentId: 'local',
       locationId: 'claude-skills',
       reason: 'remove-failed',
       message: 'disk went away',
@@ -62,7 +80,7 @@ describe('RemovalResultPanel', () => {
   });
 
   it('says nothing was removed rather than nothing was written', () => {
-    panelOf({ partial: false, removed: [], kept: [], failed: [] });
+    panelOf({ partial: false, backups: [], removed: [], kept: [], failed: [] });
 
     expect(screen.getByText(en.library.removal.resultNone)).toBeInTheDocument();
     expect(screen.queryByText(en.library.result.none)).not.toBeInTheDocument();

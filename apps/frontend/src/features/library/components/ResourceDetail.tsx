@@ -166,23 +166,15 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Removal still only offers this machine's copies; propagation is
-              what crosses machines. Threading removal is the follow-on. */}
-          {isLocal ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              onClick={() => setRemoving(true)}
-              disabled={!candidates.isResolved}
-              data-testid="remove-resource"
-            >
-              {l.detail.remove}
-            </Button>
-          ) : (
-            <span className="text-on-surface-variant text-xs" data-testid="writes-local-only">
-              {l.detail.writesLocalOnly}
-            </span>
-          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => setRemoving(true)}
+            disabled={!candidates.isResolved}
+            data-testid="remove-resource"
+          >
+            {l.detail.remove}
+          </Button>
           <Button size="sm" onClick={() => setPropagating(true)} disabled={!candidates.isResolved}>
             {l.detail.propagate}
           </Button>
@@ -305,7 +297,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         {targetsQuery.isError && <p className="text-[11px] text-error">{l.matrix.loadError}</p>}
       </section>
 
-      {isLocal && propagating && (
+      {propagating && (
         <PropagationWizard
           resourceKeys={[resource.key]}
           locationIds={candidates.locationIds}
@@ -314,10 +306,11 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
         />
       )}
 
-      {isLocal && removing && (
+      {removing && (
         <RemovalWizard
           resourceKeys={[resource.key]}
           locationIds={candidates.locationIds}
+          environmentId={scope.environmentId}
           onClose={() => setRemoving(false)}
         />
       )}

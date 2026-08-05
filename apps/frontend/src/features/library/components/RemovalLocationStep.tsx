@@ -5,6 +5,10 @@
  * to remove: "there is no copy here" is an answer, and hiding the row leaves the
  * user wondering whether the location was even checked. Nothing is pre-checked,
  * because the safe state is keeping everything.
+ *
+ * Rows are grouped by machine for the same reason the destination step is: one
+ * location label names a different directory on each machine, and a delete form
+ * is the last place ambiguity about *where* belongs.
  */
 
 import type {
@@ -13,6 +17,7 @@ import type {
   RemovalPreview,
   RemovalPreviewEntry,
 } from '@mangostudio/shared/library';
+import { Server } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { formatRelativeTime, hashPrefix } from '../format';
@@ -27,10 +32,31 @@ import { BlockedReason } from './BlockedReason';
 interface RemovalLocationStepProps {
   readonly preview: RemovalPreview;
   readonly draft: RemovalDraft;
-  readonly onToggle: (resourceKey: string, locationId: LibraryLocationId) => void;
+  readonly environmentName: (environmentId: string) => string;
+  readonly onToggle: (
+    resourceKey: string,
+    environmentId: string,
+    locationId: LibraryLocationId
+  ) => void;
 }
 
-export function RemovalLocationStep({ preview, draft, onToggle }: RemovalLocationStepProps) {
+/** Copies per machine, in the order the preview reported them. */
+function byEnvironment(locations: readonly RemovalLocation[]): [string, RemovalLocation[]][] {
+  const grouped = new Map<string, RemovalLocation[]>();
+  for (const location of locations) {
+    const existing = grouped.get(location.environmentId);
+    if (existing) existing.push(location);
+    else grouped.set(location.environmentId, [location]);
+  }
+  return [...grouped];
+}
+
+export function RemovalLocationStep({
+  preview,
+  draft,
+  environmentName,
+  onToggle,
+}: RemovalLocationStepProps) {
   const { t } = useI18n();
   const l = t.library;
 
@@ -47,10 +73,10 @@ export function RemovalLocationStep({ preview, draft, onToggle }: RemovalLocatio
           <ul className="space-y-0.5">
             {preview.staleStagedRemovals.map((leftover) => (
               <li
-                key={leftover.path}
+                key={`${leftover.environmentId}:${leftover.path}`}
                 className="break-all font-mono text-[11px] text-on-surface-variant/70"
               >
-                {leftover.path}
+                {environmentName(leftover.environmentId)} · {leftover.path}
               </li>
             ))}
           </ul>
@@ -65,14 +91,27 @@ export function RemovalLocationStep({ preview, draft, onToggle }: RemovalLocatio
           {entry.locations.length === 0 ? (
             <p className="text-on-surface-variant text-xs">{l.removal.noLocations}</p>
           ) : (
-            entry.locations.map((location) => (
-              <RemovalRow
-                key={location.locationId}
-                entry={entry}
-                location={location}
-                draft={draft}
-                onToggle={onToggle}
-              />
+            byEnvironment(entry.locations).map(([environmentId, locations]) => (
+              <div
+                key={environmentId}
+                className="space-y-1.5"
+                data-testid="removal-machine"
+                data-environment-id={environmentId}
+              >
+                <p className="flex items-center gap-1.5 font-semibold text-on-surface text-xs">
+                  <Server size={11} aria-hidden="true" />
+                  {environmentName(environmentId)}
+                </p>
+                {locations.map((location) => (
+                  <RemovalRow
+                    key={`${location.environmentId}:${location.locationId}`}
+                    entry={entry}
+                    location={location}
+                    draft={draft}
+                    onToggle={onToggle}
+                  />
+                ))}
+              </div>
             ))
           )}
         </section>
@@ -90,12 +129,18 @@ function RemovalRow({
   readonly entry: RemovalPreviewEntry;
   readonly location: RemovalLocation;
   readonly draft: RemovalDraft;
-  readonly onToggle: (resourceKey: string, locationId: LibraryLocationId) => void;
+  readonly onToggle: (
+    resourceKey: string,
+    environmentId: string,
+    locationId: LibraryLocationId
+  ) => void;
 }) {
   const { t, locale } = useI18n();
   const l = t.library;
   const removable = isRemovable(location);
-  const checked = draft.removing.has(removalKey(entry.resourceKey, location.locationId));
+  const checked = draft.removing.has(
+    removalKey(entry.resourceKey, location.environmentId, location.locationId)
+  );
   const eliminatesGroup = eliminatesSelectedContentGroup(entry, location, draft);
 
   return (
@@ -106,6 +151,7 @@ function RemovalRow({
           : 'cursor-not-allowed border-outline-variant/10 bg-surface-container/40 opacity-70'
       }`}
       data-testid="removal-row"
+      data-environment-id={location.environmentId}
       data-location-id={location.locationId}
       data-operation={location.operation}
     >
@@ -115,7 +161,7 @@ function RemovalRow({
         // Nothing else can be removed here, and the apply route rejects the
         // attempt outright, so the control is disabled rather than merely warned about.
         disabled={!removable}
-        onChange={() => onToggle(entry.resourceKey, location.locationId)}
+        onChange={() => onToggle(entry.resourceKey, location.environmentId, location.locationId)}
         className="mt-0.5 size-3.5 accent-error"
       />
       <span className="min-w-0 flex-1 space-y-0.5">

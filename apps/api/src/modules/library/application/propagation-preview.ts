@@ -97,7 +97,7 @@ export interface PropagationPreviewDeps {
  * machine propagation, and refusing the whole preview would make an unrelated
  * outage look like the feature is broken.
  */
-async function readEnvironmentSnapshot(
+export async function readEnvironmentSnapshot(
   userId: string,
   environmentId: string,
   kinds: readonly ResourceKind[]

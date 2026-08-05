@@ -9,6 +9,7 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   RemovalApply,
   RemovalFailure,
@@ -87,6 +88,8 @@ export async function executeRemovalWrites(
   })
 ): Promise<RemovalApply> {
   const env = params.pathEnv;
+  // Echoed onto every row from the envelope; see `apply-writes.ts`.
+  const environmentId = params.environmentId ?? LOCAL_ENVIRONMENT_ID;
   const backupId = params.backupId ?? createBackupId(deps.backup);
   const lastCopyResourceKeys = params.lastCopyResourceKeys ?? [];
   const results: StagedOperation[] = [];
@@ -95,9 +98,9 @@ export async function executeRemovalWrites(
   for (const operation of params.operations) {
     try {
       assertNotCancelled(params.signal);
-      results.push(await stageOperation(operation, env, backupId, deps));
+      results.push(await stageOperation(operation, env, backupId, environmentId, deps));
     } catch (error) {
-      failed.push(describeFailure(operation, error));
+      failed.push(describeFailure(operation, environmentId, error));
       break;
     }
   }
@@ -105,14 +108,15 @@ export async function executeRemovalWrites(
   const staged = results.map((result) => result.staged);
   const entries = results.map((result) => result.entry);
   const removed = results.map((result) => result.removed);
+  const handles = [{ environmentId, backupId }];
 
   if (failed.length > 0) {
-    const unattempted = notAttempted(params.operations, results.length);
+    const unattempted = notAttempted(params.operations, environmentId, results.length);
     const unrestored = await rollback(staged);
     const keptAll = [...rolledBack(results, unrestored), ...unattempted];
     if (unrestored.size === 0) {
       await discardBackupSet(backupId, deps.backup).catch(() => undefined);
-      return { partial: false, removed: [], kept: keptAll, failed };
+      return { partial: false, removed: [], kept: keptAll, failed, backups: [] };
     }
     await persistManifest(backupId, entries, lastCopyResourceKeys, params.environmentId, deps);
     return {
@@ -121,11 +125,12 @@ export async function executeRemovalWrites(
       kept: keptAll,
       failed,
       backupId,
+      backups: handles,
     };
   }
 
   if (entries.length === 0) {
-    return { partial: false, removed, kept: [], failed };
+    return { partial: false, removed, kept: [], failed, backups: [] };
   }
 
   try {
@@ -135,18 +140,24 @@ export async function executeRemovalWrites(
     if (unrestored.size === 0) await discardBackupSet(backupId, deps.backup).catch(() => undefined);
     failed.push({
       resourceKey: params.operations[0]?.resourceKey ?? '',
+      environmentId,
       locationId: params.operations[0]?.locationId ?? '',
       reason: 'remove-failed',
       message: `Could not record the backup manifest, so this removal cannot be undone automatically; the copies are under backup set "${backupId}": ${errorMessage(error)}`,
     });
     const keptAll = [...rolledBack(results, unrestored)];
+    // No handle either way on this path. The manifest is what `undo` resolves,
+    // and it is the thing that just failed to be written — naming the set would
+    // put a restore button on screen that answers 404. The failure message
+    // above still names the directory, which is the only honest handle left.
     return unrestored.size === 0
-      ? { partial: false, removed: [], kept: keptAll, failed }
+      ? { partial: false, removed: [], kept: keptAll, failed, backups: [] }
       : {
           partial: true,
           removed: stillRemoved(results, unrestored),
           kept: keptAll,
           failed,
+          backups: [],
         };
   }
 
@@ -157,7 +168,7 @@ export async function executeRemovalWrites(
   }
   await pruneBackupSets(backupId, deps.backup);
 
-  return { backupId, partial: false, removed, kept: [], failed };
+  return { backupId, backups: handles, partial: false, removed, kept: [], failed };
 }
 
 async function persistManifest(
@@ -194,6 +205,7 @@ async function stageOperation(
   operation: PreparedRemovalOperation,
   env: PathEnv,
   backupId: string,
+  environmentId: string,
   deps: RemovalWriteEngineDeps
 ): Promise<StagedOperation> {
   const location = requireWritableLocation(
@@ -245,6 +257,7 @@ async function stageOperation(
     },
     removed: {
       resourceKey: operation.resourceKey,
+      environmentId,
       locationId: location.id,
       path: destination.logicalPath,
       contentHash,
@@ -294,6 +307,7 @@ function rolledBack(
     .filter((result) => !unrestored.has(result.staged.stagePath))
     .map((result) => ({
       resourceKey: result.removed.resourceKey,
+      environmentId: result.removed.environmentId,
       locationId: result.removed.locationId,
       reason: 'rolled-back' as const,
     }));
@@ -301,10 +315,12 @@ function rolledBack(
 
 function notAttempted(
   operations: readonly PreparedRemovalOperation[],
+  environmentId: string,
   staged: number
 ): RemovalKept[] {
   return operations.slice(staged + 1).map((operation) => ({
     resourceKey: operation.resourceKey,
+    environmentId,
     locationId: operation.locationId,
     reason: 'not-attempted' as const,
   }));
@@ -313,7 +329,11 @@ function notAttempted(
 class GuardError extends Error {}
 class BackupError extends Error {}
 
-function describeFailure(operation: PreparedRemovalOperation, error: unknown): RemovalFailure {
+function describeFailure(
+  operation: PreparedRemovalOperation,
+  environmentId: string,
+  error: unknown
+): RemovalFailure {
   const reason =
     error instanceof GuardError
       ? 'guard-rejected'
@@ -326,6 +346,7 @@ function describeFailure(operation: PreparedRemovalOperation, error: unknown): R
             : 'remove-failed';
   return {
     resourceKey: operation.resourceKey,
+    environmentId,
     locationId: operation.locationId,
     reason,
     message: errorMessage(error),

@@ -2,7 +2,7 @@
  * Library section for `mango doctor` (location health only — no content hashing).
  */
 
-import type { StagedRemovalLeftover } from '@mangostudio/shared/library';
+import type { LibraryStagedRemoval } from '@mangostudio/shared/library';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import {
   createLibraryPathEnv,
@@ -15,7 +15,7 @@ import { fail, ok, warn } from './doctor-checks';
 export interface LibraryDoctorDeps {
   readonly listLocations: () => ReturnType<typeof describeLocation>[];
   /** Temp trees an interrupted removal left beside a destination. */
-  readonly listStagedRemovals: () => Promise<StagedRemovalLeftover[]>;
+  readonly listStagedRemovals: () => Promise<LibraryStagedRemoval[]>;
 }
 
 export async function collectLibraryDoctorSection(
@@ -70,6 +70,6 @@ function defaultListLocations(): ReturnType<typeof describeLocation>[] {
   return LIBRARY_LOCATION_DEFINITIONS.map((location) => describeLocation(location.id, env));
 }
 
-function defaultListStagedRemovals(): Promise<StagedRemovalLeftover[]> {
+function defaultListStagedRemovals(): Promise<LibraryStagedRemoval[]> {
   return findStagedRemovalsForLocations(LIBRARY_LOCATION_DEFINITIONS, createLibraryPathEnv());
 }

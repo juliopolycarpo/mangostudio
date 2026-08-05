@@ -101,15 +101,19 @@ function previewRemoval(
     userId,
     { resourceKeys: ['skill:gh'], locationIds: [...locationIds] },
     {
-      discover: (scanUserId, kinds) =>
-        discoverLibraryResources(getDb(), scanUserId, {
+      snapshot: async (scanUserId, environmentId, kinds) => ({
+        environmentId,
+        resources: await discoverLibraryResources(getDb(), scanUserId, {
           force: true,
           kinds,
           cache,
           pathEnv,
           settings: skillLocationSettings(),
         }),
-      describeLocation: (id) => describeLocation(id, pathEnv),
+        statuses: new Map(
+          [...locationIds].map((id) => [id, describeLocation(id, pathEnv)] as const)
+        ),
+      }),
       enabledLocationIds: () =>
         Promise.resolve(
           enabledLibraryLocations(libraryLocationsFor(skillLocationSettings()), 'home')

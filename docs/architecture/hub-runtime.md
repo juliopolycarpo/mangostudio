@@ -305,7 +305,13 @@ with restore disabled and the reason stated.
 A propagation that spans machines produces one backup set per machine, so it has one undo
 per machine. There is deliberately no "undo everything": each is a separate conversation
 with a separate host, any of which can be offline, and a single button that half-worked
-would be the worst available outcome.
+would be the worst available outcome. The same holds for removal, and matters more there:
+a removal's backup is the only remaining copy of what it deleted.
+
+Removal's last-copy guard counts copies on **every machine in scope**, not on the rows the
+user is looking at. A copy surviving on another box is a surviving copy — a guard that
+counted only locations would nag about a resource that is not disappearing, or, in the
+direction that actually costs someone their work, stay silent about one that is.
 
 ### Audit log
 

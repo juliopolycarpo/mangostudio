@@ -861,6 +861,10 @@ export const RemovalBlockedReasonSchema = Type.Union([
   Type.Literal('read-only-location'),
   Type.Literal('unsupported-location'),
   Type.Literal('location-unwritable'),
+  /** Same machine-level reasons propagation reports; see `PropagationBlockedReasonSchema`. */
+  Type.Literal('environment-offline'),
+  Type.Literal('environment-unsupported'),
+  Type.Literal('environment-readonly'),
   /**
    * The scanner could not read this instance end to end. An instance that
    * cannot be backed up faithfully cannot be undone, and a removal whose undo
@@ -870,6 +874,8 @@ export const RemovalBlockedReasonSchema = Type.Union([
 ]);
 
 export const RemovalLocationSchema = Type.Object({
+  /** Machine this copy is on; a copy is the pair, never the location alone. */
+  environmentId: LibraryEnvironmentIdSchema,
   locationId: LibraryLocationIdSchema,
   /** Every target that would stop seeing the resource if this copy goes. */
   targetIds: Type.Array(LibraryTargetIdSchema),
@@ -898,12 +904,23 @@ export const RemovalPreviewEntrySchema = Type.Object({
   divergence: LibraryDivergenceSchema,
   locations: Type.Array(RemovalLocationSchema),
   /**
-   * Every location holding a copy, including ones this preview does not offer.
+   * Every copy that exists, on every machine in scope — including ones this
+   * preview does not offer to remove.
+   *
    * The last-copy guard is decided against this list rather than against the
    * offered rows: a resource is only zeroed when nothing is left *anywhere*,
    * and a preview scoped to two of its four homes must not be able to claim it.
+   * Machine-qualified for the same reason, one dimension out: a copy surviving
+   * on another box is still a surviving copy, and a guard that counted only
+   * locations would demand an acknowledgement for a resource that is not
+   * actually about to disappear.
    */
-  instanceLocationIds: Type.Array(LibraryLocationIdSchema),
+  instancePlacements: Type.Array(
+    Type.Object({
+      environmentId: LibraryEnvironmentIdSchema,
+      locationId: LibraryLocationIdSchema,
+    })
+  ),
   /** True when removing every removable location shown would leave no instance anywhere. */
   wouldRemoveLastCopy: Type.Boolean(),
 });
@@ -914,11 +931,18 @@ export const RemovalPreviewEntrySchema = Type.Object({
  * cost of never leaving a half-removed skill, and quietly deleting one would
  * discard the only copy of whatever the interrupted apply was holding.
  */
-export const StagedRemovalLeftoverSchema = Type.Object({
+/** A leftover as the machine holding it describes itself — no environment id. */
+export const LibraryStagedRemovalSchema = Type.Object({
   locationId: LibraryLocationIdSchema,
   path: Type.String({ minLength: 1 }),
   modifiedAtMs: Type.Integer({ minimum: 0 }),
 });
+
+/** The hub's view, which names the machine the stale directory is sitting on. */
+export const StagedRemovalLeftoverSchema = Type.Composite([
+  LibraryStagedRemovalSchema,
+  Type.Object({ environmentId: LibraryEnvironmentIdSchema }),
+]);
 
 export const RemovalPreviewRequestSchema = Type.Object({
   resourceKeys: Type.Array(Type.String({ minLength: 1 }), {
@@ -926,6 +950,14 @@ export const RemovalPreviewRequestSchema = Type.Object({
     maxItems: PROPAGATION_PREVIEW_MAX_RESOURCES,
   }),
   locationIds: Type.Array(LibraryLocationIdSchema, { minItems: 1, maxItems: 64 }),
+  /**
+   * Machines whose copies are in scope. Omitted means Local. Every named machine
+   * is offered as a place to remove from *and* counted by the last-copy guard —
+   * the two cannot be separated without the guard lying.
+   */
+  environmentIds: Type.Optional(
+    Type.Array(LibraryEnvironmentIdSchema, { minItems: 1, maxItems: 16 })
+  ),
   /** Reserved: profiles are not selectable yet. Omitted requests use the active profile. */
   profileId: Type.Optional(ProfileIdSchema),
 });
@@ -944,6 +976,8 @@ export const RemovalPreviewSchema = Type.Object({
 });
 
 export const RemovalLocationDecisionSchema = Type.Object({
+  /** Machine the copy is on; omitted means Local. */
+  environmentId: Type.Optional(LibraryEnvironmentIdSchema),
   locationId: LibraryLocationIdSchema,
   action: Type.Union([Type.Literal('remove'), Type.Literal('keep')]),
 });
@@ -1007,6 +1041,7 @@ export const RemovalFailureReasonSchema = Type.Union([
 
 export const RemovalRemovedSchema = Type.Object({
   resourceKey: Type.String({ minLength: 1 }),
+  environmentId: LibraryEnvironmentIdSchema,
   locationId: LibraryLocationIdSchema,
   path: Type.String({ minLength: 1 }),
   /** Hash of what was removed, re-read from disk rather than taken from the preview. */
@@ -1017,12 +1052,14 @@ export const RemovalRemovedSchema = Type.Object({
 
 export const RemovalKeptSchema = Type.Object({
   resourceKey: Type.String({ minLength: 1 }),
+  environmentId: LibraryEnvironmentIdSchema,
   locationId: LibraryLocationIdSchema,
   reason: RemovalKeptReasonSchema,
 });
 
 export const RemovalFailureSchema = Type.Object({
   resourceKey: Type.String({ minLength: 1 }),
+  environmentId: LibraryEnvironmentIdSchema,
   locationId: LibraryLocationIdSchema,
   reason: RemovalFailureReasonSchema,
   message: Type.String(),
@@ -1030,10 +1067,20 @@ export const RemovalFailureSchema = Type.Object({
 
 export const RemovalApplySchema = Type.Object({
   /**
-   * Present when anything was removed. Shares propagation's backup namespace,
-   * so `POST /library/propagate/undo` restores either kind of apply.
+   * The set on the machine this result describes. Shares propagation's backup
+   * namespace, so `POST /library/propagate/undo` restores either kind of apply.
+   * Absent when the removal spanned machines — see `backups`.
    */
   backupId: Type.Optional(Type.String({ minLength: 1 })),
+  /**
+   * Every set this removal produced, one per machine it took copies from.
+   *
+   * A removal's backup is the only remaining copy of what it deleted, so a
+   * cross-machine removal has one irreplaceable set per machine. Naming only
+   * one of them is how a user restores half of what they lost and believes
+   * they restored all of it.
+   */
+  backups: Type.Array(PropagationBackupHandleSchema),
   /**
    * False when the filesystem matches its pre-apply state — everything landed,
    * or a failure was fully compensated. True is the alarming case: a failure
@@ -1107,6 +1154,7 @@ export type RemovalOperation = Static<typeof RemovalOperationSchema>;
 export type RemovalBlockedReason = Static<typeof RemovalBlockedReasonSchema>;
 export type RemovalLocation = Static<typeof RemovalLocationSchema>;
 export type RemovalPreviewEntry = Static<typeof RemovalPreviewEntrySchema>;
+export type LibraryStagedRemoval = Static<typeof LibraryStagedRemovalSchema>;
 export type StagedRemovalLeftover = Static<typeof StagedRemovalLeftoverSchema>;
 export type RemovalPreviewRequest = Static<typeof RemovalPreviewRequestSchema>;
 export type RemovalPreview = Static<typeof RemovalPreviewSchema>;

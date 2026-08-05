@@ -15,7 +15,7 @@
 import type { Dirent, Stats } from 'node:fs';
 import { lstat, readdir, rename, rm, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import type { LibraryLocationId, StagedRemovalLeftover } from '@mangostudio/shared/library';
+import type { LibraryLocationId, LibraryStagedRemoval } from '@mangostudio/shared/library';
 import type { LocationDefinition } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 
@@ -136,7 +136,7 @@ export async function stageResourceRemoval(
 export async function findStagedRemovalLeftovers(
   input: { readonly locationId: LibraryLocationId; readonly directory: string },
   fs: TreeRemovalFs = nodeTreeRemovalFs
-): Promise<StagedRemovalLeftover[]> {
+): Promise<LibraryStagedRemoval[]> {
   let entries: Dirent[];
   try {
     entries = await fs.readdir(input.directory);
@@ -164,7 +164,7 @@ export async function findStagedRemovalLeftovers(
   );
 
   return leftovers
-    .filter((leftover): leftover is StagedRemovalLeftover => leftover !== null)
+    .filter((leftover): leftover is LibraryStagedRemoval => leftover !== null)
     .sort(
       (left, right) => right.modifiedAtMs - left.modifiedAtMs || (left.path < right.path ? -1 : 1)
     );
@@ -181,7 +181,7 @@ export async function findStagedRemovalsForLocations(
   locations: readonly LocationDefinition[],
   env: PathEnv,
   fs: TreeRemovalFs = nodeTreeRemovalFs
-): Promise<StagedRemovalLeftover[]> {
+): Promise<LibraryStagedRemoval[]> {
   const scanned = new Map<string, LocationDefinition[]>();
   for (const location of locations) {
     const directory = stagedRemovalDirectory(location, env);

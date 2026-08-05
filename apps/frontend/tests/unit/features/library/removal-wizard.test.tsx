@@ -25,6 +25,7 @@ const preview: RemovalPreview = {
       divergence: 'uniform',
       locations: [
         {
+          environmentId: 'local',
           locationId: 'claude-skills',
           targetIds: [],
           operation: 'remove',
@@ -34,7 +35,10 @@ const preview: RemovalPreview = {
           eliminatesContentGroup: false,
         },
       ],
-      instanceLocationIds: ['claude-skills', 'agents-skills'],
+      instancePlacements: [
+        { environmentId: 'local', locationId: 'claude-skills' },
+        { environmentId: 'local', locationId: 'agents-skills' },
+      ],
       wouldRemoveLastCopy: false,
     },
   ],

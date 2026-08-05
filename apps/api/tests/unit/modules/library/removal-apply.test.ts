@@ -77,6 +77,7 @@ async function entryFor(
     locationIds.map(async (locationId) => {
       const path = join(home, SKILL_LOCATION_ROOTS[locationId], slug);
       return {
+        environmentId: 'local',
         locationId,
         targetIds: [],
         operation: 'remove' as const,
@@ -93,7 +94,10 @@ async function entryFor(
     ref: { kind: 'skill', slug },
     divergence: 'uniform',
     locations,
-    instanceLocationIds: [...locationIds],
+    instancePlacements: locationIds.map((locationId) => ({
+      environmentId: 'local',
+      locationId,
+    })),
     wouldRemoveLastCopy: true,
   };
 }
@@ -124,6 +128,7 @@ function requestFor(
     decisions: preview.entries.map((entry) => ({
       resourceKey: entry.resourceKey,
       locations: entry.locations.map((location) => ({
+        environmentId: location.environmentId,
         locationId: location.locationId,
         action: keep.has(location.locationId) ? ('keep' as const) : ('remove' as const),
       })),
@@ -517,5 +522,192 @@ describe('applyLibraryRemoval atomicity', () => {
         decisions: [{ resourceKey: 'skill:gh', locations: [request.decisions[0].locations[0]] }],
       })
     ).rejects.toBeInstanceOf(LibraryRequestError);
+  });
+});
+
+/*
+  Removal across machines, driven in process against two temp homes.
+
+  The two things that must hold are the ones a single-machine engine cannot
+  check for itself: copies go from the machine the preview named, and each
+  machine's backup — the only remaining copy of what it deleted — lands on its
+  own disk with its own handle.
+*/
+describe('applyLibraryRemoval across machines', () => {
+  let remoteHome: string;
+  let remoteBackupRoot: string;
+
+  beforeEach(() => {
+    remoteHome = mkdtempSync(join(tmpdir(), 'mango-removal-remote-'));
+    remoteBackupRoot = join(remoteHome, 'backups');
+  });
+
+  afterEach(() => {
+    rmSync(remoteHome, { recursive: true, force: true });
+  });
+
+  const homeOf = (environmentId: string) => (environmentId === 'local' ? home : remoteHome);
+
+  function envFor(environmentId: string) {
+    return { homeDir: homeOf(environmentId), platform: 'linux' as const, env: {} };
+  }
+
+  function seedOn(environmentId: string, locationId: SkillLocationId, body: string): string {
+    const path = join(homeOf(environmentId), SKILL_LOCATION_ROOTS[locationId], 'gh');
+    mkdirSync(path, { recursive: true });
+    writeFileSync(join(path, 'SKILL.md'), `---\nname: gh\ndescription: d\n---\n${body}\n`);
+    return path;
+  }
+
+  async function locationOn(
+    environmentId: string,
+    locationId: SkillLocationId
+  ): Promise<RemovalPreviewEntry['locations'][number]> {
+    const path = join(homeOf(environmentId), SKILL_LOCATION_ROOTS[locationId], 'gh');
+    return {
+      environmentId,
+      locationId,
+      targetIds: [],
+      operation: 'remove' as const,
+      path,
+      contentHash: await hashResourceAt(path, 'directory'),
+      modifiedAtMs: 1,
+      eliminatesContentGroup: false,
+    };
+  }
+
+  function backupRootFor(environmentId: string): string {
+    return environmentId === 'local' ? backupRoot : remoteBackupRoot;
+  }
+
+  /** Follows the batch currently running, the way a real per-machine store does. */
+  let currentEnvironmentId = 'local';
+
+  function crossMachineApply(preview: RemovalPreview, request: RemovalApplyRequest) {
+    return applyLibraryRemoval('user-1', request, {
+      preview: () => Promise.resolve(preview),
+      pathEnv: (environmentId) => {
+        currentEnvironmentId = environmentId;
+        return envFor(environmentId);
+      },
+      writeEngine: 'in-process',
+      backup: {
+        ...backupDeps(),
+        backupDir: () => backupRootFor(currentEnvironmentId),
+      },
+      recordBackup: () => Promise.resolve(),
+    });
+  }
+
+  it('removes each copy from the machine the preview named', async () => {
+    const localPath = seedOn('local', 'claude-skills', 'local');
+    const remotePath = seedOn('remote-box', 'claude-skills', 'remote');
+    const preview = previewOf([
+      {
+        resourceKey: 'skill:gh',
+        ref: { kind: 'skill', slug: 'gh' },
+        divergence: 'divergent',
+        locations: [
+          await locationOn('local', 'claude-skills'),
+          await locationOn('remote-box', 'claude-skills'),
+        ],
+        instancePlacements: [
+          { environmentId: 'local', locationId: 'claude-skills' },
+          { environmentId: 'remote-box', locationId: 'claude-skills' },
+        ],
+        wouldRemoveLastCopy: true,
+      },
+    ]);
+
+    const result = await crossMachineApply(
+      preview,
+      requestFor(preview, { acknowledgeLastCopy: ['skill:gh'] })
+    );
+
+    expect(result.failed).toEqual([]);
+    expect(result.removed.map((row) => row.environmentId).sort()).toEqual(['local', 'remote-box']);
+    expect(existsSync(localPath)).toBe(false);
+    expect(existsSync(remotePath)).toBe(false);
+    // One irreplaceable set per machine, each on its own disk. A single handle
+    // would restore half of what was lost while looking like it restored all.
+    expect(result.backups.map((handle) => handle.environmentId).sort()).toEqual([
+      'local',
+      'remote-box',
+    ]);
+    expect(result.backupId).toBeUndefined();
+    expect(existsSync(remoteBackupRoot)).toBe(true);
+  });
+
+  it('leaves the other machine alone when only one is selected', async () => {
+    const localPath = seedOn('local', 'claude-skills', 'local');
+    const remotePath = seedOn('remote-box', 'claude-skills', 'remote');
+    const preview = previewOf([
+      {
+        resourceKey: 'skill:gh',
+        ref: { kind: 'skill', slug: 'gh' },
+        divergence: 'divergent',
+        locations: [
+          await locationOn('local', 'claude-skills'),
+          await locationOn('remote-box', 'claude-skills'),
+        ],
+        instancePlacements: [
+          { environmentId: 'local', locationId: 'claude-skills' },
+          { environmentId: 'remote-box', locationId: 'claude-skills' },
+        ],
+        wouldRemoveLastCopy: false,
+      },
+    ]);
+    const request: RemovalApplyRequest = {
+      previewToken: preview.previewToken,
+      stateHash: preview.stateHash,
+      request: { resourceKeys: ['skill:gh'], locationIds: ['claude-skills'] },
+      decisions: [
+        {
+          resourceKey: 'skill:gh',
+          locations: [
+            { environmentId: 'local', locationId: 'claude-skills', action: 'remove' },
+            { environmentId: 'remote-box', locationId: 'claude-skills', action: 'keep' },
+          ],
+        },
+      ],
+      // No acknowledgement needed and none given: a copy survives on the other
+      // machine, so this is not a last-copy removal.
+      acknowledgeLastCopy: [],
+    };
+
+    const result = await crossMachineApply(preview, request);
+
+    expect(result.failed).toEqual([]);
+    expect(existsSync(localPath)).toBe(false);
+    expect(existsSync(remotePath)).toBe(true);
+    expect(result.backups).toHaveLength(1);
+    expect(result.backups[0].environmentId).toBe('local');
+  });
+
+  it('refuses to zero a resource across machines without an acknowledgement', async () => {
+    seedOn('local', 'claude-skills', 'local');
+    seedOn('remote-box', 'claude-skills', 'remote');
+    const preview = previewOf([
+      {
+        resourceKey: 'skill:gh',
+        ref: { kind: 'skill', slug: 'gh' },
+        divergence: 'divergent',
+        locations: [
+          await locationOn('local', 'claude-skills'),
+          await locationOn('remote-box', 'claude-skills'),
+        ],
+        instancePlacements: [
+          { environmentId: 'local', locationId: 'claude-skills' },
+          { environmentId: 'remote-box', locationId: 'claude-skills' },
+        ],
+        wouldRemoveLastCopy: true,
+      },
+    ]);
+
+    // Removing every machine's copy is exactly the case the guard exists for,
+    // and it does not stop being one because the copies are on two disks.
+    await expect(crossMachineApply(preview, requestFor(preview))).rejects.toMatchObject({
+      status: 422,
+    });
   });
 });

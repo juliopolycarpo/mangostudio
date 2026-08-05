@@ -1637,7 +1637,6 @@ export const messages = {
       selectedCount: '{count} selecionados',
       clearSelection: 'Limpar seleção',
       propagate: 'Propagar',
-      writesLocalOnly: 'Propagar e remover estão disponíveis apenas nesta máquina por enquanto.',
       loadError: 'Não foi possível carregar a biblioteca.',
       retry: 'Tentar novamente',
       rescan: 'Reler do disco',
@@ -1685,7 +1684,6 @@ export const messages = {
       alsoIn: 'também em {locations}, idêntico',
       propagate: 'Propagar',
       remove: 'Remover',
-      writesLocalOnly: 'Propagar e remover estão disponíveis apenas nesta máquina por enquanto.',
       notFound: 'Este recurso não existe mais na biblioteca.',
       invalidInstance: 'Cópia ilegível em {location}',
       // 001 não normaliza fim de linha de propósito, então CRLF contra LF é uma
@@ -1890,6 +1888,7 @@ export const messages = {
       resultRolledBack: 'Uma remoção falhou, então todas as cópias voltaram para o lugar.',
       resultNone: 'Nada foi removido.',
       resultKeptHeading: 'Continuam no lugar',
+      restore: 'Devolver estas cópias',
     },
     result: {
       title: 'Resultado',

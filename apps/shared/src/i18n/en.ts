@@ -1612,7 +1612,6 @@ export const messages: Messages = {
       selectedCount: '{count} selected',
       clearSelection: 'Clear selection',
       propagate: 'Propagate',
-      writesLocalOnly: 'Propagate and remove are available on this machine only for now.',
       loadError: 'The library could not be loaded.',
       retry: 'Try again',
       rescan: 'Re-read from disk',
@@ -1660,7 +1659,6 @@ export const messages: Messages = {
       alsoIn: 'also in {locations}, identical',
       propagate: 'Propagate',
       remove: 'Remove',
-      writesLocalOnly: 'Propagate and remove are available on this machine only for now.',
       notFound: 'This resource is no longer in the library.',
       invalidInstance: 'Unreadable copy in {location}',
       // 001 deliberately does not normalize line endings, so a CRLF/LF split is
@@ -1868,6 +1866,10 @@ export const messages: Messages = {
       resultRolledBack: 'A removal failed, so every copy was put back.',
       resultNone: 'Nothing was removed.',
       resultKeptHeading: 'Still there',
+      // One machine's copies at a time: a removal's backup is the only remaining
+      // copy of what it deleted, so the verb has to name what is being restored
+      // rather than promise a single undo across every machine touched.
+      restore: 'Put these copies back',
     },
     result: {
       title: 'Result',

@@ -25,9 +25,21 @@ export interface RemovalDraft {
   readonly acknowledged: ReadonlySet<string>;
 }
 
-/** Identity of one planned removal: one resource leaving one location. */
-export function removalKey(resourceKey: string, locationId: LibraryLocationId): string {
-  return `${resourceKey} ${locationId}`;
+/**
+ * Identity of one planned removal: one resource leaving one location on one
+ * machine.
+ *
+ * Never the location alone. `~/.claude/skills` exists on every machine the user
+ * has, and a checkbox keyed on the location would mark all of them at once —
+ * deleting copies nobody selected, from a form whose whole posture is that
+ * nothing is ever checked for you.
+ */
+export function removalKey(
+  resourceKey: string,
+  environmentId: string,
+  locationId: LibraryLocationId
+): string {
+  return `${resourceKey}\u001f${environmentId}\u001f${locationId}`;
 }
 
 export function initialRemovalDraft(): RemovalDraft {
@@ -48,7 +60,9 @@ export function plannedRemovals(
       .filter(
         (location) =>
           isRemovable(location) &&
-          draft.removing.has(removalKey(entry.resourceKey, location.locationId))
+          draft.removing.has(
+            removalKey(entry.resourceKey, location.environmentId, location.locationId)
+          )
       )
       .map((location) => ({ entry, location }))
   );
@@ -57,20 +71,22 @@ export function plannedRemovals(
 /**
  * Resources the current selection would leave with no copy anywhere.
  *
- * Decided against `instanceLocationIds` — every location holding a copy,
- * including ones this preview does not offer — rather than against the rows on
- * screen, which is the same rule the API applies. A wizard that decided it from
- * the visible rows would ask for an acknowledgement the API does not want, or
- * worse, fail to ask for one it does.
+ * Decided against `instancePlacements` — every copy that exists on every
+ * machine in scope, including ones this preview does not offer — rather than
+ * against the rows on screen, which is the same rule the API applies. A wizard
+ * that decided it from the visible rows would ask for an acknowledgement the API
+ * does not want, or worse, fail to ask for one it does.
  */
 export function lastCopyEntries(
   preview: RemovalPreview,
   draft: RemovalDraft
 ): RemovalPreviewEntry[] {
   return preview.entries.filter((entry) => {
-    if (entry.instanceLocationIds.length === 0) return false;
-    return entry.instanceLocationIds.every((locationId) =>
-      draft.removing.has(removalKey(entry.resourceKey, locationId))
+    if (entry.instancePlacements.length === 0) return false;
+    return entry.instancePlacements.every((placement) =>
+      draft.removing.has(
+        removalKey(entry.resourceKey, placement.environmentId, placement.locationId)
+      )
     );
   });
 }
@@ -108,9 +124,14 @@ export function eliminatesSelectedContentGroup(
   if (location.contentHash === undefined) return false;
   return !entry.locations.some(
     (candidate) =>
-      candidate.locationId !== location.locationId &&
+      // A copy of the same bytes on another machine counts as a survivor just
+      // as much as one in another directory does.
+      (candidate.locationId !== location.locationId ||
+        candidate.environmentId !== location.environmentId) &&
       candidate.contentHash === location.contentHash &&
-      !draft.removing.has(removalKey(entry.resourceKey, candidate.locationId))
+      !draft.removing.has(
+        removalKey(entry.resourceKey, candidate.environmentId, candidate.locationId)
+      )
   );
 }
 
@@ -148,10 +169,13 @@ export function buildRemovalDecisions(
   return preview.entries.map((entry) => ({
     resourceKey: entry.resourceKey,
     locations: entry.locations.map((location) => ({
+      environmentId: location.environmentId,
       locationId: location.locationId,
       action:
         isRemovable(location) &&
-        draft.removing.has(removalKey(entry.resourceKey, location.locationId))
+        draft.removing.has(
+          removalKey(entry.resourceKey, location.environmentId, location.locationId)
+        )
           ? ('remove' as const)
           : ('keep' as const),
     })),

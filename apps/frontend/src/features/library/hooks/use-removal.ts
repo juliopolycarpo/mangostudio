@@ -41,13 +41,18 @@ export interface RemovalController {
   /** Set when the API found a last copy the wizard did not; re-preview is the way out. */
   readonly needsLastCopyReview: boolean;
   readonly setStep: (step: RemovalStep) => void;
-  readonly toggleLocation: (resourceKey: string, locationId: LibraryLocationId) => void;
+  readonly toggleLocation: (
+    resourceKey: string,
+    environmentId: string,
+    locationId: LibraryLocationId
+  ) => void;
   readonly toggleAcknowledgement: (resourceKey: string) => void;
   readonly apply: () => void;
   readonly isApplying: boolean;
   readonly applyError: unknown;
   readonly result: RemovalApply | undefined;
-  readonly undo: () => void;
+  /** One backup set on one machine; a cross-machine removal produced several. */
+  readonly undo: (environmentId: string, backupId: string) => void;
   readonly isUndoing: boolean;
   readonly undoError: unknown;
   readonly undoResult: PropagationUndo | undefined;
@@ -139,23 +144,27 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
   });
 
   const undoMutation = useMutation({
-    mutationFn: (backupId: string) => undoPropagation(backupId),
+    mutationFn: (target: { environmentId: string; backupId: string }) =>
+      undoPropagation(target.backupId, target.environmentId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: libraryKeys.all }),
   });
 
-  const toggleLocation = useCallback((resourceKey: string, locationId: LibraryLocationId) => {
-    setDraft((current) => {
-      if (!current) return current;
-      const removing = new Set(current.removing);
-      const key = removalKey(resourceKey, locationId);
-      if (!removing.delete(key)) removing.add(key);
-      // Unchecking a copy can turn a last-copy removal back into an ordinary
-      // one, so a sign-off given for the old selection must not survive it.
-      const acknowledged = new Set(current.acknowledged);
-      acknowledged.delete(resourceKey);
-      return { removing, acknowledged };
-    });
-  }, []);
+  const toggleLocation = useCallback(
+    (resourceKey: string, environmentId: string, locationId: LibraryLocationId) => {
+      setDraft((current) => {
+        if (!current) return current;
+        const removing = new Set(current.removing);
+        const key = removalKey(resourceKey, environmentId, locationId);
+        if (!removing.delete(key)) removing.add(key);
+        // Unchecking a copy can turn a last-copy removal back into an ordinary
+        // one, so a sign-off given for the old selection must not survive it.
+        const acknowledged = new Set(current.acknowledged);
+        acknowledged.delete(resourceKey);
+        return { removing, acknowledged };
+      });
+    },
+    []
+  );
 
   const toggleAcknowledgement = useCallback((resourceKey: string) => {
     setDraft((current) => {
@@ -182,9 +191,12 @@ export function useRemoval(request: RemovalPreviewRequest): RemovalController {
     isApplying: applyMutation.isPending,
     applyError: applyMutation.error,
     result,
-    undo: useCallback(() => {
-      if (result?.backupId) undoMutation.mutate(result.backupId);
-    }, [result?.backupId, undoMutation]),
+    undo: useCallback(
+      (environmentId: string, backupId: string) => {
+        undoMutation.mutate({ environmentId, backupId });
+      },
+      [undoMutation]
+    ),
     isUndoing: undoMutation.isPending,
     undoError: undoMutation.error,
     undoResult: undoMutation.data,
