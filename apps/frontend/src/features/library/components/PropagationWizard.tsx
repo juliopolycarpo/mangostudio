@@ -54,7 +54,8 @@ export function PropagationWizard({
 }: PropagationWizardProps) {
   const { t } = useI18n();
   const l = t.library;
-  const environments = useEnvironmentEntitiesQuery().data ?? [];
+  const environmentsQuery = useEnvironmentEntitiesQuery();
+  const environments = environmentsQuery.data ?? [];
   const scopeEnvironmentId = environmentId ?? LOCAL_ENVIRONMENT_ID;
 
   /**
@@ -81,10 +82,14 @@ export function PropagationWizard({
   const request = useMemo<PropagationPreviewRequest>(
     () => ({
       resourceKeys: [...resourceKeys],
-      targetLocationIds: [...locationIds],
+      // Empty until the environments query resolves: `environmentIds` below
+      // only reflects the full machine set once it does, and previewing
+      // before that would fire a second, more expensive preview the moment
+      // it lands.
+      targetLocationIds: environmentsQuery.isSuccess ? [...locationIds] : [],
       environmentIds,
     }),
-    [resourceKeys, locationIds, environmentIds]
+    [resourceKeys, locationIds, environmentIds, environmentsQuery.isSuccess]
   );
   const wizard = usePropagation(request);
   const locationsQuery = useQuery(libraryLocationsQueryOptions(scopeEnvironmentId));
