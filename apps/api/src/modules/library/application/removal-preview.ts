@@ -252,7 +252,7 @@ function buildRemovalEntry(
         // on a box nobody could reach, and naming the location's problem there
         // sends the user after the wrong thing.
         blockedReason:
-          (instance && environmentBlockedReason(snapshot.blockedReason)) ??
+          environmentBlockedReason(snapshot.blockedReason) ??
           removalBlockedReason(location, snapshot.statuses.get(location.id), instance),
       };
     });
@@ -337,11 +337,11 @@ function describeRemovalLocation(
     ...(instance !== undefined && { modifiedAtMs: instance.modifiedAtMs }),
   };
 
-  if (!instance) {
-    return { ...base, operation: 'absent', eliminatesContentGroup: false };
-  }
   if (blockedReason) {
     return { ...base, operation: 'blocked', blockedReason, eliminatesContentGroup: false };
+  }
+  if (!instance) {
+    return { ...base, operation: 'absent', eliminatesContentGroup: false };
   }
 
   return {
