@@ -30,7 +30,10 @@ import {
 } from '@mangostudio/shared/environments';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
-import { classifyContainerFailure } from '../../modules/environments/domain/container-failure';
+import {
+  classifyContainerFailure,
+  describeContainerFailure,
+} from '../../modules/environments/domain/container-failure';
 import {
   ContainerRuntimeSourceError,
   resolveContainerRuntimeBinary,
@@ -132,7 +135,13 @@ export async function connectContainerRuntime(
         // carries the stderr tail: a protocol mismatch reported by a runtime
         // that did answer is described better there than by anything the
         // engine said about starting it.
-        return undefined;
+        return failureReason === 'unknown'
+          ? undefined
+          : describeContainerFailure(failureReason, {
+              engine,
+              image: config.image,
+              stderr: failure.stderr,
+            });
       },
       onClosed: onUnavailable,
     });
