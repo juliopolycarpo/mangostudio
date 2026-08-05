@@ -127,20 +127,16 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           CARGO_VERSION: ${{ inputs.cargo_version }}
-        # Two globs, not one: `mangostudio-runtime-<version>-*` does not match
-        # `mangostudio-<version>-*`, so a single pattern silently drops every raw
-        # runtime binary. The hub streams that asset to a paired runtime during a
-        # live self-update and refuses to unpack an archive for it, so a canary
-        # release without it can never serve an upgrade.
-        run: |
-          mkdir -p github-canary-assets
-          for asset in release-assets/mangostudio-"${VERSION}"-* \
-                       release-assets/mangostudio-runtime-"${VERSION}"-*; do
-            [ -e "$asset" ] || continue
-            target="$(basename "$asset")"
-            cp "$asset" "github-canary-assets/${target/${VERSION}/${CARGO_VERSION}}"
-          done
-          (cd github-canary-assets && sha256sum mangostudio-* > SHA256SUMS)
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        # Named selection, not a glob. `release-assets/mangostudio-<version>-*`
+        # absorbed the eight raw hub binaries the moment raw assets shipped while
+        # never matching a raw runtime binary, so canary paid ~760 MB per green
+        # commit for assets nothing could use. The script publishes every platform
+        # archive (the Cargo launcher resolves one for its own host) plus raw
+        # hub+runtime pairs for the curated canary platforms, and writes
+        # canary-manifest.json so the source commit behind a rolling name is
+        # recoverable.
+        run: bun ./scripts/release/stage-canary-assets.ts
 
       - name: Publish rolling pre-release assets for the launcher
         # The cargo shim resolves .../releases/download/v<version>/, so existing
@@ -158,6 +154,10 @@ jobs:
             --prerelease \
             --title "$tag" \
             --notes "$notes"
+          # The curated asset set can shrink between runs (a platform dropped
+          # from CANARY_PAIR_PLATFORMS); the rolling tag must not keep serving
+          # a stale binary the docs and manifest no longer promise.
+          purge_stale_release_assets "$tag" github-canary-assets/*
 
   canary-summary:
     name: Canary publish summary

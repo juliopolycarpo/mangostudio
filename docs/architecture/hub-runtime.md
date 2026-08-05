@@ -417,11 +417,28 @@ handshake failure the user cannot act on. Releases publish standalone
 `mangostudio-runtime-<version>-<platform>` binaries beside the platform archives
 for one-liner installs and hub-driven WSL/SSH push.
 
+Which release those bytes come from is resolved by channel, not by splicing the hub's
+version into a URL. Stable maps to `v<version>` and versioned asset names. A canary hub
+reports `<root>-canary.<sha7>` while its assets live on the rolling `v<root>-canary` tag
+under rolling names, so splicing would ask for a tag that has never existed. The cache
+stays keyed on the hub's own sha-stamped version even though the fetch targets the rolling
+tag, so two canary builds never share a cache entry.
+
+A rolling tag is clobbered on every green commit, which means the asset behind a rolling
+name is not necessarily this hub's pair — and its checksum verifies, because `SHA256SUMS`
+was clobbered with it. Before installing from one, the hub reads `canary-manifest.json`
+(published beside the assets, checksummed like them) and refuses when the tag has moved
+past its own build. The refusal lands on the hub, before any remote write, instead of
+surfacing as a handshake failure on somebody's machine. A rolling release that publishes
+no manifest is tolerated and falls back to the install-time version check.
+
 What lands is written down: version, digest, and which hub installed it. The digest is
 what version equality cannot supply in a checkout — two `dev` builds are different
 binaries with the same name, so without it a rebuilt runtime would never reach the
 distribution. A release short-circuits on version alone, because a published tag's bytes
-do not change and hashing tens of megabytes to learn that would be absurd. Consent is
+do not change and hashing tens of megabytes to learn that would be absurd. Canary counts
+as a release here: its version carries the source sha, so what a slot recorded still names
+one build. Consent is
 recorded once, on the first provision, by running the installed runtime's own `setup`;
 upgrades leave it alone. The unversioned `~/.mango/bin/mangostudio-runtime` that the first
 WSL release wrote is deleted on the first install into this layout, and the removal is

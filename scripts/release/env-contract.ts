@@ -29,6 +29,15 @@ export const RELEASE_SCRIPT_ENV_CONTRACTS = {
   'scripts/release/push-dist-repo.ts': {
     tokenEnvFlag: '--token-env',
   },
+  // Each value falls back to its env var only when the matching flag is absent,
+  // which is exactly how the script resolves them.
+  'scripts/release/stage-canary-assets.ts': {
+    requirements: [
+      { env: ['VERSION'], unlessArgsInclude: '--version' },
+      { env: ['CARGO_VERSION'], unlessArgsInclude: '--cargo-version' },
+      { env: ['SOURCE_SHA'], unlessArgsInclude: '--source-sha' },
+    ],
+  },
   'scripts/release/stage-docker-ctx.ts': {
     requirements: [{ env: ['VERSION'], whenArgsInclude: '--release-assets' }],
   },

@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { basename, join } from 'node:path';
 
-import { createReleaseAssetPlan, platformArchiveMembers } from '../lib/release-assets';
+import {
+  CANARY_PAIR_PLATFORMS,
+  createReleaseAssetPlan,
+  platformArchiveMembers,
+  selectCanaryAssets,
+} from '../lib/release-assets';
 import {
   ALL_BINARY_TARGETS,
   filterBinaryTargets,
@@ -125,11 +130,15 @@ describe('createReleaseAssetPlan', () => {
         sourcePath: join('/repo', '.mango', 'out', 'linux-x64', 'mangostudio'),
         assetName: 'mangostudio-1.2.3-linux-x64',
         assetPath: join('/repo', 'release-assets', 'mangostudio-1.2.3-linux-x64'),
+        platform: 'linux-x64',
+        kind: 'hub',
       },
       {
         sourcePath: join('/repo', '.mango', 'out', 'linux-x64', 'mangostudio-runtime'),
         assetName: 'mangostudio-runtime-1.2.3-linux-x64',
         assetPath: join('/repo', 'release-assets', 'mangostudio-runtime-1.2.3-linux-x64'),
+        platform: 'linux-x64',
+        kind: 'runtime',
       },
     ]);
   });
@@ -138,6 +147,70 @@ describe('createReleaseAssetPlan', () => {
     expect(() =>
       createReleaseAssetPlan({ version: '1.2.3', rootDir: '/repo', onlyPlatform: 'freebsd-x64' })
     ).toThrow(/No release platform matches filter/);
+  });
+});
+
+describe('selectCanaryAssets', () => {
+  const plan = () => createReleaseAssetPlan({ version: '1.2.3', rootDir: '/repo' });
+
+  test('publishes complete raw pairs for the curated platforms only', () => {
+    expect(selectCanaryAssets(plan()).rawBinaries).toEqual([
+      'mangostudio-1.2.3-linux-x64',
+      'mangostudio-runtime-1.2.3-linux-x64',
+      'mangostudio-1.2.3-darwin-arm64',
+      'mangostudio-runtime-1.2.3-darwin-arm64',
+      'mangostudio-1.2.3-windows-x64.exe',
+      'mangostudio-runtime-1.2.3-windows-x64.exe',
+    ]);
+    expect(CANARY_PAIR_PLATFORMS).not.toContain('linux-arm64');
+  });
+
+  // The Cargo launcher resolves `mangostudio-<version>-<its own platform>.<ext>`
+  // from the rolling tag, so narrowing archives the way raw binaries are
+  // narrowed would strand canary launchers on the five uncurated platforms.
+  test('keeps every platform archive so the Cargo launcher can still resolve one', () => {
+    const selection = selectCanaryAssets(plan());
+
+    expect(selection.archives).toHaveLength(9);
+    expect(selection.archives).toContain('mangostudio-1.2.3-linux-arm64.tar.gz');
+    expect(selection.archives).toContain('mangostudio-1.2.3-windows-arm64.zip');
+    expect(selection.archives).toContain('mangostudio-1.2.3-frontend-dist.tar.gz');
+  });
+
+  // The defect this replaced: a glob over the release plan silently absorbed
+  // every raw hub binary the moment raw assets shipped. Selection by name means
+  // a new asset type cannot change what canary uploads without changing this.
+  test('does not widen when the release plan grows a new asset type', () => {
+    const grown = plan();
+    const widened = {
+      ...grown,
+      rawBinaries: [
+        ...grown.rawBinaries,
+        {
+          sourcePath: '/repo/.mango/out/linux-x64/mangostudio-sidecar',
+          assetName: 'mangostudio-sidecar-1.2.3-linux-x64',
+          assetPath: '/repo/release-assets/mangostudio-sidecar-1.2.3-linux-x64',
+          platform: 'linux-x64',
+          kind: 'hub' as const,
+        },
+      ],
+    };
+
+    expect(selectCanaryAssets(widened).rawBinaries).toEqual(selectCanaryAssets(grown).rawBinaries);
+  });
+
+  test('refuses a platform that cannot contribute both halves of a pair', () => {
+    const half = plan();
+    const missingRuntime = {
+      ...half,
+      rawBinaries: half.rawBinaries.filter(
+        (asset) => !(asset.platform === 'linux-x64' && asset.kind === 'runtime')
+      ),
+    };
+
+    expect(() => selectCanaryAssets(missingRuntime)).toThrow(
+      /linux-x64 has no complete hub\+runtime pair/
+    );
   });
 });
 

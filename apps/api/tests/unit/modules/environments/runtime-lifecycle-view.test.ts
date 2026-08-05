@@ -326,6 +326,21 @@ describe('manual install commands on a released hub', () => {
     const manual = manualFor('linux-x64');
     expect(manual?.serviceInstall).toBe('./mangostudio-runtime service install --mode connect');
   });
+
+  // A dial-in machine cannot be pushed to, so this one-liner is the whole
+  // install story for it. On canary it pointed at `v<root>-canary.<sha7>` —
+  // a tag no release publishes — and named an asset that does not exist, so
+  // the only path onto those machines was a 404 the user had to debug.
+  it('points the one-liner at the rolling tag and asset on canary', () => {
+    process.env.VERSION = '9.9.9-canary.abcdef0';
+    const manual = manualFor('linux-x64');
+    const asset = 'mangostudio-runtime-9.9.9-canary-linux-x64';
+    const tagUrl = 'https://github.com/juliopolycarpo/mangostudio/releases/download/v9.9.9-canary';
+
+    expect(manual?.install).toContain(`${tagUrl}/${asset}`);
+    expect(manual?.install).toContain(`${tagUrl}/SHA256SUMS`);
+    expect(manual?.install).not.toContain('abcdef0');
+  });
 });
 
 describe('manual release asset naming', () => {
@@ -344,6 +359,15 @@ describe('manual release asset naming', () => {
     );
     expect(manualRuntimeReleaseAssetName('1.2.3', 'darwin-arm64')).toBe(
       'mangostudio-runtime-1.2.3-darwin-arm64'
+    );
+  });
+
+  it('names the rolling asset for a canary version, exe suffix included', () => {
+    expect(manualRuntimeReleaseAssetName('1.2.3-canary.abcdef0', 'linux-x64')).toBe(
+      'mangostudio-runtime-1.2.3-canary-linux-x64'
+    );
+    expect(manualRuntimeReleaseAssetName('1.2.3-canary.abcdef0', 'win32-arm64')).toBe(
+      'mangostudio-runtime-1.2.3-canary-windows-arm64.exe'
     );
   });
 });

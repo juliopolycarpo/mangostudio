@@ -10,7 +10,13 @@ import { dirname, join } from 'node:path';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
-import { resolveRuntimeRelease } from './runtime-release-resolution';
+import {
+  CANARY_MANIFEST_ASSET,
+  type CanaryManifest,
+  canaryPairRefusal,
+  parseCanaryManifest,
+} from './canary-manifest';
+import { type RuntimeReleaseResolution, resolveRuntimeRelease } from './runtime-release-resolution';
 import {
   findReleaseChecksum,
   localRuntimeBuildPath,
@@ -83,6 +89,8 @@ export async function loadRuntimeReleaseBytes(
     ...(overrides.resolveHostname ? { resolveHostname: overrides.resolveHostname } : {}),
   };
   const release = resolveRuntimeRelease(version, platformId);
+  if (release.rolling) await assertRollingPair(deps, version, release, platformId);
+
   try {
     const bytes = await loadAsset(
       deps,
@@ -115,6 +123,39 @@ export async function loadRuntimeReleaseBytes(
 }
 
 class RuntimeAssetMissingError extends RuntimeAssetLoadError {}
+
+/**
+ * Refuses a rolling install whose assets belong to a different commit.
+ *
+ * A missing manifest is tolerated: rolling releases cut before it existed have
+ * none, and turning that into a failure would break the channel to add a check.
+ */
+async function assertRollingPair(
+  deps: SafeFetchDeps,
+  version: string,
+  release: RuntimeReleaseResolution,
+  platformId: string
+): Promise<void> {
+  let manifest: CanaryManifest | null = null;
+  try {
+    const bytes = await download(
+      deps,
+      releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
+      MAX_CHECKSUMS_BYTES
+    );
+    manifest = parseCanaryManifest(new TextDecoder().decode(bytes));
+  } catch (error) {
+    // A 404 is the "no manifest published" case. A transport failure is
+    // tolerated too rather than promoted to fatal here: the asset download that
+    // follows hits the same host and reports a real outage on its own terms,
+    // and an advisory guardrail should not be the thing that fails a provision.
+    if (!(error instanceof RuntimeAssetLoadError)) throw error;
+  }
+  if (!manifest) return;
+
+  const refusal = canaryPairRefusal(manifest, version, platformId);
+  if (refusal) throw new RuntimeAssetLoadError(refusal);
+}
 
 async function loadAsset(
   deps: SafeFetchDeps,

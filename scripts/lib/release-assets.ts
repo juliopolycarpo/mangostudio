@@ -46,6 +46,14 @@ interface RawBinaryAssetPlan {
   readonly sourcePath: string;
   readonly assetName: string;
   readonly assetPath: string;
+  /** Release platform id (`target.arch`) this binary was compiled for. */
+  readonly platform: string;
+  /**
+   * Which half of the platform's pair this is. The handshake refuses a version
+   * mismatch, so a hub published without its runtime is not a partial release —
+   * it is a broken one, and selection code has to be able to say which is which.
+   */
+  readonly kind: 'hub' | 'runtime';
 }
 
 export interface ReleaseAssetPlan {
@@ -127,13 +135,87 @@ function createRawBinaryPlans(
       sourcePath: archive.binaryPath,
       assetName: hubName,
       assetPath: join(assetsDir, hubName),
+      platform: archive.platform.arch,
+      kind: 'hub',
     },
     {
       sourcePath: archive.runtimeBinaryPath,
       assetName: runtimeName,
       assetPath: join(assetsDir, runtimeName),
+      platform: archive.platform.arch,
+      kind: 'runtime',
     },
   ];
+}
+
+/**
+ * Platforms whose raw hub+runtime pair the rolling canary publishes.
+ *
+ * A default, not a constant — widening it is a one-line config change. What it
+ * must never do is widen by accident, which is why the canary staging step
+ * names its assets from this list instead of globbing the release plan.
+ *
+ * `linux-arm64` is deliberately absent: ARM Linux users are on stable, and the
+ * pair costs roughly 190 MB per green commit to serve nobody. Stable publishes
+ * the full matrix and is one `mangostudio update` away.
+ */
+export const CANARY_PAIR_PLATFORMS: readonly string[] = [
+  'linux-x64',
+  'darwin-arm64',
+  'windows-x64',
+];
+
+export interface CanaryAssetSelection {
+  /**
+   * Every platform archive plus the frontend archive, unchanged. The Cargo
+   * launcher resolves `mangostudio-<version>-<platform>.<ext>` for whatever
+   * host it was built for (`packages/cargo-shim/src/main.rs`), so narrowing
+   * archives to the curated platforms would strand canary launchers on the
+   * other five.
+   */
+  readonly archives: readonly string[];
+  /** Raw hub+runtime pairs, curated to {@link CANARY_PAIR_PLATFORMS}. */
+  readonly rawBinaries: readonly string[];
+}
+
+/**
+ * The exact asset names the rolling canary pre-release publishes.
+ *
+ * Explicit selection rather than a shell glob: `release-assets/mangostudio-*`
+ * silently absorbed the eight raw hub binaries the moment raw assets shipped,
+ * while never matching a single raw runtime binary — canary paid the upload
+ * cost and got none of the benefit. Naming the assets here means a new asset
+ * type added to the release plan cannot change what canary uploads without
+ * also changing this function and the test that pins it.
+ * // Usage: selectCanaryAssets(createReleaseAssetPlan({ version }))
+ */
+export function selectCanaryAssets(
+  plan: ReleaseAssetPlan,
+  platforms: readonly string[] = CANARY_PAIR_PLATFORMS
+): CanaryAssetSelection {
+  const rawBinaries: string[] = [];
+  for (const platform of platforms) {
+    const pair = plan.rawBinaries.filter((asset) => asset.platform === platform);
+    const hub = pair.find((asset) => asset.kind === 'hub');
+    const runtime = pair.find((asset) => asset.kind === 'runtime');
+    // Half a pair is a handshake refusal on somebody's machine, so a platform
+    // that cannot contribute both contributes neither — loudly, here, rather
+    // than as a failed upgrade later.
+    if (!hub || !runtime) {
+      throw new Error(
+        `Canary platform ${platform} has no complete hub+runtime pair in the release plan.`
+      );
+    }
+    rawBinaries.push(hub.assetName, runtime.assetName);
+  }
+
+  return {
+    archives: [
+      ...plan.platformArchives.map((archive) => archive.assetName),
+      plan.frontendArchive.assetName,
+    ],
+    rawBinaries,
+  };
 }
 
 /**

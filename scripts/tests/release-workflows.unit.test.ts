@@ -773,9 +773,13 @@ describe('release workflow binary gate', () => {
     expect(releaseBlock).toContain('scope: assets');
     expect(releaseBlock).toContain(`VERSION: ${'$'}{{ inputs.version }}`);
     expect(releaseBlock).toContain(`CARGO_VERSION: ${cargoVersionInput}`);
-    expect(releaseBlock).toContain(
-      `github-canary-assets/${'$'}{target/${versionVar}/${cargoVersionVar}}`
-    );
+    // Staging is a named selection in TypeScript, not a shell glob: a glob over
+    // the release plan silently absorbed every raw hub binary the moment raw
+    // assets shipped, while never matching a raw runtime binary.
+    expect(releaseBlock).toContain('run: bun ./scripts/release/stage-canary-assets.ts');
+    expect(releaseBlock).toContain(`SOURCE_SHA: ${'$'}{{ inputs.source_sha }}`);
+    expect(releaseBlock).not.toContain('cp "$asset"');
+    expect(releaseBlock).not.toContain('sha256sum mangostudio-');
     expect(releaseBlock).toContain(`tag="v${cargoVersionVar}"`);
     expect(releaseBlock).toContain(`Canary version: ${versionVar}`);
     expect(releaseBlock).toContain('source scripts/release/create-or-update-release.sh');

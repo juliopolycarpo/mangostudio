@@ -14,6 +14,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { getVersion, isDevelopmentVersion } from '../../../lib/config';
+import { resolveRuntimeRelease } from './runtime-release-resolution';
 import { releaseAssetUrl } from './wsl-runtime-release';
 
 /** Matches the connection manager's manifest freshness window. */
@@ -148,11 +149,14 @@ export function releasePlatformIdFromHint(platformHint: string): string {
 /**
  * Raw runtime asset basename published for a release platform id — mirrors
  * `releaseRawRuntimeBinaryFileName` (`.exe` on Windows).
+ *
+ * Resolved through the channel, not spliced from the running version: on a
+ * rolling channel the asset is named for the tag it lives under, so a canary
+ * hub that pasted its own `<root>-canary.<sha7>` in here would hand somebody a
+ * command that 404s.
  */
 export function manualRuntimeReleaseAssetName(version: string, platformHint: string): string {
-  const platformId = releasePlatformIdFromHint(platformHint);
-  const suffix = platformId.startsWith('windows-') ? '.exe' : '';
-  return `mangostudio-runtime-${version}-${platformId}${suffix}`;
+  return resolveRuntimeRelease(version, releasePlatformIdFromHint(platformHint)).runtimeAssetName;
 }
 
 /** Fallback when no peer has ever reported a platform. Always marked as assumed. */
@@ -185,9 +189,10 @@ function manualCommandsFor(
     };
   }
 
-  const asset = manualRuntimeReleaseAssetName(version, hint);
-  const url = releaseAssetUrl(version, asset);
-  const sumsUrl = releaseAssetUrl(version, 'SHA256SUMS');
+  const release = resolveRuntimeRelease(version, platformId);
+  const asset = release.runtimeAssetName;
+  const url = releaseAssetUrl(release.tagVersion, asset);
+  const sumsUrl = releaseAssetUrl(release.tagVersion, 'SHA256SUMS');
 
   // A one-liner that downloads an executable and chmods it without checking the
   // release checksum is the one shape this must not ship. Posix chains the three
