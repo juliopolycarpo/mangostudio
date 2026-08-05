@@ -190,7 +190,7 @@ export async function writeDirectoryResource(
   assertExpectedResourceEntry(destination.resolvedPath, 'directory');
   if ((input.sourceDir === undefined) === (input.files === undefined)) {
     throw new LibraryWriteError(
-      'invalid-slug',
+      'invalid-source',
       `Directory write for "${input.slug}" needs exactly one of a source directory or its files.`
     );
   }
