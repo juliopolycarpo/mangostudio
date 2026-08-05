@@ -279,6 +279,12 @@ export const RuntimeServiceStatusSchema = Type.Object({
   linger: Type.Optional(Type.Boolean()),
   /** Whether the unit's ExecStart points at the slot `current` symlink. */
   execUsesCurrent: Type.Optional(Type.Boolean()),
+  /**
+   * Whether a binary is actually reachable through `current`. A unit can point
+   * at the right path and still never start, which is the one failure the
+   * manager's own states describe only as "not running".
+   */
+  currentBinaryPresent: Type.Optional(Type.Boolean()),
   /** Manager-specific detail (unit path, label, raw states). */
   manager: Type.Optional(
     Type.Object({

@@ -5,12 +5,11 @@
  * through an injected exec seam so tests never touch live systemd or launchd.
  */
 
-import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   RUNTIME_BINARY_BASENAME,
-  RUNTIME_CURRENT_LINK_NAME,
   type RuntimeServiceMode,
   type RuntimeServiceStatus,
   type RuntimeSlot,
@@ -26,11 +25,20 @@ import {
   readServeToken,
 } from '../runtime-home';
 
-const RUNTIME_SERVICE_DOCS_URL =
+export const RUNTIME_SERVICE_DOCS_URL =
   'https://github.com/juliopolycarpo/mangostudio/blob/main/docs/operations/remote-runtimes.md';
 
 const SYSTEMD_UNIT_BASENAME = 'mangostudio-runtime.service';
 const LAUNCHD_LABEL = 'com.mangostudio.runtime';
+
+const RUNTIME_SERVICE_NO_SYSTEMD_ERROR = 'systemd is not available';
+const RUNTIME_SERVICE_UNSUPPORTED_PLATFORM_ERROR = 'unsupported platform';
+/**
+ * Exported because doctor branches on this one specifically: it is the single
+ * `status.error` that means "could not look", not "nothing is there". Matching
+ * it as a literal in the other file is what would drift.
+ */
+export const RUNTIME_SERVICE_NO_SESSION_BUS_ERROR = 'no session bus';
 
 export interface RuntimeServiceExecResult {
   readonly exitCode: number;
@@ -53,12 +61,14 @@ export interface RuntimeServiceExecDeps {
   readonly readFile: (path: string) => Promise<string>;
   readonly unlink: (path: string) => Promise<void>;
   readonly mkdir: (path: string) => Promise<void>;
+  /** Follows symlinks, so a dangling `current` reads as absent. */
+  readonly pathExists: (path: string) => Promise<boolean>;
 }
 
 const PAIRED_SLOT = 'remote' as const satisfies RuntimeSlot;
 
-function homeOptions(env: NodeJS.ProcessEnv) {
-  return { mangoHome: loadRuntimeConfig(env).mangoHome, platform: process.platform };
+function homeOptions(env: NodeJS.ProcessEnv, platform: NodeJS.Platform) {
+  return { mangoHome: loadRuntimeConfig(env).mangoHome, platform };
 }
 
 export function systemdUnitPath(home: string): string {
@@ -130,16 +140,17 @@ function escapeXml(value: string): string {
     .replaceAll('"', '&quot;');
 }
 
+/**
+ * Accepts the `current` directory or the binary inside it. A bare
+ * `current/` substring is deliberately not enough: it matches any slot on any
+ * home, which would call a unit pointing at someone else's install correct.
+ */
 export function execStartUsesCurrent(unitBody: string, currentBinaryPath: string): boolean {
   const normalized = currentBinaryPath.replaceAll('\\', '/');
   const alt = normalized.endsWith(`/${RUNTIME_BINARY_BASENAME}`)
     ? normalized
     : `${normalized}/${RUNTIME_BINARY_BASENAME}`;
-  return (
-    unitBody.includes(normalized) ||
-    unitBody.includes(alt) ||
-    unitBody.includes(`${RUNTIME_CURRENT_LINK_NAME}/`)
-  );
+  return unitBody.includes(normalized) || unitBody.includes(alt);
 }
 
 function defaultRuntimeServiceExecDeps(
@@ -177,6 +188,11 @@ function defaultRuntimeServiceExecDeps(
     readFile: (path) => readFile(path, 'utf8'),
     unlink: (path) => unlink(path),
     mkdir: (path) => mkdir(path, { recursive: true }).then(() => undefined),
+    pathExists: (path) =>
+      stat(path).then(
+        () => true,
+        () => false
+      ),
   };
 }
 
@@ -270,10 +286,10 @@ export function resolveInstallMode(
 
 function currentBinaryForService(
   slot: RuntimeSlot = PAIRED_SLOT,
-  env: NodeJS.ProcessEnv = process.env
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform
 ): string {
-  const options = { mangoHome: loadRuntimeConfig(env).mangoHome, platform: process.platform };
-  return runtimeSlotCurrentBinaryPath(slot, options);
+  return runtimeSlotCurrentBinaryPath(slot, homeOptions(env, platform));
 }
 
 export interface RuntimeServiceManager {
@@ -286,7 +302,8 @@ export function createRuntimeServiceManager(
   deps: RuntimeServiceExecDeps = defaultRuntimeServiceExecDeps()
 ): RuntimeServiceManager {
   const slot = PAIRED_SLOT;
-  const options = () => homeOptions(deps.env);
+  const options = () => homeOptions(deps.env, deps.platform);
+  const currentBinary = () => currentBinaryForService(slot, deps.env, deps.platform);
 
   const refuseUnsupported = (detail: string): never => {
     throw new RuntimeServiceManagementError(
@@ -295,12 +312,34 @@ export function createRuntimeServiceManager(
     );
   };
 
+  /**
+   * `ExecStart` points at `current` so upgrades never strand the unit, which
+   * only works once something has published bytes there. `setup`, `connect`
+   * and `serve` all run happily from a binary sitting anywhere — a manually
+   * downloaded one never populates the slot — so without this the install
+   * "succeeds" and leaves an enabled unit that fails to start at every boot.
+   */
+  const assertCurrentBinaryInstalled = async (): Promise<void> => {
+    const binaryPath = currentBinary();
+    if (await deps.pathExists(binaryPath)) return;
+    throw new RuntimeServiceManagementError(
+      'runtime_service_binary_missing',
+      [
+        `No runtime binary at ${binaryPath}.`,
+        'A unit pointing there would fail to start at every boot.',
+        'Install this runtime into the slot first — upgrade it from its environment card, or push it over ssh — then install the service.',
+        `See ${RUNTIME_SERVICE_DOCS_URL}`,
+      ].join('\n')
+    );
+  };
+
   const linuxInstall = async (mode: RuntimeServiceMode): Promise<void> => {
     if (!sessionBusAvailable(deps.env)) refuseNoSessionBus(deps.uid);
     if (!(await deps.hasSystemd())) {
       refuseUnsupported('systemd user services are not available on this machine.');
     }
-    const binaryPath = currentBinaryForService(slot, deps.env);
+    await assertCurrentBinaryInstalled();
+    const binaryPath = currentBinary();
     const unitPath = systemdUnitPath(deps.home);
     await deps.mkdir(join(deps.home, '.config', 'systemd', 'user'));
     await deps.writeFile(unitPath, renderSystemdUnit(binaryPath, mode));
@@ -330,7 +369,8 @@ export function createRuntimeServiceManager(
   };
 
   const darwinInstall = async (mode: RuntimeServiceMode): Promise<void> => {
-    const binaryPath = currentBinaryForService(slot, deps.env);
+    await assertCurrentBinaryInstalled();
+    const binaryPath = currentBinary();
     const plistPath = launchdPlistPath(deps.home);
     await deps.mkdir(join(deps.home, 'Library', 'LaunchAgents'));
     await deps.writeFile(plistPath, renderLaunchdPlist(binaryPath, mode));
@@ -397,7 +437,7 @@ export function createRuntimeServiceManager(
             installed: false,
             enabled: false,
             running: false,
-            error: 'systemd is not available',
+            error: RUNTIME_SERVICE_NO_SYSTEMD_ERROR,
           });
         }
         if (!sessionBusAvailable(deps.env)) {
@@ -405,7 +445,7 @@ export function createRuntimeServiceManager(
             installed: false,
             enabled: false,
             running: false,
-            error: 'no session bus',
+            error: RUNTIME_SERVICE_NO_SESSION_BUS_ERROR,
           });
         }
         const unitPath = systemdUnitPath(deps.home);
@@ -432,6 +472,7 @@ export function createRuntimeServiceManager(
           running,
           linger,
           execUsesCurrent: installed ? execStartUsesCurrent(unitBody, currentDir) : false,
+          currentBinaryPresent: await deps.pathExists(currentBinary()),
           manager: {
             unitPath,
             label: SYSTEMD_UNIT_BASENAME,
@@ -460,6 +501,7 @@ export function createRuntimeServiceManager(
           enabled,
           running,
           execUsesCurrent: installed ? execStartUsesCurrent(plistBody, currentDir) : false,
+          currentBinaryPresent: await deps.pathExists(currentBinary()),
           manager: {
             unitPath: plistPath,
             label: LAUNCHD_LABEL,
@@ -472,7 +514,7 @@ export function createRuntimeServiceManager(
         installed: false,
         enabled: false,
         running: false,
-        error: 'unsupported platform',
+        error: RUNTIME_SERVICE_UNSUPPORTED_PLATFORM_ERROR,
       });
     },
   };
@@ -566,11 +608,16 @@ export function shouldCheckRuntimeService(report: {
   return Boolean(report.hubUrl || report.serveListen);
 }
 
-export async function collectServiceDoctorDetails(env?: NodeJS.ProcessEnv): Promise<{
+export async function collectServiceDoctorDetails(
+  env?: NodeJS.ProcessEnv,
+  deps: RuntimeServiceExecDeps = defaultRuntimeServiceExecDeps(env)
+): Promise<{
   readonly status: RuntimeServiceStatus;
   readonly currentBinaryPath: string;
 }> {
-  const manager = createRuntimeServiceManager(defaultRuntimeServiceExecDeps(env));
-  const status = await manager.status();
-  return { status, currentBinaryPath: currentBinaryForService(PAIRED_SLOT, env) };
+  const status = await createRuntimeServiceManager(deps).status();
+  return {
+    status,
+    currentBinaryPath: currentBinaryForService(PAIRED_SLOT, deps.env, deps.platform),
+  };
 }

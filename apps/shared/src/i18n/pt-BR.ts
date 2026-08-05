@@ -2244,7 +2244,7 @@ export const messages = {
         stepConnectPowerShell: 'No Windows, no PowerShell',
         stepService: 'Manter rodando após sair da sessão',
         serviceHint:
-          'Rode o comando de instalação do serviço para o connect sobreviver a reinícios sem um terminal aberto.',
+          'Atualize este runtime pelo card primeiro, depois instale o serviço para o connect sobreviver a reinícios sem um terminal aberto.',
       },
       directUrl: {
         title: 'URL direta',
@@ -2254,9 +2254,8 @@ export const messages = {
         baseUrlHint: 'http://host:porta ou https://… — o runtime serve WebSocket em /.',
         stepServe: 'Escute o MangoStudio naquela máquina',
         stepService: 'Manter rodando após sair da sessão',
-        serviceInstallCommand: 'mangostudio-runtime service install --mode serve',
         serviceHint:
-          'Depois que o serve guardar endereço e token, instale o serviço de usuário para sobreviver a reinícios.',
+          'Depois que o serve guardar endereço e token, atualize este runtime pelo card e então instale o serviço de usuário para sobreviver a reinícios.',
         tokenLabel: 'Token do serve',
         tokenHint: 'Somente escrita. Cole o token impresso pelo serve, ou rotacione aqui.',
         tokenSet: 'Há um token guardado no cofre de segredos.',

@@ -31,7 +31,13 @@ import {
   resolveRuntimeSlot,
   resolveRuntimeSource,
 } from './runtime-home';
-import { collectServiceDoctorDetails, shouldCheckRuntimeService } from './services/runtime-service';
+import {
+  collectServiceDoctorDetails,
+  RUNTIME_SERVICE_DOCS_URL,
+  RUNTIME_SERVICE_NO_SESSION_BUS_ERROR,
+  type RuntimeServiceExecDeps,
+  shouldCheckRuntimeService,
+} from './services/runtime-service';
 
 export interface RuntimeHealthOptions {
   readonly runtimeVersion: string;
@@ -241,7 +247,8 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
  */
 export async function diagnoseRuntimeServiceHealth(
   report: RuntimeHealthReport,
-  env?: NodeJS.ProcessEnv
+  env?: NodeJS.ProcessEnv,
+  deps?: RuntimeServiceExecDeps
 ): Promise<RuntimeDoctorFinding[]> {
   const { config } = await readRuntimeSlotState(report.slot, env);
   if (
@@ -254,7 +261,7 @@ export async function diagnoseRuntimeServiceHealth(
     return [];
   }
 
-  const { status } = await collectServiceDoctorDetails(env);
+  const { status, currentBinaryPath } = await collectServiceDoctorDetails(env, deps);
   const findings: RuntimeDoctorFinding[] = [];
   const installFixConnect = 'mangostudio-runtime service install --mode connect';
   const installFixServe = 'mangostudio-runtime service install --mode serve';
@@ -264,6 +271,43 @@ export async function diagnoseRuntimeServiceHealth(
       : config.serveListen && !config.hubUrl
         ? installFixServe
         : 'mangostudio-runtime service install --mode connect|serve';
+
+  // Where `service install` refuses, doctor must not name it as the fix — the
+  // one command it could suggest is the one command guaranteed to fail. Each of
+  // these reports what is true here and points at the manual alternative.
+  if (status.platform === 'win32') {
+    return [
+      {
+        severity: 'warn',
+        title: 'Service',
+        detail: `Windows has no service install — keep this runtime running with a Scheduled Task (${RUNTIME_SERVICE_DOCS_URL})`,
+      },
+    ];
+  }
+
+  if (status.platform === 'unsupported') {
+    return [
+      {
+        severity: 'warn',
+        title: 'Service',
+        detail: `${status.error ?? 'no user-level service manager here'} — supervise this runtime yourself (${RUNTIME_SERVICE_DOCS_URL})`,
+      },
+    ];
+  }
+
+  // A non-interactive `ssh host cmd` carries no session bus, so systemctl can
+  // be asked nothing at all. Reading that as "not installed" would call a
+  // healthy, running unit a defect on the one path 020 uses to reach it.
+  if (status.error === RUNTIME_SERVICE_NO_SESSION_BUS_ERROR) {
+    return [
+      {
+        severity: 'warn',
+        title: 'Service',
+        detail: 'cannot read the user service without a session bus',
+        fix: 'XDG_RUNTIME_DIR=/run/user/$(id -u) mangostudio-runtime doctor',
+      },
+    ];
+  }
 
   if (!status.installed) {
     findings.push({
@@ -329,6 +373,16 @@ export async function diagnoseRuntimeServiceHealth(
       severity: 'ok',
       title: 'Service',
       detail: 'unit ExecStart uses the current symlink',
+    });
+  }
+
+  // No `fix` on purpose: nothing this machine can run puts the bytes there.
+  // The install comes from the hub, so the path is what a reader needs.
+  if (status.currentBinaryPresent === false) {
+    findings.push({
+      severity: 'fail',
+      title: 'Service',
+      detail: `no runtime binary at ${currentBinaryPath} — the unit cannot start until the slot is installed`,
     });
   }
 

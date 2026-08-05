@@ -146,9 +146,12 @@ printf %s "$TOKEN" | mangostudio-runtime serve --listen 0.0.0.0:8787 --token -
 ### `service`
 
 Install a user-level unit so `connect` or `serve` survives logout and reboot.
-See [`docs/operations/remote-runtimes.md`](../operations/remote-runtimes.md) for
-linger, SSH session-bus workarounds, macOS launchd verbs, and the Windows
-Scheduled Task snippet.
+`ExecStart` points at the slot's `current` link, so the runtime has to be
+installed into the slot first — `install` refuses rather than write a unit that
+cannot start. See
+[`docs/operations/remote-runtimes.md`](../operations/remote-runtimes.md) for
+that prerequisite, linger, SSH session-bus workarounds, macOS launchd verbs, and
+the Windows Scheduled Task snippet.
 
 | Subcommand / flag       | Description                                                                                 |
 | ----------------------- | ------------------------------------------------------------------------------------------- |

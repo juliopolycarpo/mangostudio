@@ -22,6 +22,7 @@ export type RuntimeServiceErrorKind =
   | 'runtime_service_no_session_bus'
   | 'runtime_service_setup_pending'
   | 'runtime_service_unconfigured'
+  | 'runtime_service_binary_missing'
   | 'library_backup_missing'
   | 'mcp_connection'
   | 'mcp_call'
@@ -67,7 +68,8 @@ export class RuntimeServiceManagementError extends RuntimeServiceError {
       | 'runtime_service_unsupported'
       | 'runtime_service_no_session_bus'
       | 'runtime_service_setup_pending'
-      | 'runtime_service_unconfigured',
+      | 'runtime_service_unconfigured'
+      | 'runtime_service_binary_missing',
     message: string,
     data: Readonly<Record<string, unknown>> = {}
   ) {

@@ -37,6 +37,18 @@ tokens on the command line. Configure those first:
 `install` refuses when setup is still `pending` or the chosen mode was never
 configured, and names the missing step.
 
+### The binary has to live in the slot
+
+`current` is published by an install — a push over ssh, a WSL provision, or an
+upgrade from the environment card. A binary you downloaded by hand and ran from
+your home directory works fine for `setup`, `connect` and `serve`, but it never
+puts anything in the slot, so `current` does not exist yet.
+
+`install` refuses in that state rather than writing a unit that would fail to
+start at every boot. Pair the runtime first, then upgrade it from its
+environment card — that publishes `current` — and install the service after.
+`doctor` reports the same gap as a `fail` naming the missing path.
+
 `status --json` returns a stable document for environment cards (`schemaVersion`,
 `installed`, `enabled`, `running`, optional `linger` and `execUsesCurrent`).
 
@@ -119,7 +131,16 @@ runtimes are not expected to have a unit; doctor skips them instead of reporting
 “not installed” as a defect.
 
 For in-scope slots, doctor reports installed, enabled, running, linger (Linux),
-and whether the unit still references `current`.
+whether the unit still references `current`, and whether a binary is actually
+reachable through it.
+
+Where `service install` cannot help, doctor does not name it as the fix:
+
+- **Windows** — one warning pointing at the Scheduled Task snippet above.
+- **No systemd** — one warning saying so, with no command to run.
+- **No session bus** — systemctl can be asked nothing, so doctor says it could
+  not read the service and gives you the `XDG_RUNTIME_DIR` prefix rather than
+  reporting a running unit as missing.
 
 ## See also
 

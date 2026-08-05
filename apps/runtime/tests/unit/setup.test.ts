@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
+  type RuntimeHealthReport,
   SHELL_TRUST_NOTICE,
 } from '@mangostudio/shared/runtime-home';
 import { parseRuntimeCliArgs } from '../../src/cli';
@@ -16,7 +17,11 @@ import {
   worstSeverity,
 } from '../../src/health';
 import { readRuntimeSlotConfig, writeRuntimeSlotConfig } from '../../src/runtime-home';
-import { shouldCheckRuntimeService } from '../../src/services/runtime-service';
+import {
+  type RuntimeServiceExecDeps,
+  renderSystemdUnit,
+  shouldCheckRuntimeService,
+} from '../../src/services/runtime-service';
 import { parseAllowOverrides, type RuntimeSetupArgs, runRuntimeSetup } from '../../src/setup';
 
 const homes: string[] = [];
@@ -32,6 +37,57 @@ async function isolatedEnv(
   const home = await mkdtemp(join(tmpdir(), 'mango-runtime-setup-'));
   homes.push(home);
   return { MANGO_HOME: home, ...extra };
+}
+
+/** Service-manager seams for the doctor branches, with nothing live behind them. */
+function serviceDeps(options: {
+  readonly env: NodeJS.ProcessEnv;
+  readonly platform?: NodeJS.Platform;
+  readonly sessionBus?: boolean;
+  readonly currentBinaryPresent?: boolean;
+  readonly unitInstalled?: boolean;
+}): RuntimeServiceExecDeps {
+  const bus = options.sessionBus ?? true;
+  const unitBody = renderSystemdUnit(
+    join(options.env.MANGO_HOME as string, 'runtime/remote/current/mangostudio-runtime'),
+    'connect'
+  );
+  return {
+    exec: (argv) => {
+      if (argv.includes('is-enabled')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'enabled', stderr: '' });
+      }
+      if (argv.includes('is-active')) {
+        return Promise.resolve({ exitCode: 0, stdout: 'active', stderr: '' });
+      }
+      if (argv[0] === 'loginctl') {
+        return Promise.resolve({ exitCode: 0, stdout: 'Linger=yes', stderr: '' });
+      }
+      return Promise.resolve({ exitCode: 0, stdout: '', stderr: '' });
+    },
+    platform: options.platform ?? 'linux',
+    env: {
+      ...options.env,
+      ...(bus
+        ? {
+            XDG_RUNTIME_DIR: '/run/user/1000',
+            DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1000/bus',
+          }
+        : {}),
+    },
+    home: '/home/test',
+    uid: 1000,
+    user: 'test',
+    hasSystemd: () => Promise.resolve(true),
+    writeFile: () => Promise.resolve(),
+    readFile: (path) =>
+      options.unitInstalled
+        ? Promise.resolve(unitBody)
+        : Promise.reject(new Error(`ENOENT ${path}`)),
+    unlink: () => Promise.resolve(),
+    mkdir: () => Promise.resolve(),
+    pathExists: () => Promise.resolve(options.currentBinaryPresent ?? true),
+  };
 }
 
 interface SetupRun {
@@ -338,6 +394,51 @@ describe('runtime health', () => {
       false
     );
     expect(await diagnoseRuntimeServiceHealth(report)).toEqual([]);
+  });
+
+  // Every branch here is a machine where `service install` refuses, so naming
+  // it as the fix would send the reader in a circle.
+  it.each([
+    ['win32' as const, /Scheduled Task/],
+    ['freebsd' as const, /supervise this runtime yourself/],
+  ])('points %s at the manual path instead of a command that refuses', async (platform, detail) => {
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
+    const findings = await diagnoseRuntimeServiceHealth(
+      { slot: 'remote' } as RuntimeHealthReport,
+      env,
+      serviceDeps({ platform, env })
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.detail).toMatch(detail);
+    expect(findings[0]?.fix).toBeUndefined();
+  });
+
+  it('says it could not read the service without a session bus, not that none exists', async () => {
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
+    const findings = await diagnoseRuntimeServiceHealth(
+      { slot: 'remote' } as RuntimeHealthReport,
+      env,
+      serviceDeps({ env, sessionBus: false })
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.detail).toContain('without a session bus');
+    expect(findings[0]?.fix).toContain('XDG_RUNTIME_DIR');
+  });
+
+  it('fails with the missing path when the unit points at a current that holds nothing', async () => {
+    const env = await isolatedEnv();
+    await writeRuntimeSlotConfig('remote', { hubUrl: 'wss://hub.test/api/runtime' }, env);
+    const deps = serviceDeps({ env, currentBinaryPresent: false, unitInstalled: true });
+    const findings = await diagnoseRuntimeServiceHealth(
+      { slot: 'remote' } as RuntimeHealthReport,
+      env,
+      deps
+    );
+    const missing = findings.find((finding) => finding.detail.includes('no runtime binary at'));
+    expect(missing?.severity).toBe('fail');
+    expect(missing?.detail).toContain(join(env.MANGO_HOME as string, 'runtime/remote/current'));
   });
 
   it('refuses every capability in the report a config it cannot read produces', async () => {
