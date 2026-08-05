@@ -798,9 +798,11 @@ to be: the container is gone at the end of the connection.
 
 The protection points at the agent, not at the hub. A container is what makes `allow.shell`
 safe to grant, because it bounds what a shell can reach to a filesystem that is discarded
-afterwards. It is **not** a boundary against whoever configures the environment: the engine
-runs as the hub's own user and is host-root-equivalent, so an environment that can start
-containers can already do anything on the machine.
+afterward — for whatever the image itself provides. A `mounts` entry is host-backed and does
+not share in that discarding: it stays exactly as writable (or, with `readonly`, as unwritable)
+as it was outside the container. It is **not** a boundary against whoever configures the
+environment: the engine runs as the hub's own user and is host-root-equivalent, so an
+environment that can start containers can already do anything on the machine.
 
 That is why the mount denylist is enforced rather than documented. A mount of the engine
 socket, `/proc`, `/sys`, `/var/run` or `/run` is refused by the shared validator that both the
