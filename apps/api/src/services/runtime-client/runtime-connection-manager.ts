@@ -229,11 +229,12 @@ function statusErrorCode(error: unknown): RuntimeErrorCode {
 /**
  * The transport-specific half of a failure, when the connector could name one.
  *
- * Only ssh produces it today, and it has to travel as data because its client
- * reports an unverified host key, a refused credential and an unreachable host
- * with one exit status — none of which `errorCode` can distinguish, and all of
- * which need a different fix. Validated rather than trusted: the value comes
- * back through an untyped details bag.
+ * ssh and container launches both produce one, for the same reason: their
+ * clients report several unrelated causes — an unverified host key, a refused
+ * credential, a daemon nobody started, an image that does not exist — through
+ * one exit status that `errorCode` cannot distinguish, and each needs a
+ * different fix. Validated rather than trusted: the values come back through an
+ * untyped details bag.
  */
 function failureDetail(
   error: unknown

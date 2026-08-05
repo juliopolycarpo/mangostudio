@@ -760,6 +760,23 @@ answer. That is what distinguishes an Alpine image (musl) from a Debian one (gli
 `uname -m` alone cannot. An image with no shell fails there with a typed error rather than at
 launch — using a shell-bearing image is a documented limit of this transport.
 
+### What an image has to provide
+
+Three requirements, in the order they bite:
+
+1. **A shell (`sh`)**, or the platform probe cannot run and the environment fails with
+   "use a shell-bearing image". Distroless images are out of scope for this reason.
+2. **`libstdc++` on musl images.** A Bun-compiled musl binary links against it, so the runtime
+   cannot start on a bare `alpine` — it dies relocating symbols before the handshake.
+   `Dockerfile.alpine` installs it for exactly this reason. Glibc images already have it.
+3. **`bash` or `zsh` for the shell tool.** Those are the shell kinds the protocol defines, and
+   Alpine ships neither by default. Everything else — filesystem, Git, probing, MCP — works
+   without them; only the shell tool needs one present.
+
+An image that satisfies all three is the difference between "the sandbox works" and "the
+sandbox works and agents can use a terminal in it". `alpine:3` plus
+`apk add --no-cache bash libstdc++` is the smallest image that does.
+
 The probe result is cached against the image *id* the engine reported, not the image name. A
 tag is a moving target, so keying on identity means a re-pulled image misses the cache by
 construction rather than by an invalidation rule.
