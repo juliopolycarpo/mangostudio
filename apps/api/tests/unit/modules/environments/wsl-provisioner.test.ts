@@ -59,6 +59,11 @@ function harness(
     readonly localBuild?: Uint8Array | null;
     /** Overrides the (otherwise fake) cache directory — used for real-fs GC tests. */
     readonly cacheDirOverride?: (version: string) => string;
+    /**
+     * `canary-manifest.json` the rolling tag serves, or null for a release that
+     * publishes none. Only consulted on a rolling version.
+     */
+    readonly manifest?: string | null;
   } = {}
 ) {
   const version = options.version ?? VERSION;
@@ -127,6 +132,13 @@ function harness(
     fetch: ((input: string | URL) => {
       const url = String(input);
       requested.push(url);
+      if (url.endsWith('canary-manifest.json')) {
+        return Promise.resolve(
+          options.manifest
+            ? new Response(new TextEncoder().encode(options.manifest), { status: 200 })
+            : new Response('not found', { status: 404 })
+        );
+      }
       const body = url.endsWith('SHA256SUMS')
         ? new TextEncoder().encode(options.checksums ?? CHECKSUMS)
         : (options.archive ?? ARCHIVE);
@@ -189,6 +201,7 @@ describe('WslProvisioner', () => {
     await provisioner.ensure('Ubuntu');
 
     expect(requested).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
       'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
     ]);
@@ -211,10 +224,60 @@ describe('WslProvisioner', () => {
     await provisioner.ensure('Ubuntu');
 
     expect(requested).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
       'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
     ]);
     expect(written.get(`/cache/1.2.3-canary.abcdef0/${canaryAsset}`)).toEqual(ARCHIVE);
+  });
+
+  // The rolling tag is clobbered on every green commit, so a hub can ask for
+  // "its" runtime and be handed a newer one whose checksum verifies. Nothing
+  // else catches that until the handshake refuses the pair on the machine, so
+  // the refusal has to land here — before anything is written to the distro.
+  it('refuses a rolling install the canary tag has moved past', async () => {
+    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      channel: 'canary',
+      version: '1.2.3-canary.9999999',
+      assetVersion: '1.2.3-canary',
+      sourceSha: '9999999999999999999999999999999999999999',
+      builtAt: '2026-08-05T00:00:00.000Z',
+      pairs: [
+        {
+          platform: 'linux-x64',
+          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
+          runtime: { asset: canaryAsset, digest: 'b'.repeat(64) },
+        },
+      ],
+    });
+    const { provisioner, calls } = harness({
+      version: '1.2.3-canary.abcdef0',
+      checksums: `${DIGEST}  ${canaryAsset}\n`,
+      manifest,
+    });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
+      /rolling canary release has moved on/
+    );
+    expect(calls.some((call) => call.script.includes('cat > '))).toBe(false);
+    expect(calls.some((call) => call.script.includes('runtime.json.incoming'))).toBe(false);
+  });
+
+  // Rolling releases cut before the manifest existed have none, and turning
+  // that into a failure would break the channel to add a check.
+  it('still provisions from a rolling tag that publishes no manifest', async () => {
+    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const { provisioner, calls } = harness({
+      version: '1.2.3-canary.abcdef0',
+      checksums: `${DIGEST}  ${canaryAsset}\n`,
+      manifest: null,
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(calls.some((call) => call.script.includes('cat > '))).toBe(true);
   });
 
   it('records what it installed and what the distribution may do', async () => {

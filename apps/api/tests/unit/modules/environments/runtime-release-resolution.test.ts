@@ -76,6 +76,11 @@ describe('resolveRuntimeRelease', () => {
       fetch: ((input: string | URL | Request) => {
         const url = String(input);
         calls.push(url);
+        // A rolling release cut before the manifest existed publishes none;
+        // provisioning has to keep working against those.
+        if (url.endsWith('/canary-manifest.json')) {
+          return Promise.resolve(new Response('not found', { status: 404 }));
+        }
         return Promise.resolve(
           url.endsWith('/SHA256SUMS') ? new Response(`${hash}  ${asset}\n`) : new Response(bytes)
         );
@@ -91,9 +96,52 @@ describe('resolveRuntimeRelease', () => {
 
     expect(loaded).toMatchObject({ fromArchive: false, digest: `sha256:${hash}` });
     expect(calls).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
       'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/SHA256SUMS',
       `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${asset}`,
     ]);
-    expect(resolved).toBe(2);
+    expect(resolved).toBe(3);
+  });
+
+  // Same refusal the WSL provisioner makes, on the path SSH push and the live
+  // self-update share: the rolling tag can hand back a runtime from a newer
+  // commit whose checksum verifies, and the mismatch is only visible here.
+  it('refuses to fetch bytes the rolling tag has moved past', async () => {
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      channel: 'canary',
+      version: '1.2.3-canary.9999999',
+      assetVersion: '1.2.3-canary',
+      sourceSha: '9999999999999999999999999999999999999999',
+      builtAt: '2026-08-05T00:00:00.000Z',
+      pairs: [
+        {
+          platform: 'linux-x64',
+          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
+          runtime: {
+            asset: 'mangostudio-runtime-1.2.3-canary-linux-x64',
+            digest: 'b'.repeat(64),
+          },
+        },
+      ],
+    });
+    const calls: string[] = [];
+
+    await expect(
+      loadRuntimeReleaseBytes('linux-x64', {
+        version: '1.2.3-canary.abcdef0',
+        fetch: ((input: string | URL | Request) => {
+          calls.push(String(input));
+          return Promise.resolve(new Response(manifest));
+        }) as unknown as typeof fetch,
+        resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+        cacheDir: () => '/unused',
+        readBytes: () => Promise.resolve(null),
+        writeCache: () => Promise.resolve(),
+      })
+    ).rejects.toThrow(/rolling canary release has moved on/);
+
+    // Refused on the manifest alone: no checksum fetch, no asset download.
+    expect(calls).toHaveLength(1);
   });
 });

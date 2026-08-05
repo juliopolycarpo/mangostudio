@@ -94,6 +94,48 @@ carries only the main binary silently loses out-of-process environments.
 `scripts/release/archive-assets.ts` assembles the full set; `scripts/lib/release-assets.ts`
 defines the naming contract and is covered by unit tests.
 
+### What each channel publishes
+
+A stable release publishes everything. The rolling canary does not: it is cut
+from every green `main` commit, so each asset it carries is paid for many times
+a day.
+
+| Channel          | Platform archives | Raw hub + runtime pairs                    |
+| ---------------- | ----------------- | ------------------------------------------ |
+| Stable release   | all 8 platforms   | all 8 platforms                            |
+| Canary (rolling) | all 8 platforms   | `linux-x64`, `darwin-arm64`, `windows-x64` |
+
+Archives stay at the full matrix on both channels because the Cargo launcher
+resolves an archive for whatever host it was built for, so narrowing them would
+strand canary launchers. Raw pairs are curated: `linux-arm64` is deliberately
+absent from canary — ARM Linux users are on stable, and the pair costs roughly
+190 MB per green commit to serve nobody. Stable publishes the full matrix and is
+one `mangostudio update` away.
+
+The canary set is chosen **by name** in `selectCanaryAssets`
+(`scripts/lib/release-assets.ts`) and staged by
+`scripts/release/stage-canary-assets.ts`, not by a shell glob. Adding a new asset
+type to the release plan therefore cannot widen a canary upload on its own; a
+unit test pins that. Widening the curated platform list is a one-line change to
+`CANARY_PAIR_PLATFORMS`.
+
+### Rolling identity and `canary-manifest.json`
+
+Canary assets keep the **rolling name** on the **rolling tag** —
+`mangostudio-runtime-0.1.0-canary-linux-x64` under `v0.1.0-canary` — because
+sha-named assets are unbounded and a per-sha tag would cut a pre-release per
+commit. The cost is that two different builds answer to one filename, while the
+binaries themselves report the sha-stamped `<root>-canary.<sha7>` version.
+
+`canary-manifest.json` closes that gap. It ships beside the assets, is listed in
+`SHA256SUMS` like everything else, and records the source commit, the build
+time, and the digest of both halves of every published pair. The hub reads it
+before installing from a rolling tag: if the tag has moved past this hub's own
+build, provisioning is refused on the hub, before anything is written to the
+target machine, rather than surfacing later as a handshake failure. A rolling
+release that publishes no manifest is tolerated — provisioning falls back to the
+install-time version check.
+
 Install scripts are **not** release assets. The canonical installers are hosted at
 [mangostudio.dev](https://mangostudio.dev) (`install.sh` / `install.ps1`) and download
 the platform archives above, verifying them against `SHA256SUMS`. The repo keeps

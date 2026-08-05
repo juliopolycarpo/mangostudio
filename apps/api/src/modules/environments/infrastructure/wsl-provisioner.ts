@@ -29,6 +29,12 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
 import {
+  CANARY_MANIFEST_ASSET,
+  type CanaryManifest,
+  canaryPairRefusal,
+  parseCanaryManifest,
+} from '../domain/canary-manifest';
+import {
   pushRuntimeBinary,
   type RuntimeCommandOptions,
   type RuntimeCommandResult,
@@ -431,6 +437,8 @@ async function loadRelease(
   const rawName = release.runtimeAssetName;
   const archiveName = releaseArchiveName(release.assetVersion, platformId);
 
+  if (release.rolling) await assertRollingPair(deps, version, release, platformId);
+
   try {
     const bytes = await loadAsset(deps, version, release, rawName);
     return { fromArchive: false, bytes };
@@ -456,6 +464,43 @@ async function loadRelease(
     }
     throw error;
   }
+}
+
+/**
+ * Refuses a rolling install whose assets belong to a different commit.
+ *
+ * A missing manifest is tolerated: rolling releases cut before it existed have
+ * none, and turning that into a failure would break the channel to add a check.
+ * Those fall through to the install-time version check, which is what caught
+ * this case before — later, and after bytes had already reached the machine.
+ */
+async function assertRollingPair(
+  deps: WslProvisionerDeps,
+  version: string,
+  release: RuntimeReleaseResolution,
+  platformId: LinuxPlatformId
+): Promise<void> {
+  let manifest: CanaryManifest | null = null;
+  try {
+    const bytes = await download(
+      deps,
+      releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
+      MAX_CHECKSUMS_BYTES
+    );
+    manifest = parseCanaryManifest(new TextDecoder().decode(bytes));
+  } catch (error) {
+    // A 404 is the "no manifest published" case. A transport failure is
+    // tolerated too rather than promoted to fatal here: the asset download that
+    // follows hits the same host and reports a real outage on its own terms,
+    // and an advisory guardrail should not be the thing that fails a provision.
+    if (!(error instanceof WslDownloadError) && !(error instanceof WslAssetMissingError)) {
+      throw error;
+    }
+  }
+  if (!manifest) return;
+
+  const refusal = canaryPairRefusal(manifest, version, platformId);
+  if (refusal) throw new WslProvisioningError(refusal);
 }
 
 class WslAssetMissingError extends WslProvisioningError {}
