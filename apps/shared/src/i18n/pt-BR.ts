@@ -2475,6 +2475,7 @@ export const messages = {
       continue: 'Continuar',
       back: 'Voltar',
       finish: 'Concluir',
+      close: 'Fechar',
       missingEnvironment: 'Esta etapa precisa do ambiente que a anterior cria.',
       reachIntro:
         'O MangoStudio usa o seu próprio cliente ssh, então chaves, o seu agente, o ~/.ssh/config e o known_hosts valem aqui. Nada precisa estar instalado na máquina antes.',

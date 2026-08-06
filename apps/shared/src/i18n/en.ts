@@ -2465,6 +2465,7 @@ export const messages: Messages = {
       continue: 'Continue',
       back: 'Back',
       finish: 'Finish',
+      close: 'Close',
       missingEnvironment: 'This step needs the environment that the previous one creates.',
       reachIntro:
         'MangoStudio uses your own ssh client, so keys, your agent, ~/.ssh/config and known_hosts all apply. Nothing has to be installed on the machine first.',

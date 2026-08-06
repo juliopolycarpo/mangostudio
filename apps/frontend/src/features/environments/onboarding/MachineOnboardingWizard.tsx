@@ -13,6 +13,7 @@
  */
 
 import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
+import { X } from 'lucide-react';
 import { useId, useState } from 'react';
 
 import { useI18n } from '@/hooks/use-i18n';
@@ -85,7 +86,7 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
   };
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus.
+    // biome-ignore lint/a11y/noStaticElementInteractions: Escape is delegated from the overlay to whatever inside it holds focus; a backdrop click closes the same way the X button does.
     <div
       className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-background/80 p-4 fade-in backdrop-blur-sm duration-200"
       data-testid="machine-onboarding-wizard"
@@ -94,6 +95,11 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
         event.stopPropagation();
         onClose();
       }}
+      onClick={(event) => {
+        // Only the backdrop itself, never a bubbled click from the panel —
+        // this listener sits above every step's own buttons and inputs.
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
       <div
         role="dialog"
@@ -101,17 +107,28 @@ export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboa
         aria-labelledby={titleId}
         className="max-h-full w-full max-w-lg space-y-5 overflow-y-auto rounded-3xl border border-outline-variant/20 bg-surface-container-high p-5 shadow-2xl sm:p-8"
       >
-        <div className="space-y-1">
-          <h3 id={titleId} className="font-bold text-lg text-on-surface">
-            {labels.title}
-          </h3>
-          <p className="text-on-surface-variant/60 text-xs">
-            {formatMessage(labels.progress, {
-              step: String(index + 1),
-              total: String(steps.length),
-              name: labels.steps[step],
-            })}
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h3 id={titleId} className="font-bold text-lg text-on-surface">
+              {labels.title}
+            </h3>
+            <p className="text-on-surface-variant/60 text-xs">
+              {formatMessage(labels.progress, {
+                step: String(index + 1),
+                total: String(steps.length),
+                name: labels.steps[step],
+              })}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            data-testid="machine-onboarding-close"
+            className="shrink-0 rounded-xl p-1.5 text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface"
+            aria-label={labels.close}
+          >
+            <X size={16} />
+          </button>
         </div>
 
         <ol className="flex list-none flex-wrap gap-1.5" aria-label={labels.title}>
@@ -217,7 +234,11 @@ function StepBody(props: StepBodyProps) {
       );
     case 'library':
       return props.environment ? (
-        <LibraryStep environment={props.environment} onContinue={props.onAdvance} />
+        <LibraryStep
+          environment={props.environment}
+          consent={props.consent}
+          onContinue={props.onAdvance}
+        />
       ) : (
         <MissingEnvironment message={labels.missingEnvironment} />
       );

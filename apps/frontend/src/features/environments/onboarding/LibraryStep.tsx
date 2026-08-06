@@ -7,7 +7,8 @@
  * that was just onboarded, not a second copy of it.
  */
 
-import type { Environment } from '@mangostudio/shared/environments';
+import type { Environment, RuntimeSetupBody } from '@mangostudio/shared/environments';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { Link } from '@tanstack/react-router';
 import { LibraryBig } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
@@ -16,13 +17,33 @@ import { StepActions } from './StepActions';
 
 interface LibraryStepProps {
   readonly environment: Environment;
+  /** What this session recorded, when the manifest never arrived to confirm it. */
+  readonly consent: RuntimeSetupBody | null;
   readonly onContinue: () => void;
 }
 
-export function LibraryStep({ environment, onContinue }: LibraryStepProps) {
+/**
+ * A probed manifest is ground truth; a consent choice from this session is the
+ * next best thing for a machine that never reached the hub (e.g. `unsupervised`
+ * paired onboarding). Absent both, the choice is unknown, not permitted — a
+ * link that can only land on a refusal is worse than no link.
+ */
+function resolvesLibraryAccess(
+  environment: Environment,
+  consent: RuntimeSetupBody | null
+): boolean {
+  const manifest = environment.status.manifest;
+  if (manifest) return manifest.features.library !== false;
+  if (!consent) return false;
+  const allow =
+    consent.profile === 'custom' ? consent.allow : RUNTIME_CONSENT_PRESETS[consent.profile];
+  return allow.library;
+}
+
+export function LibraryStep({ environment, consent, onContinue }: LibraryStepProps) {
   const { t } = useI18n();
   const labels = t.environments.onboarding;
-  const permitsLibrary = environment.status.manifest?.features.library !== false;
+  const permitsLibrary = resolvesLibraryAccess(environment, consent);
 
   return (
     <div className="space-y-4" data-testid="onboarding-library-step">
