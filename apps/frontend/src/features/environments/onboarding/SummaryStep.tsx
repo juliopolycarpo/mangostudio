@@ -12,12 +12,23 @@
  */
 
 import type { Environment } from '@mangostudio/shared/environments';
+import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { CopyLine } from '../components/CopyLine';
 import { useRuntimeLifecycleQuery } from '../queries';
 import { StepActions } from './StepActions';
 import type { OnboardingEndState } from './steps';
+
+/**
+ * The remote runtime lives under `~/.mango/runtime/remote/current/`, not on
+ * PATH — a bare `mangostudio-runtime` would fail with "command not found" for
+ * whoever pastes it in. `binaryPath` is the resolved path health already
+ * carries; fall back to the bare name only when a report predates that field.
+ */
+function runtimeCommand(health: RuntimeHealthReport | null, args: string): string {
+  return `${health?.binaryPath ?? 'mangostudio-runtime'} ${args}`;
+}
 
 interface SummaryStepProps {
   readonly environment: Environment;
@@ -42,7 +53,7 @@ export function SummaryStep({ environment, endState, onDone }: SummaryStepProps)
     },
     {
       label: labels.summaryDigest,
-      value: health?.digest ? health.digest.slice(0, 15) : labels.summaryUnknown,
+      value: health?.digest ? `${health.digest.slice(0, 15)}…` : labels.summaryUnknown,
     },
     {
       label: labels.summaryProfile,
@@ -71,12 +82,12 @@ export function SummaryStep({ environment, endState, onDone }: SummaryStepProps)
         <p className="text-on-surface-variant/70 text-xs">{labels.summaryAudit}</p>
         <CopyLine
           label={entities.permissions.setupCommand}
-          value="mangostudio-runtime setup --slot remote"
+          value={runtimeCommand(health, 'setup --slot remote')}
         />
         {endState === 'paired' ? (
           <CopyLine
             label={labels.summaryServiceCommand}
-            value="mangostudio-runtime service status"
+            value={runtimeCommand(health, 'service status')}
           />
         ) : null}
       </div>
