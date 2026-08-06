@@ -56,7 +56,10 @@ function fakeRunner(
   };
 }
 
-function fakePairing(issued: { count: number }): RuntimePairingService {
+function fakePairing(
+  issued: { count: number },
+  revoked: { count: number } = { count: 0 }
+): RuntimePairingService {
   return {
     issue: () => {
       issued.count += 1;
@@ -66,6 +69,10 @@ function fakePairing(issued: { count: number }): RuntimePairingService {
         lastSeenAt: null,
         token: TOKEN,
       });
+    },
+    revoke: () => {
+      revoked.count += 1;
+      return Promise.resolve();
     },
   } as unknown as RuntimePairingService;
 }
@@ -166,9 +173,53 @@ describe('runPairedBootstrap', () => {
     await expect(runPairedBootstrap(input({ runner }))).rejects.toThrow(/known_hosts/);
   });
 
+  it('revokes the pairing credential when the pairing step itself fails', async () => {
+    const calls: RunnerCall[] = [];
+    const issued = { count: 0 };
+    const revoked = { count: 0 };
+    const runner = fakeRunner(calls, {
+      connect: { stdout: '', stderr: 'Host key verification failed.', exitCode: 255 },
+    });
+
+    // A credential minted for a machine that never stored it working is a
+    // live token nothing legitimate holds — it must not survive the failure.
+    await expect(
+      runPairedBootstrap(input({ runner, pairing: fakePairing(issued, revoked) }))
+    ).rejects.toThrow(/known_hosts/);
+    expect(issued.count).toBe(1);
+    expect(revoked.count).toBe(1);
+  });
+
+  it('revokes the pairing credential when the run is cancelled after issuance', async () => {
+    const issued = { count: 0 };
+    const revoked = { count: 0 };
+    const calls: RunnerCall[] = [];
+    const controller = new AbortController();
+    const runner = (script: string, options?: RuntimeCommandOptions) => {
+      // Abort right as the credential is handed to `connect`, before the
+      // runner call would otherwise resolve.
+      if (script.includes('connect --hub')) controller.abort();
+      return fakeRunner(calls)(script, options);
+    };
+
+    await expect(
+      runPairedBootstrap(
+        input({
+          runner,
+          pairing: fakePairing(issued, revoked),
+          signal: controller.signal,
+        })
+      )
+    ).rejects.toThrow();
+    expect(issued.count).toBe(1);
+    expect(revoked.count).toBe(1);
+  });
+
   it('keeps a machine whose service could not be installed, and says what is left', async () => {
     const lines: string[] = [];
     const calls: RunnerCall[] = [];
+    const issued = { count: 0 };
+    const revoked = { count: 0 };
     const runner = fakeRunner(calls, {
       service: {
         stdout: '',
@@ -178,7 +229,12 @@ describe('runPairedBootstrap', () => {
     });
 
     const outcome = await runPairedBootstrap(
-      input({ runner, stream: fakeStream(lines), manager: fakeManager('disconnected') })
+      input({
+        runner,
+        pairing: fakePairing(issued, revoked),
+        stream: fakeStream(lines),
+        manager: fakeManager('disconnected'),
+      })
     );
 
     expect(outcome).toBe('unsupervised');
@@ -186,15 +242,21 @@ describe('runPairedBootstrap', () => {
     // rather than restated.
     expect(lines).toContain('No D-Bus session bus for systemd user services.');
     expect(lines.some((line) => line.includes('provisioned, consented and paired'))).toBe(true);
+    // Unsupervised is a success outcome — the credential is exactly what lets
+    // the machine finish the last step itself, so it must survive.
+    expect(revoked.count).toBe(0);
   });
 
   it('reports a supervised machine that never dialed in as a failure', async () => {
     const lines: string[] = [];
     const calls: RunnerCall[] = [];
+    const issued = { count: 0 };
+    const revoked = { count: 0 };
 
     const outcome = await runPairedBootstrap(
       input({
         runner: fakeRunner(calls),
+        pairing: fakePairing(issued, revoked),
         stream: fakeStream(lines),
         manager: fakeManager('disconnected'),
       })
@@ -202,6 +264,9 @@ describe('runPairedBootstrap', () => {
 
     expect(outcome).toBe('no-dial-in');
     expect(lines.some((line) => line.includes(ENDPOINT))).toBe(true);
+    // The service is installed and dial-in may still land later on the same
+    // credential; revoking it here would strand a working setup.
+    expect(revoked.count).toBe(0);
   });
 });
 

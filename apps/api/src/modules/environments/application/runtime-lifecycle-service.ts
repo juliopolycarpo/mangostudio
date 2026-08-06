@@ -989,35 +989,45 @@ export async function runPairedBootstrap(
   // Issued only now: an earlier mint would be a live credential for a machine
   // that had not yet agreed to anything.
   const issued = await input.pairing.issue(input.userId, input.environmentId);
-  say('Storing the pairing credential on that machine.');
-  const bootstrap = buildConnectBootstrapCommand(DEFAULT_SSH_RUNTIME_PATH, input.endpoint);
-  const bootstrapResult = await runner(bootstrap.script, {
-    args: bootstrap.args,
-    stdin: new TextEncoder().encode(issued.token),
-    timeoutMs: 120_000,
-    signal,
-  });
-  signal.throwIfAborted();
-  if (bootstrapResult.exitCode !== 0) {
-    throw new Error(sshStepFailure('Pairing', body.ssh, bootstrapResult));
-  }
+  try {
+    say('Storing the pairing credential on that machine.');
+    const bootstrap = buildConnectBootstrapCommand(DEFAULT_SSH_RUNTIME_PATH, input.endpoint);
+    const bootstrapResult = await runner(bootstrap.script, {
+      args: bootstrap.args,
+      stdin: new TextEncoder().encode(issued.token),
+      timeoutMs: 120_000,
+      signal,
+    });
+    signal.throwIfAborted();
+    if (bootstrapResult.exitCode !== 0) {
+      throw new Error(sshStepFailure('Pairing', body.ssh, bootstrapResult));
+    }
 
-  say('Installing the service that keeps it connected.');
-  const service = buildServiceInstallCommand(DEFAULT_SSH_RUNTIME_PATH);
-  const serviceResult = await runner(service.script, {
-    args: service.args,
-    timeoutMs: 120_000,
-    signal,
-  });
-  signal.throwIfAborted();
-  if (serviceResult.exitCode !== 0) {
-    // The runtime's refusals are typed and carry their own fix; pass them
-    // through verbatim rather than restating them less accurately.
-    say(serviceResult.stderr.trim() || serviceResult.stdout.trim(), 'stderr');
-    say(
-      `"${body.ssh.host}" is provisioned, consented and paired, but nothing keeps it running yet. Fix the above and run "mangostudio-runtime service install --mode connect" there, or start it once with "mangostudio-runtime connect" — the hub URL and credential are already stored.`
-    );
-    return 'unsupervised';
+    say('Installing the service that keeps it connected.');
+    const service = buildServiceInstallCommand(DEFAULT_SSH_RUNTIME_PATH);
+    const serviceResult = await runner(service.script, {
+      args: service.args,
+      timeoutMs: 120_000,
+      signal,
+    });
+    signal.throwIfAborted();
+    if (serviceResult.exitCode !== 0) {
+      // The runtime's refusals are typed and carry their own fix; pass them
+      // through verbatim rather than restating them less accurately.
+      say(serviceResult.stderr.trim() || serviceResult.stdout.trim(), 'stderr');
+      say(
+        `"${body.ssh.host}" is provisioned, consented and paired, but nothing keeps it running yet. Fix the above and run "mangostudio-runtime service install --mode connect" there, or start it once with "mangostudio-runtime connect" — the hub URL and credential are already stored.`
+      );
+      return 'unsupervised';
+    }
+  } catch (error) {
+    // The token minted above never made it into a working, supervised setup —
+    // pairing failed, or the run was cancelled mid-transfer. Either way it is
+    // a live credential nothing legitimate holds; kill it rather than leaving
+    // it to sit unused and unexpiring. A cancelled service install still
+    // returns `unsupervised` above and keeps its credential on purpose.
+    await input.pairing.revoke(input.userId, input.environmentId).catch(() => undefined);
+    throw error;
   }
 
   say('Waiting for the runtime to dial in…');
