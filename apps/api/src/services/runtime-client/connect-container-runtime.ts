@@ -102,14 +102,10 @@ export async function connectContainerRuntime(
     );
   }
 
-  const platformId = await withFailureReason(
-    () => deps.engines.prepare(config, { onPullStart: () => report?.('pulling') }),
-    engine
+  const platformId = await withFailureReason(() =>
+    deps.engines.prepare(config, { onPullStart: () => report?.('pulling') })
   );
-  const runtimeBinaryPath = await withFailureReason(
-    () => deps.resolveRuntimeBinary(platformId),
-    engine
-  );
+  const runtimeBinaryPath = await withFailureReason(() => deps.resolveRuntimeBinary(platformId));
 
   // A fresh name per launch: a relaunch must not collide with a container the
   // engine has not finished reaping, and the backstop below has to be certain
@@ -187,21 +183,24 @@ async function killQuietly(
 /**
  * Runs a preparation step, turning its typed failure into a transport error
  * that carries the reason to the card.
+ *
+ * Only the reason travels. The engine is not attached: the manager's
+ * `failureDetail` forwards the reason fields and nothing else, and both sides
+ * already read the engine off the environment's own config — a second copy in
+ * the details bag was carried to the card and dropped there.
  */
-async function withFailureReason<T>(step: () => Promise<T>, engine: ContainerEngine): Promise<T> {
+async function withFailureReason<T>(step: () => Promise<T>): Promise<T> {
   try {
     return await step();
   } catch (error) {
     if (error instanceof ContainerEngineError) {
       throw new RuntimeRemoteError('RUNTIME_UNAVAILABLE', error.message, {
         containerFailureReason: error.reason,
-        containerEngine: engine,
       });
     }
     if (error instanceof ContainerRuntimeSourceError) {
       throw new RuntimeRemoteError('RUNTIME_UNAVAILABLE', error.message, {
         containerFailureReason: 'runtime-unavailable' satisfies ContainerFailureReason,
-        containerEngine: engine,
       });
     }
     throw error;

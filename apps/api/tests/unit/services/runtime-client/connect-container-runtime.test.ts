@@ -97,7 +97,6 @@ describe('connectContainerRuntime failure reporting', () => {
       const remote = error as RuntimeRemoteError;
       expect(remote.code).toBe('RUNTIME_UNAVAILABLE');
       expect(remote.details?.containerFailureReason).toBe('engine-unreachable');
-      expect(remote.details?.containerEngine).toBe('docker');
     }
   });
 
@@ -117,7 +116,11 @@ describe('connectContainerRuntime failure reporting', () => {
     }
   });
 
-  it('names the engine the environment chose, not the default', async () => {
+  it('prepares with the engine the environment chose, not the default', async () => {
+    // Asserted on what the connector does rather than on a details field: the
+    // engine reaches the card through the environment's own config, so the
+    // observable decision is which engine gets prepared.
+    let preparedWith: string | undefined;
     try {
       await connectContainerRuntime(
         definition({ image: 'node:22', engine: 'podman' }),
@@ -125,14 +128,18 @@ describe('connectContainerRuntime failure reporting', () => {
         undefined,
         {
           engines: engines({
-            prepare: () => Promise.reject(new ContainerEngineError('engine-missing', 'no podman')),
+            prepare: (config) => {
+              preparedWith = config.engine;
+              return Promise.reject(new ContainerEngineError('engine-missing', 'no podman'));
+            },
           }),
           resolveRuntimeBinary: () => Promise.resolve(RUNTIME_BINARY),
         }
       );
       throw new Error('expected the connect to fail');
     } catch (error) {
-      expect((error as RuntimeRemoteError).details?.containerEngine).toBe('podman');
+      expect(preparedWith).toBe('podman');
+      expect((error as RuntimeRemoteError).details?.containerFailureReason).toBe('engine-missing');
     }
   });
 });
