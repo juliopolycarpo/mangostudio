@@ -640,7 +640,8 @@ touches push, setup, service or probing internals belongs in one of the files ab
   the `service install` that supplies the session-bus environment)
 - `apps/api/src/modules/environments/application/runtime-lifecycle-service.ts` →
   `runPairedBootstrap` (push → setup → credential → service, over one channel; the ssh
-  config is request-scoped and never stored, and the pairing token never leaves the hub)
+  config is request-scoped and never stored, and the pairing token leaves the hub only over
+  that ssh channel's stdin, never as a response or a command argument)
 - `apps/frontend/src/features/environments/onboarding/` (`steps.ts` is the flow shape and
   the whole of resume — read it before any step component)
 - Reference: `docs/operations/remote-runtimes.md` — Onboard a new machine
