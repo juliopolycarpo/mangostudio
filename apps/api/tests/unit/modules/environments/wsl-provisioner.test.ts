@@ -59,6 +59,8 @@ function harness(
     readonly localBuild?: Uint8Array | null;
     /** Overrides the (otherwise fake) cache directory — used for real-fs GC tests. */
     readonly cacheDirOverride?: (version: string) => string;
+    /** Stands in for a full disk or an unwritable cache directory. */
+    readonly writeCacheFails?: boolean;
     /**
      * `canary-manifest.json` the rolling tag serves, or null for a release that
      * publishes none. Only consulted on a rolling version.
@@ -86,6 +88,7 @@ function harness(
       );
     },
     writeCache: (path, bytes) => {
+      if (options.writeCacheFails) return Promise.reject(new Error('disk full'));
       written.set(path, bytes);
       return Promise.resolve();
     },
@@ -655,6 +658,46 @@ describe('WslProvisioner', () => {
     } finally {
       await rm(cacheRoot, { force: true, recursive: true });
     }
+  });
+
+  // Regression: this provisioner keeps its own copy of `loadAsset`, and only the
+  // shared one in `runtime-release-fetch` learned to record the digest it
+  // verified. Both write into the same `~/.mango/runtime-cache/<version>/` the
+  // staged-runtime card reads, so bytes cached by a WSL install arrived with no
+  // sidecar — and the card fell back to checking them against whatever
+  // SHA256SUMS the rolling tag serves at view time. That reports a mismatch for
+  // a perfectly good cached file as soon as the tag moves, which is the exact
+  // false alarm the sidecar exists to prevent.
+  it('records the verified digest beside a freshly cached asset', async () => {
+    const { provisioner, written } = harness();
+
+    await provisioner.ensure('Ubuntu');
+
+    const sidecar = written.get(`/cache/${VERSION}/${RAW_ASSET}.sha256`);
+    expect(sidecar).toBeDefined();
+    expect(new TextDecoder().decode(sidecar)).toBe(DIGEST);
+  });
+
+  // The archive fallback caches a different filename; the sidecar has to follow
+  // the bytes that actually landed, not the raw asset that was never written.
+  it('records the digest beside the platform archive when the raw asset is unpublished', async () => {
+    const { provisioner, written } = harness({ checksums: `${DIGEST}  ${ASSET}\n` });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(written.has(`/cache/${VERSION}/${RAW_ASSET}.sha256`)).toBe(false);
+    expect(new TextDecoder().decode(written.get(`/cache/${VERSION}/${ASSET}.sha256`))).toBe(DIGEST);
+  });
+
+  // Caching is a courtesy: a hub that cannot write the asset must not leave a
+  // sidecar claiming a digest for a file that is not there. The card treats a
+  // readable sidecar as proof of what the cached bytes are.
+  it('writes no sidecar when the asset itself could not be cached', async () => {
+    const { provisioner, written } = harness({ writeCacheFails: true });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect([...written.keys()]).toEqual([]);
   });
 
   // Regression: `ensure` had no way to report transfer bytes, so a WSL install

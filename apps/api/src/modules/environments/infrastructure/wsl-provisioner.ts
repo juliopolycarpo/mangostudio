@@ -42,7 +42,7 @@ import {
   runtimeRemoveSlotBytesScript,
   runtimeSlotBytesScript,
 } from '../domain/runtime-push';
-import { pruneRuntimeCache } from '../domain/runtime-release-fetch';
+import { pruneRuntimeCache, runtimeDigestSidecarPath } from '../domain/runtime-release-fetch';
 import {
   type RuntimeReleaseResolution,
   resolveRuntimeRelease,
@@ -627,9 +627,22 @@ async function loadAsset(
 
   // Caching is a courtesy, not part of the contract: a hub that cannot write
   // here still provisions, it just pays for the download again next time.
-  await deps.writeCache(cachePath, bytes).catch((error: unknown) => {
-    logger.warn('cache_write_failed', { path: cachePath, error: String(error) });
-  });
+  const written = await deps.writeCache(cachePath, bytes).then(
+    () => true,
+    (error: unknown) => {
+      logger.warn('cache_write_failed', { path: cachePath, error: String(error) });
+      return false;
+    }
+  );
+  if (written) {
+    // Same cache the staged-runtime card describes, so the same sidecar it
+    // reads: without one, the verify command it prints for these bytes goes
+    // back to the rolling tag's SHA256SUMS, which reports a mismatch for a
+    // perfectly good cached file the moment the tag moves.
+    await deps
+      .writeCache(runtimeDigestSidecarPath(cachePath), new TextEncoder().encode(actual))
+      .catch(() => undefined);
+  }
   await pruneRuntimeCache(deps.cacheDir(version), version).catch((error: unknown) => {
     logger.warn('cache_prune_failed', { path: deps.cacheDir(version), error: String(error) });
   });
