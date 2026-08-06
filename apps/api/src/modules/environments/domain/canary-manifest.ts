@@ -185,3 +185,27 @@ export function canaryPairRefusal(
 
   return null;
 }
+
+/**
+ * The digest a validated manifest already committed to for one platform's raw
+ * runtime asset, or undefined when the manifest names something else.
+ *
+ * This is what closes the gap {@link checkRollingPair} otherwise leaves open: a
+ * caller that approves a pair from the manifest and then fetches a fresh
+ * `SHA256SUMS` for the actual download is trusting two separate reads of a tag
+ * that can move between them. Binding the download to the digest this same
+ * manifest read already named removes the second read — and the second
+ * opportunity for the tag to have moved — entirely. The asset-name comparison
+ * is a defensive check, not an expected mismatch: {@link canaryPairRefusal}
+ * already required this platform to be in `manifest.pairs` before a caller can
+ * reach here.
+ */
+export function manifestRuntimeDigest(
+  manifest: CanaryManifest,
+  platformId: string,
+  runtimeAssetName: string
+): string | undefined {
+  const pair = manifest.pairs.find((candidate) => candidate.platform === platformId);
+  if (!pair || pair.runtime.asset !== runtimeAssetName) return undefined;
+  return pair.runtime.digest;
+}

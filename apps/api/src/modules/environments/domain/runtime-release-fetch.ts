@@ -10,7 +10,12 @@ import { dirname, join } from 'node:path';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
-import { CANARY_MANIFEST_ASSET, type CanaryManifest, checkRollingPair } from './canary-manifest';
+import {
+  CANARY_MANIFEST_ASSET,
+  type CanaryManifest,
+  checkRollingPair,
+  manifestRuntimeDigest,
+} from './canary-manifest';
 import { type RuntimeReleaseResolution, resolveRuntimeRelease } from './runtime-release-resolution';
 import {
   findReleaseChecksum,
@@ -96,6 +101,12 @@ export async function loadRuntimeReleaseBytes(
     ? await assertRollingPair(deps, version, release, platformId)
     : null;
   const provenance = manifest ? { sourceSha: manifest.sourceSha } : {};
+  // Bound to the manifest read {@link assertRollingPair} already validated,
+  // rather than a second, later fetch of SHA256SUMS off the same rolling tag —
+  // see {@link manifestRuntimeDigest}.
+  const boundDigest = manifest
+    ? manifestRuntimeDigest(manifest, platformId, release.runtimeAssetName)
+    : undefined;
 
   try {
     const bytes = await loadAsset(
@@ -107,7 +118,8 @@ export async function loadRuntimeReleaseBytes(
       },
       cacheDir,
       readBytes,
-      writeCache
+      writeCache,
+      boundDigest
     );
     return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}`, ...provenance };
   } catch (error) {
@@ -166,11 +178,12 @@ async function loadAsset(
   },
   cacheDir: (version: string) => string,
   readBytes: (path: string) => Promise<Uint8Array | null>,
-  writeCache: (path: string, bytes: Uint8Array) => Promise<void>
+  writeCache: (path: string, bytes: Uint8Array) => Promise<void>,
+  expectedDigest?: string
 ): Promise<Uint8Array> {
   const { assetName, cacheVersion, tagVersion } = identity;
   const cachePath = join(cacheDir(cacheVersion), assetName);
-  const expected = await fetchExpectedChecksum(deps, tagVersion, assetName);
+  const expected = expectedDigest ?? (await fetchExpectedChecksum(deps, tagVersion, assetName));
   const cached = await readBytes(cachePath);
   if (cached && sha256(cached) === expected) return cached;
 

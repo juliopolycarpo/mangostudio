@@ -280,6 +280,73 @@ describe('WslProvisioner', () => {
     expect(calls.some((call) => call.script.includes('cat > '))).toBe(true);
   });
 
+  // The manifest read that clears `canaryPairRefusal` already named a digest
+  // for this platform's raw asset. Trusting it instead of a second SHA256SUMS
+  // fetch removes the only remaining window for the tag to move between the
+  // check and the download.
+  it('binds a rolling raw asset to the digest a validated manifest already named, skipping a second SHA256SUMS fetch', async () => {
+    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      channel: 'canary',
+      version: '1.2.3-canary.abcdef0',
+      assetVersion: '1.2.3-canary',
+      sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
+      builtAt: '2026-08-05T00:00:00.000Z',
+      pairs: [
+        {
+          platform: 'linux-x64',
+          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
+          runtime: { asset: canaryAsset, digest: DIGEST },
+        },
+      ],
+    });
+    const { provisioner, requested, written } = harness({
+      version: '1.2.3-canary.abcdef0',
+      manifest,
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(requested).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
+    ]);
+    expect(written.get(`/cache/1.2.3-canary.abcdef0/${canaryAsset}`)).toEqual(ARCHIVE);
+  });
+
+  // Simulates the tag moving between the manifest read and the asset download:
+  // same asset name, different bytes, still "clean" against a SHA256SUMS this
+  // hub never consults for a bound asset. Without the binding, this is the
+  // scenario where build B installs under the pair validated for build A.
+  it('refuses a rolling raw asset whose bytes do not match the manifest-bound digest', async () => {
+    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      channel: 'canary',
+      version: '1.2.3-canary.abcdef0',
+      assetVersion: '1.2.3-canary',
+      sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
+      builtAt: '2026-08-05T00:00:00.000Z',
+      pairs: [
+        {
+          platform: 'linux-x64',
+          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
+          runtime: { asset: canaryAsset, digest: 'b'.repeat(64) },
+        },
+      ],
+    });
+    const { provisioner, calls } = harness({
+      version: '1.2.3-canary.abcdef0',
+      manifest,
+      archive: new TextEncoder().encode('a later build under the same rolling name'),
+    });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(/does not match the checksum/);
+    expect(calls.some((call) => call.script.includes('cat > '))).toBe(false);
+    expect(calls.some((call) => call.script.includes('runtime.json.incoming'))).toBe(false);
+  });
+
   it('records what it installed and what the distribution may do', async () => {
     const { provisioner, calls, config } = harness();
 

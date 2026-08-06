@@ -144,4 +144,93 @@ describe('resolveRuntimeRelease', () => {
     // Refused on the manifest alone: no checksum fetch, no asset download.
     expect(calls).toHaveLength(1);
   });
+
+  // The manifest read that clears the refusal check above already named a
+  // digest for this platform's raw asset. Trusting it instead of a second
+  // SHA256SUMS fetch removes the only remaining window for the tag to move
+  // between the check and the download.
+  it('binds a rolling raw asset to the digest a validated manifest already named, skipping a second SHA256SUMS fetch', async () => {
+    const asset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const bytes = new TextEncoder().encode('canary-runtime');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      channel: 'canary',
+      version: '1.2.3-canary.abcdef0',
+      assetVersion: '1.2.3-canary',
+      sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
+      builtAt: '2026-08-05T00:00:00.000Z',
+      pairs: [
+        {
+          platform: 'linux-x64',
+          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
+          runtime: { asset, digest: hash },
+        },
+      ],
+    });
+    const calls: string[] = [];
+
+    const loaded = await loadRuntimeReleaseBytes('linux-x64', {
+      version: '1.2.3-canary.abcdef0',
+      fetch: ((input: string | URL | Request) => {
+        const url = String(input);
+        calls.push(url);
+        if (url.endsWith('/canary-manifest.json')) {
+          return Promise.resolve(new Response(manifest));
+        }
+        return Promise.resolve(new Response(bytes));
+      }) as unknown as typeof fetch,
+      resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+      cacheDir: () => '/unused',
+      readBytes: () => Promise.resolve(null),
+      writeCache: () => Promise.resolve(),
+    });
+
+    expect(loaded).toMatchObject({ fromArchive: false, digest: `sha256:${hash}` });
+    // No SHA256SUMS fetch: the manifest-bound digest already answered it.
+    expect(calls).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${asset}`,
+    ]);
+  });
+
+  // Simulates the tag moving between the manifest read and the asset download:
+  // same asset name, different bytes, still "clean" against a SHA256SUMS this
+  // hub never consults for a bound asset. Without the binding, this is the
+  // scenario where build B installs under the pair validated for build A.
+  it('refuses a rolling raw asset whose bytes do not match the manifest-bound digest', async () => {
+    const asset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      channel: 'canary',
+      version: '1.2.3-canary.abcdef0',
+      assetVersion: '1.2.3-canary',
+      sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
+      builtAt: '2026-08-05T00:00:00.000Z',
+      pairs: [
+        {
+          platform: 'linux-x64',
+          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
+          runtime: { asset, digest: 'b'.repeat(64) },
+        },
+      ],
+    });
+
+    await expect(
+      loadRuntimeReleaseBytes('linux-x64', {
+        version: '1.2.3-canary.abcdef0',
+        fetch: ((input: string | URL | Request) => {
+          const url = String(input);
+          if (url.endsWith('/canary-manifest.json')) {
+            return Promise.resolve(new Response(manifest));
+          }
+          return Promise.resolve(new Response('a later build under the same rolling name'));
+        }) as unknown as typeof fetch,
+        resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+        cacheDir: () => '/unused',
+        readBytes: () => Promise.resolve(null),
+        writeCache: () => Promise.resolve(),
+      })
+    ).rejects.toThrow(/does not match the checksum/);
+  });
 });

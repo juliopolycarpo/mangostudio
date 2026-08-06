@@ -32,6 +32,7 @@ import {
   CANARY_MANIFEST_ASSET,
   type CanaryManifest,
   checkRollingPair,
+  manifestRuntimeDigest,
 } from '../domain/canary-manifest';
 import {
   pushRuntimeBinary,
@@ -455,9 +456,13 @@ async function loadRelease(
     ? await assertRollingPair(deps, version, release, platformId)
     : null;
   const provenance = manifest ? { sourceSha: manifest.sourceSha } : {};
+  // Bound to the manifest read `assertRollingPair` already validated, rather
+  // than a second, later fetch of SHA256SUMS off the same rolling tag — see
+  // `manifestRuntimeDigest`.
+  const boundDigest = manifest ? manifestRuntimeDigest(manifest, platformId, rawName) : undefined;
 
   try {
-    const bytes = await loadAsset(deps, version, release, rawName);
+    const bytes = await loadAsset(deps, version, release, rawName, boundDigest);
     return { fromArchive: false, bytes, ...provenance };
   } catch (error) {
     if (!(error instanceof WslAssetMissingError)) {
@@ -586,7 +591,8 @@ async function loadAsset(
   deps: WslProvisionerDeps,
   version: string,
   release: RuntimeReleaseResolution,
-  assetName: string
+  assetName: string,
+  expectedDigest?: string
 ): Promise<Uint8Array> {
   // Cached under the hub's own version, downloaded from the resolved tag. On a
   // rolling channel those differ, and it is the difference that keeps two
@@ -596,7 +602,13 @@ async function loadAsset(
   // bytes on disk are still the bytes this tag publishes. A rolling tag
   // republishes under one filename, so a cached copy of yesterday's canary is
   // only distinguishable from today's by failing this comparison.
-  const expected = await fetchExpectedChecksum(deps, release.tagVersion, assetName);
+  //
+  // `expectedDigest`, when given, is a rolling raw asset already bound to a
+  // validated manifest read — see `manifestRuntimeDigest`. Trusting it instead
+  // of a fresh SHA256SUMS fetch here is what keeps the tag from moving between
+  // the manifest check and this download.
+  const expected =
+    expectedDigest ?? (await fetchExpectedChecksum(deps, release.tagVersion, assetName));
 
   const cached = await deps.readBytes(cachePath);
   if (cached && sha256(cached) === expected) return cached;
