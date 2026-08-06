@@ -2504,6 +2504,7 @@ export const messages = {
       toolsIntro: 'O que o MangoStudio encontrou naquela máquina.',
       toolsProbing: 'Verificando o que está instalado…',
       toolsNone: 'Nenhum toolchain ou CLI de agente foi encontrado lá ainda.',
+      toolsError: 'Não foi possível verificar o que está instalado naquela máquina.',
       toolsDisconnected:
         'Nada foi verificado ainda — o MangoStudio lê isso da máquina assim que ela conecta.',
       toolsInstallsNote:

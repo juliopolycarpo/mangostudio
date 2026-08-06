@@ -54,6 +54,10 @@ export function ToolsStep({ environment, onContinue }: ToolsStepProps) {
         </p>
       ) : runtimes.isPending || agents.isPending ? (
         <p className="text-on-surface-variant/50 text-xs">{labels.toolsProbing}</p>
+      ) : runtimes.isError || agents.isError ? (
+        <p className="text-error text-xs" role="alert">
+          {labels.toolsError}
+        </p>
       ) : found.length === 0 ? (
         <p className="text-on-surface-variant/70 text-xs">{labels.toolsNone}</p>
       ) : (

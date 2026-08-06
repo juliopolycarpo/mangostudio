@@ -2494,6 +2494,7 @@ export const messages: Messages = {
       toolsIntro: 'What MangoStudio found on that machine.',
       toolsProbing: 'Looking at what is installed…',
       toolsNone: 'No toolchains or agent CLIs were found there yet.',
+      toolsError: 'Could not check what is installed on that machine.',
       toolsDisconnected:
         'Nothing has been probed yet — MangoStudio reads this from the machine once it is connected.',
       toolsInstallsNote:
