@@ -6,7 +6,7 @@
  * environment; progress bytes from {@link pushRuntimeBinary} land as log lines.
  */
 
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
@@ -63,6 +63,7 @@ import {
   type LoadedRuntimeAsset,
   loadRuntimeReleaseBytes,
   RuntimeAssetLoadError,
+  runtimeDigestSidecarPath,
 } from '../domain/runtime-release-fetch';
 import { classifySshFailure, describeSshFailure } from '../domain/ssh-failure';
 import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
@@ -158,7 +159,10 @@ export interface RuntimeLifecycleServiceDeps {
   readonly manager?: RuntimeConnectionManager;
   readonly provisioner?: WslProvisioner;
   readonly now?: () => number;
-  readonly loadRuntimeAsset?: (platformId: string) => Promise<LoadedRuntimeAsset>;
+  readonly loadRuntimeAsset?: (
+    platformId: string,
+    options?: { readonly signal?: AbortSignal }
+  ) => Promise<LoadedRuntimeAsset>;
   /** Mints the credential the bootstrapped machine dials back with. */
   readonly pairing?: RuntimePairingService;
   /** Read per call, not per construction: config reloads without a restart. */
@@ -369,9 +373,20 @@ export function createRuntimeLifecycleService(
 
     void (async () => {
       try {
-        const asset = await loadRuntimeAsset(staged.platformId);
+        const asset = await loadRuntimeAsset(staged.platformId, { signal: abort.signal });
         if (abort.signal.aborted) {
           finish(run, 'cancelled', null);
+          return;
+        }
+
+        if (!asset.cached) {
+          stream.publish({
+            type: 'log',
+            stream: 'stderr',
+            line: `Verified ${staged.assetName} but could not write it to ${runtimeCacheDir(staged.version)}. Nothing is staged at ${staged.path}; check that the cache directory is writable and retry.`,
+            done: false,
+          });
+          finish(run, 'failed', 1);
           return;
         }
 
@@ -384,7 +399,15 @@ export function createRuntimeLifecycleService(
           : `Verified and cached at ${staged.path}`;
         stream.publish({ type: 'log', stream: 'system', line, done: false });
         if (!asset.fromArchive) {
-          stream.publish({ type: 'log', stream: 'system', line: staged.verify, done: false });
+          // Pinned to the digest this run just verified rather than reusing
+          // `staged.verify` — that was built before the download, off whatever
+          // SHA256SUMS a rolling tag served then, which is not necessarily the
+          // build these bytes are.
+          const pinnedDigest = asset.digest.replace(/^sha256:/, '');
+          const verify =
+            stagedRuntimeAssetFor(input.transportKind, input.health, { pinnedDigest })?.verify ??
+            staged.verify;
+          stream.publish({ type: 'log', stream: 'system', line: verify, done: false });
         }
         finish(run, 'succeeded', 0);
       } catch (error) {
@@ -774,7 +797,10 @@ interface LiveUpdateInput {
   readonly transportKind: EnvironmentTransportKind;
   readonly health: RuntimeHealthReport;
   readonly manager: RuntimeConnectionManager;
-  readonly loadRuntimeAsset: (platformId: string) => Promise<LoadedRuntimeAsset>;
+  readonly loadRuntimeAsset: (
+    platformId: string,
+    options?: { readonly signal?: AbortSignal }
+  ) => Promise<LoadedRuntimeAsset>;
   readonly stream: EventBuffer;
   readonly signal: AbortSignal;
 }
@@ -800,7 +826,7 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
     line: `Loading the checksummed ${platformId} runtime for ${version}…`,
     done: false,
   });
-  const asset = await input.loadRuntimeAsset(platformId);
+  const asset = await input.loadRuntimeAsset(platformId, { signal: input.signal });
   if (asset.fromArchive) {
     throw new RuntimeAssetLoadError(
       `Release ${version} has no raw ${platformId} runtime binary. Live update never streams an archive as executable bytes.`
@@ -1005,7 +1031,7 @@ export async function pushRuntimeOverSsh(
   });
   if (signal.aborted) return;
 
-  const asset = await loadRuntimeReleaseBytes(platformId);
+  const asset = await loadRuntimeReleaseBytes(platformId, { signal });
   if (signal.aborted) return;
   const onProgress = transferProgressPublisher(stream);
   await pushRuntimeBinary({
@@ -1297,17 +1323,26 @@ function runtimeCacheDir(version: string): string {
  * Prefers `platformId` over `platform`-`arch` because it is the exact release
  * identity, libc variant included — `linux-x64` and `linux-x64-musl` are
  * different assets, and only one of them exists on the release.
+ *
+ * The `platform`-`arch` fallback is refused outright for Linux: libc is not
+ * derivable from either field, so a peer that predates `platformId` (or a
+ * probe that could not resolve one) would silently guess the glibc asset for
+ * what might be a musl machine and stage — or name as "the matching
+ * runtime" — a binary that will not run there. darwin and win32 have no such
+ * ambiguity, so they keep the fallback.
  */
 function stagedRuntimeAssetFor(
   transportKind: EnvironmentTransportKind,
   health: RuntimeHealthReport | null,
-  options: { readonly fromArchive?: boolean } = {}
+  options: { readonly fromArchive?: boolean; readonly pinnedDigest?: string } = {}
 ): RuntimeStagedAsset | undefined {
   if (transportKind !== 'wsl' && transportKind !== 'ssh') return undefined;
 
   const platformHint =
     health?.platformId ??
-    (health?.platform && health.arch ? `${health.platform}-${health.arch}` : undefined);
+    (health?.platform && health.platform !== 'linux' && health.arch
+      ? `${health.platform}-${health.arch}`
+      : undefined);
 
   return stagedRuntimeAsset({
     version: getVersion(),
@@ -1315,6 +1350,7 @@ function stagedRuntimeAssetFor(
     cacheDir: runtimeCacheDir,
     present: false,
     fromArchive: options.fromArchive,
+    pinnedDigest: options.pinnedDigest,
   });
 }
 
@@ -1334,12 +1370,41 @@ async function resolveStagedRuntime(
   const raw = stagedRuntimeAssetFor(transportKind, health);
   if (!raw) return undefined;
 
-  if (await pathExists(raw.path)) return { ...raw, present: true };
+  if (await pathExists(raw.path)) {
+    return withPinnedVerify(transportKind, health, raw, {});
+  }
 
   const archive = stagedRuntimeAssetFor(transportKind, health, { fromArchive: true });
-  if (archive && (await pathExists(archive.path))) return { ...archive, present: true };
+  if (archive && (await pathExists(archive.path))) {
+    return withPinnedVerify(transportKind, health, archive, { fromArchive: true });
+  }
 
   return { ...raw, present: false };
+}
+
+/**
+ * Rebuilds a staged asset's verify command from the digest recorded next to it
+ * at download time, when one was recorded. A hub upgraded from before that
+ * sidecar existed has cached files with none; the tag-based command it built
+ * without a digest is what still runs for those.
+ */
+async function withPinnedVerify(
+  transportKind: EnvironmentTransportKind,
+  health: RuntimeHealthReport | null,
+  base: RuntimeStagedAsset,
+  options: { readonly fromArchive?: boolean }
+): Promise<RuntimeStagedAsset> {
+  const pinnedDigest = await readPinnedDigest(base.path);
+  if (!pinnedDigest) return { ...base, present: true };
+  const pinned = stagedRuntimeAssetFor(transportKind, health, { ...options, pinnedDigest });
+  return { ...(pinned ?? base), present: true };
+}
+
+function readPinnedDigest(assetPath: string): Promise<string | undefined> {
+  return readFile(runtimeDigestSidecarPath(assetPath), 'utf8').then(
+    (text) => text.trim() || undefined,
+    () => undefined
+  );
 }
 
 function pathExists(path: string): Promise<boolean> {

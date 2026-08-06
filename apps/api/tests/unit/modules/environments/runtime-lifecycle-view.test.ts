@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import type { RuntimeStagedAsset } from '@mangostudio/shared/environments';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import {
   buildRuntimeLifecycleView,
@@ -7,6 +8,17 @@ import {
   releasePlatformIdFromHint,
   stagedRuntimeAsset,
 } from '../../../../src/modules/environments/domain/runtime-lifecycle-view';
+
+// A resolved identity (present or not) is what tells `download` it can offer
+// itself; these fixtures cover unrelated gates and just need one to exist.
+const anyStagedRuntime: RuntimeStagedAsset = {
+  version: '1.2.3',
+  platformId: 'linux-x64-musl',
+  assetName: 'mangostudio-runtime-1.2.3-linux-x64-musl',
+  path: '/home/u/.mango/runtime-cache/1.2.3/mangostudio-runtime-1.2.3-linux-x64-musl',
+  verify: 'sha256sum -c -',
+  present: false,
+};
 
 const health = (overrides: Partial<RuntimeHealthReport> = {}): RuntimeHealthReport => ({
   schemaVersion: 1,
@@ -68,6 +80,7 @@ describe('buildRuntimeLifecycleView', () => {
       readAtMs: 1_000,
       connected: false,
       nowMs: 2_000,
+      stagedRuntime: anyStagedRuntime,
     });
     expect(view.stale).toBe(true);
     expect(view.health?.version).toBe('1.2.3');
@@ -247,6 +260,7 @@ describe('buildRuntimeLifecycleView', () => {
         readAtMs: 1_000,
         connected: true,
         nowMs: 2_000,
+        stagedRuntime: anyStagedRuntime,
       }).actions
     ).toEqual(['download']);
 
@@ -257,6 +271,7 @@ describe('buildRuntimeLifecycleView', () => {
         readAtMs: 1_000,
         connected: true,
         nowMs: 2_000,
+        stagedRuntime: anyStagedRuntime,
       }).actions
     ).toEqual(['setup', 'download']);
   });
@@ -268,6 +283,7 @@ describe('buildRuntimeLifecycleView', () => {
       readAtMs: null,
       connected: false,
       nowMs: 2_000,
+      stagedRuntime: anyStagedRuntime,
     });
     expect(view.actions).toEqual(['install', 'reinstall', 'upgrade', 'download']);
   });
@@ -280,6 +296,7 @@ describe('buildRuntimeLifecycleView', () => {
       connected: true,
       nowMs: 2_000,
       managedPush: false,
+      stagedRuntime: anyStagedRuntime,
     });
     expect(view.actions).toEqual(['setup', 'download']);
   });
@@ -294,26 +311,30 @@ describe('buildRuntimeLifecycleView', () => {
       present: true,
     } as const;
 
-    expect(
-      buildRuntimeLifecycleView({
-        transportKind: 'wsl',
-        health: health(),
-        readAtMs: 1_000,
-        connected: true,
-        nowMs: 2_000,
-        stagedRuntime: staged,
-      }).stagedRuntime
-    ).toEqual(staged);
+    const withStaged = buildRuntimeLifecycleView({
+      transportKind: 'wsl',
+      health: health(),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+      stagedRuntime: staged,
+    });
+    expect(withStaged.stagedRuntime).toEqual(staged);
+    expect(withStaged.actions).toContain('download');
 
-    expect(
-      buildRuntimeLifecycleView({
-        transportKind: 'wsl',
-        health: health(),
-        readAtMs: 1_000,
-        connected: true,
-        nowMs: 2_000,
-      }).stagedRuntime
-    ).toBeUndefined();
+    const withoutStaged = buildRuntimeLifecycleView({
+      transportKind: 'wsl',
+      health: health(),
+      readAtMs: 1_000,
+      connected: true,
+      nowMs: 2_000,
+    });
+    expect(withoutStaged.stagedRuntime).toBeUndefined();
+    // A machine that has never reported a platform (or a source-checkout hub
+    // with no release to fetch) gives `stagedRuntimeAssetFor` no identity to
+    // resolve — offering the button would reject the click with "connect it
+    // once" the instant somebody presses it.
+    expect(withoutStaged.actions).not.toContain('download');
   });
 });
 
@@ -409,6 +430,41 @@ describe('stagedRuntimeAsset', () => {
     expect(staged?.verify).toContain('curl.exe');
     expect(staged?.verify).not.toContain('awk');
     expect(staged?.verify).not.toContain('sha256sum');
+  });
+
+  // A rolling tag republishes SHA256SUMS under the same name as newer builds
+  // land, so a verify command fetched fresh checks today's build against
+  // yesterday's cached bytes. A pinned digest — recorded next to the file at
+  // download time — checks the file against itself instead, no network hop.
+  it('checks the cached bytes against a pinned digest instead of re-fetching SHA256SUMS', () => {
+    const staged = stagedRuntimeAsset({
+      version: '1.2.3-canary.gabc1234',
+      platformHint: 'linux-x64',
+      cacheDir,
+      present: true,
+      pinnedDigest: 'deadbeef',
+    });
+
+    expect(staged?.verify).toBe(`echo "deadbeef  ${staged?.path}" | sha256sum -c -`);
+    expect(staged?.verify).not.toContain('curl');
+    expect(staged?.verify).not.toContain('SHA256SUMS');
+  });
+
+  it('checks a pinned digest with Get-FileHash on a Windows hub, no SHA256SUMS fetch', () => {
+    const winCacheDir = (version: string) => `C:\\Users\\dev\\.mango\\runtime-cache\\${version}`;
+    const staged = stagedRuntimeAsset({
+      version: '1.2.3-canary.gabc1234',
+      platformHint: 'linux-x64',
+      cacheDir: winCacheDir,
+      present: true,
+      hostPlatform: 'win32',
+      pinnedDigest: 'deadbeef',
+    });
+
+    expect(staged?.verify).toContain('Get-FileHash');
+    expect(staged?.verify).toContain('"deadbeef"');
+    expect(staged?.verify).not.toContain('curl.exe');
+    expect(staged?.verify).not.toContain('SHA256SUMS');
   });
 
   // A guess is fine for a command somebody reads before running. It is not fine

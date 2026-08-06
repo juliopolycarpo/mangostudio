@@ -48,6 +48,13 @@ export interface LoadedRuntimeAsset {
    * A stable version already names one build on its own.
    */
   readonly sourceSha?: string;
+  /**
+   * Whether `bytes` is actually on disk at the cache path, not just verified
+   * in memory. A caller that installs the bytes elsewhere (WSL/SSH push) can
+   * treat the cache as a courtesy and ignore this; a caller whose entire job
+   * is populating the cache (hub-only download) cannot.
+   */
+  readonly cached: boolean;
 }
 
 export async function loadRuntimeReleaseBytes(
@@ -58,8 +65,11 @@ export async function loadRuntimeReleaseBytes(
     readonly readBytes?: (path: string) => Promise<Uint8Array | null>;
     readonly writeCache?: (path: string, bytes: Uint8Array) => Promise<void>;
     readonly localBuildPath?: (platformId: string) => string;
+    /** Cancels an in-flight manifest or asset download; checked between hops, not mid-byte-stream. */
+    readonly signal?: AbortSignal;
   } = {}
 ): Promise<LoadedRuntimeAsset> {
+  const signal = overrides.signal;
   const version = overrides.version ?? getVersion();
   const cacheDir = overrides.cacheDir ?? ((v) => join(getHomeMangoDir(), 'runtime-cache', v));
   const readBytes =
@@ -89,7 +99,7 @@ export async function loadRuntimeReleaseBytes(
         `No local runtime build at ${path} for development version "${version}".`
       );
     }
-    return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}` };
+    return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}`, cached: true };
   }
 
   const deps: SafeFetchDeps = {
@@ -98,7 +108,7 @@ export async function loadRuntimeReleaseBytes(
   };
   const release = resolveRuntimeRelease(version, platformId);
   const manifest = release.rolling
-    ? await assertRollingPair(deps, version, release, platformId)
+    ? await assertRollingPair(deps, version, release, platformId, signal)
     : null;
   const provenance = manifest ? { sourceSha: manifest.sourceSha } : {};
   // Bound to the manifest read {@link assertRollingPair} already validated,
@@ -109,7 +119,7 @@ export async function loadRuntimeReleaseBytes(
     : undefined;
 
   try {
-    const bytes = await loadAsset(
+    const { bytes, cached } = await loadAsset(
       deps,
       {
         cacheVersion: version,
@@ -119,14 +129,15 @@ export async function loadRuntimeReleaseBytes(
       cacheDir,
       readBytes,
       writeCache,
-      boundDigest
+      boundDigest,
+      signal
     );
-    return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}`, ...provenance };
+    return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}`, cached, ...provenance };
   } catch (error) {
     if (!(error instanceof RuntimeAssetMissingError)) throw error;
   }
 
-  const bytes = await loadAsset(
+  const { bytes, cached } = await loadAsset(
     deps,
     {
       cacheVersion: version,
@@ -135,9 +146,11 @@ export async function loadRuntimeReleaseBytes(
     },
     cacheDir,
     readBytes,
-    writeCache
+    writeCache,
+    undefined,
+    signal
   );
-  return { bytes, fromArchive: true, digest: `sha256:${sha256(bytes)}`, ...provenance };
+  return { bytes, fromArchive: true, digest: `sha256:${sha256(bytes)}`, cached, ...provenance };
 }
 
 class RuntimeAssetMissingError extends RuntimeAssetLoadError {}
@@ -152,14 +165,16 @@ async function assertRollingPair(
   deps: SafeFetchDeps,
   version: string,
   release: RuntimeReleaseResolution,
-  platformId: string
+  platformId: string,
+  signal?: AbortSignal
 ): Promise<CanaryManifest | null> {
   const { manifest, refusal } = await checkRollingPair({
     fetchManifest: () =>
       download(
         deps,
         releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
-        MAX_CHECKSUMS_BYTES
+        MAX_CHECKSUMS_BYTES,
+        signal
       ),
     tolerate: (error) => error instanceof RuntimeAssetLoadError,
     hubVersion: version,
@@ -179,24 +194,54 @@ async function loadAsset(
   cacheDir: (version: string) => string,
   readBytes: (path: string) => Promise<Uint8Array | null>,
   writeCache: (path: string, bytes: Uint8Array) => Promise<void>,
-  expectedDigest?: string
-): Promise<Uint8Array> {
+  expectedDigest?: string,
+  signal?: AbortSignal
+): Promise<{ bytes: Uint8Array; cached: boolean }> {
   const { assetName, cacheVersion, tagVersion } = identity;
   const cachePath = join(cacheDir(cacheVersion), assetName);
-  const expected = expectedDigest ?? (await fetchExpectedChecksum(deps, tagVersion, assetName));
-  const cached = await readBytes(cachePath);
-  if (cached && sha256(cached) === expected) return cached;
+  const expected =
+    expectedDigest ?? (await fetchExpectedChecksum(deps, tagVersion, assetName, signal));
+  const fromCache = await readBytes(cachePath);
+  if (fromCache && sha256(fromCache) === expected) return { bytes: fromCache, cached: true };
 
-  const bytes = await download(deps, releaseAssetUrl(tagVersion, assetName), MAX_ARCHIVE_BYTES);
+  const bytes = await download(
+    deps,
+    releaseAssetUrl(tagVersion, assetName),
+    MAX_ARCHIVE_BYTES,
+    signal
+  );
   const actual = sha256(bytes);
   if (actual !== expected) {
     throw new RuntimeAssetLoadError(
       `The downloaded ${assetName} does not match the checksum published for this release.`
     );
   }
-  await writeCache(cachePath, bytes).catch(() => undefined);
+  const cached = await writeCache(cachePath, bytes).then(
+    () => true,
+    () => false
+  );
+  if (cached) {
+    // Pins what verifying this file later means, independent of whatever
+    // SHA256SUMS a rolling tag serves by then — see {@link runtimeDigestSidecarPath}.
+    await writeCache(runtimeDigestSidecarPath(cachePath), new TextEncoder().encode(actual)).catch(
+      () => undefined
+    );
+  }
   await pruneRuntimeCache(cacheDir(cacheVersion), cacheVersion).catch(() => undefined);
-  return bytes;
+  return { bytes, cached };
+}
+
+/**
+ * Where the digest that validated a cached asset is recorded, next to it.
+ *
+ * A rolling tag republishes SHA256SUMS under the same filename as newer builds
+ * land, so re-fetching it to build a verify command for bytes already on disk
+ * checks today's build against yesterday's cache and reports a false mismatch.
+ * The sidecar remembers the digest this hub actually verified at download
+ * time, so a later verify command can check the file against itself.
+ */
+export function runtimeDigestSidecarPath(assetPath: string): string {
+  return `${assetPath}.sha256`;
 }
 
 /**
@@ -228,12 +273,14 @@ export async function pruneRuntimeCache(
 async function fetchExpectedChecksum(
   deps: SafeFetchDeps,
   version: string,
-  assetName: string
+  assetName: string,
+  signal?: AbortSignal
 ): Promise<string> {
   const checksums = await download(
     deps,
     releaseAssetUrl(version, 'SHA256SUMS'),
-    MAX_CHECKSUMS_BYTES
+    MAX_CHECKSUMS_BYTES,
+    signal
   );
   const expected = findReleaseChecksum(new TextDecoder().decode(checksums), assetName);
   if (!expected) {
@@ -242,11 +289,16 @@ async function fetchExpectedChecksum(
   return expected;
 }
 
-async function download(deps: SafeFetchDeps, url: string, maxBytes: number): Promise<Uint8Array> {
+async function download(
+  deps: SafeFetchDeps,
+  url: string,
+  maxBytes: number,
+  signal?: AbortSignal
+): Promise<Uint8Array> {
   try {
     const result = await safeFetchBytes(
       url,
-      { maxBytes, maxRedirects: MAX_REDIRECTS, timeoutMs: DOWNLOAD_TIMEOUT_MS },
+      { maxBytes, maxRedirects: MAX_REDIRECTS, timeoutMs: DOWNLOAD_TIMEOUT_MS, signal },
       deps
     );
     return result.bytes;

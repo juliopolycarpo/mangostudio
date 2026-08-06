@@ -56,7 +56,8 @@ export function buildRuntimeLifecycleView(
       ? [...new Set<RuntimeLifecycleAction>([...baseActions, 'upgrade'])]
       : baseActions,
     input.health,
-    input.managedPush !== false
+    input.managedPush !== false,
+    input.stagedRuntime !== undefined
   );
   const manualCommands = manualCommandsFor(input.transportKind, input.platformHint);
 
@@ -142,11 +143,18 @@ const PUSH_ACTIONS: readonly RuntimeLifecycleAction[] = ['install', 'reinstall',
  * neither a machine that refuses hub-driven updates nor a custom runtime path
  * the push helper cannot target is a reason to withhold it — those are exactly
  * the cases where somebody has to carry the verified bytes over by hand.
+ *
+ * `canStage` is the one gate `download` does not survive: a machine that has
+ * never reported a platform (or a source-checkout hub with no release to
+ * fetch) gives `stagedRuntimeAssetFor` nothing to name, and the card would
+ * offer a button that rejects the click with "connect it once" the instant
+ * somebody presses it.
  */
 function filterLifecycleActions(
   actions: readonly RuntimeLifecycleAction[],
   health: RuntimeHealthReport | null,
-  managedPush: boolean
+  managedPush: boolean,
+  canStage: boolean
 ): readonly RuntimeLifecycleAction[] {
   let next = actions;
   if (!managedPush) {
@@ -154,6 +162,9 @@ function filterLifecycleActions(
   }
   if (health?.allow?.update === false) {
     next = next.filter((action) => !PUSH_ACTIONS.includes(action));
+  }
+  if (!canStage) {
+    next = next.filter((action) => action !== 'download');
   }
   return next;
 }
@@ -208,6 +219,13 @@ export function stagedRuntimeAsset(input: {
    * both hosts without one physically existing.
    */
   readonly hostPlatform?: string;
+  /**
+   * The digest recorded next to the cached file at download time (see
+   * {@link runtimeDigestSidecarPath}). When present, the verify command checks
+   * the file against this pinned value instead of re-fetching SHA256SUMS —
+   * the fetch is what a rolling tag can outrun between download and view.
+   */
+  readonly pinnedDigest?: string;
 }): RuntimeStagedAsset | undefined {
   if (isDevelopmentVersion(input.version)) return undefined;
   if (input.platformHint === undefined || input.platformHint.length === 0) return undefined;
@@ -234,15 +252,19 @@ export function stagedRuntimeAsset(input: {
     // `curl | awk | sha256sum` needs a POSIX shell and GNU coreutils, neither
     // of which a stock Windows hub has; it gets the same PowerShell shape
     // {@link manualCommandsFor} already hands a Windows target below.
-    verify: hostIsWindows
-      ? `curl.exe -fsSL "${sumsUrl}" -o SHA256SUMS; ` +
-        `$want = (Select-String -Path SHA256SUMS -Pattern ' ${assetName}$').Line.Split(' ')[0]; ` +
-        `if ((Get-FileHash "${path}" -Algorithm SHA256).Hash -ne $want) { throw 'checksum mismatch' } else { 'OK' }`
-      : // Checks the file where it actually is, against the release that
-        // published it. `sha256sum -c` needs "<digest>  <path>", and the
-        // published line names the asset, not this cache path — so the path
-        // is substituted in.
-        `curl -fsSL "${sumsUrl}" | awk '$2=="${assetName}"{print $1"  ${path}"}' | sha256sum -c -`,
+    verify: input.pinnedDigest
+      ? hostIsWindows
+        ? `if ((Get-FileHash "${path}" -Algorithm SHA256).Hash -ne "${input.pinnedDigest}") { throw 'checksum mismatch' } else { 'OK' }`
+        : `echo "${input.pinnedDigest}  ${path}" | sha256sum -c -`
+      : hostIsWindows
+        ? `curl.exe -fsSL "${sumsUrl}" -o SHA256SUMS; ` +
+          `$want = (Select-String -Path SHA256SUMS -Pattern ' ${assetName}$').Line.Split(' ')[0]; ` +
+          `if ((Get-FileHash "${path}" -Algorithm SHA256).Hash -ne $want) { throw 'checksum mismatch' } else { 'OK' }`
+        : // Checks the file where it actually is, against the release that
+          // published it. `sha256sum -c` needs "<digest>  <path>", and the
+          // published line names the asset, not this cache path — so the path
+          // is substituted in.
+          `curl -fsSL "${sumsUrl}" | awk '$2=="${assetName}"{print $1"  ${path}"}' | sha256sum -c -`,
     present: input.present,
   };
 }

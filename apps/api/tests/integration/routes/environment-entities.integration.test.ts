@@ -114,7 +114,10 @@ function createTestApp(
 /** A real update-capable host whose health matches installed release bytes. */
 function createProvisionedRuntimeHost(
   options: Parameters<typeof createLocalRuntimeHost>[0],
-  platformId?: RuntimePlatformId
+  platformId?: RuntimePlatformId,
+  // Simulates a peer whose runtime predates the `platformId` field: `platform`
+  // and `arch` still arrive, but nothing names the exact release identity.
+  stripPlatformId = false
 ): RuntimeHost {
   let host: RuntimeHost | undefined;
   const registry = createRuntimeMethodHandlers({
@@ -128,8 +131,9 @@ function createProvisionedRuntimeHost(
   const handlers = new Map(registry.handlers);
   handlers.set('runtime.health', async (params, context) => {
     const report = (await health(params, context)) as RuntimeHealthReport;
+    const { platformId: _omitted, ...withoutPlatformId } = report;
     return {
-      ...report,
+      ...(stripPlatformId ? withoutPlatformId : report),
       source: 'provisioned',
       ...(platformId ? { platformId } : {}),
     } satisfies RuntimeHealthReport;
@@ -574,7 +578,61 @@ describe('environment entity routes', () => {
     expect(wsl.status).toBe(200);
     const wslView = (await wsl.json()) as RuntimeLifecycleView;
     expect(Value.Check(RuntimeLifecycleViewSchema, wslView)).toBe(true);
-    expect(wslView.actions).toEqual(['install', 'reinstall', 'upgrade', 'download']);
+    // Never connected, so no platform has been reported yet: `download` would
+    // reject the click with "connect it once" the instant somebody pressed
+    // it, so the action list withholds it until there is an identity to stage.
+    expect(wslView.actions).toEqual(['install', 'reinstall', 'upgrade']);
+    expect(wslView.stagedRuntime).toBeUndefined();
+  });
+
+  // `linux-x64` glibc and `linux-x64-musl` are different release assets. A
+  // peer that predates `platformId` (or whose probe could not resolve one)
+  // reports `platform`/`arch` alone, and those two fields cannot tell musl
+  // from glibc — guessing glibc here would stage (and describe as "the
+  // matching runtime") a binary that will not run on an actually-musl machine.
+  it('withholds staging for a connected Linux peer with no exact platform identity', async () => {
+    const originalVersion = process.env.VERSION;
+    process.env.VERSION = '9.9.9-test';
+    try {
+      const host = createProvisionedRuntimeHost(
+        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
+        undefined,
+        true
+      );
+      const { app, repository, manager } = createTestApp({
+        wsl: async (_definition, onUnavailable) => {
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      });
+      await repository.create({
+        id: 'wsl-no-platform-id',
+        userId: TEST_USER.id,
+        name: 'WSL no platform id',
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      });
+      await manager.connect(TEST_USER.id, 'wsl-no-platform-id');
+      await manager.refreshManifest(TEST_USER.id, 'wsl-no-platform-id');
+
+      const response = await app.handle(
+        new Request('http://localhost/environments/wsl-no-platform-id/runtime')
+      );
+      expect(response.status).toBe(200);
+      const view = (await response.json()) as RuntimeLifecycleView;
+      expect(view.health?.platformId).toBeUndefined();
+      expect(view.health?.platform).toBe('linux');
+      expect(view.actions).not.toContain('download');
+      expect(view.stagedRuntime).toBeUndefined();
+      await manager.closeAll();
+    } finally {
+      if (originalVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = originalVersion;
+    }
   });
 
   it('starts a WSL runtime install and streams SSE exit', async () => {
@@ -725,6 +783,7 @@ describe('environment entity routes', () => {
                 bytes: new TextEncoder().encode('verified-runtime-binary'),
                 digest: 'sha256:0',
                 fromArchive: false as const,
+                cached: true,
               });
             },
           })
@@ -770,6 +829,167 @@ describe('environment entity routes', () => {
     }
   });
 
+  // The download-only action's whole point is a file left on disk. A hub
+  // that cannot write its cache dir (full disk, permissions) must not report
+  // success for bytes that only ever existed in memory.
+  it('fails staging when the verified bytes cannot be written to the hub cache', async () => {
+    const originalVersion = process.env.VERSION;
+    process.env.VERSION = '9.9.9-test';
+    try {
+      const host = createProvisionedRuntimeHost(
+        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
+        'linux-x64-musl'
+      );
+      const { app, repository, manager } = createTestApp(
+        {
+          wsl: async (_definition, onUnavailable) => {
+            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            return {
+              client: new RuntimeClient(connection.client, onUnavailable),
+              close: () => connection.close(),
+            };
+          },
+        },
+        undefined,
+        undefined,
+        (runtimeManager) =>
+          createRuntimeLifecycleService({
+            manager: runtimeManager,
+            provisioner: {
+              ensure: async () => undefined,
+              removeSlotBytes: async () => undefined,
+              slotBytes: async () => null,
+            },
+            loadRuntimeAsset: () =>
+              Promise.resolve({
+                bytes: new TextEncoder().encode('verified-runtime-binary'),
+                digest: 'sha256:0',
+                fromArchive: false as const,
+                cached: false,
+              }),
+          })
+      );
+      await repository.create({
+        id: 'wsl-staged-download-cache-failure',
+        userId: TEST_USER.id,
+        name: 'Staged download cache failure',
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      });
+      await manager.connect(TEST_USER.id, 'wsl-staged-download-cache-failure');
+      await manager.refreshManifest(TEST_USER.id, 'wsl-staged-download-cache-failure');
+
+      const started = await app.handle(
+        new Request(
+          'http://localhost/environments/wsl-staged-download-cache-failure/runtime/install',
+          jsonRequest('POST', { action: 'download' })
+        )
+      );
+      expect(started.status).toBe(200);
+      const { runId } = (await started.json()) as { runId: string };
+      const log = await app.handle(
+        new Request(
+          `http://localhost/environments/wsl-staged-download-cache-failure/runtime/runs/${runId}/log`
+        )
+      );
+      const body = await log.text();
+
+      expect(body).toContain('"status":"failed"');
+      expect(body).not.toContain('Verified and cached');
+      await manager.closeAll();
+    } finally {
+      if (originalVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = originalVersion;
+    }
+  });
+
+  // Before the run signal reached the loader, cancelling here only took effect
+  // once the (up to 300s) download settled on its own: the run stayed active
+  // and an immediate retry saw a conflict despite the cancel having "worked".
+  it('cancels a staged download instead of waiting for it to finish on its own', async () => {
+    const originalVersion = process.env.VERSION;
+    process.env.VERSION = '9.9.9-test';
+    try {
+      let sawSignal: AbortSignal | undefined;
+      const host = createProvisionedRuntimeHost(
+        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
+        'linux-x64-musl'
+      );
+      let lifecycle: RuntimeLifecycleService | undefined;
+      const { app, repository, manager } = createTestApp(
+        {
+          wsl: async (_definition, onUnavailable) => {
+            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            return {
+              client: new RuntimeClient(connection.client, onUnavailable),
+              close: () => connection.close(),
+            };
+          },
+        },
+        undefined,
+        undefined,
+        (runtimeManager) => {
+          lifecycle = createRuntimeLifecycleService({
+            manager: runtimeManager,
+            provisioner: {
+              ensure: async () => undefined,
+              removeSlotBytes: async () => undefined,
+              slotBytes: async () => null,
+            },
+            loadRuntimeAsset: (_platformId, options) => {
+              sawSignal = options?.signal;
+              return new Promise((_resolve, reject) => {
+                options?.signal?.addEventListener('abort', () => reject(new Error('cancelled')), {
+                  once: true,
+                });
+              });
+            },
+          });
+          return lifecycle;
+        }
+      );
+      await repository.create({
+        id: 'wsl-cancel-download',
+        userId: TEST_USER.id,
+        name: 'WSL cancel download',
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      });
+      await manager.connect(TEST_USER.id, 'wsl-cancel-download');
+      await manager.refreshManifest(TEST_USER.id, 'wsl-cancel-download');
+
+      const started = await app.handle(
+        new Request(
+          'http://localhost/environments/wsl-cancel-download/runtime/install',
+          jsonRequest('POST', { action: 'download' })
+        )
+      );
+      expect(started.status).toBe(200);
+      const { runId } = (await started.json()) as { runId: string };
+      const log = await app.handle(
+        new Request(`http://localhost/environments/wsl-cancel-download/runtime/runs/${runId}/log`)
+      );
+
+      const cancelled = await app.handle(
+        new Request(
+          `http://localhost/environments/wsl-cancel-download/runtime/runs/${runId}/cancel`,
+          jsonRequest('POST')
+        )
+      );
+      expect(cancelled.status).toBe(200);
+      expect(await log.text()).toContain('"status":"cancelled"');
+      // Not just that the run ended, but that the loader was the one told to stop.
+      expect(sawSignal?.aborted).toBe(true);
+      expect(lifecycle?.hasActiveInstall(TEST_USER.id, 'wsl-cancel-download')).toBe(false);
+      await manager.closeAll();
+    } finally {
+      if (originalVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = originalVersion;
+    }
+  });
+
   it('updates a connected runtime over its existing protocol connection', async () => {
     const mangoHome = await mkdtemp(join(tmpdir(), 'mango-live-update-route-'));
     tempHomes.push(mangoHome);
@@ -802,7 +1022,7 @@ describe('environment entity routes', () => {
           manager: runtimeManager,
           loadRuntimeAsset: (platformId) => {
             loadedPlatformId = platformId;
-            return Promise.resolve({ bytes, digest, fromArchive: false as const });
+            return Promise.resolve({ bytes, digest, fromArchive: false as const, cached: true });
           },
         })
     );
@@ -897,7 +1117,8 @@ describe('environment entity routes', () => {
       (runtimeManager) =>
         createRuntimeLifecycleService({
           manager: runtimeManager,
-          loadRuntimeAsset: () => Promise.resolve({ bytes, digest, fromArchive: false as const }),
+          loadRuntimeAsset: () =>
+            Promise.resolve({ bytes, digest, fromArchive: false as const, cached: true }),
         })
     );
     await repository.create({
@@ -981,7 +1202,12 @@ describe('environment entity routes', () => {
         createRuntimeLifecycleService({
           manager: runtimeManager,
           loadRuntimeAsset: () =>
-            Promise.resolve({ bytes, digest: wrongDigest, fromArchive: false as const }),
+            Promise.resolve({
+              bytes,
+              digest: wrongDigest,
+              fromArchive: false as const,
+              cached: true,
+            }),
         })
     );
     await repository.create({
@@ -1070,7 +1296,8 @@ describe('environment entity routes', () => {
       (runtimeManager) =>
         createRuntimeLifecycleService({
           manager: runtimeManager,
-          loadRuntimeAsset: () => Promise.resolve({ bytes, digest, fromArchive: false as const }),
+          loadRuntimeAsset: () =>
+            Promise.resolve({ bytes, digest, fromArchive: false as const, cached: true }),
         })
     );
     await repository.create({
@@ -1148,7 +1375,8 @@ describe('environment entity routes', () => {
       (runtimeManager) =>
         createRuntimeLifecycleService({
           manager: runtimeManager,
-          loadRuntimeAsset: () => Promise.resolve({ bytes, digest, fromArchive: false as const }),
+          loadRuntimeAsset: () =>
+            Promise.resolve({ bytes, digest, fromArchive: false as const, cached: true }),
         })
     );
     await repository.create({
