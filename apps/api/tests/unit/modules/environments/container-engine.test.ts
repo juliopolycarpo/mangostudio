@@ -113,6 +113,40 @@ describe('container engine detection', () => {
       { engine: 'podman', available: false, reason: 'engine-missing' },
     ]);
   });
+
+  it('answers a repeat question without forking the engines again', async () => {
+    let calls = 0;
+    const service = createContainerEngineService({
+      run: () => {
+        calls += 1;
+        return Promise.resolve({ stdout: '29.7.1', stderr: '', exitCode: 0 });
+      },
+    });
+
+    const first = await service.detect();
+    const second = await service.detect();
+
+    // One CLI per engine, for both questions.
+    expect(calls).toBe(2);
+    expect(second).toEqual(first);
+  });
+
+  it('shares one probe between callers that arrive together', async () => {
+    let calls = 0;
+    const service = createContainerEngineService({
+      run: () => {
+        calls += 1;
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ stdout: '29.7.1', stderr: '', exitCode: 0 }), 5)
+        );
+      },
+    });
+
+    const [first, second] = await Promise.all([service.detect(), service.detect()]);
+
+    expect(calls).toBe(2);
+    expect(second).toEqual(first);
+  });
 });
 
 describe('container image preparation', () => {

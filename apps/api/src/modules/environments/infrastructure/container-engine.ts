@@ -63,6 +63,14 @@ const MAXBUFFER_ERROR_CODE = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
  */
 const PROBE_CACHE_MAX_ENTRIES = 64;
 
+/**
+ * How long a detection answer is reused before the engines are asked again.
+ *
+ * Short on purpose: this exists to collapse a burst of identical questions, not
+ * to remember what is installed.
+ */
+const DETECT_CACHE_TTL_MS = 5_000;
+
 const logger = createDiagnosticLogger('container-engine');
 
 const ENGINES: readonly ContainerEngine[] = ['docker', 'podman'];
@@ -164,6 +172,19 @@ export function createContainerEngineService(
    */
   const probeCache = new Map<string, LinuxPlatformId>();
 
+  /**
+   * The last detection answer, and the call currently producing one.
+   *
+   * Detection forks one CLI per engine and is asked by every client that opens
+   * the add dialog — several browser tabs, or a refetch on focus, would
+   * otherwise fork two processes each. The answer only changes when somebody
+   * installs an engine or starts a daemon, so a short window is enough to make
+   * this constant rather than linear in request count, while still reflecting
+   * "I just started Docker" within a few seconds of it being true.
+   */
+  let detectCache: { readonly at: number; readonly value: ContainerDetection } | undefined;
+  let detectInFlight: Promise<ContainerDetection> | undefined;
+
   const run = (
     command: { readonly command: string; readonly args: readonly string[] },
     timeoutMs: number,
@@ -197,27 +218,43 @@ export function createContainerEngineService(
     throw error;
   };
 
+  const runDetect = async (): Promise<ContainerDetection> => {
+    const engines = await Promise.all(
+      ENGINES.map(async (engine): Promise<ContainerEngineStatus> => {
+        const result = await run(containerEngineVersionCommand(engine), INSPECT_TIMEOUT_MS);
+        if (result.exitCode === 0) {
+          const version = result.stdout.trim();
+          return { engine, available: true, ...(version ? { version } : {}) };
+        }
+        return {
+          engine,
+          available: false,
+          reason: classifyContainerFailure({
+            stderr: result.stderr,
+            exitCode: result.exitCode,
+            spawnErrorCode: result.spawnErrorCode,
+          }),
+        };
+      })
+    );
+    return { available: engines.some((status) => status.available), engines };
+  };
+
   return {
     async detect(): Promise<ContainerDetection> {
-      const engines = await Promise.all(
-        ENGINES.map(async (engine): Promise<ContainerEngineStatus> => {
-          const result = await run(containerEngineVersionCommand(engine), INSPECT_TIMEOUT_MS);
-          if (result.exitCode === 0) {
-            const version = result.stdout.trim();
-            return { engine, available: true, ...(version ? { version } : {}) };
-          }
-          return {
-            engine,
-            available: false,
-            reason: classifyContainerFailure({
-              stderr: result.stderr,
-              exitCode: result.exitCode,
-              spawnErrorCode: result.spawnErrorCode,
-            }),
-          };
+      const cached = detectCache;
+      if (cached && Date.now() - cached.at < DETECT_CACHE_TTL_MS) return cached.value;
+      // Callers that arrive while one is running share it rather than starting
+      // a second: the question is the same and the answer is process-wide.
+      detectInFlight ??= runDetect()
+        .then((value) => {
+          detectCache = { at: Date.now(), value };
+          return value;
         })
-      );
-      return { available: engines.some((status) => status.available), engines };
+        .finally(() => {
+          detectInFlight = undefined;
+        });
+      return await detectInFlight;
     },
 
     async prepare(config, hooks = {}): Promise<LinuxPlatformId> {
