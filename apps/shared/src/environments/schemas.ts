@@ -1025,3 +1025,26 @@ export const RuntimeSetupBodySchema = Type.Union([
   ),
 ]);
 export type RuntimeSetupBody = Static<typeof RuntimeSetupBodySchema>;
+
+/**
+ * Body for POST /environments/:id/runtime/bootstrap — one call that takes an
+ * ssh-reachable machine to a paired environment that dials the hub itself.
+ *
+ * The ssh credentials are **request-scoped**: the hub opens a channel with
+ * them, pushes, consents, pairs and installs the service, and keeps nothing.
+ * They are deliberately not stored on the environment row, because after this
+ * runs the hub never reaches that machine over ssh again — it waits for the
+ * machine to dial in. Re-running the flow asks for them again, which is the
+ * honest cost of not holding a credential nothing needs.
+ *
+ * `consent` is the same body `setup` takes on the card, so one consent surface
+ * and one `allow.shell` honesty string serve both.
+ */
+export const RuntimePairedBootstrapBodySchema = Type.Object(
+  {
+    ssh: SshEnvironmentConfigSchema,
+    consent: RuntimeSetupBodySchema,
+  },
+  { additionalProperties: Type.Never() }
+);
+export type RuntimePairedBootstrapBody = Static<typeof RuntimePairedBootstrapBodySchema>;

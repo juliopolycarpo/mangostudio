@@ -47,6 +47,12 @@ type ReachabilityChoice = 'stdio' | 'wsl' | 'container' | 'websocket' | 'http' |
 
 interface AddEnvironmentDialogProps {
   readonly onClose: () => void;
+  /**
+   * Opens the guided flow instead of this form. Offered as a picker answer
+   * because "set up a new machine" is the same question this dialog asks —
+   * a user who has one does not know yet that it is an ssh answer.
+   */
+  readonly onStartOnboarding?: () => void;
 }
 
 /** Derives an id from a name so the common case needs one field, not two. */
@@ -68,7 +74,7 @@ function preferredDistro(offered: readonly WslDistribution[]): string {
   return (offered.find((distribution) => distribution.default) ?? offered[0])?.name ?? '';
 }
 
-export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
+export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironmentDialogProps) {
   const { t } = useI18n();
   const labels = t.environments.entities.add;
   const create = useCreateEnvironmentMutation();
@@ -273,6 +279,23 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
                 />
               ))}
             </div>
+            {/* Last, and it leaves rather than selects: the guided flow asks
+                these same questions in an order that suits somebody who has a
+                bare machine and no environment yet. Sibling to the tablist, not
+                inside it: it is not a tab and does not select a choice. */}
+            {onStartOnboarding ? (
+              <button
+                type="button"
+                onClick={onStartOnboarding}
+                data-testid="add-environment-onboarding"
+                className="mt-2 block w-full rounded-xl border border-outline-variant/20 border-dashed px-3 py-2 text-left font-semibold text-on-surface-variant/70 text-sm transition-colors hover:bg-surface-container-highest"
+              >
+                {labels.reachNewMachine}
+                <span className="mt-0.5 block font-normal text-on-surface-variant/55 text-xs">
+                  {labels.newMachineHint}
+                </span>
+              </button>
+            ) : null}
             <div className="rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
               <p className="text-on-surface-variant/70 text-xs">{hints[kind]}</p>
             </div>

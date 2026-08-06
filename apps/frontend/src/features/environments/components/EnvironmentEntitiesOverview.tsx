@@ -6,6 +6,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
+import { MachineOnboardingWizard } from '../onboarding/MachineOnboardingWizard';
 import {
   useConnectEnvironmentMutation,
   useDisconnectEnvironmentMutation,
@@ -39,6 +40,7 @@ export function EnvironmentEntitiesOverview() {
   const { t } = useI18n();
   const environments = useEnvironmentEntitiesQuery();
   const [adding, setAdding] = useState(false);
+  const [onboarding, setOnboarding] = useState(false);
 
   return (
     <section className="space-y-3" data-testid="overview-environments">
@@ -61,7 +63,17 @@ export function EnvironmentEntitiesOverview() {
         </button>
       </div>
 
-      {adding ? <AddEnvironmentDialog onClose={() => setAdding(false)} /> : null}
+      {adding ? (
+        <AddEnvironmentDialog
+          onClose={() => setAdding(false)}
+          onStartOnboarding={() => {
+            setAdding(false);
+            setOnboarding(true);
+          }}
+        />
+      ) : null}
+
+      {onboarding ? <MachineOnboardingWizard onClose={() => setOnboarding(false)} /> : null}
 
       {environments.isPending && !environments.data ? (
         <EnvironmentPageState variant="loading" size="section" />

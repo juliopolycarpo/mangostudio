@@ -2444,7 +2444,81 @@ export const messages: Messages = {
         submit: 'Add environment',
         cancel: 'Cancel',
         createFailed: 'The environment could not be created.',
+        reachNewMachine: 'Set up a new machine…',
+        newMachineHint:
+          'Walks a machine you can reach over SSH from nothing to a working environment: the runtime, its permissions, what is installed on it, and your library.',
       },
+    },
+    onboarding: {
+      title: 'Set up a new machine',
+      progress: 'Step {step} of {total} · {name}',
+      steps: {
+        reach: 'Reach it',
+        'end-state': 'End state',
+        install: 'Runtime',
+        permissions: 'Permissions',
+        provision: 'Provision',
+        tools: 'Tools',
+        library: 'Library',
+        done: 'Done',
+      },
+      continue: 'Continue',
+      back: 'Back',
+      finish: 'Finish',
+      close: 'Close',
+      missingEnvironment: 'This step needs the environment that the previous one creates.',
+      reachIntro:
+        'MangoStudio uses your own ssh client, so keys, your agent, ~/.ssh/config and known_hosts all apply. Nothing has to be installed on the machine first.',
+      reachWindows:
+        'Linux and macOS targets only. Windows is not supported over SSH — pair it from its own card instead.',
+      endStateLabel: 'How should MangoStudio reach it afterwards?',
+      endStateSsh: 'Over SSH, every time',
+      endStateSshHint:
+        'MangoStudio starts the runtime there with your ssh client whenever it needs it. Nothing runs on that machine in between, and there is no service to keep alive.',
+      endStatePaired: 'The machine dials MangoStudio',
+      endStatePairedHint:
+        'Set up once over SSH, then the runtime connects on its own and stays connected — through a router, a firewall, or MangoStudio moving to another network. It needs a service on that machine to survive reboots.',
+      endStatePairingUnavailable:
+        'MangoStudio could not check whether it has a public address to hand the machine. Nothing has been done on that machine yet — try again.',
+      endStatePairingRetry: 'Check again',
+      permissionsSshIntro:
+        'The runtime is on the machine. Say what MangoStudio may do with it — this is recorded on that machine, not here.',
+      permissionsPairedIntro:
+        'Say what MangoStudio may do on that machine. The answer is recorded there during setup, in the next step, and can be narrowed later from the card.',
+      permissionsNone: 'No permissions chosen yet.',
+      permissionsChosen: 'Profile: {profile}',
+      permissionsChoose: 'Choose permissions',
+      permissionsChange: 'Change permissions',
+      provisionSshIntro:
+        'MangoStudio pushes the runtime it matches, verifies its checksum, and publishes it. Running this again when the machine already has these bytes does nothing.',
+      provisionPairedIntro:
+        'One run over SSH: push the runtime, record your permissions, hand the machine a credential, and install the service that keeps it connected. Every step is safe to repeat.',
+      provisionStartSsh: 'Install the runtime',
+      provisionStartPaired: 'Set up the machine',
+      toolsIntro: 'What MangoStudio found on that machine.',
+      toolsProbing: 'Looking at what is installed…',
+      toolsNone: 'No toolchains or agent CLIs were found there yet.',
+      toolsError: 'Could not check what is installed on that machine.',
+      toolsDisconnected:
+        'Nothing has been probed yet — MangoStudio reads this from the machine once it is connected.',
+      toolsInstallsNote:
+        'Off by default. Installing on {name} needs this switch and that machine’s own permissions to agree; whichever one refuses says so.',
+      libraryIntro:
+        'Skills, subagents and instructions live per machine. Copying yours across is its own review — conflicts, per-destination consent, and undo — so it happens in the library.',
+      libraryOpen: 'Open the library for {name}',
+      libraryNotPermitted:
+        'This machine’s permissions exclude the library, so there is nothing to copy across until that changes.',
+      summaryReady: '{name} is set up and connected.',
+      summaryPending:
+        '{name} is set up. It is not connected right now — its card has the actions to finish or retry.',
+      summaryTransport: 'Transport',
+      summaryStatus: 'Status',
+      summaryVersion: 'Runtime version',
+      summaryDigest: 'Digest',
+      summaryProfile: 'Profile',
+      summaryUnknown: 'Not reported',
+      summaryAudit: 'Run these on that machine to see what was recorded there.',
+      summaryServiceCommand: 'Check the service',
     },
     runtimes: {
       description: 'Once two binaries share a name, only one runs. Here is which one.',
