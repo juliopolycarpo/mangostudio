@@ -881,8 +881,7 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
       websocket: refuseDialInRuntime,
       http: connectHttpRuntime,
       ssh: connectSshRuntime,
-      container: (definition, onUnavailable, report) =>
-        connectContainerRuntime(definition, onUnavailable, report),
+      container: connectContainerRuntime,
     },
     publish: publishEnvironmentInvalidation,
   });
