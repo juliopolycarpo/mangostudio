@@ -54,12 +54,15 @@ consented and holds a working credential, and one of these finishes it there.
 
 ```bash
 # after fixing whatever the console reported
-mangostudio-runtime service install --mode connect
+~/.mango/runtime/remote/current/mangostudio-runtime service install --mode connect
 # or, to run it now without a service
-mangostudio-runtime connect
+~/.mango/runtime/remote/current/mangostudio-runtime connect
 ```
 
-Neither needs flags — the hub URL and token are already stored.
+Neither needs flags — the hub URL and token are already stored. The full path is
+not decoration: the flow installs into the managed slot and never puts the
+binary on `PATH`, so a bare `mangostudio-runtime` is `command not found` on a
+machine this flow onboarded.
 
 ### Leaving early, and coming back
 
@@ -76,11 +79,15 @@ Everything above ran on your machine on your credentials. To see what was
 recorded there, on that machine:
 
 ```bash
-mangostudio-runtime health          # slot, version, digest, profile, permissions
-mangostudio-runtime setup --slot remote   # review or narrow the permissions
-mangostudio-runtime service status  # paired machines only
-mangostudio-runtime audit --since 24h     # if the slot records one
+cd ~/.mango/runtime/remote/current
+./mangostudio-runtime health              # slot, version, digest, profile, permissions
+./mangostudio-runtime setup --slot remote # review or narrow the permissions
+./mangostudio-runtime service status      # paired machines only
+./mangostudio-runtime audit --since 24h   # if the slot records one
 ```
+
+The summary at the end of the flow prints these with the runtime's own reported
+path already filled in, so copying them from there needs no `cd`.
 
 ## Connect and serve
 

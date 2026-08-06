@@ -1055,7 +1055,11 @@ export async function runPairedBootstrap(
   );
   if (!connected) {
     say(
-      `The service is installed on "${body.ssh.host}", but nothing has dialed ${input.endpoint} yet. Check that the machine can reach that address, then read its own log with "journalctl --user -u mangostudio-runtime".`,
+      // `service status` is the runtime's own command and answers on both
+      // supported targets; `journalctl` does not exist on macOS, and this is
+      // the only diagnostic a `no-dial-in` run prints, so naming a Linux-only
+      // one would leave half the supported targets with nothing to run.
+      `The service is installed on "${body.ssh.host}", but nothing has dialed ${input.endpoint} yet. Check that the machine can reach that address, then ask the service what it is doing with "${DEFAULT_SSH_RUNTIME_PATH} service status". Its log is in "journalctl --user -u mangostudio-runtime" on Linux, or "log show --predicate 'process == \\"mangostudio-runtime\\"' --last 1h" on macOS.`,
       'stderr'
     );
     return 'no-dial-in';

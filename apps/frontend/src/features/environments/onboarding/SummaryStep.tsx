@@ -11,7 +11,7 @@
  * after it stopped being.
  */
 
-import type { Environment } from '@mangostudio/shared/environments';
+import { DEFAULT_SSH_RUNTIME_PATH, type Environment } from '@mangostudio/shared/environments';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -24,10 +24,12 @@ import type { OnboardingEndState } from './steps';
  * The remote runtime lives under `~/.mango/runtime/remote/current/`, not on
  * PATH — a bare `mangostudio-runtime` would fail with "command not found" for
  * whoever pastes it in. `binaryPath` is the resolved path health already
- * carries; fall back to the bare name only when a report predates that field.
+ * carries; when there is no report yet — an `unsupervised` end state reached
+ * before anything dialed in — fall back to the managed slot rather than the
+ * bare name, because that is the only place this flow ever installs to.
  */
 function runtimeCommand(health: RuntimeHealthReport | null, args: string): string {
-  return `${health?.binaryPath ?? 'mangostudio-runtime'} ${args}`;
+  return `${health?.binaryPath ?? DEFAULT_SSH_RUNTIME_PATH} ${args}`;
 }
 
 interface SummaryStepProps {
