@@ -493,7 +493,9 @@ The card can fetch and verify the matching runtime into `~/.mango/runtime-cache/
 and stop there, writing nothing to the target machine. That is the half of a provision worth
 keeping when somebody declines the other half: the download is the expensive, network-bound,
 checksum-verified part, and the card shows the resulting path next to a `sha256sum -c` line
-that checks it, so the binary can be carried over by hand.
+that checks it, so the binary can be carried over by hand. A Windows hub gets a native path
+and a `Get-FileHash` line instead — the POSIX pipe assumes tools a stock Windows install does
+not have.
 
 Staging deliberately survives both push gates. `allow.update` is an answer about what a hub
 may write to *that* machine, and a custom `remoteRuntimePath` is a statement that the push

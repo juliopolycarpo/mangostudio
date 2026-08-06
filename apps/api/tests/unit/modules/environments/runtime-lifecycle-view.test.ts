@@ -369,6 +369,48 @@ describe('stagedRuntimeAsset', () => {
     expect(staged?.assetName).toBe('mangostudio-runtime-1.2.3-windows-x64.exe');
   });
 
+  // A release that publishes no standalone runtime for a platform caches the
+  // platform archive instead; the metadata has to name what is actually on
+  // disk, not the raw asset the download never wrote.
+  it('names the platform archive when fromArchive is set', () => {
+    const staged = stagedRuntimeAsset({
+      version: '1.2.3',
+      platformHint: 'linux-x64',
+      cacheDir,
+      present: true,
+      fromArchive: true,
+    });
+
+    expect(staged?.assetName).toBe('mangostudio-1.2.3-linux-x64.tar.gz');
+    expect(staged?.path).toBe(
+      '/home/u/.mango/runtime-cache/1.2.3/mangostudio-1.2.3-linux-x64.tar.gz'
+    );
+    expect(staged?.verify).toContain(`{print $1"  ${staged?.path}"}`);
+  });
+
+  // A Windows hub's cache dir is already backslash-shaped; appending the asset
+  // name with a forward slash would mix separators in a path some tools reject.
+  // The verify command also has to drop curl/awk/sha256sum for something a
+  // stock Windows hub actually has.
+  it('joins a Windows host path natively and emits a PowerShell verify command', () => {
+    const winCacheDir = (version: string) => `C:\\Users\\dev\\.mango\\runtime-cache\\${version}`;
+    const staged = stagedRuntimeAsset({
+      version: '1.2.3',
+      platformHint: 'linux-x64',
+      cacheDir: winCacheDir,
+      present: true,
+      hostPlatform: 'win32',
+    });
+
+    expect(staged?.path).toBe(
+      'C:\\Users\\dev\\.mango\\runtime-cache\\1.2.3\\mangostudio-runtime-1.2.3-linux-x64'
+    );
+    expect(staged?.verify).toContain('Get-FileHash');
+    expect(staged?.verify).toContain('curl.exe');
+    expect(staged?.verify).not.toContain('awk');
+    expect(staged?.verify).not.toContain('sha256sum');
+  });
+
   // A guess is fine for a command somebody reads before running. It is not fine
   // for a path this card claims already holds verified bytes.
   it.each([

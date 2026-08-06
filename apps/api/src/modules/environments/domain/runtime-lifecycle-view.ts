@@ -16,7 +16,7 @@ import type {
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { resolveRuntimeRelease } from './runtime-release-resolution';
-import { releaseAssetUrl } from './wsl-runtime-release';
+import { releaseArchiveName, releaseAssetUrl } from './wsl-runtime-release';
 
 /** Matches the connection manager's manifest freshness window. */
 const RUNTIME_HEALTH_FRESHNESS_MS = 15_000;
@@ -194,14 +194,36 @@ export function stagedRuntimeAsset(input: {
   readonly platformHint: string | undefined;
   readonly cacheDir: (version: string) => string;
   readonly present: boolean;
+  /**
+   * Names the platform archive instead of the standalone runtime — the asset
+   * that is actually on disk when a release publishes no raw runtime for this
+   * platform and the download fell back to it. Naming the raw asset anyway
+   * would describe a file that is not there and a checksum line that cannot
+   * pass.
+   */
+  readonly fromArchive?: boolean;
+  /**
+   * The hub's own OS, for a path and a verify command it can actually run.
+   * Defaults to the running process's — a parameter only so tests can cover
+   * both hosts without one physically existing.
+   */
+  readonly hostPlatform?: string;
 }): RuntimeStagedAsset | undefined {
   if (isDevelopmentVersion(input.version)) return undefined;
   if (input.platformHint === undefined || input.platformHint.length === 0) return undefined;
 
   const platformId = releasePlatformIdFromHint(input.platformHint);
   const release = resolveRuntimeRelease(input.version, platformId);
-  const assetName = release.runtimeAssetName;
-  const path = joinPosix(input.cacheDir(input.version), assetName);
+  const assetName = input.fromArchive
+    ? releaseArchiveName(release.assetVersion, platformId)
+    : release.runtimeAssetName;
+  // `cacheDir()` returns a host-native path (backslashes on a Windows hub);
+  // joining onto it with the wrong separator produces a mixed path that
+  // Explorer, cmd, and some tools reject.
+  const hostIsWindows = (input.hostPlatform ?? process.platform) === 'win32';
+  const path = hostIsWindows
+    ? joinWin32(input.cacheDir(input.version), assetName)
+    : joinPosix(input.cacheDir(input.version), assetName);
   const sumsUrl = releaseAssetUrl(release.tagVersion, 'SHA256SUMS');
 
   return {
@@ -209,17 +231,29 @@ export function stagedRuntimeAsset(input: {
     platformId,
     assetName,
     path,
-    // Checks the file where it actually is, against the release that published
-    // it. `sha256sum -c` needs "<digest>  <path>", and the published line names
-    // the asset, not this cache path — so the path is substituted in.
-    verify: `curl -fsSL "${sumsUrl}" | awk '$2=="${assetName}"{print $1"  ${path}"}' | sha256sum -c -`,
+    // `curl | awk | sha256sum` needs a POSIX shell and GNU coreutils, neither
+    // of which a stock Windows hub has; it gets the same PowerShell shape
+    // {@link manualCommandsFor} already hands a Windows target below.
+    verify: hostIsWindows
+      ? `curl.exe -fsSL "${sumsUrl}" -o SHA256SUMS; ` +
+        `$want = (Select-String -Path SHA256SUMS -Pattern ' ${assetName}$').Line.Split(' ')[0]; ` +
+        `if ((Get-FileHash "${path}" -Algorithm SHA256).Hash -ne $want) { throw 'checksum mismatch' } else { 'OK' }`
+      : // Checks the file where it actually is, against the release that
+        // published it. `sha256sum -c` needs "<digest>  <path>", and the
+        // published line names the asset, not this cache path — so the path
+        // is substituted in.
+        `curl -fsSL "${sumsUrl}" | awk '$2=="${assetName}"{print $1"  ${path}"}' | sha256sum -c -`,
     present: input.present,
   };
 }
 
-/** Cache paths are hub-local and always posix-shaped in the documented form. */
+/** Cache paths are hub-local and posix-shaped everywhere but a Windows hub. */
 function joinPosix(dir: string, name: string): string {
   return dir.endsWith('/') ? `${dir}${name}` : `${dir}/${name}`;
+}
+
+function joinWin32(dir: string, name: string): string {
+  return dir.endsWith('\\') ? `${dir}${name}` : `${dir}\\${name}`;
 }
 
 /** Fallback when no peer has ever reported a platform. Always marked as assumed. */

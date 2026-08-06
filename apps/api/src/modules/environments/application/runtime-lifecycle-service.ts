@@ -1300,7 +1300,8 @@ function runtimeCacheDir(version: string): string {
  */
 function stagedRuntimeAssetFor(
   transportKind: EnvironmentTransportKind,
-  health: RuntimeHealthReport | null
+  health: RuntimeHealthReport | null,
+  options: { readonly fromArchive?: boolean } = {}
 ): RuntimeStagedAsset | undefined {
   if (transportKind !== 'wsl' && transportKind !== 'ssh') return undefined;
 
@@ -1313,22 +1314,39 @@ function stagedRuntimeAssetFor(
     platformHint,
     cacheDir: runtimeCacheDir,
     present: false,
+    fromArchive: options.fromArchive,
   });
 }
 
-/** {@link stagedRuntimeAssetFor} plus the one question only the disk answers. */
+/**
+ * {@link stagedRuntimeAssetFor} plus the one question only the disk answers.
+ *
+ * Checks the raw asset first — what a download prefers — and falls back to the
+ * platform archive: a release that publishes no raw runtime for this platform
+ * caches the archive instead, and reporting the raw path would claim bytes
+ * that were never written while the archive a download actually verified goes
+ * unmentioned.
+ */
 async function resolveStagedRuntime(
   transportKind: EnvironmentTransportKind,
   health: RuntimeHealthReport | null
 ): Promise<RuntimeStagedAsset | undefined> {
-  const probe = stagedRuntimeAssetFor(transportKind, health);
-  if (!probe) return undefined;
+  const raw = stagedRuntimeAssetFor(transportKind, health);
+  if (!raw) return undefined;
 
-  const present = await access(probe.path).then(
+  if (await pathExists(raw.path)) return { ...raw, present: true };
+
+  const archive = stagedRuntimeAssetFor(transportKind, health, { fromArchive: true });
+  if (archive && (await pathExists(archive.path))) return { ...archive, present: true };
+
+  return { ...raw, present: false };
+}
+
+function pathExists(path: string): Promise<boolean> {
+  return access(path).then(
     () => true,
     () => false
   );
-  return { ...probe, present };
 }
 
 async function readSlotBytes(
