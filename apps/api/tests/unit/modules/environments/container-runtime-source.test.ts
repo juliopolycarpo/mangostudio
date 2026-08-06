@@ -16,6 +16,7 @@ function deps(overrides: Record<string, unknown> = {}) {
     loadBytes: () => Promise.resolve({ bytes: BYTES, fromArchive: false, digest: 'sha256:abc' }),
     fileExists: () => Promise.resolve(true),
     writeBinary: () => Promise.resolve(),
+    markExecutable: () => Promise.resolve(),
     ...overrides,
   } as never;
 }
@@ -43,6 +44,22 @@ describe('resolveContainerRuntimeBinary in a source checkout', () => {
     expect(fetched).toBe(false);
   });
 
+  it('marks the checkout build executable, which nothing else on this path does', async () => {
+    const marked: string[] = [];
+    const path = await resolveContainerRuntimeBinary(
+      'linux-x64-musl',
+      deps({
+        version: 'dev',
+        markExecutable: (target: string) => {
+          marked.push(target);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    expect(marked).toEqual([path]);
+  });
+
   it('names the command that produces a build there is not one of', async () => {
     const attempt = resolveContainerRuntimeBinary(
       'linux-arm64',
@@ -60,6 +77,9 @@ describe('resolveContainerRuntimeBinary from a release', () => {
     const path = await resolveContainerRuntimeBinary(
       'linux-x64',
       deps({
+        // The fetch's own cache write is best-effort; this is the run where it
+        // did not land, so the bytes still have to reach disk here.
+        fileExists: () => Promise.resolve(false),
         writeBinary: (target: string, bytes: Uint8Array) => {
           written.path = target;
           written.bytes = bytes;
@@ -71,6 +91,28 @@ describe('resolveContainerRuntimeBinary from a release', () => {
     expect(path).toBe('/home/j/.mango/runtime-cache/0.1.1/mangostudio-runtime-0.1.1-linux-x64');
     expect(written.path).toBe(path);
     expect(written.bytes).toEqual(BYTES);
+  });
+
+  it('marks a cached binary executable instead of rewriting it', async () => {
+    let wrote = false;
+    const marked: string[] = [];
+    const path = await resolveContainerRuntimeBinary(
+      'linux-x64',
+      deps({
+        fileExists: () => Promise.resolve(true),
+        writeBinary: () => {
+          wrote = true;
+          return Promise.resolve();
+        },
+        markExecutable: (target: string) => {
+          marked.push(target);
+          return Promise.resolve();
+        },
+      })
+    );
+
+    expect(wrote).toBe(false);
+    expect(marked).toEqual([path]);
   });
 
   it('resolves a canary hub onto the rolling asset name', async () => {

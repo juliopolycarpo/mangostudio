@@ -42,6 +42,7 @@ export interface ContainerRuntimeSourceDeps {
   readonly loadBytes: typeof loadRuntimeReleaseBytes;
   readonly fileExists: (path: string) => Promise<boolean>;
   readonly writeBinary: (path: string, bytes: Uint8Array) => Promise<void>;
+  readonly markExecutable: (path: string) => Promise<void>;
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -81,6 +82,19 @@ async function writeExecutable(path: string, bytes: Uint8Array): Promise<void> {
   }
 }
 
+/**
+ * Sets the executable bit on a binary already on disk, without rewriting it.
+ *
+ * The same guarantee {@link writeExecutable} makes, for the two paths that do
+ * not write: a cache entry the fetch validated, and a build a checkout made.
+ * Both are mounted as the container's entrypoint, and a file without the bit is
+ * mounted just as unexecutable — the container then dies with a permission
+ * error that says nothing about why.
+ */
+async function markExecutable(path: string): Promise<void> {
+  await chmod(path, 0o755);
+}
+
 const defaultDeps: ContainerRuntimeSourceDeps = {
   get version() {
     return getVersion();
@@ -94,6 +108,7 @@ const defaultDeps: ContainerRuntimeSourceDeps = {
   loadBytes: loadRuntimeReleaseBytes,
   fileExists: exists,
   writeBinary: writeExecutable,
+  markExecutable,
 };
 
 /**
@@ -113,7 +128,13 @@ export async function resolveContainerRuntimeBinary(
 
   if (isDevelopmentVersion(deps.version)) {
     const built = localRuntimeBuildPath(deps.baseDir, platformId);
-    if (await deps.fileExists(built)) return built;
+    if (await deps.fileExists(built)) {
+      // A build materialised by something other than the build script — an
+      // extracted tarball, a copy off a Windows share — can arrive without the
+      // bit, and this path is otherwise the one place nothing sets it.
+      await deps.markExecutable(built);
+      return built;
+    }
     throw new ContainerRuntimeSourceError(
       `This checkout has no ${platformId} runtime to mount into the container. Build one with: ${localRuntimeBuildCommand(platformId, built)}`
     );
@@ -144,8 +165,16 @@ export async function resolveContainerRuntimeBinary(
     );
   }
 
-  // Written rather than assumed present: the fetch caches on a best-effort
-  // basis, and a mount source that may or may not be there is not a source.
-  await deps.writeBinary(cached, asset.bytes);
+  // `cached` is the path the fetch caches to, so a hit above already left the
+  // verified bytes there and rewriting ~100 MB of them would change nothing.
+  // The one thing the fetch does not do is mark the file executable, which the
+  // mount needs. Written only when the fetch's own cache write did not land —
+  // it is best-effort — because a mount source that may or may not be there is
+  // not a source.
+  if (await deps.fileExists(cached)) {
+    await deps.markExecutable(cached);
+  } else {
+    await deps.writeBinary(cached, asset.bytes);
+  }
   return cached;
 }
