@@ -1,5 +1,89 @@
 # Remote runtimes (connect and serve)
 
+## Onboard a new machine
+
+**Environments → Add environment → “Set up a new machine…”** walks a box you can
+reach over SSH from nothing to a working environment. Everything it does is
+something the environment card can also do one button at a time; the flow exists
+because doing them in the right order, once, is the hard part.
+
+You need: a host you can already `ssh` into (its key in your `known_hosts` —
+MangoStudio will not accept an unknown one for you), and Linux or macOS on the
+far side. Windows is not an SSH target; pair it from its own card instead.
+
+### The one decision
+
+| End state    | How MangoStudio reaches it                         | Needs                              |
+| ------------ | -------------------------------------------------- | ---------------------------------- |
+| **Over SSH** | Starts the runtime with your ssh client, each time | Nothing else                       |
+| **Paired**   | The machine dials MangoStudio and stays connected  | `server.publicUrl`, a user service |
+
+Pick **paired** for a box behind a router or firewall, or when MangoStudio moves
+between networks. Pick **SSH** when neither is true — there is no service to keep
+alive and nothing runs on that machine in between.
+
+The paired flow stops at this step if `publicUrl` is unset, because the machine
+would have nowhere to dial. Set it under `[server]` in `config.toml` (or
+`PUBLIC_URL`) and come back.
+
+### What runs on the machine
+
+The SSH end state pushes the runtime and then runs `setup` with the permissions
+you chose. The paired end state does four things over one ssh channel:
+
+1. pushes the matching runtime into `~/.mango/runtime/remote/` and publishes
+   `current`, verifying the release checksum first;
+2. runs `setup` with your permissions, recorded on that machine;
+3. runs `connect --hub <publicUrl> --token -` once, long enough to store the hub
+   URL and a pairing token, then stops it — **the token is piped in on stdin and
+   is in no command line on either side**;
+4. runs `service install --mode connect`, with `XDG_RUNTIME_DIR` supplied
+   because a non-interactive ssh session has none (see
+   [No session bus](#no-session-bus-ssh-one-liners)).
+
+Your ssh credentials are used for that run and are not stored: after it, the
+machine reaches MangoStudio rather than the other way round. That is also why
+re-entering the flow for a half-onboarded paired machine asks for them again.
+
+### When step 4 does not work
+
+`service install` is the step most likely to fail, and it fails for local
+reasons — linger needing root, a distro without a user session bus. The flow
+treats that as a **degraded success** and says so: the machine is provisioned,
+consented and holds a working credential, and one of these finishes it there.
+
+```bash
+# after fixing whatever the console reported
+mangostudio-runtime service install --mode connect
+# or, to run it now without a service
+mangostudio-runtime connect
+```
+
+Neither needs flags — the hub URL and token are already stored.
+
+### Leaving early, and coming back
+
+There are no wizard tables. The environment row is the only thing the flow
+creates, and every step is safe to repeat: a push with matching bytes is a
+no-op, `setup` is re-runnable, `service install` converges. Closing the flow
+leaves a normal environment card with its usual actions, and reopening it works
+out the first unfinished step from the runtime's own health, its consent, and
+whether anything has been probed.
+
+### Auditing it afterwards
+
+Everything above ran on your machine on your credentials. To see what was
+recorded there, on that machine:
+
+```bash
+mangostudio-runtime health          # slot, version, digest, profile, permissions
+mangostudio-runtime setup --slot remote   # review or narrow the permissions
+mangostudio-runtime service status  # paired machines only
+mangostudio-runtime audit --since 24h     # if the slot records one
+```
+
+## Connect and serve
+
 Dial-in environments keep a `mangostudio-runtime` process on another machine.
 Two transports share one `remote` slot under `~/.mango/runtime/remote/`:
 

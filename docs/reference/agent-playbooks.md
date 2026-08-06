@@ -632,6 +632,19 @@ with WSL. Everything that puts runtime bytes on another machine goes through it:
   archive fallback, checksum verified before any remote write, hub cache prune)
 - `apps/frontend/src/features/environments/components/SshPanel.tsx`
 
+Onboarding is sequencing over those pieces, not a layer of its own. A change here that
+touches push, setup, service or probing internals belongs in one of the files above:
+
+- `apps/api/src/modules/environments/domain/remote-bootstrap-commands.ts` (**the only two
+  ssh commands onboarding adds**: the bounded `connect` that stores hub URL and token, and
+  the `service install` that supplies the session-bus environment)
+- `apps/api/src/modules/environments/application/runtime-lifecycle-service.ts` →
+  `runPairedBootstrap` (push → setup → credential → service, over one channel; the ssh
+  config is request-scoped and never stored, and the pairing token never leaves the hub)
+- `apps/frontend/src/features/environments/onboarding/` (`steps.ts` is the flow shape and
+  the whole of resume — read it before any step component)
+- Reference: `docs/operations/remote-runtimes.md` — Onboard a new machine
+
 Containers are the third launcher, and the only one whose point is what the agent *cannot*
 do. Nothing is installed on the far side — the runtime is bind-mounted read-only — so none of
 the push path above applies:
