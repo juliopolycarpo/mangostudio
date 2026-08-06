@@ -18,6 +18,7 @@ import {
 import type { SecretStore } from '../../../services/secret-store/store';
 import { bunSecretStore } from '../../../services/secret-store/store';
 import { assertEnvironmentConfig, environmentConfigFor } from '../domain/environment-config';
+import { EnvironmentServiceError } from '../domain/environment-error';
 import { runtimeRemoveSlotBytesScript } from '../domain/runtime-push';
 import {
   type EnvironmentRecord,
@@ -27,16 +28,6 @@ import {
 import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
 import { wslProvisioner } from '../infrastructure/wsl-provisioner';
 import { runtimeLifecycleService } from './runtime-lifecycle-service';
-
-export class EnvironmentServiceError extends Error {
-  constructor(
-    message: string,
-    readonly status: 400 | 404 | 409 | 503
-  ) {
-    super(message);
-    this.name = 'EnvironmentServiceError';
-  }
-}
 
 function statusForTokenPersistFailure(error: unknown): 400 | 503 {
   // Secret-store outages are server conditions; a malformed request stays 400.

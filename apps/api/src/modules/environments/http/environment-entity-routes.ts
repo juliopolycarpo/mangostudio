@@ -7,6 +7,7 @@ import {
   RuntimeLifecycleInstallBodySchema,
   RuntimeLifecycleStartResponseSchema,
   RuntimeLifecycleViewSchema,
+  RuntimePairedBootstrapBodySchema,
   RuntimePairingIssueSchema,
   RuntimePairingStatusSchema,
   RuntimeSetupBodySchema,
@@ -20,10 +21,7 @@ import {
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import {
-  type EnvironmentService,
-  EnvironmentServiceError,
-} from '../application/environment-service';
+import type { EnvironmentService } from '../application/environment-service';
 import {
   RuntimeLifecycleConflictError,
   type RuntimeLifecycleService,
@@ -34,6 +32,7 @@ import {
   type RuntimePairingService,
   runtimePairingService,
 } from '../application/runtime-pairing-service';
+import { EnvironmentServiceError } from '../domain/environment-error';
 
 const environmentParams = t.Object({ id: EnvironmentIdSchema });
 const runIdParams = t.Object({
@@ -347,6 +346,30 @@ export function createEnvironmentEntityRoutes(
           body: RuntimeSetupBodySchema,
           response: {
             200: RuntimeLifecycleViewSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+          },
+        }
+      )
+      // The ssh credentials in this body are used for the duration of the run
+      // and never stored: after it, the machine reaches the hub, not the other
+      // way round. The pairing token it mints stays hub-side too — it goes
+      // straight into the ssh channel's stdin rather than into this response.
+      .post(
+        '/environments/:id/runtime/bootstrap',
+        async ({ params, body, user, set }) => {
+          try {
+            return await lifecycle.startPairedBootstrap(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
+        },
+        {
+          params: environmentParams,
+          body: RuntimePairedBootstrapBodySchema,
+          response: {
+            200: RuntimeLifecycleStartResponseSchema,
             400: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,

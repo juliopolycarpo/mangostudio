@@ -13,7 +13,9 @@ import type {
   RuntimeLifecycleInstallBody,
   RuntimeLifecycleStartResponse,
   RuntimeLifecycleView,
+  RuntimePairedBootstrapBody,
   RuntimeSetupBody,
+  SshEnvironmentConfig,
 } from '@mangostudio/shared/environments';
 import {
   DEFAULT_SSH_RUNTIME_PATH,
@@ -27,13 +29,19 @@ import {
   type RuntimeHealthReport,
   resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
-import { getVersion, isDevelopmentVersion } from '../../../lib/config';
+import { getConfig, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import {
   getRuntimeConnectionManager,
   type RuntimeConnectionManager,
 } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { environmentConfigFor } from '../domain/environment-config';
+import { runtimeDialEndpoint } from '../domain/pairing-token';
+import {
+  buildConnectBootstrapCommand,
+  buildServiceInstallCommand,
+  RESOLVE_RUNTIME_PATH,
+} from '../domain/remote-bootstrap-commands';
 import {
   buildRuntimeLifecycleView,
   canUpdateOverLiveConnection,
@@ -41,6 +49,7 @@ import {
 import { streamRuntimeUpdate } from '../domain/runtime-live-update';
 import {
   pushRuntimeBinary,
+  type RuntimeCommandResult,
   type RuntimeCommandRunner,
   RuntimePushError,
   runtimeSlotBytesScript,
@@ -51,6 +60,7 @@ import {
   loadRuntimeReleaseBytes,
   RuntimeAssetLoadError,
 } from '../domain/runtime-release-fetch';
+import { classifySshFailure, describeSshFailure } from '../domain/ssh-failure';
 import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
 import {
   type EnvironmentRecord,
@@ -62,6 +72,7 @@ import {
   WslProvisioningError,
   wslProvisioner,
 } from '../infrastructure/wsl-provisioner';
+import { type RuntimePairingService, runtimePairingService } from './runtime-pairing-service';
 
 const MAX_RECENT_STREAMS = 20;
 
@@ -125,6 +136,15 @@ export interface RuntimeLifecycleService {
     environmentId: string,
     body: RuntimeSetupBody
   ): Promise<RuntimeLifecycleView>;
+  /**
+   * Provisions an ssh-reachable machine so it dials this hub over WebSocket:
+   * push, consent, credential, service. See {@link runPairedBootstrap}.
+   */
+  startPairedBootstrap(
+    userId: string,
+    environmentId: string,
+    body: RuntimePairedBootstrapBody
+  ): Promise<RuntimeLifecycleStartResponse>;
   getRunStream(runId: string, userId: string): Promise<AsyncIterable<InstallStreamEvent> | null>;
   cancel(runId: string, userId: string): Promise<boolean>;
   hasActiveInstall(userId: string, environmentId: string): boolean;
@@ -135,6 +155,12 @@ export interface RuntimeLifecycleServiceDeps {
   readonly provisioner?: WslProvisioner;
   readonly now?: () => number;
   readonly loadRuntimeAsset?: (platformId: string) => Promise<LoadedRuntimeAsset>;
+  /** Mints the credential the bootstrapped machine dials back with. */
+  readonly pairing?: RuntimePairingService;
+  /** Read per call, not per construction: config reloads without a restart. */
+  readonly publicUrl?: () => string;
+  /** Builds the ssh channel for a bootstrap; injected so tests never spawn ssh. */
+  readonly commandRunner?: (config: SshEnvironmentConfig) => RuntimeCommandRunner;
 }
 
 function createEventBuffer(): EventBuffer {
@@ -227,6 +253,9 @@ export function createRuntimeLifecycleService(
   const provisioner = overrides.provisioner ?? wslProvisioner;
   const now = overrides.now ?? Date.now;
   const loadRuntimeAsset = overrides.loadRuntimeAsset ?? loadRuntimeReleaseBytes;
+  const pairing = overrides.pairing ?? runtimePairingService;
+  const publicUrl = overrides.publicUrl ?? (() => getConfig().server.publicUrl);
+  const commandRunner = overrides.commandRunner ?? createSshCommandRunner;
 
   const activeByEnvironment = new Map<string, ActiveRun>();
   const activeByRun = new Map<string, ActiveRun>();
@@ -243,6 +272,22 @@ export function createRuntimeLifecycleService(
       recentStreams.delete(candidateId);
       if (recentStreams.size <= MAX_RECENT_STREAMS) break;
     }
+  };
+
+  /** Registers a new streamed run as the one active run for its environment. */
+  const beginRun = (userId: string, environmentId: string): ActiveRun => {
+    const run: ActiveRun = {
+      runId: generateId(),
+      userId,
+      environmentId,
+      startedAt: now(),
+      stream: createEventBuffer(),
+      abort: new AbortController(),
+    };
+    activeByEnvironment.set(installKey(userId, environmentId), run);
+    activeByRun.set(run.runId, run);
+    rememberStream(run.runId, userId, run.stream);
+    return run;
   };
 
   const finish = (
@@ -375,20 +420,8 @@ export function createRuntimeLifecycleService(
         );
       }
 
-      const runId = generateId();
-      const stream = createEventBuffer();
-      const abort = new AbortController();
-      const run: ActiveRun = {
-        runId,
-        userId,
-        environmentId,
-        startedAt: now(),
-        stream,
-        abort,
-      };
-      activeByEnvironment.set(installKey(userId, environmentId), run);
-      activeByRun.set(runId, run);
-      rememberStream(runId, userId, stream);
+      const run = beginRun(userId, environmentId);
+      const { runId, stream, abort } = run;
 
       const forceReplace = action === 'reinstall';
       const targetLabel =
@@ -511,6 +544,86 @@ export function createRuntimeLifecycleService(
         .then(() => manager.refreshManifest(userId, environmentId))
         .catch(() => undefined);
       return this.getView(userId, environmentId);
+    },
+
+    async startPairedBootstrap(userId, environmentId, body) {
+      const record = await environmentRepository.find(userId, environmentId);
+      if (!record) {
+        throw new RuntimeLifecycleUnavailableError(`Environment "${environmentId}" was not found.`);
+      }
+      if (record.transportKind !== 'websocket') {
+        throw new RuntimeLifecycleUnavailableError(
+          'Bootstrapping over ssh applies to a paired environment; this one uses a different transport.',
+          409
+        );
+      }
+      // The push writes the managed slot and nothing else, so a custom path
+      // would consent, pair and supervise a binary this run never installed.
+      if (body.ssh.remoteRuntimePath?.trim()) {
+        throw new RuntimeLifecycleUnavailableError(
+          `Bootstrapping installs into the managed slot (${DEFAULT_SSH_RUNTIME_PATH}); it cannot target a custom runtime path.`,
+          400
+        );
+      }
+      const endpoint = runtimeDialEndpoint(publicUrl());
+      if (!endpoint) {
+        throw new RuntimeLifecycleUnavailableError(
+          'MangoStudio does not know its own public address, so it cannot tell that machine where to dial. Set `publicUrl` under `[server]` in config.toml (or PUBLIC_URL) first.',
+          409
+        );
+      }
+      if (activeByEnvironment.has(installKey(userId, environmentId))) {
+        throw new RuntimeLifecycleConflictError(
+          `A runtime install is already running for environment "${environmentId}".`
+        );
+      }
+
+      const run = beginRun(userId, environmentId);
+      run.stream.publish({
+        type: 'log',
+        stream: 'system',
+        line: `Setting up "${body.ssh.host}" to dial ${endpoint} (hub ${getVersion()}).`,
+        done: false,
+      });
+
+      void (async () => {
+        try {
+          const outcome = await runPairedBootstrap({
+            userId,
+            environmentId,
+            body,
+            endpoint,
+            runner: commandRunner(body.ssh),
+            pairing,
+            manager,
+            stream: run.stream,
+            signal: run.abort.signal,
+          });
+          if (run.abort.signal.aborted) {
+            finish(run, 'cancelled', null);
+            return;
+          }
+          // `unsupervised` is a success: everything this hub can do over ssh
+          // landed, and the console already named the one step left. Only a
+          // machine that was supposed to dial in and did not is a failure.
+          const failed = outcome === 'no-dial-in';
+          finish(run, failed ? 'failed' : 'succeeded', failed ? 1 : 0);
+        } catch (error) {
+          if (run.abort.signal.aborted) {
+            finish(run, 'cancelled', null);
+            return;
+          }
+          run.stream.publish({
+            type: 'log',
+            stream: 'stderr',
+            line: error instanceof Error ? error.message : String(error),
+            done: false,
+          });
+          finish(run, 'failed', 1);
+        }
+      })();
+
+      return { runId: run.runId };
     },
 
     getRunStream(runId, userId) {
@@ -792,6 +905,172 @@ export async function pushRuntimeOverSsh(
   });
 }
 
+/** Where a paired bootstrap got to. Every outcome leaves a usable machine. */
+export type PairedBootstrapOutcome =
+  /** The unit is installed and the runtime has dialed in. */
+  | 'connected'
+  /** Provisioned, consented and paired; nothing supervises it yet. */
+  | 'unsupervised'
+  /** The unit is installed, but nothing dialed this hub within the window. */
+  | 'no-dial-in';
+
+interface PairedBootstrapInput {
+  readonly userId: string;
+  readonly environmentId: string;
+  readonly body: RuntimePairedBootstrapBody;
+  /** `wss://…/api/runtime`, already resolved from the hub's public URL. */
+  readonly endpoint: string;
+  readonly runner: RuntimeCommandRunner;
+  readonly pairing: RuntimePairingService;
+  readonly manager: RuntimeConnectionManager;
+  readonly stream: EventBuffer;
+  readonly signal: AbortSignal;
+  /**
+   * How long to wait for the supervised runtime to appear on the hub's socket.
+   * A seam: the default is the only value production uses, and a test that had
+   * to sit out a real minute to cover the timeout would not be written.
+   */
+  readonly dialInTimeoutMs?: number;
+}
+
+const DIAL_IN_TIMEOUT_MS = 60_000;
+
+/**
+ * Turns an ssh-reachable machine into one that dials this hub by itself.
+ *
+ * Four things happen in order, and each is a call an earlier plan already
+ * ships: the runtime is pushed into the managed slot, consent is recorded with
+ * `setup`, a pairing credential is minted and handed to `connect` on stdin, and
+ * a user-level service is installed to keep `connect` running. Only the last
+ * two commands are new; the first two are the same helpers the environment card
+ * calls.
+ *
+ * The credential never leaves the hub as a response: it is issued here and
+ * piped straight into the ssh channel, so no browser ever holds a machine
+ * credential it has no use for.
+ *
+ * A failed `service install` is not a failed onboarding. The machine is
+ * provisioned, consented and holds a working credential at that point — what is
+ * missing is a supervisor, which usually needs a decision at the machine (root
+ * for linger, or a login session for the bus). That returns `unsupervised` with
+ * the runtime's own refusal and the one command that finishes it, rather than
+ * discarding four successful steps.
+ *
+ * Taking a {@link RuntimeCommandRunner} rather than building one keeps the
+ * whole sequence exercisable with a fake runner, ssh never spawned.
+ */
+export async function runPairedBootstrap(
+  input: PairedBootstrapInput
+): Promise<PairedBootstrapOutcome> {
+  const { body, runner, stream, signal } = input;
+  const say = (line: string, channel: 'system' | 'stderr' = 'system'): void => {
+    stream.publish({ type: 'log', stream: channel, line, done: false });
+  };
+
+  await pushRuntimeOverSsh(runner, body.ssh.host, stream, signal);
+  signal.throwIfAborted();
+
+  say(`Recording consent on "${body.ssh.host}" (${body.consent.profile}).`);
+  const setup = buildSetupCommand(
+    body.consent,
+    resolveSetupAllow(body.consent),
+    DEFAULT_SSH_RUNTIME_PATH
+  );
+  const setupResult = await runner(setup.script, {
+    args: setup.args,
+    timeoutMs: 60_000,
+    signal,
+  });
+  signal.throwIfAborted();
+  if (setupResult.exitCode !== 0) {
+    throw new Error(sshStepFailure('Recording consent', body.ssh, setupResult));
+  }
+
+  // Issued only now: an earlier mint would be a live credential for a machine
+  // that had not yet agreed to anything.
+  const issued = await input.pairing.issue(input.userId, input.environmentId);
+  say('Storing the pairing credential on that machine.');
+  const bootstrap = buildConnectBootstrapCommand(DEFAULT_SSH_RUNTIME_PATH, input.endpoint);
+  const bootstrapResult = await runner(bootstrap.script, {
+    args: bootstrap.args,
+    stdin: new TextEncoder().encode(issued.token),
+    timeoutMs: 120_000,
+    signal,
+  });
+  signal.throwIfAborted();
+  if (bootstrapResult.exitCode !== 0) {
+    throw new Error(sshStepFailure('Pairing', body.ssh, bootstrapResult));
+  }
+
+  say('Installing the service that keeps it connected.');
+  const service = buildServiceInstallCommand(DEFAULT_SSH_RUNTIME_PATH);
+  const serviceResult = await runner(service.script, {
+    args: service.args,
+    timeoutMs: 120_000,
+    signal,
+  });
+  signal.throwIfAborted();
+  if (serviceResult.exitCode !== 0) {
+    // The runtime's refusals are typed and carry their own fix; pass them
+    // through verbatim rather than restating them less accurately.
+    say(serviceResult.stderr.trim() || serviceResult.stdout.trim(), 'stderr');
+    say(
+      `"${body.ssh.host}" is provisioned, consented and paired, but nothing keeps it running yet. Fix the above and run "mangostudio-runtime service install --mode connect" there, or start it once with "mangostudio-runtime connect" — the hub URL and credential are already stored.`
+    );
+    return 'unsupervised';
+  }
+
+  say('Waiting for the runtime to dial in…');
+  const connected = await waitForRuntimeDialIn(
+    input.manager,
+    input.userId,
+    input.environmentId,
+    signal,
+    input.dialInTimeoutMs ?? DIAL_IN_TIMEOUT_MS
+  );
+  if (!connected) {
+    say(
+      `The service is installed on "${body.ssh.host}", but nothing has dialed ${input.endpoint} yet. Check that the machine can reach that address, then read its own log with "journalctl --user -u mangostudio-runtime".`,
+      'stderr'
+    );
+    return 'no-dial-in';
+  }
+  say(`"${body.ssh.host}" is connected.`);
+  return 'connected';
+}
+
+/**
+ * One sentence for a bootstrap step that exited non-zero, using 013's
+ * classifier so an auth refusal, an unverified host key and a missing binary
+ * each say what to do instead of sharing one "the command failed".
+ */
+function sshStepFailure(
+  step: string,
+  config: SshEnvironmentConfig,
+  result: RuntimeCommandResult
+): string {
+  const stderr = result.stderr.trim();
+  const reason = classifySshFailure({ stderr, exitCode: result.exitCode });
+  const described = describeSshFailure(reason, config, stderr || result.stdout.trim());
+  return `${step} failed: ${described}`;
+}
+
+async function waitForRuntimeDialIn(
+  manager: RuntimeConnectionManager,
+  userId: string,
+  environmentId: string,
+  signal: AbortSignal,
+  timeoutMs = DIAL_IN_TIMEOUT_MS
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    signal.throwIfAborted();
+    if (manager.getStatus(userId, environmentId).state === 'connected') return true;
+    await Bun.sleep(500);
+  }
+  return false;
+}
+
 /**
  * Turns byte counts into install-console log lines, throttled to every 5%.
  *
@@ -824,15 +1103,6 @@ function resolveSetupAllow(body: RuntimeSetupBody): RuntimeCapabilityAllow {
   }
   return body.allow;
 }
-
-/**
- * Resolves the runtime path into `$1` and expands a leading `~/` the way the
- * login shell would for an ssh launch. The path itself never enters the script
- * text: a custom `remoteRuntimePath` is user input, and this module's rule is
- * that values travel as argv while scripts stay constants.
- */
-// biome-ignore lint/suspicious/noTemplateCurlyInString: shell parameter expansion on the target, not a JS placeholder
-const RESOLVE_RUNTIME_PATH = 'p="$1"; case "$p" in "~/"*) p="$HOME/${p#"~/"}" ;; esac; ';
 
 /**
  * The `setup` invocation to run over ssh for a consent submission. Exported

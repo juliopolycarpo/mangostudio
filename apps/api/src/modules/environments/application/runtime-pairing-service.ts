@@ -19,6 +19,7 @@ import {
   type RuntimeConnectionManager,
 } from '../../../services/runtime-client/runtime-connection-manager';
 import { constantTimeEquals } from '../../../utils/hash';
+import { EnvironmentServiceError } from '../domain/environment-error';
 import {
   generatePairingToken,
   hashPairingSecret,
@@ -33,7 +34,6 @@ import {
   type RuntimePairingRepository,
   runtimePairingRepository,
 } from '../infrastructure/runtime-pairing-repository';
-import { EnvironmentServiceError } from './environment-service';
 
 /** Transports where the runtime dials the hub and needs a credential to do it. */
 const PAIRABLE_TRANSPORT_KINDS = new Set(['websocket']);
