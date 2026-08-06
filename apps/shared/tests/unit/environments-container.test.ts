@@ -171,6 +171,26 @@ describe('containerConfigRefusal', () => {
     expect(refusal?.code).toBe('host-root');
   });
 
+  it.each([
+    '/Proc',
+    '/Sys/exports',
+    '/RUN/data',
+    '/home/j/.Docker',
+  ])('allows %s, which is an ordinary directory on a case-sensitive filesystem', (hostPath) => {
+    expect(
+      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/work' }] }))
+    ).toBeNull();
+  });
+
+  it.each([
+    'C:\\Users\\j\\.Docker',
+    'C:\\VAR\\RUN\\Docker.sock',
+  ])('still folds case for %s, because Windows does', (hostPath) => {
+    expect(
+      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/work' }] }))?.code
+    ).toBe('engine-control');
+  });
+
   it('allows a directory whose name merely contains a denied segment', () => {
     expect(
       containerConfigRefusal(

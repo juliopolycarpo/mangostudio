@@ -253,9 +253,19 @@ function mountRefusal(mount: ContainerMount): ContainerMountRefusal | null {
   return null;
 }
 
-/** Lower-cased, forward-slashed, and without a trailing slash, for comparison. */
+/**
+ * Forward-slashed and without a trailing slash, for comparison. Case is folded
+ * only for a drive path.
+ *
+ * Windows is case-insensitive, so `C:\Users\j\.Docker` and `c:/users/j/.docker`
+ * are one directory and both have to be refused. A POSIX path is not: the
+ * denied prefixes below name real directories on a case-sensitive filesystem,
+ * where `/Proc` is an ordinary directory somebody made and refusing it as
+ * procfs would reject a mount that has nothing to do with the kernel.
+ */
 function normalizeHostPath(host: string): string {
-  const forward = host.replaceAll('\\', '/').toLowerCase();
+  const slashed = host.replaceAll('\\', '/');
+  const forward = WINDOWS_DRIVE_PREFIX.test(slashed) ? slashed.toLowerCase() : slashed;
   // A bare drive root ("c:/") keeps its slash: stripping it would leave "c:",
   // which no longer matches WINDOWS_DRIVE_PREFIX, so collapseTraversal below
   // would stop treating it as a drive and misparse it as a relative segment.
