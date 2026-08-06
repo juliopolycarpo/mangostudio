@@ -632,6 +632,25 @@ with WSL. Everything that puts runtime bytes on another machine goes through it:
   archive fallback, checksum verified before any remote write, hub cache prune)
 - `apps/frontend/src/features/environments/components/SshPanel.tsx`
 
+Containers are the third launcher, and the only one whose point is what the agent *cannot*
+do. Nothing is installed on the far side — the runtime is bind-mounted read-only — so none of
+the push path above applies:
+
+- `apps/shared/src/environments/container.ts` (launch/probe/pull/kill argv, the mount denylist
+  both the browser form and the connector run)
+- `apps/api/src/modules/environments/infrastructure/container-engine.ts` (engine detection,
+  image presence, pull, the platform probe cached by image id)
+- `apps/api/src/modules/environments/domain/container-runtime-source.ts` (**the only place
+  that resolves a mountable runtime path**; delegates which bytes to the channel-aware
+  resolver rather than fetching its own)
+- `apps/api/src/modules/environments/domain/container-failure.ts` (engine stderr → typed reason)
+- `apps/api/src/services/runtime-client/connect-container-runtime.ts` (spawn, pull phase,
+  kill backstop)
+- `apps/frontend/src/features/environments/container-form.ts` and
+  `components/ContainerConfigFields.tsx` / `ContainerPanel.tsx`
+- Engine behaviour is proven against a real engine, not asserted from argv:
+  `apps/api/tests/integration/services/connect-container-runtime.integration.test.ts`
+
 The card's install/upgrade/setup/removal surface sits on top of both:
 
 - `apps/api/src/modules/environments/domain/runtime-lifecycle-view.ts` (which actions a

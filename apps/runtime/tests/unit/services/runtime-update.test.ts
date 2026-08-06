@@ -388,7 +388,13 @@ describe('runtime self-update', () => {
     const service = createRuntimeUpdateService({ slot: 'remote', env, sessionTimeoutMs: 5 });
     await service.begin({ version: '1.1.0', digest: digestOf('next'), totalBytes: 4 });
 
-    await Bun.sleep(20);
+    // The timeout does not end the session itself: it schedules a serialized
+    // async discard, and `active` stays true until that finishes. Waited out
+    // rather than raced with a fixed sleep, because the margin that holds on an
+    // idle laptop does not hold on a loaded runner under coverage.
+    const deadline = Date.now() + 5_000;
+    while (service.active && Date.now() < deadline) await Bun.sleep(5);
+
     expect(service.active).toBe(false);
     expect(
       await stat(join(slotDir, '1.1.0', `${RUNTIME_BINARY_BASENAME}.incoming`)).catch(() => null)

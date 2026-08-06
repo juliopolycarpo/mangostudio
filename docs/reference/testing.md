@@ -189,6 +189,29 @@ bun run --filter @mangostudio/api test:integration
 > an isolated in-memory sandbox (never the real `~/.mango`) and the harness throws an
 > actionable error, so a wrong-directory run fails loudly instead of corrupting data.
 
+### Environment-gated suites
+
+Some API integration suites need something the machine may not have and skip themselves
+rather than fail. Git and sshd suites probe for their tool; the container transport suite
+needs more than a tool, so it is told what to use:
+
+```bash
+cd apps/api
+MANGO_CONTAINER_E2E_IMAGE=mango-container-smoke:test \
+MANGO_CONTAINER_E2E_RUNTIME=/abs/path/to/mangostudio-runtime \
+bun test tests/integration/services/connect-container-runtime.integration.test.ts
+```
+
+A compiled Linux runtime binary matching the image's libc is the part a checkout does not
+have. Build one with `bun build apps/runtime/src/cli.ts --compile --target=bun-linux-x64`
+(or `bun-linux-x64-musl`), and use an image that satisfies the three requirements in
+[hub-runtime.md](../architecture/hub-runtime.md#what-an-image-has-to-provide) — for musl that
+means `alpine:3` plus `apk add --no-cache bash libstdc++`. `MANGO_CONTAINER_E2E_ENGINE=podman`
+runs the same suite against podman.
+
+CI does not compile a second copy: the `Smoke — Container` job consumes the Linux runtime
+binaries the distribution lane already built, so the suite runs against release bytes.
+
 API support lives in `apps/api/tests/support/`:
 
 - `setup/test-environment.ts` — single source of truth for the test bootstrap (config,

@@ -16,6 +16,7 @@ import {
   useUpdateEnvironmentMutation,
 } from '../queries';
 import { AddEnvironmentDialog } from './AddEnvironmentDialog';
+import { ContainerPanel } from './ContainerPanel';
 import { CopyLine } from './CopyLine';
 import { DirectUrlPanel } from './DirectUrlPanel';
 import { EnvironmentPageState } from './EnvironmentPageState';
@@ -188,13 +189,22 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
               )}
               <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-on-surface-variant/65">
                 <span>{labels.transport[environment.transportKind]}</span>
+                {environment.transportKind === 'container' ? (
+                  <span className="rounded-full bg-primary/10 px-1.5 py-0.5 font-semibold text-primary">
+                    {labels.container.badge}
+                  </span>
+                ) : null}
                 {environment.virtual ? <span>{labels.virtual}</span> : null}
                 {!environment.enabled ? <span>{labels.disabled}</span> : null}
               </p>
             </div>
           </div>
           <span className="shrink-0 rounded-full bg-surface-container-high px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">
-            {updating ? labels.status.updating : labels.status[state]}
+            {updating
+              ? labels.status.updating
+              : environment.status.pullingImage
+                ? labels.status.pulling
+                : labels.status[state]}
           </span>
         </div>
 
@@ -213,6 +223,10 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
         {environment.transportKind === 'http' ? <DirectUrlPanel environment={environment} /> : null}
 
         {environment.transportKind === 'ssh' ? <SshPanel environment={environment} /> : null}
+
+        {environment.transportKind === 'container' ? (
+          <ContainerPanel environment={environment} />
+        ) : null}
 
         <InstallTrustToggle environment={environment} />
 

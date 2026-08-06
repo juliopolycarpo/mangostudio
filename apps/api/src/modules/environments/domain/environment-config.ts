@@ -3,6 +3,7 @@ import type {
   EnvironmentTransportKind,
 } from '@mangostudio/shared/environments';
 import {
+  ContainerEnvironmentConfigSchema,
   HttpEnvironmentConfigSchema,
   InProcessEnvironmentConfigSchema,
   SshEnvironmentConfigSchema,
@@ -19,6 +20,7 @@ const CONFIG_SCHEMAS = {
   websocket: WebSocketEnvironmentConfigSchema,
   http: HttpEnvironmentConfigSchema,
   ssh: SshEnvironmentConfigSchema,
+  container: ContainerEnvironmentConfigSchema,
 } as const;
 
 export function isEnvironmentConfigValid(

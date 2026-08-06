@@ -157,6 +157,20 @@ jobs:
       channel: ${{ needs.distribution-identity.outputs.channel }}
       target_artifacts: ${{ needs.distribution.outputs.target_artifacts }}
 
+  smoke-container:
+    # Proves the container transport against a real engine, using the Linux
+    # runtime binaries distribution already built. Gated on the same changes
+    # filter as the other distribution-consuming lanes.
+    name: Smoke — Container
+    needs: [distribution-identity, distribution, changes]
+    if: ${{ needs.changes.outputs.distribution == 'true' }}
+    uses: ./.github/workflows/smoke-container.yml
+    with:
+      version: ${{ needs.distribution-identity.outputs.version }}
+      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
+      channel: ${{ needs.distribution-identity.outputs.channel }}
+      target_artifacts: ${{ needs.distribution.outputs.target_artifacts }}
+
   gate:
     # Single stable check ("CI / Gate") aggregating every mandatory job, so
     # branch protection and Canary depend on one name instead of tracking
@@ -177,6 +191,7 @@ jobs:
       browser-smoke,
       qa-metrics,
       smoke,
+      smoke-container,
     ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -195,10 +210,11 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2}',
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}',
             github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',
             needs.changes.outputs.distribution == 'false' && 'distribution' || '',
-            needs.changes.outputs.distribution == 'false' && 'smoke' || '') }}
+            needs.changes.outputs.distribution == 'false' && 'smoke' || '',
+            needs.changes.outputs.distribution == 'false' && 'smoke-container' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
 

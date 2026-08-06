@@ -123,15 +123,21 @@ describe('CI / Gate aggregate', () => {
   });
 
   test('gate accepts qa-metrics on workflow_dispatch and distribution skips when irrelevant', () => {
-    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2}',`);
+    // The placeholder count is pinned deliberately: `format` drops arguments it
+    // has no slot for, so a fifth skip added without widening this would be
+    // accepted silently and never allow the skip it was written for.
+    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3}',`);
     expect(gateBlock).toContain("github.event_name == 'workflow_dispatch' && 'qa-metrics'");
     expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'distribution'");
     expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'smoke'");
+    expect(gateBlock).toContain(
+      "needs.changes.outputs.distribution == 'false' && 'smoke-container'"
+    );
   });
 
   test('the distribution and smoke lanes run only when the changes job says so', () => {
     const relevanceIf = `if: ${EXPR} needs.changes.outputs.distribution == 'true' }}`;
-    for (const job of ['distribution', 'smoke']) {
+    for (const job of ['distribution', 'smoke', 'smoke-container']) {
       expect(extractJobBlock(workflow, job), job).toContain(relevanceIf);
     }
   });

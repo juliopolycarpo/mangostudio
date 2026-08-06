@@ -32,6 +32,7 @@ export const EnvironmentTransportKindSchema = Type.Union([
   Type.Literal('websocket'),
   Type.Literal('http'),
   Type.Literal('ssh'),
+  Type.Literal('container'),
 ]);
 
 export const InProcessEnvironmentConfigSchema = Type.Object(
@@ -85,6 +86,131 @@ export const SshEnvironmentConfigSchema = Type.Object(
     remoteRuntimePath: Type.Optional(SshArgumentValueSchema),
   },
   { additionalProperties: Type.Never() }
+);
+
+/**
+ * Which container engine runs the image. It selects a binary name and nothing
+ * else: every flag this transport passes is accepted by both CLIs, and the
+ * moment one of them needs its own argv the union stops being a name and
+ * becomes a fork nobody signed up for.
+ */
+export const ContainerEngineSchema = Type.Union([Type.Literal('docker'), Type.Literal('podman')]);
+
+/**
+ * A host path the agent can see inside the container.
+ *
+ * Absolute on both sides because a relative path is resolved by whichever
+ * process the engine happens to inherit a working directory from. Colons are
+ * refused (they separate the three fields of `-v`) except for a Windows drive
+ * prefix, which the engines parse themselves.
+ */
+export const ContainerMountSchema = Type.Object(
+  {
+    hostPath: Type.String({ minLength: 1, maxLength: 1_024, pattern: '^[^-]' }),
+    containerPath: Type.String({ minLength: 1, maxLength: 1_024, pattern: '^/[^\\s:]*$' }),
+    readonly: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: Type.Never() }
+);
+
+/**
+ * How many mounts one environment may declare.
+ *
+ * A bound rather than a policy: each entry is an argv pair the hub constructs,
+ * and an unbounded list is an unbounded command line. Eight is well past what
+ * "the project, and maybe its cache" needs.
+ */
+export const CONTAINER_MAX_MOUNTS = 8;
+
+/**
+ * An image the hub starts a runtime inside, and the limits it starts it with.
+ *
+ * The image is the user's, never ours: nothing is baked and nothing is
+ * published. The runtime binary is bind-mounted read-only at launch, so an
+ * upgrade follows the hub with no image rebuild.
+ *
+ * `cpus` and `memoryMib` are engine limits, not isolation guarantees — they
+ * bound what a runaway agent consumes, and no copy should present them as part
+ * of the sandbox boundary.
+ */
+export const ContainerEnvironmentConfigSchema = Type.Object(
+  {
+    /**
+     * A reference the engine can resolve: `[registry/]name[:tag][@digest]`.
+     * The character class refuses whitespace and a leading dash, so an image
+     * can never arrive at the engine as an option.
+     */
+    image: Type.String({
+      minLength: 1,
+      maxLength: 256,
+      pattern: '^[A-Za-z0-9][A-Za-z0-9._/:@-]*$',
+    }),
+    engine: Type.Optional(ContainerEngineSchema),
+    /**
+     * Whether the container gets a network. On by default because agents clone,
+     * fetch and install; off is one flag (`--network none`) and one toggle.
+     */
+    network: Type.Optional(Type.Boolean()),
+    cpus: Type.Optional(Type.Number({ minimum: 0.01, maximum: 1_024 })),
+    memoryMib: Type.Optional(Type.Integer({ minimum: 64, maximum: 1_048_576 })),
+    mounts: Type.Optional(Type.Array(ContainerMountSchema, { maxItems: CONTAINER_MAX_MOUNTS })),
+  },
+  { additionalProperties: Type.Never() }
+);
+
+/**
+ * Why a container launch failed, when the engine's output allows naming it.
+ *
+ * Same reason SSH carries one: these arrive as one exit status and one
+ * `RUNTIME_UNAVAILABLE`, while the fixes have nothing to do with each other —
+ * a missing engine is installed, an unreachable daemon is started, an image
+ * without a shell is swapped for one that has it.
+ */
+export const ContainerFailureReasonSchema = Type.Union([
+  /** No `docker`/`podman` on the hub's PATH. */
+  Type.Literal('engine-missing'),
+  /** The CLI is there; the daemon is down, or this user may not talk to it. */
+  Type.Literal('engine-unreachable'),
+  /** The registry has no such image, or refuses this hub's (absent) credentials. */
+  Type.Literal('image-missing'),
+  /** The pull started and did not finish: network, registry error, rate limit. */
+  Type.Literal('image-pull-failed'),
+  /** No shell to probe with, or an architecture no runtime is built for. */
+  Type.Literal('image-unsupported'),
+  /** The hub could not produce a runtime binary matching the image's platform. */
+  Type.Literal('runtime-unavailable'),
+  Type.Literal('unknown'),
+]);
+
+/**
+ * Whether this machine can run containers at all, and with which engines.
+ *
+ * Answered hub-side for the same reason WSL detection is: the environments it
+ * would describe do not exist yet, so there is no runtime to ask. Linux
+ * containers only — Windows containers are out of scope, and Docker Desktop on
+ * a Windows or macOS hub is a supported host, so nothing here is
+ * platform-gated.
+ */
+export const ContainerEngineStatusSchema = Type.Object(
+  {
+    engine: ContainerEngineSchema,
+    /** True when the CLI is on PATH *and* answered a version query. */
+    available: Type.Boolean(),
+    /** What the CLI reported, when it answered. */
+    version: Type.Optional(Type.String({ maxLength: 128 })),
+    /** Why it did not, so the dialog can say "start Docker" rather than "no engine". */
+    reason: Type.Optional(ContainerFailureReasonSchema),
+  },
+  { additionalProperties: false }
+);
+
+export const ContainerDetectionSchema = Type.Object(
+  {
+    /** True when at least one engine answered. */
+    available: Type.Boolean(),
+    engines: Type.Array(ContainerEngineStatusSchema),
+  },
+  { additionalProperties: false }
 );
 
 /**
@@ -185,6 +311,13 @@ export const EnvironmentTransportConfigSchema = Type.Union([
     },
     { additionalProperties: false }
   ),
+  Type.Object(
+    {
+      transportKind: Type.Literal('container'),
+      config: ContainerEnvironmentConfigSchema,
+    },
+    { additionalProperties: false }
+  ),
 ]);
 
 export const CreateEnvironmentBodySchema = Type.Union([
@@ -240,6 +373,16 @@ export const CreateEnvironmentBodySchema = Type.Union([
     },
     { additionalProperties: false }
   ),
+  Type.Object(
+    {
+      id: EnvironmentIdSchema,
+      name: Type.String({ minLength: 1, maxLength: 80 }),
+      transportKind: Type.Literal('container'),
+      config: ContainerEnvironmentConfigSchema,
+      enabled: Type.Optional(Type.Boolean()),
+    },
+    { additionalProperties: false }
+  ),
 ]);
 
 export const UpdateEnvironmentBodySchema = Type.Object(
@@ -287,6 +430,15 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
      * `RUNTIME_UNAVAILABLE`, and they have nothing to do with each other.
      */
     sshFailureReason: Type.Optional(SshFailureReasonSchema),
+    /** The same, for a container launch. See {@link ContainerFailureReasonSchema}. */
+    containerFailureReason: Type.Optional(ContainerFailureReasonSchema),
+    /**
+     * Set while a container image is being fetched, before anything can start
+     * inside it. A cold pull of a large image runs for minutes, and `connecting`
+     * alone would report that as a hub that has stopped responding rather than
+     * as a download with an end.
+     */
+    pullingImage: Type.Optional(Type.Boolean()),
     /**
      * Set while the hub is swapping this runtime's binary over its own
      * connection. A live update ends with a deliberate disconnect, and without
@@ -376,6 +528,12 @@ export type WebSocketEnvironmentConfig = Static<typeof WebSocketEnvironmentConfi
 export type HttpEnvironmentConfig = Static<typeof HttpEnvironmentConfigSchema>;
 export type SshEnvironmentConfig = Static<typeof SshEnvironmentConfigSchema>;
 export type SshFailureReason = Static<typeof SshFailureReasonSchema>;
+export type ContainerEngine = Static<typeof ContainerEngineSchema>;
+export type ContainerMount = Static<typeof ContainerMountSchema>;
+export type ContainerEnvironmentConfig = Static<typeof ContainerEnvironmentConfigSchema>;
+export type ContainerFailureReason = Static<typeof ContainerFailureReasonSchema>;
+export type ContainerEngineStatus = Static<typeof ContainerEngineStatusSchema>;
+export type ContainerDetection = Static<typeof ContainerDetectionSchema>;
 export type WslDistribution = Static<typeof WslDistributionSchema>;
 export type WslUnavailableReason = Static<typeof WslUnavailableReasonSchema>;
 export type WslDetection = Static<typeof WslDetectionSchema>;

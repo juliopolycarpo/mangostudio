@@ -1,0 +1,148 @@
+name: Smoke — Container
+
+# Proves the container transport against a real engine and a real image.
+#
+# It runs here rather than in the Test lane because the one thing it exists to
+# check needs bytes that lane does not have: a compiled Linux runtime binary
+# matching the image's libc. Those already exist as distribution artifacts, so
+# this consumes them instead of compiling a second copy — which also means the
+# suite runs against the bytes a release would actually ship.
+#
+# The matrix is the pairing that matters: `uname -m` cannot tell glibc from
+# musl, so both are exercised with the base image an ordinary user would pick.
+# Docker and Podman are exercised too — the connector builds an argv for
+# whichever engine a config names, and GitHub's ubuntu-latest runner ships
+# both, so there is no reason to prove only one of them here.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Version of the distribution bundle to consume.
+        required: true
+        type: string
+      source_sha:
+        description: Commit the distribution bundle was built from.
+        required: true
+        type: string
+      channel:
+        description: Distribution channel of the bundle.
+        required: true
+        type: string
+      target_artifacts:
+        description: JSON map of target IDs to immutable artifact names.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  container:
+    name: Container ${{ matrix.variant }} (${{ matrix.engine }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_PATH: /tmp/mangostudio-container-smoke.sqlite
+      CONTAINER_CLI: ${{ matrix.engine }}
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [docker, podman]
+        variant: [glibc, musl]
+        include:
+          - variant: glibc
+            binary_platform: linux-x64
+            # Ships bash, which the shell tool needs, and glibc, which the
+            # runtime needs. The unmodified image an ordinary user would pick.
+            base_image: debian:bookworm-slim
+            packages: ""
+            artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-x64'] }}
+          - variant: musl
+            binary_platform: linux-x64-musl
+            # Bare alpine cannot run this: a Bun musl binary needs libstdc++
+            # (Dockerfile.alpine installs it for the same reason), and the shell
+            # tool needs bash, which alpine does not ship. Both are added here so
+            # the job proves the musl pairing rather than proving that.
+            base_image: alpine:3
+            packages: bash libstdc++
+            artifact_name: ${{ fromJSON(inputs.target_artifacts)['linux-x64-musl'] }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Download prebuilt runtime target
+        uses: ./.github/actions/download-distribution
+        with:
+          artifact-name: ${{ matrix.artifact_name }}
+          source-sha: ${{ inputs.source_sha }}
+          version: ${{ inputs.version }}
+          channel: ${{ inputs.channel }}
+          target: ${{ matrix.binary_platform }}
+
+      # Built here rather than pulled by the suite: the connector's own pull
+      # path is covered by unit tests, and a test that downloads on demand turns
+      # a registry hiccup into a launcher failure.
+      - name: Build the test image
+        env:
+          BASE_IMAGE: ${{ matrix.base_image }}
+          PACKAGES: ${{ matrix.packages }}
+        run: |
+          set -euo pipefail
+          if [ -z "$PACKAGES" ]; then
+            "$CONTAINER_CLI" pull "$BASE_IMAGE"
+            "$CONTAINER_CLI" tag "$BASE_IMAGE" mango-container-smoke:test
+          else
+            printf 'FROM %s\nRUN apk add --no-cache %s\n' "$BASE_IMAGE" "$PACKAGES" \
+              | "$CONTAINER_CLI" build -t mango-container-smoke:test -
+          fi
+
+      - name: Run container transport smoke
+        working-directory: apps/api
+        env:
+          MANGO_CONTAINER_E2E_IMAGE: mango-container-smoke:test
+          MANGO_CONTAINER_E2E_RUNTIME: ${{ github.workspace }}/.mango/out/${{ matrix.binary_platform }}/mangostudio-runtime
+          MANGO_CONTAINER_E2E_ENGINE: ${{ matrix.engine }}
+          MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
+          # The container transport keeps `requireMatchingRelease` on, because
+          # the binary it mounts is the hub's own. The runtime downloaded above
+          # is stamped with the distribution's version, so the hub has to report
+          # that same one — a checkout otherwise says `dev` and the handshake
+          # correctly refuses the pair. Setting it here is also what makes this
+          # job a real pairing check rather than two halves that never meet.
+          VERSION: ${{ inputs.version }}
+        # The suite self-skips when the binary or the image is missing, which
+        # would make this job green while proving nothing. Fail loudly instead.
+        run: |
+          set -euo pipefail
+          if [ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]; then
+            echo "::error::no runtime binary at $MANGO_CONTAINER_E2E_RUNTIME"
+            exit 1
+          fi
+          bun test tests/integration/services/connect-container-runtime.integration.test.ts
+
+      - name: Assert no container outlived the suite
+        if: ${{ !cancelled() }}
+        # `--rm` reaping is asynchronous in both engines, so a container the
+        # suite already ended can still be listed for a moment. Poll rather
+        # than race it, or this gate fails on timing instead of on a leak.
+        run: |
+          set -euo pipefail
+          leftover=""
+          for _ in $(seq 1 20); do
+            leftover="$("$CONTAINER_CLI" ps -a --format '{{.Names}}' --filter 'name=mango-rt-')"
+            if [ -z "$leftover" ]; then
+              break
+            fi
+            sleep 1
+          done
+          if [ -n "$leftover" ]; then
+            echo "::error::containers left behind: $leftover"
+            exit 1
+          fi

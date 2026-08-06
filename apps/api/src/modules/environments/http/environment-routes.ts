@@ -8,6 +8,7 @@ import type {
 import {
   AgentCliStatusListSchema,
   AgentCliStatusSchema,
+  ContainerDetectionSchema,
   EnvironmentIdSchema,
   LOCAL_ENVIRONMENT_ID,
   RuntimeIdSchema,
@@ -40,6 +41,10 @@ import {
   wslDetectionService,
 } from '../application/wsl-detection';
 import { environmentConfigFor, isEnvironmentConfigValid } from '../domain/environment-config';
+import {
+  type ContainerEngineService,
+  containerEngineService,
+} from '../infrastructure/container-engine';
 import { createEnvironmentEntityRoutes } from './environment-entity-routes';
 import { createInstallRoutes } from './install-routes';
 
@@ -122,7 +127,8 @@ export function createEnvironmentRoutes(
   probingService: EnvironmentProbingService = environmentProbingService,
   environmentInstallService: InstallService = installService,
   entityService: EnvironmentService = environmentService,
-  wslService: WslDetectionService = wslDetectionService
+  wslService: WslDetectionService = wslDetectionService,
+  containerService: ContainerEngineService = containerEngineService
 ) {
   return new Elysia()
     .use(requireAuth)
@@ -234,6 +240,9 @@ export function createEnvironmentRoutes(
       },
       { response: { 200: WslDetectionSchema } }
     )
+    .get('/environments/containers', () => containerService.detect(), {
+      response: { 200: ContainerDetectionSchema },
+    })
     .use(createInstallRoutes(environmentInstallService))
     .use(createEnvironmentEntityRoutes(entityService));
 }

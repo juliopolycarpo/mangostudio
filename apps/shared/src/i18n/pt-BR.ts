@@ -2141,6 +2141,7 @@ export const messages = {
         disconnected: 'Desconectado',
         error: 'Falha na conexão',
         updating: 'Atualizando',
+        pulling: 'Baixando imagem',
       },
       transport: {
         'in-process': 'No processo',
@@ -2149,6 +2150,7 @@ export const messages = {
         websocket: 'WebSocket',
         http: 'URL direta',
         ssh: 'SSH',
+        container: 'Contêiner',
       },
       connect: 'Conectar',
       disconnect: 'Desconectar',
@@ -2314,6 +2316,86 @@ export const messages = {
             'O ssh não conseguiu iniciar o runtime. Clique em Conectar para ver o que ele relatou.',
         },
       },
+      container: {
+        badge: 'Isolado',
+        title: 'Contêiner',
+        description:
+          'Ferramentas, workspaces e Git rodam dentro de um contêiner iniciado a partir de uma imagem que você já tem.',
+        isolationNote:
+          'O sandbox limita o agente, não o MangoStudio: ele mantém uma chamada de ferramenta longe do resto desta máquina. O motor de contêineres roda com o próprio usuário do MangoStudio, então isto não é uma barreira contra quem configura este ambiente.',
+        ephemeralNote:
+          'O sistema de arquivos do contêiner é descartado quando a conexão termina. O que precisa sobreviver — um projeto, um cache de pacotes, a home de um agente — precisa de um ponto de montagem abaixo.',
+        imageLabel: 'Imagem',
+        imageHint:
+          'Qualquer imagem que traga um shell. Ela nunca é modificada: o runtime do MangoStudio é montado nela somente para leitura na inicialização.',
+        imageInvalid: 'Use uma referência como nome:tag, sem espaços e sem traço inicial.',
+        engineLabel: 'Motor',
+        engine: {
+          docker: 'Docker',
+          podman: 'Podman',
+        },
+        engineReady: 'Disponível',
+        engineUnavailable: 'Indisponível aqui',
+        networkOffLabel: 'Desconectar a rede',
+        networkOffHint:
+          'Agentes normalmente precisam da rede para clonar, baixar e instalar. Desligue para um contêiner que não deve alcançar nada.',
+        cpusLabel: 'Limite de CPU',
+        cpusInvalid: 'Use um número maior que zero.',
+        memoryLabel: 'Limite de memória (MiB)',
+        memoryInvalid: 'Use um número inteiro de pelo menos 64.',
+        limitsHint:
+          'Limites restringem o que um processo descontrolado consome. Eles não fazem parte da barreira de isolamento.',
+        mountsLabel: 'Montagens',
+        mountsHint:
+          'Caminhos absolutos, compartilhados entre esta máquina e o contêiner. Caminhos que dariam ao contêiner o controle desta máquina são recusados.',
+        mountAdd: 'Adicionar montagem',
+        mountHostLabel: 'Caminho nesta máquina',
+        mountContainerLabel: 'Caminho no contêiner',
+        mountReadonly: 'Somente leitura',
+        mountRemove: 'Remover montagem',
+        mountIncomplete: 'Informe um caminho dos dois lados de cada montagem, ou remova a linha.',
+        mountTooLong: 'Um caminho de montagem pode ter no máximo 1024 caracteres.',
+        mountContainerInvalid:
+          'Um caminho no contêiner deve começar com /, sem espaços nem dois-pontos.',
+        mountRefusal: {
+          'too-many-mounts': 'Um ambiente pode montar no máximo {max} caminhos em seu contêiner.',
+          whitespace: 'O caminho {host} tem espaços em branco no início ou no fim.',
+          'not-absolute':
+            'O caminho {host} não é absoluto. Um caminho relativo seria resolvido contra o diretório que o motor de contêineres herdou.',
+          'contains-colon':
+            'O caminho {host} contém dois-pontos, que separa os campos de uma especificação de montagem.',
+          'engine-control':
+            'Montar {host} daria ao contêiner controle do motor de contêineres, o que é uma forma de escapar do contêiner.',
+          'denied-prefix':
+            'Montar {host} exporia o {prefix} desta máquina, o que é uma forma de escapar do contêiner.',
+          'host-root':
+            'Montar {host} exporia todo o sistema de arquivos desta máquina, o que é uma forma de escapar do contêiner.',
+          'shadows-runtime':
+            '{runtimePath} é onde o runtime do MangoStudio é montado. Escolha outro caminho dentro do contêiner.',
+          'shadows-image-root':
+            'Montar sobre / substituiria a imagem da qual o contêiner é construído.',
+          'duplicate-target':
+            'Duas montagens miram {containerPath} dentro do contêiner. Dê a cada uma seu próprio caminho.',
+        },
+        save: 'Salvar configurações do contêiner',
+        saveFailed: 'Não foi possível salvar as configurações do contêiner.',
+        reason: {
+          'engine-missing':
+            'Esta máquina não tem um motor de contêineres no PATH. Instale o Docker ou o Podman aqui, ou aponte este ambiente para o outro.',
+          'engine-unreachable':
+            'O motor está instalado mas não respondeu. Inicie-o e verifique se a conta que roda o MangoStudio pode usá-lo.',
+          'image-missing':
+            'O motor não encontrou essa imagem. Confira o nome e a tag, e se esta máquina pode baixar desse registro.',
+          'image-pull-failed':
+            'O download da imagem não terminou. Pressione Conectar para ver o que o motor relatou.',
+          'image-unsupported':
+            'Essa imagem não tem shell, então o MangoStudio não consegue descobrir de qual build do runtime ela precisa. Use uma imagem que traga um.',
+          'runtime-unavailable':
+            'O MangoStudio não tem um build do runtime para a plataforma que essa imagem roda. Use uma imagem feita para uma plataforma que esta versão publica.',
+          unknown:
+            'O motor não conseguiu iniciar um runtime nessa imagem. Pressione Conectar para ver o que ele relatou.',
+        },
+      },
       add: {
         trigger: 'Adicionar ambiente',
         title: 'Adicionar um ambiente',
@@ -2321,6 +2403,9 @@ export const messages = {
         reachLabel: 'Como você alcança esta máquina?',
         reachLocal: 'É esta máquina',
         reachWsl: 'Uma distribuição Linux nesta máquina',
+        reachContainer: 'Em um contêiner isolado nesta máquina',
+        containerHint:
+          'Roda ferramentas, workspaces e Git dentro de um contêiner descartável nesta máquina, de modo que uma chamada de ferramenta não alcance o resto dela. Nada é instalado: o MangoStudio monta seu runtime em uma imagem que você já tem.',
         reachPaired: 'Outra máquina que consegue alcançar o MangoStudio',
         reachDirect: 'Eu alcanço por URL',
         stdioHint:
