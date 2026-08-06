@@ -278,23 +278,24 @@ export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironm
                   onSelect={() => setKind(choice.value)}
                 />
               ))}
-              {/* Last, and it leaves rather than selects: the guided flow asks
-                  these same questions in an order that suits somebody who has a
-                  bare machine and no environment yet. */}
-              {onStartOnboarding ? (
-                <button
-                  type="button"
-                  onClick={onStartOnboarding}
-                  data-testid="add-environment-onboarding"
-                  className="rounded-xl border border-outline-variant/20 border-dashed px-3 py-2 text-left font-semibold text-on-surface-variant/70 text-sm transition-colors hover:bg-surface-container-highest"
-                >
-                  {labels.reachNewMachine}
-                  <span className="mt-0.5 block font-normal text-on-surface-variant/55 text-xs">
-                    {labels.newMachineHint}
-                  </span>
-                </button>
-              ) : null}
             </div>
+            {/* Last, and it leaves rather than selects: the guided flow asks
+                these same questions in an order that suits somebody who has a
+                bare machine and no environment yet. Sibling to the tablist, not
+                inside it: it is not a tab and does not select a choice. */}
+            {onStartOnboarding ? (
+              <button
+                type="button"
+                onClick={onStartOnboarding}
+                data-testid="add-environment-onboarding"
+                className="mt-2 block w-full rounded-xl border border-outline-variant/20 border-dashed px-3 py-2 text-left font-semibold text-on-surface-variant/70 text-sm transition-colors hover:bg-surface-container-highest"
+              >
+                {labels.reachNewMachine}
+                <span className="mt-0.5 block font-normal text-on-surface-variant/55 text-xs">
+                  {labels.newMachineHint}
+                </span>
+              </button>
+            ) : null}
             <div className="rounded-xl border border-primary/35 bg-primary/5 px-3 py-2.5">
               <p className="text-on-surface-variant/70 text-xs">{hints[kind]}</p>
             </div>
