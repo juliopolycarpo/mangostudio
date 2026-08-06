@@ -81,10 +81,15 @@ export function EndStateStep({
   );
   const dialEndpointMissing =
     endState === 'paired' && pairing.isSuccess && pairing.data?.endpoint === null;
+  // True while the gate above cannot yet say whether the endpoint is missing —
+  // covers the query still loading and a failed request alike. Without this, a
+  // second click on `existing` between mount and the query settling would
+  // advance past the gate the check above exists to enforce.
+  const dialEndpointUnresolved = endState === 'paired' && !pairing.isSuccess;
 
   const submit = async () => {
     if (existing) {
-      if (dialEndpointMissing) return;
+      if (dialEndpointMissing || dialEndpointUnresolved) return;
       onContinue();
       return;
     }
@@ -209,6 +214,7 @@ export function EndStateStep({
         continuePending={create.isPending}
         continueDisabled={
           dialEndpointMissing ||
+          (Boolean(existing) && dialEndpointUnresolved) ||
           (!existing && (trimmedName.length === 0 || effectiveId.length === 0 || idInvalid))
         }
         onContinue={() => void submit()}
