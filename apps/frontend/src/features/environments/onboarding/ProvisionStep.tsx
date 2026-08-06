@@ -53,13 +53,18 @@ export function ProvisionStep({
   const lifecycle = useRuntimeLifecycleQuery(environment.id);
   const [runId, setRunId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Tracked apart from `stream`/`runId`: closing the console (or a resumed
+  // wizard remounting) resets those, and a Continue gate that forgot a failed
+  // run the moment its console closed would not be a gate.
+  const [succeeded, setSucceeded] = useState(false);
 
   const stream = useInstallStream({
     runId,
     streamPath: runId
       ? `/api/environments/${encodeURIComponent(environment.id)}/runtime/runs/${encodeURIComponent(runId)}/log`
       : null,
-    onExit: () => {
+    onExit: (event) => {
+      setSucceeded(event.status === 'succeeded');
       void lifecycle.refetch();
     },
   });
@@ -68,10 +73,10 @@ export function ProvisionStep({
   const running = Boolean(
     runId && stream.phase !== 'finished' && stream.phase !== 'failed' && stream.phase !== 'idle'
   );
-  const finished = stream.phase === 'finished' && stream.exit?.status === 'succeeded';
 
   const start = async () => {
     setError(null);
+    setSucceeded(false);
     try {
       const started = paired
         ? await bootstrap.mutateAsync({
@@ -113,8 +118,20 @@ export function ProvisionStep({
         <InstallConsole
           stream={stream}
           onCancel={() => {
-            void cancel.mutateAsync(runId).catch(() => undefined);
-            setRunId(null);
+            // The hub rejects a second run for this environment while one is
+            // still active, so the console must stay open — and `runId` must
+            // stay set — until cancellation is confirmed. Clearing it on a
+            // failed cancel would let a retry race the run it was meant to end.
+            void (async () => {
+              try {
+                await cancel.mutateAsync(runId);
+                setRunId(null);
+              } catch (caught) {
+                setError(
+                  resolveApiErrorMessage(caught, t.environments.entities.runtime.actionFailed)
+                );
+              }
+            })();
           }}
           onClose={() => setRunId(null)}
         />
@@ -122,7 +139,7 @@ export function ProvisionStep({
 
       <StepActions
         continueLabel={labels.continue}
-        continueDisabled={running || (!finished && runId !== null)}
+        continueDisabled={running || !succeeded}
         onContinue={onContinue}
       />
     </div>
