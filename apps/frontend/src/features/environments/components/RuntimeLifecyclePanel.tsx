@@ -238,11 +238,14 @@ function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
 }
 
 /**
- * Names the runtime the buttons below would install.
+ * Names the runtime the buttons below would install — or, when there is
+ * nothing to install (`allow.update` is false, or SSH targets a custom
+ * `remoteRuntimePath` the push helper cannot reach), the runtime a download
+ * would cache, in copy that does not imply a hub-managed install.
  *
- * Only shown when a push action is actually on offer — a card with nothing to
- * install has no offer to describe, and the health line already says what is
- * there.
+ * Only shown when there is an offer to describe at all: a card with neither a
+ * push nor a download action has nothing this line could name, and the health
+ * line already says what is there.
  */
 function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
   const { t } = useI18n();
@@ -251,7 +254,19 @@ function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
   const offersPush = view.actions.some((action) =>
     PUSH_ACTIONS.includes(action as (typeof PUSH_ACTIONS)[number])
   );
-  if (!staged || !offersPush) return null;
+  if (!staged) return null;
+
+  if (!offersPush) {
+    if (!view.actions.includes('download')) return null;
+    return (
+      <p className="text-[11px] text-on-surface-variant/80" data-testid="runtime-offer">
+        {formatMessage(labels.downloadOffer, {
+          version: staged.version,
+          platform: staged.platformId,
+        })}
+      </p>
+    );
+  }
 
   return (
     <p className="text-[11px] text-on-surface-variant/80" data-testid="runtime-offer">
