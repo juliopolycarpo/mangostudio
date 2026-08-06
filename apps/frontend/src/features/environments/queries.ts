@@ -278,7 +278,7 @@ export function useRuntimeSlotBytesQuery(id: string, enabled: boolean) {
 export function useStartRuntimeInstallMutation(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (action: 'install' | 'reinstall' | 'upgrade') => {
+    mutationFn: async (action: 'install' | 'reinstall' | 'upgrade' | 'download') => {
       const { data, error } = await client.api
         .environments({ id })
         .runtime.install.post({ action });

@@ -475,7 +475,34 @@ was clobbered with it. Before installing from one, the hub reads `canary-manifes
 (published beside the assets, checksummed like them) and refuses when the tag has moved
 past its own build. The refusal lands on the hub, before any remote write, instead of
 surfacing as a handshake failure on somebody's machine. A rolling release that publishes
-no manifest is tolerated and falls back to the install-time version check.
+no manifest is tolerated and falls back to the install-time version check. The manifest is
+only read at a layout version this hub understands; an unknown `schemaVersion` reads as no
+manifest rather than as a record it would be guessing at.
+
+The manifest's source commit is kept rather than discarded once it has served that check.
+It lands in the slot's `runtime.json` beside the digest and comes back out through
+`runtime health`, so "which canary is on this machine" has an answer that survives the
+filename collision. It is provenance, not a gate — nothing compares it to decide whether to
+reinstall, which remains the digest's job — and it is written only for a rolling install,
+and cleared rather than carried, so a sha from a previous canary cannot claim a slot holds
+a build it does not.
+
+### Staging a download without installing it
+
+The card can fetch and verify the matching runtime into `~/.mango/runtime-cache/<version>/`
+and stop there, writing nothing to the target machine. That is the half of a provision worth
+keeping when somebody declines the other half: the download is the expensive, network-bound,
+checksum-verified part, and the card shows the resulting path next to a `sha256sum -c` line
+that checks it, so the binary can be carried over by hand.
+
+Staging deliberately survives both push gates. `allow.update` is an answer about what a hub
+may write to *that* machine, and a custom `remoteRuntimePath` is a statement that the push
+helper cannot target it — neither is a reason to withhold bytes that only ever reach the hub,
+and both are exactly when somebody needs them. It is offered only for WSL and SSH: a dial-in
+machine the hub cannot reach gets copyable commands instead, because a copy in the hub's
+cache would move nothing closer to it. When a release publishes no standalone runtime for a
+platform, the archive fallback is cached instead and the run says so rather than naming a raw
+path that is not there.
 
 What lands is written down: version, digest, and which hub installed it. The digest is
 what version equality cannot supply in a checkout — two `dev` builds are different

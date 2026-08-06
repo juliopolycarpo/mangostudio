@@ -2204,6 +2204,14 @@ export const messages: Messages = {
           reinstall: 'Reinstall',
           upgrade: 'Upgrade',
           setup: 'Set up consent',
+          download: 'Download only',
+        },
+        staged: {
+          offer: 'Install the matching runtime ({version}, {platform}) on this machine.',
+          offerHint: 'Or download it to this hub and carry it over yourself.',
+          title: 'Downloaded to this hub',
+          path: 'Cached file',
+          verify: 'Verify it',
         },
         manual: {
           platform: 'Commands for the {platform} build.',

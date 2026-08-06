@@ -932,8 +932,43 @@ export const RuntimeLifecycleActionSchema = Type.Union([
   Type.Literal('reinstall'),
   Type.Literal('upgrade'),
   Type.Literal('setup'),
+  /**
+   * Fetch and verify the matching runtime into the hub's own cache, writing
+   * nothing to the target machine.
+   *
+   * It is deliberately not gated by `allow.update`: that answer governs what a
+   * hub may put on someone else's machine, and this puts bytes only on the hub.
+   * Refusing hub-driven installs and still wanting the verified binary to carry
+   * over yourself is a coherent position, and this is the action that serves it.
+   */
+  Type.Literal('download'),
 ]);
 export type RuntimeLifecycleAction = Static<typeof RuntimeLifecycleActionSchema>;
+
+/**
+ * A verified runtime sitting in the hub's cache, and how to check it by hand.
+ *
+ * This is what "declined the install" leaves behind. The download is the
+ * expensive, network-bound, checksum-verified half of a provision; declining to
+ * write it to a machine is no reason to throw it away, and the path plus its
+ * checksum line is enough for somebody to finish the job themselves.
+ */
+export const RuntimeStagedAssetSchema = Type.Object(
+  {
+    /** Hub version these bytes pair with — the cache directory's name. */
+    version: Type.String({ minLength: 1, maxLength: 64 }),
+    platformId: Type.String({ minLength: 1, maxLength: 64 }),
+    assetName: Type.String({ minLength: 1, maxLength: 256 }),
+    /** Absolute path in `~/.mango/runtime-cache/<version>/`. */
+    path: Type.String({ minLength: 1, maxLength: 4_096 }),
+    /** Checks the file on disk against the release `SHA256SUMS`. */
+    verify: Type.String({ maxLength: 4_096 }),
+    /** Whether the bytes are on disk now, rather than merely resolvable. */
+    present: Type.Boolean(),
+  },
+  { additionalProperties: Type.Never() }
+);
+export type RuntimeStagedAsset = Static<typeof RuntimeStagedAssetSchema>;
 
 /**
  * Copyable commands for a machine the hub cannot reach (dial-in WS, Direct URL).
@@ -972,6 +1007,12 @@ export const RuntimeLifecycleViewSchema = Type.Object({
   slotBytes: Type.Union([Type.Integer({ minimum: 0 }), Type.Null()]),
   actions: ReadonlyArraySchema(RuntimeLifecycleActionSchema),
   manualCommands: Type.Optional(RuntimeManualCommandsSchema),
+  /**
+   * The runtime this hub would install, and whether a verified copy is already
+   * staged. Absent when the hub cannot name one — a dev checkout, or a machine
+   * that has never reported a platform.
+   */
+  stagedRuntime: Type.Optional(RuntimeStagedAssetSchema),
 });
 export type RuntimeLifecycleView = Static<typeof RuntimeLifecycleViewSchema>;
 
@@ -991,6 +1032,8 @@ export const RuntimeLifecycleInstallBodySchema = Type.Object(
       Type.Literal('install'),
       Type.Literal('reinstall'),
       Type.Literal('upgrade'),
+      /** Stage into the hub cache only; nothing reaches the target machine. */
+      Type.Literal('download'),
     ]),
   },
   { additionalProperties: Type.Never() }

@@ -574,7 +574,7 @@ describe('environment entity routes', () => {
     expect(wsl.status).toBe(200);
     const wslView = (await wsl.json()) as RuntimeLifecycleView;
     expect(Value.Check(RuntimeLifecycleViewSchema, wslView)).toBe(true);
-    expect(wslView.actions).toEqual(['install', 'reinstall', 'upgrade']);
+    expect(wslView.actions).toEqual(['install', 'reinstall', 'upgrade', 'download']);
   });
 
   it('starts a WSL runtime install and streams SSE exit', async () => {
@@ -680,6 +680,94 @@ describe('environment entity routes', () => {
     expect(await log.text()).toContain('"status":"succeeded"');
     expect(ensured).toBe(true);
     await manager.closeAll();
+  });
+
+  // Declining the install is not declining the download. The bytes are the
+  // expensive, checksum-verified half of a provision; staging them costs the
+  // target machine nothing and leaves somebody able to finish by hand.
+  it('stages a verified runtime in the hub cache without touching the machine', async () => {
+    const originalVersion = process.env.VERSION;
+    // A checkout publishes no release to download from.
+    process.env.VERSION = '9.9.9-test';
+    try {
+      let ensured = false;
+      let loadedPlatformId: string | undefined;
+      const host = createProvisionedRuntimeHost(
+        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
+        'linux-x64-musl'
+      );
+      const { app, repository, manager } = createTestApp(
+        {
+          wsl: async (_definition, onUnavailable) => {
+            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            return {
+              client: new RuntimeClient(connection.client, onUnavailable),
+              close: () => connection.close(),
+            };
+          },
+        },
+        undefined,
+        undefined,
+        (runtimeManager) =>
+          createRuntimeLifecycleService({
+            manager: runtimeManager,
+            provisioner: {
+              ensure: () => {
+                ensured = true;
+                return Promise.resolve();
+              },
+              removeSlotBytes: async () => undefined,
+              slotBytes: async () => null,
+            },
+            loadRuntimeAsset: (platformId) => {
+              loadedPlatformId = platformId;
+              return Promise.resolve({
+                bytes: new TextEncoder().encode('verified-runtime-binary'),
+                digest: 'sha256:0',
+                fromArchive: false as const,
+              });
+            },
+          })
+      );
+      await repository.create({
+        id: 'wsl-staged-download',
+        userId: TEST_USER.id,
+        name: 'Staged download',
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      });
+      await manager.connect(TEST_USER.id, 'wsl-staged-download');
+      await manager.refreshManifest(TEST_USER.id, 'wsl-staged-download');
+
+      const started = await app.handle(
+        new Request(
+          'http://localhost/environments/wsl-staged-download/runtime/install',
+          jsonRequest('POST', { action: 'download' })
+        )
+      );
+      expect(started.status).toBe(200);
+      const { runId } = (await started.json()) as { runId: string };
+      const log = await app.handle(
+        new Request(`http://localhost/environments/wsl-staged-download/runtime/runs/${runId}/log`)
+      );
+      const body = await log.text();
+
+      expect(body).toContain('"status":"succeeded"');
+      // The exact release identity, libc variant included — not `linux-x64`.
+      expect(loadedPlatformId).toBe('linux-x64-musl');
+      // The documented cache location, and a checksum line to check it with.
+      expect(body).toContain('runtime-cache');
+      expect(body).toContain('mangostudio-runtime-9.9.9-test-linux-x64-musl');
+      expect(body).toContain('sha256sum -c -');
+      // Nothing reached the distribution. `ensure` is the only path that writes
+      // bytes into a WSL slot, so its not having run is the whole claim.
+      expect(ensured).toBe(false);
+      await manager.closeAll();
+    } finally {
+      if (originalVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = originalVersion;
+    }
   });
 
   it('updates a connected runtime over its existing protocol connection', async () => {

@@ -11,6 +11,7 @@ import type {
   RuntimeLifecycleAction,
   RuntimeLifecycleView,
   RuntimeManualCommands,
+  RuntimeStagedAsset,
 } from '@mangostudio/shared/environments';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { getVersion, isDevelopmentVersion } from '../../../lib/config';
@@ -34,6 +35,12 @@ export interface BuildRuntimeLifecycleViewInput {
    * custom `remoteRuntimePath` the push helper cannot target).
    */
   readonly managedPush?: boolean;
+  /**
+   * The runtime this hub would install, and whether a verified copy is already
+   * in its cache. Resolved by the caller because "is it on disk" is a question
+   * only the filesystem can answer, and this builder stays pure.
+   */
+  readonly stagedRuntime?: RuntimeStagedAsset | undefined;
 }
 
 export function buildRuntimeLifecycleView(
@@ -60,6 +67,7 @@ export function buildRuntimeLifecycleView(
     slotBytes: input.slotBytes ?? null,
     actions,
     ...(manualCommands ? { manualCommands } : {}),
+    ...(input.stagedRuntime ? { stagedRuntime: input.stagedRuntime } : {}),
   };
 }
 
@@ -96,9 +104,9 @@ export function lifecycleActions(
 ): readonly RuntimeLifecycleAction[] {
   switch (transportKind) {
     case 'wsl':
-      return ['install', 'reinstall', 'upgrade'];
+      return ['install', 'reinstall', 'upgrade', 'download'];
     case 'ssh':
-      return ['install', 'reinstall', 'upgrade', 'setup'];
+      return ['install', 'reinstall', 'upgrade', 'setup', 'download'];
     // A container mounts the hub's own runtime binary read-only, so there is
     // nothing to install, upgrade or consent to on the far side: the bytes
     // follow this hub's version by construction, and the slot they resolve to
@@ -129,6 +137,11 @@ const PUSH_ACTIONS: readonly RuntimeLifecycleAction[] = ['install', 'reinstall',
  * user's own ssh/wsl credentials, out of band, where the runtime cannot refuse
  * it the way {@link consent-gate} refuses a protocol call. A non-managed push
  * target hides the same three but keeps setup when the transport allows it.
+ *
+ * `download` survives both gates. It writes to the hub and nowhere else, so
+ * neither a machine that refuses hub-driven updates nor a custom runtime path
+ * the push helper cannot target is a reason to withhold it — those are exactly
+ * the cases where somebody has to carry the verified bytes over by hand.
  */
 function filterLifecycleActions(
   actions: readonly RuntimeLifecycleAction[],
@@ -137,7 +150,7 @@ function filterLifecycleActions(
 ): readonly RuntimeLifecycleAction[] {
   let next = actions;
   if (!managedPush) {
-    next = next.filter((action) => action === 'setup');
+    next = next.filter((action) => action === 'setup' || action === 'download');
   }
   if (health?.allow?.update === false) {
     next = next.filter((action) => !PUSH_ACTIONS.includes(action));
@@ -166,6 +179,47 @@ export function releasePlatformIdFromHint(platformHint: string): string {
  */
 export function manualRuntimeReleaseAssetName(version: string, platformHint: string): string {
   return resolveRuntimeRelease(version, releasePlatformIdFromHint(platformHint)).runtimeAssetName;
+}
+
+/**
+ * Describes the runtime this hub would install and where a staged copy lives.
+ *
+ * Returns undefined when the hub cannot name one asset: a source checkout
+ * publishes no release, and a machine that has never reported a platform would
+ * only get a guess — and a guess is fine for a copyable command somebody reads
+ * before running, but not for a path this card claims already holds bytes.
+ */
+export function stagedRuntimeAsset(input: {
+  readonly version: string;
+  readonly platformHint: string | undefined;
+  readonly cacheDir: (version: string) => string;
+  readonly present: boolean;
+}): RuntimeStagedAsset | undefined {
+  if (isDevelopmentVersion(input.version)) return undefined;
+  if (input.platformHint === undefined || input.platformHint.length === 0) return undefined;
+
+  const platformId = releasePlatformIdFromHint(input.platformHint);
+  const release = resolveRuntimeRelease(input.version, platformId);
+  const assetName = release.runtimeAssetName;
+  const path = joinPosix(input.cacheDir(input.version), assetName);
+  const sumsUrl = releaseAssetUrl(release.tagVersion, 'SHA256SUMS');
+
+  return {
+    version: input.version,
+    platformId,
+    assetName,
+    path,
+    // Checks the file where it actually is, against the release that published
+    // it. `sha256sum -c` needs "<digest>  <path>", and the published line names
+    // the asset, not this cache path — so the path is substituted in.
+    verify: `curl -fsSL "${sumsUrl}" | awk '$2=="${assetName}"{print $1"  ${path}"}' | sha256sum -c -`,
+    present: input.present,
+  };
+}
+
+/** Cache paths are hub-local and always posix-shaped in the documented form. */
+function joinPosix(dir: string, name: string): string {
+  return dir.endsWith('/') ? `${dir}${name}` : `${dir}/${name}`;
 }
 
 /** Fallback when no peer has ever reported a platform. Always marked as assumed. */

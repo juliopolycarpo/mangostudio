@@ -5,6 +5,7 @@ import {
   lifecycleActions,
   manualRuntimeReleaseAssetName,
   releasePlatformIdFromHint,
+  stagedRuntimeAsset,
 } from '../../../../src/modules/environments/domain/runtime-lifecycle-view';
 
 const health = (overrides: Partial<RuntimeHealthReport> = {}): RuntimeHealthReport => ({
@@ -40,9 +41,15 @@ const health = (overrides: Partial<RuntimeHealthReport> = {}): RuntimeHealthRepo
 });
 
 describe('lifecycleActions', () => {
-  it('gives WSL install/reinstall/upgrade and SSH those plus setup', () => {
-    expect(lifecycleActions('wsl')).toEqual(['install', 'reinstall', 'upgrade']);
-    expect(lifecycleActions('ssh')).toEqual(['install', 'reinstall', 'upgrade', 'setup']);
+  it('gives WSL install/reinstall/upgrade and SSH those plus setup, both with download', () => {
+    expect(lifecycleActions('wsl')).toEqual(['install', 'reinstall', 'upgrade', 'download']);
+    expect(lifecycleActions('ssh')).toEqual([
+      'install',
+      'reinstall',
+      'upgrade',
+      'setup',
+      'download',
+    ]);
   });
 
   it('gives dial-in and local transports an empty action list', () => {
@@ -64,7 +71,7 @@ describe('buildRuntimeLifecycleView', () => {
     });
     expect(view.stale).toBe(true);
     expect(view.health?.version).toBe('1.2.3');
-    expect(view.actions).toEqual(['install', 'reinstall', 'upgrade']);
+    expect(view.actions).toEqual(['install', 'reinstall', 'upgrade', 'download']);
   });
 
   it('marks connected fresh health as not stale', () => {
@@ -225,7 +232,11 @@ describe('buildRuntimeLifecycleView', () => {
   // "no hub-driven updates" answer one button-click wide — all three actions
   // push the same bytes through the same helper, and the push runs out of band
   // on the user's own credentials where the runtime cannot refuse it.
-  it('hides every push action when allow.update is false, keeping setup', () => {
+  // `download` deliberately survives this gate. `allow.update` is an answer
+  // about what a hub may write to *that* machine; staging writes only to the
+  // hub, and is exactly what someone who refused hub-driven installs needs in
+  // order to carry the verified binary over themselves.
+  it('hides every push action when allow.update is false, keeping setup and download', () => {
     const base = health();
     const denied = health({ allow: { ...base.allow, update: false } });
 
@@ -237,7 +248,7 @@ describe('buildRuntimeLifecycleView', () => {
         connected: true,
         nowMs: 2_000,
       }).actions
-    ).toEqual([]);
+    ).toEqual(['download']);
 
     expect(
       buildRuntimeLifecycleView({
@@ -247,7 +258,7 @@ describe('buildRuntimeLifecycleView', () => {
         connected: true,
         nowMs: 2_000,
       }).actions
-    ).toEqual(['setup']);
+    ).toEqual(['setup', 'download']);
   });
 
   it('keeps install available when no runtime has reported consent yet', () => {
@@ -258,10 +269,10 @@ describe('buildRuntimeLifecycleView', () => {
       connected: false,
       nowMs: 2_000,
     });
-    expect(view.actions).toEqual(['install', 'reinstall', 'upgrade']);
+    expect(view.actions).toEqual(['install', 'reinstall', 'upgrade', 'download']);
   });
 
-  it('hides managed push actions when managedPush is false', () => {
+  it('hides managed push actions when managedPush is false, keeping download', () => {
     const view = buildRuntimeLifecycleView({
       transportKind: 'ssh',
       health: health({ slot: 'remote' }),
@@ -270,7 +281,102 @@ describe('buildRuntimeLifecycleView', () => {
       nowMs: 2_000,
       managedPush: false,
     });
-    expect(view.actions).toEqual(['setup']);
+    expect(view.actions).toEqual(['setup', 'download']);
+  });
+
+  it('passes a resolved staged asset through, and omits it when there is none', () => {
+    const staged = {
+      version: '1.2.3',
+      platformId: 'linux-x64',
+      assetName: 'mangostudio-runtime-1.2.3-linux-x64',
+      path: '/home/u/.mango/runtime-cache/1.2.3/mangostudio-runtime-1.2.3-linux-x64',
+      verify: 'sha256sum -c -',
+      present: true,
+    } as const;
+
+    expect(
+      buildRuntimeLifecycleView({
+        transportKind: 'wsl',
+        health: health(),
+        readAtMs: 1_000,
+        connected: true,
+        nowMs: 2_000,
+        stagedRuntime: staged,
+      }).stagedRuntime
+    ).toEqual(staged);
+
+    expect(
+      buildRuntimeLifecycleView({
+        transportKind: 'wsl',
+        health: health(),
+        readAtMs: 1_000,
+        connected: true,
+        nowMs: 2_000,
+      }).stagedRuntime
+    ).toBeUndefined();
+  });
+});
+
+describe('stagedRuntimeAsset', () => {
+  const cacheDir = (version: string) => `/home/u/.mango/runtime-cache/${version}`;
+
+  it('names the stable asset and a checksum line that checks the cached path', () => {
+    const staged = stagedRuntimeAsset({
+      version: '1.2.3',
+      platformHint: 'linux-x64',
+      cacheDir,
+      present: true,
+    });
+
+    expect(staged?.assetName).toBe('mangostudio-runtime-1.2.3-linux-x64');
+    expect(staged?.path).toBe(
+      '/home/u/.mango/runtime-cache/1.2.3/mangostudio-runtime-1.2.3-linux-x64'
+    );
+    expect(staged?.verify).toContain('releases/download/v1.2.3/SHA256SUMS');
+    // The published line names the asset; `sha256sum -c` needs the path this
+    // hub actually wrote, so the command has to substitute one for the other.
+    expect(staged?.verify).toContain(`{print $1"  ${staged?.path}"}`);
+    expect(staged?.verify).toContain('sha256sum -c -');
+    expect(staged?.present).toBe(true);
+  });
+
+  // The rolling tag and the rolling filename, never the hub's sha-stamped
+  // version — that names a tag no release ever published.
+  it('resolves a canary hub onto the rolling tag and rolling asset name', () => {
+    const staged = stagedRuntimeAsset({
+      version: '1.2.3-canary.gabc1234',
+      platformHint: 'linux-x64',
+      cacheDir,
+      present: false,
+    });
+
+    expect(staged?.assetName).toBe('mangostudio-runtime-1.2.3-canary-linux-x64');
+    expect(staged?.verify).toContain('releases/download/v1.2.3-canary/SHA256SUMS');
+    // Cached under the hub's own build, which is what keeps two canary builds
+    // in separate directories while both read one tag.
+    expect(staged?.path).toContain('/runtime-cache/1.2.3-canary.gabc1234/');
+  });
+
+  it('maps a win32 health hint onto the windows asset, .exe included', () => {
+    const staged = stagedRuntimeAsset({
+      version: '1.2.3',
+      platformHint: 'win32-x64',
+      cacheDir,
+      present: false,
+    });
+
+    expect(staged?.platformId).toBe('windows-x64');
+    expect(staged?.assetName).toBe('mangostudio-runtime-1.2.3-windows-x64.exe');
+  });
+
+  // A guess is fine for a command somebody reads before running. It is not fine
+  // for a path this card claims already holds verified bytes.
+  it.each([
+    ['a source checkout', 'dev', 'linux-x64'],
+    ['an unknown platform', '1.2.3', undefined],
+    ['an empty platform hint', '1.2.3', ''],
+  ])('returns undefined for %s', (_label, version, platformHint) => {
+    expect(stagedRuntimeAsset({ version, platformHint, cacheDir, present: false })).toBeUndefined();
   });
 });
 
