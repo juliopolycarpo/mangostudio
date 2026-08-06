@@ -2478,6 +2478,9 @@ export const messages: Messages = {
       endStatePaired: 'The machine dials MangoStudio',
       endStatePairedHint:
         'Set up once over SSH, then the runtime connects on its own and stays connected — through a router, a firewall, or MangoStudio moving to another network. It needs a service on that machine to survive reboots.',
+      endStatePairingUnavailable:
+        'MangoStudio could not check whether it has a public address to hand the machine. Nothing has been done on that machine yet — try again.',
+      endStatePairingRetry: 'Check again',
       permissionsSshIntro:
         'The runtime is on the machine. Say what MangoStudio may do with it — this is recorded on that machine, not here.',
       permissionsPairedIntro:

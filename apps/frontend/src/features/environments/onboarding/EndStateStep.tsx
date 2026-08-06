@@ -12,6 +12,7 @@
 
 import type { CreateEnvironmentBody, Environment } from '@mangostudio/shared/environments';
 import { useId, useState } from 'react';
+import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -86,6 +87,11 @@ export function EndStateStep({
   // second click on `existing` between mount and the query settling would
   // advance past the gate the check above exists to enforce.
   const dialEndpointUnresolved = endState === 'paired' && !pairing.isSuccess;
+  // Separated from the line above because the two look identical from the
+  // button's side and are not the same to the person watching it. Loading ends
+  // by itself; a failed request does not, and without its own alert and a way
+  // to ask again this step is a disabled Continue with no stated reason.
+  const dialEndpointFailed = endState === 'paired' && pairing.isError;
 
   const submit = async () => {
     if (existing) {
@@ -172,6 +178,24 @@ export function EndStateStep({
         >
           {t.environments.entities.pairing.endpointUnset}
         </p>
+      ) : null}
+
+      {dialEndpointFailed ? (
+        <div
+          className="space-y-2 rounded-xl border border-error/35 bg-error/5 px-3 py-2.5"
+          role="alert"
+          data-testid="onboarding-pairing-error"
+        >
+          <p className="text-on-surface-variant text-xs">{labels.endStatePairingUnavailable}</p>
+          <Button
+            variant="secondary"
+            className="w-full"
+            loading={pairing.isFetching}
+            onClick={() => void pairing.refetch()}
+          >
+            {labels.endStatePairingRetry}
+          </Button>
+        </div>
       ) : null}
 
       {existing ? null : (

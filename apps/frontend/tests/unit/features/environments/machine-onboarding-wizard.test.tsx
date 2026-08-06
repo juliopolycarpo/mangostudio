@@ -177,4 +177,46 @@ describe('MachineOnboardingWizard', () => {
     expect(screen.getByTestId('onboarding-end-state-step')).toBeInTheDocument();
     expect(screen.queryByTestId('onboarding-provision-step')).toBeNull();
   });
+
+  it('says so and offers another go when the gate itself cannot be asked', async () => {
+    scenario
+      .respondWithJson('POST', '/api/environments', { body: PAIRED, status: 201 })
+      // Not "no address" — no answer at all. The gate has to hold, and holding
+      // silently behind a disabled button is the failure this covers.
+      .respondWithJson('GET', '/api/environments/vps/pairing', {
+        body: { code: 'internal_error', message: 'nope' },
+        status: 500,
+      })
+      .respondWithJson('GET', '/api/environments/vps/runtime', {
+        body: { health: null, readAt: null, stale: true, slotBytes: null, actions: [] },
+      });
+    const user = userEvent.setup();
+    const wizard = await openWizard();
+
+    await user.type(
+      within(wizard).getByRole('textbox', { name: add.sshHostLabel }),
+      'vps.example.test'
+    );
+    await user.click(within(wizard).getByRole('button', { name: labels.continue }));
+
+    const endState = await screen.findByTestId('onboarding-end-state-step');
+    await user.click(within(endState).getByRole('radio', { name: labels.endStatePaired }));
+    scenario.respondWithJson('GET', '/api/environments', { body: [LOCAL, PAIRED] });
+    await user.click(within(endState).getByRole('button', { name: labels.continue }));
+
+    const failure = await screen.findByTestId('onboarding-pairing-error');
+    expect(failure).toHaveTextContent(labels.endStatePairingUnavailable);
+    expect(screen.getByRole('button', { name: labels.continue })).toBeDisabled();
+
+    // The retry is the whole point: once the hub answers, the flow moves on
+    // without making anyone reopen the wizard.
+    scenario.respondWithJson('GET', '/api/environments/vps/pairing', {
+      body: { endpoint: 'https://hub.example.test/api/runtime', token: null },
+    });
+    await user.click(screen.getByRole('button', { name: labels.endStatePairingRetry }));
+
+    await waitFor(() => expect(screen.queryByTestId('onboarding-pairing-error')).toBeNull());
+    await user.click(screen.getByRole('button', { name: labels.continue }));
+    expect(await screen.findByTestId('onboarding-permissions-step')).toBeInTheDocument();
+  });
 });

@@ -2488,6 +2488,9 @@ export const messages = {
       endStatePaired: 'A máquina liga para o MangoStudio',
       endStatePairedHint:
         'Configurada uma vez por SSH, depois o runtime se conecta sozinho e continua conectado — atrás de um roteador, de um firewall, ou com o MangoStudio mudando de rede. Precisa de um serviço naquela máquina para sobreviver a reinicializações.',
+      endStatePairingUnavailable:
+        'O MangoStudio não conseguiu verificar se tem um endereço público para entregar à máquina. Nada foi feito naquela máquina ainda — tente de novo.',
+      endStatePairingRetry: 'Verificar de novo',
       permissionsSshIntro:
         'O runtime está na máquina. Diga o que o MangoStudio pode fazer com ele — isso fica registrado naquela máquina, não aqui.',
       permissionsPairedIntro:
