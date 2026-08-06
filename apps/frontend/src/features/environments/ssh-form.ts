@@ -21,6 +21,11 @@ export interface SshFormFields {
 
 export type SshFormField = keyof SshFormFields;
 
+/** Every field blank — "not set", never an empty argv entry. */
+export function emptySshForm(): SshFormFields {
+  return { host: '', user: '', port: '', identityFile: '', remoteRuntimePath: '' };
+}
+
 /** The form as the transport sees it: empty means "not set", never an empty argv entry. */
 export function sshFormToConfig(form: SshFormFields): SshEnvironmentConfig {
   // Only a wholly numeric value becomes a port: `Number.parseInt` would

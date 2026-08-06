@@ -2454,7 +2454,76 @@ export const messages = {
         submit: 'Adicionar ambiente',
         cancel: 'Cancelar',
         createFailed: 'Não foi possível criar o ambiente.',
+        reachNewMachine: 'Configurar uma máquina nova…',
+        newMachineHint:
+          'Leva uma máquina que você alcança por SSH do zero até um ambiente funcionando: o runtime, as permissões dele, o que está instalado nela e a sua biblioteca.',
       },
+    },
+    onboarding: {
+      title: 'Configurar uma máquina nova',
+      progress: 'Etapa {step} de {total} · {name}',
+      steps: {
+        reach: 'Alcance',
+        'end-state': 'Destino',
+        install: 'Runtime',
+        permissions: 'Permissões',
+        provision: 'Preparação',
+        tools: 'Ferramentas',
+        library: 'Biblioteca',
+        done: 'Pronto',
+      },
+      continue: 'Continuar',
+      back: 'Voltar',
+      finish: 'Concluir',
+      missingEnvironment: 'Esta etapa precisa do ambiente que a anterior cria.',
+      reachIntro:
+        'O MangoStudio usa o seu próprio cliente ssh, então chaves, o seu agente, o ~/.ssh/config e o known_hosts valem aqui. Nada precisa estar instalado na máquina antes.',
+      reachWindows:
+        'Apenas alvos Linux e macOS. Windows não é suportado por SSH — pareie a partir do card dele.',
+      endStateLabel: 'Como o MangoStudio deve alcançá-la depois?',
+      endStateSsh: 'Por SSH, sempre',
+      endStateSshHint:
+        'O MangoStudio inicia o runtime lá com o seu cliente ssh quando precisa. Nada roda naquela máquina no intervalo, e não há serviço para manter de pé.',
+      endStatePaired: 'A máquina liga para o MangoStudio',
+      endStatePairedHint:
+        'Configurada uma vez por SSH, depois o runtime se conecta sozinho e continua conectado — atrás de um roteador, de um firewall, ou com o MangoStudio mudando de rede. Precisa de um serviço naquela máquina para sobreviver a reinicializações.',
+      permissionsSshIntro:
+        'O runtime está na máquina. Diga o que o MangoStudio pode fazer com ele — isso fica registrado naquela máquina, não aqui.',
+      permissionsPairedIntro:
+        'Diga o que o MangoStudio pode fazer naquela máquina. A resposta é registrada lá durante o setup, na próxima etapa, e pode ser estreitada depois pelo card.',
+      permissionsNone: 'Nenhuma permissão escolhida ainda.',
+      permissionsChosen: 'Perfil: {profile}',
+      permissionsChoose: 'Escolher permissões',
+      permissionsChange: 'Alterar permissões',
+      provisionSshIntro:
+        'O MangoStudio envia o runtime correspondente, confere o checksum e o publica. Rodar de novo quando a máquina já tem esses bytes não faz nada.',
+      provisionPairedIntro:
+        'Uma execução por SSH: enviar o runtime, registrar as suas permissões, entregar uma credencial à máquina e instalar o serviço que a mantém conectada. Toda etapa pode ser repetida com segurança.',
+      provisionStartSsh: 'Instalar o runtime',
+      provisionStartPaired: 'Preparar a máquina',
+      toolsIntro: 'O que o MangoStudio encontrou naquela máquina.',
+      toolsProbing: 'Verificando o que está instalado…',
+      toolsNone: 'Nenhum toolchain ou CLI de agente foi encontrado lá ainda.',
+      toolsDisconnected:
+        'Nada foi verificado ainda — o MangoStudio lê isso da máquina assim que ela conecta.',
+      toolsInstallsNote:
+        'Desligado por padrão. Instalar em {name} exige que esta chave e as permissões daquela máquina concordem; quem recusar diz que foi.',
+      libraryIntro:
+        'Skills, subagentes e instruções vivem por máquina. Copiar as suas para lá é uma revisão à parte — conflitos, consentimento por destino e desfazer — então acontece na biblioteca.',
+      libraryOpen: 'Abrir a biblioteca de {name}',
+      libraryNotPermitted:
+        'As permissões desta máquina excluem a biblioteca, então não há o que copiar até isso mudar.',
+      summaryReady: '{name} está configurada e conectada.',
+      summaryPending:
+        '{name} está configurada. Ela não está conectada agora — o card dela tem as ações para concluir ou tentar de novo.',
+      summaryTransport: 'Transporte',
+      summaryStatus: 'Status',
+      summaryVersion: 'Versão do runtime',
+      summaryDigest: 'Digest',
+      summaryProfile: 'Perfil',
+      summaryUnknown: 'Não informado',
+      summaryAudit: 'Rode estes comandos naquela máquina para ver o que ficou registrado lá.',
+      summaryServiceCommand: 'Conferir o serviço',
     },
     runtimes: {
       description:

@@ -14,6 +14,7 @@ import type {
   InstallRecipePreview,
   RuntimeLifecycleStartResponse,
   RuntimeLifecycleView,
+  RuntimePairedBootstrapBody,
   RuntimePairingIssue,
   RuntimePairingStatus,
   RuntimeSetupBody,
@@ -300,6 +301,29 @@ export function useCancelRuntimeInstallMutation(id: string) {
         .cancel.post();
       if (error) throw new ApiError(error.value);
       return data as { runId: string; cancellationRequested: boolean };
+    },
+  });
+}
+
+/**
+ * Provisions an ssh-reachable machine so it dials the hub by itself.
+ *
+ * The ssh credentials travel in the body and are never stored: after this the
+ * hub waits for that machine rather than reaching for it. The pairing token it
+ * mints never comes back here either — it goes straight into the ssh channel,
+ * so the browser holds no machine credential it has no use for.
+ */
+export function useStartPairedBootstrapMutation(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RuntimePairedBootstrapBody) => {
+      const { data, error } = await client.api.environments({ id }).runtime.bootstrap.post(body);
+      if (error) throw new ApiError(error.value);
+      return data as RuntimeLifecycleStartResponse;
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.runtimeLifecycle(id) });
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
     },
   });
 }
