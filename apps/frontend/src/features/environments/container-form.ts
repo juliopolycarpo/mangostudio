@@ -105,6 +105,13 @@ const CPU_LIMIT_MAX = 1_024;
 const MEMORY_LIMIT_MIN = 64;
 const MEMORY_LIMIT_MAX = 1_048_576;
 
+/** Mirrors `ContainerMountSchema`; the server is the authority. */
+const MOUNT_PATH_MAX = 1_024;
+const MOUNT_CONTAINER_PATTERN = /^\/[^\s:]*$/;
+
+/** What is wrong with the mount list, when it is not a shared policy refusal. */
+export type ContainerMountIssue = 'incomplete' | 'too-long' | 'container-path';
+
 export interface ContainerFormError {
   readonly field: 'image' | 'cpus' | 'memoryMib' | 'mounts';
   /**
@@ -114,23 +121,31 @@ export interface ContainerFormError {
    * anything, so it needs a translated sentence built from this.
    */
   readonly refusal?: ContainerMountRefusal;
+  /** Set instead of {@link refusal} when the row is malformed rather than refused. */
+  readonly mountIssue?: ContainerMountIssue;
 }
 
 /**
- * The first thing wrong with the form, or null.
+ * Everything wrong with the form, one entry per field.
+ *
+ * Every field is judged, not just the first one that fails: returning at the
+ * image made the cpus, memory and mount messages unreachable while the image
+ * box was empty, which is exactly when someone is still filling the rest in.
  *
  * Shapes are checked here; the mount policy is delegated to shared, which is
  * the same function the connector runs before it launches — so the browser
  * cannot come to a different conclusion than the thing that does the launching.
  */
-export function validateContainerForm(form: ContainerFormFields): ContainerFormError | null {
+export function validateContainerForm(form: ContainerFormFields): readonly ContainerFormError[] {
+  const errors: ContainerFormError[] = [];
+
   const image = form.image.trim();
   if (image.length === 0 || image.length > 256 || !CONTAINER_IMAGE_PATTERN.test(image)) {
-    return { field: 'image' };
+    errors.push({ field: 'image' });
   }
   const cpus = form.cpus.trim();
   if (cpus && !(Number(cpus) >= CPU_LIMIT_MIN && Number(cpus) <= CPU_LIMIT_MAX)) {
-    return { field: 'cpus' };
+    errors.push({ field: 'cpus' });
   }
   const memory = form.memoryMib.trim();
   if (
@@ -141,18 +156,40 @@ export function validateContainerForm(form: ContainerFormFields): ContainerFormE
       Number(memory) <= MEMORY_LIMIT_MAX
     )
   ) {
-    return { field: 'memoryMib' };
+    errors.push({ field: 'memoryMib' });
   }
 
+  const mounts = mountError(form);
+  if (mounts) errors.push(mounts);
+  return errors;
+}
+
+function mountError(form: ContainerFormFields): ContainerFormError | null {
+  const mounts = usableMounts(form);
   // A row with one half filled in is a half-written mount, not a policy
-  // problem, so it is caught before the shared rules run on it.
-  const incomplete = usableMounts(form).some((mount) => !mount.hostPath || !mount.containerPath);
-  if (incomplete) return { field: 'mounts' };
+  // problem, so it is caught before any rule runs on it.
+  if (mounts.some((mount) => !mount.hostPath || !mount.containerPath)) {
+    return { field: 'mounts', mountIssue: 'incomplete' };
+  }
+  // The schema settles these and shared's policy check does not look at them,
+  // so without mirroring them here a bad path passes the form and comes back
+  // as a generic 422 instead of a message beside the row that caused it.
+  if (
+    mounts.some(
+      (mount) =>
+        mount.hostPath.length > MOUNT_PATH_MAX || mount.containerPath.length > MOUNT_PATH_MAX
+    )
+  ) {
+    return { field: 'mounts', mountIssue: 'too-long' };
+  }
+  if (mounts.some((mount) => !MOUNT_CONTAINER_PATTERN.test(mount.containerPath))) {
+    return { field: 'mounts', mountIssue: 'container-path' };
+  }
 
   const refusal = containerConfigRefusal(containerFormToConfig(form));
   return refusal ? { field: 'mounts', refusal } : null;
 }
 
 export function isContainerFormUsable(form: ContainerFormFields): boolean {
-  return validateContainerForm(form) === null;
+  return validateContainerForm(form).length === 0;
 }

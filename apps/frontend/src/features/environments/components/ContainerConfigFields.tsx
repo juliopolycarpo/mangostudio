@@ -17,6 +17,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import {
   type ContainerFormError,
   type ContainerFormFields,
+  type ContainerMountIssue,
   emptyContainerMount,
 } from '../container-form';
 
@@ -25,7 +26,8 @@ const ENGINES: readonly ContainerEngine[] = ['docker', 'podman'];
 interface ContainerConfigFieldsProps {
   readonly idPrefix: string;
   readonly form: ContainerFormFields;
-  readonly error: ContainerFormError | null;
+  /** Every field's verdict, so one bad field cannot hide another's message. */
+  readonly errors: readonly ContainerFormError[];
   /** Detection result, when the surface has one; absent hides availability copy. */
   readonly detection?: ContainerDetection | undefined;
   readonly onChange: (patch: Partial<ContainerFormFields>) => void;
@@ -34,13 +36,26 @@ interface ContainerConfigFieldsProps {
 export function ContainerConfigFields({
   idPrefix,
   form,
-  error,
+  errors,
   detection,
   onChange,
 }: ContainerConfigFieldsProps) {
   const { t } = useI18n();
   const labels = t.environments.entities.container;
   const optional = t.environments.entities.add.optional;
+  const errorFor = (field: ContainerFormError['field']): ContainerFormError | undefined =>
+    errors.find((entry) => entry.field === field);
+  const mountError = errorFor('mounts');
+  const mountIssueMessage = (issue: ContainerMountIssue | undefined): string => {
+    switch (issue) {
+      case 'too-long':
+        return labels.mountTooLong;
+      case 'container-path':
+        return labels.mountContainerInvalid;
+      default:
+        return labels.mountIncomplete;
+    }
+  };
 
   const setMount = (index: number, patch: Partial<ContainerFormFields['mounts'][number]>): void => {
     onChange({
@@ -56,7 +71,7 @@ export function ContainerConfigFields({
           label={labels.imageLabel}
           placeholder="node:22"
           value={form.image}
-          error={form.image.trim() && error?.field === 'image' ? labels.imageInvalid : undefined}
+          error={form.image.trim() && errorFor('image') ? labels.imageInvalid : undefined}
           onChange={(event) => onChange({ image: event.target.value })}
         />
         <p className="text-[11px] text-on-surface-variant/60">{labels.imageHint}</p>
@@ -116,7 +131,7 @@ export function ContainerConfigFields({
           inputMode="decimal"
           placeholder="2"
           value={form.cpus}
-          error={error?.field === 'cpus' ? labels.cpusInvalid : undefined}
+          error={errorFor('cpus') ? labels.cpusInvalid : undefined}
           onChange={(event) => onChange({ cpus: event.target.value })}
         />
         <Input
@@ -125,7 +140,7 @@ export function ContainerConfigFields({
           inputMode="numeric"
           placeholder="2048"
           value={form.memoryMib}
-          error={error?.field === 'memoryMib' ? labels.memoryInvalid : undefined}
+          error={errorFor('memoryMib') ? labels.memoryInvalid : undefined}
           onChange={(event) => onChange({ memoryMib: event.target.value })}
         />
       </div>
@@ -187,11 +202,14 @@ export function ContainerConfigFields({
           </div>
         ))}
 
-        {error?.field === 'mounts' ? (
+        {mountError ? (
           <p className="text-[11px] text-error" role="alert">
-            {error.refusal
-              ? formatMessage(labels.mountRefusal[error.refusal.code], error.refusal.params)
-              : labels.mountIncomplete}
+            {mountError.refusal
+              ? formatMessage(
+                  labels.mountRefusal[mountError.refusal.code],
+                  mountError.refusal.params
+                )
+              : mountIssueMessage(mountError.mountIssue)}
           </p>
         ) : null}
       </div>

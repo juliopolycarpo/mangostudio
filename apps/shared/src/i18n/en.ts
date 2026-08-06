@@ -2344,6 +2344,9 @@ export const messages: Messages = {
         mountReadonly: 'Read only',
         mountRemove: 'Remove mount',
         mountIncomplete: 'Give each mount a path on both sides, or remove the row.',
+        mountTooLong: 'A mount path may be at most 1024 characters.',
+        mountContainerInvalid:
+          'A path in the container must start with /, with no spaces or colons.',
         mountRefusal: {
           'too-many-mounts': 'An environment may mount at most {max} paths into its container.',
           whitespace: 'The host path {host} has leading or trailing whitespace.',

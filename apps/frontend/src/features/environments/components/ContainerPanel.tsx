@@ -12,7 +12,7 @@
 
 import type { Environment } from '@mangostudio/shared/environments';
 import { Box, ShieldCheck } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -33,19 +33,22 @@ export function ContainerPanel({ environment }: ContainerPanelProps) {
   const { t } = useI18n();
   const labels = t.environments.entities.container;
   const update = useUpdateEnvironmentMutation();
-  const stored = containerConfigToForm(environment.config);
+  const stored = useMemo(() => containerConfigToForm(environment.config), [environment.config]);
   const [form, setForm] = useState<ContainerFormFields>(stored);
   const [edited, setEdited] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Realtime keeps environment rows fresh; an untouched form follows them, and
-  // one someone is typing into does not get overwritten mid-edit.
-  const storedKey = JSON.stringify(stored);
+  // one someone is typing into does not get overwritten mid-edit. Keyed on the
+  // row itself rather than a serialization of it: the effect only has to run
+  // when the stored config actually changes identity, which is what the memo
+  // above tracks.
   useEffect(() => {
-    if (!edited) setForm(JSON.parse(storedKey) as ContainerFormFields);
-  }, [edited, storedKey]);
+    if (!edited) setForm(stored);
+  }, [edited, stored]);
 
-  const invalid = validateContainerForm(form);
+  const errors = validateContainerForm(form);
+  const invalid = errors.length > 0;
   const config = containerFormToConfig(form);
   const changed = JSON.stringify(config) !== JSON.stringify(containerFormToConfig(stored));
 
@@ -92,7 +95,7 @@ export function ContainerPanel({ environment }: ContainerPanelProps) {
       <ContainerConfigFields
         idPrefix={`container-${environment.id}`}
         form={form}
-        error={invalid}
+        errors={errors}
         onChange={(patch) => {
           setEdited(true);
           setForm((current) => ({ ...current, ...patch }));
@@ -108,7 +111,7 @@ export function ContainerPanel({ environment }: ContainerPanelProps) {
       <Button
         variant="secondary"
         className="h-8 px-2.5 text-xs"
-        disabled={!changed || invalid !== null}
+        disabled={!changed || invalid}
         loading={update.isPending}
         onClick={() => void save()}
       >

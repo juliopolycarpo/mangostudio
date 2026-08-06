@@ -143,7 +143,7 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
   const sshConfig = sshFormToConfig(sshForm);
   const sshFieldInvalid = validateSshForm(sshForm);
   const sshInvalid = kind === 'ssh' && !isSshFormUsable(sshForm);
-  const containerError = validateContainerForm(container);
+  const containerErrors = validateContainerForm(container);
   const containerInvalid = kind === 'container' && !isContainerFormUsable(container);
   const blocked =
     trimmedName.length === 0 ||
@@ -347,7 +347,7 @@ export function AddEnvironmentDialog({ onClose }: AddEnvironmentDialogProps) {
             <ContainerConfigFields
               idPrefix="add-environment-container"
               form={container}
-              error={containerError}
+              errors={containerErrors}
               detection={containers.data}
               onChange={(patch) => setContainer((current) => ({ ...current, ...patch }))}
             />

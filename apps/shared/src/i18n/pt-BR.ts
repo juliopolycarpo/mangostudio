@@ -2354,6 +2354,9 @@ export const messages = {
         mountReadonly: 'Somente leitura',
         mountRemove: 'Remover montagem',
         mountIncomplete: 'Informe um caminho dos dois lados de cada montagem, ou remova a linha.',
+        mountTooLong: 'Um caminho de montagem pode ter no máximo 1024 caracteres.',
+        mountContainerInvalid:
+          'Um caminho no contêiner deve começar com /, sem espaços nem dois-pontos.',
         mountRefusal: {
           'too-many-mounts': 'Um ambiente pode montar no máximo {max} caminhos em seu contêiner.',
           whitespace: 'O caminho {host} tem espaços em branco no início ou no fim.',
