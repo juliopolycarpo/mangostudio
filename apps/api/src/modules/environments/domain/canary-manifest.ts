@@ -26,6 +26,9 @@ export const CANARY_MANIFEST_ASSET = 'canary-manifest.json';
  */
 const CANARY_MANIFEST_SCHEMA_VERSION = 1;
 
+/** A git commit as the release script writes it: `github.sha`, or a short form of it. */
+const SOURCE_SHA = /^[0-9a-f]{7,40}$/;
+
 interface CanaryManifestPair {
   readonly platform: string;
   readonly hub: { readonly asset: string; readonly digest: string };
@@ -68,7 +71,12 @@ export function parseCanaryManifest(text: string): CanaryManifest | null {
   if (candidate.channel !== 'canary') return null;
   if (typeof candidate.version !== 'string' || candidate.version.length === 0) return null;
   if (typeof candidate.assetVersion !== 'string') return null;
-  if (typeof candidate.sourceSha !== 'string') return null;
+  // Shape-checked, not merely typed: this value no longer stops at a refusal
+  // message. A rolling install writes it into the target machine's
+  // `runtime.json`, where `RuntimeSlotConfigSchema` bounds it at 64
+  // characters — and a config that fails that check is discarded whole,
+  // consent included. An out-of-shape sha must never leave this parser.
+  if (typeof candidate.sourceSha !== 'string' || !SOURCE_SHA.test(candidate.sourceSha)) return null;
   if (typeof candidate.builtAt !== 'string') return null;
   if (candidate.schemaVersion !== CANARY_MANIFEST_SCHEMA_VERSION) return null;
   if (!Array.isArray(candidate.pairs)) return null;

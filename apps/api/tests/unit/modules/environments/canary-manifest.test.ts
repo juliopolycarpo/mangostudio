@@ -57,6 +57,28 @@ describe('parseCanaryManifest', () => {
     expect(parseCanaryManifest(text)).toBeNull();
   });
 
+  // `sourceSha` stops at no refusal message: a rolling install writes it into
+  // the target machine's `runtime.json`, where the slot schema bounds it at 64
+  // characters — and a stored config that fails that check is discarded whole,
+  // consent included. A manifest carrying a sha this parser would not recognise
+  // must read as no manifest here rather than brick consent over there.
+  it.each([
+    ['an over-long sha', 'a'.repeat(65)],
+    ['an empty sha', ''],
+    ['a sha too short to identify a commit', 'abcdef'],
+    ['a sha that is not hex', 'zzzzzzz'],
+    ['an uppercase sha', 'ABCDEF0'],
+    ['a sha with surrounding whitespace', ' abcdef0 '],
+  ])('returns null for %s', (_label, sourceSha) => {
+    expect(parseCanaryManifest(JSON.stringify({ ...MANIFEST, sourceSha }))).toBeNull();
+  });
+
+  it('accepts the short sha a `git describe` build stamps', () => {
+    expect(
+      parseCanaryManifest(JSON.stringify({ ...MANIFEST, sourceSha: 'abcdef0' }))
+    ).toMatchObject({ sourceSha: 'abcdef0' });
+  });
+
   // Exact-match, not `>=`: the field exists so a later layout can change what
   // the same key means, and a hub that acted on a shape it cannot evaluate
   // would be enforcing a guardrail it does not understand.
