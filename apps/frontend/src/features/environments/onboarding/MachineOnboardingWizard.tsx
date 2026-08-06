@@ -207,18 +207,20 @@ function StepBody(props: StepBodyProps) {
           onContinue={props.onAdvance}
         />
       ) : (
-        <p className="text-error text-xs" role="alert">
-          {labels.missingEnvironment}
-        </p>
+        <MissingEnvironment message={labels.missingEnvironment} />
       );
     case 'tools':
       return props.environment ? (
         <ToolsStep environment={props.environment} onContinue={props.onAdvance} />
-      ) : null;
+      ) : (
+        <MissingEnvironment message={labels.missingEnvironment} />
+      );
     case 'library':
       return props.environment ? (
         <LibraryStep environment={props.environment} onContinue={props.onAdvance} />
-      ) : null;
+      ) : (
+        <MissingEnvironment message={labels.missingEnvironment} />
+      );
     case 'done':
       return props.environment ? (
         <SummaryStep
@@ -226,10 +228,25 @@ function StepBody(props: StepBodyProps) {
           endState={props.endState}
           onDone={props.onClose}
         />
-      ) : null;
+      ) : (
+        <MissingEnvironment message={labels.missingEnvironment} />
+      );
     default: {
       const exhaustive: never = props.step;
       return exhaustive;
     }
   }
+}
+
+/**
+ * Every post-creation step needs the same row from the list query. It can go
+ * missing mid-flow — deleted elsewhere, or dropped from a later page — and
+ * silence at that point reads as a stuck wizard rather than the explanation.
+ */
+function MissingEnvironment({ message }: { readonly message: string }) {
+  return (
+    <p className="text-error text-xs" role="alert">
+      {message}
+    </p>
+  );
 }
