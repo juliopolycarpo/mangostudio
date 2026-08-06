@@ -640,8 +640,13 @@ export function createRuntimeLifecycleService(
     cancel(runId, userId) {
       const run = activeByRun.get(runId);
       if (!run || run.userId !== userId) return Promise.resolve(false);
+      // Aborting alone, not finishing here too: the run's own async body — the
+      // one place that knows whether cleanup (e.g. revoking a just-issued
+      // pairing credential) is still in flight — is what calls `finish` once
+      // it actually unwinds. Finishing eagerly freed `activeByEnvironment`
+      // before that cleanup ran, so an immediate retry could mint a new
+      // credential that the cancelled run's still-pending revoke then deleted.
       run.abort.abort();
-      finish(run, 'cancelled', null);
       return Promise.resolve(true);
     },
 
@@ -1016,9 +1021,19 @@ export async function runPairedBootstrap(
       // through verbatim rather than restating them less accurately.
       say(serviceResult.stderr.trim() || serviceResult.stdout.trim(), 'stderr');
       say(
-        `"${body.ssh.host}" is provisioned, consented and paired, but nothing keeps it running yet. Fix the above and run "mangostudio-runtime service install --mode connect" there, or start it once with "mangostudio-runtime connect" — the hub URL and credential are already stored.`
+        `"${body.ssh.host}" is provisioned, consented and paired, but nothing keeps it running yet. Fix the above and run "${DEFAULT_SSH_RUNTIME_PATH} service install --mode connect" there, or start it once with "${DEFAULT_SSH_RUNTIME_PATH} connect" — the hub URL and credential are already stored.`
       );
       return 'unsupervised';
+    }
+    // A zero exit only means the unit was enabled and started. Enabling linger
+    // is best-effort inside it — it needs root, so `attemptEnableLinger` warns
+    // on stderr and keeps going rather than failing the install — which means a
+    // "successful" install here can still not survive logout. Surface that
+    // warning instead of discarding it now that the exit code passed the check
+    // above; the paired end state's persistence promise depends on it.
+    const serviceWarnings = serviceResult.stderr.trim();
+    if (serviceWarnings) {
+      say(serviceWarnings, 'stderr');
     }
   } catch (error) {
     // The token minted above never made it into a working, supervised setup —
