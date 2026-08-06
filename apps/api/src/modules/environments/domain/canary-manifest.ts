@@ -15,6 +15,17 @@
 
 export const CANARY_MANIFEST_ASSET = 'canary-manifest.json';
 
+/**
+ * The only manifest layout this hub knows how to read.
+ *
+ * Gated on exactly, not `>=`: the field exists so a future layout can change
+ * meaning, and a hub that acted on a shape it does not understand would be
+ * enforcing a guardrail it cannot actually evaluate. An unsupported version is
+ * treated as no manifest at all — the same tolerated fallback a rolling release
+ * cut before the manifest existed already takes.
+ */
+const CANARY_MANIFEST_SCHEMA_VERSION = 1;
+
 interface CanaryManifestPair {
   readonly platform: string;
   readonly hub: { readonly asset: string; readonly digest: string };
@@ -39,8 +50,10 @@ export interface CanaryManifest {
  * Null rather than a throw because an absent or unreadable manifest is a
  * tolerated state: rolling releases published before this record existed have
  * none, and refusing to provision from them would break the channel to add a
- * check. A manifest that parses is trusted; one that does not is treated as
- * missing, and the caller falls back to the install-time version check.
+ * check. A manifest that parses is trusted; one that does not — including one
+ * carrying a {@link CANARY_MANIFEST_SCHEMA_VERSION} this hub does not know — is
+ * treated as missing, and the caller falls back to the install-time version
+ * check.
  */
 export function parseCanaryManifest(text: string): CanaryManifest | null {
   let parsed: unknown;
@@ -57,14 +70,14 @@ export function parseCanaryManifest(text: string): CanaryManifest | null {
   if (typeof candidate.assetVersion !== 'string') return null;
   if (typeof candidate.sourceSha !== 'string') return null;
   if (typeof candidate.builtAt !== 'string') return null;
-  if (typeof candidate.schemaVersion !== 'number') return null;
+  if (candidate.schemaVersion !== CANARY_MANIFEST_SCHEMA_VERSION) return null;
   if (!Array.isArray(candidate.pairs)) return null;
 
   const pairs = candidate.pairs.map(parsePair);
   if (pairs.some((pair) => pair === null)) return null;
 
   return {
-    schemaVersion: candidate.schemaVersion,
+    schemaVersion: CANARY_MANIFEST_SCHEMA_VERSION,
     channel: 'canary',
     version: candidate.version,
     assetVersion: candidate.assetVersion,
@@ -103,6 +116,51 @@ function parsePairAsset(value: unknown): { asset: string; digest: string } | nul
  * pair. Refusing here keeps the failure on the hub, before any remote write,
  * and says what to do about it.
  */
+export interface RollingPairCheck {
+  /** The manifest behind the rolling tag, or null when none could be read. */
+  readonly manifest: CanaryManifest | null;
+  /** Why this hub must not install what the tag serves, or null when it may. */
+  readonly refusal: string | null;
+}
+
+/**
+ * Fetches the rolling tag's manifest and decides whether this hub may install
+ * from it — the one implementation both fetch paths share.
+ *
+ * It exists as a parameterised helper rather than a function per caller because
+ * the WSL provisioner and the generic release fetcher differ only in their error
+ * classes: the tolerated-failure rule and the refusal rule are the same
+ * supply-chain check, and a correction applied to one copy but not the other is
+ * precisely the failure this guard is meant to prevent.
+ *
+ * `tolerate` decides which fetch failures mean "no manifest published" rather
+ * than "this provision fails". Anything it rejects propagates untouched.
+ */
+export async function checkRollingPair(options: {
+  readonly fetchManifest: () => Promise<Uint8Array>;
+  readonly tolerate: (error: unknown) => boolean;
+  readonly hubVersion: string;
+  readonly platformId: string;
+}): Promise<RollingPairCheck> {
+  let manifest: CanaryManifest | null = null;
+  try {
+    const bytes = await options.fetchManifest();
+    manifest = parseCanaryManifest(new TextDecoder().decode(bytes));
+  } catch (error) {
+    // A 404 is the "no manifest published" case. A transport failure is
+    // tolerated too rather than promoted to fatal here: the asset download that
+    // follows hits the same host and reports a real outage on its own terms,
+    // and an advisory guardrail should not be the thing that fails a provision.
+    if (!options.tolerate(error)) throw error;
+  }
+  if (!manifest) return { manifest: null, refusal: null };
+
+  return {
+    manifest,
+    refusal: canaryPairRefusal(manifest, options.hubVersion, options.platformId),
+  };
+}
+
 export function canaryPairRefusal(
   manifest: CanaryManifest,
   hubVersion: string,

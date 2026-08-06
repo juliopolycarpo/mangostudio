@@ -115,6 +115,7 @@ export function resolveRuntimeSlotConfig(
     version: stored?.version ?? null,
     binaryPath: stored?.binaryPath ?? null,
     digest: stored?.digest ?? null,
+    sourceSha: stored?.sourceSha ?? null,
     // The stored name is a label; the set is the decision. Re-deriving keeps a
     // hand-edited file from claiming `readonly` over a full `allow`.
     profile: profileForAllow(allow),

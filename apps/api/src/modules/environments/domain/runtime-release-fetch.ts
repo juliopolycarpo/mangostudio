@@ -10,12 +10,7 @@ import { dirname, join } from 'node:path';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
 import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
-import {
-  CANARY_MANIFEST_ASSET,
-  type CanaryManifest,
-  canaryPairRefusal,
-  parseCanaryManifest,
-} from './canary-manifest';
+import { CANARY_MANIFEST_ASSET, type CanaryManifest, checkRollingPair } from './canary-manifest';
 import { type RuntimeReleaseResolution, resolveRuntimeRelease } from './runtime-release-resolution';
 import {
   findReleaseChecksum,
@@ -40,6 +35,14 @@ export interface LoadedRuntimeAsset {
   readonly bytes: Uint8Array;
   readonly fromArchive: boolean;
   readonly digest: string;
+  /**
+   * Source commit these bytes were built from, when the channel publishes one.
+   *
+   * Only a rolling release answers this: its filename and tag are reused across
+   * builds, so the commit is the only thing that says which build a slot holds.
+   * A stable version already names one build on its own.
+   */
+  readonly sourceSha?: string;
 }
 
 export async function loadRuntimeReleaseBytes(
@@ -89,7 +92,10 @@ export async function loadRuntimeReleaseBytes(
     ...(overrides.resolveHostname ? { resolveHostname: overrides.resolveHostname } : {}),
   };
   const release = resolveRuntimeRelease(version, platformId);
-  if (release.rolling) await assertRollingPair(deps, version, release, platformId);
+  const manifest = release.rolling
+    ? await assertRollingPair(deps, version, release, platformId)
+    : null;
+  const provenance = manifest ? { sourceSha: manifest.sourceSha } : {};
 
   try {
     const bytes = await loadAsset(
@@ -103,7 +109,7 @@ export async function loadRuntimeReleaseBytes(
       readBytes,
       writeCache
     );
-    return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}` };
+    return { bytes, fromArchive: false, digest: `sha256:${sha256(bytes)}`, ...provenance };
   } catch (error) {
     if (!(error instanceof RuntimeAssetMissingError)) throw error;
   }
@@ -119,7 +125,7 @@ export async function loadRuntimeReleaseBytes(
     readBytes,
     writeCache
   );
-  return { bytes, fromArchive: true, digest: `sha256:${sha256(bytes)}` };
+  return { bytes, fromArchive: true, digest: `sha256:${sha256(bytes)}`, ...provenance };
 }
 
 class RuntimeAssetMissingError extends RuntimeAssetLoadError {}
@@ -135,26 +141,20 @@ async function assertRollingPair(
   version: string,
   release: RuntimeReleaseResolution,
   platformId: string
-): Promise<void> {
-  let manifest: CanaryManifest | null = null;
-  try {
-    const bytes = await download(
-      deps,
-      releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
-      MAX_CHECKSUMS_BYTES
-    );
-    manifest = parseCanaryManifest(new TextDecoder().decode(bytes));
-  } catch (error) {
-    // A 404 is the "no manifest published" case. A transport failure is
-    // tolerated too rather than promoted to fatal here: the asset download that
-    // follows hits the same host and reports a real outage on its own terms,
-    // and an advisory guardrail should not be the thing that fails a provision.
-    if (!(error instanceof RuntimeAssetLoadError)) throw error;
-  }
-  if (!manifest) return;
-
-  const refusal = canaryPairRefusal(manifest, version, platformId);
+): Promise<CanaryManifest | null> {
+  const { manifest, refusal } = await checkRollingPair({
+    fetchManifest: () =>
+      download(
+        deps,
+        releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
+        MAX_CHECKSUMS_BYTES
+      ),
+    tolerate: (error) => error instanceof RuntimeAssetLoadError,
+    hubVersion: version,
+    platformId,
+  });
   if (refusal) throw new RuntimeAssetLoadError(refusal);
+  return manifest;
 }
 
 async function loadAsset(

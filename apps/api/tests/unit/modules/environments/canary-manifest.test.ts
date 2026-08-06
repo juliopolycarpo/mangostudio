@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   type CanaryManifest,
   canaryPairRefusal,
+  checkRollingPair,
   parseCanaryManifest,
 } from '../../../../src/modules/environments/domain/canary-manifest';
 
@@ -54,6 +55,84 @@ describe('parseCanaryManifest', () => {
     ],
   ])('returns null for %s', (_label, text) => {
     expect(parseCanaryManifest(text)).toBeNull();
+  });
+
+  // Exact-match, not `>=`: the field exists so a later layout can change what
+  // the same key means, and a hub that acted on a shape it cannot evaluate
+  // would be enforcing a guardrail it does not understand.
+  it.each([[0], [2], [99]])('returns null for schema version %i', (schemaVersion) => {
+    expect(parseCanaryManifest(JSON.stringify({ ...MANIFEST, schemaVersion }))).toBeNull();
+  });
+});
+
+describe('checkRollingPair', () => {
+  const bytesOf = (manifest: unknown): Uint8Array =>
+    new TextEncoder().encode(JSON.stringify(manifest));
+
+  const tolerateAll = () => true;
+
+  it('returns the manifest and no refusal when the tag still serves this hub', async () => {
+    const result = await checkRollingPair({
+      fetchManifest: async () => bytesOf(MANIFEST),
+      tolerate: tolerateAll,
+      hubVersion: '1.2.3-canary.abcdef0',
+      platformId: 'linux-x64',
+    });
+
+    expect(result.manifest).toEqual(MANIFEST);
+    expect(result.refusal).toBeNull();
+  });
+
+  it('reports a refusal, and still hands back the manifest that explains it', async () => {
+    const result = await checkRollingPair({
+      fetchManifest: async () => bytesOf(MANIFEST),
+      tolerate: tolerateAll,
+      hubVersion: '1.2.3-canary.0000111',
+      platformId: 'linux-x64',
+    });
+
+    expect(result.manifest).toEqual(MANIFEST);
+    expect(result.refusal).toContain('has moved on');
+  });
+
+  // A rolling release cut before the manifest existed publishes none, so a
+  // tolerated fetch failure has to read as "no manifest", not as an outage.
+  it('treats a tolerated fetch failure as no manifest', async () => {
+    const result = await checkRollingPair({
+      fetchManifest: () => Promise.reject(new Error('404')),
+      tolerate: tolerateAll,
+      hubVersion: '1.2.3-canary.abcdef0',
+      platformId: 'linux-x64',
+    });
+
+    expect(result).toEqual({ manifest: null, refusal: null });
+  });
+
+  // The predicate is the whole point of the parameterisation: each caller keeps
+  // its own error classes, and anything it does not recognise must not be
+  // swallowed by a guard that only meant to tolerate a missing file.
+  it('rethrows a failure the caller does not tolerate', async () => {
+    const boom = new Error('socket closed');
+
+    await expect(
+      checkRollingPair({
+        fetchManifest: () => Promise.reject(boom),
+        tolerate: () => false,
+        hubVersion: '1.2.3-canary.abcdef0',
+        platformId: 'linux-x64',
+      })
+    ).rejects.toThrow('socket closed');
+  });
+
+  it('treats an unparseable manifest as no manifest rather than a refusal', async () => {
+    const result = await checkRollingPair({
+      fetchManifest: async () => new TextEncoder().encode('{'),
+      tolerate: tolerateAll,
+      hubVersion: '1.2.3-canary.abcdef0',
+      platformId: 'linux-x64',
+    });
+
+    expect(result).toEqual({ manifest: null, refusal: null });
   });
 });
 

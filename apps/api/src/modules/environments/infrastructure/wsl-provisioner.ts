@@ -31,8 +31,7 @@ import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib
 import {
   CANARY_MANIFEST_ASSET,
   type CanaryManifest,
-  canaryPairRefusal,
-  parseCanaryManifest,
+  checkRollingPair,
 } from '../domain/canary-manifest';
 import {
   pushRuntimeBinary,
@@ -195,7 +194,7 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
         return;
 
       await install(deps, distro, version, platformId, source, signal, options.onTransferProgress);
-      await recordInstall(deps, distro, version, slot, digest);
+      await recordInstall(deps, distro, version, slot, digest, source.sourceSha);
       // First provision only: an upgrade replaces bytes, never the answer
       // somebody gave about what a hub may do inside this distribution. A
       // config that could not be read is neither case — `recordInstall` left
@@ -243,10 +242,23 @@ async function loadSource(
   distro: string,
   version: string,
   platformId: LinuxPlatformId
-): Promise<{ readonly fromArchive: boolean; readonly bytes: Uint8Array }> {
+): Promise<RuntimeSource> {
   return isDevelopmentVersion(version)
     ? { fromArchive: false, bytes: await loadLocalBuild(deps, distro, platformId) }
     : await loadRelease(deps, distro, version, platformId);
+}
+
+/**
+ * Bytes to install plus what is known about where they came from.
+ *
+ * `sourceSha` is present only for a rolling release: that is the one channel
+ * whose version string does not settle which build a slot holds, because the
+ * asset name behind the tag is reused across commits.
+ */
+interface RuntimeSource {
+  readonly fromArchive: boolean;
+  readonly bytes: Uint8Array;
+  readonly sourceSha?: string;
 }
 
 /**
@@ -334,7 +346,8 @@ async function recordInstall(
   distro: string,
   version: string,
   installed: DistroSlotProbe,
-  digest: string
+  digest: string,
+  sourceSha: string | undefined
 ): Promise<void> {
   const slot = await reprobeSlot(deps, distro, installed);
   const config = distroRuntimeConfigAfterInstall({
@@ -342,6 +355,7 @@ async function recordInstall(
     home: slot.home,
     version,
     digest,
+    sourceSha,
     hubVersion: deps.version(),
     hubHost: deps.hubHost(),
     at: new Date().toISOString(),
@@ -432,16 +446,19 @@ async function loadRelease(
   distro: string,
   version: string,
   platformId: LinuxPlatformId
-): Promise<{ readonly fromArchive: boolean; readonly bytes: Uint8Array }> {
+): Promise<RuntimeSource> {
   const release = resolveRuntimeRelease(version, platformId);
   const rawName = release.runtimeAssetName;
   const archiveName = releaseArchiveName(release.assetVersion, platformId);
 
-  if (release.rolling) await assertRollingPair(deps, version, release, platformId);
+  const manifest = release.rolling
+    ? await assertRollingPair(deps, version, release, platformId)
+    : null;
+  const provenance = manifest ? { sourceSha: manifest.sourceSha } : {};
 
   try {
     const bytes = await loadAsset(deps, version, release, rawName);
-    return { fromArchive: false, bytes };
+    return { fromArchive: false, bytes, ...provenance };
   } catch (error) {
     if (!(error instanceof WslAssetMissingError)) {
       if (error instanceof WslDownloadError) {
@@ -455,7 +472,7 @@ async function loadRelease(
 
   try {
     const bytes = await loadAsset(deps, version, release, archiveName);
-    return { fromArchive: true, bytes };
+    return { fromArchive: true, bytes, ...provenance };
   } catch (error) {
     if (error instanceof WslDownloadError || error instanceof WslAssetMissingError) {
       throw new WslProvisioningError(
@@ -479,28 +496,20 @@ async function assertRollingPair(
   version: string,
   release: RuntimeReleaseResolution,
   platformId: LinuxPlatformId
-): Promise<void> {
-  let manifest: CanaryManifest | null = null;
-  try {
-    const bytes = await download(
-      deps,
-      releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
-      MAX_CHECKSUMS_BYTES
-    );
-    manifest = parseCanaryManifest(new TextDecoder().decode(bytes));
-  } catch (error) {
-    // A 404 is the "no manifest published" case. A transport failure is
-    // tolerated too rather than promoted to fatal here: the asset download that
-    // follows hits the same host and reports a real outage on its own terms,
-    // and an advisory guardrail should not be the thing that fails a provision.
-    if (!(error instanceof WslDownloadError) && !(error instanceof WslAssetMissingError)) {
-      throw error;
-    }
-  }
-  if (!manifest) return;
-
-  const refusal = canaryPairRefusal(manifest, version, platformId);
+): Promise<CanaryManifest | null> {
+  const { manifest, refusal } = await checkRollingPair({
+    fetchManifest: () =>
+      download(
+        deps,
+        releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
+        MAX_CHECKSUMS_BYTES
+      ),
+    tolerate: (error) => error instanceof WslDownloadError || error instanceof WslAssetMissingError,
+    hubVersion: version,
+    platformId,
+  });
   if (refusal) throw new WslProvisioningError(refusal);
+  return manifest;
 }
 
 class WslAssetMissingError extends WslProvisioningError {}
