@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   loadRuntimeReleaseBytes,
+  pinnedRuntimeDigest,
   runtimeDigestSidecarPath,
 } from '../../../../src/modules/environments/domain/runtime-release-fetch';
 import { resolveRuntimeRelease } from '../../../../src/modules/environments/domain/runtime-release-resolution';
@@ -313,5 +314,35 @@ describe('resolveRuntimeRelease', () => {
         writeCache: () => Promise.resolve(),
       })
     ).rejects.toThrow(/does not match the checksum/);
+  });
+});
+
+describe('pinnedRuntimeDigest', () => {
+  it('accepts what the sidecar writer records, trailing newline included', () => {
+    const digest = 'a'.repeat(64);
+
+    expect(pinnedRuntimeDigest(digest)).toBe(digest);
+    expect(pinnedRuntimeDigest(`${digest}\n`)).toBe(digest);
+  });
+
+  // The cache directory is an ordinary user-writable directory, and the reader
+  // interpolates this straight into a shell command it prints for somebody to
+  // paste — then returns it in a response whose schema caps that command's
+  // length. Anything unrecognised has to read as no sidecar so the caller keeps
+  // its tag-based command, rather than a file's contents deciding either.
+  it.each([
+    ['an empty file', ''],
+    ['whitespace only', '   \n'],
+    ['a truncated digest', 'a'.repeat(63)],
+    ['a digest with trailing junk', `${'a'.repeat(64)}x`],
+    ['uppercase hex the writer never emits', 'A'.repeat(64)],
+    ['a `sha256sum` line rather than a bare digest', `${'a'.repeat(64)}  runtime`],
+    ['a shell fragment', '$(rm -rf ~)'],
+    // Bounded on purpose: `RuntimeStagedAsset.verify` is capped at 4096
+    // characters, so a large file here used to fail response validation and
+    // take the whole runtime card down with it.
+    ['a file far larger than any digest', 'a'.repeat(8192)],
+  ])('reads %s as no sidecar', (_label, text) => {
+    expect(pinnedRuntimeDigest(text)).toBeUndefined();
   });
 });

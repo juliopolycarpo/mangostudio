@@ -62,6 +62,7 @@ import {
 import {
   type LoadedRuntimeAsset,
   loadRuntimeReleaseBytes,
+  pinnedRuntimeDigest,
   RuntimeAssetLoadError,
   runtimeDigestSidecarPath,
 } from '../domain/runtime-release-fetch';
@@ -390,25 +391,23 @@ export function createRuntimeLifecycleService(
           return;
         }
 
-        // A release that published no raw runtime for this platform is served
-        // from its archive instead, and the archive is what the cache now
-        // holds. Naming the raw path anyway would print a file that is not
-        // there and a checksum line that cannot pass.
+        // Describes what the cache actually holds. A release that published no
+        // raw runtime for this platform is served from its archive instead, so
+        // the path and the checksum line have to name the archive — the raw
+        // ones would point at a file that is not there. Pinned to the digest
+        // this run just verified rather than reusing `staged.verify`: that was
+        // built before the download, off whatever SHA256SUMS a rolling tag
+        // served then, which is not necessarily the build these bytes are.
+        const landed =
+          stagedRuntimeAssetFor(input.transportKind, input.health, {
+            fromArchive: asset.fromArchive,
+            pinnedDigest: asset.digest.replace(/^sha256:/, ''),
+          }) ?? staged;
         const line = asset.fromArchive
-          ? `This release publishes no standalone runtime for ${staged.platformId}; its platform archive is cached under ${runtimeCacheDir(staged.version)} instead.`
-          : `Verified and cached at ${staged.path}`;
+          ? `This release publishes no standalone runtime for ${staged.platformId}; its platform archive is cached at ${landed.path} instead.`
+          : `Verified and cached at ${landed.path}`;
         stream.publish({ type: 'log', stream: 'system', line, done: false });
-        if (!asset.fromArchive) {
-          // Pinned to the digest this run just verified rather than reusing
-          // `staged.verify` — that was built before the download, off whatever
-          // SHA256SUMS a rolling tag served then, which is not necessarily the
-          // build these bytes are.
-          const pinnedDigest = asset.digest.replace(/^sha256:/, '');
-          const verify =
-            stagedRuntimeAssetFor(input.transportKind, input.health, { pinnedDigest })?.verify ??
-            staged.verify;
-          stream.publish({ type: 'log', stream: 'system', line: verify, done: false });
-        }
+        stream.publish({ type: 'log', stream: 'system', line: landed.verify, done: false });
         finish(run, 'succeeded', 0);
       } catch (error) {
         if (abort.signal.aborted) {
@@ -1400,9 +1399,10 @@ async function withPinnedVerify(
   return { ...(pinned ?? base), present: true };
 }
 
+/** The digest recorded beside a cached asset, when one is recorded and readable. */
 function readPinnedDigest(assetPath: string): Promise<string | undefined> {
   return readFile(runtimeDigestSidecarPath(assetPath), 'utf8').then(
-    (text) => text.trim() || undefined,
+    pinnedRuntimeDigest,
     () => undefined
   );
 }

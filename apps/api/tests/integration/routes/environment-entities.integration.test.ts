@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   connectInProcessRuntime,
@@ -822,6 +822,110 @@ describe('environment entity routes', () => {
       // Nothing reached the distribution. `ensure` is the only path that writes
       // bytes into a WSL slot, so its not having run is the whole claim.
       expect(ensured).toBe(false);
+      await manager.closeAll();
+    } finally {
+      if (originalVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = originalVersion;
+    }
+  });
+
+  // Regression: on the archive-fallback branch the run named the cache
+  // *directory* and printed no verify line at all — so the one thing staging
+  // exists to produce, a path plus a command to check it with, went missing
+  // exactly when the fallback fired. The raw asset it would otherwise have
+  // named is not on disk in this case; only the archive is.
+  it('names the archive it staged, and a checksum line for it, on the fallback path', async () => {
+    const originalVersion = process.env.VERSION;
+    process.env.VERSION = '9.9.9-test';
+    try {
+      const bytes = new TextEncoder().encode('verified-platform-archive');
+      const hash = createHash('sha256').update(bytes).digest('hex');
+      const host = createProvisionedRuntimeHost(
+        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
+        'linux-x64-musl'
+      );
+      const { app, repository, manager } = createTestApp(
+        {
+          wsl: async (_definition, onUnavailable) => {
+            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            return {
+              client: new RuntimeClient(connection.client, onUnavailable),
+              close: () => connection.close(),
+            };
+          },
+        },
+        undefined,
+        undefined,
+        (runtimeManager) =>
+          createRuntimeLifecycleService({
+            manager: runtimeManager,
+            provisioner: {
+              ensure: async () => undefined,
+              removeSlotBytes: async () => undefined,
+              slotBytes: async () => null,
+            },
+            // What a release that publishes no standalone runtime for this
+            // platform leaves in the cache: the platform archive instead.
+            loadRuntimeAsset: () =>
+              Promise.resolve({
+                bytes,
+                digest: `sha256:${hash}`,
+                fromArchive: true as const,
+                cached: true,
+              }),
+          })
+      );
+      await repository.create({
+        id: 'wsl-staged-download-archive',
+        userId: TEST_USER.id,
+        name: 'Staged download archive fallback',
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      });
+      await manager.connect(TEST_USER.id, 'wsl-staged-download-archive');
+      await manager.refreshManifest(TEST_USER.id, 'wsl-staged-download-archive');
+
+      const started = await app.handle(
+        new Request(
+          'http://localhost/environments/wsl-staged-download-archive/runtime/install',
+          jsonRequest('POST', { action: 'download' })
+        )
+      );
+      expect(started.status).toBe(200);
+      const { runId } = (await started.json()) as { runId: string };
+      const log = await app.handle(
+        new Request(
+          `http://localhost/environments/wsl-staged-download-archive/runtime/runs/${runId}/log`
+        )
+      );
+      const body = await log.text();
+      // Only what the run reported *after* the download settled. The opening
+      // line names the raw asset legitimately — that is what the hub set out to
+      // fetch, before the release turned out not to publish it.
+      const [, ...reported] = body
+        .split('\n\n')
+        .flatMap((frame) =>
+          frame.startsWith('data: ')
+            ? [JSON.parse(frame.slice('data: '.length)) as { line?: string }]
+            : []
+        )
+        .flatMap((event) => event.line ?? []);
+
+      expect(body).toContain('"status":"succeeded"');
+      // The file that is actually there, named in full — not just its directory.
+      const archivePath = join(
+        homedir(),
+        '.mango/runtime-cache/9.9.9-test/mangostudio-9.9.9-test-linux-x64-musl.tar.gz'
+      );
+      expect(reported[0]).toContain(archivePath);
+      // A checksum line, pinned to the digest this run just verified rather
+      // than to a SHA256SUMS fetch a rolling tag can outrun, and checking the
+      // archive where it actually landed.
+      expect(reported[1]).toBe(`echo "${hash}  ${archivePath}" | sha256sum -c -`);
+      // The raw runtime asset was never published for this platform, so nothing
+      // the run reports may claim it is on disk.
+      expect(reported.join('\n')).not.toContain('mangostudio-runtime-9.9.9-test');
       await manager.closeAll();
     } finally {
       if (originalVersion === undefined) delete process.env.VERSION;

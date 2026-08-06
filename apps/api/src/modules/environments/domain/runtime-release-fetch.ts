@@ -244,6 +244,24 @@ export function runtimeDigestSidecarPath(assetPath: string): string {
   return `${assetPath}.sha256`;
 }
 
+/** Exactly what {@link loadAsset} writes into a sidecar, and nothing else. */
+const PINNED_DIGEST = /^[0-9a-f]{64}$/;
+
+/**
+ * A sidecar's digest, believed only when it looks like one.
+ *
+ * Kept beside the writer so both ends agree on one format. The cache directory
+ * is an ordinary user-writable directory, and a reader interpolates this string
+ * into a shell command it tells somebody to paste, then returns it in a
+ * response whose schema bounds the command's length. Anything that is not a
+ * sha256 hex digest has to read as no sidecar at all, so the caller falls back
+ * to its tag-based command rather than shipping whatever was in the file.
+ */
+export function pinnedRuntimeDigest(text: string): string | undefined {
+  const digest = text.trim();
+  return PINNED_DIGEST.test(digest) ? digest : undefined;
+}
+
 /**
  * Keeps the hub cache at current + previous version directories only — same rule
  * as slot version GC in {@link pushRuntimeBinary}.
