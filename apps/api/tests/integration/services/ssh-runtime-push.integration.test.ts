@@ -11,13 +11,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SshEnvironmentConfig } from '@mangostudio/shared/environments';
 import { quoteForRemoteShell } from '@mangostudio/shared/environments';
-import { resolveRuntimePlatformId } from '@mangostudio/shared/runtime-home';
+import { PLATFORM_PROBE_SCRIPT, resolveRuntimePlatformId } from '@mangostudio/shared/runtime-home';
 import {
   pushRuntimeBinary,
   type RuntimeCommandOptions,
   type RuntimeCommandRunner,
 } from '../../../src/modules/environments/domain/runtime-push';
-import { PLATFORM_PROBE_SCRIPT } from '../../../src/modules/environments/domain/wsl-runtime-release';
 import { createSshCommandRunner } from '../../../src/modules/environments/infrastructure/ssh-command-runner';
 
 const hasSshClient = Bun.which('ssh') !== null;

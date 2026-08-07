@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { setTimeout as delay } from 'node:timers/promises';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { appendBoundedTail } from '../../../../lib/bounded-tail';
 import { sanitizeShellEnv } from '../../../tools/builtin/_shell-env';
 
@@ -40,6 +41,7 @@ export function spawnNodeSidecarProcess(
   const child = spawn(options.nodePath, [options.sidecarScriptPath], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: buildNodeSidecarEnv(options.envSource),
+    ...HIDDEN_WINDOW,
   });
   const childExit = waitForChildExit(child);
 

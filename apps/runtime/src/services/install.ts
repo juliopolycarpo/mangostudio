@@ -20,6 +20,7 @@ import type {
   RuntimeInstallRunResult,
 } from '../methods';
 import { RUNTIME_INSTALL_OUTPUT_TOPIC } from '../methods';
+import { HIDDEN_WINDOW } from './process-window';
 
 const INSTALL_OUTPUT_LIMIT_BYTES = 1024 * 1024;
 
@@ -99,6 +100,7 @@ const DEFAULT_DEPS: InstallHostDeps = {
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
+      ...HIDDEN_WINDOW,
     }) as InstallSubprocess,
   now: Date.now,
   prepareLog: async (path) => {

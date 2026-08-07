@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
@@ -50,7 +51,6 @@ import {
 import {
   CONFIG_LOCK_BUSY_EXIT,
   DISTRO_RUNTIME_PATH,
-  type DistroPlatformProbe,
   type DistroSlotProbe,
   distroRuntimeConfigAfterInstall,
   findReleaseChecksum,
@@ -58,7 +58,6 @@ import {
   type LinuxPlatformId,
   localRuntimeBuildCommand,
   localRuntimeBuildPath,
-  PLATFORM_PROBE_SCRIPT,
   PROBE_SLOT_SCRIPT,
   parseDistroSlotProbe,
   REMOVE_LEGACY_RUNTIME_SCRIPT,
@@ -66,9 +65,9 @@ import {
   releaseAssetUrl,
   resolveLinuxPlatformId,
   SETUP_FULL_SCRIPT,
-  VERSION_SCRIPT,
   WRITE_CONFIG_SCRIPT,
 } from '../domain/wsl-runtime-release';
+import { resolveWslExecutable } from './wsl-executable';
 
 /** Platform archives / raw binaries are tens of megabytes; the cap is generous but finite. */
 const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
@@ -161,15 +160,21 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
         throw new WslProvisioningError(`Runtime provision for "${distro}" was cancelled.`);
       }
       const version = deps.version();
-      const slot = parseDistroSlotProbe(
-        (await deps.runInDistro(distro, PROBE_SLOT_SCRIPT, { signal })).stdout
-      );
+      const probeResult = await deps.runInDistro(distro, PROBE_SLOT_SCRIPT, { signal });
+      if (probeResult.exitCode !== 0) {
+        throw new WslProvisioningError(
+          `Could not start the "${distro}" distribution: ${describe(probeResult, DISTRO_COMMAND_TIMEOUT_MS)}`
+        );
+      }
+      const slot = parseDistroSlotProbe(probeResult.stdout);
       const recorded = slot.config?.version === version;
-      // Asked at most once: the answer is deterministic, and every question put
-      // to a stopped distribution pays for booting it.
-      let runs: boolean | null = null;
-      const stillRuns = async (): Promise<boolean> =>
-        (runs ??= await runsVersion(deps, distro, version, signal));
+      // Whether the installed binary runs and says what the config claims — the
+      // config recording a version proves what was written, not that it
+      // survived: a distribution whose runtime was deleted or built for another
+      // architecture needs the answer "install one" rather than a launch
+      // failure later. Read straight off the merged probe: it already ran the
+      // binary's own `--version` in the same round trip as everything else.
+      const runs = slot.version === version;
 
       // Version equality settles it for a release: a published tag's bytes
       // never change, so a distribution holding that version holds these bytes.
@@ -177,10 +182,9 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       // so what the slot recorded still names one build, even though the tag
       // those bytes came from has since been clobbered.
       // Reinstall forces a replace even when the version already matches.
-      if (!options.force && recorded && !isDevelopmentVersion(version) && (await stillRuns()))
-        return;
+      if (!options.force && recorded && !isDevelopmentVersion(version) && runs) return;
 
-      const platformId = resolvePlatformId(await probePlatform(deps, distro, signal), distro);
+      const platformId = resolvePlatformId(slot, distro);
       const source = await loadSource(deps, distro, version, platformId);
       if (signal?.aborted) {
         throw new WslProvisioningError(`Runtime provision for "${distro}" was cancelled.`);
@@ -191,8 +195,7 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       // digest can tell one build from another — and that is the hole this
       // closes: a rebuilt runtime used to stay on the hub forever, because the
       // distribution's copy also called itself `dev`.
-      if (!options.force && recorded && slot.config?.digest === digest && (await stillRuns()))
-        return;
+      if (!options.force && recorded && slot.config?.digest === digest && runs) return;
 
       await install(deps, distro, version, platformId, source, signal, options.onTransferProgress);
       await recordInstall(deps, distro, version, slot, digest, source.sourceSha);
@@ -208,7 +211,7 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       const result = await deps.runInDistro(distro, runtimeRemoveSlotBytesScript('wsl'));
       if (result.exitCode !== 0) {
         throw new WslProvisioningError(
-          `Could not remove the runtime from "${distro}": ${describe(result)}`
+          `Could not remove the runtime from "${distro}": ${describe(result, DISTRO_COMMAND_TIMEOUT_MS)}`
         );
       }
     },
@@ -221,7 +224,10 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
   };
 }
 
-function resolvePlatformId(probe: DistroPlatformProbe, distro: string): LinuxPlatformId {
+function resolvePlatformId(
+  probe: Pick<DistroSlotProbe, 'machine' | 'libc'>,
+  distro: string
+): LinuxPlatformId {
   const platformId = resolveLinuxPlatformId(probe);
   if (!platformId) {
     throw new WslProvisioningError(
@@ -260,23 +266,6 @@ interface RuntimeSource {
   readonly fromArchive: boolean;
   readonly bytes: Uint8Array;
   readonly sourceSha?: string;
-}
-
-/**
- * Whether the installed binary runs and says what the config claims.
- *
- * The config recording a version proves what was written, not that it survived:
- * a distribution whose runtime was deleted or built for another architecture
- * needs the answer "install one" rather than a launch failure later.
- */
-async function runsVersion(
-  deps: WslProvisionerDeps,
-  distro: string,
-  version: string,
-  signal?: AbortSignal
-): Promise<boolean> {
-  const present = await deps.runInDistro(distro, VERSION_SCRIPT, { signal });
-  return present.exitCode === 0 && present.stdout.trim() === version;
 }
 
 /** Places the bytes and confirms what landed actually runs as this version. */
@@ -377,7 +366,10 @@ async function recordInstall(
     return;
   }
   if (result.exitCode !== 0) {
-    logger.warn('config_write_failed', { distro, detail: describe(result) });
+    logger.warn('config_write_failed', {
+      distro,
+      detail: describe(result, DISTRO_COMMAND_TIMEOUT_MS),
+    });
   }
 }
 
@@ -408,7 +400,7 @@ async function grantConsent(deps: WslProvisionerDeps, distro: string): Promise<v
   const result = await deps.runInDistro(distro, SETUP_FULL_SCRIPT);
   if (result.exitCode !== 0) {
     throw new WslProvisioningError(
-      `The runtime in "${distro}" could not record what it is allowed to do: ${describe(result)}`
+      `The runtime in "${distro}" could not record what it is allowed to do: ${describe(result, DISTRO_COMMAND_TIMEOUT_MS)}`
     );
   }
 }
@@ -424,7 +416,10 @@ async function grantConsent(deps: WslProvisionerDeps, distro: string): Promise<v
 async function removeLegacyRuntime(deps: WslProvisionerDeps, distro: string): Promise<void> {
   const result = await deps.runInDistro(distro, REMOVE_LEGACY_RUNTIME_SCRIPT);
   if (result.exitCode !== 0) {
-    logger.warn('legacy_runtime_removal_failed', { distro, detail: describe(result) });
+    logger.warn('legacy_runtime_removal_failed', {
+      distro,
+      detail: describe(result, DISTRO_COMMAND_TIMEOUT_MS),
+    });
     return;
   }
   if (result.stdout.includes('removed')) {
@@ -564,25 +559,6 @@ function manualInstallHint(
   );
 }
 
-async function probePlatform(
-  deps: WslProvisionerDeps,
-  distro: string,
-  signal?: AbortSignal
-): Promise<DistroPlatformProbe> {
-  const result = await deps.runInDistro(distro, PLATFORM_PROBE_SCRIPT, { signal });
-  if (result.exitCode !== 0) {
-    throw new WslProvisioningError(
-      `Could not start the "${distro}" distribution: ${describe(result)}`
-    );
-  }
-  // `PLATFORM_PROBE_SCRIPT` is a constant this hub just sent, so the shape is
-  // known: kernel, machine, libc. Guessing an older two-line shape instead
-  // would misread `uname -s` as the machine on any host whose `ldd` prints
-  // nothing at all — the resolver would then reject a perfectly good target.
-  const [kernel = '', machine = '', libc = ''] = result.stdout.trim().split(/\r?\n/);
-  return { kernel, machine, libc };
-}
-
 /**
  * Returns the verified asset bytes, downloading them only when the cache does
  * not already hold a copy whose digest matches the release.
@@ -695,13 +671,19 @@ function sha256(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex');
 }
 
-function describe(result: DistroCommandResult): string {
+/**
+ * `timeoutMs` is the effective timeout of the call that produced `result`,
+ * not always {@link DISTRO_COMMAND_TIMEOUT_MS}: a caller running under a
+ * longer budget (a cold install's push, say) needs the message to say so
+ * rather than reporting the default every command falls back to.
+ */
+function describe(result: DistroCommandResult, timeoutMs: number): string {
   const detail = result.stderr.trim() || result.stdout.trim();
   // A killed command usually says nothing at all, and "exited with code -1" is
   // the least useful thing to tell someone whose distribution took too long to
   // boot — which is the cause this timeout exists for.
   if (result.signal) {
-    const cause = `it was stopped by ${result.signal} after ${DISTRO_COMMAND_TIMEOUT_MS / 1000}s`;
+    const cause = `it was stopped by ${result.signal} after ${timeoutMs / 1000}s`;
     return detail ? `${detail} (${cause})` : cause;
   }
   return detail || `the command exited with code ${result.exitCode}`;
@@ -731,9 +713,10 @@ function runInDistroWithWsl(
     const argv = ['-d', distro, '--exec', 'sh', '-c', script];
     if (options.args?.length) argv.push('mangostudio-runtime', ...options.args);
     const timeoutMs = options.timeoutMs ?? DISTRO_COMMAND_TIMEOUT_MS;
-    const child = spawn('wsl.exe', argv, {
+    const wslExecutable = resolveWslExecutable();
+    const child = spawn(wslExecutable.path, argv, {
       stdio: 'pipe',
-      windowsHide: true,
+      ...HIDDEN_WINDOW,
       timeout: timeoutMs,
     });
 
@@ -758,8 +741,8 @@ function runInDistroWithWsl(
       reject(
         new WslProvisioningError(
           error.code === 'ENOENT'
-            ? 'Could not run "wsl.exe". WSL is not installed on this host, or it is not on the PATH MangoStudio was started with.'
-            : `Could not run "wsl.exe": ${error.message}`
+            ? `Could not run WSL at "${wslExecutable.path}". Install WSL, or set MANGO_WSL_EXE to the wsl.exe path if it is installed somewhere else.`
+            : `Could not run "${wslExecutable.path}": ${error.message}`
         )
       );
     });

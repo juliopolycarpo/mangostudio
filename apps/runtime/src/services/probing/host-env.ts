@@ -32,6 +32,7 @@ import type {
 } from '@mangostudio/shared/environments/detection';
 import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import { HIDDEN_WINDOW } from '../process-window';
 
 const execFileAsync = promisify(execFile);
 
@@ -65,7 +66,10 @@ async function probeBinaryVersion(
   timeoutMs: number
 ): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(binary, [...args], { timeout: timeoutMs });
+    const { stdout } = await execFileAsync(binary, [...args], {
+      timeout: timeoutMs,
+      ...HIDDEN_WINDOW,
+    });
     return stdout.trim() || null;
   } catch {
     return null;

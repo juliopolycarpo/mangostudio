@@ -68,7 +68,7 @@ function isWithheld(key: string, value: string, policy: ShellEnvPolicy): boolean
  * explicit env of an AI-spawned shell. Bun.spawn replaces (not merges) the child
  * env when `env` is passed, so starting from the full environment keeps the
  * operator's PATH/HOME/etc. while dropping the secrets.
- * // Usage: Bun.spawn(cmd, { env: sanitizeShellEnv({ allow: ['GITHUB_TOKEN'] }) })
+ * // Usage: Bun.spawn(cmd, { env: sanitizeShellEnv({ allow: ['GITHUB_TOKEN'] }), ...HIDDEN_WINDOW })
  */
 export function sanitizeShellEnv(
   policy: ShellEnvPolicy = {},

@@ -8,6 +8,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import {
   quoteForRemoteShell,
   SSH_FORCED_OPTIONS,
@@ -64,7 +65,7 @@ function runOverSsh(
 
     const child = spawn('ssh', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
+      ...HIDDEN_WINDOW,
     });
 
     let stdout = '';

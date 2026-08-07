@@ -13,6 +13,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import {
   createStdioFramePort,
+  HIDDEN_WINDOW,
   RuntimeProtocolClient,
   RuntimeRemoteError,
   sanitizeShellEnv,
@@ -88,7 +89,7 @@ export async function spawnRuntimeChild(
     ...(options.cwd ? { cwd: options.cwd } : {}),
     env: sanitizeShellEnv({}, process.env),
     stdio: 'pipe',
-    windowsHide: true,
+    ...HIDDEN_WINDOW,
   });
 
   let stderrTail = '';

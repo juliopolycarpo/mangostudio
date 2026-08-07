@@ -92,6 +92,12 @@ Windows archives use `.zip` instead of `.tar.gz` (`windows-x64`, `windows-arm64`
 Asset names and archive layout are documented in
 [`docs/reference/releasing.md`](../reference/releasing.md#release-asset-naming).
 
+Windows-only environment variable:
+
+| Variable        | Purpose                                                                                                                                                                                                                                |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MANGO_WSL_EXE` | Overrides which `wsl.exe` the hub spawns for WSL environments. Auto-detected otherwise (`%ProgramFiles%\WSL\wsl.exe`, then `%SystemRoot%\System32\wsl.exe`, then PATH); `mango doctor --env` reports the resolved path and its source. |
+
 ## Production Build
 
 ```bash

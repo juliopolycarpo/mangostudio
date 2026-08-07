@@ -5,6 +5,7 @@ import {
   type RuntimeCapabilityAllow,
 } from '@mangostudio/shared/runtime-home';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import { HIDDEN_WINDOW } from './services/process-window';
 import { isShellAvailable } from './services/shell';
 
 /**
@@ -69,6 +70,7 @@ function inspectGit(): RuntimeCapabilityManifest['git'] {
   const result = Bun.spawnSync([executable, '--version'], {
     stdout: 'pipe',
     stderr: 'ignore',
+    ...HIDDEN_WINDOW,
   });
   if (!result.success) return { available: false };
   const version = result.stdout

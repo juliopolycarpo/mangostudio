@@ -72,6 +72,47 @@ describe('WslDetectionService', () => {
 
     expect(await service.detect()).toEqual({ available: true, distributions: [] });
   });
+
+  it('reuses a recent answer instead of spawning wsl.exe again', async () => {
+    let probeCount = 0;
+    let now = 0;
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: () => {
+        probeCount += 1;
+        return Promise.resolve({ stdout: new TextEncoder().encode(LISTING), failed: false });
+      },
+      now: () => now,
+    });
+
+    // A picker open, then a second browser tab opening the same picker a
+    // moment later: both should read the one answer, not spawn a second
+    // wsl.exe launch of their own.
+    await service.detect();
+    now += 1_000;
+    await service.detect();
+
+    expect(probeCount).toBe(1);
+  });
+
+  it('probes again once the memo goes stale', async () => {
+    let probeCount = 0;
+    let now = 0;
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: () => {
+        probeCount += 1;
+        return Promise.resolve({ stdout: new TextEncoder().encode(LISTING), failed: false });
+      },
+      now: () => now,
+    });
+
+    await service.detect();
+    now += 10_001;
+    await service.detect();
+
+    expect(probeCount).toBe(2);
+  });
 });
 
 describe('markConfiguredDistributions', () => {

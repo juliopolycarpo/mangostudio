@@ -15,6 +15,7 @@
 
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import type {
   ContainerDetection,
   ContainerEngine,
@@ -132,7 +133,7 @@ function runWithExecFile(
     execFile(
       command,
       [...args],
-      { timeout: timeoutMs, maxBuffer: maxOutputBytes, windowsHide: true },
+      { timeout: timeoutMs, maxBuffer: maxOutputBytes, ...HIDDEN_WINDOW },
       (error, stdout, stderr) => {
         const err = error as (Error & { code?: unknown; killed?: boolean }) | null;
         const code = err?.code;

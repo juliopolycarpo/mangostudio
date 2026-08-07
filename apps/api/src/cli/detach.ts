@@ -5,6 +5,7 @@
  */
 
 import { closeSync, openSync } from 'node:fs';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { RUNTIME_CONFIG_ENV_KEYS } from '../lib/config';
 import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';
@@ -168,6 +169,7 @@ function realSpawn(port: number, host: string, logFile: string): number {
       stdin: 'ignore',
       stdout: logFd,
       stderr: logFd,
+      ...HIDDEN_WINDOW,
     });
     proc.unref();
     return proc.pid;

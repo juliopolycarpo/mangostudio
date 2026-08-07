@@ -188,6 +188,34 @@ describe.skipIf(!hasPosixShell)('WSL config scripts against a real shell', () =>
     expect(probe.unreadable).toBe(false);
   });
 
+  it('reports the real platform and an empty version when no binary is installed', async () => {
+    const home = await distroHome();
+
+    const probe = parseDistroSlotProbe((await runScript(home, PROBE_SLOT_SCRIPT)).stdout);
+
+    // The machine's own `uname`, not a fake — this is what proves the merged
+    // preamble is exactly five lines even when the runtime it also tries to
+    // run is not there to answer `--version`.
+    expect(probe.kernel).toBe('Linux');
+    expect(probe.machine.length).toBeGreaterThan(0);
+    // A missing runtime binary must not fail the probe: `2>/dev/null` on the
+    // command substitution turns "not found" into an empty field.
+    expect(probe.version).toBe('');
+    expect(probe.config).toBeNull();
+  });
+
+  it("reads the installed runtime's own reported version off the current link", async () => {
+    const home = await distroHome();
+    await runScript(home, INSTALL_BINARY_SCRIPT, {
+      stdin: new TextEncoder().encode('#!/bin/sh\necho 9.9.9\n'),
+      args: ['9.9.9'],
+    });
+
+    const probe = parseDistroSlotProbe((await runScript(home, PROBE_SLOT_SCRIPT)).stdout);
+
+    expect(probe.version).toBe('9.9.9');
+  });
+
   it('takes the runtime lock, and leaves it released', async () => {
     const home = await distroHome();
     const run = await runScript(home, WRITE_CONFIG_SCRIPT, {

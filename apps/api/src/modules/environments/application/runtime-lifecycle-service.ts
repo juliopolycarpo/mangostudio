@@ -26,6 +26,7 @@ import {
   sshRuntimePath,
 } from '@mangostudio/shared/environments';
 import {
+  PLATFORM_PROBE_SCRIPT,
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
@@ -67,7 +68,6 @@ import {
   runtimeDigestSidecarPath,
 } from '../domain/runtime-release-fetch';
 import { classifySshFailure, describeSshFailure } from '../domain/ssh-failure';
-import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
 import {
   type EnvironmentRecord,
   environmentRepository,

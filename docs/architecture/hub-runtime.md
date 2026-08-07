@@ -438,7 +438,7 @@ chats through the embedded Local runtime, it just cannot start stdio environment
 
 `transportKind: 'wsl'` carries `{ distro }` and is a launcher over the stdio transport
 rather than a protocol of its own. The argv is
-`wsl.exe -d <distro> --exec sh -c 'exec
+`<wsl.exe> -d <distro> --exec sh -c 'exec
 "$HOME/.mango/runtime/wsl/current/mangostudio-runtime" "$@"' mangostudio-runtime`, which
 the stdio spawn then appends `--stdio` to. The distribution name is an argv entry and the
 script is a constant, so a name containing spaces, quotes, or shell metacharacters is data
@@ -446,21 +446,55 @@ throughout. `$HOME` is expanded by the distribution's own shell because `wsl.exe
 expands nothing and the hub does not know where a distribution's home directory is — and
 where a version has to appear in a script, it arrives as `$1` for the same reason.
 
+### Which `wsl.exe`
+
+`<wsl.exe>` above is resolved, not hard-coded, by
+`apps/api/src/modules/environments/infrastructure/wsl-executable.ts`. First hit wins:
+
+1. `MANGO_WSL_EXE`, used verbatim with no existence check — a bad override fails loudly on
+   spawn instead of silently falling back.
+2. `%ProgramFiles%\WSL\wsl.exe`, then `%ProgramW6432%\WSL\wsl.exe` (a 32-bit host process
+   sees the redirected view under the first variable).
+3. `%SystemRoot%\System32\wsl.exe`, the in-box launcher, for hosts with no MSI package.
+4. `wsl.exe` on PATH, last resort.
+
+This exists because `C:\Program Files\WSL` — where the real, actively maintained WSL 2
+binary lives — is never on PATH. A bare `spawn('wsl.exe', …)` therefore always resolves to
+`C:\Windows\System32\wsl.exe`, a launcher stub that reads the MSI install location out of
+the registry and re-launches the Program Files binary as a fresh, unflagged process. The
+hub's `windowsHide` on the process it spawned does not apply to a process it did not
+create, and per [microsoft/WSL#9646](https://github.com/microsoft/WSL/issues/9646) the
+stub's relaunch opens a console window in a non-elevated session. Resolving the real binary
+directly means the process the hub flags is the process that does the work — no stub hop,
+no window, and one fewer process creation per command. The answer is memoised per process
+and logged once at info level, so a support transcript names the binary in use; `mango
+doctor --env` reports it too, Windows only, with its source (`override` / `program-files`
+/ `system32` / `path`).
+
 `GET /environments/wsl` lists what the Windows host reports and marks distributions an
 environment already points at. It is gated to win32 and answers every other platform with
 a typed reason instead of a spawn that cannot work. Reading `wsl.exe --list --verbose`
 means decoding UTF-16LE (UTF-8 under `WSL_UTF8`) and parsing by column shape: the headers
-and the state column are localized, and the columns are padded to their widest value.
+and the state column are localized, and the columns are padded to their widest value. The
+answer is memoised for a short TTL, so a picker reopened or a second browser tab does not
+spawn its own probe.
 
-Connect provisions on demand. The distribution is asked where its home is and what its
-`runtime.json` records, and when that names another version — or the binary it names does
-not run — the Linux build for this hub's own version is fetched from its release, verified
-against that release's `SHA256SUMS`, cached under `~/.mango/runtime-cache/<version>/`, and
-piped into the distribution (raw asset preferred; archive fallback for older
-releases). A hub update is therefore absorbed by reinstalling rather than by a
-handshake failure the user cannot act on. Releases publish standalone
+Connect provisions on demand, in one round trip: a single script reports the distribution's
+home, its platform (`uname -s`/`-m`, `ldd --version`), and the installed runtime's own
+`--version` alongside whatever `runtime.json` records. When that names another version — or
+the binary it names does not run — the Linux build for this hub's own version is fetched
+from its release, verified against that release's `SHA256SUMS`, cached under
+`~/.mango/runtime-cache/<version>/`, and piped into the distribution (raw asset preferred;
+archive fallback for older releases). A hub update is therefore absorbed by reinstalling
+rather than by a handshake failure the user cannot act on. Releases publish standalone
 `mangostudio-runtime-<version>-<platform>` binaries beside the platform archives
 for one-liner installs and hub-driven WSL/SSH push.
+
+The merge above collapses what used to be two separate `wsl.exe` launches — one for the
+slot probe, one for the platform/version check — into one: a connect that already matches
+costs a single launch instead of two, and a cold install costs one fewer launch than before.
+Each launch also used to pay the System32-stub relaunch described above, so the round-trip
+savings compound with the direct-binary resolution rather than being independent of it.
 
 Which release those bytes come from is resolved by channel, not by splicing the hub's
 version into a URL. Stable maps to `v<version>` and versioned asset names. A canary hub

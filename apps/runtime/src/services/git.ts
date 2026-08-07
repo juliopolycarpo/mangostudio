@@ -5,6 +5,7 @@
 
 import { RuntimeServiceError, RuntimeToolArgumentError } from '../errors';
 import type { RuntimeGitExecParams, RuntimeGitExecResult } from '../methods';
+import { HIDDEN_WINDOW } from './process-window';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
@@ -217,6 +218,7 @@ function spawnGit(args: readonly string[], cwd: string) {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
+    ...HIDDEN_WINDOW,
   });
 }
 

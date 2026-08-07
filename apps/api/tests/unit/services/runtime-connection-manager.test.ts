@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it, setSystemTime } from 'bun:test';
+import { afterEach, describe, expect, it, mock, setSystemTime } from 'bun:test';
+import * as realChildProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
   EnvironmentConnectionState,
@@ -759,5 +761,84 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getCachedHealth('user-1', 'devbox')).toBeNull();
     expect(manager.getStatus('user-1', 'devbox').manifest).toBeUndefined();
     expect(manager.getStatus('user-1', 'devbox').runtimeVersion).toBeUndefined();
+  });
+});
+
+describe('connectWslRuntime', () => {
+  const ORIGINAL_PLATFORM = process.platform;
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: ORIGINAL_PLATFORM, configurable: true });
+    mock.restore();
+  });
+
+  /**
+   * A `ChildProcess`-shaped `EventEmitter` that fails the way a spawn of a
+   * missing executable does: an `error` event carrying `ENOENT`, followed by
+   * the pipe closing with nothing said. `stdout.pause` and `stdin.write`/`end`
+   * are the minimum `createStdioFramePort` and `spawnRuntimeChild` need to
+   * tear the connection down without throwing on a missing method.
+   */
+  function enoentChild(): unknown {
+    const stdout = Object.assign(new EventEmitter(), { pause: () => undefined });
+    const stderr = new EventEmitter();
+    const stdin = Object.assign(new EventEmitter(), { write: () => true, end: () => undefined });
+    const child = Object.assign(new EventEmitter(), {
+      stdout,
+      stderr,
+      stdin,
+      exitCode: null as number | null,
+      signalCode: null as NodeJS.Signals | null,
+      kill: () => undefined,
+    });
+
+    queueMicrotask(() => {
+      child.emit('error', Object.assign(new Error('spawn wsl.exe ENOENT'), { code: 'ENOENT' }));
+      child.emit('exit', null, null);
+      child.exitCode = -1;
+      stdout.emit('end');
+    });
+
+    return child;
+  }
+
+  it('reports a WSL launch failure at the resolved path, not "reinstall MangoStudio"', async () => {
+    // connectWslRuntime is windows-gated before anything else runs.
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+
+    // The distribution already holds a matching runtime; only the runtime
+    // launch itself — the second wsl.exe spawn — is under test here.
+    await mock.module('../../../src/modules/environments/infrastructure/wsl-provisioner', () => ({
+      wslProvisioner: { ensure: () => Promise.resolve() },
+    }));
+    await mock.module('node:child_process', () => ({
+      ...realChildProcess,
+      spawn: () => enoentChild(),
+    }));
+
+    const { connectWslRuntime } = await import(
+      '../../../src/services/runtime-client/runtime-connection-manager'
+    );
+
+    const outcome = await connectWslRuntime(
+      {
+        id: 'win-distro',
+        userId: 'user-1',
+        name: 'WSL',
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      },
+      () => undefined
+    ).catch((caught: unknown) => caught);
+    const error = outcome as RuntimeRemoteError;
+
+    // Before this fix, a missing wsl.exe surfaced as "The runtime binary was
+    // not found at wsl.exe. Reinstall MangoStudio…" — true of a missing
+    // sibling runtime binary, not of WSL itself being absent, and it sent the
+    // user to the wrong fix.
+    expect(error).toBeInstanceOf(RuntimeRemoteError);
+    expect(error.message).toContain('WSL could not be started');
+    expect(error.message).not.toContain('Reinstall MangoStudio');
   });
 });

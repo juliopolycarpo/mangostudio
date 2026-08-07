@@ -105,6 +105,12 @@ export interface MangoConfig {
      * discarded on restart and mutate an image the user did not build.
      */
     container: boolean;
+    /**
+     * Overrides which `wsl.exe` the hub spawns (`MANGO_WSL_EXE`). Used verbatim,
+     * with no existence check, so a bad value fails loudly on spawn rather than
+     * silently falling back to auto-detection. Empty means auto-detect.
+     */
+    wslExecutable: string;
   };
   /** Computed CORS origins derived from frontend host/port. */
   corsOrigins: string[];
@@ -146,7 +152,7 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   checkpoints: { dir: '' },
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
-  environments: { ltsRefresh: false, installsEnabled: false, container: false },
+  environments: { ltsRefresh: false, installsEnabled: false, container: false, wslExecutable: '' },
   cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
@@ -220,6 +226,9 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   // not become invisible because an env file says otherwise.
   MANGO_CONTAINER: (cfg, v) => {
     cfg.environments.container = cfg.environments.container || parseBooleanFlag(v);
+  },
+  MANGO_WSL_EXE: (cfg, v) => {
+    cfg.environments.wslExecutable = v;
   },
   CURSOR_WORKSPACE_DIR: (cfg, v) => {
     cfg.cursor.workspaceDir = v;
