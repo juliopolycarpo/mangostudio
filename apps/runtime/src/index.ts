@@ -229,6 +229,7 @@ export {
   type ProbingService,
   probingService,
 } from './services/probing/service';
+export { HIDDEN_WINDOW } from './services/process-window';
 export {
   findShellExecutable,
   isShellAvailable,

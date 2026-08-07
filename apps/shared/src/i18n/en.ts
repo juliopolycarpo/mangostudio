@@ -1526,6 +1526,7 @@ export const messages: Messages = {
     openMenu: 'Open menu',
     closeMenu: 'Close menu',
     disclaimer: 'Artificial Intelligence can make mistakes. Please double-check the results.',
+    dismissToast: 'Dismiss toast',
   },
 
   library: {

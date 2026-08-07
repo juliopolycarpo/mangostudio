@@ -7,6 +7,8 @@
  * that works in every other respect can still be unable to start one.
  */
 
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 
 export interface SshClientProbe {
@@ -23,7 +25,7 @@ export async function probeSshClient(
 
   let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
   try {
-    child = Bun.spawn([path, '-V'], { stdout: 'pipe', stderr: 'pipe' });
+    child = Bun.spawn([path, '-V'], { stdout: 'pipe', stderr: 'pipe', ...HIDDEN_WINDOW });
   } catch (error) {
     return { path, version: null, error: describeError(error) };
   }

@@ -5,6 +5,7 @@
  */
 
 import { existsSync } from 'node:fs';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { getRuntimeBinaryPath } from '../lib/runtime-paths';
 
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
@@ -34,7 +35,7 @@ export async function probeRuntimeBinary(
   // exists to report that as a finding rather than die on it.
   let child: Bun.Subprocess<'ignore', 'pipe', 'pipe'>;
   try {
-    child = Bun.spawn([path, '--version'], { stdout: 'pipe', stderr: 'pipe' });
+    child = Bun.spawn([path, '--version'], { stdout: 'pipe', stderr: 'pipe', ...HIDDEN_WINDOW });
   } catch (error) {
     return { path, present: true, version: null, error: describeError(error) };
   }

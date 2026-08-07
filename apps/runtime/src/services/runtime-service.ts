@@ -24,6 +24,7 @@ import {
   readRuntimeSlotState,
   readServeToken,
 } from '../runtime-home';
+import { HIDDEN_WINDOW } from './process-window';
 
 export const RUNTIME_SERVICE_DOCS_URL =
   'https://github.com/juliopolycarpo/mangostudio/blob/main/docs/operations/remote-runtimes.md';
@@ -164,6 +165,7 @@ function defaultRuntimeServiceExecDeps(
         stdout: 'pipe',
         stderr: 'pipe',
         timeout: 30_000,
+        ...HIDDEN_WINDOW,
       });
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(),
@@ -181,6 +183,7 @@ function defaultRuntimeServiceExecDeps(
       const result = await Bun.spawn(['which', 'systemctl'], {
         stdout: 'ignore',
         stderr: 'ignore',
+        ...HIDDEN_WINDOW,
       }).exited;
       return result === 0;
     },

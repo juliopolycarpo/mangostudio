@@ -19,6 +19,8 @@ const MUTATED_ENV_KEYS = [
   'MANGOSTUDIO_DIAGNOSTIC_LOGS',
   'SOME_RANDOM_VAR',
   'ANOTHER_SECRET',
+  'ProgramFiles',
+  'ProgramW6432',
 ];
 
 let envSnapshot: Record<string, string | undefined> = {};
@@ -72,6 +74,19 @@ describe('buildDetachedEnv', () => {
     expect(env.DATABASE_PATH).toBe('/custom/sqlite.db');
     expect(env.BETTER_AUTH_SECRET).toBe('a-valid-secret-at-least-32-characters-long');
     expect(env.FRONTEND_PORT).toBe('9999');
+  });
+
+  it('forwards ProgramFiles and ProgramW6432 for the WSL executable lookup', () => {
+    // wsl-executable.ts resolves the real wsl.exe under these; without them a
+    // detached Windows server falls back to the System32 launcher stub and
+    // brings back the console-window flash spawning wsl.exe directly avoids.
+    process.env.ProgramFiles = 'C:\\Program Files';
+    process.env.ProgramW6432 = 'C:\\Program Files';
+
+    const env = buildDetachedEnv('localhost', 3001, '/tmp/server.log');
+
+    expect(env.ProgramFiles).toBe('C:\\Program Files');
+    expect(env.ProgramW6432).toBe('C:\\Program Files');
   });
 
   it('never includes keys outside the allowlist', () => {

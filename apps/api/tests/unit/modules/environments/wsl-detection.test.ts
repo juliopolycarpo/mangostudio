@@ -72,6 +72,86 @@ describe('WslDetectionService', () => {
 
     expect(await service.detect()).toEqual({ available: true, distributions: [] });
   });
+
+  it('reuses a recent answer instead of spawning wsl.exe again', async () => {
+    let probeCount = 0;
+    let now = 0;
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: () => {
+        probeCount += 1;
+        return Promise.resolve({ stdout: new TextEncoder().encode(LISTING), failed: false });
+      },
+      now: () => now,
+    });
+
+    // A picker open, then a second browser tab opening the same picker a
+    // moment later: both should read the one answer, not spawn a second
+    // wsl.exe launch of their own.
+    await service.detect();
+    now += 1_000;
+    await service.detect();
+
+    expect(probeCount).toBe(1);
+  });
+
+  it('probes again once the memo goes stale', async () => {
+    let probeCount = 0;
+    let now = 0;
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: () => {
+        probeCount += 1;
+        return Promise.resolve({ stdout: new TextEncoder().encode(LISTING), failed: false });
+      },
+      now: () => now,
+    });
+
+    await service.detect();
+    now += 10_001;
+    await service.detect();
+
+    expect(probeCount).toBe(2);
+  });
+
+  it('collapses callers that arrive while a probe is still in flight', async () => {
+    let probeCount = 0;
+    let release: ((result: { stdout: Uint8Array; failed: boolean }) => void) | undefined;
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: () => {
+        probeCount += 1;
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+    });
+
+    // Both callers arrive before the memo is written, which is the common case:
+    // two tabs opening the picker at once, not ten seconds apart.
+    const first = service.detect();
+    const second = service.detect();
+    release?.({ stdout: new TextEncoder().encode(LISTING), failed: false });
+
+    expect(await first).toEqual(await second);
+    expect(probeCount).toBe(1);
+  });
+
+  it('retries after a failed probe instead of latching onto the rejection', async () => {
+    let probeCount = 0;
+    const service = createWslDetectionService({
+      platform: 'win32',
+      probe: () => {
+        probeCount += 1;
+        if (probeCount === 1) return Promise.reject(new Error('spawn EPERM'));
+        return Promise.resolve({ stdout: new TextEncoder().encode(LISTING), failed: false });
+      },
+    });
+
+    await expect(service.detect()).rejects.toThrow('spawn EPERM');
+    expect((await service.detect()).available).toBe(true);
+    expect(probeCount).toBe(2);
+  });
 });
 
 describe('markConfiguredDistributions', () => {

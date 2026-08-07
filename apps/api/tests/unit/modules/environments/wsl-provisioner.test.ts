@@ -113,10 +113,15 @@ function harness(
         return Promise.resolve(ok());
       }
       if (script.startsWith('printf')) {
-        return Promise.resolve(ok(`${DISTRO_HOME}\n${config ? JSON.stringify(config) : ''}`));
+        // The slot probe: home, then the platform preamble, then whatever
+        // config is on record. Version is a separate round trip, below.
+        return Promise.resolve(
+          ok(
+            `${DISTRO_HOME}\nLinux\nx86_64\nldd (GNU libc) 2.35\n` +
+              (config ? JSON.stringify(config) : '')
+          )
+        );
       }
-      if (script.includes('uname -m'))
-        return Promise.resolve(ok('Linux\nx86_64\nldd (GNU libc) 2.35\n'));
       if (script.includes('setup --profile')) {
         config = { ...(config as RuntimeSlotConfig), setup: { state: 'configured', by: 'cli' } };
         return Promise.resolve(ok());
@@ -126,6 +131,8 @@ function harness(
         installed = version;
         return Promise.resolve(ok());
       }
+      // VERSION_SCRIPT, the one remaining branch: reports what runs, or fails
+      // the way a missing/wedged binary would.
       return Promise.resolve(
         installed
           ? ok(`${installed}\n`)
@@ -170,6 +177,19 @@ describe('WslProvisioner', () => {
     expect(unpack?.script).not.toContain('tar');
     // The version is an argv entry, never text inside the script.
     expect(unpack?.args).toEqual([VERSION]);
+  });
+
+  it('merges the platform probe into the initial slot probe', async () => {
+    const { provisioner, calls } = harness();
+
+    await provisioner.ensure('Ubuntu');
+
+    // Exactly one call happens before the runtime is pushed: the merged
+    // slot probe, which now also answers the platform question a separate
+    // PLATFORM_PROBE_SCRIPT call used to.
+    expect(calls[0]?.script.startsWith('printf')).toBe(true);
+    const pushIndex = calls.findIndex((call) => call.script.includes('cat > '));
+    expect(pushIndex).toBe(1);
   });
 
   it('falls back to the platform archive when the raw asset is unpublished', async () => {
@@ -396,6 +416,30 @@ describe('WslProvisioner', () => {
     expect(requested).toHaveLength(2);
   });
 
+  it('reinstalls rather than fail when the installed binary is wedged', async () => {
+    // A damaged or stuck runtime binary times out `--version` rather than
+    // exiting, which the real runner reports as a killed command. That must
+    // not read as "the distribution could not start" — the slot probe itself
+    // still answered fine — it must fail only the version check and fall
+    // through to reinstall, the self-healing path this config exists for.
+    // Only the pre-install check is wedged; the freshly pushed binary's own
+    // post-install verification (also a `--version` call) must still pass.
+    let preInstallChecked = false;
+    const { provisioner, requested } = harness({
+      config: provisionedConfig(VERSION, ARCHIVE),
+      respond: (script) => {
+        if (!script.includes('--version') || script.includes('uname')) return undefined;
+        if (preInstallChecked) return undefined;
+        preInstallChecked = true;
+        return { stdout: '', stderr: '', exitCode: -1, signal: 'SIGTERM' };
+      },
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(requested).toHaveLength(2);
+  });
+
   it('replaces a runtime an older release left behind', async () => {
     const { provisioner, requested } = harness({
       installed: '1.0.0',
@@ -411,7 +455,10 @@ describe('WslProvisioner', () => {
     // The file that could not be read may have narrowed this distribution, and
     // an unknown answer must not resolve to full.
     const { provisioner, calls, config } = harness({
-      respond: (script) => (script.startsWith('printf') ? ok('/home/dev\n{ truncated') : undefined),
+      respond: (script) =>
+        script.startsWith('printf')
+          ? ok('/home/dev\nLinux\nx86_64\nldd (GNU libc) 2.35\n{ truncated')
+          : undefined,
     });
 
     await provisioner.ensure('Ubuntu');
@@ -464,8 +511,8 @@ describe('WslProvisioner', () => {
     });
 
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(WslProvisioningError);
-    // Only the two probes ran; nothing was piped into the distribution.
-    expect(calls).toHaveLength(2);
+    // Only the merged slot probe ran; nothing was piped into the distribution.
+    expect(calls).toHaveLength(1);
     expect(calls.every((call) => call.stdinBytes === 0)).toBe(true);
   });
 
@@ -484,10 +531,9 @@ describe('WslProvisioner', () => {
       version: () => VERSION,
       cacheDir: (version) => `/cache/${version}`,
       readBytes: () => Promise.resolve(null),
-      runInDistro: (_distro, script) =>
-        script.includes('uname -m')
-          ? Promise.resolve(ok('Linux\nx86_64\nldd (GNU libc) 2.35\n'))
-          : Promise.resolve({ stdout: '', stderr: 'not found', exitCode: 127 }),
+      // Only the slot probe runs before the download fails.
+      runInDistro: () =>
+        Promise.resolve(ok(`${DISTRO_HOME}\nLinux\nx86_64\nldd (GNU libc) 2.35\n`)),
       fetch: ((_input: string | URL): Promise<Response> =>
         Promise.reject(new Error('getaddrinfo ENOTFOUND'))) as typeof fetch,
     });

@@ -8,12 +8,20 @@
  */
 
 import { execFile } from 'node:child_process';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import type { WslDetection, WslDistribution } from '@mangostudio/shared/environments';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { decodeWslOutput, parseWslDistributions } from '../domain/wsl-output';
+import { resolveWslExecutable } from '../infrastructure/wsl-executable';
 
 const PROBE_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 1_024 * 1_024;
+/**
+ * Repeated picker opens or a second browser tab each ask `detect()` again; a
+ * short memo collapses those into one `wsl.exe` launch instead of one apiece.
+ * The frontend's own `staleTime` only covers a single client.
+ */
+const PROBE_MEMO_TTL_MS = 10_000;
 
 const logger = createDiagnosticLogger('wsl-detection');
 
@@ -25,6 +33,7 @@ interface WslProbeResult {
 export interface WslDetectionDeps {
   readonly platform: NodeJS.Platform;
   readonly probe: () => Promise<WslProbeResult>;
+  readonly now: () => number;
 }
 
 export interface WslDetectionService {
@@ -39,13 +48,13 @@ export interface WslDetectionService {
 function probeWithWslExe(): Promise<WslProbeResult> {
   return new Promise((resolve) => {
     execFile(
-      'wsl.exe',
+      resolveWslExecutable().path,
       ['--list', '--verbose'],
       {
         encoding: 'buffer',
         timeout: PROBE_TIMEOUT_MS,
         maxBuffer: MAX_OUTPUT_BYTES,
-        windowsHide: true,
+        ...HIDDEN_WINDOW,
         env: { ...process.env, WSL_UTF8: '1' },
       },
       (error, stdout) => {
@@ -61,30 +70,57 @@ function probeWithWslExe(): Promise<WslProbeResult> {
 const defaultDeps: WslDetectionDeps = {
   platform: process.platform,
   probe: probeWithWslExe,
+  now: Date.now,
 };
 
 export function createWslDetectionService(
   overrides: Partial<WslDetectionDeps> = {}
 ): WslDetectionService {
   const deps = { ...defaultDeps, ...overrides };
+  let memo: { readonly at: number; readonly result: WslDetection } | null = null;
+  /**
+   * The memo is only written once the probe resolves, so callers that arrive
+   * while one is in flight would all miss it and spawn their own `wsl.exe` —
+   * exactly the pile-up the memo exists to prevent, since two browser tabs
+   * open the picker at the same time far more often than 10s apart.
+   */
+  let inFlight: Promise<WslDetection> | null = null;
+
+  async function probeOnce(startedAt: number): Promise<WslDetection> {
+    const { stdout, failed } = await deps.probe();
+    const distributions = parseWslDistributions(decodeWslOutput(stdout));
+    let result: WslDetection;
+    if (distributions.length > 0) {
+      result = { available: true, distributions };
+    } else if (failed) {
+      logger.warn('probe_failed', { bytes: stdout.byteLength });
+      result = { available: false, distributions: [], reason: 'wsl-not-installed' };
+    } else {
+      // wsl.exe ran and said nothing recognizable: it is installed, but there
+      // is nothing to configure.
+      result = { available: true, distributions: [] };
+    }
+
+    memo = { at: startedAt, result };
+    return result;
+  }
 
   return {
-    async detect(): Promise<WslDetection> {
+    detect(): Promise<WslDetection> {
       if (deps.platform !== 'win32') {
-        return { available: false, distributions: [], reason: 'not-windows' };
+        return Promise.resolve({ available: false, distributions: [], reason: 'not-windows' });
       }
 
-      const { stdout, failed } = await deps.probe();
-      const distributions = parseWslDistributions(decodeWslOutput(stdout));
-      if (distributions.length > 0) return { available: true, distributions };
+      const now = deps.now();
+      if (memo && now - memo.at < PROBE_MEMO_TTL_MS) return Promise.resolve(memo.result);
+      if (inFlight) return inFlight;
 
-      if (failed) {
-        logger.warn('probe_failed', { bytes: stdout.byteLength });
-        return { available: false, distributions: [], reason: 'wsl-not-installed' };
-      }
-      // wsl.exe ran and said nothing recognizable: it is installed, but there is
-      // nothing to configure.
-      return { available: true, distributions: [] };
+      // Cleared in `finally` so a rejected probe is retried rather than being
+      // latched onto by every later caller.
+      inFlight = probeOnce(now).finally(() => {
+        inFlight = null;
+      });
+      return inFlight;
     },
   };
 }

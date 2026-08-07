@@ -612,10 +612,20 @@ Where a runtime lives and what it is allowed to do — `~/.mango/runtime/<slot>/
 WSL is a launcher over that same transport, not a protocol of its own:
 
 - `apps/api/src/modules/environments/domain/wsl-output.ts` (UTF-16LE + localized listing)
-- `apps/api/src/modules/environments/application/wsl-detection.ts` (detection service, win32 gate)
+- `apps/api/src/modules/environments/application/wsl-detection.ts` (detection service, win32 gate,
+  TTL memo)
 - `apps/api/src/modules/environments/http/environment-routes.ts` (`GET /environments/wsl`)
-- `apps/api/src/modules/environments/domain/wsl-runtime-release.ts` (argv, scripts, asset names)
+- `apps/api/src/modules/environments/domain/wsl-runtime-release.ts` (argv, merged slot/platform/
+  version probe script, asset names)
 - `apps/api/src/modules/environments/infrastructure/wsl-provisioner.ts` (download, verify, install)
+- `apps/api/src/modules/environments/infrastructure/wsl-executable.ts` (resolves the real
+  `wsl.exe` — `MANGO_WSL_EXE`, Program Files, System32, PATH — instead of the System32 launcher
+  stub that a bare `wsl.exe` on PATH always finds)
+- Tests: `apps/api/tests/unit/modules/environments/wsl-executable.test.ts`,
+  `wsl-runtime-release.test.ts`, `wsl-provisioner.test.ts`, `wsl-detection.test.ts`;
+  `apps/api/tests/integration/modules/environments/wsl-runtime-scripts.integration.test.ts`
+  (the scripts against a real `sh`); `apps/api/tests/unit/services/runtime-connection-manager.test.ts`
+  (`connectWslRuntime`'s failure classification)
 
 SSH is a launcher too — the system `ssh` client, not a library — and shares one push path
 with WSL. Everything that puts runtime bytes on another machine goes through it:

@@ -28,6 +28,7 @@ import {
 } from '../../modules/environments/domain/environment-config';
 import { wslLaunchCommand } from '../../modules/environments/domain/wsl-runtime-release';
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
+import { resolveWslExecutable } from '../../modules/environments/infrastructure/wsl-executable';
 import { wslProvisioner } from '../../modules/environments/infrastructure/wsl-provisioner';
 import { publishEnvironmentInvalidation } from '../realtime/environment-invalidation';
 import { connectContainerRuntime } from './connect-container-runtime';
@@ -35,7 +36,7 @@ import { connectHttpRuntime } from './connect-http-runtime';
 import { connectSshRuntime } from './connect-ssh-runtime';
 import { capabilityManifestFromHealth } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
-import { spawnRuntimeChild } from './spawn-runtime-child';
+import { type RuntimeLaunchFailure, spawnRuntimeChild } from './spawn-runtime-child';
 
 /** Last `runtime.health` retained across disconnect the way the manifest is. */
 export interface CachedRuntimeHealth {
@@ -828,8 +829,12 @@ async function connectStdioRuntime(
  * own release built for Linux is in the distribution first. That is also how a
  * hub update is absorbed: the stale binary is replaced instead of failing the
  * handshake with nothing the user can act on.
+ *
+ * Exported for the same reason `connectSshRuntime` is: so its failure
+ * classification is testable directly rather than only through a live
+ * `getRuntimeConnectionManager()` singleton.
  */
-async function connectWslRuntime(
+export async function connectWslRuntime(
   definition: RuntimeEnvironmentDefinition,
   onUnavailable: () => void
 ): Promise<ManagedRuntimeConnection> {
@@ -841,10 +846,15 @@ async function connectWslRuntime(
   const { distro } = environmentConfigFor('wsl', definition.config);
   await wslProvisioner.ensure(distro);
 
+  const wslExecutable = resolveWslExecutable();
   const connection = await spawnRuntimeChild({
     environmentId: definition.id,
-    launch: wslLaunchCommand(distro),
+    launch: wslLaunchCommand(distro, wslExecutable.path),
     hubVersion: getVersion(),
+    describeFailure: (failure: RuntimeLaunchFailure) =>
+      failure.spawnErrorCode === 'ENOENT'
+        ? `WSL could not be started at "${wslExecutable.path}". Install WSL, or set MANGO_WSL_EXE to the wsl.exe path if it is installed somewhere else.`
+        : undefined,
     onClosed: onUnavailable,
   });
   return {

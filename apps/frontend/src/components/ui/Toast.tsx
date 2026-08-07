@@ -1,5 +1,14 @@
 import { X } from 'lucide-react';
-import { createContext, type ReactNode, use, useCallback, useState } from 'react';
+import {
+  createContext,
+  type ReactNode,
+  use,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
+import { useI18n } from '@/hooks/use-i18n';
 
 interface Toast {
   id: string;
@@ -14,18 +23,42 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
   const [toasts, setToasts] = useState<Toast[]>([]);
+  /**
+   * Auto-dismiss timers, keyed by toast id. They outlive the toast they were
+   * scheduled for by up to 4s, so an unmount that leaves one pending fires
+   * `setToasts` against a torn-down tree.
+   */
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      for (const timer of pending.values()) clearTimeout(timer);
+      pending.clear();
+    };
+  }, []);
+
+  const dismiss = useCallback((id: string) => {
+    const timer = timers.current.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   const toast = useCallback((message: string, type: Toast['type'] = 'info') => {
     const id = crypto.randomUUID();
     setToasts((prev) => [...prev, { id, message, type }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
-  }, []);
-
-  const dismiss = useCallback((id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+    timers.current.set(
+      id,
+      setTimeout(() => {
+        timers.current.delete(id);
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 4000)
+    );
   }, []);
 
   const typeStyles: Record<Toast['type'], string> = {
@@ -38,15 +71,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext value={{ toast }}>
       {children}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => (
+        {toasts.map((toastItem) => (
           <div
-            key={t.id}
-            className={`glass-panel pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border text-sm max-w-sm ${typeStyles[t.type]}`}
+            key={toastItem.id}
+            className={`glass-panel pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border text-sm max-w-sm ${typeStyles[toastItem.type]}`}
           >
-            <span className="flex-1">{t.message}</span>
+            <span className="flex-1">{toastItem.message}</span>
             <button
               type="button"
-              onClick={() => dismiss(t.id)}
+              onClick={() => dismiss(toastItem.id)}
+              aria-label={t.common.dismissToast}
               className="shrink-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
             >
               <X size={14} />

@@ -13,6 +13,11 @@ import {
   LOCAL_PROBE_SCOPE,
   type ProbeOptions,
 } from '../modules/environments/application/probing-service';
+import {
+  resolveWslExecutable,
+  type WslExecutable,
+  type WslExecutableSource,
+} from '../modules/environments/infrastructure/wsl-executable';
 import type { CheckResult } from './doctor-checks';
 import { fail, ok, warn } from './doctor-checks';
 import { findingSeverity, renderFinding, runtimeHealthToCheckStatus } from './finding-renderer';
@@ -21,6 +26,9 @@ export interface EnvironmentDoctorDeps {
   readonly listRuntimes: (options?: ProbeOptions) => Promise<RuntimeStatus[]>;
   readonly listVersionManagers: (options?: ProbeOptions) => Promise<VersionManagerStatus[]>;
   readonly listAgents: (options?: ProbeOptions) => Promise<AgentCliStatus[]>;
+  /** Windows only; the row this produces is skipped everywhere else. */
+  readonly platform: NodeJS.Platform;
+  readonly resolveWslExecutable: () => WslExecutable;
 }
 
 function displayName(id: string): string {
@@ -90,6 +98,17 @@ function agentRow(status: AgentCliStatus): CheckResult {
   return fail(label, 'not installed');
 }
 
+/**
+ * Names which `wsl.exe` a WSL connect would spawn and why, so a support
+ * transcript can tell a `program-files` resolution from an `override` without
+ * asking the reporter to run PowerShell. Windows only: off Windows nothing
+ * calls `wsl.exe`, and the row would just repeat the same PATH fallback.
+ */
+function wslExecutableRow(executable: WslExecutable): CheckResult {
+  const source: WslExecutableSource = executable.source;
+  return ok('WSL executable', `${executable.path} (${source})`);
+}
+
 export async function collectEnvironmentDoctorSection(
   deps: Partial<EnvironmentDoctorDeps> = {}
 ): Promise<CheckResult[]> {
@@ -111,6 +130,9 @@ export async function collectEnvironmentDoctorSection(
   for (const agent of agents) {
     rows.push(agentRow(agent));
   }
+  if (d.platform === 'win32') {
+    rows.push(wslExecutableRow(d.resolveWslExecutable()));
+  }
   return rows;
 }
 
@@ -125,5 +147,7 @@ function resolveDeps(deps: Partial<EnvironmentDoctorDeps>): EnvironmentDoctorDep
     listAgents:
       deps.listAgents ??
       ((opts) => environmentProbingService.listAgentCliStatuses(LOCAL_PROBE_SCOPE, opts)),
+    platform: deps.platform ?? process.platform,
+    resolveWslExecutable: deps.resolveWslExecutable ?? resolveWslExecutable,
   };
 }

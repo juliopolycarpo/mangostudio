@@ -7,6 +7,7 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { RuntimeServiceError } from '../errors';
 import type { RuntimeShellResult } from '../methods';
+import { HIDDEN_WINDOW } from './process-window';
 import { type ShellEnvPolicy, sanitizeShellEnv } from './shell-env';
 
 /** Shell interpreters exposed as tools. */
@@ -198,6 +199,7 @@ function spawnShell(spawn: typeof Bun.spawn, executable: string, input: RunShell
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
+      ...HIDDEN_WINDOW,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to start shell process';

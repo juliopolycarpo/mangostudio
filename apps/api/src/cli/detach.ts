@@ -5,6 +5,7 @@
  */
 
 import { closeSync, openSync } from 'node:fs';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { RUNTIME_CONFIG_ENV_KEYS } from '../lib/config';
 import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';
@@ -117,8 +118,11 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
   'all_proxy',
   // Windows runtime essentials. Bun.spawn replaces the env, and without these a
   // detached Windows server loses networking/crypto (SystemRoot/windir),
-  // executable resolution for the shell tools (COMSPEC/PATHEXT), and the
-  // standard data directories provider SDKs read.
+  // executable resolution for the shell tools (COMSPEC/PATHEXT), the standard
+  // data directories provider SDKs read, and — without ProgramFiles /
+  // ProgramW6432 — wsl-executable.ts's MSI lookup, which falls back to the
+  // System32 launcher stub and reintroduces the console-window flash this hub
+  // spawns wsl.exe directly to avoid (see wsl-executable.ts).
   'SystemRoot',
   'windir',
   'SystemDrive',
@@ -127,6 +131,8 @@ const DETACH_ENV_ALLOWLIST = new Set<string>([
   'APPDATA',
   'LOCALAPPDATA',
   'ProgramData',
+  'ProgramFiles',
+  'ProgramW6432',
   'NUMBER_OF_PROCESSORS',
 ]);
 
@@ -168,6 +174,7 @@ function realSpawn(port: number, host: string, logFile: string): number {
       stdin: 'ignore',
       stdout: logFd,
       stderr: logFd,
+      ...HIDDEN_WINDOW,
     });
     proc.unref();
     return proc.pid;

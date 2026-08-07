@@ -1,3 +1,5 @@
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
+
 const DEFAULT_TIMEOUT_MS = 15_000;
 const PROBE_TIMEOUT_MS = 5_000;
 const PROBE_CACHE_TTL_MS = 60_000;
@@ -251,6 +253,7 @@ function spawnGh(args: GhCommandArgs, cwd: string, source?: NodeJS.ProcessEnv) {
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
+    ...HIDDEN_WINDOW,
   });
 }
 

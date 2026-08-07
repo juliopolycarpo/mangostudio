@@ -63,22 +63,6 @@ export const DISTRO_RUNTIME_PATH = runtimeSlotCurrentBinaryPath('wsl', {
 /** The unversioned binary #771 shipped, kept only so it can be removed. */
 export const LEGACY_DISTRO_RUNTIME_PATH = '~/.mango/bin/mangostudio-runtime';
 
-export interface DistroPlatformProbe {
-  /** `uname -s` output. Present once the probe script reports it. */
-  readonly kernel?: string;
-  /** `uname -m` output. */
-  readonly machine: string;
-  /** First line of `ldd --version`, which names the C library. */
-  readonly libc: string;
-}
-
-/**
- * Re-exported so this module stays the one import for WSL provisioning. The
- * script itself lives beside the parser it feeds, because container and SSH
- * targets answer the same one.
- */
-export { PLATFORM_PROBE_SCRIPT } from '@mangostudio/shared/runtime-home';
-
 const CURRENT_BINARY = distroPath(RUNTIME_CURRENT_LINK_NAME, RUNTIME_ARCHIVE_MEMBER);
 const CONFIG_PATH = distroPath(RUNTIME_CONFIG_FILE_NAME);
 const STAGED_CONFIG_PATH = distroPath(`${RUNTIME_CONFIG_FILE_NAME}.incoming`);
@@ -101,7 +85,13 @@ export const INSTALL_BINARY_SCRIPT = runtimePushBinaryScript('wsl');
  */
 const LAUNCH_SCRIPT = `exec ${CURRENT_BINARY} "$@"`;
 
-/** Reports the installed runtime's version, and fails when there is not one. */
+/**
+ * Reports the installed runtime's version, and fails when there is not one.
+ *
+ * Kept as its own round trip rather than folded into {@link PROBE_SLOT_SCRIPT}:
+ * a damaged or hung binary must be able to fail *this* probe alone and fall
+ * through to reinstall, not take the home/platform/config read down with it.
+ */
 export const VERSION_SCRIPT = runtimeVersionScript('wsl');
 
 /**
@@ -117,11 +107,29 @@ export const VERSION_SCRIPT = runtimeVersionScript('wsl');
 export const SETUP_FULL_SCRIPT = `exec ${CURRENT_BINARY} setup --profile full --yes`;
 
 /**
- * Reports where the distribution's home directory is and what it recorded about
- * its own runtime — the home on the first line, the config on the rest.
+ * Reports what a connect needs about the `wsl` slot's identity in one round
+ * trip: the distribution's home directory, its platform (kernel/machine/libc),
+ * and what it recorded about itself — a fixed four-line preamble followed by
+ * the config body.
  *
- * Both in one round trip because both are needed together and neither is worth
- * a spawn of its own. The digest is read rather than recomputed: hashing the
+ * One round trip because a stopped distribution pays a boot cost per launch,
+ * and the System32 stub this hub used to go through (see `wsl-executable.ts`)
+ * made every one of those launches flash a console window besides. Merging
+ * the platform probe that used to follow this one turns a connect that needs
+ * to install into fewer launches than it used to.
+ *
+ * The installed runtime's own `--version` deliberately stays out of this
+ * script and lives in {@link VERSION_SCRIPT} instead: it is the one field here
+ * that runs code the hub does not control, and a damaged or wedged binary
+ * must be able to fail that probe alone — and fall through to reinstall —
+ * rather than take this whole identity read down with it.
+ *
+ * `$( … )` strips trailing newlines, so every preamble field is exactly one
+ * line even when its command prints nothing — `ldd --version` on a distro
+ * whose `ldd` writes nothing at all being the case that motivated pinning the
+ * shape rather than counting lines.
+ *
+ * The digest is read from the config rather than recomputed: hashing the
  * installed binary inside the distribution on every connect would make the
  * cheapest check the most expensive one, and the hub pushed those bytes, so it
  * already knows what their digest is.
@@ -135,7 +143,8 @@ export const SETUP_FULL_SCRIPT = `exec ${CURRENT_BINARY} setup --profile full --
  */
 const CONFIG_UNREADABLE_MARKER = '<runtime.json unreadable>';
 export const PROBE_SLOT_SCRIPT =
-  `printf '%s\\n' "$HOME"; ` +
+  'printf \'%s\\n\' "$HOME" "$(uname -s)" "$(uname -m)" ' +
+  '"$(ldd --version 2>&1 | head -n1)"; ' +
   `cat ${CONFIG_PATH} 2>/dev/null || ` +
   `{ [ -e ${CONFIG_PATH} ] && printf '%s\\n' '${CONFIG_UNREADABLE_MARKER}'; }; ` +
   'true';
@@ -144,6 +153,12 @@ export const PROBE_SLOT_SCRIPT =
 export interface DistroSlotProbe {
   /** The distribution's `$HOME`, which no hub can guess. */
   readonly home: string;
+  /** `uname -s` output. Always `Linux` in a WSL distribution. */
+  readonly kernel: string;
+  /** `uname -m` output. */
+  readonly machine: string;
+  /** First line of `ldd --version`, which names the C library. */
+  readonly libc: string;
   /** Its `runtime.json`, or null when there is none or it could not be read. */
   readonly config: RuntimeSlotConfig | null;
   /**
@@ -156,19 +171,24 @@ export interface DistroSlotProbe {
 }
 
 export function parseDistroSlotProbe(stdout: string): DistroSlotProbe {
-  const newline = stdout.indexOf('\n');
-  const home = (newline === -1 ? stdout : stdout.slice(0, newline)).trim();
-  const rest = newline === -1 ? '' : stdout.slice(newline + 1).trim();
-  if (!rest) return { home, config: null, unreadable: false };
-  if (rest === CONFIG_UNREADABLE_MARKER) return { home, config: null, unreadable: true };
+  const lines = stdout.split(/\r?\n/);
+  const home = (lines[0] ?? '').trim();
+  const kernel = (lines[1] ?? '').trim();
+  const machine = (lines[2] ?? '').trim();
+  const libc = (lines[3] ?? '').trim();
+  const rest = lines.slice(4).join('\n').trim();
+
+  const base = { home, kernel, machine, libc };
+  if (!rest) return { ...base, config: null, unreadable: false };
+  if (rest === CONFIG_UNREADABLE_MARKER) return { ...base, config: null, unreadable: true };
 
   try {
     const parsed: unknown = JSON.parse(rest);
     return Value.Check(RuntimeSlotConfigSchema, parsed)
-      ? { home, config: parsed, unreadable: false }
-      : { home, config: null, unreadable: true };
+      ? { ...base, config: parsed, unreadable: false }
+      : { ...base, config: null, unreadable: true };
   } catch {
-    return { home, config: null, unreadable: true };
+    return { ...base, config: null, unreadable: true };
   }
 }
 
@@ -276,16 +296,23 @@ export const REMOVE_LEGACY_RUNTIME_SCRIPT =
  * local runtime uses, which appends its own `--stdio` — the script's `"$@"` is
  * where that lands. `$0` is set so anything the shell reports names the runtime
  * rather than `sh`.
- * // Usage: wslLaunchCommand('Ubuntu-22.04')
+ *
+ * `wslExecutable` is the resolved binary (see `wsl-executable.ts`) rather than
+ * a hard-coded `'wsl.exe'`: PATH always resolves that name to the System32
+ * launcher stub, which relaunches the real binary as an unflagged process and
+ * flashes a console window.
+ * // Usage: wslLaunchCommand('Ubuntu-22.04', 'C:\\Program Files\\WSL\\wsl.exe')
  */
-export function wslLaunchCommand(distro: string): RuntimeLaunchCommand {
+export function wslLaunchCommand(distro: string, wslExecutable: string): RuntimeLaunchCommand {
   return {
-    command: 'wsl.exe',
+    command: wslExecutable,
     args: ['-d', distro, '--exec', 'sh', '-c', LAUNCH_SCRIPT, RUNTIME_ARCHIVE_MEMBER],
   };
 }
 
-export function resolveLinuxPlatformId(probe: DistroPlatformProbe): LinuxPlatformId | null {
+export function resolveLinuxPlatformId(
+  probe: Pick<DistroSlotProbe, 'machine' | 'libc'>
+): LinuxPlatformId | null {
   return resolveLinuxPlatformIdShared(probe);
 }
 

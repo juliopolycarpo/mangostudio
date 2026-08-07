@@ -1551,6 +1551,7 @@ export const messages = {
     openMenu: 'Abrir menu',
     closeMenu: 'Fechar menu',
     disclaimer: 'A Inteligencia Artificial pode cometer erros, verifique os resultados com cautela',
+    dismissToast: 'Fechar notificação',
   },
 
   library: {

@@ -24,6 +24,7 @@ const SLOT_DIR = '"$HOME/.mango/runtime/wsl';
 const RUNTIME_PATH = `${SLOT_DIR}/$1/mangostudio-runtime"`;
 const STAGED_PATH = `${SLOT_DIR}/$1/mangostudio-runtime.incoming"`;
 const CURRENT_BINARY = `${SLOT_DIR}/current/mangostudio-runtime"`;
+const CONFIG_PATH = `${SLOT_DIR}/runtime.json"`;
 
 const GLIBC = 'ldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35';
 const MUSL = 'musl libc (x86_64)';
@@ -116,12 +117,19 @@ describe('install scripts', () => {
 });
 
 describe('slot scripts', () => {
-  it('launches, versions, and consents through the current link', () => {
+  it('versions and consents through the current link', () => {
+    // The version check runs its own round trip against the current link
+    // rather than folding into PROBE_SLOT_SCRIPT — see that script's doc.
     for (const script of [VERSION_SCRIPT, SETUP_FULL_SCRIPT]) {
       expect(script).toContain(CURRENT_BINARY);
     }
     expect(SETUP_FULL_SCRIPT).toContain('setup --profile full --yes');
     expect(DISTRO_RUNTIME_PATH).toBe('~/.mango/runtime/wsl/current/mangostudio-runtime');
+  });
+
+  it('probes the slot through the runtime.json path, not the current link', () => {
+    expect(PROBE_SLOT_SCRIPT).toContain('"$HOME"');
+    expect(PROBE_SLOT_SCRIPT).toContain(CONFIG_PATH);
   });
 
   it('removes the unversioned binary the previous layout left behind', () => {
@@ -132,24 +140,37 @@ describe('slot scripts', () => {
 });
 
 describe('parseDistroSlotProbe', () => {
-  it('reads the home directory and the config out of one round trip', () => {
+  it('reads home, platform, and config out of one round trip', () => {
     expect(PROBE_SLOT_SCRIPT).toContain('"$HOME"');
     const probe = parseDistroSlotProbe(
-      '/home/dev\n{"schemaVersion":1,"slot":"wsl","version":"1.2.3"}\n'
+      '/home/dev\nLinux\nx86_64\nldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35\n' +
+        '{"schemaVersion":1,"slot":"wsl","version":"1.2.3"}\n'
     );
 
     expect(probe.home).toBe('/home/dev');
+    expect(probe.kernel).toBe('Linux');
+    expect(probe.machine).toBe('x86_64');
+    expect(probe.libc).toBe('ldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35');
     expect(probe.config?.version).toBe('1.2.3');
   });
 
-  it('reports a distribution with no config yet', () => {
-    expect(parseDistroSlotProbe('/home/dev\n')).toEqual({
+  it('reports a distribution with no config yet and an empty ldd', () => {
+    // `$( … )` strips trailing newlines, so a distro whose `ldd` prints
+    // nothing still leaves four clean preamble lines — an empty field, never
+    // a shifted one.
+    expect(parseDistroSlotProbe('/home/dev\nLinux\nx86_64\n\n')).toEqual({
       home: '/home/dev',
+      kernel: 'Linux',
+      machine: 'x86_64',
+      libc: '',
       config: null,
       unreadable: false,
     });
-    expect(parseDistroSlotProbe('/home/dev')).toEqual({
+    expect(parseDistroSlotProbe('/home/dev\nLinux\nx86_64\n')).toEqual({
       home: '/home/dev',
+      kernel: 'Linux',
+      machine: 'x86_64',
+      libc: '',
       config: null,
       unreadable: false,
     });
@@ -158,13 +179,30 @@ describe('parseDistroSlotProbe', () => {
   it('tells a config it cannot read apart from one that is not there', () => {
     // The install facts recover by being rewritten; consent does not, so the
     // two cases must not collapse into one.
-    for (const output of ['/home/dev\n{ truncated', '/home/dev\n{"schemaVersion":1,"slot":"x"}']) {
+    for (const output of [
+      '/home/dev\nLinux\nx86_64\nGLIBC\n{ truncated',
+      '/home/dev\nLinux\nx86_64\nGLIBC\n{"schemaVersion":1,"slot":"x"}',
+    ]) {
       expect(parseDistroSlotProbe(output)).toEqual({
         home: '/home/dev',
+        kernel: 'Linux',
+        machine: 'x86_64',
+        libc: 'GLIBC',
         config: null,
         unreadable: true,
       });
     }
+  });
+
+  it('parses a config that spans multiple lines', () => {
+    // WRITE_CONFIG_SCRIPT stores what the hub serialized with
+    // JSON.stringify(config, null, 2) — the config body is never one line.
+    const config = '{\n  "schemaVersion": 1,\n  "slot": "wsl",\n  "version": "1.2.3"\n}\n';
+
+    const probe = parseDistroSlotProbe(`/home/dev\nLinux\nx86_64\nGLIBC\n${config}`);
+
+    expect(probe.config?.version).toBe('1.2.3');
+    expect(probe.unreadable).toBe(false);
   });
 });
 
@@ -235,9 +273,11 @@ describe('local runtime build', () => {
 
 describe('wslLaunchCommand', () => {
   it('builds argv the stdio spawn can append --stdio to', () => {
-    const launch = wslLaunchCommand('Ubuntu-22.04');
+    const launch = wslLaunchCommand('Ubuntu-22.04', 'C:\\Program Files\\WSL\\wsl.exe');
 
-    expect(launch.command).toBe('wsl.exe');
+    // The resolved executable, not a hard-coded 'wsl.exe': PATH always
+    // resolves that name to the System32 launcher stub.
+    expect(launch.command).toBe('C:\\Program Files\\WSL\\wsl.exe');
     // What the spawn ultimately runs. `"$@"` is where the appended flag lands.
     expect([...launch.args, '--stdio']).toEqual([
       '-d',
@@ -255,7 +295,7 @@ describe('wslLaunchCommand', () => {
     // Distribution names are user input: spaces, quotes, and shell characters
     // are argv entries here, never text some shell will parse.
     const hostile = 'My Distro"; rm -rf /; #';
-    const launch = wslLaunchCommand(hostile);
+    const launch = wslLaunchCommand(hostile, 'wsl.exe');
 
     expect(launch.args[1]).toBe(hostile);
     expect(launch.args.filter((argument) => argument.includes('rm -rf'))).toEqual([hostile]);
