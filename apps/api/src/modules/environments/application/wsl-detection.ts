@@ -78,32 +78,49 @@ export function createWslDetectionService(
 ): WslDetectionService {
   const deps = { ...defaultDeps, ...overrides };
   let memo: { readonly at: number; readonly result: WslDetection } | null = null;
+  /**
+   * The memo is only written once the probe resolves, so callers that arrive
+   * while one is in flight would all miss it and spawn their own `wsl.exe` —
+   * exactly the pile-up the memo exists to prevent, since two browser tabs
+   * open the picker at the same time far more often than 10s apart.
+   */
+  let inFlight: Promise<WslDetection> | null = null;
+
+  async function probeOnce(startedAt: number): Promise<WslDetection> {
+    const { stdout, failed } = await deps.probe();
+    const distributions = parseWslDistributions(decodeWslOutput(stdout));
+    let result: WslDetection;
+    if (distributions.length > 0) {
+      result = { available: true, distributions };
+    } else if (failed) {
+      logger.warn('probe_failed', { bytes: stdout.byteLength });
+      result = { available: false, distributions: [], reason: 'wsl-not-installed' };
+    } else {
+      // wsl.exe ran and said nothing recognizable: it is installed, but there
+      // is nothing to configure.
+      result = { available: true, distributions: [] };
+    }
+
+    memo = { at: startedAt, result };
+    return result;
+  }
 
   return {
-    async detect(): Promise<WslDetection> {
+    detect(): Promise<WslDetection> {
       if (deps.platform !== 'win32') {
-        return { available: false, distributions: [], reason: 'not-windows' };
+        return Promise.resolve({ available: false, distributions: [], reason: 'not-windows' });
       }
 
       const now = deps.now();
-      if (memo && now - memo.at < PROBE_MEMO_TTL_MS) return memo.result;
+      if (memo && now - memo.at < PROBE_MEMO_TTL_MS) return Promise.resolve(memo.result);
+      if (inFlight) return inFlight;
 
-      const { stdout, failed } = await deps.probe();
-      const distributions = parseWslDistributions(decodeWslOutput(stdout));
-      let result: WslDetection;
-      if (distributions.length > 0) {
-        result = { available: true, distributions };
-      } else if (failed) {
-        logger.warn('probe_failed', { bytes: stdout.byteLength });
-        result = { available: false, distributions: [], reason: 'wsl-not-installed' };
-      } else {
-        // wsl.exe ran and said nothing recognizable: it is installed, but there
-        // is nothing to configure.
-        result = { available: true, distributions: [] };
-      }
-
-      memo = { at: now, result };
-      return result;
+      // Cleared in `finally` so a rejected probe is retried rather than being
+      // latched onto by every later caller.
+      inFlight = probeOnce(now).finally(() => {
+        inFlight = null;
+      });
+      return inFlight;
     },
   };
 }
