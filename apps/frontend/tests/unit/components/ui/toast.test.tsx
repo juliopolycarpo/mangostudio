@@ -122,7 +122,7 @@ describe('ToastProvider + useToast', () => {
       });
 
       act(() => {
-        screen.getByRole('button', { name: '' }).click();
+        screen.getByRole('button', { name: 'Dismiss toast' }).click();
       });
 
       expect(screen.queryByText('Operation successful')).not.toBeInTheDocument();

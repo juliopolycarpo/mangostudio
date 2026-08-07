@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useI18n } from '@/hooks/use-i18n';
 
 interface Toast {
   id: string;
@@ -22,6 +23,7 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n();
   const [toasts, setToasts] = useState<Toast[]>([]);
   /**
    * Auto-dismiss timers, keyed by toast id. They outlive the toast they were
@@ -69,15 +71,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext value={{ toast }}>
       {children}
       <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none">
-        {toasts.map((t) => (
+        {toasts.map((toastItem) => (
           <div
-            key={t.id}
-            className={`glass-panel pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border text-sm max-w-sm ${typeStyles[t.type]}`}
+            key={toastItem.id}
+            className={`glass-panel pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border text-sm max-w-sm ${typeStyles[toastItem.type]}`}
           >
-            <span className="flex-1">{t.message}</span>
+            <span className="flex-1">{toastItem.message}</span>
             <button
               type="button"
-              onClick={() => dismiss(t.id)}
+              onClick={() => dismiss(toastItem.id)}
+              aria-label={t.common.dismissToast}
               className="shrink-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
             >
               <X size={14} />
