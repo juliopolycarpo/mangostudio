@@ -94,9 +94,9 @@ Asset names and archive layout are documented in
 
 Windows-only environment variable:
 
-| Variable        | Purpose                                                                                                                                                                                                                                |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MANGO_WSL_EXE` | Overrides which `wsl.exe` the hub spawns for WSL environments. Auto-detected otherwise (`%ProgramFiles%\WSL\wsl.exe`, then `%SystemRoot%\System32\wsl.exe`, then PATH); `mango doctor --env` reports the resolved path and its source. |
+| Variable        | Purpose                                                                                                                                                                                                                                                                                             |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MANGO_WSL_EXE` | Overrides which `wsl.exe` the hub spawns for WSL environments. Auto-detected otherwise (`%ProgramFiles%\WSL\wsl.exe`, then `%ProgramW6432%\WSL\wsl.exe` for a 32-bit host process, then `%SystemRoot%\System32\wsl.exe`, then PATH); `mango doctor --env` reports the resolved path and its source. |
 
 ## Production Build
 
