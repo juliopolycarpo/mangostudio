@@ -141,7 +141,17 @@ before installing from a rolling tag: if the tag has moved past this hub's own
 build, provisioning is refused on the hub, before anything is written to the
 target machine, rather than surfacing later as a handshake failure. A rolling
 release that publishes no manifest is tolerated — provisioning falls back to the
-install-time version check.
+install-time version check — and so is one whose `schemaVersion` this hub does
+not know, which reads as no manifest rather than as a record it would be
+guessing at. Bumping `MANIFEST_SCHEMA_VERSION` in
+`scripts/release/stage-canary-assets.ts` therefore turns the guardrail off for
+every hub already in the field until they update; change the shape only when
+that is what you mean.
+
+The source commit it carries outlives the check. A rolling install records it in
+the target's `runtime.json` next to the digest, and `runtime health` prints it,
+so a canary machine can say which commit it is running even though its runtime's
+filename cannot.
 
 Install scripts are **not** release assets. The canonical installers are hosted at
 [mangostudio.dev](https://mangostudio.dev) (`install.sh` / `install.ps1`) and download

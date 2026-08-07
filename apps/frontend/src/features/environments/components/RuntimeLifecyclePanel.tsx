@@ -10,7 +10,7 @@ import type {
   RuntimeLifecycleAction,
   RuntimeLifecycleView,
 } from '@mangostudio/shared/environments';
-import { Download, RefreshCw, RotateCcw, Shield } from 'lucide-react';
+import { Download, HardDriveDownload, RefreshCw, RotateCcw, Shield } from 'lucide-react';
 import { useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
@@ -30,7 +30,11 @@ const ACTION_ICONS: Partial<Record<RuntimeLifecycleAction, typeof Download>> = {
   install: Download,
   reinstall: RotateCcw,
   upgrade: RefreshCw,
+  download: HardDriveDownload,
 };
+
+/** Actions that put bytes on the target machine, in the order the card shows them. */
+const PUSH_ACTIONS = ['install', 'reinstall', 'upgrade'] as const;
 
 interface RuntimeLifecyclePanelProps {
   readonly environment: Environment;
@@ -115,12 +119,15 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
 
       <HealthSummary view={data} />
 
+      <RuntimeOffer view={data} />
+
       {data.actions.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {data.actions
             .filter(
-              (action): action is 'install' | 'reinstall' | 'upgrade' =>
-                action === 'install' || action === 'reinstall' || action === 'upgrade'
+              (action): action is 'install' | 'reinstall' | 'upgrade' | 'download' =>
+                PUSH_ACTIONS.includes(action as (typeof PUSH_ACTIONS)[number]) ||
+                action === 'download'
             )
             .map((action) => {
               const Icon = ACTION_ICONS[action] ?? Download;
@@ -138,7 +145,13 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
                         setActionError(resolveApiErrorMessage(error, labels.actionFailed))
                       );
                   }}
-                  className="inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary/10 px-2 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/15 disabled:opacity-45"
+                  // Staging is the quieter option on purpose: it is what you
+                  // reach for after declining the install, not instead of it.
+                  className={
+                    action === 'download'
+                      ? 'inline-flex h-7 items-center gap-1.5 rounded-lg bg-surface-container-high/60 px-2 text-[11px] font-semibold text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:opacity-45'
+                      : 'inline-flex h-7 items-center gap-1.5 rounded-lg bg-primary/10 px-2 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/15 disabled:opacity-45'
+                  }
                 >
                   <Icon size={12} />
                   {labels.actions[action]}
@@ -181,6 +194,8 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
 
       {data.manualCommands ? <ManualCommands view={data} /> : null}
 
+      <StagedRuntime view={data} />
+
       {actionError ? (
         <p className="text-[11px] text-error" role="alert">
           {actionError}
@@ -220,6 +235,69 @@ function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
   ].filter((bit): bit is string => Boolean(bit));
 
   return <p className="font-mono text-[10px] text-on-surface-variant">{bits.join(' · ')}</p>;
+}
+
+/**
+ * Names the runtime the buttons below would install — or, when there is
+ * nothing to install (`allow.update` is false, or SSH targets a custom
+ * `remoteRuntimePath` the push helper cannot reach), the runtime a download
+ * would cache, in copy that does not imply a hub-managed install.
+ *
+ * Only shown when there is an offer to describe at all: a card with neither a
+ * push nor a download action has nothing this line could name, and the health
+ * line already says what is there.
+ */
+function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
+  const { t } = useI18n();
+  const labels = t.environments.entities.runtime.staged;
+  const staged = view.stagedRuntime;
+  const offersPush = view.actions.some((action) =>
+    PUSH_ACTIONS.includes(action as (typeof PUSH_ACTIONS)[number])
+  );
+  if (!staged) return null;
+
+  if (!offersPush) {
+    if (!view.actions.includes('download')) return null;
+    return (
+      <p className="text-[11px] text-on-surface-variant/80" data-testid="runtime-offer">
+        {formatMessage(labels.downloadOffer, {
+          version: staged.version,
+          platform: staged.platformId,
+        })}
+      </p>
+    );
+  }
+
+  return (
+    <p className="text-[11px] text-on-surface-variant/80" data-testid="runtime-offer">
+      {formatMessage(labels.offer, { version: staged.version, platform: staged.platformId })}{' '}
+      <span className="text-on-surface-variant/60">{labels.offerHint}</span>
+    </p>
+  );
+}
+
+/**
+ * The bytes a declined install leaves behind, and how to check them by hand.
+ *
+ * Rendered only once something is actually on disk: a path that does not exist
+ * yet is not a fact about this machine, and printing it with a checksum command
+ * that cannot pass would be worse than saying nothing.
+ */
+function StagedRuntime({ view }: { view: RuntimeLifecycleView }) {
+  const { t } = useI18n();
+  const labels = t.environments.entities.runtime.staged;
+  const staged = view.stagedRuntime;
+  if (!staged?.present) return null;
+
+  return (
+    <div className="space-y-2" data-testid="runtime-staged">
+      <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+        {labels.title}
+      </p>
+      <CopyLine label={labels.path} value={staged.path} />
+      <CopyLine label={labels.verify} value={staged.verify} />
+    </div>
+  );
 }
 
 function ManualCommands({ view }: { view: RuntimeLifecycleView }) {

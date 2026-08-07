@@ -59,6 +59,8 @@ function harness(
     readonly localBuild?: Uint8Array | null;
     /** Overrides the (otherwise fake) cache directory — used for real-fs GC tests. */
     readonly cacheDirOverride?: (version: string) => string;
+    /** Stands in for a full disk or an unwritable cache directory. */
+    readonly writeCacheFails?: boolean;
     /**
      * `canary-manifest.json` the rolling tag serves, or null for a release that
      * publishes none. Only consulted on a rolling version.
@@ -86,6 +88,7 @@ function harness(
       );
     },
     writeCache: (path, bytes) => {
+      if (options.writeCacheFails) return Promise.reject(new Error('disk full'));
       written.set(path, bytes);
       return Promise.resolve();
     },
@@ -278,6 +281,73 @@ describe('WslProvisioner', () => {
     await provisioner.ensure('Ubuntu');
 
     expect(calls.some((call) => call.script.includes('cat > '))).toBe(true);
+  });
+
+  // The manifest read that clears `canaryPairRefusal` already named a digest
+  // for this platform's raw asset. Trusting it instead of a second SHA256SUMS
+  // fetch removes the only remaining window for the tag to move between the
+  // check and the download.
+  it('binds a rolling raw asset to the digest a validated manifest already named, skipping a second SHA256SUMS fetch', async () => {
+    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      channel: 'canary',
+      version: '1.2.3-canary.abcdef0',
+      assetVersion: '1.2.3-canary',
+      sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
+      builtAt: '2026-08-05T00:00:00.000Z',
+      pairs: [
+        {
+          platform: 'linux-x64',
+          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
+          runtime: { asset: canaryAsset, digest: DIGEST },
+        },
+      ],
+    });
+    const { provisioner, requested, written } = harness({
+      version: '1.2.3-canary.abcdef0',
+      manifest,
+    });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(requested).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/canary-manifest.json',
+      `https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3-canary/${canaryAsset}`,
+    ]);
+    expect(written.get(`/cache/1.2.3-canary.abcdef0/${canaryAsset}`)).toEqual(ARCHIVE);
+  });
+
+  // Simulates the tag moving between the manifest read and the asset download:
+  // same asset name, different bytes, still "clean" against a SHA256SUMS this
+  // hub never consults for a bound asset. Without the binding, this is the
+  // scenario where build B installs under the pair validated for build A.
+  it('refuses a rolling raw asset whose bytes do not match the manifest-bound digest', async () => {
+    const canaryAsset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const manifest = JSON.stringify({
+      schemaVersion: 1,
+      channel: 'canary',
+      version: '1.2.3-canary.abcdef0',
+      assetVersion: '1.2.3-canary',
+      sourceSha: 'abcdef0abcdef0abcdef0abcdef0abcdef0abcde',
+      builtAt: '2026-08-05T00:00:00.000Z',
+      pairs: [
+        {
+          platform: 'linux-x64',
+          hub: { asset: 'mangostudio-1.2.3-canary-linux-x64', digest: 'a'.repeat(64) },
+          runtime: { asset: canaryAsset, digest: 'b'.repeat(64) },
+        },
+      ],
+    });
+    const { provisioner, calls } = harness({
+      version: '1.2.3-canary.abcdef0',
+      manifest,
+      archive: new TextEncoder().encode('a later build under the same rolling name'),
+    });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(/does not match the checksum/);
+    expect(calls.some((call) => call.script.includes('cat > '))).toBe(false);
+    expect(calls.some((call) => call.script.includes('runtime.json.incoming'))).toBe(false);
   });
 
   it('records what it installed and what the distribution may do', async () => {
@@ -588,6 +658,46 @@ describe('WslProvisioner', () => {
     } finally {
       await rm(cacheRoot, { force: true, recursive: true });
     }
+  });
+
+  // Regression: this provisioner keeps its own copy of `loadAsset`, and only the
+  // shared one in `runtime-release-fetch` learned to record the digest it
+  // verified. Both write into the same `~/.mango/runtime-cache/<version>/` the
+  // staged-runtime card reads, so bytes cached by a WSL install arrived with no
+  // sidecar — and the card fell back to checking them against whatever
+  // SHA256SUMS the rolling tag serves at view time. That reports a mismatch for
+  // a perfectly good cached file as soon as the tag moves, which is the exact
+  // false alarm the sidecar exists to prevent.
+  it('records the verified digest beside a freshly cached asset', async () => {
+    const { provisioner, written } = harness();
+
+    await provisioner.ensure('Ubuntu');
+
+    const sidecar = written.get(`/cache/${VERSION}/${RAW_ASSET}.sha256`);
+    expect(sidecar).toBeDefined();
+    expect(new TextDecoder().decode(sidecar)).toBe(DIGEST);
+  });
+
+  // The archive fallback caches a different filename; the sidecar has to follow
+  // the bytes that actually landed, not the raw asset that was never written.
+  it('records the digest beside the platform archive when the raw asset is unpublished', async () => {
+    const { provisioner, written } = harness({ checksums: `${DIGEST}  ${ASSET}\n` });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(written.has(`/cache/${VERSION}/${RAW_ASSET}.sha256`)).toBe(false);
+    expect(new TextDecoder().decode(written.get(`/cache/${VERSION}/${ASSET}.sha256`))).toBe(DIGEST);
+  });
+
+  // Caching is a courtesy: a hub that cannot write the asset must not leave a
+  // sidecar claiming a digest for a file that is not there. The card treats a
+  // readable sidecar as proof of what the cached bytes are.
+  it('writes no sidecar when the asset itself could not be cached', async () => {
+    const { provisioner, written } = harness({ writeCacheFails: true });
+
+    await provisioner.ensure('Ubuntu');
+
+    expect([...written.keys()]).toEqual([]);
   });
 
   // Regression: `ensure` had no way to report transfer bytes, so a WSL install

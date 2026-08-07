@@ -6,6 +6,8 @@
  * environment; progress bytes from {@link pushRuntimeBinary} land as log lines.
  */
 
+import { access, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
 import type {
   EnvironmentTransportKind,
@@ -15,6 +17,7 @@ import type {
   RuntimeLifecycleView,
   RuntimePairedBootstrapBody,
   RuntimeSetupBody,
+  RuntimeStagedAsset,
   SshEnvironmentConfig,
 } from '@mangostudio/shared/environments';
 import {
@@ -29,7 +32,7 @@ import {
   type RuntimeHealthReport,
   resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
-import { getConfig, getVersion, isDevelopmentVersion } from '../../../lib/config';
+import { getConfig, getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import {
   getRuntimeConnectionManager,
   type RuntimeConnectionManager,
@@ -45,6 +48,7 @@ import {
 import {
   buildRuntimeLifecycleView,
   canUpdateOverLiveConnection,
+  stagedRuntimeAsset,
 } from '../domain/runtime-lifecycle-view';
 import { streamRuntimeUpdate } from '../domain/runtime-live-update';
 import {
@@ -58,7 +62,9 @@ import {
 import {
   type LoadedRuntimeAsset,
   loadRuntimeReleaseBytes,
+  pinnedRuntimeDigest,
   RuntimeAssetLoadError,
+  runtimeDigestSidecarPath,
 } from '../domain/runtime-release-fetch';
 import { classifySshFailure, describeSshFailure } from '../domain/ssh-failure';
 import { PLATFORM_PROBE_SCRIPT } from '../domain/wsl-runtime-release';
@@ -154,7 +160,10 @@ export interface RuntimeLifecycleServiceDeps {
   readonly manager?: RuntimeConnectionManager;
   readonly provisioner?: WslProvisioner;
   readonly now?: () => number;
-  readonly loadRuntimeAsset?: (platformId: string) => Promise<LoadedRuntimeAsset>;
+  readonly loadRuntimeAsset?: (
+    platformId: string,
+    options?: { readonly signal?: AbortSignal }
+  ) => Promise<LoadedRuntimeAsset>;
   /** Mints the credential the bootstrapped machine dials back with. */
   readonly pairing?: RuntimePairingService;
   /** Read per call, not per construction: config reloads without a restart. */
@@ -310,6 +319,114 @@ export function createRuntimeLifecycleService(
     rememberStream(run.runId, run.userId, run.stream);
   };
 
+  /**
+   * Fetches and verifies the matching runtime into the hub's cache, and stops.
+   *
+   * Nothing here touches the target machine, which is the point: it is the
+   * half of a provision that is worth keeping when somebody declines the other
+   * half. The bytes are checksum-verified against the release on the way in —
+   * an unverified download left on disk with a path printed next to it would be
+   * worse than no download at all.
+   */
+  const startStagedDownload = (input: {
+    readonly userId: string;
+    readonly environmentId: string;
+    readonly transportKind: EnvironmentTransportKind;
+    readonly health: RuntimeHealthReport | null;
+  }): RuntimeLifecycleStartResponse => {
+    const { userId, environmentId } = input;
+    if (input.transportKind !== 'wsl' && input.transportKind !== 'ssh') {
+      throw new RuntimeLifecycleUnavailableError(
+        `Staging a runtime download is not available for ${input.transportKind} environments. The hub does not install to them, so a copy in its cache would move nothing closer to that machine.`,
+        409
+      );
+    }
+    if (isDevelopmentVersion(getVersion())) {
+      throw new RuntimeLifecycleUnavailableError(
+        'This MangoStudio runs from a source checkout, so no release publishes a runtime to download. Build one from the repository root instead.',
+        409
+      );
+    }
+
+    const staged = stagedRuntimeAssetFor(input.transportKind, input.health);
+    if (!staged) {
+      throw new RuntimeLifecycleUnavailableError(
+        'This hub does not know which build that machine needs yet. Connect it once so it reports its platform, then download the matching runtime.',
+        409
+      );
+    }
+
+    if (activeByEnvironment.has(installKey(userId, environmentId))) {
+      throw new RuntimeLifecycleConflictError(
+        `A runtime install is already running for environment "${environmentId}".`
+      );
+    }
+
+    const run = beginRun(userId, environmentId);
+    const { runId, stream, abort } = run;
+
+    stream.publish({
+      type: 'log',
+      stream: 'system',
+      line: `Downloading ${staged.assetName} into the hub cache. Nothing is written to the target machine.`,
+      done: false,
+    });
+
+    void (async () => {
+      try {
+        const asset = await loadRuntimeAsset(staged.platformId, { signal: abort.signal });
+        if (abort.signal.aborted) {
+          finish(run, 'cancelled', null);
+          return;
+        }
+
+        if (!asset.cached) {
+          stream.publish({
+            type: 'log',
+            stream: 'stderr',
+            line: `Verified ${staged.assetName} but could not write it to ${runtimeCacheDir(staged.version)}. Nothing is staged at ${staged.path}; check that the cache directory is writable and retry.`,
+            done: false,
+          });
+          finish(run, 'failed', 1);
+          return;
+        }
+
+        // Describes what the cache actually holds. A release that published no
+        // raw runtime for this platform is served from its archive instead, so
+        // the path and the checksum line have to name the archive — the raw
+        // ones would point at a file that is not there. Pinned to the digest
+        // this run just verified rather than reusing `staged.verify`: that was
+        // built before the download, off whatever SHA256SUMS a rolling tag
+        // served then, which is not necessarily the build these bytes are.
+        const landed =
+          stagedRuntimeAssetFor(input.transportKind, input.health, {
+            fromArchive: asset.fromArchive,
+            pinnedDigest: asset.digest.replace(/^sha256:/, ''),
+          }) ?? staged;
+        const line = asset.fromArchive
+          ? `This release publishes no standalone runtime for ${staged.platformId}; its platform archive is cached at ${landed.path} instead.`
+          : `Verified and cached at ${landed.path}`;
+        stream.publish({ type: 'log', stream: 'system', line, done: false });
+        stream.publish({ type: 'log', stream: 'system', line: landed.verify, done: false });
+        finish(run, 'succeeded', 0);
+      } catch (error) {
+        if (abort.signal.aborted) {
+          finish(run, 'cancelled', null);
+          return;
+        }
+        stream.publish({
+          type: 'log',
+          stream: 'stderr',
+          line: error instanceof Error ? error.message : String(error),
+          done: false,
+        });
+        finish(run, 'failed', 1);
+      }
+    })();
+
+    return { runId };
+  };
+
   return {
     async getView(userId, environmentId, options) {
       const record =
@@ -355,6 +472,7 @@ export function createRuntimeLifecycleService(
         platformHint,
         slotBytes,
         managedPush,
+        stagedRuntime: await resolveStagedRuntime(transportKind, cached?.health ?? null),
       });
     },
 
@@ -378,6 +496,20 @@ export function createRuntimeLifecycleService(
         record.transportKind === 'ssh' &&
         Boolean(environmentConfigFor('ssh', record.config).remoteRuntimePath?.trim());
       const canPushOutOfBand = record.transportKind === 'wsl' || record.transportKind === 'ssh';
+
+      // Staging stops before every gate below, because every gate below is
+      // about writing to someone else's machine. This writes to the hub's own
+      // cache and stops: no consent to honour, no push target to be wrong
+      // about, and useful precisely when the push gates say no.
+      if (action === 'download') {
+        return startStagedDownload({
+          userId,
+          environmentId,
+          transportKind: record.transportKind,
+          health: cached?.health ?? null,
+        });
+      }
+
       const canUpdateLive =
         action === 'upgrade' &&
         cached !== null &&
@@ -664,7 +796,10 @@ interface LiveUpdateInput {
   readonly transportKind: EnvironmentTransportKind;
   readonly health: RuntimeHealthReport;
   readonly manager: RuntimeConnectionManager;
-  readonly loadRuntimeAsset: (platformId: string) => Promise<LoadedRuntimeAsset>;
+  readonly loadRuntimeAsset: (
+    platformId: string,
+    options?: { readonly signal?: AbortSignal }
+  ) => Promise<LoadedRuntimeAsset>;
   readonly stream: EventBuffer;
   readonly signal: AbortSignal;
 }
@@ -690,7 +825,7 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
     line: `Loading the checksummed ${platformId} runtime for ${version}…`,
     done: false,
   });
-  const asset = await input.loadRuntimeAsset(platformId);
+  const asset = await input.loadRuntimeAsset(platformId, { signal: input.signal });
   if (asset.fromArchive) {
     throw new RuntimeAssetLoadError(
       `Release ${version} has no raw ${platformId} runtime binary. Live update never streams an archive as executable bytes.`
@@ -895,7 +1030,7 @@ export async function pushRuntimeOverSsh(
   });
   if (signal.aborted) return;
 
-  const asset = await loadRuntimeReleaseBytes(platformId);
+  const asset = await loadRuntimeReleaseBytes(platformId, { signal });
   if (signal.aborted) return;
   const onProgress = transferProgressPublisher(stream);
   await pushRuntimeBinary({
@@ -1169,6 +1304,114 @@ export function buildSetupCommand(
     script: `${RESOLVE_RUNTIME_PATH}exec "$p" setup --slot remote --profile "$2" --yes --json`,
     args: [binaryPath, body.profile],
   };
+}
+
+/** The hub's cache directory for one version — the one documented location. */
+function runtimeCacheDir(version: string): string {
+  return join(getHomeMangoDir(), 'runtime-cache', version);
+}
+
+/**
+ * The runtime this hub would install for an environment, and whether a verified
+ * copy is already staged.
+ *
+ * Only for transports the hub installs to. A dial-in machine gets copyable
+ * commands instead: staging bytes on the hub would not move them any closer to
+ * a machine the hub cannot reach.
+ *
+ * Prefers `platformId` over `platform`-`arch` because it is the exact release
+ * identity, libc variant included — `linux-x64` and `linux-x64-musl` are
+ * different assets, and only one of them exists on the release.
+ *
+ * The `platform`-`arch` fallback is refused outright for Linux: libc is not
+ * derivable from either field, so a peer that predates `platformId` (or a
+ * probe that could not resolve one) would silently guess the glibc asset for
+ * what might be a musl machine and stage — or name as "the matching
+ * runtime" — a binary that will not run there. darwin and win32 have no such
+ * ambiguity, so they keep the fallback.
+ */
+function stagedRuntimeAssetFor(
+  transportKind: EnvironmentTransportKind,
+  health: RuntimeHealthReport | null,
+  options: { readonly fromArchive?: boolean; readonly pinnedDigest?: string } = {}
+): RuntimeStagedAsset | undefined {
+  if (transportKind !== 'wsl' && transportKind !== 'ssh') return undefined;
+
+  const platformHint =
+    health?.platformId ??
+    (health?.platform && health.platform !== 'linux' && health.arch
+      ? `${health.platform}-${health.arch}`
+      : undefined);
+
+  return stagedRuntimeAsset({
+    version: getVersion(),
+    platformHint,
+    cacheDir: runtimeCacheDir,
+    present: false,
+    fromArchive: options.fromArchive,
+    pinnedDigest: options.pinnedDigest,
+  });
+}
+
+/**
+ * {@link stagedRuntimeAssetFor} plus the one question only the disk answers.
+ *
+ * Checks the raw asset first — what a download prefers — and falls back to the
+ * platform archive: a release that publishes no raw runtime for this platform
+ * caches the archive instead, and reporting the raw path would claim bytes
+ * that were never written while the archive a download actually verified goes
+ * unmentioned.
+ */
+async function resolveStagedRuntime(
+  transportKind: EnvironmentTransportKind,
+  health: RuntimeHealthReport | null
+): Promise<RuntimeStagedAsset | undefined> {
+  const raw = stagedRuntimeAssetFor(transportKind, health);
+  if (!raw) return undefined;
+
+  if (await pathExists(raw.path)) {
+    return withPinnedVerify(transportKind, health, raw, {});
+  }
+
+  const archive = stagedRuntimeAssetFor(transportKind, health, { fromArchive: true });
+  if (archive && (await pathExists(archive.path))) {
+    return withPinnedVerify(transportKind, health, archive, { fromArchive: true });
+  }
+
+  return { ...raw, present: false };
+}
+
+/**
+ * Rebuilds a staged asset's verify command from the digest recorded next to it
+ * at download time, when one was recorded. A hub upgraded from before that
+ * sidecar existed has cached files with none; the tag-based command it built
+ * without a digest is what still runs for those.
+ */
+async function withPinnedVerify(
+  transportKind: EnvironmentTransportKind,
+  health: RuntimeHealthReport | null,
+  base: RuntimeStagedAsset,
+  options: { readonly fromArchive?: boolean }
+): Promise<RuntimeStagedAsset> {
+  const pinnedDigest = await readPinnedDigest(base.path);
+  if (!pinnedDigest) return { ...base, present: true };
+  const pinned = stagedRuntimeAssetFor(transportKind, health, { ...options, pinnedDigest });
+  return { ...(pinned ?? base), present: true };
+}
+
+/** The digest recorded beside a cached asset, when one is recorded and readable. */
+function readPinnedDigest(assetPath: string): Promise<string | undefined> {
+  return readFile(runtimeDigestSidecarPath(assetPath), 'utf8').then(
+    pinnedRuntimeDigest,
+    () => undefined
+  );
+}
+
+function pathExists(path: string): Promise<boolean> {
+  return access(path).then(
+    () => true,
+    () => false
+  );
 }
 
 async function readSlotBytes(

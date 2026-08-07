@@ -31,8 +31,8 @@ import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib
 import {
   CANARY_MANIFEST_ASSET,
   type CanaryManifest,
-  canaryPairRefusal,
-  parseCanaryManifest,
+  checkRollingPair,
+  manifestRuntimeDigest,
 } from '../domain/canary-manifest';
 import {
   pushRuntimeBinary,
@@ -42,7 +42,7 @@ import {
   runtimeRemoveSlotBytesScript,
   runtimeSlotBytesScript,
 } from '../domain/runtime-push';
-import { pruneRuntimeCache } from '../domain/runtime-release-fetch';
+import { pruneRuntimeCache, runtimeDigestSidecarPath } from '../domain/runtime-release-fetch';
 import {
   type RuntimeReleaseResolution,
   resolveRuntimeRelease,
@@ -195,7 +195,7 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
         return;
 
       await install(deps, distro, version, platformId, source, signal, options.onTransferProgress);
-      await recordInstall(deps, distro, version, slot, digest);
+      await recordInstall(deps, distro, version, slot, digest, source.sourceSha);
       // First provision only: an upgrade replaces bytes, never the answer
       // somebody gave about what a hub may do inside this distribution. A
       // config that could not be read is neither case — `recordInstall` left
@@ -243,10 +243,23 @@ async function loadSource(
   distro: string,
   version: string,
   platformId: LinuxPlatformId
-): Promise<{ readonly fromArchive: boolean; readonly bytes: Uint8Array }> {
+): Promise<RuntimeSource> {
   return isDevelopmentVersion(version)
     ? { fromArchive: false, bytes: await loadLocalBuild(deps, distro, platformId) }
     : await loadRelease(deps, distro, version, platformId);
+}
+
+/**
+ * Bytes to install plus what is known about where they came from.
+ *
+ * `sourceSha` is present only for a rolling release: that is the one channel
+ * whose version string does not settle which build a slot holds, because the
+ * asset name behind the tag is reused across commits.
+ */
+interface RuntimeSource {
+  readonly fromArchive: boolean;
+  readonly bytes: Uint8Array;
+  readonly sourceSha?: string;
 }
 
 /**
@@ -334,7 +347,8 @@ async function recordInstall(
   distro: string,
   version: string,
   installed: DistroSlotProbe,
-  digest: string
+  digest: string,
+  sourceSha: string | undefined
 ): Promise<void> {
   const slot = await reprobeSlot(deps, distro, installed);
   const config = distroRuntimeConfigAfterInstall({
@@ -342,6 +356,7 @@ async function recordInstall(
     home: slot.home,
     version,
     digest,
+    sourceSha,
     hubVersion: deps.version(),
     hubHost: deps.hubHost(),
     at: new Date().toISOString(),
@@ -432,16 +447,23 @@ async function loadRelease(
   distro: string,
   version: string,
   platformId: LinuxPlatformId
-): Promise<{ readonly fromArchive: boolean; readonly bytes: Uint8Array }> {
+): Promise<RuntimeSource> {
   const release = resolveRuntimeRelease(version, platformId);
   const rawName = release.runtimeAssetName;
   const archiveName = releaseArchiveName(release.assetVersion, platformId);
 
-  if (release.rolling) await assertRollingPair(deps, version, release, platformId);
+  const manifest = release.rolling
+    ? await assertRollingPair(deps, version, release, platformId)
+    : null;
+  const provenance = manifest ? { sourceSha: manifest.sourceSha } : {};
+  // Bound to the manifest read `assertRollingPair` already validated, rather
+  // than a second, later fetch of SHA256SUMS off the same rolling tag — see
+  // `manifestRuntimeDigest`.
+  const boundDigest = manifest ? manifestRuntimeDigest(manifest, platformId, rawName) : undefined;
 
   try {
-    const bytes = await loadAsset(deps, version, release, rawName);
-    return { fromArchive: false, bytes };
+    const bytes = await loadAsset(deps, version, release, rawName, boundDigest);
+    return { fromArchive: false, bytes, ...provenance };
   } catch (error) {
     if (!(error instanceof WslAssetMissingError)) {
       if (error instanceof WslDownloadError) {
@@ -455,7 +477,7 @@ async function loadRelease(
 
   try {
     const bytes = await loadAsset(deps, version, release, archiveName);
-    return { fromArchive: true, bytes };
+    return { fromArchive: true, bytes, ...provenance };
   } catch (error) {
     if (error instanceof WslDownloadError || error instanceof WslAssetMissingError) {
       throw new WslProvisioningError(
@@ -479,28 +501,20 @@ async function assertRollingPair(
   version: string,
   release: RuntimeReleaseResolution,
   platformId: LinuxPlatformId
-): Promise<void> {
-  let manifest: CanaryManifest | null = null;
-  try {
-    const bytes = await download(
-      deps,
-      releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
-      MAX_CHECKSUMS_BYTES
-    );
-    manifest = parseCanaryManifest(new TextDecoder().decode(bytes));
-  } catch (error) {
-    // A 404 is the "no manifest published" case. A transport failure is
-    // tolerated too rather than promoted to fatal here: the asset download that
-    // follows hits the same host and reports a real outage on its own terms,
-    // and an advisory guardrail should not be the thing that fails a provision.
-    if (!(error instanceof WslDownloadError) && !(error instanceof WslAssetMissingError)) {
-      throw error;
-    }
-  }
-  if (!manifest) return;
-
-  const refusal = canaryPairRefusal(manifest, version, platformId);
+): Promise<CanaryManifest | null> {
+  const { manifest, refusal } = await checkRollingPair({
+    fetchManifest: () =>
+      download(
+        deps,
+        releaseAssetUrl(release.tagVersion, CANARY_MANIFEST_ASSET),
+        MAX_CHECKSUMS_BYTES
+      ),
+    tolerate: (error) => error instanceof WslDownloadError || error instanceof WslAssetMissingError,
+    hubVersion: version,
+    platformId,
+  });
   if (refusal) throw new WslProvisioningError(refusal);
+  return manifest;
 }
 
 class WslAssetMissingError extends WslProvisioningError {}
@@ -577,7 +591,8 @@ async function loadAsset(
   deps: WslProvisionerDeps,
   version: string,
   release: RuntimeReleaseResolution,
-  assetName: string
+  assetName: string,
+  expectedDigest?: string
 ): Promise<Uint8Array> {
   // Cached under the hub's own version, downloaded from the resolved tag. On a
   // rolling channel those differ, and it is the difference that keeps two
@@ -587,7 +602,13 @@ async function loadAsset(
   // bytes on disk are still the bytes this tag publishes. A rolling tag
   // republishes under one filename, so a cached copy of yesterday's canary is
   // only distinguishable from today's by failing this comparison.
-  const expected = await fetchExpectedChecksum(deps, release.tagVersion, assetName);
+  //
+  // `expectedDigest`, when given, is a rolling raw asset already bound to a
+  // validated manifest read — see `manifestRuntimeDigest`. Trusting it instead
+  // of a fresh SHA256SUMS fetch here is what keeps the tag from moving between
+  // the manifest check and this download.
+  const expected =
+    expectedDigest ?? (await fetchExpectedChecksum(deps, release.tagVersion, assetName));
 
   const cached = await deps.readBytes(cachePath);
   if (cached && sha256(cached) === expected) return cached;
@@ -606,9 +627,22 @@ async function loadAsset(
 
   // Caching is a courtesy, not part of the contract: a hub that cannot write
   // here still provisions, it just pays for the download again next time.
-  await deps.writeCache(cachePath, bytes).catch((error: unknown) => {
-    logger.warn('cache_write_failed', { path: cachePath, error: String(error) });
-  });
+  const written = await deps.writeCache(cachePath, bytes).then(
+    () => true,
+    (error: unknown) => {
+      logger.warn('cache_write_failed', { path: cachePath, error: String(error) });
+      return false;
+    }
+  );
+  if (written) {
+    // Same cache the staged-runtime card describes, so the same sidecar it
+    // reads: without one, the verify command it prints for these bytes goes
+    // back to the rolling tag's SHA256SUMS, which reports a mismatch for a
+    // perfectly good cached file the moment the tag moves.
+    await deps
+      .writeCache(runtimeDigestSidecarPath(cachePath), new TextEncoder().encode(actual))
+      .catch(() => undefined);
+  }
   await pruneRuntimeCache(deps.cacheDir(version), version).catch((error: unknown) => {
     logger.warn('cache_prune_failed', { path: deps.cacheDir(version), error: String(error) });
   });

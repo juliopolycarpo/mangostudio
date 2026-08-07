@@ -11,11 +11,12 @@ import type {
   RuntimeLifecycleAction,
   RuntimeLifecycleView,
   RuntimeManualCommands,
+  RuntimeStagedAsset,
 } from '@mangostudio/shared/environments';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { resolveRuntimeRelease } from './runtime-release-resolution';
-import { releaseAssetUrl } from './wsl-runtime-release';
+import { releaseArchiveName, releaseAssetUrl } from './wsl-runtime-release';
 
 /** Matches the connection manager's manifest freshness window. */
 const RUNTIME_HEALTH_FRESHNESS_MS = 15_000;
@@ -34,6 +35,12 @@ export interface BuildRuntimeLifecycleViewInput {
    * custom `remoteRuntimePath` the push helper cannot target).
    */
   readonly managedPush?: boolean;
+  /**
+   * The runtime this hub would install, and whether a verified copy is already
+   * in its cache. Resolved by the caller because "is it on disk" is a question
+   * only the filesystem can answer, and this builder stays pure.
+   */
+  readonly stagedRuntime?: RuntimeStagedAsset | undefined;
 }
 
 export function buildRuntimeLifecycleView(
@@ -49,7 +56,8 @@ export function buildRuntimeLifecycleView(
       ? [...new Set<RuntimeLifecycleAction>([...baseActions, 'upgrade'])]
       : baseActions,
     input.health,
-    input.managedPush !== false
+    input.managedPush !== false,
+    input.stagedRuntime !== undefined
   );
   const manualCommands = manualCommandsFor(input.transportKind, input.platformHint);
 
@@ -60,6 +68,7 @@ export function buildRuntimeLifecycleView(
     slotBytes: input.slotBytes ?? null,
     actions,
     ...(manualCommands ? { manualCommands } : {}),
+    ...(input.stagedRuntime ? { stagedRuntime: input.stagedRuntime } : {}),
   };
 }
 
@@ -96,9 +105,9 @@ export function lifecycleActions(
 ): readonly RuntimeLifecycleAction[] {
   switch (transportKind) {
     case 'wsl':
-      return ['install', 'reinstall', 'upgrade'];
+      return ['install', 'reinstall', 'upgrade', 'download'];
     case 'ssh':
-      return ['install', 'reinstall', 'upgrade', 'setup'];
+      return ['install', 'reinstall', 'upgrade', 'setup', 'download'];
     // A container mounts the hub's own runtime binary read-only, so there is
     // nothing to install, upgrade or consent to on the far side: the bytes
     // follow this hub's version by construction, and the slot they resolve to
@@ -129,18 +138,33 @@ const PUSH_ACTIONS: readonly RuntimeLifecycleAction[] = ['install', 'reinstall',
  * user's own ssh/wsl credentials, out of band, where the runtime cannot refuse
  * it the way {@link consent-gate} refuses a protocol call. A non-managed push
  * target hides the same three but keeps setup when the transport allows it.
+ *
+ * `download` survives both gates. It writes to the hub and nowhere else, so
+ * neither a machine that refuses hub-driven updates nor a custom runtime path
+ * the push helper cannot target is a reason to withhold it — those are exactly
+ * the cases where somebody has to carry the verified bytes over by hand.
+ *
+ * `canStage` is the one gate `download` does not survive: a machine that has
+ * never reported a platform (or a source-checkout hub with no release to
+ * fetch) gives `stagedRuntimeAssetFor` nothing to name, and the card would
+ * offer a button that rejects the click with "connect it once" the instant
+ * somebody presses it.
  */
 function filterLifecycleActions(
   actions: readonly RuntimeLifecycleAction[],
   health: RuntimeHealthReport | null,
-  managedPush: boolean
+  managedPush: boolean,
+  canStage: boolean
 ): readonly RuntimeLifecycleAction[] {
   let next = actions;
   if (!managedPush) {
-    next = next.filter((action) => action === 'setup');
+    next = next.filter((action) => action === 'setup' || action === 'download');
   }
   if (health?.allow?.update === false) {
     next = next.filter((action) => !PUSH_ACTIONS.includes(action));
+  }
+  if (!canStage) {
+    next = next.filter((action) => action !== 'download');
   }
   return next;
 }
@@ -166,6 +190,92 @@ export function releasePlatformIdFromHint(platformHint: string): string {
  */
 export function manualRuntimeReleaseAssetName(version: string, platformHint: string): string {
   return resolveRuntimeRelease(version, releasePlatformIdFromHint(platformHint)).runtimeAssetName;
+}
+
+/**
+ * Describes the runtime this hub would install and where a staged copy lives.
+ *
+ * Returns undefined when the hub cannot name one asset: a source checkout
+ * publishes no release, and a machine that has never reported a platform would
+ * only get a guess — and a guess is fine for a copyable command somebody reads
+ * before running, but not for a path this card claims already holds bytes.
+ */
+export function stagedRuntimeAsset(input: {
+  readonly version: string;
+  readonly platformHint: string | undefined;
+  readonly cacheDir: (version: string) => string;
+  readonly present: boolean;
+  /**
+   * Names the platform archive instead of the standalone runtime — the asset
+   * that is actually on disk when a release publishes no raw runtime for this
+   * platform and the download fell back to it. Naming the raw asset anyway
+   * would describe a file that is not there and a checksum line that cannot
+   * pass.
+   */
+  readonly fromArchive?: boolean;
+  /**
+   * The hub's own OS, for a path and a verify command it can actually run.
+   * Defaults to the running process's — a parameter only so tests can cover
+   * both hosts without one physically existing.
+   */
+  readonly hostPlatform?: string;
+  /**
+   * The digest recorded next to the cached file at download time (see
+   * {@link runtimeDigestSidecarPath}). When present, the verify command checks
+   * the file against this pinned value instead of re-fetching SHA256SUMS —
+   * the fetch is what a rolling tag can outrun between download and view.
+   */
+  readonly pinnedDigest?: string;
+}): RuntimeStagedAsset | undefined {
+  if (isDevelopmentVersion(input.version)) return undefined;
+  if (input.platformHint === undefined || input.platformHint.length === 0) return undefined;
+
+  const platformId = releasePlatformIdFromHint(input.platformHint);
+  const release = resolveRuntimeRelease(input.version, platformId);
+  const assetName = input.fromArchive
+    ? releaseArchiveName(release.assetVersion, platformId)
+    : release.runtimeAssetName;
+  // `cacheDir()` returns a host-native path (backslashes on a Windows hub);
+  // joining onto it with the wrong separator produces a mixed path that
+  // Explorer, cmd, and some tools reject.
+  const hostIsWindows = (input.hostPlatform ?? process.platform) === 'win32';
+  const path = hostIsWindows
+    ? joinWin32(input.cacheDir(input.version), assetName)
+    : joinPosix(input.cacheDir(input.version), assetName);
+  const sumsUrl = releaseAssetUrl(release.tagVersion, 'SHA256SUMS');
+
+  return {
+    version: input.version,
+    platformId,
+    assetName,
+    path,
+    // `curl | awk | sha256sum` needs a POSIX shell and GNU coreutils, neither
+    // of which a stock Windows hub has; it gets the same PowerShell shape
+    // {@link manualCommandsFor} already hands a Windows target below.
+    verify: input.pinnedDigest
+      ? hostIsWindows
+        ? `if ((Get-FileHash "${path}" -Algorithm SHA256).Hash -ne "${input.pinnedDigest}") { throw 'checksum mismatch' } else { 'OK' }`
+        : `echo "${input.pinnedDigest}  ${path}" | sha256sum -c -`
+      : hostIsWindows
+        ? `curl.exe -fsSL "${sumsUrl}" -o SHA256SUMS; ` +
+          `$want = (Select-String -Path SHA256SUMS -Pattern ' ${assetName}$').Line.Split(' ')[0]; ` +
+          `if ((Get-FileHash "${path}" -Algorithm SHA256).Hash -ne $want) { throw 'checksum mismatch' } else { 'OK' }`
+        : // Checks the file where it actually is, against the release that
+          // published it. `sha256sum -c` needs "<digest>  <path>", and the
+          // published line names the asset, not this cache path — so the path
+          // is substituted in.
+          `curl -fsSL "${sumsUrl}" | awk '$2=="${assetName}"{print $1"  ${path}"}' | sha256sum -c -`,
+    present: input.present,
+  };
+}
+
+/** Cache paths are hub-local and posix-shaped everywhere but a Windows hub. */
+function joinPosix(dir: string, name: string): string {
+  return dir.endsWith('/') ? `${dir}${name}` : `${dir}/${name}`;
+}
+
+function joinWin32(dir: string, name: string): string {
+  return dir.endsWith('\\') ? `${dir}${name}` : `${dir}\\${name}`;
 }
 
 /** Fallback when no peer has ever reported a platform. Always marked as assumed. */

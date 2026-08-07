@@ -190,6 +190,8 @@ export function distroRuntimeConfigAfterInstall(params: {
   readonly home: string;
   readonly version: string;
   readonly digest: string;
+  /** Source commit, for a rolling build whose version does not name one. */
+  readonly sourceSha?: string | undefined;
   readonly hubVersion: string;
   readonly hubHost: string;
   readonly at: string;
@@ -205,6 +207,10 @@ export function distroRuntimeConfigAfterInstall(params: {
       mangoHome: mangoHomeDir(params.home),
     }),
     digest: params.digest,
+    // Cleared, not carried, when this install has no commit to record: a
+    // stale sha left over from a previous rolling install would claim this
+    // slot holds a build it does not.
+    ...(params.sourceSha ? { sourceSha: params.sourceSha } : { sourceSha: undefined }),
     installedBy: {
       hubVersion: params.hubVersion,
       host: params.hubHost,

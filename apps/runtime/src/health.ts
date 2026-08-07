@@ -80,6 +80,10 @@ export async function collectRuntimeHealth(
     // Read, never recomputed. Hashing ~95 MB to answer "how are you" would make
     // the cheapest question the most expensive one; the installer writes it.
     digest: config.digest,
+    // Read, never derived: only the installer knew which rolling build it took
+    // these bytes from, and the binary itself cannot tell you — its version
+    // string is exactly what the rolling filename threw away.
+    sourceSha: config.sourceSha,
     profile: denyEverything ? 'none' : config.profile,
     allow,
     setup: config.setup,

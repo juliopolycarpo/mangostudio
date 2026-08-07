@@ -819,6 +819,9 @@ async function runHealth(json: boolean, runtimeVersion: string): Promise<number>
       `version     ${report.runtimeVersion}`,
       `binary      ${report.binaryPath ?? 'workspace entry (source checkout)'}`,
       `digest      ${report.digest ?? '-'}`,
+      // Only a rolling install records one, so an absent line is the normal
+      // case on stable rather than a gap worth printing a dash for.
+      ...(report.sourceSha ? [`source      ${report.sourceSha}`] : []),
       `profile     ${report.profile} (${report.setup.state})`,
       // `none` grants nothing, and a bare `allow` with trailing space reads as
       // a line that failed to render rather than one that says so.

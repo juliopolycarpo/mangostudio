@@ -212,6 +212,19 @@ export const RuntimeSlotConfigSchema = Type.Object({
    * never re-push the one that changed.
    */
   digest: Type.Optional(RuntimeBinaryDigestSchema),
+  /**
+   * Source commit the installed bytes were built from, recorded only for a
+   * rolling channel.
+   *
+   * A stable version identifies one build by itself. A rolling one does not:
+   * `mangostudio-runtime-0.1.0-canary-linux-x64` is whatever the last green
+   * commit published under that name, so without this field "which canary is
+   * on this machine" has no answer that survives the filename collision.
+   *
+   * It is provenance, not a gate — nothing compares it to decide whether to
+   * re-install. {@link digest} is what answers that.
+   */
+  sourceSha: Type.Optional(Type.String({ maxLength: 64 })),
   profile: Type.Optional(RuntimeConsentProfileSchema),
   allow: Type.Optional(Type.Partial(RuntimeCapabilityAllowSchema)),
   setup: Type.Optional(RuntimeSetupRecordSchema),
@@ -244,6 +257,7 @@ export interface ResolvedRuntimeSlotConfig {
   readonly version: string | null;
   readonly binaryPath: string | null;
   readonly digest: string | null;
+  readonly sourceSha: string | null;
   readonly profile: RuntimeConsentProfile;
   readonly allow: RuntimeCapabilityAllow;
   readonly setup: RuntimeSetupRecord;
@@ -313,6 +327,12 @@ export const RuntimeHealthReportSchema = Type.Object({
   version: Type.Union([Type.String({ maxLength: 64 }), Type.Null()]),
   binaryPath: Type.Union([Type.String({ maxLength: 4_096 }), Type.Null()]),
   digest: Type.Union([RuntimeBinaryDigestSchema, Type.Null()]),
+  /**
+   * Source commit of a rolling build, echoed from `runtime.json`. Optional so a
+   * hub still accepts health from a runtime that predates the field, and null
+   * on every stable install, where the version already names the build.
+   */
+  sourceSha: Type.Optional(Type.Union([Type.String({ maxLength: 64 }), Type.Null()])),
   profile: RuntimeConsentProfileSchema,
   allow: RuntimeCapabilityAllowSchema,
   setup: RuntimeSetupRecordSchema,
