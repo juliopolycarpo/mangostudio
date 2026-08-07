@@ -13,8 +13,22 @@ import { join, resolve } from 'node:path';
 const REPO_ROOT = resolve(__dirname, '../../../../..');
 const RUNTIME_SRC = join(REPO_ROOT, 'apps/runtime/src');
 
-/** Names `node:child_process` exports that spawn a subprocess directly. */
-const SPAWNING_EXPORTS = new Set(['spawn', 'spawnSync', 'execFile', 'execFileSync']);
+/**
+ * Names `node:child_process` exports that can launch a subprocess. All of them
+ * accept `windowsHide`, so all of them are in scope — `exec` and `execSync` run
+ * their command through `cmd.exe` on Windows and are the loudest of the set.
+ */
+const SPAWNING_EXPORTS = new Set([
+  'spawn',
+  'spawnSync',
+  'execFile',
+  'execFileSync',
+  'exec',
+  'execSync',
+  'fork',
+]);
+
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
 function sourceFilesUnder(directory: string): string[] {
   return readdirSync(directory, { recursive: true, encoding: 'utf8' })
@@ -39,19 +53,88 @@ function boundSpawnNames(source: string): string[] {
     .flatMap((member) => {
       const [imported, alias] = member.split(/\s+as\s+/).map((part) => part.trim());
       if (!imported || !SPAWNING_EXPORTS.has(imported)) return [];
-      return [alias || imported];
+      const local = alias || imported;
+      // Interpolated into a RegExp below, so anything that is not a plain
+      // identifier is dropped rather than trusted as a pattern.
+      return IDENTIFIER.test(local) ? [local] : [];
     });
 }
 
-/** Line numbers (1-based) of every spawn call site in a file. */
-function spawnCallLines(source: string): number[] {
-  const names = ['Bun\\.spawnSync', 'Bun\\.spawn', ...boundSpawnNames(source)];
-  const pattern = new RegExp(`\\b(?:${names.join('|')})\\(`, 'g');
-  const lines: number[] = [];
-  for (const match of source.matchAll(pattern)) {
-    lines.push(source.slice(0, match.index).split('\n').length);
+/** Index just past the closing quote of the string or template starting at `start`. */
+function endOfString(source: string, start: number): number {
+  const quote = source[start];
+  for (let i = start + 1; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === '\\') {
+      i += 1;
+      continue;
+    }
+    if (char === quote) return i;
   }
-  return lines;
+  return source.length - 1;
+}
+
+/**
+ * The argument list of the call whose opening paren sits at `open`. Strings,
+ * templates, and comments are skipped whole so a paren inside one cannot close
+ * the span early and truncate the text searched for `HIDDEN_WINDOW`.
+ */
+function callArguments(source: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < source.length; i += 1) {
+    const char = source[i];
+    if (char === '/' && source[i + 1] === '/') {
+      const newline = source.indexOf('\n', i);
+      if (newline === -1) break;
+      i = newline;
+      continue;
+    }
+    if (char === '/' && source[i + 1] === '*') {
+      const end = source.indexOf('*/', i + 2);
+      if (end === -1) break;
+      i = end + 1;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      i = endOfString(source, i);
+      continue;
+    }
+    if (char === '(') depth += 1;
+    else if (char === ')') {
+      depth -= 1;
+      if (depth === 0) return source.slice(open, i + 1);
+    }
+  }
+  return source.slice(open);
+}
+
+interface SpawnCallSite {
+  readonly line: number;
+  readonly hidesWindow: boolean;
+}
+
+/**
+ * Every spawn call site in a file, each paired with whether its own arguments
+ * carry `HIDDEN_WINDOW`. `Bun.spawn` is matched with its receiver; a bare
+ * bound name must not be preceded by a dot or word character, so `deps.spawn()`
+ * (an injected wrapper that applies the flag itself) and `/re/.exec()` are not
+ * mistaken for direct spawns.
+ */
+function spawnCallSites(source: string): SpawnCallSite[] {
+  const alternatives = ['\\bBun\\.(?:spawnSync|spawn)'];
+  const bound = boundSpawnNames(source);
+  if (bound.length > 0) alternatives.push(`(?<![.\\w$])(?:${bound.join('|')})`);
+  const pattern = new RegExp(`(?:${alternatives.join('|')})\\s*\\(`, 'g');
+
+  const sites: SpawnCallSite[] = [];
+  for (const match of source.matchAll(pattern)) {
+    const open = match.index + match[0].length - 1;
+    sites.push({
+      line: source.slice(0, match.index).split('\n').length,
+      hidesWindow: /\bHIDDEN_WINDOW\b/.test(callArguments(source, open)),
+    });
+  }
+  return sites;
 }
 
 describe('every child-process spawn hides its console window on Windows', () => {
@@ -63,22 +146,81 @@ describe('every child-process spawn hides its console window on Windows', () => 
     expect(files.length).toBeGreaterThan(20);
   });
 
-  it('has HIDDEN_WINDOW in scope wherever it spawns a child process', () => {
+  it('finds the spawn sites it is supposed to be guarding', () => {
+    // Guards the scanner: a regex that stopped matching would also make the
+    // check below pass by finding nothing to complain about.
+    const total = files.reduce(
+      (count, file) => count + spawnCallSites(readFileSync(file, 'utf8')).length,
+      0
+    );
+
+    expect(total).toBeGreaterThan(5);
+  });
+
+  it('passes HIDDEN_WINDOW at every child-process call', () => {
     const offenders: string[] = [];
 
     for (const file of files) {
       const source = readFileSync(file, 'utf8');
-      const callLines = spawnCallLines(source);
-      if (callLines.length === 0) continue;
-
-      if (!/\bHIDDEN_WINDOW\b/.test(source)) {
+      for (const site of spawnCallSites(source)) {
+        if (site.hidesWindow) continue;
         const relative = file.slice(REPO_ROOT.length + 1);
-        for (const line of callLines) {
-          offenders.push(`${relative}:${line} spawns without HIDDEN_WINDOW in scope`);
-        }
+        offenders.push(`${relative}:${site.line} spawns without HIDDEN_WINDOW`);
       }
     }
 
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('the spawn scanner itself', () => {
+  const IMPORT = "import { spawn, exec as run } from 'node:child_process';\n";
+
+  it('accepts a call that spreads HIDDEN_WINDOW', () => {
+    const sites = spawnCallSites(`${IMPORT}spawn('git', args, { cwd, ...HIDDEN_WINDOW });`);
+
+    expect(sites).toEqual([{ line: 2, hidesWindow: true }]);
+  });
+
+  it('rejects a call that only has HIDDEN_WINDOW elsewhere in the file', () => {
+    // The hole in a file-level check: one correct call site used to vouch for
+    // every other call in the same file.
+    const source = `${IMPORT}spawn('a', [], { ...HIDDEN_WINDOW });\nspawn('b', [], { cwd });`;
+
+    expect(spawnCallSites(source)).toEqual([
+      { line: 2, hidesWindow: true },
+      { line: 3, hidesWindow: false },
+    ]);
+  });
+
+  it('follows an as-alias and covers exec', () => {
+    expect(spawnCallSites(`${IMPORT}run('ls', { cwd });`)).toEqual([
+      { line: 2, hidesWindow: false },
+    ]);
+  });
+
+  it('ignores method calls that merely share a spawning name', () => {
+    const source = `${IMPORT}const m = /x(y)/.exec(value);\nconst p = deps.spawn(argv);`;
+
+    expect(spawnCallSites(source)).toEqual([]);
+  });
+
+  it('ignores a spawning name in a file that never imports it', () => {
+    expect(spawnCallSites('const m = PATTERN.exec(line);\nexec(fn);')).toEqual([]);
+  });
+
+  it('does not let a paren inside a string end the argument span', () => {
+    const source = `${IMPORT}spawn('sh', ['-c', 'f() { :; }'], { ...HIDDEN_WINDOW });`;
+
+    expect(spawnCallSites(source)).toEqual([{ line: 2, hidesWindow: true }]);
+  });
+
+  it('does not credit a HIDDEN_WINDOW that belongs to the next call', () => {
+    const source = `${IMPORT}spawn('a', []);\nspawn('b', [], { ...HIDDEN_WINDOW });`;
+
+    expect(spawnCallSites(source)).toEqual([
+      { line: 2, hidesWindow: false },
+      { line: 3, hidesWindow: true },
+    ]);
   });
 });
