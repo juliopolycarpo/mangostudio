@@ -41,14 +41,14 @@ function sourceFilesUnder(directory: string): string[] {
 
 /**
  * Local names bound to `node:child_process` spawning exports in this file,
- * following any `as` alias. A file that imports nothing from the module binds
- * none, so a coincidental local named `spawn` (a wrapper variable, a renamed
- * helper) is never mistaken for the real thing.
+ * following any `as` alias and any `promisify()` wrapper. A file that imports
+ * nothing from the module binds none, so a coincidental local named `spawn`
+ * (a wrapper variable, a renamed helper) is never mistaken for the real thing.
  */
 function boundSpawnNames(source: string): string[] {
   const match = source.match(/import\s*{([^}]*)}\s*from\s*['"]node:child_process['"]/);
   if (!match?.[1]) return [];
-  return match[1]
+  const direct = match[1]
     .split(',')
     .map((member) => member.trim())
     .filter(Boolean)
@@ -60,6 +60,23 @@ function boundSpawnNames(source: string): string[] {
       // identifier is dropped rather than trusted as a pattern.
       return IDENTIFIER.test(local) ? [local] : [];
     });
+  if (direct.length === 0) return [];
+
+  // `execFileAsync = promisify(execFile)` binds a call-site name the direct
+  // scan above never sees, and the promisified version of every spawning
+  // export still takes `windowsHide` — node-runtime.ts's own execFileAsync is
+  // the counterexample that motivated tracking these.
+  const directSet = new Set(direct);
+  const promisified = [
+    ...source.matchAll(
+      /\b(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*promisify\(\s*([A-Za-z_$][\w$]*)\s*\)/g
+    ),
+  ]
+    .filter(([, , wrapped]) => directSet.has(wrapped))
+    .map(([, local]) => local)
+    .filter((local) => IDENTIFIER.test(local));
+
+  return [...direct, ...promisified];
 }
 
 /** Index just past the closing quote of the string or template starting at `start`. */
@@ -199,6 +216,30 @@ describe('the spawn scanner itself', () => {
     expect(spawnCallSites(`${IMPORT}run('ls', { cwd });`)).toEqual([
       { line: 2, hidesWindow: false },
     ]);
+  });
+
+  it('follows a promisified alias, the counterexample that used to slip through', () => {
+    // node-runtime.ts:107's `execFileAsync = promisify(execFile)` called
+    // without HIDDEN_WINDOW passed this whole suite until this alias tracking
+    // existed, because the scanner only ever saw the direct `execFile` name.
+    const source =
+      "import { execFile } from 'node:child_process';\n" +
+      "import { promisify } from 'node:util';\n" +
+      'const execFileAsync = promisify(execFile);\n' +
+      "execFileAsync('node', ['--version'], { timeout: 2_000 });\n";
+
+    expect(spawnCallSites(source)).toEqual([{ line: 4, hidesWindow: false }]);
+  });
+
+  it('does not bind a promisified name that wraps something other than a spawn export', () => {
+    const source =
+      "import { spawn } from 'node:child_process';\n" +
+      "import { promisify } from 'node:util';\n" +
+      "import { readFile } from 'node:fs';\n" +
+      'const readFileAsync = promisify(readFile);\n' +
+      "readFileAsync('x');\n";
+
+    expect(spawnCallSites(source)).toEqual([]);
   });
 
   it('ignores method calls that merely share a spawning name', () => {

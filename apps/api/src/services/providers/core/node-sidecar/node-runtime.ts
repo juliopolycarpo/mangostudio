@@ -12,6 +12,7 @@ import { existsSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
+import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import {
   type BinaryScanDeps,
   binaryCandidateNames,
@@ -104,7 +105,10 @@ function meetsMinimumVersion(
 /** Runs `<binary> --version` off the event loop, returning trimmed stdout or null. */
 async function probeNodeVersion(binary: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(binary, ['--version'], { timeout: 2_000 });
+    const { stdout } = await execFileAsync(binary, ['--version'], {
+      timeout: 2_000,
+      ...HIDDEN_WINDOW,
+    });
     return stdout.trim() || null;
   } catch {
     return null;
