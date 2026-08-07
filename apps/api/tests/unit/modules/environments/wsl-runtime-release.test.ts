@@ -16,6 +16,7 @@ import {
   releaseRuntimeBinaryName,
   resolveLinuxPlatformId,
   SETUP_FULL_SCRIPT,
+  VERSION_SCRIPT,
   wslLaunchCommand,
 } from '../../../../src/modules/environments/domain/wsl-runtime-release';
 
@@ -23,6 +24,7 @@ const SLOT_DIR = '"$HOME/.mango/runtime/wsl';
 const RUNTIME_PATH = `${SLOT_DIR}/$1/mangostudio-runtime"`;
 const STAGED_PATH = `${SLOT_DIR}/$1/mangostudio-runtime.incoming"`;
 const CURRENT_BINARY = `${SLOT_DIR}/current/mangostudio-runtime"`;
+const CONFIG_PATH = `${SLOT_DIR}/runtime.json"`;
 
 const GLIBC = 'ldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35';
 const MUSL = 'musl libc (x86_64)';
@@ -115,12 +117,19 @@ describe('install scripts', () => {
 });
 
 describe('slot scripts', () => {
-  it('probes and consents through the current link', () => {
-    for (const script of [PROBE_SLOT_SCRIPT, SETUP_FULL_SCRIPT]) {
+  it('versions and consents through the current link', () => {
+    // The version check runs its own round trip against the current link
+    // rather than folding into PROBE_SLOT_SCRIPT — see that script's doc.
+    for (const script of [VERSION_SCRIPT, SETUP_FULL_SCRIPT]) {
       expect(script).toContain(CURRENT_BINARY);
     }
     expect(SETUP_FULL_SCRIPT).toContain('setup --profile full --yes');
     expect(DISTRO_RUNTIME_PATH).toBe('~/.mango/runtime/wsl/current/mangostudio-runtime');
+  });
+
+  it('probes the slot through the runtime.json path, not the current link', () => {
+    expect(PROBE_SLOT_SCRIPT).toContain('"$HOME"');
+    expect(PROBE_SLOT_SCRIPT).toContain(CONFIG_PATH);
   });
 
   it('removes the unversioned binary the previous layout left behind', () => {
@@ -131,10 +140,10 @@ describe('slot scripts', () => {
 });
 
 describe('parseDistroSlotProbe', () => {
-  it('reads home, platform, installed version, and config out of one round trip', () => {
+  it('reads home, platform, and config out of one round trip', () => {
     expect(PROBE_SLOT_SCRIPT).toContain('"$HOME"');
     const probe = parseDistroSlotProbe(
-      '/home/dev\nLinux\nx86_64\nldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35\n1.2.3\n' +
+      '/home/dev\nLinux\nx86_64\nldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35\n' +
         '{"schemaVersion":1,"slot":"wsl","version":"1.2.3"}\n'
     );
 
@@ -142,29 +151,26 @@ describe('parseDistroSlotProbe', () => {
     expect(probe.kernel).toBe('Linux');
     expect(probe.machine).toBe('x86_64');
     expect(probe.libc).toBe('ldd (Ubuntu GLIBC 2.35-0ubuntu3.6) 2.35');
-    expect(probe.version).toBe('1.2.3');
     expect(probe.config?.version).toBe('1.2.3');
   });
 
-  it('reports a distribution with no config yet, an empty ldd, and no runtime installed', () => {
+  it('reports a distribution with no config yet and an empty ldd', () => {
     // `$( … )` strips trailing newlines, so a distro whose `ldd` prints
-    // nothing and one with no runtime installed both still leave five clean
-    // preamble lines — an empty field, never a shifted one.
-    expect(parseDistroSlotProbe('/home/dev\nLinux\nx86_64\n\n\n')).toEqual({
-      home: '/home/dev',
-      kernel: 'Linux',
-      machine: 'x86_64',
-      libc: '',
-      version: '',
-      config: null,
-      unreadable: false,
-    });
+    // nothing still leaves four clean preamble lines — an empty field, never
+    // a shifted one.
     expect(parseDistroSlotProbe('/home/dev\nLinux\nx86_64\n\n')).toEqual({
       home: '/home/dev',
       kernel: 'Linux',
       machine: 'x86_64',
       libc: '',
-      version: '',
+      config: null,
+      unreadable: false,
+    });
+    expect(parseDistroSlotProbe('/home/dev\nLinux\nx86_64\n')).toEqual({
+      home: '/home/dev',
+      kernel: 'Linux',
+      machine: 'x86_64',
+      libc: '',
       config: null,
       unreadable: false,
     });
@@ -174,15 +180,14 @@ describe('parseDistroSlotProbe', () => {
     // The install facts recover by being rewritten; consent does not, so the
     // two cases must not collapse into one.
     for (const output of [
-      '/home/dev\nLinux\nx86_64\nGLIBC\n1.2.3\n{ truncated',
-      '/home/dev\nLinux\nx86_64\nGLIBC\n1.2.3\n{"schemaVersion":1,"slot":"x"}',
+      '/home/dev\nLinux\nx86_64\nGLIBC\n{ truncated',
+      '/home/dev\nLinux\nx86_64\nGLIBC\n{"schemaVersion":1,"slot":"x"}',
     ]) {
       expect(parseDistroSlotProbe(output)).toEqual({
         home: '/home/dev',
         kernel: 'Linux',
         machine: 'x86_64',
         libc: 'GLIBC',
-        version: '1.2.3',
         config: null,
         unreadable: true,
       });
@@ -194,7 +199,7 @@ describe('parseDistroSlotProbe', () => {
     // JSON.stringify(config, null, 2) — the config body is never one line.
     const config = '{\n  "schemaVersion": 1,\n  "slot": "wsl",\n  "version": "1.2.3"\n}\n';
 
-    const probe = parseDistroSlotProbe(`/home/dev\nLinux\nx86_64\nGLIBC\n1.2.3\n${config}`);
+    const probe = parseDistroSlotProbe(`/home/dev\nLinux\nx86_64\nGLIBC\n${config}`);
 
     expect(probe.config?.version).toBe('1.2.3');
     expect(probe.unreadable).toBe(false);

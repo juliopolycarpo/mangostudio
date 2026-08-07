@@ -65,6 +65,7 @@ import {
   releaseAssetUrl,
   resolveLinuxPlatformId,
   SETUP_FULL_SCRIPT,
+  VERSION_SCRIPT,
   WRITE_CONFIG_SCRIPT,
 } from '../domain/wsl-runtime-release';
 import { resolveWslExecutable } from './wsl-executable';
@@ -168,13 +169,14 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       }
       const slot = parseDistroSlotProbe(probeResult.stdout);
       const recorded = slot.config?.version === version;
-      // Whether the installed binary runs and says what the config claims — the
-      // config recording a version proves what was written, not that it
-      // survived: a distribution whose runtime was deleted or built for another
-      // architecture needs the answer "install one" rather than a launch
-      // failure later. Read straight off the merged probe: it already ran the
-      // binary's own `--version` in the same round trip as everything else.
-      const runs = slot.version === version;
+      // Asked at most once: the answer is deterministic, and every question put
+      // to a stopped distribution pays for booting it. A separate round trip
+      // from the rest of the slot probe on purpose — see `runsVersion` — so a
+      // damaged or wedged binary fails only this check and falls through to
+      // reinstall, rather than a probe failure this hub cannot recover from.
+      let runs: boolean | null = null;
+      const stillRuns = async (): Promise<boolean> =>
+        (runs ??= await runsVersion(deps, distro, version, signal));
 
       // Version equality settles it for a release: a published tag's bytes
       // never change, so a distribution holding that version holds these bytes.
@@ -182,7 +184,8 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       // so what the slot recorded still names one build, even though the tag
       // those bytes came from has since been clobbered.
       // Reinstall forces a replace even when the version already matches.
-      if (!options.force && recorded && !isDevelopmentVersion(version) && runs) return;
+      if (!options.force && recorded && !isDevelopmentVersion(version) && (await stillRuns()))
+        return;
 
       const platformId = resolvePlatformId(slot, distro);
       const source = await loadSource(deps, distro, version, platformId);
@@ -195,7 +198,8 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       // digest can tell one build from another — and that is the hole this
       // closes: a rebuilt runtime used to stay on the hub forever, because the
       // distribution's copy also called itself `dev`.
-      if (!options.force && recorded && slot.config?.digest === digest && runs) return;
+      if (!options.force && recorded && slot.config?.digest === digest && (await stillRuns()))
+        return;
 
       await install(deps, distro, version, platformId, source, signal, options.onTransferProgress);
       await recordInstall(deps, distro, version, slot, digest, source.sourceSha);
@@ -266,6 +270,26 @@ interface RuntimeSource {
   readonly fromArchive: boolean;
   readonly bytes: Uint8Array;
   readonly sourceSha?: string;
+}
+
+/**
+ * Whether the installed binary runs and says what the config claims.
+ *
+ * The config recording a version proves what was written, not that it survived:
+ * a distribution whose runtime was deleted or built for another architecture
+ * needs the answer "install one" rather than a launch failure later. A timeout
+ * or nonzero exit here — a damaged or wedged binary — also answers `false`
+ * rather than throwing, so provisioning can replace it instead of getting
+ * stuck behind it.
+ */
+async function runsVersion(
+  deps: WslProvisionerDeps,
+  distro: string,
+  version: string,
+  signal?: AbortSignal
+): Promise<boolean> {
+  const present = await deps.runInDistro(distro, VERSION_SCRIPT, { signal });
+  return present.exitCode === 0 && present.stdout.trim() === version;
 }
 
 /** Places the bytes and confirms what landed actually runs as this version. */

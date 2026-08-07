@@ -34,6 +34,7 @@ import {
   runtimePushArchiveScript,
   runtimePushBinaryScript,
   runtimeSlotShellPath,
+  runtimeVersionScript,
 } from './runtime-push';
 
 export type { LinuxPlatformId };
@@ -85,6 +86,15 @@ export const INSTALL_BINARY_SCRIPT = runtimePushBinaryScript('wsl');
 const LAUNCH_SCRIPT = `exec ${CURRENT_BINARY} "$@"`;
 
 /**
+ * Reports the installed runtime's version, and fails when there is not one.
+ *
+ * Kept as its own round trip rather than folded into {@link PROBE_SLOT_SCRIPT}:
+ * a damaged or hung binary must be able to fail *this* probe alone and fall
+ * through to reinstall, not take the home/platform/config read down with it.
+ */
+export const VERSION_SCRIPT = runtimeVersionScript('wsl');
+
+/**
  * Records the consent a distribution gets by being one.
  *
  * A WSL distribution is this machine, reached sideways — the account that runs
@@ -97,25 +107,27 @@ const LAUNCH_SCRIPT = `exec ${CURRENT_BINARY} "$@"`;
 export const SETUP_FULL_SCRIPT = `exec ${CURRENT_BINARY} setup --profile full --yes`;
 
 /**
- * Reports everything a connect needs about the `wsl` slot in one round trip:
- * the distribution's home directory, its platform (kernel/machine/libc), the
- * installed runtime's own reported version, and what it recorded about
- * itself — a fixed five-line preamble followed by the config body.
+ * Reports what a connect needs about the `wsl` slot's identity in one round
+ * trip: the distribution's home directory, its platform (kernel/machine/libc),
+ * and what it recorded about itself — a fixed four-line preamble followed by
+ * the config body.
  *
  * One round trip because a stopped distribution pays a boot cost per launch,
  * and the System32 stub this hub used to go through (see `wsl-executable.ts`)
  * made every one of those launches flash a console window besides. Merging
- * the version and platform probes that used to follow this one turns a
- * connect into a single `wsl.exe` launch instead of two, and a cold install
- * into four instead of six.
+ * the platform probe that used to follow this one turns a connect that needs
+ * to install into fewer launches than it used to.
+ *
+ * The installed runtime's own `--version` deliberately stays out of this
+ * script and lives in {@link VERSION_SCRIPT} instead: it is the one field here
+ * that runs code the hub does not control, and a damaged or wedged binary
+ * must be able to fail that probe alone — and fall through to reinstall —
+ * rather than take this whole identity read down with it.
  *
  * `$( … )` strips trailing newlines, so every preamble field is exactly one
  * line even when its command prints nothing — `ldd --version` on a distro
  * whose `ldd` writes nothing at all being the case that motivated pinning the
- * shape rather than counting lines. A missing runtime binary yields an empty
- * version field rather than a failed probe: `command not found` goes to the
- * `2>/dev/null` this redirects, and command substitution only ever captures
- * stdout.
+ * shape rather than counting lines.
  *
  * The digest is read from the config rather than recomputed: hashing the
  * installed binary inside the distribution on every connect would make the
@@ -132,7 +144,7 @@ export const SETUP_FULL_SCRIPT = `exec ${CURRENT_BINARY} setup --profile full --
 const CONFIG_UNREADABLE_MARKER = '<runtime.json unreadable>';
 export const PROBE_SLOT_SCRIPT =
   'printf \'%s\\n\' "$HOME" "$(uname -s)" "$(uname -m)" ' +
-  `"$(ldd --version 2>&1 | head -n1)" "$(${CURRENT_BINARY} --version 2>/dev/null)"; ` +
+  '"$(ldd --version 2>&1 | head -n1)"; ' +
   `cat ${CONFIG_PATH} 2>/dev/null || ` +
   `{ [ -e ${CONFIG_PATH} ] && printf '%s\\n' '${CONFIG_UNREADABLE_MARKER}'; }; ` +
   'true';
@@ -147,8 +159,6 @@ export interface DistroSlotProbe {
   readonly machine: string;
   /** First line of `ldd --version`, which names the C library. */
   readonly libc: string;
-  /** The installed runtime's own `--version` output, or `''` when absent. */
-  readonly version: string;
   /** Its `runtime.json`, or null when there is none or it could not be read. */
   readonly config: RuntimeSlotConfig | null;
   /**
@@ -166,10 +176,9 @@ export function parseDistroSlotProbe(stdout: string): DistroSlotProbe {
   const kernel = (lines[1] ?? '').trim();
   const machine = (lines[2] ?? '').trim();
   const libc = (lines[3] ?? '').trim();
-  const version = (lines[4] ?? '').trim();
-  const rest = lines.slice(5).join('\n').trim();
+  const rest = lines.slice(4).join('\n').trim();
 
-  const base = { home, kernel, machine, libc, version };
+  const base = { home, kernel, machine, libc };
   if (!rest) return { ...base, config: null, unreadable: false };
   if (rest === CONFIG_UNREADABLE_MARKER) return { ...base, config: null, unreadable: true };
 

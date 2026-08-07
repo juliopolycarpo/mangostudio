@@ -23,6 +23,7 @@ import {
   PROBE_SLOT_SCRIPT,
   parseDistroSlotProbe,
   REMOVE_LEGACY_RUNTIME_SCRIPT,
+  VERSION_SCRIPT,
   WRITE_CONFIG_SCRIPT,
 } from '../../../../src/modules/environments/domain/wsl-runtime-release';
 
@@ -188,19 +189,17 @@ describe.skipIf(!hasPosixShell)('WSL config scripts against a real shell', () =>
     expect(probe.unreadable).toBe(false);
   });
 
-  it('reports the real platform and an empty version when no binary is installed', async () => {
+  it('reports the real platform even when no binary is installed', async () => {
     const home = await distroHome();
 
     const probe = parseDistroSlotProbe((await runScript(home, PROBE_SLOT_SCRIPT)).stdout);
 
-    // The machine's own `uname`, not a fake — this is what proves the merged
-    // preamble is exactly five lines even when the runtime it also tries to
-    // run is not there to answer `--version`.
+    // The machine's own `uname`, not a fake — this is what proves the
+    // preamble is exactly four lines regardless of whether a runtime is
+    // installed. PROBE_SLOT_SCRIPT never runs the runtime binary itself: see
+    // VERSION_SCRIPT below for why that stays a separate round trip.
     expect(probe.kernel).toBe('Linux');
     expect(probe.machine.length).toBeGreaterThan(0);
-    // A missing runtime binary must not fail the probe: `2>/dev/null` on the
-    // command substitution turns "not found" into an empty field.
-    expect(probe.version).toBe('');
     expect(probe.config).toBeNull();
   });
 
@@ -211,9 +210,24 @@ describe.skipIf(!hasPosixShell)('WSL config scripts against a real shell', () =>
       args: ['9.9.9'],
     });
 
-    const probe = parseDistroSlotProbe((await runScript(home, PROBE_SLOT_SCRIPT)).stdout);
+    const run = await runScript(home, VERSION_SCRIPT);
 
-    expect(probe.version).toBe('9.9.9');
+    expect(run.exitCode).toBe(0);
+    expect(run.stdout.trim()).toBe('9.9.9');
+  });
+
+  it('fails only the version check, never the slot probe, when no binary is installed', async () => {
+    // The regression this guards: a damaged or absent runtime must not take
+    // the home/platform/config read down with it, or provisioning's
+    // self-healing reinstall path (wsl-provisioner.ts `ensure`) never gets a
+    // chance to run.
+    const home = await distroHome();
+
+    const probe = await runScript(home, PROBE_SLOT_SCRIPT);
+    expect(probe.exitCode).toBe(0);
+
+    const version = await runScript(home, VERSION_SCRIPT);
+    expect(version.exitCode).not.toBe(0);
   });
 
   it('takes the runtime lock, and leaves it released', async () => {
