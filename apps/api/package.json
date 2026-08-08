@@ -30,7 +30,7 @@
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/openapi": "^1.4.15",
     "@elysiajs/static": "^1.4.10",
-    "@google/genai": "^1.52.0",
+    "@google/genai": "^2.15.0",
     "@mangostudio/runtime": "workspace:*",
     "@mangostudio/shared": "workspace:*",
     "ai": "^7.0.55",
