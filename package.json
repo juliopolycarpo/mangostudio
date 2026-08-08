@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",
-    "@dprint/dockerfile": "^0.5.0",
+    "@dprint/dockerfile": "^0.4.1",
     "@dprint/markdown": "^0.22.1",
     "@dprint/toml": "^0.7.0",
     "@mangostudio/shared": "workspace:*",
