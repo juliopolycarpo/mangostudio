@@ -237,6 +237,14 @@ export async function listByChatId(
   };
 }
 
+/**
+ * Text history excludes image turns and nothing else. The predicate is
+ * negative rather than an allow-list of `chat`/`agent` because the message
+ * mode no longer names an interaction the product has: `chat` only appears on
+ * rows written before the mode axis was retired and by the non-streaming
+ * `POST /respond` path, while every streamed turn writes `agent`. Matching on
+ * either literal would silently drop the other half of a chat's transcript.
+ */
 export async function loadHistory(
   chatId: string,
   opts: ListHistoryOptions,
@@ -246,7 +254,7 @@ export async function loadHistory(
     .selectFrom('messages')
     .select(['id', 'role', 'text', 'parts'])
     .where('chatId', '=', chatId)
-    .where('interactionMode', '=', 'chat')
+    .where('interactionMode', '!=', 'image')
     .orderBy('timestamp', 'desc')
     .limit(opts.limit ?? 200);
 
@@ -259,6 +267,7 @@ export async function loadHistory(
   return rows.map((row) => ({ id: row.id, role: row.role, text: row.text }));
 }
 
+/** Same text-history predicate as {@link loadHistory}. */
 export async function loadRichHistory(
   chatId: string,
   opts: ListHistoryOptions,
@@ -268,7 +277,7 @@ export async function loadRichHistory(
     .selectFrom('messages')
     .select(['id', 'role', 'text', 'parts', 'providerState', 'modelName'])
     .where('chatId', '=', chatId)
-    .where('interactionMode', '=', 'chat')
+    .where('interactionMode', '!=', 'image')
     .orderBy('timestamp', 'desc')
     .limit(opts.limit ?? 200);
 
