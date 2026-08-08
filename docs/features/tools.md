@@ -69,14 +69,13 @@ interface ToolSettingsMetadata {
 
 ## Built-in Tools
 
-Chats can bind a server-side working directory for **agent mode** turns. In that
-mode, filesystem tools default omitted `path` / `cwd` arguments to the bound
-directory, resolve relative arguments against it, and the agent system prompt
-announces it. **Chat mode** does not
-inject the bound directory: `bash`, `glob`, and related shell tools fall back
-to the API process working directory when `cwd` is omitted, and tools such as
-`list_directory` and `grep` still require an explicit `path`. When restriction
-is enabled for agent mode, path containment policy applies to routed tools.
+Chats bind a server-side working directory. Filesystem tools default omitted
+`path` / `cwd` arguments to the bound directory, resolve relative arguments
+against it, and the agent system prompt announces it. A chat with no bound
+directory falls back to the API process working directory when `cwd` is
+omitted, and tools such as `list_directory` and `grep` still require an
+explicit `path`. When restriction is enabled, path containment policy applies
+to routed tools.
 
 ### `generate_image`
 
