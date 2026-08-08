@@ -106,7 +106,7 @@ describe('044_chat_runner chat rows', () => {
     });
   });
 
-  it('carries an agent id whose profile no longer exists, leaving it to the read path', async () => {
+  it('carries an agent id whose profile no longer exists, leaving it to turn resolution', async () => {
     await seedChat('chat-dangling', 'agent', 'user:deleted');
 
     await migrateTo(TARGET);
@@ -118,11 +118,46 @@ describe('044_chat_runner chat rows', () => {
   });
 });
 
+describe('044_chat_runner rollback', () => {
+  async function readRestoredChat(id: string) {
+    const rows = await sql<{ lastUsedMode: string | null; selectedAgentId: string | null }>`
+      SELECT lastUsedMode, selectedAgentId FROM chats WHERE id = ${id}
+    `.execute(db);
+    const row = rows.rows[0];
+    if (!row) throw new Error(`chat ${id} vanished`);
+    return row;
+  }
+
+  // Post-044 every chat is an agent chat. Rolling back to a NULL `lastUsedMode`
+  // would hand each of them back to the retired tool-less chat profile.
+  it('restores agent mode alongside the agent selection', async () => {
+    await seedChat('chat-agent', 'agent', 'user:reviewer');
+    await seedChat('chat-plain', 'chat', 'chat');
+    await migrateTo(TARGET);
+
+    await migrateTo(BEFORE);
+
+    expect(await readRestoredChat('chat-agent')).toEqual({
+      lastUsedMode: 'agent',
+      selectedAgentId: 'user:reviewer',
+    });
+    expect(await readRestoredChat('chat-plain')).toEqual({
+      lastUsedMode: 'agent',
+      selectedAgentId: 'default',
+    });
+  });
+});
+
 describe('044_chat_runner user_agent_settings rows', () => {
+  /**
+   * `settingsJson` is a whole serialized profile, so the stored `id` is what the
+   * read path validates — seeding it keeps the embedded-id case honest.
+   */
   async function seedAgentSetting(userId: string, agentId: string, model: string): Promise<void> {
     await sql`
       INSERT INTO user_agent_settings (id, userId, agentId, settingsJson, createdAt, updatedAt)
-      VALUES (${`${userId}-${agentId}`}, ${userId}, ${agentId}, ${JSON.stringify({ model })}, 0, 0)
+      VALUES (${`${userId}-${agentId}`}, ${userId}, ${agentId},
+        ${JSON.stringify({ id: agentId, model })}, 0, 0)
     `.execute(db);
   }
 
@@ -134,13 +169,17 @@ describe('044_chat_runner user_agent_settings rows', () => {
     return rows.rows.map((row) => ({ agentId: row.agentId, ...JSON.parse(row.settingsJson) }));
   }
 
-  it("moves a lone 'chat' row onto default", async () => {
+  // The column and the profile id embedded in `settingsJson` have to move
+  // together: `AgentProfileSchema` no longer accepts `'chat'`, so a row left
+  // saying `"id":"chat"` fails validation on read and the saved settings are
+  // silently replaced by synthesized defaults.
+  it("moves a lone 'chat' row onto default, embedded profile id included", async () => {
     await seedAgentSetting('user-1', 'chat', 'model-from-chat');
 
     await migrateTo(TARGET);
 
     expect(await readAgentSettings('user-1')).toEqual([
-      { agentId: 'default', model: 'model-from-chat' },
+      { agentId: 'default', id: 'default', model: 'model-from-chat' },
     ]);
   });
 
@@ -151,8 +190,22 @@ describe('044_chat_runner user_agent_settings rows', () => {
     await migrateTo(TARGET);
 
     expect(await readAgentSettings('user-1')).toEqual([
-      { agentId: 'default', model: 'model-from-default' },
+      { agentId: 'default', id: 'default', model: 'model-from-default' },
     ]);
+  });
+
+  it('still moves the column when settingsJson is not a rewritable object', async () => {
+    await sql`
+      INSERT INTO user_agent_settings (id, userId, agentId, settingsJson, createdAt, updatedAt)
+      VALUES ('user-1-broken', 'user-1', 'chat', 'not json', 0, 0)
+    `.execute(db);
+
+    await migrateTo(TARGET);
+
+    const rows = await sql<{ agentId: string; settingsJson: string }>`
+      SELECT agentId, settingsJson FROM user_agent_settings WHERE userId = 'user-1'
+    `.execute(db);
+    expect(rows.rows).toEqual([{ agentId: 'default', settingsJson: 'not json' }]);
   });
 });
 

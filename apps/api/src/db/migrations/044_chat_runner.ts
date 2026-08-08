@@ -9,12 +9,14 @@ import type { Migration } from 'kysely/migration';
  * - `selectedAgentId = 'chat'` (the GAP-1 sentinel for "none") normalizes to
  *   `'default'`, same as a null selection.
  * - Any other `selectedAgentId` value, including one that no longer resolves
- *   to a live profile, carries through unchanged — the repository read path
- *   normalizes an unresolvable id at read time, not this migration.
+ *   to a live profile, carries through unchanged — turn resolution falls back
+ *   to `default` when the profile is gone (see `resolveRunnerAgentProfile`),
+ *   not this migration.
  * - `user_agent_settings` rows for the removed `chat` profile move onto
- *   `default`. If a `default` row already exists for that user, the existing
- *   `default` row wins and the `chat` row is dropped, to avoid clobbering a
- *   user's configured default agent with the tool-less chat profile.
+ *   `default`, embedded profile `id` included. If a `default` row already
+ *   exists for that user, the existing `default` row wins and the `chat` row is
+ *   dropped, to avoid clobbering a user's configured default agent with the
+ *   tool-less chat profile.
  * - `turn_checkpoint` message parts recorded against the `chat` profile move
  *   onto `default`. `'chat'` has left `BuiltInAgentIdSchema`, and
  *   `isTurnCheckpointPart` validates the whole part, so leaving these rows
@@ -95,7 +97,22 @@ export const chatRunner: Migration = {
         )
     `.execute(db);
 
+    // `settingsJson` is a whole serialized profile, so its embedded `id` has to
+    // move with the column. `AgentProfileSchema` no longer accepts `'chat'`, and
+    // `parseAgentSettingsRow` validates the JSON before returning it — a row
+    // left saying `"id":"chat"` would be dropped on read and the user's saved
+    // prompt, model and tool choices replaced by synthesized defaults.
     const migrated = await sql`
+      UPDATE user_agent_settings
+      SET agentId = 'default',
+        settingsJson = json_set(settingsJson, '$.id', 'default')
+      WHERE agentId = 'chat' AND json_valid(settingsJson) AND json_type(settingsJson) = 'object'
+    `.execute(db);
+
+    // A row whose settings are not a JSON object cannot be rewritten in place;
+    // move the column anyway so nothing is left claiming the removed agent, and
+    // let the read path fall back to defaults for that one row.
+    const unparsable = await sql`
       UPDATE user_agent_settings SET agentId = 'default' WHERE agentId = 'chat'
     `.execute(db);
 
@@ -115,7 +132,8 @@ export const chatRunner: Migration = {
     console.warn(
       `[migrate 044_chat_runner] dropped ${conflicting.rows.length} conflicting 'chat' ` +
         `user_agent_settings rows (kept 'default'); moved ${Number(migrated.numAffectedRows ?? 0)} ` +
-        `remaining 'chat' rows onto 'default'; repaired ${repairedCheckpoints} turn checkpoints ` +
+        `remaining 'chat' rows onto 'default' (${Number(unparsable.numAffectedRows ?? 0)} with ` +
+        `settings this migration could not rewrite); repaired ${repairedCheckpoints} turn checkpoints ` +
         `recorded against the removed 'chat' agent.`
     );
 
@@ -127,7 +145,11 @@ export const chatRunner: Migration = {
     await db.schema.alterTable('chats').addColumn('lastUsedMode', 'text').execute();
     await db.schema.alterTable('chats').addColumn('selectedAgentId', 'text').execute();
 
-    await sql`UPDATE chats SET selectedAgentId = runnerAgentId`.execute(db);
+    // Every chat runs as an agent once 044 is up, so a rollback has to say so.
+    // Leaving `lastUsedMode` NULL would make the restored `use-agent-selection`
+    // read every chat as the tool-less chat profile — silently dropping the
+    // tools and workdir the chat has been running with since the upgrade.
+    await sql`UPDATE chats SET lastUsedMode = 'agent', selectedAgentId = runnerAgentId`.execute(db);
 
     await db.schema.alterTable('chats').dropColumn('runnerKind').execute();
     await db.schema.alterTable('chats').dropColumn('runnerAgentId').execute();
