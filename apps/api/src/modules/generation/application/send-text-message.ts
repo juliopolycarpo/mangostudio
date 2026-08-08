@@ -1,4 +1,4 @@
-import type { ChatAttachment } from '@mangostudio/shared/chat';
+import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
@@ -18,6 +18,21 @@ import {
 } from '../infrastructure/conversation-persistence';
 import { resolveModel } from './resolve-model';
 import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
+
+export class UnsupportedChatRunnerError extends Error {
+  constructor(chatId: string) {
+    super(
+      `Chat ${chatId} is configured with a runner that POST /api/respond does not support. Use /api/respond/stream instead.`
+    );
+    this.name = 'UnsupportedChatRunnerError';
+  }
+}
+
+function assertDirectTextRunner(chatId: string, runner: ChatRunnerConfiguration): void {
+  if (runner.kind !== 'mangostudio' || runner.agentId !== 'default') {
+    throw new UnsupportedChatRunnerError(chatId);
+  }
+}
 
 export interface SendTextMessageInput {
   chatId: string;
@@ -57,6 +72,7 @@ export async function sendTextMessage(
   db: Kysely<Database>
 ): Promise<SendTextMessageResult> {
   const chat = await getOwnedChatOrThrow(input.chatId, input.userId, db);
+  assertDirectTextRunner(input.chatId, chat.runner);
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
   await assertChatAttachmentIdsAvailable(
