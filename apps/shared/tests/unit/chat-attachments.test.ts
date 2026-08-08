@@ -63,15 +63,24 @@ describe('chat attachment contracts', () => {
     expect(Value.Check(RespondStreamBodySchema, body)).toBe(true);
   });
 
-  it('allows streaming text requests to include agent mode metadata', () => {
+  it('allows streaming text requests to name the agent that runs the turn', () => {
     const body = {
       chatId: 'chat-contract-1',
       prompt: 'Use the selected agent.',
-      agentMode: 'agent',
-      agentId: 'default',
+      agentId: 'explore',
     };
 
     expect(Value.Check(RespondStreamBodySchema, body)).toBe(true);
+  });
+
+  it('rejects the retired chat agent id on streaming text requests', () => {
+    const body = {
+      chatId: 'chat-contract-1',
+      prompt: 'Use the selected agent.',
+      agentId: 'chat',
+    };
+
+    expect(Value.Check(RespondStreamBodySchema, body)).toBe(false);
   });
 
   it('rejects oversized text generation payload fields', () => {

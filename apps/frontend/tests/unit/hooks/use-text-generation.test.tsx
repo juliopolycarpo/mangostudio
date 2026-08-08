@@ -324,8 +324,11 @@ describe('useTextGeneration — maxToolIterations forwarding', () => {
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
     const firstCall = mockStream.mock.calls[0];
-    const request = firstCall[0] as { agentId?: string };
+    const request = firstCall[0] as { agentId?: string; agentMode?: unknown };
     expect(request.agentId).toBe('default');
+    // The mode axis is gone from the contract; TypeBox objects allow extra
+    // properties, so only a negative assertion catches a leftover send site.
+    expect(request).not.toHaveProperty('agentMode');
   });
 
   it('marks optimistic messages as agent interactions', async () => {
