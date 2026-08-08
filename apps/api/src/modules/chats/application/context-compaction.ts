@@ -48,6 +48,8 @@ interface OwnedChat {
   imageModel: string | null;
   environmentId: string;
   runner: ChatRunnerConfiguration;
+  workdir: string | null;
+  restrictToolsToWorkdir: boolean | null;
 }
 
 function buildSummaryParts(
@@ -86,6 +88,8 @@ async function loadOwnedChat(
     imageModel: chat.imageModel,
     environmentId: chat.environmentId,
     runner: chat.runner,
+    workdir: chat.workdir,
+    restrictToolsToWorkdir: chat.restrictToolsToWorkdir,
   };
 }
 
@@ -236,6 +240,8 @@ export async function summarizeToNewChatUseCase(
       textModel: sourceChat.textModel ?? undefined,
       imageModel: sourceChat.imageModel ?? undefined,
       runner: sourceChat.runner,
+      workdir: sourceChat.workdir,
+      restrictToolsToWorkdir: sourceChat.restrictToolsToWorkdir,
     },
     db
   );

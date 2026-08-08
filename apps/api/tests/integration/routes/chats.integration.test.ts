@@ -678,6 +678,8 @@ describe('POST /chats/:id/summarize-to-new-chat', () => {
         imageModel: 'image-model',
         runnerKind: 'mangostudio',
         runnerAgentId: 'user:reviewer',
+        workdir: '/workspace/source-project',
+        restrictToolsToWorkdir: 1,
         userId: TEST_USER.id,
       })
       .execute();
@@ -735,7 +737,16 @@ describe('POST /chats/:id/summarize-to-new-chat', () => {
 
     const newChat = await db
       .selectFrom('chats')
-      .select(['id', 'title', 'textModel', 'imageModel', 'runnerKind', 'runnerAgentId'])
+      .select([
+        'id',
+        'title',
+        'textModel',
+        'imageModel',
+        'runnerKind',
+        'runnerAgentId',
+        'workdir',
+        'restrictToolsToWorkdir',
+      ])
       .where('id', '=', body.chatId)
       .executeTakeFirst();
     expect(newChat).toMatchObject({
@@ -745,6 +756,8 @@ describe('POST /chats/:id/summarize-to-new-chat', () => {
       imageModel: 'image-model',
       runnerKind: 'mangostudio',
       runnerAgentId: 'user:reviewer',
+      workdir: '/workspace/source-project',
+      restrictToolsToWorkdir: 1,
     });
 
     const newMessages = await db
