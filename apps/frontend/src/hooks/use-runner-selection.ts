@@ -46,7 +46,14 @@ export function useRunnerSelection({
     (runner: ChatRunnerConfiguration) => {
       setRunnerOverride({ chatId: currentChatId, runner });
       if (!currentChatId) return;
-      void updateChatRunner(currentChatId, runner);
+      // The override is optimistic, so a rejected write has to take it back:
+      // otherwise the picker keeps showing an agent the chat does not store,
+      // and turns keep being sent against it.
+      void updateChatRunner(currentChatId, runner).catch(() => {
+        setRunnerOverride((current) =>
+          current?.chatId === currentChatId && current.runner === runner ? null : current
+        );
+      });
     },
     [currentChatId, updateChatRunner]
   );
@@ -81,7 +88,11 @@ export function useRunnerSelection({
   // a mode switch that no longer exists.
   const workdirDefaultedChatIds = useRef(new Set<string>());
   useEffect(() => {
-    if (!currentChatId || currentChat?.workdir) return;
+    // A selected chat has an id before its record arrives, and a missing
+    // record is indistinguishable from a null workdir. Acting on that window
+    // would write the default over whatever the server actually has — and,
+    // because the id is then marked as defaulted, never retry.
+    if (!currentChatId || !currentChat || currentChat.workdir) return;
     if (workdirDefaultedChatIds.current.has(currentChatId)) return;
     workdirDefaultedChatIds.current.add(currentChatId);
 
@@ -93,7 +104,7 @@ export function useRunnerSelection({
     void updateChatWorkdir(currentChatId, defaultWorkdir)
       .then(() => addRecentWorkdir(defaultWorkdir))
       .catch(() => setWorkdirPickerOpen(true));
-  }, [addRecentWorkdir, currentChat?.workdir, currentChatId, defaultWorkdir, updateChatWorkdir]);
+  }, [addRecentWorkdir, currentChat, currentChatId, defaultWorkdir, updateChatWorkdir]);
 
   return {
     agents,

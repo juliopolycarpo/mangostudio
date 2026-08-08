@@ -82,4 +82,78 @@ describe('useRunnerSelection workdir binding', () => {
     expect(addRecentWorkdir).toHaveBeenCalledWith('/srv/projects/mango');
     expect(result.current.isWorkdirPickerOpen).toBe(false);
   });
+
+  it('waits for the chat record before defaulting, so a loading chat is never overwritten', async () => {
+    const { rerender } = renderHook(
+      (props: { currentChat: ChatWithContext | null }) =>
+        useRunnerSelection({
+          currentChatId: CHAT.id,
+          currentChat: props.currentChat,
+          defaultWorkdir: '/srv/projects/default',
+          updateChatRunner,
+          updateChatWorkdir,
+          addRecentWorkdir,
+        }),
+      { initialProps: { currentChat: null as ChatWithContext | null } }
+    );
+
+    // The id is selected but the row has not arrived; a null record is not
+    // evidence that the chat has no workdir.
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+
+    rerender({ currentChat: { ...CHAT, workdir: '/srv/projects/persisted' } });
+
+    await waitFor(() => expect(updateChatWorkdir).not.toHaveBeenCalled());
+  });
+});
+
+describe('useRunnerSelection agent selection', () => {
+  const updateChatWorkdir = vi.fn(() => Promise.resolve());
+  const addRecentWorkdir = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows the chosen agent optimistically', async () => {
+    const updateChatRunner = vi.fn(() => Promise.resolve());
+    const { result } = renderHook(() =>
+      useRunnerSelection({
+        currentChatId: CHAT.id,
+        currentChat: { ...CHAT, workdir: '/srv/projects/bound' },
+        defaultWorkdir: '/srv/projects/default',
+        updateChatRunner,
+        updateChatWorkdir,
+        addRecentWorkdir,
+      })
+    );
+
+    act(() => result.current.setRunnerAgentId('explore'));
+
+    await waitFor(() => expect(result.current.selectedAgentId).toBe('explore'));
+    expect(updateChatRunner).toHaveBeenCalledWith(CHAT.id, {
+      kind: 'mangostudio',
+      agentId: 'explore',
+    });
+  });
+
+  it('takes the optimistic selection back when the write is rejected', async () => {
+    const updateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
+    const { result } = renderHook(() =>
+      useRunnerSelection({
+        currentChatId: CHAT.id,
+        currentChat: { ...CHAT, workdir: '/srv/projects/bound' },
+        defaultWorkdir: '/srv/projects/default',
+        updateChatRunner,
+        updateChatWorkdir,
+        addRecentWorkdir,
+      })
+    );
+
+    act(() => result.current.setRunnerAgentId('explore'));
+
+    // Falling back to the persisted runner keeps the picker and every
+    // subsequent turn agreeing with what the chat actually stores.
+    await waitFor(() => expect(result.current.selectedAgentId).toBe('default'));
+  });
 });
