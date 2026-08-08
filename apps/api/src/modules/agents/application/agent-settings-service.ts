@@ -7,11 +7,7 @@ import type {
   CreateAgentProfileBody,
   DeleteAgentProfileResponse,
 } from '@mangostudio/shared/agents';
-import {
-  BUILT_IN_CHAT_AGENT,
-  BUILT_IN_DEFAULT_AGENT,
-  BUILT_IN_EXPLORE_AGENT,
-} from '@mangostudio/shared/agents';
+import { BUILT_IN_DEFAULT_AGENT, BUILT_IN_EXPLORE_AGENT } from '@mangostudio/shared/agents';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
@@ -117,15 +113,13 @@ async function getEffectiveBuiltInProfiles(
   db: Kysely<Database>,
   userId: string
 ): Promise<ReadonlyArray<AgentProfile>> {
-  const [savedProfiles, chatProfile, defaultProfile, exploreProfile] = await Promise.all([
+  const [savedProfiles, defaultProfile, exploreProfile] = await Promise.all([
     listSavedBuiltInAgentSettings(db, userId),
-    synthesizeBuiltInProfile(db, userId, 'chat'),
     synthesizeBuiltInProfile(db, userId, 'default'),
     synthesizeBuiltInProfile(db, userId, 'explore'),
   ]);
 
   return [
-    savedProfiles.get('chat') ?? chatProfile,
     savedProfiles.get('default') ?? defaultProfile,
     savedProfiles.get('explore') ?? exploreProfile,
   ];
@@ -156,8 +150,14 @@ async function synthesizeBuiltInProfile(
 
   return {
     ...baseProfile,
+    // The app-level text system prompt has no other home now that the
+    // tool-less `chat` profile is gone; `default` is the only built-in that
+    // runs every turn, so it is the one place a user's configured prompt
+    // must keep landing.
     systemPrompt:
-      agentId === 'chat' ? appSettings.promptSettings.textSystemPrompt : baseProfile.systemPrompt,
+      agentId === 'default'
+        ? appSettings.promptSettings.textSystemPrompt
+        : baseProfile.systemPrompt,
     thinkingEnabled: appSettings.thinkingEnabled,
     reasoningEffort: appSettings.reasoningEffort,
     maxToolIterations: appSettings.maxToolIterations,
@@ -167,7 +167,6 @@ async function synthesizeBuiltInProfile(
 }
 
 function getBuiltInBaseProfile(agentId: BuiltInAgentId): AgentProfile {
-  if (agentId === 'chat') return BUILT_IN_CHAT_AGENT;
   if (agentId === 'explore') return BUILT_IN_EXPLORE_AGENT;
   return BUILT_IN_DEFAULT_AGENT;
 }

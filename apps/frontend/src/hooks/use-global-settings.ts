@@ -447,8 +447,6 @@ export function useGlobalSettings() {
     setProviderCompactionEnabled: (value: boolean) =>
       updateContextSettings({ providerCompactionEnabled: value }),
     setMultiAgentEnabled: (value: boolean) => updateMultiAgentSettings({ enabled: value }),
-    setChatDelegationEnabled: (value: boolean) =>
-      updateMultiAgentSettings({ chatDelegationEnabled: value }),
     setTraceVisibility: (value: MultiAgentSettings['traceVisibility']) =>
       updateMultiAgentSettings({ traceVisibility: value }),
     setMaxDelegationDepth: (value: number) => updateMultiAgentSettings({ maxDepth: value }),

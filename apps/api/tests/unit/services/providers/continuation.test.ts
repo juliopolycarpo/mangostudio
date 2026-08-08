@@ -148,7 +148,7 @@ describe('validateContinuationEnvelope', () => {
   });
 
   it('detects agent id mismatch when current turn is agent-bound', () => {
-    const envelope = { ...BASE_ENVELOPE, agentId: 'chat' as const };
+    const envelope = { ...BASE_ENVELOPE, agentId: 'explore' as const };
     const result = validateContinuationEnvelope(envelope, {
       ...current,
       agentId: 'default',

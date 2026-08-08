@@ -202,7 +202,6 @@ function isNonRetryableDelegationError(error: unknown): boolean {
   return [
     'ABORTED',
     'DISABLED',
-    'CHAT_DISABLED',
     'MAX_CALLS',
     'MAX_DEPTH',
     'TARGET_NOT_ALLOWED',

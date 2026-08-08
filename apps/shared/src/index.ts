@@ -1,6 +1,5 @@
 export * from './agentic-limits';
 export {
-  AgentExecutionModeSchema,
   AgentIdSchema,
   AgentKindSchema,
   AgentMarkdownPreviewBodySchema,
@@ -14,7 +13,6 @@ export {
   AgentSourceSchema,
   assertAgentProfile,
   BUILT_IN_AGENT_PROFILES,
-  BUILT_IN_CHAT_AGENT,
   BUILT_IN_DEFAULT_AGENT,
   BuiltInAgentIdSchema,
   CreateAgentProfileBodySchema,

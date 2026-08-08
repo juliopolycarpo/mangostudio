@@ -24,7 +24,6 @@ export const capabilityRoutes = new Elysia()
           userId: user?.id ?? '',
           chatId: params.id,
           model: query.model,
-          agentMode: query.agentMode,
           agentId: query.agentId,
         });
       } catch (err) {

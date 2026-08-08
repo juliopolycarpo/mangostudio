@@ -1,4 +1,3 @@
-import type { AgentExecutionMode } from '@mangostudio/shared/agents';
 import {
   WORKSPACE_PANEL_WIDTH_MAX,
   WORKSPACE_PANEL_WIDTH_MIN,
@@ -19,19 +18,12 @@ const COLLAPSED_RAIL_WIDTH = 48;
 
 interface WorkspaceRailProps {
   readonly chatId: string;
-  readonly agentExecutionMode: AgentExecutionMode;
   readonly workdir: string | null;
   readonly settings: WorkspacePanelSettings;
   readonly onWidthChange?: (width: number) => void;
 }
 
-export function WorkspaceRail({
-  chatId,
-  agentExecutionMode,
-  workdir,
-  settings,
-  onWidthChange,
-}: WorkspaceRailProps) {
+export function WorkspaceRail({ chatId, workdir, settings, onWidthChange }: WorkspaceRailProps) {
   const { t } = useI18n();
   const todosQuery = useChatTodos(chatId);
   const todos = todosQuery.data?.todos ?? [];
@@ -40,12 +32,8 @@ export function WorkspaceRail({
     todos: t.chat.todo.title,
   };
   const availablePanels = useMemo(
-    () =>
-      getAvailableWorkspacePanels(
-        { agentExecutionMode, chatId, workdir, todoCount: todos.length },
-        settings
-      ),
-    [agentExecutionMode, chatId, settings, todos.length, workdir]
+    () => getAvailableWorkspacePanels({ chatId, workdir, todoCount: todos.length }, settings),
+    [chatId, settings, todos.length, workdir]
   );
   const [activePanelId, setActivePanelId] = useState<WorkspacePanelId | null>(
     () => availablePanels[0]?.id ?? null

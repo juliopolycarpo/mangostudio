@@ -1,5 +1,5 @@
 import type { ReasoningEffort } from '@mangostudio/shared';
-import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
+import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatAttachment } from '@mangostudio/shared/chat';
 import { FileText, FolderOpen, Image, Mic, Send, Square, X } from 'lucide-react';
 import { useState } from 'react';
@@ -32,11 +32,9 @@ interface Props {
   imageToolIntent?: boolean;
   onImageToolIntentChange?: (active: boolean) => void;
   activeModel?: string | null;
-  agentExecutionMode?: AgentExecutionMode;
   selectedAgentId?: string;
   agents?: ReadonlyArray<AgentProfile>;
   isAgentListLoading?: boolean;
-  onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
   onSelectedAgentIdChange?: (agentId: string) => void;
   environmentId?: string | null;
   onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
@@ -66,11 +64,9 @@ export function InputBar({
   imageToolIntent = false,
   onImageToolIntentChange,
   activeModel = null,
-  agentExecutionMode = 'chat',
   selectedAgentId = 'default',
   agents = [],
   isAgentListLoading = false,
-  onAgentExecutionModeChange,
   onSelectedAgentIdChange,
   environmentId = null,
   onEnvironmentChange,
@@ -112,27 +108,6 @@ export function InputBar({
       <div className="max-w-4xl mx-auto w-full">
         <div className="flex items-center justify-between mb-2 sm:mb-3">
           <div className="flex items-center gap-2 flex-wrap">
-            {onAgentExecutionModeChange ? (
-              <div className="flex items-center rounded-full border border-outline-variant/20 bg-surface-container-lowest p-0.5 text-[10px] sm:text-[11px] font-medium">
-                {(['chat', 'agent'] as const).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    onClick={() => onAgentExecutionModeChange(mode)}
-                    disabled={disabled}
-                    className={`rounded-full px-2.5 py-1 transition-colors ${
-                      agentExecutionMode === mode
-                        ? 'bg-primary text-on-primary shadow-sm'
-                        : 'text-on-surface-variant hover:text-on-surface'
-                    }`}
-                    aria-pressed={agentExecutionMode === mode}
-                  >
-                    {mode === 'chat' ? t.chat.input.modeChat : t.chat.input.modeAgent}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-
             {environmentId && onEnvironmentChange ? (
               <EnvironmentSelector
                 environmentId={environmentId}
@@ -141,13 +116,13 @@ export function InputBar({
               />
             ) : null}
 
-            {agentExecutionMode === 'agent' && onSelectedAgentIdChange ? (
+            {onSelectedAgentIdChange ? (
               <label className="sr-only" htmlFor="chat-agent-selector">
                 {t.chat.input.selectAgent}
               </label>
             ) : null}
 
-            {agentExecutionMode === 'agent' && onWorkdirClick ? (
+            {onWorkdirClick ? (
               <button
                 type="button"
                 onClick={onWorkdirClick}
@@ -164,7 +139,7 @@ export function InputBar({
                 <span className="truncate">{workdirName ?? t.workspace.chooseWorkdir}</span>
               </button>
             ) : null}
-            {agentExecutionMode === 'agent' && onSelectedAgentIdChange ? (
+            {onSelectedAgentIdChange ? (
               <select
                 id="chat-agent-selector"
                 value={selectedAgentId}
@@ -205,8 +180,7 @@ export function InputBar({
               chatId={chatId}
               disabled={disabled}
               activeModel={activeModel}
-              agentMode={agentExecutionMode}
-              selectedAgentId={agentExecutionMode === 'agent' ? selectedAgentId : undefined}
+              selectedAgentId={selectedAgentId}
             />
 
             {onImageToolIntentChange && (

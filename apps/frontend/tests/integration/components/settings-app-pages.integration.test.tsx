@@ -51,7 +51,6 @@ function GeneralSettingsHarness() {
       setPreferredChatTitleModel={settings.setPreferredChatTitleModel}
       multiAgentSettings={settings.multiAgentSettings}
       setMultiAgentEnabled={settings.setMultiAgentEnabled}
-      setChatDelegationEnabled={settings.setChatDelegationEnabled}
       setTraceVisibility={settings.setTraceVisibility}
       setMaxDelegationDepth={settings.setMaxDelegationDepth}
       setMaxSubagentCalls={settings.setMaxSubagentCalls}

@@ -10,7 +10,7 @@
  * Health itself is read passively (last-known status, no extra probe).
  */
 
-import type { AgentExecutionMode, AgentId } from '@mangostudio/shared/agents';
+import type { AgentId } from '@mangostudio/shared/agents';
 import type {
   CapabilityMcpServerEntry,
   CapabilitySkillEntry,
@@ -49,7 +49,6 @@ export interface InspectChatCapabilitiesInput {
   readonly chatId: string;
   /** Composer overrides — the same selection inputs a turn would send. */
   readonly model?: string;
-  readonly agentMode?: AgentExecutionMode;
   readonly agentId?: AgentId;
 }
 
@@ -62,7 +61,7 @@ export async function inspectChatCapabilities(
 ): Promise<ChatCapabilitiesResponse> {
   const ownedChat = await getOwnedChatOrThrow(input.chatId, input.userId, input.db);
 
-  const requestedAgentId = resolveRuntimeAgentId(input.agentMode, input.agentId);
+  const requestedAgentId = resolveRuntimeAgentId(input.agentId);
   const profile = await getAgentProfile(input.db, input.userId, requestedAgentId);
   const resolvedModel = await resolveModel({
     requestedModel: input.model ?? profile.model,
@@ -82,7 +81,6 @@ export async function inspectChatCapabilities(
     resolveAgentRuntime({
       db: input.db,
       userId: input.userId,
-      agentMode: input.agentMode,
       agentId: input.agentId,
       provider: provider.providerType,
       profile,
@@ -95,9 +93,7 @@ export async function inspectChatCapabilities(
     listSkills(input.db, input.userId),
   ]);
 
-  const interactionMode = input.agentMode === 'agent' ? 'agent' : 'chat';
   const delegateToolAvailable = shouldExposeDelegateTool({
-    interactionMode,
     profile: agentRuntime.profile,
     settings: appSettings.multiAgentSettings,
   });
@@ -138,7 +134,6 @@ export async function inspectChatCapabilities(
       id: profile.id,
       name: profile.name,
       kind: profile.kind,
-      mode: interactionMode,
     },
     tools,
     mcpServers,

@@ -36,11 +36,9 @@ function ChatRoute() {
       imageToolIntent={app.imageToolIntent}
       onImageToolIntentChange={app.setImageToolIntent}
       activeModel={app.activeModel}
-      agentExecutionMode={app.agentExecutionMode}
-      selectedAgentId={app.selectedAgentId}
+      selectedAgentId={app.selectedAgentId ?? undefined}
       agents={app.agents}
       isAgentListLoading={app.isAgentListLoading}
-      onAgentExecutionModeChange={app.setAgentExecutionMode}
       onSelectedAgentIdChange={app.setSelectedAgentId}
       environmentId={app.currentEnvironmentId}
       onEnvironmentChange={

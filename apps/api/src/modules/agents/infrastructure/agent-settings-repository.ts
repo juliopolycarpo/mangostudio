@@ -34,7 +34,7 @@ export async function listSavedBuiltInAgentSettings(
 
   const settings = new Map<BuiltInAgentId, AgentProfile>();
   for (const row of rows) {
-    if (row.agentId !== 'chat' && row.agentId !== 'default' && row.agentId !== 'explore') continue;
+    if (row.agentId !== 'default' && row.agentId !== 'explore') continue;
     const profile = parseAgentSettingsRow(row);
     if (profile) settings.set(row.agentId, profile);
   }

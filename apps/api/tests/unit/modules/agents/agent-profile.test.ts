@@ -28,10 +28,10 @@ describe('agent profile domain', () => {
   });
 
   it('normalizes profile bodies for built-in and user agents', () => {
-    const builtIn = profileFromBody('chat', PROFILE_BODY, { type: 'builtin' });
+    const builtIn = profileFromBody('default', PROFILE_BODY, { type: 'builtin' });
     const user = profileFromBody('user:researcher', PROFILE_BODY, { type: 'markdown' });
 
-    expect(builtIn).toMatchObject({ id: 'chat', kind: 'builtin', source: { type: 'builtin' } });
+    expect(builtIn).toMatchObject({ id: 'default', kind: 'builtin', source: { type: 'builtin' } });
     expect(user).toMatchObject({ id: 'user:researcher', kind: 'user' });
     expect(user.toolNames).toEqual(['read_file', 'list_directory']);
   });

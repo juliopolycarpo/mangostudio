@@ -10,7 +10,6 @@
 
 // Agents
 export type {
-  AgentExecutionMode,
   AgentId,
   AgentKind,
   AgentMarkdownPreviewBody,

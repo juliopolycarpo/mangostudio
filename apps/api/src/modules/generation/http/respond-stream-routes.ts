@@ -4,7 +4,7 @@
  * and error serialization.
  */
 
-import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
@@ -52,7 +52,6 @@ function sseEvent(data: object): Uint8Array {
 const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
 
 interface ResolvedRequestAgent {
-  readonly mode: AgentExecutionMode;
   readonly agentId: AgentId;
   readonly profile: AgentProfile;
 }
@@ -60,15 +59,13 @@ interface ResolvedRequestAgent {
 async function resolveRequestAgent(input: {
   readonly db: ReturnType<typeof getDb>;
   readonly userId: string;
-  readonly agentMode?: AgentExecutionMode;
   readonly agentId?: string;
 }): Promise<ResolvedRequestAgent> {
-  const mode = input.agentMode ?? 'chat';
-  const agentId = mode === 'agent' ? (input.agentId ?? 'default') : 'chat';
+  const agentId = input.agentId ?? 'default';
 
   const profile = await getAgentProfile(input.db, input.userId, agentId);
 
-  return { mode, agentId: profile.id, profile };
+  return { agentId: profile.id, profile };
 }
 
 function toSsePayload(event: StreamEvent): object {
@@ -350,7 +347,6 @@ export const respondStreamRoutes = (app: Elysia) =>
             resolvedAgent = await resolveRequestAgent({
               db,
               userId,
-              agentMode: inspectedRecovery?.agentMode ?? body.agentMode,
               agentId: inspectedRecovery?.agentId ?? body.agentId,
             });
             resolvedModel = await resolveModel({
@@ -464,7 +460,6 @@ export const respondStreamRoutes = (app: Elysia) =>
                     maxToolIterations: body.maxToolIterations,
                     contextSettings: body.contextSettings,
                     toolIntent: body.toolIntent,
-                    agentMode: resolvedAgent.mode,
                     agentId: resolvedAgent.agentId,
                     resolvedAgentProfile: resolvedAgent.profile,
                     signal: abortController.signal,

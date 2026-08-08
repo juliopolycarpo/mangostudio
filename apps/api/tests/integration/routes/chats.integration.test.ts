@@ -676,7 +676,8 @@ describe('POST /chats/:id/summarize-to-new-chat', () => {
         model: null,
         textModel: 'summary-model-2',
         imageModel: 'image-model',
-        lastUsedMode: 'chat',
+        runnerKind: 'mangostudio',
+        runnerAgentId: 'user:reviewer',
         userId: TEST_USER.id,
       })
       .execute();
@@ -734,7 +735,7 @@ describe('POST /chats/:id/summarize-to-new-chat', () => {
 
     const newChat = await db
       .selectFrom('chats')
-      .select(['id', 'title', 'textModel', 'imageModel'])
+      .select(['id', 'title', 'textModel', 'imageModel', 'runnerKind', 'runnerAgentId'])
       .where('id', '=', body.chatId)
       .executeTakeFirst();
     expect(newChat).toMatchObject({
@@ -742,6 +743,8 @@ describe('POST /chats/:id/summarize-to-new-chat', () => {
       title: 'Source Chat',
       textModel: 'summary-model-2',
       imageModel: 'image-model',
+      runnerKind: 'mangostudio',
+      runnerAgentId: 'user:reviewer',
     });
 
     const newMessages = await db
@@ -837,7 +840,7 @@ describe('GET /chats/:id/messages', () => {
       startedAt: now - STALE_TURN_CHECKPOINT_AGE_MS - 1,
       provider: 'openai',
       modelName: 'gpt-test',
-      agentId: 'chat',
+      agentId: 'default',
     });
     await db
       .insertInto('chats')

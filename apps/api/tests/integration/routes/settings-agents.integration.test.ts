@@ -48,7 +48,7 @@ afterEach(() => {
 });
 
 describe('settings agents routes', () => {
-  it('lists built-in chat and default agents for authenticated users', async () => {
+  it('lists built-in default and explore agents for authenticated users', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
 
@@ -57,8 +57,8 @@ describe('settings agents routes', () => {
 
     expect(response.status).toBe(200);
     expect(Value.Check(AgentProfileListResponseSchema, payload)).toBe(true);
-    expect(payload.agents.map((agent) => agent.id)).toEqual(['chat', 'default', 'explore']);
-    expect(payload.agents.find((agent) => agent.id === 'chat')?.source).toEqual({
+    expect(payload.agents.map((agent) => agent.id)).toEqual(['default', 'explore']);
+    expect(payload.agents.find((agent) => agent.id === 'default')?.source).toEqual({
       type: 'builtin',
     });
     expect(payload.agents.find((agent) => agent.id === 'explore')).toMatchObject({
@@ -67,7 +67,7 @@ describe('settings agents routes', () => {
     });
   });
 
-  it('synthesizes chat from legacy app settings and enabled tools', async () => {
+  it('synthesizes default from legacy app settings and enabled tools', async () => {
     await getDb()
       .insertInto('user_app_settings')
       .values({
@@ -102,13 +102,13 @@ describe('settings agents routes', () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
 
-    const response = await app.handle(new Request('http://localhost/settings/agents/chat'));
+    const response = await app.handle(new Request('http://localhost/settings/agents/default'));
     const payload = (await response.json()) as AgentProfile;
 
     expect(response.status).toBe(200);
     expect(Value.Check(AgentProfileSchema, payload)).toBe(true);
     expect(payload).toMatchObject({
-      id: 'chat',
+      id: 'default',
       systemPrompt: 'Legacy chat prompt',
       thinkingEnabled: true,
       reasoningEffort: 'high',
@@ -118,17 +118,17 @@ describe('settings agents routes', () => {
     expect(payload.toolNames.length).toBeGreaterThan(0);
   });
 
-  it('updates built-in chat settings per user', async () => {
+  it('updates built-in default settings per user', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
 
     const update = await app.handle(
-      new Request('http://localhost/settings/agents/chat', {
+      new Request('http://localhost/settings/agents/default', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: 'Chat',
-          description: 'Custom chat profile.',
+          name: 'Default',
+          description: 'Custom default profile.',
           role: 'primary',
           systemPrompt: 'Persisted chat prompt',
           thinkingEnabled: true,
@@ -145,7 +145,7 @@ describe('settings agents routes', () => {
 
     expect(update.status).toBe(200);
     expect(payload).toMatchObject({
-      id: 'chat',
+      id: 'default',
       systemPrompt: 'Persisted chat prompt',
       maxToolIterations: 1_000,
     });
@@ -155,7 +155,7 @@ describe('settings agents routes', () => {
     restoreAuth = other.restore;
 
     const otherResponse = await other.app.handle(
-      new Request('http://localhost/settings/agents/chat')
+      new Request('http://localhost/settings/agents/default')
     );
     const otherPayload = (await otherResponse.json()) as AgentProfile;
 

@@ -1,4 +1,8 @@
-import type { ContextCompactionResponse, ContextInfo } from '@mangostudio/shared/chat';
+import type {
+  ChatRunnerConfiguration,
+  ContextCompactionResponse,
+  ContextInfo,
+} from '@mangostudio/shared/chat';
 import type { MessagePart, ProviderType } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -43,6 +47,7 @@ interface OwnedChat {
   textModel: string | null;
   imageModel: string | null;
   environmentId: string;
+  runner: ChatRunnerConfiguration;
 }
 
 function buildSummaryParts(
@@ -80,6 +85,7 @@ async function loadOwnedChat(
     textModel: chat.textModel,
     imageModel: chat.imageModel,
     environmentId: chat.environmentId,
+    runner: chat.runner,
   };
 }
 
@@ -158,11 +164,10 @@ async function persistSummaryMessage(params: {
     .set({
       lastProviderState: null,
       lastContextState: JSON.stringify(snapshot),
-      lastUsedMode: 'chat',
     })
     .where('id', '=', params.chatId)
     .execute();
-  await updateChatAfterTurn(params.chatId, timestamp, 'chat', null, params.db);
+  await updateChatAfterTurn(params.chatId, timestamp, params.db);
 
   return { summaryMessageId, contextInfo: toContextInfo(snapshot) };
 }
@@ -230,7 +235,7 @@ export async function summarizeToNewChatUseCase(
     {
       textModel: sourceChat.textModel ?? undefined,
       imageModel: sourceChat.imageModel ?? undefined,
-      lastUsedMode: 'chat',
+      runner: sourceChat.runner,
     },
     db
   );

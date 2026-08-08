@@ -3,12 +3,12 @@ import { useChats } from '@/features/chat/hooks/use-chats';
 import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import { useTextGeneration } from '@/features/generation/hooks/use-text-generation';
 import { useActiveChatModel } from './use-active-chat-model';
-import { useAgentSelection } from './use-agent-selection';
 import { useChatContextSync } from './use-chat-context-sync';
 import { useChatRouteActions } from './use-chat-route-actions';
 import { useGenerationControls } from './use-generation-controls';
 import { useGlobalSettings } from './use-global-settings';
 import { useModelCatalog } from './use-model-catalog';
+import { useRunnerSelection } from './use-runner-selection';
 
 export function useAppState() {
   const chats = useChats();
@@ -22,10 +22,10 @@ export function useAppState() {
     settings,
     currentTextModel: currentChat?.textModel,
   });
-  const agentSelection = useAgentSelection({
+  const runnerSelection = useRunnerSelection({
     currentChatId: chats.currentChatId,
     currentChat,
-    updateChatAgentSelection: chats.updateChatAgentSelection,
+    updateChatRunner: chats.updateChatRunner,
     defaultWorkdir: settings.workspaceSettings.defaultWorkdir,
     updateChatWorkdir: chats.updateChatWorkdir,
     addRecentWorkdir: settings.addRecentWorkdir,
@@ -44,13 +44,8 @@ export function useAppState() {
     chatTitleSettings: settings.chatTitleSettings,
     currentChatId: chats.currentChatId,
     getAgentSelection: () => ({
-      mode: agentSelection.agentExecutionMode,
-      agentId:
-        agentSelection.agentExecutionMode === 'agent' ? agentSelection.selectedAgentId : 'chat',
-      agentName:
-        agentSelection.agentExecutionMode === 'agent'
-          ? agentSelection.selectedAgent?.name
-          : undefined,
+      agentId: runnerSelection.selectedAgentId ?? 'default',
+      agentName: runnerSelection.selectedAgent?.name,
     }),
   });
   useChatContextSync(chats.chats, textGen.seedContextInfo);
@@ -63,12 +58,12 @@ export function useAppState() {
 
   return {
     imageToolIntent: generationControls.imageToolIntent,
-    agentExecutionMode: agentSelection.agentExecutionMode,
-    selectedAgentId: agentSelection.selectedAgentId,
-    agents: agentSelection.agents,
-    isAgentListLoading: agentSelection.isAgentListLoading,
-    currentWorkdir: agentSelection.currentWorkdir,
-    isWorkdirPickerOpen: agentSelection.isWorkdirPickerOpen,
+    runner: runnerSelection.runner,
+    selectedAgentId: runnerSelection.selectedAgentId,
+    agents: runnerSelection.agents,
+    isAgentListLoading: runnerSelection.isAgentListLoading,
+    currentWorkdir: runnerSelection.currentWorkdir,
+    isWorkdirPickerOpen: runnerSelection.isWorkdirPickerOpen,
     isGenerating: textGen.isGenerating,
     chats: chats.chats,
     currentChatId: chats.currentChatId,
@@ -86,11 +81,10 @@ export function useAppState() {
     lockedProvider: modelState.lockedProvider,
 
     setImageToolIntent: generationControls.setImageToolIntent,
-    setAgentExecutionMode: agentSelection.setAgentExecutionMode,
-    setSelectedAgentId: agentSelection.setSelectedAgentId,
-    openWorkdirPicker: agentSelection.openWorkdirPicker,
-    closeWorkdirPicker: agentSelection.closeWorkdirPicker,
-    selectWorkdir: agentSelection.selectWorkdir,
+    setSelectedAgentId: runnerSelection.setRunnerAgentId,
+    openWorkdirPicker: runnerSelection.openWorkdirPicker,
+    closeWorkdirPicker: runnerSelection.closeWorkdirPicker,
+    selectWorkdir: runnerSelection.selectWorkdir,
     updateChatEnvironment: chats.updateChatEnvironment,
     restrictToolsToWorkdirOverride: currentChat?.restrictToolsToWorkdir ?? null,
     updateChatRestrictToolsToWorkdir: chats.updateChatRestrictToolsToWorkdir,

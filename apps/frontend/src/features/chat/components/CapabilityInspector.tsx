@@ -70,7 +70,6 @@ interface CapabilityInspectorProps {
   chatId: string | null;
   disabled?: boolean;
   activeModel?: string | null;
-  agentMode?: 'chat' | 'agent';
   selectedAgentId?: string;
 }
 
@@ -78,7 +77,6 @@ export function CapabilityInspector({
   chatId,
   disabled,
   activeModel,
-  agentMode = 'chat',
   selectedAgentId,
 }: CapabilityInspectorProps) {
   const { t } = useI18n();
@@ -88,7 +86,6 @@ export function CapabilityInspector({
   const selection: ChatCapabilitiesSelection = {
     chatId: chatId ?? '',
     ...(activeModel ? { model: activeModel } : {}),
-    agentMode,
     ...(selectedAgentId ? { agentId: selectedAgentId } : {}),
   };
   const capabilitiesQuery = useQuery({

@@ -36,8 +36,6 @@ export const messages: Messages = {
     stopGenerating: 'Stop',
     streaming: 'Generating...',
     input: {
-      modeChat: 'Chat',
-      modeAgent: 'Agent',
       modeImage: 'Create Image',
       send: 'Send',
       generate: 'Generate',
@@ -520,7 +518,6 @@ export const messages: Messages = {
       multiAgentDescription:
         'Allow agents to delegate bounded work to configured subagents during a turn.',
       multiAgentEnabledLabel: 'Enable delegation',
-      chatDelegationEnabledLabel: 'Allow Chat mode delegation',
       traceVisibilityLabel: 'Trace visibility',
       traceVisibilityCompact: 'Compact',
       traceVisibilityFull: 'Full',

@@ -11,15 +11,8 @@ import {
 } from '../../src/agents';
 
 describe('agent contracts', () => {
-  it('normalizes the built-in chat and default profiles', () => {
+  it('normalizes the built-in default and explore profiles', () => {
     expect(BUILT_IN_AGENT_PROFILES).toEqual([
-      expect.objectContaining({
-        id: 'chat',
-        name: 'Chat',
-        kind: 'builtin',
-        role: 'primary',
-        source: { type: 'builtin' },
-      }),
       expect.objectContaining({
         id: 'default',
         name: 'Default',

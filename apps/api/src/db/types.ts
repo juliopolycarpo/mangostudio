@@ -14,8 +14,9 @@ interface ChatsTable {
   model: string | null;
   textModel: string | null;
   imageModel: string | null;
-  lastUsedMode: string | null;
-  selectedAgentId: string | null;
+  runnerKind: Generated<string>;
+  runnerAgentId: string | null;
+  runnerTargetId: string | null;
   workdir: string | null;
   environmentId: Generated<string>;
   /** null = inherit workspace default; 0/1 stored as boolean override */

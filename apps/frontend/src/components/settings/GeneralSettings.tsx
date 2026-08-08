@@ -45,7 +45,6 @@ interface GeneralSettingsProps {
   setPreferredChatTitleModel: (value: string) => void;
   multiAgentSettings: MultiAgentSettings;
   setMultiAgentEnabled: (value: boolean) => void;
-  setChatDelegationEnabled: (value: boolean) => void;
   setTraceVisibility: (value: MultiAgentSettings['traceVisibility']) => void;
   setMaxDelegationDepth: (value: number) => void;
   setMaxSubagentCalls: (value: number) => void;
@@ -86,7 +85,6 @@ export function GeneralSettings({
   setPreferredChatTitleModel,
   multiAgentSettings,
   setMultiAgentEnabled,
-  setChatDelegationEnabled,
   setTraceVisibility,
   setMaxDelegationDepth,
   setMaxSubagentCalls,
@@ -365,17 +363,6 @@ export function GeneralSettings({
             className="mt-1 h-4 w-4 rounded border-outline-variant/30 accent-primary"
           />
         </div>
-
-        <label className="flex items-center gap-2 rounded-xl border border-outline-variant/20 bg-surface-container-lowest px-3 py-2 text-sm text-on-surface">
-          <input
-            type="checkbox"
-            checked={multiAgentSettings.chatDelegationEnabled}
-            onChange={(event) => setChatDelegationEnabled(event.target.checked)}
-            disabled={!multiAgentSettings.enabled}
-            className="accent-primary disabled:opacity-50"
-          />
-          {s.chatDelegationEnabledLabel}
-        </label>
 
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <label className="block space-y-2">

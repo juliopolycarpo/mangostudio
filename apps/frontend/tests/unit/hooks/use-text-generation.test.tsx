@@ -128,7 +128,7 @@ function makeProps(overrides: Partial<TextGenerationProps> = {}): TextGeneration
     contextSettings: DEFAULT_CONTEXT_SETTINGS,
     chatTitleSettings: DEFAULT_CHAT_TITLE_SETTINGS,
     currentChatId: 'chat-1',
-    getAgentSelection: () => ({ mode: 'chat' as const, agentId: 'chat' }),
+    getAgentSelection: () => ({ agentId: 'default' }),
     ...overrides,
   };
 }
@@ -307,9 +307,9 @@ describe('useTextGeneration — maxToolIterations forwarding', () => {
     expect(request.contextSettings).toEqual(props.contextSettings);
   });
 
-  it('forwards agent mode metadata into the stream request body', async () => {
+  it('forwards agent metadata into the stream request body', async () => {
     const props = makeProps({
-      getAgentSelection: () => ({ mode: 'agent', agentId: 'default', agentName: 'Default' }),
+      getAgentSelection: () => ({ agentId: 'default', agentName: 'Default' }),
     });
     mockStream.mockImplementation(
       makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
@@ -324,14 +324,13 @@ describe('useTextGeneration — maxToolIterations forwarding', () => {
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
     const firstCall = mockStream.mock.calls[0];
-    const request = firstCall[0] as { agentMode?: string; agentId?: string };
-    expect(request.agentMode).toBe('agent');
+    const request = firstCall[0] as { agentId?: string };
     expect(request.agentId).toBe('default');
   });
 
-  it('marks optimistic messages as agent interactions in Agent mode', async () => {
+  it('marks optimistic messages as agent interactions', async () => {
     const props = makeProps({
-      getAgentSelection: () => ({ mode: 'agent', agentId: 'default', agentName: 'Default' }),
+      getAgentSelection: () => ({ agentId: 'default', agentName: 'Default' }),
     });
     mockStream.mockImplementation(
       makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
@@ -365,7 +364,7 @@ describe('useTextGeneration — subagent lifecycle events', () => {
 
   it('routes subagent retry system events into the trace part', async () => {
     const props = makeProps({
-      getAgentSelection: () => ({ mode: 'agent', agentId: 'default', agentName: 'Default' }),
+      getAgentSelection: () => ({ agentId: 'default', agentName: 'Default' }),
     });
     mockStream.mockImplementation(
       makeStreamFn([

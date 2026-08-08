@@ -79,7 +79,6 @@ export interface StreamTextTurnSession {
   userMsgId: string;
   aiMsgId: string;
   startTime: number;
-  interactionMode: 'chat' | 'agent';
   workdir: string | undefined;
   workdirPolicy: WorkdirPolicy | undefined;
   resolvedModel: ResolvedModel;
@@ -176,7 +175,6 @@ export async function prepareStreamTextTurn(
     effectiveSystemPrompt,
     continuationSystemPrompt,
     attachmentIds,
-    interactionMode,
     workdir,
     workdirPolicy,
     chatId,
@@ -219,7 +217,7 @@ export async function prepareStreamTextTurn(
         displayPrompt: input.prompt,
         attachmentIds,
         timestamp: now,
-        interactionMode,
+        interactionMode: 'agent',
         modelName: modelId,
         assistantParts: allParts,
       },
@@ -237,7 +235,6 @@ export async function prepareStreamTextTurn(
     userMsgId,
     aiMsgId,
     startTime: now,
-    interactionMode,
     workdir,
     workdirPolicy,
     resolvedModel,
@@ -578,7 +575,6 @@ async function* executePendingToolCalls(
     agentRuntime,
     multiAgentSettings,
     allowedToolNames,
-    interactionMode,
     workdir,
     workdirPolicy,
     resolvedModel,
@@ -596,7 +592,6 @@ async function* executePendingToolCalls(
     assistantMessageId: session.aiMsgId,
     parentAgentProfile: agentRuntime.profile,
     parentModelName: modelId,
-    interactionMode,
     workdir,
     workdirPolicy,
     settings: multiAgentSettings,
@@ -947,8 +942,6 @@ export async function* finalizeSuccessfulTurn(
     userId,
     chatId,
     startTime,
-    interactionMode,
-    agentRuntime,
     resolvedModel,
     generatedImageArtifacts,
     executionState,
@@ -985,13 +978,7 @@ export async function* finalizeSuccessfulTurn(
   );
   if (!finalized) return;
 
-  await updateChatAfterTurn(
-    chatId,
-    aiTimestamp,
-    interactionMode,
-    interactionMode === 'agent' ? agentRuntime.profile.id : null,
-    db
-  );
+  await updateChatAfterTurn(chatId, aiTimestamp, db);
 
   yield { type: 'done', messageId: aiMsgId, generationTime };
 }
@@ -1009,7 +996,6 @@ export async function* finalizeToolLoopExhausted(
     userId,
     chatId,
     startTime,
-    interactionMode,
     agentRuntime,
     resolvedModel,
     generatedImageArtifacts,
@@ -1064,13 +1050,7 @@ export async function* finalizeToolLoopExhausted(
       db
     );
     if (!finalized) return;
-    await updateChatAfterTurn(
-      chatId,
-      Date.now(),
-      interactionMode,
-      interactionMode === 'agent' ? agentRuntime.profile.id : null,
-      db
-    );
+    await updateChatAfterTurn(chatId, Date.now(), db);
   } catch {
     // best-effort
   }
@@ -1093,8 +1073,6 @@ export async function* finalizeTurnError(
     startTime,
     resolvedModel,
     generatedImageArtifacts,
-    interactionMode,
-    agentRuntime,
   } = session;
 
   if (signal?.aborted) {
@@ -1145,13 +1123,7 @@ export async function* finalizeTurnError(
       db
     );
     if (finalized) {
-      await updateChatAfterTurn(
-        chatId,
-        Date.now(),
-        interactionMode,
-        interactionMode === 'agent' ? agentRuntime.profile.id : null,
-        db
-      );
+      await updateChatAfterTurn(chatId, Date.now(), db);
     }
   } catch {
     // best-effort
@@ -1170,8 +1142,6 @@ export async function finalizeInterruptedTurn(
     userId,
     chatId,
     startTime,
-    interactionMode,
-    agentRuntime,
     resolvedModel,
     generatedImageArtifacts,
     executionState,
@@ -1195,13 +1165,7 @@ export async function finalizeInterruptedTurn(
     db
   );
   if (!finalized) return;
-  await updateChatAfterTurn(
-    chatId,
-    Date.now(),
-    interactionMode,
-    interactionMode === 'agent' ? agentRuntime.profile.id : null,
-    db
-  );
+  await updateChatAfterTurn(chatId, Date.now(), db);
 }
 
 export function getAbortInterruptionReason(

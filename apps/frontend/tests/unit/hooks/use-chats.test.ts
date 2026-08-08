@@ -227,33 +227,20 @@ describe('useChats', () => {
     });
   });
 
-  describe('updateChatAgentSelection', () => {
-    it('calls the update mutation with agent mode and id', async () => {
+  describe('updateChatRunner', () => {
+    it('calls the update mutation with a mangostudio runner', async () => {
       const { result } = renderHook(() => useChats());
 
       await act(async () => {
-        await result.current.updateChatAgentSelection(CHAT_A.id, {
-          lastUsedMode: 'agent',
-          selectedAgentId: 'user:my-agent',
+        await result.current.updateChatRunner(CHAT_A.id, {
+          kind: 'mangostudio',
+          agentId: 'user:my-agent',
         });
       });
 
       expect(mockUpdateChat).toHaveBeenCalledWith({
         id: CHAT_A.id,
-        updates: { lastUsedMode: 'agent', selectedAgentId: 'user:my-agent' },
-      });
-    });
-
-    it('calls the update mutation with chat mode and no agent id', async () => {
-      const { result } = renderHook(() => useChats());
-
-      await act(async () => {
-        await result.current.updateChatAgentSelection(CHAT_A.id, { lastUsedMode: 'chat' });
-      });
-
-      expect(mockUpdateChat).toHaveBeenCalledWith({
-        id: CHAT_A.id,
-        updates: { lastUsedMode: 'chat' },
+        updates: { runner: { kind: 'mangostudio', agentId: 'user:my-agent' } },
       });
     });
   });

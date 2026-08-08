@@ -287,7 +287,6 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         Promise.resolve({
           multiAgentSettings: {
             enabled: true,
-            chatDelegationEnabled: true,
             traceVisibility: 'full',
             maxDepth: 2,
             maxSubagentCalls: 5,

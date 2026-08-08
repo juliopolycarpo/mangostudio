@@ -38,7 +38,6 @@ export const ChatTitleSettingsSchema = Type.Object({
 
 export const MultiAgentSettingsSchema = Type.Object({
   enabled: Type.Boolean(),
-  chatDelegationEnabled: Type.Boolean(),
   traceVisibility: Type.Union([Type.Literal('compact'), Type.Literal('full'), Type.Literal('off')]),
   maxDepth: Type.Integer({ minimum: 0, maximum: 3 }),
   maxSubagentCalls: Type.Integer({

@@ -40,8 +40,8 @@ function resolveCandidates(
 
 function makeProfile(overrides: Partial<AgentProfile> = {}): AgentProfile {
   return {
-    id: 'chat',
-    name: 'Chat',
+    id: 'default',
+    name: 'Default',
     description: '',
     kind: 'builtin',
     role: 'primary',

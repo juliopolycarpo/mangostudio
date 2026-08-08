@@ -1,7 +1,7 @@
 import { createMockChat } from '@mangostudio/shared/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatWithContext } from '../../../src/features/chat/queries';
-import { useAgentSelection } from '../../../src/hooks/use-agent-selection';
+import { useRunnerSelection } from '../../../src/hooks/use-runner-selection';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
 vi.mock('../../../src/features/settings/agents/queries', () => ({
@@ -20,8 +20,8 @@ const CHAT: ChatWithContext = createMockChat({
   workdir: null,
 });
 
-describe('useAgentSelection workdir binding', () => {
-  const updateChatAgentSelection = vi.fn(() => Promise.resolve());
+describe('useRunnerSelection workdir binding', () => {
+  const updateChatRunner = vi.fn(() => Promise.resolve());
   const updateChatWorkdir = vi.fn(() => Promise.resolve());
   const addRecentWorkdir = vi.fn();
 
@@ -29,57 +29,50 @@ describe('useAgentSelection workdir binding', () => {
     vi.clearAllMocks();
   });
 
-  it('applies the default workdir without blocking the mode switch', async () => {
+  it('applies the default workdir the first time a chat without one is observed', async () => {
     const { result } = renderHook(() =>
-      useAgentSelection({
+      useRunnerSelection({
         currentChatId: CHAT.id,
         currentChat: CHAT,
         defaultWorkdir: '/srv/projects/default',
-        updateChatAgentSelection,
+        updateChatRunner,
         updateChatWorkdir,
         addRecentWorkdir,
       })
     );
 
-    act(() => result.current.setAgentExecutionMode('agent'));
-
-    expect(result.current.agentExecutionMode).toBe('agent');
     await waitFor(() =>
       expect(updateChatWorkdir).toHaveBeenCalledWith(CHAT.id, '/srv/projects/default')
     );
     expect(result.current.isWorkdirPickerOpen).toBe(false);
   });
 
-  it('opens the picker when Agent mode has no chat or default workdir', () => {
+  it('opens the picker when the chat has no workdir and no default is configured', async () => {
     const { result } = renderHook(() =>
-      useAgentSelection({
+      useRunnerSelection({
         currentChatId: CHAT.id,
         currentChat: CHAT,
         defaultWorkdir: '',
-        updateChatAgentSelection,
+        updateChatRunner,
         updateChatWorkdir,
         addRecentWorkdir,
       })
     );
 
-    act(() => result.current.setAgentExecutionMode('agent'));
-
-    expect(result.current.agentExecutionMode).toBe('agent');
-    expect(result.current.isWorkdirPickerOpen).toBe(true);
+    await waitFor(() => expect(result.current.isWorkdirPickerOpen).toBe(true));
   });
 
   it('binds a selected workdir, records it as recent, and closes the picker', async () => {
     const { result } = renderHook(() =>
-      useAgentSelection({
+      useRunnerSelection({
         currentChatId: CHAT.id,
         currentChat: CHAT,
         defaultWorkdir: '',
-        updateChatAgentSelection,
+        updateChatRunner,
         updateChatWorkdir,
         addRecentWorkdir,
       })
     );
-    act(() => result.current.openWorkdirPicker());
 
     await act(async () => {
       await result.current.selectWorkdir('/srv/projects/mango');

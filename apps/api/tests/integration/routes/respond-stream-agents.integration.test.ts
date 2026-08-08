@@ -32,28 +32,7 @@ afterEach(async () => {
 });
 
 describe('POST /respond/stream — agent resolution', () => {
-  it('resolves Chat agent metadata when agentMode is chat without agentId', async () => {
-    const requestedAgentIds: string[] = [];
-    await mockVerifiedChatOwnership();
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-      getAgentProfile: (_db: unknown, _userId: string, agentId: string) => {
-        requestedAgentIds.push(agentId);
-        return Promise.resolve({ id: 'chat' });
-      },
-    }));
-
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
-    restoreAuth = restore;
-
-    const response = await app.handle(
-      buildRespondStreamRequest({ chatId: 'chat-1', prompt: 'Hello', agentMode: 'chat' })
-    );
-
-    expect(requestedAgentIds).toEqual(['chat']);
-    expect(response.headers.get('content-type') ?? '').not.toContain('text/event-stream');
-  });
-
-  it('defaults Agent mode to the Default agent', async () => {
+  it('defaults to the Default agent when no agentId is given', async () => {
     const requestedAgentIds: string[] = [];
     await mockVerifiedChatOwnership();
     await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
@@ -67,7 +46,7 @@ describe('POST /respond/stream — agent resolution', () => {
     restoreAuth = restore;
 
     const response = await app.handle(
-      buildRespondStreamRequest({ chatId: 'chat-1', prompt: 'Hello', agentMode: 'agent' })
+      buildRespondStreamRequest({ chatId: 'chat-1', prompt: 'Hello' })
     );
 
     expect(requestedAgentIds).toEqual(['default']);
@@ -88,7 +67,6 @@ describe('POST /respond/stream — agent resolution', () => {
       buildRespondStreamRequest({
         chatId: 'chat-1',
         prompt: 'Hello',
-        agentMode: 'agent',
         agentId: 'user:missing-agent',
       })
     );
@@ -137,7 +115,6 @@ describe('POST /respond/stream — agent resolution', () => {
         prompt: 'Hello',
         model: 'test-model',
         systemPrompt: 'Frontend system prompt must be ignored.',
-        agentMode: 'agent',
         agentId: 'user:runtime-agent',
         promptSettings: {
           textSystemPrompt: 'Legacy settings prompt must be ignored.',
@@ -247,7 +224,7 @@ describe('POST /respond/stream — agent resolution', () => {
       getAgentProfile: () =>
         Promise.resolve(
           makeAgentProfile({
-            id: 'chat',
+            id: 'default',
             systemPrompt: 'Chat runtime prompt.',
             thinkingEnabled: true,
             reasoningEffort: 'max',
@@ -307,7 +284,7 @@ describe('POST /respond/stream — agent resolution', () => {
       getAgentProfile: () =>
         Promise.resolve(
           makeAgentProfile({
-            id: 'chat',
+            id: 'default',
             systemPrompt: 'Chat runtime prompt.',
             thinkingEnabled: true,
             reasoningEffort: 'max',

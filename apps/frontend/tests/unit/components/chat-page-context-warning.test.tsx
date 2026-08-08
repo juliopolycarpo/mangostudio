@@ -1,3 +1,4 @@
+import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -92,16 +93,25 @@ describe('ChatPage context warning', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled();
   });
 
-  it('moves tasks into the workspace rail only in Agent mode', () => {
+  it('shows the workspace rail and falls back to the pinned panel when the rail hides todos', () => {
     const { props, rerender } = renderChatPage({
-      agentExecutionMode: 'chat',
       workdir: '/srv/projects/mangostudio',
     });
-    expect(screen.getByTestId('pinned-todos')).toHaveTextContent('chat-1');
-    expect(screen.queryByTestId('workspace-rail')).not.toBeInTheDocument();
-
-    rerender(<ChatPage {...props} agentExecutionMode="agent" />);
     expect(screen.getByTestId('workspace-rail')).toHaveTextContent('chat-1');
     expect(screen.queryByTestId('pinned-todos')).not.toBeInTheDocument();
+
+    rerender(
+      <ChatPage
+        {...props}
+        workspaceSettings={{
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          sidePanel: {
+            ...DEFAULT_WORKSPACE_SETTINGS.sidePanel,
+            visiblePanelIds: ['git'],
+          },
+        }}
+      />
+    );
+    expect(screen.getByTestId('pinned-todos')).toHaveTextContent('chat-1');
   });
 });

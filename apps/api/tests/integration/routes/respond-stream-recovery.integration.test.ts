@@ -93,7 +93,7 @@ describe('POST /respond/stream — recovery prompt fitting', () => {
       startedAt: Date.now(),
       provider: 'openai-compatible',
       modelName: MODEL_ID,
-      agentId: 'chat',
+      agentId: 'default',
     });
     checkpoint.status = 'interrupted';
     checkpoint.reasonCode = 'server_restart';

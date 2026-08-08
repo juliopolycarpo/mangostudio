@@ -73,6 +73,8 @@ export async function insertTestChat(
       updatedAt: Date.now(),
       model: null,
       userId: chat.userId,
+      runnerKind: 'mangostudio',
+      runnerAgentId: 'default',
     })
     .execute();
 

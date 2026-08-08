@@ -340,7 +340,6 @@ describe('normalizeMultiAgentSettings', () => {
     expect(
       normalizeMultiAgentSettings({
         enabled: false,
-        chatDelegationEnabled: true,
         traceVisibility: 'full',
         maxDepth: 9,
         maxSubagentCalls: -1,
@@ -349,7 +348,6 @@ describe('normalizeMultiAgentSettings', () => {
       })
     ).toEqual({
       enabled: false,
-      chatDelegationEnabled: true,
       traceVisibility: 'full',
       maxDepth: 3,
       maxSubagentCalls: MAX_SUBAGENT_CALLS_MIN,

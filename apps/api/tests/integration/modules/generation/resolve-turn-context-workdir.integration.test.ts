@@ -79,11 +79,11 @@ async function insertConnectorForModel(): Promise<void> {
     .execute();
 }
 
-async function allowAllToolsForChatAgent(): Promise<void> {
-  await updateAgentProfile(getDb(), user.id, 'chat', {
-    name: 'Chat',
+async function allowAllToolsForDefaultAgent(): Promise<void> {
+  await updateAgentProfile(getDb(), user.id, 'default', {
+    name: 'Default',
     description: '',
-    role: 'primary',
+    role: 'both',
     systemPrompt: '',
     toolNames: ['*'],
     toolsEnabled: true,
@@ -112,7 +112,7 @@ beforeEach(async () => {
     .where('id', '=', chatId)
     .execute();
   await insertConnectorForModel();
-  await allowAllToolsForChatAgent();
+  await allowAllToolsForDefaultAgent();
 
   try {
     previousProvider = getProvider('openai-compatible');
@@ -132,25 +132,12 @@ afterEach(() => {
 });
 
 describe('resolveTurnContext workdir scope', () => {
-  it('omits workdir and policy in chat mode even when the chat row is bound', async () => {
+  it('populates workdir, policy, and prompt section when the chat row is bound', async () => {
     const context = await resolveTurnContext(
-      { chatId, userId: user.id, prompt: 'Hello', model: MODEL_ID, agentMode: 'chat' },
+      { chatId, userId: user.id, prompt: 'Hello', model: MODEL_ID },
       getDb()
     );
 
-    expect(context.interactionMode).toBe('chat');
-    expect(context.workdir).toBeUndefined();
-    expect(context.workdirPolicy).toBeUndefined();
-    expect(context.effectiveSystemPrompt ?? '').not.toContain('Working directory:');
-  });
-
-  it('populates workdir, policy, and prompt section in agent mode', async () => {
-    const context = await resolveTurnContext(
-      { chatId, userId: user.id, prompt: 'Hello', model: MODEL_ID, agentMode: 'agent' },
-      getDb()
-    );
-
-    expect(context.interactionMode).toBe('agent');
     expect(context.workdir).toBe(boundWorkdir);
     expect(context.workdirPolicy).toEqual({ root: boundWorkdir, restricted: true });
     expect(context.effectiveSystemPrompt).toContain(`Working directory:\n${boundWorkdir}`);

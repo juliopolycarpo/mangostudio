@@ -6,7 +6,7 @@ import type {
   ReasoningEffort,
   TodoPart,
 } from '@mangostudio/shared';
-import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import type { ToolIntent } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
@@ -31,7 +31,6 @@ export interface StreamTextTurnInput {
   maxToolIterations?: number;
   contextSettings?: ContextSettings;
   toolIntent?: ToolIntent;
-  agentMode?: AgentExecutionMode;
   agentId?: AgentId;
   resolvedAgentProfile?: AgentProfile;
   signal?: AbortSignal;

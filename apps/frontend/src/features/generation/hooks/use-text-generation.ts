@@ -1,7 +1,7 @@
 /* global console */
 
 import type { Message, MessagePart, ReasoningEffort } from '@mangostudio/shared';
-import { type AgentExecutionMode, isAgentId } from '@mangostudio/shared/agents';
+import { isAgentId } from '@mangostudio/shared/agents';
 import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
 import {
   type ContextCompactionResponse,
@@ -48,7 +48,6 @@ interface UseTextGenerationOptions {
   chatTitleSettings: ChatTitleSettings;
   currentChatId: string | null;
   getAgentSelection: () => {
-    readonly mode: AgentExecutionMode;
     readonly agentId: string;
     readonly agentName?: string;
   };
@@ -197,7 +196,6 @@ export function useTextGeneration({
 
       const model = getActiveModel();
       const agentSelection = getAgentSelection();
-      const interactionMode = agentSelection.mode === 'agent' ? 'agent' : 'chat';
 
       if (
         !recovery &&
@@ -221,10 +219,9 @@ export function useTextGeneration({
         role: 'user',
         text: prompt,
         timestamp: Date.now(),
-        interactionMode,
-        ...(interactionMode === 'agent'
-          ? { agentId: agentSelection.agentId, agentName: agentSelection.agentName }
-          : {}),
+        interactionMode: 'agent',
+        agentId: agentSelection.agentId,
+        agentName: agentSelection.agentName,
       };
 
       const optimisticAiMsg: Message = {
@@ -235,10 +232,9 @@ export function useTextGeneration({
         timestamp: Date.now(),
         isGenerating: true,
         modelName: model,
-        interactionMode,
-        ...(interactionMode === 'agent'
-          ? { agentId: agentSelection.agentId, agentName: agentSelection.agentName }
-          : {}),
+        interactionMode: 'agent',
+        agentId: agentSelection.agentId,
+        agentName: agentSelection.agentName,
       };
 
       appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
@@ -264,7 +260,6 @@ export function useTextGeneration({
             maxToolIterations,
             contextSettings,
             toolIntent,
-            agentMode: agentSelection.mode,
             agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
             recovery,
           },

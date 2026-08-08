@@ -1,5 +1,5 @@
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared';
-import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
@@ -50,7 +50,6 @@ export interface TurnContextInput {
   maxToolIterations?: number;
   contextSettings?: ContextSettings;
   toolIntent?: ToolIntent;
-  agentMode?: AgentExecutionMode;
   agentId?: AgentId;
   resolvedAgentProfile?: AgentProfile;
   signal?: AbortSignal;
@@ -63,7 +62,6 @@ export interface TurnContext {
   environmentId: string;
   prompt: string;
   attachmentIds: string[];
-  interactionMode: 'chat' | 'agent';
   workdir: string | undefined;
   workdirPolicy: WorkdirPolicy | undefined;
   resolvedModel: ResolvedModel;
@@ -90,7 +88,7 @@ export async function resolveTurnContext(
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
 
-  const requestedAgentId = resolveRuntimeAgentId(input.agentMode, input.agentId);
+  const requestedAgentId = resolveRuntimeAgentId(input.agentId);
   const resolvedAgentProfile =
     input.resolvedAgentProfile ?? (await getAgentProfile(db, input.userId, requestedAgentId));
   const resolvedModel =
@@ -102,8 +100,7 @@ export async function resolveTurnContext(
     }));
 
   const { modelId, providerType } = resolvedModel;
-  const interactionMode = input.agentMode === 'agent' ? 'agent' : 'chat';
-  const workdir = interactionMode === 'agent' ? (chat.workdir ?? undefined) : undefined;
+  const workdir = chat.workdir ?? undefined;
 
   const provider = providerType
     ? getProvider(providerType)
@@ -117,7 +114,6 @@ export async function resolveTurnContext(
     resolveAgentRuntime({
       db,
       userId: input.userId,
-      agentMode: input.agentMode,
       agentId: input.agentId,
       provider: provider.providerType,
       requestRuntimeSettings: getRequestRuntimeSettings(provider.providerType, input),
@@ -137,7 +133,6 @@ export async function resolveTurnContext(
   );
   const workdirPolicy = buildWorkdirPolicy(workdir, restrictToolsToWorkdir);
   const delegateToolAvailable = shouldExposeDelegateTool({
-    interactionMode,
     profile: agentRuntime.profile,
     settings: multiAgentSettings,
   });
@@ -183,7 +178,6 @@ export async function resolveTurnContext(
     environmentId: chat.environmentId,
     prompt: input.prompt,
     attachmentIds,
-    interactionMode,
     workdir,
     workdirPolicy,
     resolvedModel,

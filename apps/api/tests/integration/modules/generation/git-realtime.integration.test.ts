@@ -118,7 +118,6 @@ describe('Git realtime invalidation during generation', () => {
         chatId,
         userId: user.id,
         prompt: 'Create three files.',
-        agentMode: 'agent',
         resolvedModel: RESOLVED_MODEL,
         resolvedAgentProfile: makeAgentProfile({
           toolNames: ['create_file'],

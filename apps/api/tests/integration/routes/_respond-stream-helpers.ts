@@ -181,7 +181,6 @@ export interface SubagentProfileMockOptions {
 
 export interface MultiAgentSettingsOverrides {
   enabled?: boolean;
-  chatDelegationEnabled?: boolean;
   traceVisibility?: 'off' | 'summary' | 'full';
   maxDepth?: number;
   maxSubagentCalls?: number;
@@ -523,7 +522,6 @@ function multiAgentSettings(
 ): Required<MultiAgentSettingsOverrides> {
   return {
     enabled: true,
-    chatDelegationEnabled: true,
     traceVisibility: 'full',
     maxDepth: 2,
     maxSubagentCalls: 5,
