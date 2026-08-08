@@ -28,16 +28,12 @@ describe('install guards', () => {
     expect(isLoopbackAddress(address)).toBe(true);
   });
 
-  it.each([
-    '0.0.0.0',
-    '192.168.1.4',
-    '::',
-    '::ffff:192.168.1.4',
-    'unknown',
-    undefined,
-  ])('rejects non-loopback address %s', (address) => {
-    expect(isLoopbackAddress(address)).toBe(false);
-  });
+  it.each(['0.0.0.0', '192.168.1.4', '::', '::ffff:192.168.1.4', 'unknown', undefined])(
+    'rejects non-loopback address %s',
+    (address) => {
+      expect(isLoopbackAddress(address)).toBe(false);
+    }
+  );
 
   it('refuses a non-loopback bind outside standalone mode', () => {
     expect(evaluateInstallGuard({ ...ALLOWED_CONTEXT, serverHost: '0.0.0.0' })).toEqual({

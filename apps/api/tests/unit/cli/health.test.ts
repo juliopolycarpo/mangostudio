@@ -56,15 +56,12 @@ describe('probeHealth', () => {
     expect(calls).toEqual([expectedUrl]);
   });
 
-  it.each([
-    'evil.test',
-    '169.254.169.254',
-    '10.0.0.1',
-    '192.168.1.5',
-    'example.com',
-  ])('fails closed without issuing a request for non-local host %s', async (host) => {
-    const { calls } = recordingFetch();
-    expect(await probeHealth(host, 3001)).toBe(false);
-    expect(calls).toEqual([]);
-  });
+  it.each(['evil.test', '169.254.169.254', '10.0.0.1', '192.168.1.5', 'example.com'])(
+    'fails closed without issuing a request for non-local host %s',
+    async (host) => {
+      const { calls } = recordingFetch();
+      expect(await probeHealth(host, 3001)).toBe(false);
+      expect(calls).toEqual([]);
+    }
+  );
 });

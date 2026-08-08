@@ -46,15 +46,13 @@ describe('library resource keys', () => {
     expect(Value.Check(LibraryResourceRefSchema, { kind: 'skill', slug })).toBe(false);
   });
 
-  it.each([
-    'gh',
-    'settings.local',
-    'AGENTS',
-    'multi-word_slug',
-  ])('accepts path-safe slug %s', (slug) => {
-    expect(isValidResourceSlug(slug)).toBe(true);
-    expect(Value.Check(LibraryResourceRefSchema, { kind: 'skill', slug })).toBe(true);
-  });
+  it.each(['gh', 'settings.local', 'AGENTS', 'multi-word_slug'])(
+    'accepts path-safe slug %s',
+    (slug) => {
+      expect(isValidResourceSlug(slug)).toBe(true);
+      expect(Value.Check(LibraryResourceRefSchema, { kind: 'skill', slug })).toBe(true);
+    }
+  );
 
   it('rejects unknown kinds and malformed keys', () => {
     expect(parseResourceKey('unknown:resource')).toBeNull();

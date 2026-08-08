@@ -296,17 +296,15 @@ describe('parseChatGptUsageHeaders promo message', () => {
 });
 
 describe('parseChatGptRedeemResponse', () => {
-  it.each([
-    'reset',
-    'nothing_to_reset',
-    'no_credit',
-    'already_redeemed',
-  ] as const)('accepts the %s outcome', (code) => {
-    expect(parseChatGptRedeemResponse({ code, windows_reset: 2 })).toEqual({
-      code,
-      windowsReset: 2,
-    });
-  });
+  it.each(['reset', 'nothing_to_reset', 'no_credit', 'already_redeemed'] as const)(
+    'accepts the %s outcome',
+    (code) => {
+      expect(parseChatGptRedeemResponse({ code, windows_reset: 2 })).toEqual({
+        code,
+        windowsReset: 2,
+      });
+    }
+  );
 
   it('coerces a numeric-string windows_reset and defaults a missing one to 0', () => {
     expect(parseChatGptRedeemResponse({ code: 'reset', windows_reset: '1' })).toEqual({

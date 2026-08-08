@@ -34,15 +34,14 @@ describe('gate result evaluation', () => {
     expect(verdict.ok).toBe(true);
   });
 
-  test.each([
-    'failure',
-    'cancelled',
-    'skipped',
-  ] as const)('fails when a mandatory dependency result is %s', (result) => {
-    const verdict = evaluateGate({ check: 'success', test: result }, new Set());
-    expect(verdict.ok).toBe(false);
-    expect(verdict.lines.join('\n')).toContain(`test: ${result}`);
-  });
+  test.each(['failure', 'cancelled', 'skipped'] as const)(
+    'fails when a mandatory dependency result is %s',
+    (result) => {
+      const verdict = evaluateGate({ check: 'success', test: result }, new Set());
+      expect(verdict.ok).toBe(false);
+      expect(verdict.lines.join('\n')).toContain(`test: ${result}`);
+    }
+  );
 
   test('accepts a skip only for a declared conditional lane', () => {
     expect(evaluateGate({ check: 'success', 'qa-metrics': 'skipped' }, skips).ok).toBe(true);
@@ -246,20 +245,21 @@ describe('shared gate job contract', () => {
     expect(gateBlock).toContain('run: bun ./scripts/ci/evaluate-gate.ts');
   });
 
-  test.each([
-    ...GATED_WORKFLOWS,
-  ])('%s gate needs includes changes when the workflow has a changes job', (path) => {
-    const workflow = readText(path);
-    const jobs = extractJobBlocks(workflow).map(({ job }) => job);
-    if (!jobs.includes('changes')) {
-      return;
-    }
+  test.each([...GATED_WORKFLOWS])(
+    '%s gate needs includes changes when the workflow has a changes job',
+    (path) => {
+      const workflow = readText(path);
+      const jobs = extractJobBlocks(workflow).map(({ job }) => job);
+      if (!jobs.includes('changes')) {
+        return;
+      }
 
-    // Skip predicates read outputs from `changes`; dangling ALLOWED_SKIPS
-    // would silently accept the wrong lanes if it dropped out of needs.
-    expect(expectedGateNeeds(workflow)).toContain('changes');
-    expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('changes');
-  });
+      // Skip predicates read outputs from `changes`; dangling ALLOWED_SKIPS
+      // would silently accept the wrong lanes if it dropped out of needs.
+      expect(expectedGateNeeds(workflow)).toContain('changes');
+      expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('changes');
+    }
+  );
 
   test('expectedGateNeeds picks up a synthetic job that is not gated', () => {
     const base = readText('.github/workflows/cargo-shim.yml');

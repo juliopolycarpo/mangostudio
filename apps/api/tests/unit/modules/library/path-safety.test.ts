@@ -26,20 +26,17 @@ afterEach(() => {
 });
 
 describe('library path containment', () => {
-  it.each([
-    '../../etc/passwd',
-    '/etc/passwd',
-    'a/../../b',
-    '.',
-    'stream:name',
-  ])('rejects unsafe slug %s', (slug) => {
-    expect(() => resolveContainedResourcePath(locationRoot, slug)).toThrow(LibraryWriteError);
-    try {
-      resolveContainedResourcePath(locationRoot, slug);
-    } catch (error) {
-      expect(error).toMatchObject({ reason: 'invalid-slug' });
+  it.each(['../../etc/passwd', '/etc/passwd', 'a/../../b', '.', 'stream:name'])(
+    'rejects unsafe slug %s',
+    (slug) => {
+      expect(() => resolveContainedResourcePath(locationRoot, slug)).toThrow(LibraryWriteError);
+      try {
+        resolveContainedResourcePath(locationRoot, slug);
+      } catch (error) {
+        expect(error).toMatchObject({ reason: 'invalid-slug' });
+      }
     }
-  });
+  );
 
   it('accepts a destination beneath a symlinked location root', () => {
     const dotfilesRoot = join(tempDir, 'dotfiles', 'skills');

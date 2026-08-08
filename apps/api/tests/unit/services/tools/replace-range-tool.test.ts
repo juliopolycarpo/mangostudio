@@ -68,19 +68,22 @@ describe('executeReplaceRange', () => {
     ['first', 1, 1, 'ONE', 'ONE\ntwo\nthree\n'],
     ['middle', 2, 2, 'TWO', 'one\nTWO\nthree\n'],
     ['last', 3, 3, 'THREE', 'one\ntwo\nTHREE\n'],
-  ])('replaces the %s line inclusively', async (_position, startLine, endLine, content, expected) => {
-    const filePath = await seedAndRead(`${_position}.txt`, 'one\ntwo\nthree\n');
+  ])(
+    'replaces the %s line inclusively',
+    async (_position, startLine, endLine, content, expected) => {
+      const filePath = await seedAndRead(`${_position}.txt`, 'one\ntwo\nthree\n');
 
-    const result = await executeReplaceRange(
-      { path: filePath, startLine, endLine, content },
-      makeContext()
-    );
+      const result = await executeReplaceRange(
+        { path: filePath, startLine, endLine, content },
+        makeContext()
+      );
 
-    expect(result.replacedLines).toBe(1);
-    expect(result.newTotalLines).toBe(3);
-    expect(result.sha256).toHaveLength(64);
-    expect(await Bun.file(filePath).text()).toBe(expected);
-  });
+      expect(result.replacedLines).toBe(1);
+      expect(result.newTotalLines).toBe(3);
+      expect(result.sha256).toHaveLength(64);
+      expect(await Bun.file(filePath).text()).toBe(expected);
+    }
+  );
 
   it('grows and shrinks the number of lines', async () => {
     const filePath = await seedAndRead('resize.txt', 'one\ntwo\nthree\nfour');

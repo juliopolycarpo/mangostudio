@@ -250,11 +250,13 @@ describe('skills lazy-load end-to-end turn', () => {
     expect(body.files).toEqual(expect.arrayContaining(['reference.md', 'scripts/hello.sh']));
 
     const fileResult = results.find((event) => event.callId === 'skill-file');
-    expect((fileResult?.result as { content: string }).content).toContain('pdftotext');
+    expect((fileResult?.result as { content: string } | undefined)?.content).toContain('pdftotext');
 
     const scriptResult = results.find((event) => event.callId === 'skill-script');
     expect(scriptResult?.isError).toBe(false);
-    expect((scriptResult?.result as { stdout: string }).stdout).toContain('hello from pdf-tools');
+    expect((scriptResult?.result as { stdout: string } | undefined)?.stdout).toContain(
+      'hello from pdf-tools'
+    );
 
     expect(events.some((event) => event.type === 'done')).toBe(true);
   });

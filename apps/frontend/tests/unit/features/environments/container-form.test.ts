@@ -158,18 +158,17 @@ describe('validateContainerForm', () => {
     expect(error?.mountIssue).toBe('incomplete');
   });
 
-  it.each([
-    '/my work',
-    '/work:ro',
-    '/work\ttab',
-  ])('blocks the container path %p, which the schema rejects', (containerPath) => {
-    const error = errorFor(
-      { mounts: [{ hostPath: '/home/j', containerPath, readonly: false }] },
-      'mounts'
-    );
+  it.each(['/my work', '/work:ro', '/work\ttab'])(
+    'blocks the container path %p, which the schema rejects',
+    (containerPath) => {
+      const error = errorFor(
+        { mounts: [{ hostPath: '/home/j', containerPath, readonly: false }] },
+        'mounts'
+      );
 
-    expect(error?.mountIssue).toBe('container-path');
-  });
+      expect(error?.mountIssue).toBe('container-path');
+    }
+  );
 
   it('blocks a mount path past the schema length bound', () => {
     const error = errorFor(

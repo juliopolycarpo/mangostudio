@@ -16,11 +16,12 @@ const VALID_FRAMES: readonly RealtimeServerMessage[] = [
 ];
 
 describe('parseServerMessage', () => {
-  it.each(
-    VALID_FRAMES.map((frame) => [JSON.stringify(frame), frame] as const)
-  )('round-trips %s', (serialized, frame) => {
-    expect(parseServerMessage(serialized)).toEqual(frame);
-  });
+  it.each(VALID_FRAMES.map((frame) => [JSON.stringify(frame), frame] as const))(
+    'round-trips %s',
+    (serialized, frame) => {
+      expect(parseServerMessage(serialized)).toEqual(frame);
+    }
+  );
 
   const REJECTED: readonly [string, unknown][] = [
     ['non-string data', { type: 'ready' }],
