@@ -55,9 +55,13 @@ interface UseTextGenerationOptions {
    * Applies the selection the empty state was holding — runner and default
    * workdir — to a chat auto-created by this turn. Awaited before the stream
    * opens so the first turn resolves against the same configuration every
-   * later turn will.
+   * later turn will, and its return value (not `getAgentSelection`) is what
+   * that first turn runs as.
    */
-  onChatCreated?: (chatId: string) => Promise<void>;
+  onChatCreated?: (chatId: string) => Promise<{
+    readonly agentId: string;
+    readonly agentName?: string;
+  }>;
 }
 
 type RecoveryRequest = NonNullable<RespondStreamBody['recovery']>;
@@ -195,16 +199,17 @@ export function useTextGeneration({
       let activeChatId = chats.currentChatId;
       let createdChatDuringRequest = false;
       let activeChatTitle = chats.currentChat?.title;
+      let boundAgentSelection: { agentId: string; agentName?: string } | null = null;
       if (!activeChatId) {
         const newChat = await chats.createChat();
         activeChatId = newChat.id;
         activeChatTitle = newChat.title;
         createdChatDuringRequest = true;
-        await onChatCreated?.(newChat.id);
+        boundAgentSelection = (await onChatCreated?.(newChat.id)) ?? null;
       }
 
       const model = getActiveModel();
-      const agentSelection = getAgentSelection();
+      const agentSelection = boundAgentSelection ?? getAgentSelection();
 
       if (
         !recovery &&

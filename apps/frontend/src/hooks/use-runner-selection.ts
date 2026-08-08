@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatWithContext } from '@/features/chat/queries';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 
-const DEFAULT_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' };
+const DEFAULT_AGENT_ID = 'default';
+const DEFAULT_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: DEFAULT_AGENT_ID };
 
 interface RunnerSelectionOverride {
   readonly chatId: string | null;
@@ -58,6 +59,14 @@ export function useRunnerSelection({
     [currentChatId, updateChatRunner]
   );
 
+  const runnerAgentSelection = useCallback(
+    (runner: ChatRunnerConfiguration) => {
+      const agentId = runner.kind === 'mangostudio' ? runner.agentId : DEFAULT_AGENT_ID;
+      return { agentId, agentName: agents.find((agent) => agent.id === agentId)?.name };
+    },
+    [agents]
+  );
+
   const setRunnerAgentId = useCallback(
     (agentId: string) => {
       persistRunner({ kind: 'mangostudio', agentId: isAgentId(agentId) ? agentId : 'default' });
@@ -97,30 +106,47 @@ export function useRunnerSelection({
    * which time generation has already started. Left alone, the first turn runs
    * against the server's `default` runner with no workdir, so a configured
    * `restrictToolsToWorkdir` has nothing to contain.
+   *
+   * Returns the agent selection that was actually bound, rather than leaving
+   * the caller to re-read `selectedAgentId` afterwards: that value is a stale
+   * closure captured before this awaited call, so it can still show the
+   * override this function just reverted after a rejected persist.
    */
   const bindNewChat = useCallback(
     async (chatId: string) => {
       const pendingRunner = runnerOverride?.chatId === null ? runnerOverride.runner : null;
+      let effectiveRunner: ChatRunnerConfiguration = DEFAULT_RUNNER;
       if (pendingRunner) {
         setRunnerOverride({ chatId, runner: pendingRunner });
-        await updateChatRunner(chatId, pendingRunner).catch(() => {
-          setRunnerOverride((current) => (current?.chatId === chatId ? null : current));
-        });
+        effectiveRunner = await updateChatRunner(chatId, pendingRunner)
+          .then(() => pendingRunner)
+          .catch(() => {
+            setRunnerOverride((current) => (current?.chatId === chatId ? null : current));
+            return DEFAULT_RUNNER;
+          });
       }
 
-      if (workdirDefaultedChatIds.current.has(chatId)) return;
-      workdirDefaultedChatIds.current.add(chatId);
-
-      if (!defaultWorkdir) {
-        setWorkdirPickerOpen(true);
-        return;
+      if (!workdirDefaultedChatIds.current.has(chatId)) {
+        workdirDefaultedChatIds.current.add(chatId);
+        if (!defaultWorkdir) {
+          setWorkdirPickerOpen(true);
+        } else {
+          await updateChatWorkdir(chatId, defaultWorkdir)
+            .then(() => addRecentWorkdir(defaultWorkdir))
+            .catch(() => setWorkdirPickerOpen(true));
+        }
       }
 
-      await updateChatWorkdir(chatId, defaultWorkdir)
-        .then(() => addRecentWorkdir(defaultWorkdir))
-        .catch(() => setWorkdirPickerOpen(true));
+      return runnerAgentSelection(effectiveRunner);
     },
-    [addRecentWorkdir, defaultWorkdir, runnerOverride, updateChatRunner, updateChatWorkdir]
+    [
+      addRecentWorkdir,
+      defaultWorkdir,
+      runnerAgentSelection,
+      runnerOverride,
+      updateChatRunner,
+      updateChatWorkdir,
+    ]
   );
 
   useEffect(() => {

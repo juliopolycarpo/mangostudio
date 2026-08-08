@@ -163,6 +163,33 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
     expect(result.current.selectedAgentId).toBe('explore');
   });
 
+  it('returns the effective agent selection, falling back after a rejected persist', async () => {
+    const rejectingUpdateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
+    const { result } = renderHook(
+      (props: SelectionProps) =>
+        useRunnerSelection({
+          ...props,
+          defaultWorkdir: '/srv/projects/default',
+          updateChatRunner: rejectingUpdateChatRunner,
+          updateChatWorkdir,
+          addRecentWorkdir,
+        }),
+      { initialProps: EMPTY_STATE }
+    );
+
+    act(() => result.current.setRunnerAgentId('explore'));
+
+    let selection: { agentId: string; agentName?: string } | undefined;
+    await act(async () => {
+      selection = await result.current.bindNewChat('chat-new');
+    });
+
+    // The persist failed, so the turn must run as the agent the chat actually
+    // stores — not the optimistic pick `getAgentSelection` would otherwise
+    // have kept reading from a stale closure.
+    expect(selection).toEqual({ agentId: 'default', agentName: undefined });
+  });
+
   it('applies the default workdir before the first turn opens', async () => {
     const { result } = renderOnEmptyState('/srv/projects/default');
 
