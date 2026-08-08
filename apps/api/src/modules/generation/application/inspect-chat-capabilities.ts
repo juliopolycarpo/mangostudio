@@ -33,13 +33,14 @@ import { getAgentProfile } from '../../agents/application/agent-settings-service
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { extractContextInfo } from '../../chats/application/list-chats';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
+import { resolveRunnerAgentId } from '../../chats/domain/chat-runner';
 import { getById } from '../../chats/infrastructure/chat-repository';
 import { listMcpServerRows } from '../../mcp-servers/infrastructure/mcp-server-repository';
 import { listSkills } from '../../skills/application/skill-discovery';
 import { SKILL_TOOL_NAME } from '../../skills/domain/skill';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { resolveEnvironmentDisplayName } from './environment-display-name';
-import { resolveAgentRuntime, resolveRuntimeAgentId } from './resolve-agent-runtime';
+import { resolveAgentRuntime } from './resolve-agent-runtime';
 import type { ToolCapabilityCandidate } from './resolve-capability-candidates';
 import { resolveModel } from './resolve-model';
 
@@ -61,7 +62,7 @@ export async function inspectChatCapabilities(
 ): Promise<ChatCapabilitiesResponse> {
   const ownedChat = await getOwnedChatOrThrow(input.chatId, input.userId, input.db);
 
-  const requestedAgentId = resolveRuntimeAgentId(input.agentId);
+  const requestedAgentId = resolveRunnerAgentId(ownedChat.runner, input.agentId);
   const profile = await getAgentProfile(input.db, input.userId, requestedAgentId);
   const resolvedModel = await resolveModel({
     requestedModel: input.model ?? profile.model,
@@ -81,7 +82,7 @@ export async function inspectChatCapabilities(
     resolveAgentRuntime({
       db: input.db,
       userId: input.userId,
-      agentId: input.agentId,
+      agentId: requestedAgentId,
       provider: provider.providerType,
       profile,
       runtimeManifest: runtimeClient.manifest,

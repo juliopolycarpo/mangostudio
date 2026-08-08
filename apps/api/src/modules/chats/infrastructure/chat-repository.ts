@@ -32,6 +32,12 @@ function toOverrideFlag(value: number | null): boolean | null {
   return value === null ? null : value !== 0;
 }
 
+/** Exactly what {@link toRunnerConfiguration} reads, so narrow selects qualify. */
+type RunnerColumns = Pick<
+  Selectable<Database['chats']>,
+  'id' | 'runnerKind' | 'runnerAgentId' | 'runnerTargetId'
+>;
+
 /**
  * Maps the flat `runnerKind`/`runnerAgentId`/`runnerTargetId` columns to the
  * typed union at this boundary; nothing above the repository sees the flat
@@ -40,7 +46,7 @@ function toOverrideFlag(value: number | null): boolean | null {
  * (existence is checked when the turn resolves the profile, not here) is a
  * known shape with a missing referent, so it normalizes to `default` instead.
  */
-function toRunnerConfiguration(row: Selectable<Database['chats']>): ChatRunnerConfiguration {
+function toRunnerConfiguration(row: RunnerColumns): ChatRunnerConfiguration {
   if (row.runnerKind === 'mangostudio') {
     if (!row.runnerAgentId) {
       throw new ChatRunnerCorruptionError(
@@ -230,10 +236,7 @@ export async function updateChat(
   if (data.model !== undefined) dbUpdates.model = data.model;
   if (data.textModel !== undefined) dbUpdates.textModel = data.textModel;
   if (data.imageModel !== undefined) dbUpdates.imageModel = data.imageModel;
-  if (data.runner !== undefined) {
-    await assertRunnerKindChangeAllowed(id, userId, data.runner.kind, db);
-    Object.assign(dbUpdates, runnerColumns(data.runner));
-  }
+  if (data.runner !== undefined) Object.assign(dbUpdates, runnerColumns(data.runner));
   if (data.workdir !== undefined) dbUpdates.workdir = data.workdir;
   if (data.environmentId !== undefined) dbUpdates.environmentId = data.environmentId;
   if (data.restrictToolsToWorkdir !== undefined) {
@@ -243,12 +246,30 @@ export async function updateChat(
 
   if (Object.keys(dbUpdates).length === 0) return;
 
-  await db
-    .updateTable('chats')
-    .set(dbUpdates)
-    .where('id', '=', id)
-    .where('userId', '=', userId)
-    .execute();
+  const runner = data.runner;
+  if (runner === undefined) {
+    await db
+      .updateTable('chats')
+      .set(dbUpdates)
+      .where('id', '=', id)
+      .where('userId', '=', userId)
+      .execute();
+    return;
+  }
+
+  // The D14 guard reads `messages` and then writes `chats`, so it only holds
+  // if both happen under one transaction — otherwise the chat's first turn can
+  // commit between the two statements and the kind changes anyway. SQLite
+  // serializes writers, so the transaction alone closes the window.
+  await db.transaction().execute(async (trx) => {
+    await assertRunnerKindChangeAllowed(id, userId, runner.kind, trx);
+    await trx
+      .updateTable('chats')
+      .set(dbUpdates)
+      .where('id', '=', id)
+      .where('userId', '=', userId)
+      .execute();
+  });
 }
 
 export async function deleteChat(id: string, userId: string, db: Kysely<Database>): Promise<void> {
@@ -270,6 +291,7 @@ export async function verifyChatOwnership(
 
 /** Chat fields a generation turn needs; excludes the large persisted state blobs. */
 export interface OwnedChatRecord {
+  runner: ChatRunnerConfiguration;
   workdir: string | null;
   environmentId: string;
   restrictToolsToWorkdir: boolean | null;
@@ -282,12 +304,21 @@ export async function getOwnedChat(
 ): Promise<OwnedChatRecord | undefined> {
   const row = await db
     .selectFrom('chats')
-    .select(['workdir', 'environmentId', 'restrictToolsToWorkdir'])
+    .select([
+      'id',
+      'runnerKind',
+      'runnerAgentId',
+      'runnerTargetId',
+      'workdir',
+      'environmentId',
+      'restrictToolsToWorkdir',
+    ])
     .where('id', '=', chatId)
     .where('userId', '=', userId)
     .executeTakeFirst();
   if (!row) return undefined;
   return {
+    runner: toRunnerConfiguration(row),
     workdir: row.workdir,
     environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),

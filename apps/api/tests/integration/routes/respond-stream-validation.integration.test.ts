@@ -21,7 +21,7 @@ afterEach(async () => {
 describe('POST /respond/stream — validation', () => {
   it('returns 404 when chat is not found', async () => {
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(false),
+      getOwnedChat: () => Promise.resolve(undefined),
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -42,7 +42,7 @@ describe('POST /respond/stream — validation', () => {
 
   it('accepts thinkingVisibility in request body without error', async () => {
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(false),
+      getOwnedChat: () => Promise.resolve(undefined),
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -66,7 +66,7 @@ describe('POST /respond/stream — validation', () => {
 
   it('accepts thinkingEnabled and reasoningEffort in request body', async () => {
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(false),
+      getOwnedChat: () => Promise.resolve(undefined),
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -91,7 +91,7 @@ describe('POST /respond/stream — validation', () => {
 
   it('accepts legacy requests without thinkingVisibility', async () => {
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(false),
+      getOwnedChat: () => Promise.resolve(undefined),
     }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);

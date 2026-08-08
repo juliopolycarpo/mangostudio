@@ -20,6 +20,7 @@ import type { WorkdirPolicy } from '../../../services/tools/types';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
+import { resolveRunnerAgentId } from '../../chats/domain/chat-runner';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { appendTodosPromptSection } from '../../todos/application/todos-prompt-section';
 import {
@@ -29,11 +30,7 @@ import {
 import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { resolveEnvironmentDisplayName } from './environment-display-name';
-import {
-  type ResolvedAgentRuntime,
-  resolveAgentRuntime,
-  resolveRuntimeAgentId,
-} from './resolve-agent-runtime';
+import { type ResolvedAgentRuntime, resolveAgentRuntime } from './resolve-agent-runtime';
 import { type ResolvedModel, resolveModel } from './resolve-model';
 import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text-turn-content';
 
@@ -88,7 +85,7 @@ export async function resolveTurnContext(
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
 
-  const requestedAgentId = resolveRuntimeAgentId(input.agentId);
+  const requestedAgentId = resolveRunnerAgentId(chat.runner, input.agentId);
   const resolvedAgentProfile =
     input.resolvedAgentProfile ?? (await getAgentProfile(db, input.userId, requestedAgentId));
   const resolvedModel =
@@ -114,7 +111,7 @@ export async function resolveTurnContext(
     resolveAgentRuntime({
       db,
       userId: input.userId,
-      agentId: input.agentId,
+      agentId: requestedAgentId,
       provider: provider.providerType,
       requestRuntimeSettings: getRequestRuntimeSettings(provider.providerType, input),
       profile: resolvedAgentProfile,

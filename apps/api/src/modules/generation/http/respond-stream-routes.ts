@@ -5,6 +5,7 @@
  */
 
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
@@ -22,7 +23,8 @@ import {
   assertChatAttachmentIdsAvailable,
   ChatAttachmentNotFoundError,
 } from '../../attachments/infrastructure/attachment-repository';
-import { verifyChatOwnership } from '../../chats/infrastructure/chat-repository';
+import { resolveRunnerAgentId } from '../../chats/domain/chat-runner';
+import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
 import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
 import {
   NoModelAvailableError,
@@ -59,9 +61,10 @@ interface ResolvedRequestAgent {
 async function resolveRequestAgent(input: {
   readonly db: ReturnType<typeof getDb>;
   readonly userId: string;
-  readonly agentId?: string;
+  readonly runner: ChatRunnerConfiguration;
+  readonly agentId?: AgentId;
 }): Promise<ResolvedRequestAgent> {
-  const agentId = input.agentId ?? 'default';
+  const agentId = resolveRunnerAgentId(input.runner, input.agentId);
 
   const profile = await getAgentProfile(input.db, input.userId, agentId);
 
@@ -294,8 +297,11 @@ export const respondStreamRoutes = (app: Elysia) =>
           const userId = user?.id ?? '';
           const db = getDb();
 
-          // Ownership check must be pre-flight to return HTTP 404 before SSE headers flush.
-          if (!(await verifyChatOwnership(body.chatId, userId, db))) {
+          // Ownership check must be pre-flight to return HTTP 404 before SSE
+          // headers flush. The same read supplies the persisted runner, which
+          // names the agent when the request does not.
+          const ownedChat = await getOwnedChat(body.chatId, userId, db);
+          if (!ownedChat) {
             set.status = 404;
             return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }
@@ -347,6 +353,7 @@ export const respondStreamRoutes = (app: Elysia) =>
             resolvedAgent = await resolveRequestAgent({
               db,
               userId,
+              runner: ownedChat.runner,
               agentId: inspectedRecovery?.agentId ?? body.agentId,
             });
             resolvedModel = await resolveModel({

@@ -32,7 +32,13 @@ describe('POST /respond/stream — tool execution edge cases', () => {
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
-      getOwnedChat: () => Promise.resolve({ workdir: null, restrictToolsToWorkdir: null }),
+      getOwnedChat: () =>
+        Promise.resolve({
+          runner: { kind: 'mangostudio', agentId: 'default' },
+          workdir: null,
+          environmentId: 'local',
+          restrictToolsToWorkdir: null,
+        }),
     }));
 
     await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
@@ -161,7 +167,13 @@ describe('POST /respond/stream — tool execution edge cases', () => {
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
-      getOwnedChat: () => Promise.resolve({ workdir: null, restrictToolsToWorkdir: null }),
+      getOwnedChat: () =>
+        Promise.resolve({
+          runner: { kind: 'mangostudio', agentId: 'default' },
+          workdir: null,
+          environmentId: 'local',
+          restrictToolsToWorkdir: null,
+        }),
     }));
 
     await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
@@ -279,7 +291,13 @@ describe('POST /respond/stream — tool execution edge cases', () => {
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
-      getOwnedChat: () => Promise.resolve({ workdir: null, restrictToolsToWorkdir: null }),
+      getOwnedChat: () =>
+        Promise.resolve({
+          runner: { kind: 'mangostudio', agentId: 'default' },
+          workdir: null,
+          environmentId: 'local',
+          restrictToolsToWorkdir: null,
+        }),
     }));
 
     await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({

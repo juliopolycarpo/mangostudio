@@ -58,14 +58,13 @@ export interface ResolveAgentRuntimeInput {
   readonly environmentName?: string;
 }
 
-export function resolveRuntimeAgentId(agentId: AgentId | undefined): AgentId {
-  return agentId ?? 'default';
-}
-
 export async function resolveAgentRuntime(
   input: ResolveAgentRuntimeInput
 ): Promise<ResolvedAgentRuntime> {
-  const requestedAgentId = resolveRuntimeAgentId(input.agentId);
+  // Callers that own a chat resolve the agent against its persisted runner
+  // first (see `resolveRunnerAgentId`); this fallback only covers runtimes
+  // resolved outside a chat, such as subagent delegation.
+  const requestedAgentId = input.agentId ?? 'default';
   const profile =
     input.profile ?? (await getAgentProfile(input.db, input.userId, requestedAgentId));
   const [savedProviderSettings, toolSettings, mcpServerSnapshots] = await Promise.all([

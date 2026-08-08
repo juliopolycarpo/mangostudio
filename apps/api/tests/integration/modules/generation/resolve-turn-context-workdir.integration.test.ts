@@ -1,7 +1,8 @@
 /**
- * resolveTurnContext workdir scoping: the chat row may store a workdir for the
- * agent UI, but TurnContext only exposes it (and policy) in agent mode so
- * prompts and filesystem tools agree.
+ * resolveTurnContext reading the chat row: the workdir it stores reaches
+ * TurnContext as both a policy and a prompt section, so prompts and
+ * filesystem tools agree; the runner it stores names the agent that runs the
+ * turn when the request does not.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -142,5 +143,37 @@ describe('resolveTurnContext workdir scope', () => {
     expect(context.workdirPolicy).toEqual({ root: boundWorkdir, restricted: true });
     expect(context.effectiveSystemPrompt).toContain(`Working directory:\n${boundWorkdir}`);
     expect(context.effectiveSystemPrompt).toContain(WORKDIR_RESTRICTED_PROMPT_LINE);
+  });
+});
+
+describe('resolveTurnContext agent resolution', () => {
+  it('runs the persisted runner agent when the request names none', async () => {
+    await getDb()
+      .updateTable('chats')
+      .set({ runnerAgentId: 'explore' })
+      .where('id', '=', chatId)
+      .execute();
+
+    const context = await resolveTurnContext(
+      { chatId, userId: user.id, prompt: 'Hello', model: MODEL_ID },
+      getDb()
+    );
+
+    expect(context.agentRuntime.profile.id).toBe('explore');
+  });
+
+  it('lets an explicit request agent override the persisted runner', async () => {
+    await getDb()
+      .updateTable('chats')
+      .set({ runnerAgentId: 'explore' })
+      .where('id', '=', chatId)
+      .execute();
+
+    const context = await resolveTurnContext(
+      { chatId, userId: user.id, prompt: 'Hello', model: MODEL_ID, agentId: 'default' },
+      getDb()
+    );
+
+    expect(context.agentRuntime.profile.id).toBe('default');
   });
 });
