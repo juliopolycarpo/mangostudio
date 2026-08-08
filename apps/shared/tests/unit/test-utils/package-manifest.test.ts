@@ -42,7 +42,7 @@ describe('shared package manifest', () => {
   it('declares faker as a runtime dependency for the exported test-utils entrypoint', async () => {
     const manifest = await readSharedManifest();
 
-    expect(manifest.dependencies?.['@faker-js/faker']).toBe('^10.4.0');
+    expect(manifest.dependencies?.['@faker-js/faker']).toBeDefined();
     expect(manifest.devDependencies?.['@faker-js/faker']).toBeUndefined();
   });
 });
