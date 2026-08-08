@@ -34,7 +34,19 @@ describe('respond stream test helpers', () => {
     await insertMessage(db, { role: 'ai', text: 'Ignored' });
     const row = await executeOwnershipLookup(db);
 
-    expect(row).toEqual({ userId: 'user-1' });
+    // The pre-flight read is `getOwnedChat`, which maps the runner columns
+    // into the typed union, so the stand-in row has to carry them: a bare
+    // `{ userId }` reads as a corrupt runner configuration.
+    expect(row).toEqual({
+      id: 'chat-1',
+      userId: 'user-1',
+      runnerKind: 'mangostudio',
+      runnerAgentId: 'default',
+      runnerTargetId: null,
+      workdir: null,
+      environmentId: 'local',
+      restrictToolsToWorkdir: null,
+    });
   });
 
   it('creates the subagent delegation error class used by runner mocks', () => {
