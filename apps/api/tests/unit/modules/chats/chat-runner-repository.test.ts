@@ -66,7 +66,7 @@ describe('chat runner mapping', () => {
       .where('id', '=', chat.id)
       .execute();
 
-    expect(getById(chat.id, getDb())).rejects.toThrow(/corrupt runner configuration/);
+    await expect(getById(chat.id, getDb())).rejects.toThrow(/corrupt runner configuration/);
   });
 
   it('exposes the runner to the generation turn path', async () => {
@@ -109,7 +109,7 @@ describe('D14 runner kind immutability', () => {
     const chat = await insertTestChat(user.id);
     await insertMessage(chat.id);
 
-    expect(
+    await expect(
       updateChat(chat.id, user.id, { runner: { kind: 'external', targetId: 'codex' } }, getDb())
     ).rejects.toBeInstanceOf(RunnerKindImmutableError);
 
@@ -141,7 +141,7 @@ describe('D14 runner kind immutability', () => {
     const chat = await insertTestChat(user.id);
     await insertMessage(chat.id);
 
-    expect(
+    await expect(
       updateChat(
         chat.id,
         user.id,
