@@ -156,13 +156,16 @@ describe('containerConfigRefusal', () => {
     // The engines' own state: every other container's rootfs and layers.
     ['/var/lib/docker', 'denied-prefix', '/var/lib/docker'],
     ['/var/lib/containers/storage', 'denied-prefix', '/var/lib/containers'],
-  ] as const)('refuses %s, which reaches an engine socket or its state', (hostPath, code, prefix) => {
-    const refusal = containerConfigRefusal(
-      config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })
-    );
-    expect(refusal?.code).toBe(code);
-    if (prefix !== undefined) expect(refusal?.params.prefix).toBe(prefix);
-  });
+  ] as const)(
+    'refuses %s, which reaches an engine socket or its state',
+    (hostPath, code, prefix) => {
+      const refusal = containerConfigRefusal(
+        config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })
+      );
+      expect(refusal?.code).toBe(code);
+      if (prefix !== undefined) expect(refusal?.params.prefix).toBe(prefix);
+    }
+  );
 
   it('still calls the filesystem root a root rather than naming one denied child', () => {
     const refusal = containerConfigRefusal(
@@ -171,25 +174,23 @@ describe('containerConfigRefusal', () => {
     expect(refusal?.code).toBe('host-root');
   });
 
-  it.each([
-    '/Proc',
-    '/Sys/exports',
-    '/RUN/data',
-    '/home/j/.Docker',
-  ])('allows %s, which is an ordinary directory on a case-sensitive filesystem', (hostPath) => {
-    expect(
-      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/work' }] }))
-    ).toBeNull();
-  });
+  it.each(['/Proc', '/Sys/exports', '/RUN/data', '/home/j/.Docker'])(
+    'allows %s, which is an ordinary directory on a case-sensitive filesystem',
+    (hostPath) => {
+      expect(
+        containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/work' }] }))
+      ).toBeNull();
+    }
+  );
 
-  it.each([
-    'C:\\Users\\j\\.Docker',
-    'C:\\VAR\\RUN\\Docker.sock',
-  ])('still folds case for %s, because Windows does', (hostPath) => {
-    expect(
-      containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/work' }] }))?.code
-    ).toBe('engine-control');
-  });
+  it.each(['C:\\Users\\j\\.Docker', 'C:\\VAR\\RUN\\Docker.sock'])(
+    'still folds case for %s, because Windows does',
+    (hostPath) => {
+      expect(
+        containerConfigRefusal(config({ mounts: [{ hostPath, containerPath: '/work' }] }))?.code
+      ).toBe('engine-control');
+    }
+  );
 
   it('allows a directory whose name merely contains a denied segment', () => {
     expect(
@@ -211,13 +212,16 @@ describe('containerConfigRefusal', () => {
     ['/tmp/../proc', 'denied-prefix', '/proc'],
     ['/tmp/../../var/run', 'denied-prefix', '/var/run'],
     ['/home/j/../../var/run/docker.sock', 'engine-control', undefined],
-  ] as const)('refuses a denied path spelled with a traversal segment: %s', (hostPath, code, prefix) => {
-    const refusal = containerConfigRefusal(
-      config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })
-    );
-    expect(refusal?.code).toBe(code);
-    if (prefix !== undefined) expect(refusal?.params.prefix).toBe(prefix);
-  });
+  ] as const)(
+    'refuses a denied path spelled with a traversal segment: %s',
+    (hostPath, code, prefix) => {
+      const refusal = containerConfigRefusal(
+        config({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })
+      );
+      expect(refusal?.code).toBe(code);
+      if (prefix !== undefined) expect(refusal?.params.prefix).toBe(prefix);
+    }
+  );
 
   it('allows a traversal that resolves to an ordinary path', () => {
     expect(
@@ -227,17 +231,14 @@ describe('containerConfigRefusal', () => {
     ).toBeNull();
   });
 
-  it.each([
-    '/',
-    'C:\\foo\\..\\..',
-    'C:/',
-    'C:\\',
-    'c:/',
-  ])('refuses the host filesystem root: %s', (hostPath) => {
-    expect(refusalText({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })).toMatch(
-      /entire filesystem/
-    );
-  });
+  it.each(['/', 'C:\\foo\\..\\..', 'C:/', 'C:\\', 'c:/'])(
+    'refuses the host filesystem root: %s',
+    (hostPath) => {
+      expect(refusalText({ mounts: [{ hostPath, containerPath: '/mnt/x' }] })).toMatch(
+        /entire filesystem/
+      );
+    }
+  );
 
   it('refuses a host path carrying its own mount separator', () => {
     expect(

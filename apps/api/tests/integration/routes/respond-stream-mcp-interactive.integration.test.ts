@@ -228,88 +228,91 @@ describe('POST /respond/stream — interactive MCP end to end', () => {
     ['accept', 'accepted'],
     ['decline', 'declined'],
     ['cancel', 'cancelled'],
-  ] as const)('streams, persists, and reloads an elicitation %s response', async (action, expectedStatus) => {
-    const provider = installProvider([{ callId: 'call-1', name: `mcp__${SERVER_SLUG}__elicit` }]);
-    const { recorder } = await startStream();
-    const requestEvent = await recorder.readUntil(
-      (event) => event.type === 'mcp_elicitation_request'
-    );
-    const elicitationId = String(requestEvent.elicitationId);
+  ] as const)(
+    'streams, persists, and reloads an elicitation %s response',
+    async (action, expectedStatus) => {
+      const provider = installProvider([{ callId: 'call-1', name: `mcp__${SERVER_SLUG}__elicit` }]);
+      const { recorder } = await startStream();
+      const requestEvent = await recorder.readUntil(
+        (event) => event.type === 'mcp_elicitation_request'
+      );
+      const elicitationId = String(requestEvent.elicitationId);
 
-    const pendingParts = assistantParts(await reloadMessages());
-    expect(pendingParts).toContainEqual(
-      expect.objectContaining({
-        type: 'mcp_elicitation',
-        elicitationId,
-        toolCallId: 'call-1',
-        status: 'pending',
-      })
-    );
+      const pendingParts = assistantParts(await reloadMessages());
+      expect(pendingParts).toContainEqual(
+        expect.objectContaining({
+          type: 'mcp_elicitation',
+          elicitationId,
+          toolCallId: 'call-1',
+          status: 'pending',
+        })
+      );
 
-    const response = await respondToElicitation(elicitationId, action);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, status: expectedStatus });
+      const response = await respondToElicitation(elicitationId, action);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, status: expectedStatus });
 
-    const events = await recorder.finish();
-    assertPublicStreamSchema(events);
-    expect(eventTypes(events)).toEqual([
-      'user_message_id',
-      'assistant_message_id',
-      'tool_call_started',
-      'tool_call_completed',
-      'context_info',
-      'tool_execution',
-      'tool_execution',
-      'tool_execution',
-      'mcp_elicitation_request',
-      'tool_execution',
-      'mcp_elicitation_status',
-      'tool_execution',
-      'tool_result',
-      'text',
-      'context_info',
-      'done',
-    ]);
-    expect(executionStatuses(events, 'call-1').map(({ status }) => status)).toEqual([
-      'queued',
-      'running',
-      'awaiting_user',
-      'running',
-      'succeeded',
-    ]);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'mcp_elicitation_status',
-        elicitationId,
-        toolCallId: 'call-1',
-        status: expectedStatus,
-        reason: 'responded',
-      })
-    );
+      const events = await recorder.finish();
+      assertPublicStreamSchema(events);
+      expect(eventTypes(events)).toEqual([
+        'user_message_id',
+        'assistant_message_id',
+        'tool_call_started',
+        'tool_call_completed',
+        'context_info',
+        'tool_execution',
+        'tool_execution',
+        'tool_execution',
+        'mcp_elicitation_request',
+        'tool_execution',
+        'mcp_elicitation_status',
+        'tool_execution',
+        'tool_result',
+        'text',
+        'context_info',
+        'done',
+      ]);
+      expect(executionStatuses(events, 'call-1').map(({ status }) => status)).toEqual([
+        'queued',
+        'running',
+        'awaiting_user',
+        'running',
+        'succeeded',
+      ]);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'mcp_elicitation_status',
+          elicitationId,
+          toolCallId: 'call-1',
+          status: expectedStatus,
+          reason: 'responded',
+        })
+      );
 
-    const terminalParts = assistantParts(await reloadMessages());
-    expect(terminalParts).toContainEqual(
-      expect.objectContaining({ type: 'mcp_elicitation', elicitationId, status: expectedStatus })
-    );
-    expect(terminalParts).toContainEqual(
-      expect.objectContaining({
-        type: 'tool_call',
-        toolCallId: 'call-1',
-        execution: expect.objectContaining({ status: 'succeeded', source: 'mcp' }),
-      })
-    );
-    expect(provider.requests[1]?.toolResults?.[0]).toMatchObject({
-      callId: 'call-1',
-      isError: false,
-    });
+      const terminalParts = assistantParts(await reloadMessages());
+      expect(terminalParts).toContainEqual(
+        expect.objectContaining({ type: 'mcp_elicitation', elicitationId, status: expectedStatus })
+      );
+      expect(terminalParts).toContainEqual(
+        expect.objectContaining({
+          type: 'tool_call',
+          toolCallId: 'call-1',
+          execution: expect.objectContaining({ status: 'succeeded', source: 'mcp' }),
+        })
+      );
+      expect(provider.requests[1]?.toolResults?.[0]).toMatchObject({
+        callId: 'call-1',
+        isError: false,
+      });
 
-    const stale = await respondToElicitation(elicitationId, 'decline');
-    expect(stale.status).toBe(404);
-    expect(await stale.json()).toEqual({
-      error: 'Elicitation not found or already resolved.',
-      code: 'NOT_FOUND',
-    });
-  });
+      const stale = await respondToElicitation(elicitationId, 'decline');
+      expect(stale.status).toBe(404);
+      expect(await stale.json()).toEqual({
+        error: 'Elicitation not found or already resolved.',
+        code: 'NOT_FOUND',
+      });
+    }
+  );
 
   it('distinguishes elicitation timeout from an explicit turn abort', async () => {
     await getDb()

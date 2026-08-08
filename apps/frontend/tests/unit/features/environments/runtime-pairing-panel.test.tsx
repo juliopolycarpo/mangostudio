@@ -175,7 +175,7 @@ describe('Add Environment reachability picker', () => {
         (init as RequestInit | undefined)?.method?.toUpperCase() === 'POST' &&
         String(input instanceof Request ? input.url : input).endsWith('/api/environments')
     );
-    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toEqual({
+    expect(JSON.parse(String((call?.[1] as RequestInit | undefined)?.body))).toEqual({
       id: 'workshop',
       name: 'Workshop',
       transportKind: 'websocket',

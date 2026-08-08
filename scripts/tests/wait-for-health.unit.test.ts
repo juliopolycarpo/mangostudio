@@ -64,13 +64,13 @@ describe('scripts/lib/wait-for-health', () => {
       expect(resolveReadyBudgetMs()).toBe(WIN32_READY_BUDGET_MS);
     });
 
-    test.each([
-      'linux',
-      'darwin',
-    ] as const)('returns the shared default budget on %s', (platform) => {
-      restorePlatform = stubProcessPlatform(platform);
-      expect(resolveReadyBudgetMs()).toBe(DEFAULT_READY_BUDGET_MS);
-    });
+    test.each(['linux', 'darwin'] as const)(
+      'returns the shared default budget on %s',
+      (platform) => {
+        restorePlatform = stubProcessPlatform(platform);
+        expect(resolveReadyBudgetMs()).toBe(DEFAULT_READY_BUDGET_MS);
+      }
+    );
   });
 
   describe('waitForServerReady', () => {

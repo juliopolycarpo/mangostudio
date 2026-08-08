@@ -27,13 +27,10 @@ describe('validateRepoPaths', () => {
   // These resolve inside the root, so a purely lexical containment check passes
   // them. Without `:(literal)` they reach Git as magic pathspecs and widen the
   // operation to files the caller never selected — `--` does not disable magic.
-  it.each([
-    ':/',
-    ':!a.txt',
-    ':(exclude)a.txt',
-    ':(glob)**/*.ts',
-    ':(top)a.txt',
-  ])('neutralizes pathspec magic that lexical containment cannot reject: %s', (path) => {
-    expect(validateRepoPaths('/srv/repo', [path])).toEqual([`:(literal)${path}`]);
-  });
+  it.each([':/', ':!a.txt', ':(exclude)a.txt', ':(glob)**/*.ts', ':(top)a.txt'])(
+    'neutralizes pathspec magic that lexical containment cannot reject: %s',
+    (path) => {
+      expect(validateRepoPaths('/srv/repo', [path])).toEqual([`:(literal)${path}`]);
+    }
+  );
 });

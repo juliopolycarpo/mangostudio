@@ -29,8 +29,7 @@
     },
     "apps/frontend": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/support/setup/motion-react-stub.tsx"],
-      "project": ["src/**/*.{ts,tsx}", "tests/**/*.{ts,tsx}", "*.config.ts"],
-      "ignoreDependencies": ["tailwindcss"]
+      "project": ["src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}", "*.config.ts"]
     },
     "apps/shared": {
       "entry": ["tests/**/*.test.ts"],

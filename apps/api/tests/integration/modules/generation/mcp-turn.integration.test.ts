@@ -484,7 +484,7 @@ describe('cross-feature turn (skill + MCP)', () => {
 
     const events = await collectTurn('Load notes and echo.');
 
-    expect((toolResult(events, 'skill-1')?.result as { body: string }).body).toContain(
+    expect((toolResult(events, 'skill-1')?.result as { body: string } | undefined)?.body).toContain(
       'Notes body'
     );
     expect(toolResult(events, 'mcp-1')?.result).toBe('cross-feature');
