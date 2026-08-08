@@ -87,6 +87,42 @@ export function useRunnerSelection({
   // once per chat the first time it is observed without one, rather than on
   // a mode switch that no longer exists.
   const workdirDefaultedChatIds = useRef(new Set<string>());
+
+  /**
+   * Binds a chat that was just created mid-submit, before its first turn opens.
+   *
+   * Neither of the two paths below can cover this window: `persistRunner` had
+   * no chat id to write to when the picker was used on the empty state, and the
+   * workdir effect cannot fire until React has observed the new record — by
+   * which time generation has already started. Left alone, the first turn runs
+   * against the server's `default` runner with no workdir, so a configured
+   * `restrictToolsToWorkdir` has nothing to contain.
+   */
+  const bindNewChat = useCallback(
+    async (chatId: string) => {
+      const pendingRunner = runnerOverride?.chatId === null ? runnerOverride.runner : null;
+      if (pendingRunner) {
+        setRunnerOverride({ chatId, runner: pendingRunner });
+        await updateChatRunner(chatId, pendingRunner).catch(() => {
+          setRunnerOverride((current) => (current?.chatId === chatId ? null : current));
+        });
+      }
+
+      if (workdirDefaultedChatIds.current.has(chatId)) return;
+      workdirDefaultedChatIds.current.add(chatId);
+
+      if (!defaultWorkdir) {
+        setWorkdirPickerOpen(true);
+        return;
+      }
+
+      await updateChatWorkdir(chatId, defaultWorkdir)
+        .then(() => addRecentWorkdir(defaultWorkdir))
+        .catch(() => setWorkdirPickerOpen(true));
+    },
+    [addRecentWorkdir, defaultWorkdir, runnerOverride, updateChatRunner, updateChatWorkdir]
+  );
+
   useEffect(() => {
     // A selected chat has an id before its record arrives, and a missing
     // record is indistinguishable from a null workdir. Acting on that window
@@ -114,6 +150,7 @@ export function useRunnerSelection({
     selectedAgent,
     currentWorkdir: currentChat?.workdir ?? null,
     isWorkdirPickerOpen,
+    bindNewChat,
     setRunnerAgentId,
     setRunnerTarget,
     openWorkdirPicker,

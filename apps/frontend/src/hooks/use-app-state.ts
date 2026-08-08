@@ -47,6 +47,7 @@ export function useAppState() {
       agentId: runnerSelection.selectedAgentId ?? 'default',
       agentName: runnerSelection.selectedAgent?.name,
     }),
+    onChatCreated: runnerSelection.bindNewChat,
   });
   useChatContextSync(chats.chats, textGen.seedContextInfo);
 

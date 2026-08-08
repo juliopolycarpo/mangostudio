@@ -107,6 +107,100 @@ describe('useRunnerSelection workdir binding', () => {
   });
 });
 
+describe('useRunnerSelection binding a chat created mid-submit', () => {
+  const updateChatRunner = vi.fn(() => Promise.resolve());
+  const updateChatWorkdir = vi.fn(() => Promise.resolve());
+  const addRecentWorkdir = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  interface SelectionProps {
+    readonly currentChatId: string | null;
+    readonly currentChat: ChatWithContext | null;
+  }
+
+  const EMPTY_STATE: SelectionProps = { currentChatId: null, currentChat: null };
+
+  function renderOnEmptyState(defaultWorkdir: string) {
+    return renderHook(
+      (props: SelectionProps) =>
+        useRunnerSelection({
+          ...props,
+          defaultWorkdir,
+          updateChatRunner,
+          updateChatWorkdir,
+          addRecentWorkdir,
+        }),
+      { initialProps: EMPTY_STATE }
+    );
+  }
+
+  it('persists the agent picked before any chat existed', async () => {
+    const { result, rerender } = renderOnEmptyState('/srv/projects/default');
+
+    act(() => result.current.setRunnerAgentId('explore'));
+    expect(updateChatRunner).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.bindNewChat('chat-new');
+    });
+
+    expect(updateChatRunner).toHaveBeenCalledWith('chat-new', {
+      kind: 'mangostudio',
+      agentId: 'explore',
+    });
+
+    // `createChat` selects the new id, and the retargeted override has to
+    // survive that — otherwise the picker snaps back to the server's `default`
+    // as soon as the new chat renders, and so does every later turn.
+    rerender({
+      currentChatId: 'chat-new',
+      currentChat: { ...CHAT, id: 'chat-new', workdir: '/srv/projects/default' },
+    });
+
+    expect(result.current.selectedAgentId).toBe('explore');
+  });
+
+  it('applies the default workdir before the first turn opens', async () => {
+    const { result } = renderOnEmptyState('/srv/projects/default');
+
+    await act(async () => {
+      await result.current.bindNewChat('chat-new');
+    });
+
+    expect(updateChatWorkdir).toHaveBeenCalledWith('chat-new', '/srv/projects/default');
+    expect(addRecentWorkdir).toHaveBeenCalledWith('/srv/projects/default');
+  });
+
+  it('opens the picker when no default workdir is configured', async () => {
+    const { result } = renderOnEmptyState('');
+
+    await act(async () => {
+      await result.current.bindNewChat('chat-new');
+    });
+
+    expect(updateChatWorkdir).not.toHaveBeenCalled();
+    expect(result.current.isWorkdirPickerOpen).toBe(true);
+  });
+
+  it('does not re-apply the default once the chat record arrives', async () => {
+    const { result, rerender } = renderOnEmptyState('/srv/projects/default');
+
+    await act(async () => {
+      await result.current.bindNewChat('chat-new');
+    });
+
+    rerender({
+      currentChatId: 'chat-new',
+      currentChat: { ...CHAT, id: 'chat-new', workdir: null },
+    });
+
+    await waitFor(() => expect(updateChatWorkdir).toHaveBeenCalledTimes(1));
+  });
+});
+
 describe('useRunnerSelection agent selection', () => {
   const updateChatWorkdir = vi.fn(() => Promise.resolve());
   const addRecentWorkdir = vi.fn();
