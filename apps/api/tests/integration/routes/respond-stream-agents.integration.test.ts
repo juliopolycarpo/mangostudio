@@ -77,6 +77,33 @@ describe('POST /respond/stream — agent resolution', () => {
     expect(body.error).toBe('Agent not found');
   });
 
+  // Migration 044 carries a dangling `user:<slug>` selection through, and an
+  // agent can be deleted out from under a chat at any time. That chat is still
+  // usable, so its turns fall back rather than 404 until someone repicks.
+  it("falls back to Default when the chat's persisted runner names a deleted agent", async () => {
+    const requestedAgentIds: string[] = [];
+    await mockVerifiedChatOwnership(null, { kind: 'mangostudio', agentId: 'user:deleted' });
+    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+      getAgentProfile: (_db: unknown, _userId: string, agentId: string) => {
+        requestedAgentIds.push(agentId);
+        if (agentId !== 'default') {
+          return Promise.reject(new AgentSettingsError('Agent not found.', 404, 'NOT_FOUND'));
+        }
+        return Promise.resolve({ id: 'default' });
+      },
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      buildRespondStreamRequest({ chatId: 'chat-1', prompt: 'Hello' })
+    );
+
+    expect(requestedAgentIds).toEqual(['user:deleted', 'default']);
+    expect(response.status).not.toBe(404);
+  });
+
   it('sends the selected agent system prompt to the provider', async () => {
     let capturedSystemPrompt: string | undefined;
     let capturedPrompt: string | undefined;

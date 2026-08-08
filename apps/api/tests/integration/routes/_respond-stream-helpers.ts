@@ -1,5 +1,6 @@
 import { mock } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { getDb } from '../../../src/db/database';
@@ -224,12 +225,15 @@ export function buildRespondStreamRequest(body: Record<string, unknown>): Reques
  * Mocks chat ownership as verified for streaming route authorization.
  * // Usage: await mockVerifiedChatOwnership()
  */
-export async function mockVerifiedChatOwnership(workdir: string | null = null): Promise<void> {
+export async function mockVerifiedChatOwnership(
+  workdir: string | null = null,
+  runner: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' }
+): Promise<void> {
   await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
     verifyChatOwnership: () => Promise.resolve(true),
     getOwnedChat: () =>
       Promise.resolve({
-        runner: { kind: 'mangostudio', agentId: 'default' },
+        runner,
         workdir,
         environmentId: LOCAL_ENVIRONMENT_ID,
         restrictToolsToWorkdir: null,

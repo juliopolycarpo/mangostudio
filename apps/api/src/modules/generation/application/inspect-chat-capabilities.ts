@@ -29,11 +29,9 @@ import {
 } from '../../../services/providers/core/provider-registry';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
-import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { extractContextInfo } from '../../chats/application/list-chats';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
-import { resolveRunnerAgentId } from '../../chats/domain/chat-runner';
 import { getById } from '../../chats/infrastructure/chat-repository';
 import { listMcpServerRows } from '../../mcp-servers/infrastructure/mcp-server-repository';
 import { listSkills } from '../../skills/application/skill-discovery';
@@ -43,6 +41,7 @@ import { resolveEnvironmentDisplayName } from './environment-display-name';
 import { resolveAgentRuntime } from './resolve-agent-runtime';
 import type { ToolCapabilityCandidate } from './resolve-capability-candidates';
 import { resolveModel } from './resolve-model';
+import { resolveRunnerAgentProfile } from './resolve-runner-agent';
 
 export interface InspectChatCapabilitiesInput {
   readonly db: Kysely<Database>;
@@ -62,8 +61,12 @@ export async function inspectChatCapabilities(
 ): Promise<ChatCapabilitiesResponse> {
   const ownedChat = await getOwnedChatOrThrow(input.chatId, input.userId, input.db);
 
-  const requestedAgentId = resolveRunnerAgentId(ownedChat.runner, input.agentId);
-  const profile = await getAgentProfile(input.db, input.userId, requestedAgentId);
+  const { agentId: requestedAgentId, profile } = await resolveRunnerAgentProfile({
+    db: input.db,
+    userId: input.userId,
+    runner: ownedChat.runner,
+    agentId: input.agentId,
+  });
   const resolvedModel = await resolveModel({
     requestedModel: input.model ?? profile.model,
     userId: input.userId,

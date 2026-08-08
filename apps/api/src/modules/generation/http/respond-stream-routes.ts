@@ -4,8 +4,6 @@
  * and error serialization.
  */
 
-import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
-import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { RespondStreamBodySchema } from '@mangostudio/shared/generation';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
@@ -17,13 +15,11 @@ import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
-import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { AgentSettingsError } from '../../agents/domain/agent-profile';
 import {
   assertChatAttachmentIdsAvailable,
   ChatAttachmentNotFoundError,
 } from '../../attachments/infrastructure/attachment-repository';
-import { resolveRunnerAgentId } from '../../chats/domain/chat-runner';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
 import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
 import {
@@ -31,6 +27,10 @@ import {
   type ResolvedModel,
   resolveModel,
 } from '../application/resolve-model';
+import {
+  type ResolvedRunnerAgent,
+  resolveRunnerAgentProfile,
+} from '../application/resolve-runner-agent';
 import { type StreamEvent, streamTextTurn } from '../application/stream-text-turn';
 import {
   assertTextTurnHasContent,
@@ -52,24 +52,6 @@ function sseEvent(data: object): Uint8Array {
 }
 
 const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
-
-interface ResolvedRequestAgent {
-  readonly agentId: AgentId;
-  readonly profile: AgentProfile;
-}
-
-async function resolveRequestAgent(input: {
-  readonly db: ReturnType<typeof getDb>;
-  readonly userId: string;
-  readonly runner: ChatRunnerConfiguration;
-  readonly agentId?: AgentId;
-}): Promise<ResolvedRequestAgent> {
-  const agentId = resolveRunnerAgentId(input.runner, input.agentId);
-
-  const profile = await getAgentProfile(input.db, input.userId, agentId);
-
-  return { agentId: profile.id, profile };
-}
 
 function toSsePayload(event: StreamEvent): object {
   switch (event.type) {
@@ -348,9 +330,9 @@ export const respondStreamRoutes = (app: Elysia) =>
 
           // Model resolution must be pre-flight to return HTTP 503 before SSE headers flush.
           let resolvedModel: ResolvedModel;
-          let resolvedAgent: ResolvedRequestAgent;
+          let resolvedAgent: ResolvedRunnerAgent;
           try {
-            resolvedAgent = await resolveRequestAgent({
+            resolvedAgent = await resolveRunnerAgentProfile({
               db,
               userId,
               runner: ownedChat.runner,
