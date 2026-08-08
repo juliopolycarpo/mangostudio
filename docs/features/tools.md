@@ -69,13 +69,13 @@ interface ToolSettingsMetadata {
 
 ## Built-in Tools
 
-Chats bind a server-side working directory. Filesystem tools default omitted
-`path` / `cwd` arguments to the bound directory, resolve relative arguments
-against it, and the agent system prompt announces it. A chat with no bound
-directory falls back to the API process working directory when `cwd` is
-omitted, and tools such as `list_directory` and `grep` still require an
-explicit `path`. When restriction is enabled, path containment policy applies
-to routed tools.
+Chats bind a server-side working directory. Filesystem tools resolve relative
+`path` / `cwd` arguments against the bound directory, and the agent system
+prompt announces it. Tools that take a `cwd` default it to the bound
+directory; a chat with no bound directory falls back to the API process
+working directory. Tools such as `read_file`, `list_directory`, and `grep`
+still require an explicit `path`. When restriction is enabled, path
+containment policy applies to routed tools.
 
 ### `generate_image`
 
