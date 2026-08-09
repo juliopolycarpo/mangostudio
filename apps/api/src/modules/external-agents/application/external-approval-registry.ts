@@ -146,13 +146,6 @@ export function createExternalApprovalRegistry(
     return created;
   }
 
-  function forget(chatId: string, requestId: string): void {
-    const entries = byChat.get(chatId);
-    if (!entries) return;
-    entries.delete(requestId);
-    if (entries.size === 0) byChat.delete(chatId);
-  }
-
   return {
     register(input) {
       chatEntries(input.binding.chatId).set(input.binding.requestId, {
@@ -204,17 +197,13 @@ export function createExternalApprovalRegistry(
         resolvedAt: now(),
       };
 
-      try {
-        await pending.forward(input.optionId);
-      } catch (error) {
-        // The authorization stands — the user did answer — but the vendor never
-        // heard it, so the turn will fail on its own terms. Keeping the record
-        // resolved stops a retry from authorizing a second time.
-        forget(input.chatId, input.requestId);
-        throw error;
-      }
-
-      forget(input.chatId, input.requestId);
+      // The record stays after a successful answer, so a client that retried a
+      // dropped response gets the outcome it already caused rather than a
+      // refusal. It is dropped when the turn ends, which bounds it to one turn's
+      // approvals. A failed forward keeps it for the same reason the comment
+      // above gives: the authorization stands even though the vendor never
+      // heard it, so a retry must not authorize a second time.
+      await pending.forward(input.optionId);
       return { status: 'accepted', optionId: input.optionId, idempotent: false };
     },
 
@@ -225,6 +214,8 @@ export function createExternalApprovalRegistry(
       const resolutions: ExternalApprovalResolution[] = [];
       for (const [requestId, pending] of entries) {
         if (pending.binding.nativeTurnId !== nativeTurnId) continue;
+        // Every entry for the turn goes, answered or not: this is what keeps
+        // the answered ones from accumulating for the life of the chat.
         entries.delete(requestId);
         if (pending.resolved) continue;
         resolutions.push({ requestId, source, resolvedAt: at });
@@ -238,7 +229,11 @@ export function createExternalApprovalRegistry(
     },
 
     pendingCount(chatId) {
-      return byChat.get(chatId)?.size ?? 0;
+      const entries = byChat.get(chatId);
+      if (!entries) return 0;
+      let pending = 0;
+      for (const entry of entries.values()) if (!entry.resolved) pending += 1;
+      return pending;
     },
   };
 }

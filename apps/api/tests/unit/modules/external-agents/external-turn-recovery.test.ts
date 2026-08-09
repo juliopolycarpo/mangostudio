@@ -144,15 +144,17 @@ describe('external turn recovery', () => {
     expect((await readParts(messageId)).generating).toBe(true);
   });
 
-  it('does not rewrite a turn that already reached a terminal state', async () => {
+  it('clears a row recorded terminal before its final update landed', async () => {
     const messageId = await insertGeneratingMessage([
       { ...ACTIVE_TURN_PART, status: 'terminal', terminalReason: 'cancelled-by-user' },
     ]);
 
     await expect(
       reconcileExternalTurns({ reason: 'hub-restarted', chatId }, getDb())
-    ).resolves.toBe(0);
+    ).resolves.toBe(1);
     const stored = await readParts(messageId);
+    // The flag goes; the reason the turn actually ended for stays.
+    expect(stored.generating).toBe(false);
     expect(stored.parts[0]).toMatchObject({ terminalReason: 'cancelled-by-user' });
   });
 });

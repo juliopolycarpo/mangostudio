@@ -11,6 +11,12 @@
  * it records the reason on the turn's own record. Approvals left pending are
  * sealed at the same time: an approval whose hub restarted is not going to be
  * answered, and a card that says otherwise is a lie the user can click.
+ *
+ * This runs at boot and nowhere else, deliberately. `hub-restarted` is only
+ * honest about a hub that is starting up; a periodic sweep would have to name a
+ * reason for a turn whose controller vanished while the hub kept running, and
+ * every member of the closed set would be a claim nothing here can support.
+ * During normal operation the controller finalizes its own turn.
  */
 
 import type { ExternalTurnTerminalReason } from '@mangostudio/shared/external-agents';
@@ -20,7 +26,7 @@ import type { Database } from '../../../db/types';
 
 export interface ReconcileExternalTurnsInput {
   readonly reason: ExternalTurnTerminalReason;
-  /** Omitted at boot, where nothing can be live. Supplied by the periodic sweep. */
+  /** Nothing can be live at boot; the guard exists so a caller can prove it. */
   readonly isActive?: (messageId: string) => boolean;
   readonly chatId?: string;
   readonly now?: () => number;
@@ -48,11 +54,17 @@ export async function reconcileExternalTurns(
     const turnPart = parts.find(isExternalTurnPart);
     // Not an external turn: the generic sweep owns it, and clearing it here
     // would take away the reason it records.
-    if (!turnPart || turnPart.status === 'terminal') continue;
+    if (!turnPart) continue;
 
-    turnPart.status = 'terminal';
-    turnPart.terminalReason = input.reason;
-    turnPart.updatedAt = at;
+    // A turn can be recorded terminal a moment before its final update clears
+    // `isGenerating`; a crash in that window leaves a message that says it
+    // finished and renders as still running. Clear the flag, keep the reason
+    // the turn actually ended for.
+    if (turnPart.status !== 'terminal') {
+      turnPart.status = 'terminal';
+      turnPart.terminalReason = input.reason;
+      turnPart.updatedAt = at;
+    }
     sealPendingApprovals(parts, at);
 
     const result = await db

@@ -197,7 +197,10 @@ export function createExternalSessionManager(
    * while the continuation row is what guarantees a chat never ends up
    * remembering two vendor sessions.
    */
-  const opening = new Map<string, Promise<ExternalSessionHandle>>();
+  const opening = new Map<
+    string,
+    { readonly promise: Promise<ExternalSessionHandle>; readonly binding: ExternalSessionBinding }
+  >();
   /**
    * Bumped by every reap. An open is slow — it starts a process on someone
    * else's machine — and a consent revocation or a chat deletion landing while
@@ -335,17 +338,6 @@ export function createExternalSessionManager(
       { timeoutMs: openTimeoutMs }
     );
 
-    if ((reapGenerations.get(input.chatId) ?? 0) !== generation) {
-      // Something reaped this chat while the vendor was starting. Close what was
-      // just opened rather than registering a session the owner has already
-      // refused, the chat no longer exists for, or the environment has moved on
-      // from.
-      await client.externalAgents
-        .close({ sessionId }, { timeoutMs: callTimeoutMs })
-        .catch(() => undefined);
-      throw new ExternalSessionReapedError(input.chatId);
-    }
-
     const sequencer = new ExternalEventSequencer();
     const record: SessionRecord = {
       sessionId,
@@ -380,8 +372,6 @@ export function createExternalSessionManager(
       unsubscribeClose();
     };
 
-    sessions.set(input.chatId, record);
-
     await writeContinuation(
       {
         ...binding,
@@ -393,6 +383,19 @@ export function createExternalSessionManager(
       },
       db
     );
+
+    // Checked after the last await and registered on the same tick, so a reap
+    // that landed while the vendor was starting cannot be followed by the row it
+    // just deleted, or by a session the owner has already refused.
+    if ((reapGenerations.get(input.chatId) ?? 0) !== generation) {
+      record.unsubscribe();
+      await deleteContinuation(input.chatId, db);
+      await client.externalAgents
+        .close({ sessionId }, { timeoutMs: callTimeoutMs })
+        .catch(() => undefined);
+      throw new ExternalSessionReapedError(input.chatId);
+    }
+    sessions.set(input.chatId, record);
 
     return handleFor(record);
   }
@@ -411,13 +414,21 @@ export function createExternalSessionManager(
 
   return {
     ensureSession(input) {
+      // Shared only with a send that wants the same session. A concurrent send
+      // whose binding differs would otherwise be handed a session opened against
+      // another environment, workspace or account, so it waits for the open to
+      // settle and then takes the ordinary path, which reaps and reopens.
       const inflight = opening.get(input.chatId);
-      if (inflight) return inflight;
+      if (inflight) {
+        return sameBinding(inflight.binding, input)
+          ? inflight.promise
+          : inflight.promise.catch(() => undefined).then(() => this.ensureSession(input));
+      }
 
       const pending = ensureSession(input).finally(() => {
-        if (opening.get(input.chatId) === pending) opening.delete(input.chatId);
+        if (opening.get(input.chatId)?.promise === pending) opening.delete(input.chatId);
       });
-      opening.set(input.chatId, pending);
+      opening.set(input.chatId, { promise: pending, binding: input });
       return pending;
     },
 

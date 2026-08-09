@@ -60,6 +60,15 @@ describe('ExternalEventSequencer', () => {
     expect(sequencer.admit(envelope(2, { idempotencyKey: 'k1' })).kind).toBe('duplicate');
   });
 
+  it('advances past a key duplicate so the next event is not a false gap', () => {
+    const sequencer = new ExternalEventSequencer();
+    sequencer.beginTurn('turn-1');
+    sequencer.admit(envelope(1, { idempotencyKey: 'k1' }));
+    sequencer.admit(envelope(2, { idempotencyKey: 'k1' }));
+
+    expect(sequencer.admit(envelope(3)).kind).toBe('apply');
+  });
+
   it('drops events for a turn that already reached a terminal state', () => {
     const sequencer = new ExternalEventSequencer();
     sequencer.beginTurn('turn-1');

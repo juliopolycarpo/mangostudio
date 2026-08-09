@@ -120,14 +120,16 @@ export class ExternalTurnTranscript {
     this.#turnPart.eventCount += 1;
     this.#turnPart.persistedBytes += byteLengthOf(event);
 
-    const overBudget = this.#budgetExceeded();
-    if (overBudget) {
+    if (this.#budgetExceeded()) {
       // Applied first, then terminated: the event that crossed the line is
       // already paid for, and keeping it makes the transcript's last visible
-      // state match the recorded byte count.
+      // state match the recorded byte count. The event may itself have been
+      // terminal, in which case `finalize` keeps that first reason — so the
+      // reported one is read back off the record rather than assumed, or the
+      // caller would report a limit on a turn the transcript says completed.
       const application = this.#applyEvent(event, context.at);
       this.finalize('limit-exceeded', context.at);
-      return { ...application, durable: true, terminal: 'limit-exceeded' };
+      return { ...application, durable: true, terminal: this.#turnPart.terminalReason };
     }
 
     return this.#applyEvent(event, context.at);

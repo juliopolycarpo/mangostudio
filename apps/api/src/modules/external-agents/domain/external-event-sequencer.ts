@@ -86,13 +86,19 @@ export class ExternalEventSequencer {
    */
   admit(envelope: ExternalAgentEventEnvelope): ExternalEnvelopeVerdict {
     if (envelope.sequence <= this.#lastAppliedSequence) return { kind: 'duplicate' };
-    if (envelope.idempotencyKey && this.#appliedKeys.has(envelope.idempotencyKey)) {
-      return { kind: 'duplicate' };
-    }
 
     const expected = this.#lastAppliedSequence + 1;
     if (envelope.sequence !== expected) {
       return { kind: 'gap', expected, received: envelope.sequence };
+    }
+
+    // Checked only once the envelope is known to be in order, and it still
+    // advances: a producer that retried an event under a new sequence has
+    // delivered that sequence, and leaving the cursor behind would make the
+    // *next* envelope look like loss and terminate a healthy turn.
+    if (envelope.idempotencyKey && this.#appliedKeys.has(envelope.idempotencyKey)) {
+      this.#advance(envelope);
+      return { kind: 'duplicate' };
     }
 
     const nativeTurnId = envelope.nativeTurnId;

@@ -133,10 +133,35 @@ describe('external approval registry', () => {
     await registry.answer(ANSWER);
 
     await expect(registry.answer(ANSWER)).resolves.toEqual({
+      status: 'accepted',
+      optionId: 'approve',
+      idempotent: true,
+    });
+    // The retry returns the outcome it already caused; it does not authorize again.
+    expect(forwarded).toEqual(['approve']);
+    expect(registry.pendingCount('chat-1')).toBe(0);
+  });
+
+  it('refuses a different option after the request was answered', async () => {
+    const { registry, forwarded } = setup();
+    await registry.answer(ANSWER);
+
+    await expect(registry.answer({ ...ANSWER, optionId: 'deny' })).resolves.toEqual({
+      status: 'rejected',
+      reason: 'already-resolved',
+    });
+    expect(forwarded).toEqual(['approve']);
+  });
+
+  it('forgets an answered request once its turn ends', async () => {
+    const { registry } = setup();
+    await registry.answer(ANSWER);
+
+    expect(registry.resolvePending('chat-1', 'turn-1', 'expired', 4_000)).toEqual([]);
+    await expect(registry.answer(ANSWER)).resolves.toEqual({
       status: 'rejected',
       reason: 'not-found',
     });
-    expect(forwarded).toEqual(['approve']);
   });
 
   it('rejects a repeat with a different option instead of authorizing twice', async () => {

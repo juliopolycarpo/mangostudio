@@ -164,6 +164,16 @@ describe('ExternalTurnTranscript', () => {
     expect(target.turnPart.status).toBe('terminal');
   });
 
+  it('reports the reason it recorded when a terminal event also crosses the budget', () => {
+    const target = transcript({ maxEvents: 1 });
+    const applications = feed(target, [{ type: 'text_delta', text: 'a' }, { type: 'completed' }]);
+
+    // The event was terminal in its own right; the budget does not get to
+    // relabel a turn the transcript already recorded as completed.
+    expect(applications.at(-1)?.terminal).toBe('completed');
+    expect(target.turnPart.terminalReason).toBe('completed');
+  });
+
   it('terminates on the byte budget', () => {
     const target = transcript({ maxBytes: 40 });
     const applications = feed(target, [

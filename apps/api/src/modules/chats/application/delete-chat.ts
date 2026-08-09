@@ -26,7 +26,11 @@ export async function deleteChatUseCase(
   // the ownership check, so a request naming somebody else's chat cannot kill
   // their live turn on the way to deleting nothing.
   if (await verifyChatOwnership(input.chatId, input.userId, db)) {
-    await externalSessionManager.reapChat(input.chatId, 'cancelled-by-user');
+    // Not awaited: the live turn is told and the session unregistered
+    // synchronously, and only the vendor's own close call is left in flight.
+    // Awaiting it would hold the delete response for the runtime's full call
+    // timeout whenever the machine is reachable but unresponsive.
+    void externalSessionManager.reapChat(input.chatId, 'cancelled-by-user').catch(() => undefined);
   }
   await deleteChat(input.chatId, input.userId, db);
   await releaseCheckpointBlobs(db, blobKeys);

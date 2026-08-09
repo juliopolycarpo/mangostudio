@@ -69,10 +69,9 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   registerFrontend(app, frontendDir);
 
   listenOrExit(port, host);
-  staleTurnReconcileSweep = startStaleTurnReconcileSweep(async () => {
-    await reconcileExternalTurns({ reason: 'hub-restarted', isActive: isActiveTurn }, getDb());
-    return reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb());
-  });
+  staleTurnReconcileSweep = startStaleTurnReconcileSweep(() =>
+    reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb())
+  );
 
   registerShutdown();
 
