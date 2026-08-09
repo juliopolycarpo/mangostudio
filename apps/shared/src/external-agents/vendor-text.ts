@@ -15,7 +15,11 @@
  * 2. Bidirectional overrides are stripped. They let a string render in an order
  *    its code points do not have, which is exactly how a benign-looking command
  *    label hides what it will run.
- * 3. The remainder is cut to a **code-point** count. Never UTF-16 units: a cut
+ * 3. Lone surrogates are stripped. Not cutting a pair in half is only half the
+ *    guarantee: vendor JSON can already carry an unpaired `\ud800`, and it
+ *    survives every step above to become U+FFFD on the way out to UTF-8 —
+ *    silently rewriting an opaque session or request id we later echo back.
+ * 4. The remainder is cut to a **code-point** count. Never UTF-16 units: a cut
  *    between the halves of a surrogate pair produces a lone surrogate, which is
  *    not valid UTF-8 and fails to encode on its way out.
  *
@@ -63,9 +67,14 @@ export interface BoundedVendorText {
 }
 
 /**
- * C0 and C1 controls except tab and newline, plus every bidirectional
- * formatting character: ALM, LRM/RLM, the LRE-to-RLO overrides with PDF, and
- * the LRI-to-PDI isolates.
+ * C0 and C1 controls except tab and newline, every bidirectional formatting
+ * character — ALM, LRM/RLM, the LRE-to-RLO overrides with PDF, and the
+ * LRI-to-PDI isolates — and lone surrogates.
+ *
+ * A surrogate code point only ever reaches here unpaired: iterating a string by
+ * code point yields a well-formed pair as its combined value at or above
+ * U+10000, so anything left in D800-DFFF is half a character that no UTF-8
+ * encoder can represent.
  *
  * Expressed as code-point tests rather than a character class: a regex made of
  * escaped control characters is unreviewable, and this is exactly the code
@@ -81,6 +90,7 @@ function isStrippable(codePoint: number): boolean {
   if (codePoint === 0x061c) return true; // ARABIC LETTER MARK
   if (codePoint === 0x200e || codePoint === 0x200f) return true; // LRM, RLM
   if (codePoint >= 0x202a && codePoint <= 0x202e) return true; // LRE-to-RLO, PDF
+  if (codePoint >= 0xd800 && codePoint <= 0xdfff) return true; // lone surrogate
   return codePoint >= 0x2066 && codePoint <= 0x2069; // LRI-to-PDI
 }
 

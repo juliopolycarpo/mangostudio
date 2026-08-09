@@ -197,6 +197,26 @@ describe('bounded vendor text', () => {
     });
   });
 
+  it('strips a lone surrogate the vendor sent, rather than letting UTF-8 rewrite it', () => {
+    // Short enough that truncation cannot be what removed it, and paired with a
+    // well-formed astral character to prove only the unpaired half goes.
+    const raw = `sess-${String.fromCharCode(0xd800)}42🙂`;
+
+    const { text, truncated } = boundVendorText(raw, 'vendorId');
+
+    expect(text).toBe('sess-42🙂');
+    expect(truncated).toBe(true);
+    // The guarantee the caps exist for: what we persist is what comes back.
+    expect(Buffer.from(text, 'utf8').toString('utf8')).toBe(text);
+  });
+
+  it('strips an unpaired low surrogate too', () => {
+    const { text, truncated } = boundVendorText(`call-${String.fromCharCode(0xdfff)}1`, 'vendorId');
+
+    expect(text).toBe('call-1');
+    expect(truncated).toBe(true);
+  });
+
   it('strips control characters while keeping tab and newline', () => {
     // Built from code points rather than typed literally: a raw ESC in a test
     // file is invisible in review, which is the opposite of the point.
