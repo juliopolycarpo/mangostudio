@@ -119,6 +119,16 @@ interface ExternalTurnObserver {
     readonly resumed: boolean;
     readonly fallbackReason?: string;
   }): void;
+  /**
+   * Both message rows exist and are readable. Reported after the write rather
+   * than when the ids are minted: a client told about a message the insert then
+   * failed to create would render, and then reconcile against, a row that is not
+   * there.
+   */
+  onTurnPrepared?(ids: {
+    readonly userMessageId: string;
+    readonly assistantMessageId: string;
+  }): void;
   onEvent?(event: ExternalAgentEvent): void;
   onTerminal?(reason: ExternalTurnTerminalReason, error?: ExternalAgentError): void;
 }
@@ -521,6 +531,7 @@ export function createExternalTurnController(
         },
         db
       );
+      input.observer?.onTurnPrepared?.({ userMessageId, assistantMessageId });
 
       try {
         const nativeTurnId = await handle.startTurn({
@@ -634,7 +645,7 @@ export function createExternalTurnController(
     };
   }
 
-  return {
+  const instance: ExternalTurnController = {
     start,
     async answerApproval(input) {
       const result = await approvals.answer(input);
@@ -655,4 +666,12 @@ export function createExternalTurnController(
       return result;
     },
   };
+  return instance;
 }
+
+/**
+ * The hub's controller. One per process, because the live-turn map and the
+ * approval registry it delegates to are process state: an answer posted to the
+ * respond route has to reach the same instance that is streaming the turn.
+ */
+export const externalTurnController = createExternalTurnController();

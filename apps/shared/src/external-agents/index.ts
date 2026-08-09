@@ -104,4 +104,5 @@ export {
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
   type ExternalTextLimit,
   sanitizeVendorText,
+  schemaMaxLengthFor,
 } from './vendor-text';

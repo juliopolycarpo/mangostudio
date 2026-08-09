@@ -1,5 +1,7 @@
 export type { GeneratedMessage, GenerateImageResponse, GenerateTextResponse } from './contracts';
 export {
+  type ExternalTurnRequest,
+  ExternalTurnRequestSchema,
   GENERATION_ATTACHMENT_ID_MAX_LENGTH,
   GENERATION_ATTACHMENT_IDS_MAX_ITEMS,
   GENERATION_CHAT_ID_MAX_LENGTH,

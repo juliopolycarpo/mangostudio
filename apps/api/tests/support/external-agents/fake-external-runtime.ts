@@ -120,6 +120,12 @@ export function createFakeExternalRuntime(
         return () => existing.delete(listener);
       },
     },
+    // Posix semantics: enough for the hub's own canonicalization to be
+    // exercised without standing up a manifest. A Windows target's path style
+    // is the runtime client's own concern, covered where `createTargetPaths` is.
+    paths: {
+      canonical: (path: string) => path.replace(/\/+$/, '') || '/',
+    },
     onClose(listener: () => void) {
       closeListeners.add(listener);
       return () => closeListeners.delete(listener);
