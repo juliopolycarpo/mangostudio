@@ -9,12 +9,18 @@ import {
   RuntimeFindingCodeSchema,
   SshFailureReasonSchema,
 } from '../../src/environments';
+import {
+  ExternalAgentUnavailableReasonSchema,
+  ExternalApprovalRoutingSchema,
+  ExternalPermissionLevelSchema,
+} from '../../src/external-agents';
 import { en, ptBR } from '../../src/i18n';
 import {
   AdaptNoteSchema,
   BackupSetOperationSchema,
   LibraryCoverageStateSchema,
   LibraryDivergenceSchema,
+  LibraryTargetIdSchema,
   PropagationBlockedReasonSchema,
   type PropagationOperation,
   PropagationOperationSchema,
@@ -113,6 +119,30 @@ const ENUM_COVERAGE = [
     path: 'library.backups.origin',
     values: literalValues(BackupSetOperationSchema),
     blocks: [en.library.backups.origin, ptBR.library.backups.origin],
+  },
+  {
+    // The one place a target is given a name. The external-agent selector
+    // reuses these rather than declaring a second label for the same tool.
+    path: 'library.targets',
+    values: literalValues(LibraryTargetIdSchema),
+    blocks: [en.library.targets, ptBR.library.targets],
+  },
+  {
+    // A target the selector cannot offer has to be able to say why; a missing
+    // sentence here is a greyed row with no explanation.
+    path: 'externalAgents.unavailable',
+    values: literalValues(ExternalAgentUnavailableReasonSchema),
+    blocks: [en.externalAgents.unavailable, ptBR.externalAgents.unavailable],
+  },
+  {
+    path: 'externalAgents.permission.level',
+    values: literalValues(ExternalPermissionLevelSchema),
+    blocks: [en.externalAgents.permission.level, ptBR.externalAgents.permission.level],
+  },
+  {
+    path: 'externalAgents.permission.routing',
+    values: literalValues(ExternalApprovalRoutingSchema),
+    blocks: [en.externalAgents.permission.routing, ptBR.externalAgents.permission.routing],
   },
   {
     path: 'settings.externalApi.scope',

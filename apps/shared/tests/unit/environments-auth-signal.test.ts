@@ -122,6 +122,42 @@ describe('agent auth signals', () => {
     });
   });
 
+  it('reports an absent config as absent rather than as a key it never found', () => {
+    // The verdict was always right, but the signal said "config-key-present"
+    // for a config file that is not there — a reader looking at the signal to
+    // explain the verdict was told the opposite of what happened.
+    const directory = '/home/ada/.cursor';
+    const fs = new FakeAuthSignalFs(new Map(), new Set([directory]));
+
+    expect(probeConfigKey('/home/ada/.cursor/cli-config.json', 'authInfo', fs)).toEqual({
+      authenticated: false,
+      authSignal: 'config-key-absent',
+    });
+    expect(probeConfigKey(directory, 'authInfo', fs)).toEqual({
+      authenticated: false,
+      authSignal: 'config-key-absent',
+    });
+    expect(fs.readPaths).toEqual([]);
+  });
+
+  it('lets no part of the config it parsed reach the result', () => {
+    // The bounded read is permitted; leaking what it read is not. Anything
+    // recognizable from the file appearing in the returned object would mean a
+    // credential-adjacent value had escaped a presence check.
+    const path = '/home/ada/.cursor/cli-config.json';
+    const secret = 'sk-live-do-not-leak';
+    const fs = new FakeAuthSignalFs(
+      new Map([[path, JSON.stringify({ authInfo: { token: secret }, email: 'ada@example.com' })]])
+    );
+
+    const result = probeConfigKey(path, 'authInfo', fs);
+
+    expect(result).toEqual({ authenticated: true, authSignal: 'config-key-present' });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain('ada@example.com');
+    expect(Object.keys(result).sort()).toEqual(['authSignal', 'authenticated']);
+  });
+
   it('distinguishes an existing config directory from a file or missing path', () => {
     const fs = new FakeAuthSignalFs(
       new Map([['/home/ada/file', 'content']]),

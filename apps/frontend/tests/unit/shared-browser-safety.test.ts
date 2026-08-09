@@ -107,13 +107,24 @@ function builtinsReachableFrom(entry: string): string[] {
   return offenders;
 }
 
+/**
+ * Subpaths held to the same rule before the frontend imports them.
+ *
+ * A context that is being built for the browser but has no consumer yet would
+ * otherwise be unwatched for exactly as long as it takes someone to add a Node
+ * builtin to it — and then the first sign is a blank page, in a commit that
+ * only added an import.
+ */
+const WATCHED_BEFORE_FIRST_IMPORT = [`${PACKAGE}/external-agents`];
+
 describe('shared modules the frontend imports', () => {
   const entryPoints = sharedEntryPoints();
-  const imported = new Set(
-    sourceFilesUnder(FRONTEND_SRC)
+  const imported = new Set([
+    ...sourceFilesUnder(FRONTEND_SRC)
       .flatMap(specifiersIn)
-      .filter((specifier) => specifier === PACKAGE || specifier.startsWith(`${PACKAGE}/`))
-  );
+      .filter((specifier) => specifier === PACKAGE || specifier.startsWith(`${PACKAGE}/`)),
+    ...WATCHED_BEFORE_FIRST_IMPORT,
+  ]);
 
   it('imports subpaths that the shared package actually exports', () => {
     expect([...imported].filter((specifier) => !entryPoints.has(specifier))).toEqual([]);

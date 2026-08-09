@@ -604,6 +604,8 @@ export const AgentAuthSignalSchema = Type.Union([
   Type.Literal('file-present'),
   Type.Literal('file-absent'),
   Type.Literal('config-key-present'),
+  /** The config that would carry the key is not there. Distinct from a config that lacks it. */
+  Type.Literal('config-key-absent'),
   Type.Literal('session'),
   Type.Literal('unknown'),
 ]);

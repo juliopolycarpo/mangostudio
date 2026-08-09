@@ -2685,6 +2685,31 @@ export const messages = {
     },
   },
 
+  externalAgents: {
+    unavailable: {
+      'not-installed': 'Não instalado nesta máquina',
+      'signed-out': 'Instalado, mas sem sessão iniciada',
+      'runtime-unsupported': 'Esta máquina roda uma versão que não consegue hospedá-lo',
+      'runtime-denied': 'O dono desta máquina não liberou agentes externos',
+      'environment-unreachable': 'Não foi possível alcançar esta máquina',
+      'isolation-unproven': 'Esta máquina não provou que mantém as credenciais separadas',
+      'not-yet-available': 'Ainda não disponível',
+    },
+    permission: {
+      level: {
+        'read-only': 'Somente leitura — pode olhar o workspace, mas não alterá-lo.',
+        default:
+          'Padrão — pode alterar o workspace e pergunta antes de qualquer coisa mais arriscada.',
+        'full-access': 'Acesso total — pode agir sem perguntar, inclusive fora do workspace.',
+      },
+      routing: {
+        user: 'Você responde cada pedido.',
+        'auto-review': 'O agente revisa os próprios pedidos.',
+      },
+    },
+    loginHint: 'Rode isto naquela máquina para entrar:',
+  },
+
   providers: {
     gemini: 'Google Gemini',
     anthropic: 'Anthropic',

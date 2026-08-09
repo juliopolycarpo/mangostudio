@@ -2672,6 +2672,30 @@ export const messages: Messages = {
     },
   },
 
+  externalAgents: {
+    unavailable: {
+      'not-installed': 'Not installed on this machine',
+      'signed-out': 'Installed, but signed out',
+      'runtime-unsupported': 'This machine runs a version that cannot host it',
+      'runtime-denied': "This machine's owner has not allowed external agents",
+      'environment-unreachable': 'Could not reach this machine',
+      'isolation-unproven': 'This machine has not proven it keeps credentials separate',
+      'not-yet-available': 'Not available yet',
+    },
+    permission: {
+      level: {
+        'read-only': 'Read only — it can look at the workspace but not change it.',
+        default: 'Default — it can change the workspace and asks before anything riskier.',
+        'full-access': 'Full access — it can act without asking, including outside the workspace.',
+      },
+      routing: {
+        user: 'You answer each request.',
+        'auto-review': 'The agent reviews its own requests.',
+      },
+    },
+    loginHint: 'Run this on that machine to sign in:',
+  },
+
   providers: {
     gemini: 'Google Gemini',
     anthropic: 'Anthropic',

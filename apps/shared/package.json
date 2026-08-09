@@ -51,6 +51,7 @@
     "./library": "./src/library/index.ts",
     "./library/host": "./src/library/host.ts",
     "./environments": "./src/environments/index.ts",
+    "./external-agents": "./src/external-agents/index.ts",
     "./environments/detection": "./src/environments/detection/index.ts",
     "./profiles": "./src/profiles/index.ts",
     "./api-keys": "./src/api-keys/index.ts",
