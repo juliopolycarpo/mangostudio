@@ -101,7 +101,18 @@ export class CodexJsonRpcClient {
     const settled = new Promise<unknown>((resolve, reject) => {
       this.#pending.set(id, { method, resolve, reject });
     });
-    await this.#process.writeLine({ jsonrpc: '2.0', id, method, params });
+    try {
+      await this.#process.writeLine({ jsonrpc: '2.0', id, method, params });
+    } catch (error) {
+      // The entry has to go before the throw. Nothing is awaiting `settled` on
+      // this path — the failure leaves through `writeLine` — so a later
+      // `close()` or a dying pump rejecting the orphan would surface as an
+      // unhandled rejection that can take the runtime process down, on top of
+      // leaking the entry for a call the vendor never received.
+      this.#pending.delete(id);
+      settled.catch(() => undefined);
+      throw error;
+    }
 
     const timer = setTimeout(() => {
       this.#settle(id, (pending) =>
