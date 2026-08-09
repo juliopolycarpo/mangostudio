@@ -1,10 +1,22 @@
-import type { ReasoningEffort } from '@mangostudio/shared';
+import type {
+  ModelCatalogResponse,
+  ModelOption,
+  ProviderType,
+  ReasoningEffort,
+} from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
-import type { ChatAttachment } from '@mangostudio/shared/chat';
+import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type {
+  ExternalAgentDescriptor,
+  ExternalApprovalRouting,
+  ExternalPermissionLevel,
+} from '@mangostudio/shared/external-agents';
 import { FileText, FolderOpen, Image, Mic, Send, Square, X } from 'lucide-react';
 import { useState } from 'react';
+import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
+import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
 import { CapabilityInspector } from './CapabilityInspector';
@@ -40,6 +52,24 @@ interface Props {
   onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
   workdir?: string | null;
   onWorkdirClick?: () => void;
+  /** Who runs the turn. Decides which of the two control sets renders at all. */
+  runner?: ChatRunnerConfiguration;
+  activeModels?: ModelOption[];
+  modelCatalog?: ModelCatalogResponse;
+  lockedProvider?: ProviderType | null;
+  isModelSelectorDisabled?: boolean;
+  onModelChange?: (model: string) => void;
+  externalDescriptor?: ExternalAgentDescriptor;
+  externalModel?: string | null;
+  externalEffort?: string | null;
+  externalLevel?: ExternalPermissionLevel;
+  externalRouting?: ExternalApprovalRouting;
+  onExternalModelChange?: (model: string | null) => void;
+  onExternalEffortChange?: (effort: string | null) => void;
+  onExternalPermissionsChange?: (next: {
+    level: ExternalPermissionLevel;
+    routing: ExternalApprovalRouting;
+  }) => void;
 }
 
 function getWorkdirName(workdir: string): string {
@@ -72,6 +102,20 @@ export function InputBar({
   onEnvironmentChange,
   workdir = null,
   onWorkdirClick,
+  runner,
+  activeModels = [],
+  modelCatalog,
+  lockedProvider,
+  isModelSelectorDisabled = false,
+  onModelChange,
+  externalDescriptor,
+  externalModel = null,
+  externalEffort = null,
+  externalLevel = 'read-only',
+  externalRouting = 'user',
+  onExternalModelChange,
+  onExternalEffortChange,
+  onExternalPermissionsChange,
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
@@ -79,6 +123,9 @@ export function InputBar({
   const selectableAgents = agents.filter(
     (agent) => agent.role === 'primary' || agent.role === 'both'
   );
+  // The model moved here from the header, and it renders per runner: MangoStudio
+  // always has a catalog, an external agent only when its vendor advertised one.
+  const isExternalRunner = runner?.kind === 'external';
   const workdirName = workdir ? getWorkdirName(workdir) : null;
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
@@ -116,7 +163,7 @@ export function InputBar({
               />
             ) : null}
 
-            {onSelectedAgentIdChange ? (
+            {!isExternalRunner && onSelectedAgentIdChange ? (
               <label className="sr-only" htmlFor="chat-agent-selector">
                 {t.chat.input.selectAgent}
               </label>
@@ -139,7 +186,7 @@ export function InputBar({
                 <span className="truncate">{workdirName ?? t.workspace.chooseWorkdir}</span>
               </button>
             ) : null}
-            {onSelectedAgentIdChange ? (
+            {!isExternalRunner && onSelectedAgentIdChange ? (
               <select
                 id="chat-agent-selector"
                 value={selectedAgentId}
@@ -159,7 +206,37 @@ export function InputBar({
               </select>
             ) : null}
 
-            {onThinkingToggle && onReasoningEffortChange ? (
+            {!isExternalRunner && modelCatalog && onModelChange ? (
+              <ModelSelector
+                activeModel={activeModel ?? ''}
+                activeModels={activeModels}
+                isDisabled={isModelSelectorDisabled || disabled === true}
+                onSelect={onModelChange}
+                modelCatalog={modelCatalog}
+                lockedProvider={lockedProvider}
+              />
+            ) : null}
+
+            {isExternalRunner &&
+            onExternalModelChange &&
+            onExternalEffortChange &&
+            onExternalPermissionsChange ? (
+              <ExternalComposerControls
+                descriptor={externalDescriptor}
+                model={externalModel}
+                effort={externalEffort}
+                level={externalLevel}
+                routing={externalRouting}
+                disabled={disabled || isGenerating}
+                onModelChange={onExternalModelChange}
+                onEffortChange={onExternalEffortChange}
+                onPermissionsChange={onExternalPermissionsChange}
+              />
+            ) : null}
+
+            {/* MangoStudio's own thinking control. An external agent's effort
+                comes from its vendor's per-model catalog instead. */}
+            {!isExternalRunner && onThinkingToggle && onReasoningEffortChange ? (
               <ThinkingToggle
                 enabled={thinkingEnabled}
                 effort={reasoningEffort}

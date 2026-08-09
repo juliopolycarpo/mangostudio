@@ -317,6 +317,16 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  const updateExternalAgentSettings = useCallback(
+    (updates: Partial<AppSettings['externalAgentSettings']>) => {
+      saveSettings((current) => ({
+        ...current,
+        externalAgentSettings: { ...current.externalAgentSettings, ...updates },
+      }));
+    },
+    [saveSettings]
+  );
+
   const updateCommitMessageSettings = useCallback(
     (updates: Partial<AppSettings['gitSettings']['commitMessage']>) => {
       saveSettings((current) => ({
@@ -429,6 +439,8 @@ export function useGlobalSettings() {
     workspaceSettings: settings.workspaceSettings,
     gitSettings: settings.gitSettings,
     externalApiSettings: settings.externalApiSettings,
+    externalAgentSettings: settings.externalAgentSettings,
+    updateExternalAgentSettings,
     chatTitleSettings: settings.chatTitleSettings,
     chatDisplaySettings: settings.chatDisplaySettings,
     setDiffPreviewsEnabled: (value: boolean) =>

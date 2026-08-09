@@ -10,6 +10,7 @@ import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
+import { RunnerSelectorContainer } from '@/features/external-agents/RunnerSelectorContainer';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { useAppState } from '@/hooks/use-app-state';
@@ -86,21 +87,10 @@ function AuthenticatedLayout() {
         onChatSidebarWidthChange={app.settings.setChatSidebarWidth}
       >
         <Header
-          activeModel={app.activeModel}
-          activeModels={app.activeModels}
-          isModelSelectorDisabled={app.isModelSelectorDisabled}
-          currentChatId={app.currentChatId}
           currentPage={activePage}
-          onUpdateChatModel={(chatId, model) => void app.handleUpdateChatModel(chatId, model)}
-          onSetPageModel={(model) => {
-            if (app.currentChatId) {
-              void app.handleUpdateChatModel(app.currentChatId, model);
-            }
-          }}
           onNewChat={() => void app.handleNewChat()}
           onNavigateToSettings={() => app.handleNavigate('settings')}
-          modelCatalog={app.catalog}
-          lockedProvider={app.lockedProvider}
+          runnerSelector={<RunnerSelectorContainer />}
           onMobileMenuToggle={() => setIsMobileSidebarOpen((v) => !v)}
         />
 

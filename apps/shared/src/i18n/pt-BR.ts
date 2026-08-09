@@ -2687,6 +2687,48 @@ export const messages = {
   },
 
   externalAgents: {
+    target: {
+      codex: 'Codex CLI',
+      cursor: 'Cursor CLI',
+      claude: 'Claude Code',
+    },
+    selector: {
+      label: 'Quem executa este chat',
+      mangostudioGroup: 'MangoStudio',
+      externalGroup: 'Agentes externos',
+      loading: 'Carregando agentes…',
+      noneDiscovered: 'Nenhum agente externo encontrado nesta máquina.',
+      signedIn: 'sessão iniciada',
+      authUnknown: 'estado de login desconhecido',
+      notInstalledIn: 'Não instalado em {environment}',
+      continueInNewChat: 'Continuar em um novo chat',
+      copyLoginCommand: 'Copiar comando de login',
+      ownership: '{vendor} controla as próprias ferramentas e permissões.',
+      unavailableHere: 'Este agente não pode rodar aqui agora — escolha outro.',
+      forkFailed: 'Não foi possível criar o novo chat.',
+    },
+    model: {
+      label: 'Modelo do agente',
+      effortLabel: 'Esforço de raciocínio',
+      vendorDefault: 'Padrão do fornecedor',
+    },
+    disclosure: {
+      title: 'Antes de usar o {vendor}',
+      thirdParty:
+        'O {vendor} é um produto de terceiros, com termos próprios, rodando na máquina que você escolheu.',
+      dataFlow:
+        'O que você enviar neste chat vai para o {vendor}, que decide o que fazer com isso e para onde mandar.',
+      billing: 'O uso é cobrado na sua conta do {vendor}, não no MangoStudio.',
+      ownership:
+        'O {vendor} usa as próprias ferramentas, permissões e sandbox. As configurações de ferramentas do MangoStudio não valem aqui.',
+      autoExecution:
+        'Dependendo do nível escolhido, o {vendor} pode editar arquivos e rodar comandos sem perguntar de novo.',
+      termsHint: 'Consulte os termos do {vendor} para os detalhes completos.',
+      accept: 'Entendi, continuar',
+      cancel: 'Cancelar',
+      close: 'Fechar',
+      review: 'Rever o aviso',
+    },
     unavailable: {
       'not-installed': 'Não instalado nesta máquina',
       'signed-out': 'Instalado, mas sem sessão iniciada',
@@ -2697,6 +2739,21 @@ export const messages = {
       'not-yet-available': 'Ainda não disponível',
     },
     permission: {
+      label: 'Permissões',
+      whatItCanDo: 'O QUE ELE PODE FAZER',
+      whoApproves: 'QUEM APROVA',
+      unattendedLevelWarning: 'este agente pode editar e rodar qualquer coisa',
+      unattendedRoutingWarning: 'aprovações respondidas sem você',
+      unsupportedGeneric: 'Este agente não oferece esta combinação',
+      levelName: {
+        'read-only': 'Somente leitura',
+        default: 'Padrão',
+        'full-access': 'Acesso total',
+      },
+      routingName: {
+        user: 'Você',
+        'auto-review': 'Revisão automática',
+      },
       level: {
         'read-only': 'Somente leitura — pode olhar o workspace, mas não alterá-lo.',
         default:

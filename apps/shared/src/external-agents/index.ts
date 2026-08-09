@@ -1,4 +1,14 @@
 export {
+  DEFAULT_EXTERNAL_AGENT_SETTINGS,
+  EXTERNAL_DISCLOSURE_VERSION,
+  type ExternalAgentDisclosure,
+  ExternalAgentDisclosureSchema,
+  type ExternalAgentSettings,
+  ExternalAgentSettingsSchema,
+  externalCapabilitiesFingerprint,
+  needsExternalDisclosure,
+} from './disclosure';
+export {
   type NormalizedPermissionValue,
   normalizeApprovalRouting,
   normalizePermissionLevel,

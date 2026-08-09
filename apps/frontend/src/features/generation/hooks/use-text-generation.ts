@@ -9,7 +9,11 @@ import {
   createPromptChatTitle,
   isTimestampChatTitle,
 } from '@mangostudio/shared/chat';
-import type { RespondStreamBody, ToolIntent } from '@mangostudio/shared/generation';
+import type {
+  ExternalTurnRequest,
+  RespondStreamBody,
+  ToolIntent,
+} from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
@@ -58,6 +62,8 @@ interface UseTextGenerationOptions {
    * later turn will, and its return value (not `getAgentSelection`) is what
    * that first turn runs as.
    */
+  /** The vendor model and effort the composer chose, read at send time. */
+  getExternalTurnRequest?: () => ExternalTurnRequest | undefined;
   onChatCreated?: (chatId: string) => Promise<{
     readonly agentId: string;
     readonly agentName?: string;
@@ -153,6 +159,7 @@ export function useTextGeneration({
   chatTitleSettings,
   currentChatId,
   getAgentSelection,
+  getExternalTurnRequest,
   onChatCreated,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
@@ -274,6 +281,10 @@ export function useTextGeneration({
             maxToolIterations,
             contextSettings,
             toolIntent,
+            // Vendor ids, not MangoStudio's: a Codex model and one of that
+            // model's own efforts. Absent on an internal turn, where the closed
+            // `model`/`reasoningEffort` pair is the right vocabulary.
+            externalTurn: getExternalTurnRequest?.(),
             agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
             recovery,
           },
@@ -374,6 +385,7 @@ export function useTextGeneration({
       contextSettings,
       chatTitleSettings,
       getAgentSelection,
+      getExternalTurnRequest,
       onChatCreated,
       stream,
       pendingSubagentName,

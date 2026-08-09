@@ -2674,6 +2674,48 @@ export const messages: Messages = {
   },
 
   externalAgents: {
+    target: {
+      codex: 'Codex CLI',
+      cursor: 'Cursor CLI',
+      claude: 'Claude Code',
+    },
+    selector: {
+      label: 'Who runs this chat',
+      mangostudioGroup: 'MangoStudio',
+      externalGroup: 'External agents',
+      loading: 'Loading agents…',
+      noneDiscovered: 'No external agents found on this machine.',
+      signedIn: 'signed in',
+      authUnknown: 'sign-in state unknown',
+      notInstalledIn: 'Not installed in {environment}',
+      continueInNewChat: 'Continue in a new chat',
+      copyLoginCommand: 'Copy login command',
+      ownership: '{vendor} controls its own tools and permissions.',
+      unavailableHere: 'This agent cannot run here right now — pick another.',
+      forkFailed: 'The new chat could not be created.',
+    },
+    model: {
+      label: 'Agent model',
+      effortLabel: 'Reasoning effort',
+      vendorDefault: "The vendor's default",
+    },
+    disclosure: {
+      title: 'Before you use {vendor}',
+      thirdParty:
+        '{vendor} is a third-party product with its own terms, running on the machine you chose.',
+      dataFlow:
+        'What you send in this chat goes to {vendor}, which decides what to do with it and where to send it.',
+      billing: 'Usage is billed to your {vendor} account, not to MangoStudio.',
+      ownership:
+        "{vendor} uses its own tools, permissions and sandbox. MangoStudio's tool settings do not apply here.",
+      autoExecution:
+        'Depending on the level you choose, {vendor} can edit files and run commands without asking again.',
+      termsHint: "See {vendor}'s own terms for the full details.",
+      accept: 'Got it, continue',
+      cancel: 'Cancel',
+      close: 'Close',
+      review: 'Review the notice',
+    },
     unavailable: {
       'not-installed': 'Not installed on this machine',
       'signed-out': 'Installed, but signed out',
@@ -2684,6 +2726,21 @@ export const messages: Messages = {
       'not-yet-available': 'Not available yet',
     },
     permission: {
+      label: 'Permissions',
+      whatItCanDo: 'WHAT IT CAN DO',
+      whoApproves: 'WHO APPROVES',
+      unattendedLevelWarning: 'this agent can edit and run anything',
+      unattendedRoutingWarning: 'approvals answered without you',
+      unsupportedGeneric: 'This agent does not offer this combination',
+      levelName: {
+        'read-only': 'Read only',
+        default: 'Default',
+        'full-access': 'Allow everything',
+      },
+      routingName: {
+        user: 'You',
+        'auto-review': 'Auto-review',
+      },
       level: {
         'read-only': 'Read only — it can look at the workspace but not change it.',
         default: 'Default — it can change the workspace and asks before anything riskier.',

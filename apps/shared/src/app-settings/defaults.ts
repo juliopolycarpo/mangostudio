@@ -12,6 +12,12 @@ import {
 import type { ContextCompactionBehavior, ContextSettings } from '../chat';
 import { CHAT_TITLE_PROMPT_LENGTH_DEFAULT, clampChatTitlePromptLength } from '../chat/title';
 import {
+  DEFAULT_EXTERNAL_AGENT_SETTINGS,
+  EXTERNAL_AGENT_TARGET_IDS,
+  type ExternalAgentDisclosure,
+  type ExternalAgentSettings,
+} from '../external-agents';
+import {
   COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
   COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
@@ -174,6 +180,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   gitSettings: DEFAULT_GIT_SETTINGS,
   chatDisplaySettings: DEFAULT_CHAT_DISPLAY_SETTINGS,
   externalApiSettings: DEFAULT_EXTERNAL_API_SETTINGS,
+  externalAgentSettings: DEFAULT_EXTERNAL_AGENT_SETTINGS,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -623,6 +630,37 @@ export function normalizeExternalApiSettings(value: unknown): ExternalApiSetting
   };
 }
 
+/**
+ * Keeps only well-formed acknowledgements.
+ *
+ * A malformed row reads as "never asked" rather than as consent: the failure to
+ * prefer is showing the disclosure once more, not running a third-party agent on
+ * the strength of a record nothing can parse.
+ */
+export function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
+  if (!isRecord(value) || !isRecord(value.disclosures)) return DEFAULT_EXTERNAL_AGENT_SETTINGS;
+
+  const disclosures: Record<string, ExternalAgentDisclosure> = {};
+  for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
+    const entry = value.disclosures[targetId];
+    if (!isRecord(entry)) continue;
+    if (
+      typeof entry.version !== 'number' ||
+      typeof entry.acceptedAt !== 'number' ||
+      typeof entry.capabilitiesFingerprint !== 'string' ||
+      entry.capabilitiesFingerprint.length === 0
+    ) {
+      continue;
+    }
+    disclosures[targetId] = {
+      version: entry.version,
+      acceptedAt: entry.acceptedAt,
+      capabilitiesFingerprint: entry.capabilitiesFingerprint,
+    };
+  }
+  return { disclosures } as ExternalAgentSettings;
+}
+
 export function normalizeAppSettings(
   value: unknown,
   libraryLocationDefaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS
@@ -663,5 +701,6 @@ export function normalizeAppSettings(
     gitSettings: normalizeGitSettings(value.gitSettings),
     chatDisplaySettings: normalizeChatDisplaySettings(value.chatDisplaySettings),
     externalApiSettings: normalizeExternalApiSettings(value.externalApiSettings),
+    externalAgentSettings: normalizeExternalAgentSettings(value.externalAgentSettings),
   };
 }

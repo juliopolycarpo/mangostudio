@@ -22,6 +22,7 @@ const CHAT: ChatWithContext = createMockChat({
 
 describe('useRunnerSelection workdir binding', () => {
   const updateChatRunner = vi.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
   const updateChatWorkdir = vi.fn(() => Promise.resolve());
   const addRecentWorkdir = vi.fn();
 
@@ -36,6 +37,7 @@ describe('useRunnerSelection workdir binding', () => {
         currentChat: CHAT,
         defaultWorkdir: '/srv/projects/default',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -54,6 +56,7 @@ describe('useRunnerSelection workdir binding', () => {
         currentChat: CHAT,
         defaultWorkdir: '',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -69,6 +72,7 @@ describe('useRunnerSelection workdir binding', () => {
         currentChat: CHAT,
         defaultWorkdir: '',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -91,6 +95,7 @@ describe('useRunnerSelection workdir binding', () => {
           currentChat: props.currentChat,
           defaultWorkdir: '/srv/projects/default',
           updateChatRunner,
+          updateChatRunnerPermissions,
           updateChatWorkdir,
           addRecentWorkdir,
         }),
@@ -109,6 +114,7 @@ describe('useRunnerSelection workdir binding', () => {
 
 describe('useRunnerSelection binding a chat created mid-submit', () => {
   const updateChatRunner = vi.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
   const updateChatWorkdir = vi.fn(() => Promise.resolve());
   const addRecentWorkdir = vi.fn();
 
@@ -130,6 +136,7 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
           ...props,
           defaultWorkdir,
           updateChatRunner,
+          updateChatRunnerPermissions,
           updateChatWorkdir,
           addRecentWorkdir,
         }),
@@ -171,6 +178,7 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
           ...props,
           defaultWorkdir: '/srv/projects/default',
           updateChatRunner: rejectingUpdateChatRunner,
+          updateChatRunnerPermissions,
           updateChatWorkdir,
           addRecentWorkdir,
         }),
@@ -238,12 +246,14 @@ describe('useRunnerSelection agent selection', () => {
 
   it('shows the chosen agent optimistically', async () => {
     const updateChatRunner = vi.fn(() => Promise.resolve());
+    const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
     const { result } = renderHook(() =>
       useRunnerSelection({
         currentChatId: CHAT.id,
         currentChat: { ...CHAT, workdir: '/srv/projects/bound' },
         defaultWorkdir: '/srv/projects/default',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -260,12 +270,14 @@ describe('useRunnerSelection agent selection', () => {
 
   it('takes the optimistic selection back when the write is rejected', async () => {
     const updateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
+    const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
     const { result } = renderHook(() =>
       useRunnerSelection({
         currentChatId: CHAT.id,
         currentChat: { ...CHAT, workdir: '/srv/projects/bound' },
         defaultWorkdir: '/srv/projects/default',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })

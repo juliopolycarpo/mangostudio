@@ -1,4 +1,6 @@
+import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import { useNavigate } from '@tanstack/react-router';
+import { useCallback, useRef, useState } from 'react';
 import { useChats } from '@/features/chat/hooks/use-chats';
 import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import { useTextGeneration } from '@/features/generation/hooks/use-text-generation';
@@ -26,10 +28,30 @@ export function useAppState() {
     currentChatId: chats.currentChatId,
     currentChat,
     updateChatRunner: chats.updateChatRunner,
+    updateChatRunnerPermissions: chats.updateChatRunnerPermissions,
     defaultWorkdir: settings.workspaceSettings.defaultWorkdir,
     updateChatWorkdir: chats.updateChatWorkdir,
     addRecentWorkdir: settings.addRecentWorkdir,
   });
+
+  /**
+   * The vendor model and effort for the next send.
+   *
+   * Per-chat and ephemeral, like the image intent: the durable choice is the
+   * permission pair, which the chat persists. A model the user picked for one
+   * conversation should not follow them into the next one, and the vendor's own
+   * default is the right answer for a chat nobody has chosen one for.
+   *
+   * Held in a ref as well so the send path reads what is on screen now rather
+   * than what was on screen when the callback was created.
+   */
+  const [externalTurnRequest, setExternalTurnRequest] = useState<ExternalTurnRequest>({});
+  const externalTurnRequestRef = useRef(externalTurnRequest);
+  externalTurnRequestRef.current = externalTurnRequest;
+  const getExternalTurnRequest = useCallback(() => {
+    const request = externalTurnRequestRef.current;
+    return request.model === undefined && request.effort === undefined ? undefined : request;
+  }, []);
 
   const textGen = useTextGeneration({
     chats,
@@ -47,6 +69,7 @@ export function useAppState() {
       agentId: runnerSelection.selectedAgentId ?? 'default',
       agentName: runnerSelection.selectedAgent?.name,
     }),
+    getExternalTurnRequest,
     onChatCreated: runnerSelection.bindNewChat,
   });
   useChatContextSync(chats.chats, textGen.seedContextInfo);
@@ -60,6 +83,9 @@ export function useAppState() {
   return {
     imageToolIntent: generationControls.imageToolIntent,
     runner: runnerSelection.runner,
+    runnerPermissions: runnerSelection.runnerPermissions,
+    externalTurnRequest,
+    setExternalTurnRequest,
     selectedAgentId: runnerSelection.selectedAgentId,
     agents: runnerSelection.agents,
     isAgentListLoading: runnerSelection.isAgentListLoading,
@@ -83,6 +109,8 @@ export function useAppState() {
 
     setImageToolIntent: generationControls.setImageToolIntent,
     setSelectedAgentId: runnerSelection.setRunnerAgentId,
+    setRunnerTarget: runnerSelection.setRunnerTarget,
+    setRunnerPermissions: runnerSelection.setRunnerPermissions,
     openWorkdirPicker: runnerSelection.openWorkdirPicker,
     closeWorkdirPicker: runnerSelection.closeWorkdirPicker,
     selectWorkdir: runnerSelection.selectWorkdir,

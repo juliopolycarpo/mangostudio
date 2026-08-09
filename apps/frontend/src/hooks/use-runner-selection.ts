@@ -1,5 +1,9 @@
 import { isAgentId } from '@mangostudio/shared/agents';
-import type { ChatRunnerConfiguration, ExternalAgentTargetId } from '@mangostudio/shared/chat';
+import type {
+  ChatRunnerConfiguration,
+  ChatRunnerPermissions,
+  ExternalAgentTargetId,
+} from '@mangostudio/shared/chat';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatWithContext } from '@/features/chat/queries';
@@ -7,16 +11,27 @@ import { agentSettingsListQueryOptions } from '@/features/settings/agents/querie
 
 const DEFAULT_AGENT_ID = 'default';
 const DEFAULT_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: DEFAULT_AGENT_ID };
+/** No choice made. Resolved restrictively server-side, never to a vendor default. */
+const EMPTY_PERMISSIONS: ChatRunnerPermissions = {};
 
 interface RunnerSelectionOverride {
   readonly chatId: string | null;
   readonly runner: ChatRunnerConfiguration;
 }
 
+interface RunnerPermissionsOverride {
+  readonly chatId: string | null;
+  readonly permissions: ChatRunnerPermissions;
+}
+
 interface UseRunnerSelectionParams {
   readonly currentChatId: string | null;
   readonly currentChat: ChatWithContext | null;
   readonly updateChatRunner: (chatId: string, runner: ChatRunnerConfiguration) => Promise<void>;
+  readonly updateChatRunnerPermissions: (
+    chatId: string,
+    permissions: ChatRunnerPermissions
+  ) => Promise<void>;
   readonly defaultWorkdir: string;
   readonly updateChatWorkdir: (chatId: string, workdir: string | null) => Promise<void>;
   readonly addRecentWorkdir: (workdir: string) => void;
@@ -26,17 +41,26 @@ export function useRunnerSelection({
   currentChatId,
   currentChat,
   updateChatRunner,
+  updateChatRunnerPermissions,
   defaultWorkdir,
   updateChatWorkdir,
   addRecentWorkdir,
 }: UseRunnerSelectionParams) {
   const [runnerOverride, setRunnerOverride] = useState<RunnerSelectionOverride | null>(null);
+  const [permissionsOverride, setPermissionsOverride] = useState<RunnerPermissionsOverride | null>(
+    null
+  );
   const [isWorkdirPickerOpen, setWorkdirPickerOpen] = useState(false);
   const agentsQuery = useQuery(agentSettingsListQueryOptions());
   const agents = useMemo(() => agentsQuery.data?.agents ?? [], [agentsQuery.data?.agents]);
   const persistedRunner = currentChat?.runner ?? DEFAULT_RUNNER;
   const activeRunner =
     runnerOverride?.chatId === currentChatId ? runnerOverride.runner : persistedRunner;
+  const persistedPermissions = currentChat?.runnerPermissions ?? EMPTY_PERMISSIONS;
+  const runnerPermissions =
+    permissionsOverride?.chatId === currentChatId
+      ? permissionsOverride.permissions
+      : persistedPermissions;
   const selectedAgentId = activeRunner.kind === 'mangostudio' ? activeRunner.agentId : null;
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
@@ -74,11 +98,33 @@ export function useRunnerSelection({
     [persistRunner]
   );
 
-  // No external adapter exists yet; kept as a stub the runner selector can
-  // wire up once one does.
-  const setRunnerTarget = useCallback((_targetId: ExternalAgentTargetId) => {
-    // Intentionally a no-op until an external-agent adapter is reachable.
-  }, []);
+  const setRunnerTarget = useCallback(
+    (targetId: ExternalAgentTargetId) => {
+      persistRunner({ kind: 'external', targetId });
+    },
+    [persistRunner]
+  );
+
+  /**
+   * The permission pair, optimistically applied.
+   *
+   * Local first because the composer chip has to move the moment it is pressed,
+   * and reverted on a rejected write for the same reason the runner override is:
+   * a control showing a choice the chat does not store would keep sending turns
+   * under a permission level the user thinks they changed.
+   */
+  const setRunnerPermissions = useCallback(
+    (permissions: ChatRunnerPermissions) => {
+      setPermissionsOverride({ chatId: currentChatId, permissions });
+      if (!currentChatId) return;
+      void updateChatRunnerPermissions(currentChatId, permissions).catch(() => {
+        setPermissionsOverride((current) =>
+          current?.chatId === currentChatId && current.permissions === permissions ? null : current
+        );
+      });
+    },
+    [currentChatId, updateChatRunnerPermissions]
+  );
 
   const openWorkdirPicker = useCallback(() => setWorkdirPickerOpen(true), []);
   const closeWorkdirPicker = useCallback(() => setWorkdirPickerOpen(false), []);
@@ -172,6 +218,7 @@ export function useRunnerSelection({
     agents,
     isAgentListLoading: agentsQuery.isLoading,
     runner: activeRunner,
+    runnerPermissions,
     selectedAgentId,
     selectedAgent,
     currentWorkdir: currentChat?.workdir ?? null,
@@ -179,6 +226,7 @@ export function useRunnerSelection({
     bindNewChat,
     setRunnerAgentId,
     setRunnerTarget,
+    setRunnerPermissions,
     openWorkdirPicker,
     closeWorkdirPicker,
     selectWorkdir,
