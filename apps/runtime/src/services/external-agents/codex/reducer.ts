@@ -22,21 +22,50 @@
  */
 
 import type { ExternalAgentEvent, ExternalUsage } from '@mangostudio/shared/external-agents';
-import { classifyCodexItem, codexItemId, codexItemStatus } from './items';
+import { classifyCodexItem, codexItemId, codexItemStatus, fileChangeDetail } from './items';
 import type { AgentMessageDeltaNotification } from './protocol/v2/AgentMessageDeltaNotification';
+import type { CommandExecutionOutputDeltaNotification } from './protocol/v2/CommandExecutionOutputDeltaNotification';
 import type { ErrorNotification } from './protocol/v2/ErrorNotification';
+import type { FileChangePatchUpdatedNotification } from './protocol/v2/FileChangePatchUpdatedNotification';
 import type { ItemCompletedNotification } from './protocol/v2/ItemCompletedNotification';
 import type { ItemStartedNotification } from './protocol/v2/ItemStartedNotification';
+import type { McpToolCallProgressNotification } from './protocol/v2/McpToolCallProgressNotification';
 import type { ReasoningSummaryTextDeltaNotification } from './protocol/v2/ReasoningSummaryTextDeltaNotification';
 import type { ThreadTokenUsageUpdatedNotification } from './protocol/v2/ThreadTokenUsageUpdatedNotification';
 import type { TokenUsageBreakdown } from './protocol/v2/TokenUsageBreakdown';
 import type { TurnCompletedNotification } from './protocol/v2/TurnCompletedNotification';
+
+/**
+ * How often a still-running activity may report progress.
+ *
+ * This is a **liveness** interval, not a rendering one. The supervisor cancels a
+ * turn that produces no neutral event for its idle timeout, and a `bun test` or
+ * a long `git clone` can stream vendor output for minutes without any of the
+ * events above ever firing. Coalescing to one update per window keeps the turn
+ * demonstrably alive without spending the per-turn payload budget on a build
+ * log: the cap is 2 MB for the whole turn, which a raw forward of every delta
+ * would exhaust on its own.
+ *
+ * Comfortably under the supervisor's 60s idle timeout, and the first delta after
+ * a quiet window always emits, so a vendor that trickles slower than this is
+ * still followed delta for delta rather than batched.
+ */
+const ACTIVITY_UPDATE_INTERVAL_MS = 5_000;
+
+/** How much of the tail of an activity's output one update carries. */
+const ACTIVITY_UPDATE_DETAIL_MAX_CHARS = 2_000;
 
 /** What an open item was classified as, remembered until it completes. */
 interface OpenItem {
   readonly disposition: 'text' | 'reasoning' | 'activity' | 'drop';
   /** Text already emitted as deltas, so a completion does not repeat it. */
   emitted: string;
+  /** The tail of an activity's own output, kept bounded, for the next update. */
+  tail?: string;
+  /** True once `tail` dropped anything off its front. */
+  tailTruncated?: boolean;
+  /** When this item last produced an `activity_updated`. */
+  lastUpdateAtMs?: number;
 }
 
 export interface CodexTurnReduction {
@@ -61,10 +90,12 @@ function only(event: ExternalAgentEvent): CodexTurnReduction {
 export class CodexTurnReducer {
   readonly #turnId: string;
   readonly #items = new Map<string, OpenItem>();
+  readonly #now: () => number;
   #finished = false;
 
-  constructor(turnId: string) {
+  constructor(turnId: string, now: () => number = Date.now) {
     this.#turnId = turnId;
+    this.#now = now;
   }
 
   get finished(): boolean {
@@ -90,6 +121,18 @@ export class CodexTurnReducer {
       case 'item/reasoning/textDelta':
       case 'item/reasoning/summaryTextDelta':
         return this.#textDelta(params as ReasoningSummaryTextDeltaNotification, 'reasoning_delta');
+      case 'item/commandExecution/outputDelta':
+        return this.#activityOutput(params as CommandExecutionOutputDeltaNotification, (p) =>
+          p.delta.length > 0 ? p.delta : undefined
+        );
+      case 'item/mcpToolCall/progress':
+        return this.#activityOutput(params as McpToolCallProgressNotification, (p) =>
+          p.message.length > 0 ? `${p.message}\n` : undefined
+        );
+      case 'item/fileChange/patchUpdated':
+        return this.#activityOutput(params as FileChangePatchUpdatedNotification, (p) =>
+          p.changes.length > 0 ? `${fileChangeDetail(p.changes)}\n` : undefined
+        );
       case 'thread/tokenUsage/updated':
         return this.#usage(params as ThreadTokenUsageUpdatedNotification);
       case 'turn/completed':
@@ -100,7 +143,9 @@ export class CodexTurnReducer {
         // Includes `item/reasoning/summaryPartAdded`, which marks a boundary
         // between summary parts and carries no text of its own, and every
         // notification family this client opted out of but a future build might
-        // still send.
+        // still send. Nothing that arrives here may be load-bearing for
+        // liveness: the cases above cover every turn-scoped notification a
+        // long-running item emits, so a turn that is working is never silent.
         return NOTHING;
     }
   }
@@ -180,33 +225,88 @@ export class CodexTurnReducer {
     return only({ type, text: params.delta });
   }
 
+  /**
+   * A running activity said something. Keep the tail, emit at most one update
+   * per window.
+   *
+   * Only items this reducer classified as `activity` produce updates: a delta
+   * for an item it never bracketed has no `callId` the hub could attach it to,
+   * and inventing one would create a part the transcript then never completes.
+   */
+  #activityOutput<T extends { turnId?: string | null; itemId: string }>(
+    params: T,
+    text: (params: T) => string | undefined
+  ): CodexTurnReduction {
+    if (!this.#belongsToTurn(params)) return NOTHING;
+    const open = this.#items.get(params.itemId);
+    if (open?.disposition !== 'activity') return NOTHING;
+    const chunk = text(params);
+    if (chunk === undefined) return NOTHING;
+
+    const combined = (open.tail ?? '') + chunk;
+    if (combined.length > ACTIVITY_UPDATE_DETAIL_MAX_CHARS) {
+      open.tail = combined.slice(combined.length - ACTIVITY_UPDATE_DETAIL_MAX_CHARS);
+      open.tailTruncated = true;
+    } else {
+      open.tail = combined;
+    }
+
+    const now = this.#now();
+    const since = now - (open.lastUpdateAtMs ?? Number.NEGATIVE_INFINITY);
+    if (since < ACTIVITY_UPDATE_INTERVAL_MS) return NOTHING;
+    open.lastUpdateAtMs = now;
+    return only({
+      type: 'activity_updated',
+      callId: params.itemId,
+      update: {
+        detail: open.tail,
+        ...(open.tailTruncated ? { truncated: true } : {}),
+      },
+    });
+  }
+
   #usage(params: ThreadTokenUsageUpdatedNotification): CodexTurnReduction {
     if (!this.#belongsToTurn(params)) return NOTHING;
     return only({ type: 'usage', usage: mapTokenUsage(params.tokenUsage.last) });
   }
 
+  /**
+   * `TurnStatus` has four members and only one of them is success.
+   *
+   * `interrupted` is the one that is easy to get wrong: it is a terminal status
+   * like `completed`, so a check for `failed` alone lets a turn Codex cut short
+   * be persisted and shown as a turn that finished saying everything it meant
+   * to. It reaches this reducer only for an interruption MangoStudio did **not**
+   * ask for — a cancel from here finishes the channel before the notification
+   * lands — so the honest report is a non-success terminal, and the neutral
+   * vocabulary's non-success terminal is `error`.
+   *
+   * `inProgress` cannot legitimately arrive on `turn/completed`; treating it as
+   * terminal-but-not-successful is the conservative reading.
+   */
   #turnCompleted(params: TurnCompletedNotification): CodexTurnReduction {
     if (params.turn.id !== this.#turnId) return NOTHING;
     this.#finished = true;
-    if (params.turn.status === 'failed') {
-      const error = params.turn.error;
-      return {
-        events: [
-          {
-            type: 'error',
-            error: {
-              code: 'vendor-turn-failed',
-              message: error?.message ?? 'The Codex turn failed.',
-              ...(error?.codexErrorInfo
-                ? { vendorCode: codexErrorCode(error.codexErrorInfo) }
-                : {}),
-            },
-          },
-        ],
-        finished: true,
-      };
+    if (params.turn.status === 'completed') {
+      return { events: [{ type: 'completed' }], finished: true };
     }
-    return { events: [{ type: 'completed' }], finished: true };
+    const error = params.turn.error;
+    const interrupted = params.turn.status === 'interrupted';
+    return {
+      events: [
+        {
+          type: 'error',
+          error: {
+            code: interrupted ? 'vendor-turn-interrupted' : 'vendor-turn-failed',
+            message:
+              error?.message ??
+              (interrupted ? 'Codex interrupted the turn.' : 'The Codex turn failed.'),
+            ...(error?.codexErrorInfo ? { vendorCode: codexErrorCode(error.codexErrorInfo) } : {}),
+          },
+        },
+      ],
+      finished: true,
+    };
   }
 
   #error(params: ErrorNotification): CodexTurnReduction {

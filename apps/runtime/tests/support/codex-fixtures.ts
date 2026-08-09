@@ -15,12 +15,17 @@
  */
 
 import type { AgentMessageDeltaNotification } from '../../src/services/external-agents/codex/protocol/v2/AgentMessageDeltaNotification';
+import type { CommandExecutionOutputDeltaNotification } from '../../src/services/external-agents/codex/protocol/v2/CommandExecutionOutputDeltaNotification';
 import type { CommandExecutionRequestApprovalParams } from '../../src/services/external-agents/codex/protocol/v2/CommandExecutionRequestApprovalParams';
 import type { ErrorNotification } from '../../src/services/external-agents/codex/protocol/v2/ErrorNotification';
+import type { FileChangePatchUpdatedNotification } from '../../src/services/external-agents/codex/protocol/v2/FileChangePatchUpdatedNotification';
 import type { FileChangeRequestApprovalParams } from '../../src/services/external-agents/codex/protocol/v2/FileChangeRequestApprovalParams';
+import type { FileUpdateChange } from '../../src/services/external-agents/codex/protocol/v2/FileUpdateChange';
 import type { ItemCompletedNotification } from '../../src/services/external-agents/codex/protocol/v2/ItemCompletedNotification';
 import type { ItemStartedNotification } from '../../src/services/external-agents/codex/protocol/v2/ItemStartedNotification';
+import type { McpToolCallProgressNotification } from '../../src/services/external-agents/codex/protocol/v2/McpToolCallProgressNotification';
 import type { Model } from '../../src/services/external-agents/codex/protocol/v2/Model';
+import type { PatchChangeKind } from '../../src/services/external-agents/codex/protocol/v2/PatchChangeKind';
 import type { PermissionProfileSummary } from '../../src/services/external-agents/codex/protocol/v2/PermissionProfileSummary';
 import type { ReasoningSummaryTextDeltaNotification } from '../../src/services/external-agents/codex/protocol/v2/ReasoningSummaryTextDeltaNotification';
 import type { Thread } from '../../src/services/external-agents/codex/protocol/v2/Thread';
@@ -81,9 +86,54 @@ export function fileChangeItem(
   return {
     type: 'fileChange',
     id,
-    changes: paths.map((path) => ({ path, kind: { type: 'update', move_path: null }, diff: '' })),
+    changes: paths.map((path) => fileUpdateChange(path)),
     status,
   };
+}
+
+/**
+ * One `FileUpdateChange`, with the **tagged** kind the vendor actually sends.
+ *
+ * `kind` is an object, not a string, which is the whole reason this builder
+ * exists: a hand-written `kind: 'update'` would type-error here rather than
+ * quietly producing a rendering nobody notices until it reaches a transcript.
+ */
+export function fileUpdateChange(
+  path: string,
+  kind: PatchChangeKind = { type: 'update', move_path: null }
+): FileUpdateChange {
+  return { path, kind, diff: '' };
+}
+
+export function fileChangeItemWithChanges(
+  id: string,
+  changes: readonly FileUpdateChange[]
+): ThreadItem {
+  return { type: 'fileChange', id, changes: [...changes], status: 'completed' };
+}
+
+export function commandOutputDelta(
+  itemId: string,
+  delta: string,
+  turnId = TURN_ID
+): CommandExecutionOutputDeltaNotification {
+  return { threadId: THREAD_ID, turnId, itemId, delta };
+}
+
+export function mcpToolCallProgress(
+  itemId: string,
+  message: string,
+  turnId = TURN_ID
+): McpToolCallProgressNotification {
+  return { threadId: THREAD_ID, turnId, itemId, message };
+}
+
+export function fileChangePatchUpdated(
+  itemId: string,
+  changes: readonly FileUpdateChange[],
+  turnId = TURN_ID
+): FileChangePatchUpdatedNotification {
+  return { threadId: THREAD_ID, turnId, itemId, changes: [...changes] };
 }
 
 export function itemStarted(item: ThreadItem, turnId = TURN_ID): ItemStartedNotification {

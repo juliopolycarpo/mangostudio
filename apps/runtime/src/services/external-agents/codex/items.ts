@@ -23,6 +23,8 @@
  */
 
 import type { ExternalActivityKind } from '@mangostudio/shared/external-agents';
+import type { FileUpdateChange } from './protocol/v2/FileUpdateChange';
+import type { PatchChangeKind } from './protocol/v2/PatchChangeKind';
 import type { ThreadItem } from './protocol/v2/ThreadItem';
 
 interface CodexItemActivity {
@@ -54,6 +56,26 @@ function fileChangeTitle(changes: ReadonlyArray<{ path: string }>): string {
   return `${changes.length} files`;
 }
 
+/**
+ * One line per change, from the **tagged** kind rather than the object itself.
+ *
+ * `PatchChangeKind` is `{type:'add'} | {type:'delete'} | {type:'update', move_path}`,
+ * so interpolating it directly renders `[object Object] /path` — and this string
+ * is persisted as the change summary a user reads. A rename carries its
+ * destination in `move_path`, which is the whole content of that change.
+ */
+export function fileChangeDetail(changes: ReadonlyArray<FileUpdateChange>): string {
+  return changes.map(fileChangeLine).join('\n');
+}
+
+function fileChangeLine(change: FileUpdateChange): string {
+  const kind: PatchChangeKind = change.kind;
+  if (kind.type === 'update' && kind.move_path) {
+    return `rename ${change.path} → ${kind.move_path}`;
+  }
+  return `${kind.type} ${change.path}`;
+}
+
 export function classifyCodexItem(item: ThreadItem): CodexItemClassification {
   switch (item.type) {
     case 'agentMessage':
@@ -79,7 +101,7 @@ export function classifyCodexItem(item: ThreadItem): CodexItemClassification {
         kind: 'file-change',
         name: 'fileChange',
         title: fileChangeTitle(item.changes),
-        detail: item.changes.map((change) => `${change.kind} ${change.path}`).join('\n'),
+        detail: fileChangeDetail(item.changes),
       };
     case 'mcpToolCall':
       return {

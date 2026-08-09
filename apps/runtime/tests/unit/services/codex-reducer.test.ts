@@ -7,10 +7,15 @@ import {
   agentMessageDelta,
   agentMessageItem,
   commandExecutionItem,
+  commandOutputDelta,
   errorNotification,
   fileChangeItem,
+  fileChangeItemWithChanges,
+  fileChangePatchUpdated,
+  fileUpdateChange,
   itemCompleted,
   itemStarted,
+  mcpToolCallProgress,
   reasoningItem,
   reasoningSummaryDelta,
   TURN_ID,
@@ -26,6 +31,17 @@ function replay(
 ): ExternalAgentEvent[] {
   const reducer = new CodexTurnReducer(turnId);
   return notifications.flatMap(([method, params]) => [...reducer.reduce(method, params).events]);
+}
+
+/** A clock the test advances by hand, so coalescing is asserted, not timed. */
+function fakeClock(start = 1_000_000) {
+  let now = start;
+  return {
+    now: () => now,
+    advance(ms: number) {
+      now += ms;
+    },
+  };
 }
 
 describe('codex reducer — the captured real turn', () => {
@@ -146,12 +162,146 @@ describe('codex reducer — item classification', () => {
     expect(events[0]).toMatchObject({ result: { status: 'cancelled' } });
   });
 
+  it('renders a file change from its tagged kind rather than coercing the object', () => {
+    const changes = [
+      fileUpdateChange('/workspace/added.ts', { type: 'add' }),
+      fileUpdateChange('/workspace/gone.ts', { type: 'delete' }),
+      fileUpdateChange('/workspace/edited.ts'),
+      fileUpdateChange('/workspace/old.ts', { type: 'update', move_path: '/workspace/new.ts' }),
+    ];
+    const events = replay([
+      ['item/completed', itemCompleted(fileChangeItemWithChanges('patch', changes))],
+    ]);
+
+    const detail = events[0]?.type === 'activity_completed' ? events[0].result.detail : undefined;
+    expect(detail).toBe(
+      [
+        'add /workspace/added.ts',
+        'delete /workspace/gone.ts',
+        'update /workspace/edited.ts',
+        'rename /workspace/old.ts → /workspace/new.ts',
+      ].join('\n')
+    );
+    expect(detail).not.toContain('[object Object]');
+  });
+
   it('drops the user message echo so the transcript is not duplicated', () => {
     const events = replay([
       ['item/started', itemStarted(userMessageItem('echo', 'hello'))],
       ['item/completed', itemCompleted(userMessageItem('echo', 'hello'))],
     ]);
     expect(events).toEqual([]);
+  });
+});
+
+describe('codex reducer — liveness while an activity runs', () => {
+  /**
+   * The supervisor cancels a turn that emits no neutral event for its idle
+   * timeout. A command that streams output for minutes must therefore keep
+   * producing events — but coalesced, because the turn's whole payload budget
+   * is 2 MB and a build log would spend it.
+   */
+  function runningCommand(clock: ReturnType<typeof fakeClock>) {
+    const reducer = new CodexTurnReducer(TURN_ID, clock.now);
+    reducer.reduce(
+      'item/started',
+      itemStarted(commandExecutionItem('cmd', 'bun test', 'inProgress'))
+    );
+    return reducer;
+  }
+
+  it('keeps a long command alive without forwarding every delta', () => {
+    const clock = fakeClock();
+    const reducer = runningCommand(clock);
+
+    const updates: ExternalAgentEvent[] = [];
+    // Two minutes of output, a chunk every second: twice the idle timeout.
+    for (let second = 0; second < 120; second += 1) {
+      updates.push(
+        ...reducer.reduce(
+          'item/commandExecution/outputDelta',
+          commandOutputDelta('cmd', `line ${second}\n`)
+        ).events
+      );
+      clock.advance(1_000);
+    }
+
+    // Far fewer events than deltas, but never a 60-second silence.
+    expect(updates.length).toBeGreaterThan(1);
+    expect(updates.length).toBeLessThan(60);
+    expect(updates.every((event) => event.type === 'activity_updated')).toBe(true);
+    expect(
+      updates.every((event) => event.type === 'activity_updated' && event.callId === 'cmd')
+    ).toBe(true);
+  });
+
+  it('bounds the detail it carries and says when it dropped output', () => {
+    const clock = fakeClock();
+    const reducer = runningCommand(clock);
+
+    reducer.reduce(
+      'item/commandExecution/outputDelta',
+      commandOutputDelta('cmd', 'x'.repeat(50_000))
+    );
+    clock.advance(10_000);
+    const [event] = reducer.reduce(
+      'item/commandExecution/outputDelta',
+      commandOutputDelta('cmd', 'tail')
+    ).events;
+
+    expect(event).toMatchObject({ type: 'activity_updated', update: { truncated: true } });
+    const detail = event?.type === 'activity_updated' ? (event.update.detail ?? '') : '';
+    expect(detail.length).toBeLessThanOrEqual(2_000);
+    expect(detail.endsWith('tail')).toBe(true);
+  });
+
+  it('follows a trickle delta for delta rather than batching it', () => {
+    const clock = fakeClock();
+    const reducer = runningCommand(clock);
+
+    const first = reducer.reduce(
+      'item/commandExecution/outputDelta',
+      commandOutputDelta('cmd', 'a')
+    ).events;
+    clock.advance(30_000);
+    const second = reducer.reduce(
+      'item/commandExecution/outputDelta',
+      commandOutputDelta('cmd', 'b')
+    ).events;
+
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(1);
+  });
+
+  it('reports MCP progress and patch updates on the same channel', () => {
+    const clock = fakeClock();
+    const reducer = new CodexTurnReducer(TURN_ID, clock.now);
+    reducer.reduce('item/started', itemStarted(fileChangeItem('patch', ['a.ts'], 'inProgress')));
+    const patch = reducer.reduce(
+      'item/fileChange/patchUpdated',
+      fileChangePatchUpdated('patch', [fileUpdateChange('/workspace/a.ts', { type: 'add' })])
+    ).events;
+
+    expect(patch).toMatchObject([
+      { type: 'activity_updated', callId: 'patch', update: { detail: 'add /workspace/a.ts\n' } },
+    ]);
+
+    // An item this reducer never bracketed has no call id to attach to.
+    expect(
+      reducer.reduce('item/mcpToolCall/progress', mcpToolCallProgress('never-seen', 'working'))
+        .events
+    ).toEqual([]);
+  });
+
+  it('ignores output belonging to another turn', () => {
+    const clock = fakeClock();
+    const reducer = runningCommand(clock);
+    expect(
+      reducer.reduce(
+        'item/commandExecution/outputDelta',
+        commandOutputDelta('cmd', 'x', 'other-turn')
+      ).events
+    ).toEqual([]);
   });
 });
 
@@ -194,6 +344,17 @@ describe('codex reducer — failures', () => {
           message: 'model refused',
           vendorCode: 'httpConnectionFailed',
         },
+      },
+    ]);
+  });
+
+  it('reports an interrupted turn as a non-success terminal, not a completion', () => {
+    const events = replay([['turn/completed', turnCompleted('interrupted')]]);
+
+    expect(events).toEqual([
+      {
+        type: 'error',
+        error: { code: 'vendor-turn-interrupted', message: 'Codex interrupted the turn.' },
       },
     ]);
   });
