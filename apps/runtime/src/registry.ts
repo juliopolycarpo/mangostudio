@@ -55,7 +55,6 @@ export interface RuntimeMethodRegistry {
   readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
   readonly updateActive: () => boolean;
   readonly externalAgentRegistry: ExternalAgentAdapterRegistry;
-  readonly externalAgentHealth: () => import('@mangostudio/shared/runtime-home').RuntimeExternalAgentHealth;
   /** Releases everything the handlers hold open — MCP sessions today. */
   close(): Promise<void>;
 }
@@ -165,18 +164,14 @@ export function createRuntimeMethodHandlers(
     ]),
     updateActive: () => update.active,
     externalAgentRegistry,
-    externalAgentHealth: () => ({
-      ...externalAgents.health,
-      ...(options.externalAgents?.identityIsolation
-        ? { identityIsolation: options.externalAgents.identityIsolation }
-        : {}),
-    }),
     close: async () => {
-      install.close();
       // Settled, not chained: the external-agent supervisor owns spawned vendor
       // processes and their process trees, so an earlier rejection must not skip
-      // its teardown and leak them for the life of the runtime.
+      // its teardown and leak them for the life of the runtime. `install.close`
+      // is in here for the same reason — it aborts hub-supplied argv, and a
+      // throw from one of those aborts must not take the reaper down with it.
       const results = await Promise.allSettled([
+        (async () => install.close())(),
         update.close(),
         mcp.close(),
         externalAgents.close(),
