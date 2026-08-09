@@ -257,11 +257,7 @@ export async function updateChat(
     return;
   }
 
-  // The D14 guard reads `messages` and then writes `chats`, so it only holds
-  // if both happen under one transaction — otherwise the chat's first turn can
-  // commit between the two statements and the kind changes anyway. SQLite
-  // serializes writers, so the transaction alone closes the window.
-  await db.transaction().execute(async (trx) => {
+  const guardedWrite = async (trx: Kysely<Database>): Promise<void> => {
     await assertRunnerKindChangeAllowed(id, userId, runner.kind, trx);
     await trx
       .updateTable('chats')
@@ -269,7 +265,21 @@ export async function updateChat(
       .where('id', '=', id)
       .where('userId', '=', userId)
       .execute();
-  });
+  };
+
+  // The D14 guard reads `messages` and then writes `chats`, so it only holds
+  // if both happen under one transaction — otherwise the chat's first turn can
+  // commit between the two statements and the kind changes anyway. SQLite
+  // serializes writers, so the transaction alone closes the window.
+  //
+  // A caller that already opened one hands it in, and Kysely refuses to nest:
+  // running the same two statements on it keeps the guarantee without the
+  // second `BEGIN` that would throw.
+  if (db.isTransaction) {
+    await guardedWrite(db);
+    return;
+  }
+  await db.transaction().execute(guardedWrite);
 }
 
 export async function deleteChat(id: string, userId: string, db: Kysely<Database>): Promise<void> {

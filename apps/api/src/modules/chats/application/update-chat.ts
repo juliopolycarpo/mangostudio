@@ -1,3 +1,4 @@
+import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -68,13 +69,32 @@ export async function updateChatUseCase(
     await updateChat(input.chatId, input.userId, updates, transaction);
   });
 
-  // Environment and workspace are part of an external session's identity, so a
-  // change to either invalidates the vendor conversation rather than moving it.
-  // Done after the write: the binding it is reacting to is the persisted one.
+  // Environment, workspace and vendor are part of an external session's
+  // identity, so a change to any of them invalidates the vendor conversation
+  // rather than moving it. The target matters as much as the other two: a chat
+  // may be repointed at another vendor even after it has messages, and a live
+  // turn from the old one would otherwise keep writing into a chat that is now
+  // bound to a different vendor. Done after the write: the binding it is
+  // reacting to is the persisted one.
   const bindingChanged =
     (updates.environmentId !== undefined && updates.environmentId !== current.environmentId) ||
-    (updates.workdir !== undefined && updates.workdir !== current.workdir);
+    (updates.workdir !== undefined && updates.workdir !== current.workdir) ||
+    externalTargetChanged(current.runner, updates.runner);
   if (bindingChanged) {
     await externalSessionManager.reapChat(input.chatId, 'session-lost');
   }
+}
+
+/**
+ * True when the chat stops being run by the vendor its session was opened for.
+ *
+ * A change away from `external` is covered too: the session belongs to a runner
+ * the chat no longer has either way.
+ */
+function externalTargetChanged(
+  current: ChatRunnerConfiguration,
+  next: ChatRunnerConfiguration | undefined
+): boolean {
+  if (current.kind !== 'external' || next === undefined) return false;
+  return next.kind !== 'external' || next.targetId !== current.targetId;
 }
