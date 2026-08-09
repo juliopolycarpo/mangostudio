@@ -123,8 +123,13 @@ describe('external agent process teardown', () => {
 
       await child.terminate({ graceMs: 20 });
 
-      expect(isAlive(child.pid)).toBe(false);
-      expect(isAlive(descendantPid)).toBe(false);
+      // `terminate` resolves on the *child's* exit. Every other member of the
+      // process group was signalled at the same moment, but the kernel delivers
+      // and reaps on its own schedule, so a descendant can still be winding down
+      // here — reliably on a loaded machine, rarely on an idle one. The claim
+      // under test is that the group dies, not that it dies within one tick.
+      await waitUntilDead(child.pid);
+      await waitUntilDead(descendantPid);
     }
   );
 
@@ -233,6 +238,17 @@ describe('external agent process teardown', () => {
     }
   );
 });
+
+/** Waits for a signalled process to actually be gone, rather than assuming it is. */
+async function waitUntilDead(pid: number, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (isAlive(pid)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`Process ${pid} was still alive ${timeoutMs}ms after its group was killed.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 
 function isAlive(pid: number): boolean {
   try {
