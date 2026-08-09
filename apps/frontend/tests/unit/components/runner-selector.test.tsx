@@ -18,10 +18,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { RunnerSelector } from '../../../src/components/layout/RunnerSelector';
 import { render } from '../../support/harness/render';
 
+/** Only the three fields the selector reads; the rest of the profile is noise here. */
+function agent(id: string, name: string, role: AgentProfile['role']): AgentProfile {
+  return { id, name, role } as unknown as AgentProfile;
+}
+
 const AGENTS: AgentProfile[] = [
-  { id: 'default', name: 'Default', role: 'primary' } as AgentProfile,
-  { id: 'explore', name: 'Explore', role: 'primary' } as AgentProfile,
-  { id: 'user:helper', name: 'Sub only', role: 'subagent' } as AgentProfile,
+  agent('default', 'Default', 'primary'),
+  agent('explore', 'Explore', 'primary'),
+  agent('user:helper', 'Sub only', 'subagent'),
 ];
 
 function descriptor(overrides: Partial<ExternalAgentDescriptor> = {}): ExternalAgentDescriptor {
