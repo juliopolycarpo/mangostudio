@@ -16,12 +16,14 @@ import {
   TurnCheckpointWriter,
 } from '../../../../src/modules/generation/application/turn-checkpoint';
 import {
+  assertTurnCanCancel,
   buildRecoveryPrompt,
   inspectInterruptedTurnResume,
   reconcileStaleTurns,
   reserveInterruptedTurnResume,
   STALE_TURN_CHECKPOINT_AGE_MS,
   TurnRecoveryConflictError,
+  TurnRecoveryNotFoundError,
 } from '../../../../src/modules/generation/application/turn-recovery';
 import {
   finalizeCheckpointedAiResponse,
@@ -751,6 +753,55 @@ describe('interrupted turn recovery', () => {
     expect(row.isGenerating).toBe(0);
     // Nothing to seal and no checkpoint to record, so parts stay untouched.
     expect(row.parts).toBeNull();
+  });
+
+  it('admits an external turn to the stop button, and nothing without a record', async () => {
+    const { user, chat } = await createOwnedChat();
+    const externalId = crypto.randomUUID();
+    const bareId = crypto.randomUUID();
+    const externalTurn: MessagePart = {
+      type: 'external_turn',
+      version: 1,
+      targetId: 'codex',
+      sessionId: 'session-1',
+      status: 'active',
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+      lastSequence: 3,
+      eventCount: 3,
+      persistedBytes: 120,
+    };
+    for (const [id, parts] of [
+      [externalId, JSON.stringify([externalTurn])],
+      [bareId, null],
+    ] as const) {
+      await insertMessage(
+        {
+          id,
+          chatId: chat.id,
+          role: 'ai',
+          text: 'running',
+          timestamp: Date.now(),
+          isGenerating: true,
+          interactionMode: 'agent',
+          ...(parts ? { parts } : {}),
+        },
+        getDb()
+      );
+    }
+
+    // An external turn carries no checkpoint by design, and requiring one would
+    // 404 every stop request against a vendor turn.
+    expect(
+      await assertTurnCanCancel(
+        { chatId: chat.id, messageId: externalId, userId: user.id },
+        getDb()
+      )
+    ).toEqual({ kind: 'external' });
+
+    await expect(
+      assertTurnCanCancel({ chatId: chat.id, messageId: bareId, userId: user.id }, getDb())
+    ).rejects.toBeInstanceOf(TurnRecoveryNotFoundError);
   });
 
   it('finalizes the original assistant row once', async () => {

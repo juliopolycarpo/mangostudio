@@ -29,6 +29,8 @@ export interface ReconcileExternalTurnsInput {
   /** Nothing can be live at boot; the guard exists so a caller can prove it. */
   readonly isActive?: (messageId: string) => boolean;
   readonly chatId?: string;
+  /** One turn, for a caller acting on a message it already identified. */
+  readonly messageId?: string;
   readonly now?: () => number;
 }
 
@@ -44,6 +46,7 @@ export async function reconcileExternalTurns(
     .where('role', '=', 'ai')
     .where('isGenerating', '=', 1);
   if (input.chatId) query = query.where('chatId', '=', input.chatId);
+  if (input.messageId) query = query.where('id', '=', input.messageId);
 
   const rows = await query.execute();
   let reconciled = 0;

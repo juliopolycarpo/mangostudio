@@ -3,9 +3,10 @@ import type { TurnRecoveryActionResponse } from '@mangostudio/shared/turn-recove
 import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { reconcileExternalTurns } from '../../external-agents/application/external-turn-recovery';
 import { cancelActiveTurn } from '../application/active-turn-registry';
 import {
-  assertCheckpointedTurnCanCancel,
+  assertTurnCanCancel,
   dismissInterruptedTurn,
   interruptCheckpointedMessage,
   TurnRecoveryConflictError,
@@ -55,7 +56,7 @@ export const turnRecoveryRoutes = (app: Elysia) =>
         async ({ params, user, set }) => {
           const userId = user?.id ?? '';
           try {
-            await assertCheckpointedTurnCanCancel(
+            const turn = await assertTurnCanCancel(
               { chatId: params.id, messageId: params.messageId, userId },
               getDb()
             );
@@ -68,7 +69,14 @@ export const turnRecoveryRoutes = (app: Elysia) =>
               params.id,
               'user_cancelled'
             );
-            if (!cancelled) {
+            if (!cancelled && turn.kind === 'external') {
+              // The external record is where an external turn's reason lives;
+              // the checkpoint path has nowhere to write one.
+              await reconcileExternalTurns(
+                { reason: 'cancelled-by-user', messageId: params.messageId },
+                getDb()
+              );
+            } else if (!cancelled) {
               await interruptCheckpointedMessage(
                 { messageId: params.messageId, reasonCode: 'user_cancelled' },
                 getDb()
