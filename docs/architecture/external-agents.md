@@ -136,7 +136,7 @@ and that reviewer applies at *any* sandbox level. A flat list of four choices co
 
 Roughly, per vendor:
 
-```
+```text
 LEVEL         codex                          cursor              claude
 read-only     sandbox read-only              plan mode           plan
 default       workspace-write + on-request   agent mode          the account's own default
