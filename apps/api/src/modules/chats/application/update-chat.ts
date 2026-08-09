@@ -2,6 +2,7 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createEnvironmentRepository } from '../../environments/infrastructure/environment-repository';
+import { externalSessionManager } from '../../external-agents/application/external-session-manager';
 import { requireValidWorkdir } from '../../workspaces/application/workdir-validation';
 import { getOwnedChatOrThrow } from '../domain/chat-ownership';
 import { type UpdateChatData, updateChat } from '../infrastructure/chat-repository';
@@ -66,4 +67,14 @@ export async function updateChatUseCase(
     }
     await updateChat(input.chatId, input.userId, updates, transaction);
   });
+
+  // Environment and workspace are part of an external session's identity, so a
+  // change to either invalidates the vendor conversation rather than moving it.
+  // Done after the write: the binding it is reacting to is the persisted one.
+  const bindingChanged =
+    (updates.environmentId !== undefined && updates.environmentId !== current.environmentId) ||
+    (updates.workdir !== undefined && updates.workdir !== current.workdir);
+  if (bindingChanged) {
+    await externalSessionManager.reapChat(input.chatId, 'session-lost');
+  }
 }
