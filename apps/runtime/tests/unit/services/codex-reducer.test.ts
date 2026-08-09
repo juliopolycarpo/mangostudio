@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExternalAgentEvent } from '@mangostudio/shared/external-agents';
 import { CodexTurnReducer } from '../../../src/services/external-agents/codex/reducer';
+import { normalizeExternalAgentEvent } from '../../../src/services/external-agents/normalization';
 import {
   agentMessageDelta,
   agentMessageItem,
@@ -357,6 +358,23 @@ describe('codex reducer — failures', () => {
         error: { code: 'vendor-turn-interrupted', message: 'Codex interrupted the turn.' },
       },
     ]);
+  });
+
+  it('drops an additive item with no id rather than failing the turn on it', () => {
+    // The escape hatch cannot invent the one field it needs. Every item type at
+    // the pinned version carries an id; tolerating an unknown `type` is only
+    // meaningful if a newer Codex that does not is survivable too.
+    const noId = { type: 'quantumTool' } as never;
+    const events = replay([
+      ['item/started', itemStarted(noId)],
+      ['item/completed', itemCompleted(noId)],
+      ['turn/completed', turnCompleted()],
+    ]);
+
+    expect(events).toEqual([{ type: 'completed' }]);
+    // The real failure was downstream: a `callId` of undefined threw inside
+    // normalization, which the supervisor turns into a dead turn.
+    expect(() => events.map(normalizeExternalAgentEvent)).not.toThrow();
   });
 
   it('ignores an unknown additive notification instead of throwing', () => {

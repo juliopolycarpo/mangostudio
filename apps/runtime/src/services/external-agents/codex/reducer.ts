@@ -158,6 +158,10 @@ export class CodexTurnReducer {
     if (!this.#belongsToTurn(params)) return NOTHING;
     const classification = classifyCodexItem(params.item);
     const id = codexItemId(params.item);
+    // Nothing coherent to report for an item that cannot be correlated: the
+    // deltas and the completion would have no bracket to attach to, and an
+    // `activity_started` with no `callId` fails validation and kills the turn.
+    if (id === undefined) return NOTHING;
     this.#items.set(id, { disposition: classification.disposition, emitted: '' });
     if (classification.disposition !== 'activity') return NOTHING;
     return only({
@@ -175,6 +179,7 @@ export class CodexTurnReducer {
   #itemCompleted(params: ItemCompletedNotification): CodexTurnReduction {
     if (!this.#belongsToTurn(params)) return NOTHING;
     const id = codexItemId(params.item);
+    if (id === undefined) return NOTHING;
     const open = this.#items.get(id);
     this.#items.delete(id);
     const classification = classifyCodexItem(params.item);

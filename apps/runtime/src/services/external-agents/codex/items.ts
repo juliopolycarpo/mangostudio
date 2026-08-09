@@ -203,7 +203,19 @@ function unknownItemActivity(item: never): CodexItemActivity {
   return { disposition: 'activity', kind: 'other', name, title: name };
 }
 
-/** The item id, which is what every delta and completion correlates by. */
-export function codexItemId(item: ThreadItem): string {
-  return (item as { id?: unknown }).id as string;
+/**
+ * The item id, which is what every delta and completion correlates by.
+ *
+ * `undefined` rather than a cast, because the id is the one field the escape
+ * hatch above cannot invent. All 18 item types at the pinned version carry one,
+ * but the whole point of tolerating an unknown `type` is that a newer Codex may
+ * not look like this one — and an item with no id cannot be bracketed,
+ * correlated with its deltas, or attached to by the transcript. Asserting a
+ * `string` here instead sent `callId: undefined` into an `activity_started`,
+ * where normalization threw and failed the turn: precisely the outcome the
+ * additive-type tolerance exists to prevent, arriving by a different door.
+ */
+export function codexItemId(item: ThreadItem): string | undefined {
+  const id = (item as { id?: unknown }).id;
+  return typeof id === 'string' && id.length > 0 ? id : undefined;
 }
