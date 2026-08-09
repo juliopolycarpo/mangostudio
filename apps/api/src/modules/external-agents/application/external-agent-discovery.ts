@@ -112,11 +112,13 @@ const DEFAULT_CACHE_TTL_MS = 30_000;
 const DEFAULT_TIMEOUT_MS = 5_000;
 
 /**
- * Two at a time per environment. Single-flight already collapses one user's
- * burst into one probe, so this bounds what is left: several users pointed at
- * the same shared machine. Anything beyond it takes the cheap pass instead of
- * queueing, because a queued probe would still be waiting when the request that
- * wanted it has gone.
+ * Two at a time per (user, environment) — the same scope the cache and the
+ * single-flight below use, because environments are per-user rows and two
+ * different users can register the same environment id. Single-flight already
+ * collapses one caller's own burst into one probe, so this is headroom rather
+ * than the primary guard. Anything beyond it takes the cheap pass instead of
+ * queueing, because a queued probe would still be waiting when the request
+ * that wanted it has gone.
  */
 const DEFAULT_MAX_CONCURRENT_PER_ENVIRONMENT = 2;
 
@@ -298,26 +300,44 @@ export function createExternalAgentDiscoveryService(
   >();
   const running = new Map<string, number>();
 
-  function tryEnter(environmentId: string): boolean {
-    const current = running.get(environmentId) ?? 0;
+  function tryEnter(key: string): boolean {
+    const current = running.get(key) ?? 0;
     if (current >= maxConcurrent) return false;
-    running.set(environmentId, current + 1);
+    running.set(key, current + 1);
     return true;
   }
 
-  function leave(environmentId: string): void {
-    const current = running.get(environmentId) ?? 1;
-    if (current <= 1) running.delete(environmentId);
-    else running.set(environmentId, current - 1);
+  function leave(key: string): void {
+    const current = running.get(key) ?? 1;
+    if (current <= 1) running.delete(key);
+    else running.set(key, current - 1);
   }
 
   async function probeAuthoritative(
     scope: ProbeScope,
-    targetIds: readonly ExternalAgentTargetId[]
+    targetIds: readonly ExternalAgentTargetId[],
+    key: string
   ): Promise<ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>> {
-    if (!authoritative) return new Map();
+    if (!authoritative) {
+      leave(key);
+      return new Map();
+    }
 
     const controller = new AbortController();
+    const describing = authoritative.describe(scope, targetIds, { signal: controller.signal });
+    // The slot is held for as long as the vendor subprocess actually runs, not
+    // for as long as the race below waits for it: an implementation that
+    // ignores its abort signal must still be counted against the cap, or the
+    // timeout would let a caller start unbounded ignored probes past it. This
+    // side chain only exists to release the slot, so its own rejection (the
+    // same one `Promise.race` below already handles) is deliberately unhandled.
+    describing
+      .finally(() => leave(key))
+      .catch(() => {
+        // Intentionally empty: `describing`'s rejection is already surfaced and
+        // handled through the `Promise.race` path below.
+      });
+
     let expire: ((reason: Error) => void) | undefined;
     // The signal asks the discovery to stop; the race stops *waiting* for it.
     // Both are needed — an implementation that ignores its signal would
@@ -331,10 +351,7 @@ export function createExternalAgentDiscoveryService(
     }, timeoutMs);
 
     try {
-      const statuses = await Promise.race([
-        authoritative.describe(scope, targetIds, { signal: controller.signal }),
-        expired,
-      ]);
+      const statuses = await Promise.race([describing, expired]);
       return new Map(statuses.map((status) => [status.targetId, status]));
     } finally {
       clearTimeout(deadline);
@@ -352,9 +369,9 @@ export function createExternalAgentDiscoveryService(
     const existing = inflight.get(key);
     if (existing) return existing;
 
-    if (!tryEnter(scope.environmentId)) return Promise.resolve(new Map());
+    if (!tryEnter(key)) return Promise.resolve(new Map());
 
-    const pending = probeAuthoritative(scope, targetIds)
+    const pending = probeAuthoritative(scope, targetIds, key)
       .then((byTarget) => {
         cache.set(key, {
           expiresAt: now() + cacheTtlMs,
@@ -374,8 +391,10 @@ export function createExternalAgentDiscoveryService(
         return new Map<ExternalAgentTargetId, AuthoritativeAgentStatus>();
       })
       .finally(() => {
+        // The concurrency slot is released inside `probeAuthoritative`, tied to
+        // the underlying `describe()` promise rather than to this wrapper —
+        // releasing it here too would double-decrement `running`.
         inflight.delete(key);
-        leave(scope.environmentId);
       });
 
     inflight.set(key, pending);

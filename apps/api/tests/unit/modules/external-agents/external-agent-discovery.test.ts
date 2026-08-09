@@ -376,7 +376,11 @@ describe('external agent discovery — the authoritative pass', () => {
     expect(calls).toBe(2);
   });
 
-  it('takes the scan rather than queueing past the per-environment concurrency cap', async () => {
+  it("does not let one user's probe consume another user's concurrency slot", async () => {
+    // Environments are per-user rows (pk_environments is (userId, id)), so two
+    // users can register the same environment id without it being the same
+    // machine. The concurrency cap is scoped like the cache and single-flight
+    // are — by (user, environment) — so it must not treat these two as one.
     let calls = 0;
     const service = createExternalAgentDiscoveryService({
       probingService: PROBING,
@@ -395,11 +399,41 @@ describe('external agent discovery — the authoritative pass', () => {
       service.listExternalAgents({ userId: 'user-2', environmentId: 'env-1' }),
     ]);
 
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
     expect(first[0]?.capabilities).toEqual(ALL_CAPABLE);
-    // The second user is answered from the scan instead of waiting in a queue
-    // that would still be running when their request is gone.
-    expect(second[0]?.capabilities).toEqual(NO_EXTERNAL_AGENT_CAPABILITIES);
+    expect(second[0]?.capabilities).toEqual(ALL_CAPABLE);
+  });
+
+  it('holds the concurrency slot until the ignored-abort discovery actually settles', async () => {
+    // A timeout answers the caller early, but an adapter that ignores its
+    // AbortSignal keeps running underneath. The slot must stay held until that
+    // real probe settles, or a caller that keeps asking can start an unbounded
+    // number of ignored probes past the stated per-environment cap.
+    let started = 0;
+    let resolveSlow: (() => void) | undefined;
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      maxConcurrentPerEnvironment: 1,
+      cacheTtlMs: 0,
+      timeoutMs: 5,
+      authoritative: {
+        describe() {
+          started += 1;
+          return new Promise((resolve) => {
+            resolveSlow = () => resolve([{ targetId: 'codex', capabilities: ALL_CAPABLE }]);
+          });
+        },
+      } satisfies AuthoritativeAgentDiscovery,
+    });
+
+    const [first] = await service.listExternalAgents(SCOPE);
+    expect(first?.capabilities).toEqual(NO_EXTERNAL_AGENT_CAPABILITIES);
+
+    const [second] = await service.listExternalAgents(SCOPE);
+    expect(started).toBe(1);
+    expect(second?.capabilities).toEqual(NO_EXTERNAL_AGENT_CAPABILITIES);
+
+    resolveSlow?.();
   });
 
   it('renders only capabilities an adapter returned', async () => {
