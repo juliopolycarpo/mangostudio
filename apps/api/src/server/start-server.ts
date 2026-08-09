@@ -26,7 +26,10 @@ import {
   flushObservabilitySnapshot,
   loadObservabilitySnapshot,
 } from '../services/providers/core/provider-observability';
-import { closeAllRuntimeConnections } from '../services/runtime-client/runtime-connection-manager';
+import {
+  closeAllRuntimeConnections,
+  getRuntimeConnectionManager,
+} from '../services/runtime-client/runtime-connection-manager';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
@@ -65,6 +68,15 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   await reconcileExternalTurns({ reason: 'hub-restarted' }, getDb());
   await reconcileStaleTurns({ reasonCode: 'server_restart' }, getDb());
   await loadObservabilitySnapshot();
+  // A peer that withdraws external-agent consent closes its vendor sessions
+  // without saying so on the wire, so the hub learns it from the next manifest
+  // refresh. Without this the chats it was running would keep a session the
+  // runtime no longer has, and their turns would wait on events that stopped.
+  getRuntimeConnectionManager().onExternalAgentsRevoked((userId, environmentId) => {
+    void externalSessionManager
+      .reapScope({ userId, environmentId }, 'consent-revoked')
+      .catch(() => undefined);
+  });
   const frontendDir = getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getDefaultFrontendDir();
   registerFrontend(app, frontendDir);
 

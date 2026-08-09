@@ -881,6 +881,44 @@ describe('RuntimeConnectionManager', () => {
     expect(publishes).toBe(1);
   });
 
+  it('reports a peer that withdrew external-agent consent, once', async () => {
+    // The runtime closes its vendor sessions itself when its consent poll turns
+    // the capability off, but that close emits no event and does not drop the
+    // socket. This refresh is the only place the hub can learn of it, and the
+    // sessions it still believes it owns would otherwise wait forever.
+    const consented = capabilityManifestFromHealth(HEALTH_REPORT);
+    const revoked: RuntimeHealthReport = {
+      ...HEALTH_REPORT,
+      allow: { ...HEALTH_REPORT.allow, externalAgents: false },
+    };
+    const probe = healthProbe(consented, () => Promise.resolve(revoked));
+    const revocations: string[] = [];
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => Promise.resolve({ client: probe.client, close: () => undefined }),
+      },
+    });
+    manager.onExternalAgentsRevoked((userId, environmentId) => {
+      revocations.push(`${userId}:${environmentId}`);
+    });
+
+    await manager.connect('user-1', 'devbox');
+    advanceSeconds(20);
+    manager.refreshManifestIfStale('user-1', 'devbox');
+    await flushMicrotasks();
+
+    expect(revocations).toEqual(['user-1:devbox']);
+    expect(manager.getStatus('user-1', 'devbox').manifest?.features.externalAgents).toBe(false);
+
+    // A second refresh finding the same refusal is not a second revocation:
+    // reaping again would be work with nothing left to reap.
+    advanceSeconds(20);
+    manager.refreshManifestIfStale('user-1', 'devbox');
+    await flushMicrotasks();
+    expect(revocations).toEqual(['user-1:devbox']);
+  });
+
   it('publishes nothing when the machine answers exactly what was cached', async () => {
     // A card polling this endpoint is woken by the invalidation a refresh
     // publishes. Publishing an unchanged manifest would make every window
