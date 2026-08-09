@@ -93,13 +93,6 @@ export const chatRoutes = (app: Elysia) =>
         '/:id',
         async ({ params, body, user, set }) => {
           try {
-            // No external-agent adapter exists yet; an unreachable variant
-            // accepted by this route is an unreachable variant an attacker
-            // can reach first.
-            if (body.runner?.kind === 'external') {
-              set.status = 422;
-              return apiError('External runners are not available yet.', ERROR_CODES.VALIDATION);
-            }
             await updateChatUseCase(
               {
                 chatId: params.id,
@@ -110,6 +103,7 @@ export const chatRoutes = (app: Elysia) =>
                   textModel: body.textModel,
                   imageModel: body.imageModel,
                   runner: body.runner,
+                  runnerPermissions: body.runnerPermissions,
                   workdir: body.workdir,
                   environmentId: body.environmentId,
                   restrictToolsToWorkdir: body.restrictToolsToWorkdir,

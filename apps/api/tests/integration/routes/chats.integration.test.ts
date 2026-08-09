@@ -391,6 +391,80 @@ describe('PUT /chats/:id', () => {
     expect(row?.title).toBe('Updated Title');
   });
 
+  it('switches a chat without turns to an external runner', async () => {
+    const db = getDb();
+    const chatId = `external-runner-${Date.now()}`;
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'External Runner Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        userId: TEST_USER.id,
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/chats/${chatId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runner: { kind: 'external', targetId: 'codex' } }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      await db
+        .selectFrom('chats')
+        .select(['runnerKind', 'runnerAgentId', 'runnerTargetId'])
+        .where('id', '=', chatId)
+        .executeTakeFirst()
+    ).toEqual({ runnerKind: 'external', runnerAgentId: null, runnerTargetId: 'codex' });
+  });
+
+  it('persists the runner permission pair', async () => {
+    const db = getDb();
+    const chatId = `runner-permissions-${Date.now()}`;
+    await db
+      .insertInto('chats')
+      .values({
+        id: chatId,
+        title: 'Permissions Chat',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        model: null,
+        runnerKind: 'external',
+        runnerTargetId: 'codex',
+        userId: TEST_USER.id,
+      })
+      .execute();
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/chats/${chatId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ runnerPermissions: { level: 'read-only', routing: 'user' } }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(
+      await db
+        .selectFrom('chats')
+        .select(['runnerPermissionLevel', 'runnerApprovalRouting'])
+        .where('id', '=', chatId)
+        .executeTakeFirst()
+    ).toEqual({ runnerPermissionLevel: 'read-only', runnerApprovalRouting: 'user' });
+  });
+
   it('sets and clears a validated working directory', async () => {
     const db = getDb();
     const chatId = `workdir-target-${Date.now()}`;
