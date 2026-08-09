@@ -69,6 +69,26 @@ export interface ManagedRuntimeConnection {
   close(reason?: RuntimeConnectionCloseReason): void | Promise<void>;
 }
 
+/**
+ * Closes a connection the hub is no longer waiting on.
+ *
+ * `close` now reaches the runtime's own teardown — MCP sessions, and vendor
+ * process trees an external-agent session owns — so it can reject. Every site
+ * that drops the returned promise has to say so here instead: an unhandled
+ * rejection from a superseded connection would take the hub process down.
+ */
+function closeDetached(
+  connection: ManagedRuntimeConnection,
+  reason?: RuntimeConnectionCloseReason
+): void {
+  void Promise.resolve(connection.close(reason)).catch((error: unknown) => {
+    console.warn(
+      '[runtime] Releasing a runtime connection failed:',
+      error instanceof Error ? error.message : 'unknown error'
+    );
+  });
+}
+
 export type RuntimeEnvironmentResolver = (
   userId: string,
   environmentId: string
@@ -345,7 +365,7 @@ export class RuntimeConnectionManager {
       })
       .then((connection) => {
         if (entry.revision !== revision) {
-          connection.close();
+          closeDetached(connection);
           throw unavailable('Runtime connection was closed.');
         }
         entry.connection = connection;
@@ -430,7 +450,7 @@ export class RuntimeConnectionManager {
     const superseded = entry.connection;
     entry.connection = undefined;
     entry.connecting = undefined;
-    void superseded?.close('superseded');
+    if (superseded) closeDetached(superseded, 'superseded');
     entry.status = { state: 'connecting', ...this.#cachedPeer(entry) };
     this.#publish(userId);
 
@@ -445,7 +465,7 @@ export class RuntimeConnectionManager {
       throw normalizeUnavailable(error);
     }
     if (entry.revision !== revision) {
-      void connection.close('superseded');
+      closeDetached(connection, 'superseded');
       throw unavailable('Runtime connection was superseded while it was handshaking.');
     }
 
@@ -633,7 +653,7 @@ export class RuntimeConnectionManager {
     if (!entry || entry.revision !== revision || !entry.connection) return;
 
     // The child is already gone; nothing waits on the kill that confirms it.
-    void entry.connection.close();
+    closeDetached(entry.connection);
     entry.connection = undefined;
     if (entry.expectedUpdateDisconnect) {
       entry.expectedUpdateDisconnect = false;

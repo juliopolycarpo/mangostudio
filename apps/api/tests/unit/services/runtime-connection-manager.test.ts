@@ -565,6 +565,38 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getStatus('user-2', 'buildbox').state).toBe('disconnected');
   });
 
+  it('contains a superseded connection whose teardown rejects', async () => {
+    // `close` now reaches the runtime's own teardown, and an external-agent
+    // session owns vendor process trees that can refuse to reap. Nothing awaits
+    // a superseded close, so an unhandled rejection here would end the hub.
+    const rejecting: ManagedRuntimeConnection = {
+      client: { manifest: TEST_MANIFEST } as RuntimeClient,
+      close: () => Promise.reject(new Error('vendor process tree would not reap')),
+    };
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {},
+    });
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+
+    try {
+      await manager.adopt('user-1', 'devbox', () => Promise.resolve(rejecting));
+      await manager.adopt('user-1', 'devbox', () =>
+        Promise.resolve(fakeConnection(() => undefined))
+      );
+      await flushMicrotasks();
+    } finally {
+      console.warn = realWarn;
+    }
+
+    expect(warnings.join('\n')).toContain('vendor process tree would not reap');
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+  });
+
   it('reports the runtime error code on the status while still throwing RUNTIME_UNAVAILABLE', async () => {
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
