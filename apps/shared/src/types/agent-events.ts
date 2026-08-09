@@ -1,3 +1,12 @@
+import type {
+  ExternalActivityKind,
+  ExternalActivityStatus,
+  ExternalAgentError,
+  ExternalAgentTargetId,
+  ExternalApprovalOption,
+  ExternalTurnTerminalReason,
+  ExternalUsage,
+} from '../external-agents/schemas';
 import type { McpElicitationPart } from '../mcp/schemas';
 import type { QuestionSpec } from '../questions/schemas';
 import type { TodoItem } from '../todos/schemas';
@@ -158,6 +167,86 @@ export interface SubagentTracePart {
   error?: string;
 }
 
+/**
+ * Something a vendor CLI did during an external turn, as something to render.
+ *
+ * Deliberately **not** `tool_call` / `tool_result` with an owner flag.
+ * `resolveToolCallStatus`, the re-run affordances, tool budget accounting and
+ * the executor all key off `tool_call`; a separate type is what keeps every one
+ * of those paths from ever seeing external activity. `name` is the vendor's own
+ * tool name, verbatim — it is bounded and stripped at the runtime boundary and
+ * rendered as plain text, never markdown or HTML.
+ */
+export interface ExternalActivityPart {
+  type: 'external_activity';
+  targetId: ExternalAgentTargetId;
+  callId: string;
+  name: string;
+  kind: ExternalActivityKind;
+  title: string;
+  detail?: string;
+  status: 'running' | ExternalActivityStatus;
+  isError?: boolean;
+  /** True when any vendor string above was cut to fit its bound. */
+  truncated?: boolean;
+}
+
+/**
+ * One approval the vendor asked for, and what became of it.
+ *
+ * The option set is the vendor's, in the vendor's order, and it is persisted so
+ * that a reloaded transcript can render a resolved card without asking the
+ * vendor again. An approval still pending when its turn ends carries
+ * `decision: 'expired'`: a dead card is honest, a live control that will never
+ * resolve is not.
+ */
+export interface ExternalApprovalPart {
+  type: 'external_approval';
+  targetId: ExternalAgentTargetId;
+  requestId: string;
+  kind: ExternalActivityKind;
+  title: string;
+  detail?: string;
+  options: readonly ExternalApprovalOption[];
+  expiresAtMs: number;
+  /** Absent while pending. */
+  decision?: string;
+  decisionSource?: 'user' | 'auto-review' | 'expired' | 'cancelled';
+  resolvedAt?: number;
+  truncated?: boolean;
+}
+
+/**
+ * The durable record of one external turn, and the external analogue of
+ * `turn_checkpoint`.
+ *
+ * It cannot reuse `turn_checkpoint`: that part carries a MangoStudio provider,
+ * model and agent id, none of which an external turn has, and its
+ * `completedCalls` / `incompleteCalls` describe MangoStudio's own tool loop.
+ * What an external turn needs recorded instead is which session and native turn
+ * produced the transcript, how far the ordered stream got, and why it stopped.
+ */
+export interface ExternalTurnPart {
+  type: 'external_turn';
+  version: 1;
+  targetId: ExternalAgentTargetId;
+  /** Hub-minted session id; the vendor's own handle stays server-side. */
+  sessionId: string;
+  nativeTurnId?: string;
+  status: 'active' | 'terminal';
+  /** Present once `status` is `terminal`. */
+  terminalReason?: ExternalTurnTerminalReason;
+  startedAt: number;
+  updatedAt: number;
+  /** Highest envelope sequence applied to this turn; a cursor, not a count. */
+  lastSequence: number;
+  eventCount: number;
+  persistedBytes: number;
+  /** Accumulated as it arrives: the vendor reports usage before it reports completion. */
+  usage?: ExternalUsage;
+  error?: ExternalAgentError;
+}
+
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
   | { type: 'text'; text: string }
@@ -182,6 +271,9 @@ export type MessagePart =
   | TodoPart
   | SubagentTracePart
   | TurnCheckpointPart
+  | ExternalActivityPart
+  | ExternalApprovalPart
+  | ExternalTurnPart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }
   | {

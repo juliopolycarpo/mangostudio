@@ -12,6 +12,9 @@ export type { TurnCheckpointPart } from '../turn-recovery';
 export type {
   AgentEvent,
   ContinuationReasonCode,
+  ExternalActivityPart,
+  ExternalApprovalPart,
+  ExternalTurnPart,
   GeneratedImagePart,
   GeneratedImageStatus,
   McpElicitationPart,

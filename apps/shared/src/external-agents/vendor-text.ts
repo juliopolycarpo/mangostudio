@@ -60,6 +60,16 @@ export type ExternalTextLimit = keyof typeof EXTERNAL_TEXT_LIMITS;
  */
 export const EXTERNAL_TURN_PAYLOAD_MAX_BYTES = 2 * 1024 * 1024;
 
+/**
+ * One turn's worth of persisted external events, counted.
+ *
+ * The byte budget alone does not bound the work: a vendor emitting empty
+ * activity updates stays far under it while turning every persisted write into
+ * a walk over an ever-growing part list. Both caps terminate the turn with the
+ * same recorded reason, so neither can be exceeded quietly.
+ */
+export const EXTERNAL_TURN_MAX_EVENTS = 10_000;
+
 export interface BoundedVendorText {
   readonly text: string;
   /** True when stripping or truncation changed the input. */

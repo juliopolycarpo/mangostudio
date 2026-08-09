@@ -728,6 +728,40 @@ export const ExternalAgentAckResultSchema = Type.Object(
 );
 export type ExternalAgentAckResult = Static<typeof ExternalAgentAckResultSchema>;
 
+/**
+ * How an external turn ended. A closed set, deliberately.
+ *
+ * Every member is a state the hub can actually reach, and a turn that ends for
+ * a reason outside this union is a defect rather than a new case: the whole
+ * point of enumerating them is that recovery, the transcript and the UI decide
+ * from the same vocabulary instead of each inventing its own.
+ *
+ * `completed` is the vendor saying it is done. Everything else is MangoStudio
+ * saying why it stopped believing the vendor would.
+ */
+export const ExternalTurnTerminalReasonSchema = Type.Union([
+  Type.Literal('completed'),
+  Type.Literal('cancelled-by-user'),
+  /** The vendor reported a failure; the structured error survives on the turn. */
+  Type.Literal('vendor-error'),
+  Type.Literal('runtime-disconnected'),
+  /** Found `isGenerating` with no live registration when the hub came back up. */
+  Type.Literal('hub-restarted'),
+  /** The ordered stream skipped a sequence, so the transcript is knowably partial. */
+  Type.Literal('sequence-gap'),
+  /** The turn passed its persisted byte or event budget. */
+  Type.Literal('limit-exceeded'),
+  /** The machine's owner withdrew permission to run external agents. */
+  Type.Literal('consent-revoked'),
+  /** The runtime no longer has the session this turn was addressed to. */
+  Type.Literal('session-lost'),
+]);
+
+export type ExternalTurnTerminalReason = Static<typeof ExternalTurnTerminalReasonSchema>;
+
+export const EXTERNAL_TURN_TERMINAL_REASONS: readonly ExternalTurnTerminalReason[] =
+  ExternalTurnTerminalReasonSchema.anyOf.map((literal) => literal.const);
+
 /** Semantic event ordering is per session and starts at one, independently of transport seq. */
 export const ExternalAgentEventEnvelopeSchema = Type.Object(
   {
