@@ -10,7 +10,8 @@
       "!apps/*/coverage",
       "!.mango/artifacts",
       "!.mango/out",
-      "!apps/frontend/src/routeTree.gen.ts"
+      "!apps/frontend/src/routeTree.gen.ts",
+      "!apps/runtime/src/services/external-agents/codex/protocol"
     ]
   },
   "formatter": {

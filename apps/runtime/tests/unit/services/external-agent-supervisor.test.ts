@@ -595,7 +595,6 @@ describe('external-agent adapter registry and supervisor', () => {
         '--mode',
         'environment',
       ],
-      cwd: value.workspacePath,
     });
     if (!child) throw new Error('Expected the adapter open context.');
     const record = await child.stdout.next(1_000);
@@ -620,7 +619,6 @@ describe('external-agent adapter registry and supervisor', () => {
         '--mode',
         'graceful',
       ],
-      cwd: value.workspacePath,
     });
     if (!child) throw new Error('Expected the adapter open context.');
     const terminate = child.terminate;
@@ -817,6 +815,81 @@ describe('external-agent adapter registry and supervisor', () => {
     expect(value.events[0]?.payload).toMatchObject({
       sequence: 1,
       event: { type: 'error', error: { code: 'adapter-stream' } },
+    });
+    await value.supervisor.close();
+  });
+
+  it('does not treat a turn awaiting an approval as an idle stream', async () => {
+    // A turn blocked on an approval produces no events by definition: it is
+    // waiting on a person. Reading that as a stalled vendor would kill the turn
+    // while the user is still reading the diff, so the approval's own
+    // `expiresAtMs` — not the idle timeout — bounds the wait.
+    const adapter = new FakeExternalAgentAdapter({
+      hangTurn: true,
+      events: [
+        {
+          type: 'approval_requested',
+          request: {
+            requestId: 'req-1',
+            kind: 'command',
+            title: 'rm -rf build',
+            options: [{ id: 'accept', isDestructive: false }],
+            expiresAtMs: Date.now() + 60_000,
+          },
+        },
+      ],
+    });
+    const value = await fixture({ adapter, idleTimeoutMs: 5 });
+    await openSession(value);
+    await value.supervisor.turn({
+      sessionId: 'session-1',
+      clientMessageId: 'message-1',
+      input: 'run it',
+      configuration: CONFIGURATION,
+    });
+
+    await waitFor(() => value.events.length === 1);
+    await Bun.sleep(60);
+    expect(adapter.cancellations).toEqual([]);
+    expect(value.events).toHaveLength(1);
+    expect(value.events[0]?.payload).toMatchObject({
+      event: { type: 'approval_requested' },
+    });
+    await value.supervisor.close();
+  });
+
+  it('stops extending the wait once the approval has expired', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      hangTurn: true,
+      events: [
+        {
+          type: 'approval_requested',
+          request: {
+            requestId: 'req-1',
+            kind: 'command',
+            title: 'rm -rf build',
+            options: [{ id: 'accept', isDestructive: false }],
+            expiresAtMs: Date.now() + 20,
+          },
+        },
+      ],
+    });
+    const value = await fixture({ adapter, idleTimeoutMs: 5 });
+    await openSession(value);
+    await value.supervisor.turn({
+      sessionId: 'session-1',
+      clientMessageId: 'message-1',
+      input: 'run it',
+      configuration: CONFIGURATION,
+    });
+
+    await waitFor(() => adapter.cancellations.length === 1);
+    expect(adapter.cancellations[0]?.reason).toBe('timeout');
+    expect(value.events.at(-1)?.payload).toMatchObject({
+      event: {
+        type: 'error',
+        error: { message: expect.stringContaining('waiting for an approval') },
+      },
     });
     await value.supervisor.close();
   });

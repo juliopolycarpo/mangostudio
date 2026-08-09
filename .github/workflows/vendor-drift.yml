@@ -1,0 +1,46 @@
+name: Vendor drift
+
+# The Codex `app-server` contract under
+# apps/runtime/src/services/external-agents/codex/protocol is emitted by the
+# vendor's own generator and committed verbatim. This job regenerates it from
+# the pinned package and fails if the result differs, so the committed tree can
+# never quietly diverge from the version the adapter claims to speak.
+#
+# On a version bump the resulting diff is the changelog, which is the reason
+# the output is committed rather than generated during the build.
+#
+# Path-filtered on purpose: the check downloads the pinned vendor package, and
+# every other PR has no reason to pay for that.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/runtime/src/services/external-agents/codex/protocol/**"
+      - "apps/runtime/src/services/external-agents/codex/pinned.ts"
+      - "scripts/vendor/codex-protocol.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  codex-protocol:
+    name: Codex app-server contract is regenerable
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Regenerate and diff the vendored contract
+        run: bun run vendor:codex-protocol --check

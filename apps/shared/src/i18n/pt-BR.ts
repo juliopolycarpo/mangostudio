@@ -2708,6 +2708,21 @@ export const messages = {
         'auto-review': 'O agente revisa os próprios pedidos.',
       },
     },
+    unsupported: {
+      codexProfileDisallowed: 'A configuração do Codex nesta máquina não permite esse perfil',
+      codexVersionTooOld: 'O Codex CLI desta máquina é antigo demais — atualize para usá-lo aqui',
+    },
+    approval: {
+      option: {
+        accept: 'Permitir uma vez',
+        acceptForSession: 'Permitir pelo resto desta sessão',
+        decline: 'Recusar',
+        cancel: 'Cancelar',
+        grantTurn: 'Conceder para este turno',
+        grantSession: 'Conceder pelo resto desta sessão',
+        deny: 'Negar',
+      },
+    },
     loginHint: 'Rode isto naquela máquina para entrar:',
   },
 

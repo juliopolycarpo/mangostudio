@@ -66,6 +66,9 @@ bun.lock                   binary
 # TanStack Router auto-generated route tree
 apps/frontend/src/routeTree.gen.ts linguist-generated=true
 
+# Codex app-server contract, emitted by the vendor's own generator
+apps/runtime/src/services/external-agents/codex/protocol/** linguist-generated=true
+
 # Bun lockfile — exclude from language stats
 bun.lock                   linguist-generated=true
 

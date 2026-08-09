@@ -24,6 +24,7 @@
     "check": "bun ./scripts/check.ts",
     "check:versions": "bun ./scripts/check-versions.ts",
     "update:node-release-schedule": "bun ./scripts/update-node-release-schedule.ts",
+    "vendor:codex-protocol": "bun ./scripts/vendor/codex-protocol.ts",
     "code-health": "knip --reporter markdown",
     "test": "bun ./scripts/test.ts",
     "test:scripts": "bun test scripts",

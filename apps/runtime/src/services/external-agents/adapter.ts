@@ -10,13 +10,28 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import type { ExternalAgentManagedProcess, SpawnExternalAgentProcessOptions } from './process';
 
+/**
+ * What an adapter may set when launching a process.
+ *
+ * The working directory and the environment are absent on purpose. Both are
+ * supervisor-owned — the cwd is the workspace it canonicalized and authorized,
+ * and the environment is the positive allowlist that keeps a connector secret
+ * out of a vendor child — and both were already overwritten before the spawn
+ * happened. Omitting them from the type means an adapter cannot write a value
+ * that silently does nothing, and cannot appear to inject one that matters.
+ */
+export type ExternalAgentAdapterSpawnOptions = Omit<
+  SpawnExternalAgentProcessOptions,
+  'cwd' | 'envSource' | 'vendorEnvironmentKeys'
+>;
+
 /** Runtime-owned resources an adapter may use without reaching into hub state. */
 export interface ExternalAgentAdapterContext {
   readonly signal: AbortSignal;
   readonly executablePath?: string;
   readonly cwd?: string;
   readonly environment: Readonly<Record<string, string>>;
-  spawn(options: SpawnExternalAgentProcessOptions): ExternalAgentManagedProcess;
+  spawn(options: ExternalAgentAdapterSpawnOptions): ExternalAgentManagedProcess;
 }
 
 export interface ExternalAgentOpenedSession extends ExternalAgentOpenResult {}

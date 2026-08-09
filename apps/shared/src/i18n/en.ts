@@ -2694,6 +2694,21 @@ export const messages: Messages = {
         'auto-review': 'The agent reviews its own requests.',
       },
     },
+    unsupported: {
+      codexProfileDisallowed: "This machine's Codex configuration does not allow that profile",
+      codexVersionTooOld: 'The Codex CLI on this machine is too old — upgrade it to use it here',
+    },
+    approval: {
+      option: {
+        accept: 'Allow once',
+        acceptForSession: 'Allow for the rest of this session',
+        decline: 'Decline',
+        cancel: 'Cancel',
+        grantTurn: 'Grant for this turn',
+        grantSession: 'Grant for the rest of this session',
+        deny: 'Deny',
+      },
+    },
     loginHint: 'Run this on that machine to sign in:',
   },
 
