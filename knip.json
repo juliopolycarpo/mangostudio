@@ -37,7 +37,8 @@
     },
     "apps/runtime": {
       "entry": ["src/cli.ts", "tests/**/*.test.ts", "tests/support/external-agent-fixture.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
+      "project": ["src/**/*.ts", "tests/**/*.ts"],
+      "ignore": ["src/services/external-agents/codex/protocol/**"]
     },
     "packages/cli": {
       "project": ["bin/**/*.js"]

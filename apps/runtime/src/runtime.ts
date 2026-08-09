@@ -13,6 +13,7 @@ import { createLocalRuntimeManifest } from './manifest';
 import { createRuntimeMethodHandlers } from './registry';
 import { readRuntimeSlotState } from './runtime-home';
 import type { ExternalAgentAdapter } from './services/external-agents/adapter';
+import { createDefaultExternalAgentAdapters } from './services/external-agents/adapters';
 import type { ExternalAgentSupervisorOptions } from './services/external-agents/supervisor';
 import type { RuntimeUpdateServiceOptions } from './services/runtime-update';
 
@@ -58,13 +59,20 @@ export function createLocalRuntimeHost(options: {
   const consent =
     options.consent ??
     staticConsentSource(options.allow ?? RUNTIME_CONSENT_PRESETS.full, options.slot ?? 'host');
+  // A caller that named its own adapters gets exactly those — that is how the
+  // test suites drive a fake peer. Everyone else gets the production set, so a
+  // real runtime advertises what it can host without every call site listing it.
+  const externalAgents = {
+    ...options.externalAgents,
+    adapters: options.externalAgents?.adapters ?? createDefaultExternalAgentAdapters(),
+  };
   const registry = createRuntimeMethodHandlers({
     runtimeVersion: options.runtimeVersion,
     emit: (event) => host?.emit(event),
     slot: consent.slot,
     ...(options.update ? { update: options.update } : {}),
     consent,
-    ...(options.externalAgents ? { externalAgents: options.externalAgents } : {}),
+    externalAgents,
   });
 
   host = new RuntimeHost({
