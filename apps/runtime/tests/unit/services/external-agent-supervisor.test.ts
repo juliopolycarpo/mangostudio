@@ -32,6 +32,7 @@ async function fixture(
     };
     readonly authorizeWorkspace?: (path: string, signal: AbortSignal) => boolean | Promise<boolean>;
     readonly omitWorkspaceAuthorization?: boolean;
+    readonly resolveExecutable?: () => Promise<{ readonly path?: string }>;
     readonly env?: NodeJS.ProcessEnv;
   } = {}
 ) {
@@ -49,7 +50,7 @@ async function fixture(
     emit: (event) => events.push(event),
     consent: { slot: 'host', ...consent },
     env: options.env,
-    resolveExecutable: async () => ({ path: process.execPath }),
+    resolveExecutable: options.resolveExecutable ?? (async () => ({ path: process.execPath })),
     consentPollMs: 5,
     ...(!options.omitWorkspaceAuthorization
       ? { authorizeWorkspace: options.authorizeWorkspace ?? (() => true) }
@@ -140,6 +141,60 @@ describe('external-agent adapter registry and supervisor', () => {
 
     await expect(openSession(value)).rejects.toThrow(/not authorized/);
     expect(value.adapter.opens).toHaveLength(0);
+    await value.supervisor.close();
+  });
+
+  it('refuses a turn workspace root the open call never authorized', async () => {
+    const value = await fixture();
+    const otherRoot = await realpath(resolve(import.meta.dir, '..'));
+    await value.supervisor.open(
+      {
+        sessionId: 'session-1',
+        targetId: 'codex',
+        workspacePath: value.workspacePath,
+        configuration: { ...CONFIGURATION, workspaceRoots: [value.workspacePath] },
+        resumeMode: 'fallback',
+        timeoutMs: 1_000,
+      },
+      new AbortController().signal
+    );
+
+    // The owner's policy would allow this directory, but this session never
+    // did. Turn configuration reaches the vendor verbatim as its sandbox
+    // roots, so `open` is the only place a root can be authorized.
+    expect(() =>
+      value.supervisor.turn({
+        sessionId: 'session-1',
+        clientMessageId: 'message-1',
+        input: 'widen',
+        configuration: { ...CONFIGURATION, workspaceRoots: [otherRoot] },
+      })
+    ).toThrow(/was not authorized/);
+    expect(value.adapter.turns).toHaveLength(0);
+
+    // Narrowing stays inside the authorized set, so it is still allowed.
+    await expect(
+      value.supervisor.turn({
+        sessionId: 'session-1',
+        clientMessageId: 'message-1',
+        input: 'narrow',
+        configuration: CONFIGURATION,
+      })
+    ).resolves.toEqual({ nativeTurnId: 'turn-1' });
+    await value.supervisor.close();
+  });
+
+  it('bounds discovery when the executable lookup never settles', async () => {
+    // `probeAgentClis` takes no signal, so the deadline has to be raced around
+    // the lookup rather than trusted to reach inside it.
+    const value = await fixture({ resolveExecutable: () => new Promise<never>(() => undefined) });
+
+    await expect(
+      value.supervisor.discover(
+        { targetIds: ['codex'], timeoutMs: 10 },
+        new AbortController().signal
+      )
+    ).rejects.toThrow(/Deadline exceeded/);
     await value.supervisor.close();
   });
 

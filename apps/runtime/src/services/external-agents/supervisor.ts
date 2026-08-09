@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type {
@@ -80,6 +81,13 @@ interface LiveSession {
   readonly sessionId: string;
   readonly adapter: ExternalAgentAdapter;
   readonly workspacePath: string;
+  /**
+   * The directories `open` canonicalized and put through `authorizeWorkspace`.
+   * A turn may narrow this set but never widen it: turn configuration reaches
+   * the vendor unchanged, so a root that appeared for the first time at turn
+   * time would be a sandbox root nobody authorized.
+   */
+  readonly authorizedWorkspaceRoots: ReadonlySet<string>;
   readonly openedAtMs: number;
   readonly openResult: ExternalAgentOpenResult;
   readonly turns: Map<string, TurnReceipt>;
@@ -206,7 +214,13 @@ export class ExternalAgentSessionSupervisor {
           params.timeoutMs
         );
         try {
-          const executable = await this.#resolveExecutable(targetId, controller.signal);
+          // Raced, like `#open` does: `probeAgentClis` takes no signal, so
+          // without this the deadline would not cover executable resolution.
+          const executable = await raceAbort(
+            this.#resolveExecutable(targetId, controller.signal),
+            controller.signal,
+            `Resolving external-agent target "${targetId}" timed out.`
+          );
           throwIfAborted(controller.signal);
           const rawDescriptor = await raceAbort(
             adapter.discover(
@@ -217,10 +231,22 @@ export class ExternalAgentSessionSupervisor {
           );
           const descriptor = normalizeExternalAgentDescriptor(rawDescriptor);
           this.#assertDescriptor(adapter, descriptor);
-          return descriptor;
-        } finally {
           controller.dispose();
           await this.#terminateProcesses(processes);
+          return descriptor;
+        } catch (error) {
+          controller.dispose();
+          // Aggregated, not swallowed: a `finally` that throws would replace the
+          // discovery failure the caller has to see with the cleanup failure.
+          try {
+            await this.#terminateProcesses(processes);
+          } catch (cleanupError) {
+            throw new AggregateError(
+              [error, cleanupError],
+              `External-agent discovery for "${targetId}" failed during cleanup.`
+            );
+          }
+          throw error;
         }
       })
     );
@@ -274,7 +300,15 @@ export class ExternalAgentSessionSupervisor {
   turn(params: ExternalAgentTurnParams): Promise<ExternalAgentTurnResult> {
     assertExternalAgentParams('external-agent.turn', ExternalAgentTurnParamsSchema, params);
     const session = this.#requireSession(params.sessionId);
-    const fingerprint = JSON.stringify(params);
+    for (const root of params.configuration.workspaceRoots) {
+      if (session.authorizedWorkspaceRoots.has(root)) continue;
+      throw new RuntimeToolArgumentError(
+        `External-agent workspace root "${root}" was not authorized when session "${params.sessionId}" opened.`
+      );
+    }
+    // Hashed rather than retained: the raw fingerprint would pin every turn's
+    // attachment bytes — megabytes each — in memory for the life of the session.
+    const fingerprint = turnFingerprint(params);
     const receipt = session.turns.get(params.clientMessageId);
     if (receipt) {
       if (receipt.fingerprint !== fingerprint) {
@@ -424,8 +458,11 @@ export class ExternalAgentSessionSupervisor {
         params.workspacePath,
         controller.signal
       );
+      const authorizedWorkspaceRoots = new Set<string>([workspacePath]);
       for (const root of params.configuration.workspaceRoots) {
-        await this.#canonicalAuthorizedWorkspace(root, controller.signal);
+        authorizedWorkspaceRoots.add(
+          await this.#canonicalAuthorizedWorkspace(root, controller.signal)
+        );
       }
       const executable = await raceAbort(
         this.#resolveExecutable(params.targetId, controller.signal),
@@ -493,6 +530,7 @@ export class ExternalAgentSessionSupervisor {
         sessionId: params.sessionId,
         adapter,
         workspacePath,
+        authorizedWorkspaceRoots,
         openedAtMs: this.#now(),
         openResult,
         turns: new Map(),
@@ -1035,6 +1073,11 @@ function raceTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
     timer.unref?.();
     promise.then(resolvePromise, reject).finally(() => clearTimeout(timer));
   });
+}
+
+/** Identifies one turn's input without holding on to its attachment bytes. */
+function turnFingerprint(params: ExternalAgentTurnParams): string {
+  return createHash('sha256').update(JSON.stringify(params)).digest('hex');
 }
 
 function boundedErrorMessage(error: unknown) {
