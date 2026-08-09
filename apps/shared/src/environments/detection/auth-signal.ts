@@ -65,19 +65,28 @@ export function probeAuthFile(
 }
 
 /**
- * Cursor exposes sign-in state as a key in its ordinary CLI config. Read only a
- * bounded config file and retain the key's presence, never its value.
+ * Cursor exposes sign-in state as a key in its ordinary CLI config.
+ *
+ * This one *reads*, unlike `probeAuthFile` above, and the policy it follows is
+ * worth stating rather than implying: MangoStudio may read a bounded, non-secret
+ * CLI config to test whether a key is present. It never reads, stores, logs or
+ * transmits a credential value. Only the boolean below escapes this function —
+ * the parsed object is unreachable the moment it returns, and no branch here
+ * puts any part of it into the result, a message or a diagnostic.
+ *
+ * The read is bounded at `MAX_AUTH_CONFIG_BYTES` so a large or hostile file
+ * cannot turn a health probe into a memory problem.
  */
 export function probeConfigKey(path: string, key: string, fs: AuthSignalFs): AuthSignalResult {
   try {
     if (!fs.stat(path).isFile()) {
-      return { authenticated: false, authSignal: 'config-key-present' };
+      return { authenticated: false, authSignal: 'config-key-absent' };
     }
   } catch (error) {
     // An absent config is a signed-out verdict; a permission or I/O failure is
     // not, so it must not be reported as a definite "not authenticated".
     return isMissingPathError(error)
-      ? { authenticated: false, authSignal: 'config-key-present' }
+      ? { authenticated: false, authSignal: 'config-key-absent' }
       : { authenticated: false, authSignal: 'unknown' };
   }
 

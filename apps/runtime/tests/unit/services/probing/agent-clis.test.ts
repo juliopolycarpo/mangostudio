@@ -421,6 +421,30 @@ describe('agent CLI detection', () => {
     expect(findingCodes(signedOut)).toContain('not-authenticated');
   });
 
+  it('calls a Cursor config that is not there absent, and still reports not-authenticated', async () => {
+    const configHome = '/home/tester/.cursor';
+    const service = createProbingService({
+      agentDefinitions: [CURSOR_AGENT_CLI_DEFINITION],
+      createScanDeps: (_env, definition) => scanDeps(definition),
+      createPathEnv: () => LINUX_ENV,
+      // The config home exists; the config inside it does not.
+      authFs: new FakeAuthSignalFs(new Map(), new Set([configHome])),
+      describeLocations: () => [],
+    });
+
+    const status = await statusFor(service, 'cursor');
+
+    expect(status).toMatchObject({
+      targetId: 'cursor',
+      configHomeExists: true,
+      authenticated: false,
+      authSignal: 'config-key-absent',
+    });
+    // The finding depends on a definite verdict, so a signal that is absent
+    // rather than unknown has to keep producing it.
+    expect(findingCodes(status)).toContain('not-authenticated');
+  });
+
   it('describes the running MangoStudio process from in-process identity and the guarded session', async () => {
     const configHome = '/home/tester/.mango';
     const service = createProbingService({
