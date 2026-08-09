@@ -41,8 +41,8 @@ export const EXTERNAL_TEXT_LIMITS = {
   errorMessage: 2_048,
   /**
    * Opaque vendor identifiers — session, call, request and option ids, and
-   * vendor error codes. Not in the plan's table, but they cross the wire and
-   * are echoed back to the vendor, so they are bounded on the same terms.
+   * vendor error codes. They cross the wire and are echoed back to the vendor,
+   * so they are bounded on the same terms as rendered vendor text.
    */
   vendorId: 128,
   /** Minimal account display label. Never the raw email. */
@@ -92,6 +92,28 @@ function isStrippable(codePoint: number): boolean {
   if (codePoint >= 0x202a && codePoint <= 0x202e) return true; // LRE-to-RLO, PDF
   if (codePoint >= 0xd800 && codePoint <= 0xdfff) return true; // lone surrogate
   return codePoint >= 0x2066 && codePoint <= 0x2069; // LRI-to-PDI
+}
+
+/**
+ * Removes terminal- and wire-unsafe code points without imposing a field cap.
+ *
+ * Streaming text is bounded by the per-turn byte budget rather than one of
+ * the small label limits below, but it still must not carry control sequences,
+ * bidi overrides or lone surrogates across the runtime boundary.
+ */
+export function sanitizeVendorText(raw: string): BoundedVendorText {
+  const kept: string[] = [];
+  let removed = false;
+
+  for (const character of raw) {
+    if (isStrippable(character.codePointAt(0) ?? 0)) {
+      removed = true;
+      continue;
+    }
+    kept.push(character);
+  }
+
+  return { text: kept.join(''), truncated: removed };
 }
 
 /**

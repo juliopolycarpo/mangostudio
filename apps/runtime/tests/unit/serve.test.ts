@@ -28,10 +28,10 @@ import {
 } from '../../src/serve';
 
 const homes: string[] = [];
-const handles: Array<{ close(): void }> = [];
+const handles: Array<{ close(): void | Promise<void> }> = [];
 
 afterEach(async () => {
-  for (const handle of handles.splice(0)) handle.close();
+  await Promise.allSettled(handles.splice(0).map((handle) => handle.close()));
   for (const home of homes.splice(0)) await rm(home, { recursive: true, force: true });
 });
 
@@ -41,7 +41,7 @@ async function isolatedEnv(): Promise<NodeJS.ProcessEnv> {
   return { MANGO_HOME: home };
 }
 
-function createTestHost(): RuntimeHost {
+function createTestHost(onClose?: () => void | Promise<void>): RuntimeHost {
   return new RuntimeHost({
     runtimeVersion: 'serve-test',
     manifest: {
@@ -61,6 +61,7 @@ function createTestHost(): RuntimeHost {
       },
     },
     handlers: new Map(),
+    ...(onClose ? { onClose } : {}),
   });
 }
 
@@ -132,6 +133,88 @@ describe('serveRuntime', () => {
     await handle.stopped;
   });
 
+  it('does not report stopped until asynchronous session cleanup finishes', async () => {
+    const closeStarted = Promise.withResolvers<void>();
+    const releaseClose = Promise.withResolvers<void>();
+    const hostCreated = Promise.withResolvers<void>();
+    const handle = serveRuntime({
+      listen: { hostname: '127.0.0.1', port: 0 },
+      token: 'serve-secret',
+      createHost: () => {
+        hostCreated.resolve();
+        return createTestHost(async () => {
+          closeStarted.resolve();
+          await releaseClose.promise;
+        });
+      },
+    });
+    handles.push(handle);
+
+    const socket = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
+      headers: { Authorization: 'Bearer serve-secret' },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve(), { once: true });
+      socket.addEventListener('error', () => reject(new Error('socket failed')), { once: true });
+    });
+    await hostCreated.promise;
+
+    let stopped = false;
+    void handle.stopped.then(() => {
+      stopped = true;
+    });
+    const closing = handle.close();
+    await closeStarted.promise;
+    await Bun.sleep(0);
+    expect(stopped).toBe(false);
+
+    releaseClose.resolve();
+    await closing;
+    expect(stopped).toBe(true);
+    socket.close();
+  });
+
+  it('reaps a host created by an open callback that loses the stop race', async () => {
+    const controller = new AbortController();
+    const hostCreated = Promise.withResolvers<void>();
+    const closeStarted = Promise.withResolvers<void>();
+    const releaseClose = Promise.withResolvers<void>();
+    const handle = serveRuntime({
+      listen: { hostname: '127.0.0.1', port: 0 },
+      token: 'serve-secret',
+      signal: controller.signal,
+      createHost: () => {
+        const host = createTestHost(async () => {
+          closeStarted.resolve();
+          await releaseClose.promise;
+        });
+        hostCreated.resolve();
+        controller.abort();
+        return host;
+      },
+    });
+    handles.push(handle);
+
+    const socket = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
+      headers: { Authorization: 'Bearer serve-secret' },
+    });
+    socket.addEventListener('error', () => undefined);
+    await hostCreated.promise;
+    await closeStarted.promise;
+
+    let stopped = false;
+    void handle.stopped.then(() => {
+      stopped = true;
+    });
+    await Bun.sleep(0);
+    expect(stopped).toBe(false);
+
+    releaseClose.resolve();
+    await handle.stopped;
+    expect(stopped).toBe(true);
+    socket.close();
+  });
+
   it('refuses upgrades without a matching bearer token', async () => {
     const handle = serveRuntime({
       listen: { hostname: '127.0.0.1', port: 0 },
@@ -153,6 +236,44 @@ describe('serveRuntime', () => {
       },
     });
     expect(wrong.status).toBe(401);
+  });
+
+  it('runs asynchronous host cleanup after the socket closes', async () => {
+    const closeStarted = Promise.withResolvers<void>();
+    const releaseClose = Promise.withResolvers<void>();
+    const closeFinished = Promise.withResolvers<void>();
+    const handle = serveRuntime({
+      listen: { hostname: '127.0.0.1', port: 0 },
+      token: 'serve-secret',
+      createHost: () =>
+        createTestHost(async () => {
+          closeStarted.resolve();
+          await releaseClose.promise;
+          closeFinished.resolve();
+        }),
+    });
+    handles.push(handle);
+
+    const socket = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
+      headers: { Authorization: 'Bearer serve-secret' },
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.addEventListener('open', () => resolve(), { once: true });
+      socket.addEventListener('error', () => reject(new Error('socket failed')), { once: true });
+    });
+
+    socket.close();
+    await closeStarted.promise;
+    let finished = false;
+    void closeFinished.promise.then(() => {
+      finished = true;
+    });
+    await Bun.sleep(0);
+    expect(finished).toBe(false);
+
+    releaseClose.resolve();
+    await closeFinished.promise;
+    expect(finished).toBe(true);
   });
 
   it('closes the previous hub connection as superseded', async () => {
@@ -193,6 +314,71 @@ describe('serveRuntime', () => {
 
     expect(await firstClosed).toBe(RUNTIME_CLOSE_CODES.SUPERSEDED);
     second.close();
+  });
+
+  it('waits for superseded host cleanup before starting the replacement host', async () => {
+    const closeStarted = Promise.withResolvers<void>();
+    const releaseClose = Promise.withResolvers<void>();
+    let hostNumber = 0;
+    const handle = serveRuntime({
+      listen: { hostname: '127.0.0.1', port: 0 },
+      token: 'serve-secret',
+      createHost: () => {
+        hostNumber += 1;
+        return createTestHost(
+          hostNumber === 1
+            ? async () => {
+                closeStarted.resolve();
+                await releaseClose.promise;
+              }
+            : undefined
+        );
+      },
+    });
+    handles.push(handle);
+
+    const first = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
+      headers: { Authorization: 'Bearer serve-secret' },
+    });
+    await new Promise<void>((resolve, reject) => {
+      first.addEventListener('open', () => resolve(), { once: true });
+      first.addEventListener('error', () => reject(new Error('first socket failed')), {
+        once: true,
+      });
+    });
+
+    const second = new WebSocket(`ws://127.0.0.1:${handle.port}/`, {
+      headers: { Authorization: 'Bearer serve-secret' },
+    });
+    second.binaryType = 'arraybuffer';
+    const port = createWebSocketFramePort({ sink: clientWebSocketSink(second) });
+    const client = new RuntimeProtocolClient(port, {
+      hubVersion: 'hub-test',
+      handshakeTimeoutMs: 5_000,
+    });
+    second.addEventListener('message', (event) => port.receive(event.data as ArrayBuffer));
+    second.addEventListener('close', () => port.handleSocketClosed());
+    await new Promise<void>((resolve, reject) => {
+      second.addEventListener('open', () => resolve(), { once: true });
+      second.addEventListener('error', () => reject(new Error('second socket failed')), {
+        once: true,
+      });
+    });
+    await closeStarted.promise;
+
+    let replacementReady = false;
+    void client.waitUntilReady().then(() => {
+      replacementReady = true;
+    });
+    await Bun.sleep(0);
+    expect(replacementReady).toBe(false);
+
+    releaseClose.resolve();
+    await client.waitUntilReady();
+    expect(replacementReady).toBe(true);
+    client.close();
+    second.close();
+    first.close();
   });
 
   it('completes a hub handshake over the authenticated socket', async () => {

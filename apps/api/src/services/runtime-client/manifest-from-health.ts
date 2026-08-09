@@ -54,7 +54,17 @@ export function capabilityManifestFromHealth(
       // about whether the owner said yes.
       shell: allow.shell,
       update: allow.update,
+      // Unlike the older feature keys, missing consent is a refusal. A health
+      // report from a 1.0 peer must never be upgraded into permission to spawn
+      // a vendor process merely because the hub knows the newer key.
+      externalAgents: allow.externalAgents === true,
     },
+    ...(report.externalAgents?.targets.length
+      ? { externalAgents: [...report.externalAgents.targets] }
+      : {}),
+    ...(report.externalAgents?.identityIsolation
+      ? { identityIsolation: report.externalAgents.identityIsolation }
+      : {}),
     profile: report.profile,
     allow,
   };

@@ -725,10 +725,9 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
   const closure = await finished.finally(async () => {
     process.off('SIGINT', stopOnSignal);
     process.off('SIGTERM', stopOnSignal);
-    host.close();
-    // `close` drains what `host.close()` only scheduled, so the last records
-    // of a session reach disk before the process leaves — the same guarantee
-    // `connect` and `serve` already give.
+    await host.close();
+    // The process-scoped audit sink outlives every host connection and drains
+    // after the host has reaped all session-owned resources.
     await audit.close();
   });
 

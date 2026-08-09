@@ -11,6 +11,7 @@
  */
 
 import type {
+  ResolvedRuntimeCapabilityAllow,
   ResolvedRuntimeSlotConfig,
   RuntimeCapabilityAllow,
   RuntimeConsentProfile,
@@ -29,10 +30,13 @@ export const RUNTIME_CAPABILITY_KEYS = Object.keys(
   RuntimeCapabilityAllowSchema.properties
 ) as readonly (keyof RuntimeCapabilityAllow)[];
 
-function allowWith(overrides: Partial<RuntimeCapabilityAllow>, fill: boolean) {
+function allowWith(
+  overrides: Partial<RuntimeCapabilityAllow>,
+  fill: boolean
+): ResolvedRuntimeCapabilityAllow {
   return Object.fromEntries(
     RUNTIME_CAPABILITY_KEYS.map((key) => [key, overrides[key] ?? fill])
-  ) as RuntimeCapabilityAllow;
+  ) as ResolvedRuntimeCapabilityAllow;
 }
 
 /**
@@ -45,11 +49,14 @@ function allowWith(overrides: Partial<RuntimeCapabilityAllow>, fill: boolean) {
  * for the feature that exists to change files back.
  */
 export const RUNTIME_CONSENT_PRESETS: Readonly<
-  Record<Exclude<RuntimeConsentProfile, 'custom'>, RuntimeCapabilityAllow>
+  Record<Exclude<RuntimeConsentProfile, 'custom'>, ResolvedRuntimeCapabilityAllow>
 > = {
-  full: allowWith({}, true),
-  readonly: allowWith({ fsRead: true, git: true, probing: true, library: true }, false),
-  none: allowWith({}, false),
+  full: allowWith({ externalAgents: true }, true),
+  readonly: allowWith(
+    { fsRead: true, git: true, probing: true, library: true, externalAgents: false },
+    false
+  ),
+  none: allowWith({ externalAgents: false }, false),
 };
 
 /** Names the stored set, or `custom` when it matches no preset. */
@@ -71,7 +78,7 @@ export function profileForAllow(allow: RuntimeCapabilityAllow): RuntimeConsentPr
  * writes it is a gate that hub can decline to write.
  */
 export function defaultConsentForSlot(slot: RuntimeSlot): {
-  readonly allow: RuntimeCapabilityAllow;
+  readonly allow: ResolvedRuntimeCapabilityAllow;
   readonly setup: RuntimeSetupRecord;
 } {
   return slot === 'remote'
@@ -94,7 +101,8 @@ export function defaultAuditEnabledForSlot(slot: RuntimeSlot): boolean {
  *
  * A stored `allow` that is missing keys — written by an older runtime, or by a
  * newer one that dropped a capability — takes the *slot default* for those
- * keys, not `true`. An unknown capability must never be granted by omission.
+ * keys, not `true`. `externalAgents` is the deliberate exception: an old file
+ * never consented to launching vendor processes, so its absence resolves false.
  */
 export function resolveRuntimeSlotConfig(
   slot: RuntimeSlot,
@@ -102,10 +110,15 @@ export function resolveRuntimeSlotConfig(
   fallback: { readonly source: RuntimeInstallSource }
 ): ResolvedRuntimeSlotConfig {
   const defaults = defaultConsentForSlot(slot);
-  const allow = stored?.allow
+  const allow = stored
     ? (Object.fromEntries(
-        RUNTIME_CAPABILITY_KEYS.map((key) => [key, stored.allow?.[key] ?? defaults.allow[key]])
-      ) as RuntimeCapabilityAllow)
+        RUNTIME_CAPABILITY_KEYS.map((key) => [
+          key,
+          key === 'externalAgents'
+            ? (stored.allow?.externalAgents ?? false)
+            : (stored.allow?.[key] ?? defaults.allow[key]),
+        ])
+      ) as ResolvedRuntimeCapabilityAllow)
     : defaults.allow;
 
   return {

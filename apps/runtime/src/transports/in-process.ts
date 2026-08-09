@@ -6,7 +6,7 @@ import { createInProcessPortPair } from '../transport';
 export interface InProcessRuntimeConnection {
   readonly client: RuntimeProtocolClient;
   readonly host: RuntimeHost;
-  close(): void;
+  close(): Promise<void>;
 }
 
 /** Connects the hub client and embedded runtime through the real frame path. */
@@ -36,16 +36,16 @@ export async function connectInProcessRuntime(
     // The caller only ever sees the rejection, so it cannot reach the handle to
     // release these; a failed handshake would otherwise leak a host and a port.
     client.close();
-    host.close();
+    await host.close();
     throw error;
   }
 
   return {
     client,
     host,
-    close() {
+    async close() {
       client.close();
-      host.close();
+      await host.close();
     },
   };
 }

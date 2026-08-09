@@ -191,7 +191,7 @@ async function runOneConnection(
     }
   } finally {
     options.signal?.removeEventListener('abort', abort);
-    host.close();
+    await host.close();
   }
 }
 

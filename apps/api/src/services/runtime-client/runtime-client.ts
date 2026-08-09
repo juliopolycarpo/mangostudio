@@ -1,8 +1,20 @@
 import {
+  type ExternalAgentAckResult,
+  type ExternalAgentCancelParams,
+  type ExternalAgentCloseParams,
+  type ExternalAgentDiscoverParams,
+  type ExternalAgentDiscoverResult,
+  type ExternalAgentEventEnvelope,
+  type ExternalAgentOpenParams,
+  type ExternalAgentOpenResult,
+  type ExternalAgentRespondParams,
+  type ExternalAgentTurnParams,
+  type ExternalAgentTurnResult,
   FileNotReadError,
   GrepPatternError,
   PartialReadError,
   PathAccessError,
+  RUNTIME_EXTERNAL_AGENT_TOPIC,
   type RuntimeApplyPatchParams,
   type RuntimeApplyPatchResult,
   type RuntimeBeforeSnapshot,
@@ -103,7 +115,9 @@ import {
   StaleFileError,
   StaleLineNumbersError,
 } from '@mangostudio/runtime';
+import { ExternalAgentEventEnvelopeSchema } from '@mangostudio/shared/external-agents';
 import type { RuntimeEventFrame } from '@mangostudio/shared/runtime-protocol';
+import { Value } from '@sinclair/typebox/value';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
@@ -235,6 +249,36 @@ interface RuntimeMcpClient {
   ): Promise<RuntimeMcpAckResult>;
 }
 
+/** Vendor-agent sessions run on the target machine and are addressed by hub-minted session ids. */
+interface RuntimeExternalAgentsClient {
+  discover(
+    params: ExternalAgentDiscoverParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentDiscoverResult>;
+  open(
+    params: ExternalAgentOpenParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentOpenResult>;
+  turn(
+    params: ExternalAgentTurnParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentTurnResult>;
+  respond(
+    params: ExternalAgentRespondParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentAckResult>;
+  cancel(
+    params: ExternalAgentCancelParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentAckResult>;
+  close(
+    params: ExternalAgentCloseParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentAckResult>;
+  /** Subscribes only to validated semantic events for one hub-owned session. */
+  onEvent(sessionId: string, listener: (event: ExternalAgentEventEnvelope) => void): () => void;
+}
+
 /**
  * Install execution on the target machine. The hub keeps the recipe, the audit
  * row and the decision to run at all; only the child process is over there.
@@ -337,6 +381,7 @@ export class RuntimeClient {
   readonly install: RuntimeInstallClient;
   readonly update: RuntimeUpdateClient;
   readonly mcp: RuntimeMcpClient;
+  readonly externalAgents: RuntimeExternalAgentsClient;
   readonly probing: RuntimeProbingClient;
   readonly library: RuntimeLibraryClient;
   readonly snapshot: RuntimeSnapshotClient;
@@ -377,6 +422,24 @@ export class RuntimeClient {
       respondToElicitation: (params, options) =>
         this.request('mcp.elicit-response', params, options),
       disconnect: (params, options) => this.request('mcp.disconnect', params, options),
+    };
+    this.externalAgents = {
+      discover: (params, options) => this.request('external-agent.discover', params, options),
+      open: (params, options) => this.request('external-agent.open', params, options),
+      turn: (params, options) => this.request('external-agent.turn', params, options),
+      respond: (params, options) => this.request('external-agent.respond', params, options),
+      cancel: (params, options) => this.request('external-agent.cancel', params, options),
+      close: (params, options) => this.request('external-agent.close', params, options),
+      onEvent: (sessionId, listener) =>
+        this.protocol.onEvent((frame) => {
+          if (
+            frame.topic === RUNTIME_EXTERNAL_AGENT_TOPIC &&
+            Value.Check(ExternalAgentEventEnvelopeSchema, frame.payload) &&
+            frame.payload.sessionId === sessionId
+          ) {
+            listener(frame.payload);
+          }
+        }),
     };
     this.install = {
       run: (params, options) => this.request('install.run', params, options),

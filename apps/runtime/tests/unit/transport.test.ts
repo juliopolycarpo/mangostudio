@@ -62,22 +62,29 @@ describe('in-process runtime transport', () => {
     }
   });
 
-  it('returns a typed error for unsupported methods', async () => {
-    const connection = await connectInProcessRuntime(createHost(new Map()), {
-      hubVersion: 'hub-test',
-      validateFrames: true,
-    });
+  it('keeps an old connection usable after an unsupported external-agent method', async () => {
+    const connection = await connectInProcessRuntime(
+      createHost(new Map([['snapshot.hash', async () => ({ hash: 'still-connected' })]])),
+      {
+        hubVersion: 'hub-test',
+        validateFrames: true,
+      }
+    );
 
     try {
-      const request = connection.client.request('snapshot.hash', {
-        path: '/workspace/file.txt',
+      const request = connection.client.request('external-agent.discover', {
+        targetIds: ['codex'],
+        timeoutMs: 1_000,
       });
       await expect(request).rejects.toMatchObject({
         name: 'RuntimeRemoteError',
         code: 'METHOD_UNSUPPORTED',
       });
+      await expect(
+        connection.client.request('snapshot.hash', { path: '/workspace/file.txt' })
+      ).resolves.toEqual({ hash: 'still-connected' });
     } finally {
-      connection.close();
+      await connection.close();
     }
   });
 

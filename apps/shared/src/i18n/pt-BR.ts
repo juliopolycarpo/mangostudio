@@ -2194,6 +2194,7 @@ export const messages = {
           library: 'Biblioteca',
           checkpoints: 'Checkpoints',
           update: 'Atualizar runtime',
+          externalAgents: 'Agentes externos',
         },
       },
       runtime: {

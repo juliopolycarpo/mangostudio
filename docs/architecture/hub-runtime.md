@@ -90,6 +90,9 @@ Additive protocol changes stay on major/minor `1.0` while the wire stays compati
   "the owner refused this" from "the machine does not have it" — `git` is false either way
   — so a surface that reports refusals reads `allow` and treats its absence (an older peer)
   as "cannot tell", never as a refusal.
+  `externalAgents` is the deliberate exception: spawning a vendor CLI is newly privileged, so an
+  older stored allow set that lacks this key normalizes it to `false`. Adapter availability is a
+  separate optional top-level manifest list, and absence there means the runtime has no adapter.
 - **Refreshing the cached manifest.** `runtime.health` exposes the same report mid-session.
   Consent is answered on the machine, so the hub has nothing to invalidate on: reading an
   environment re-asks in the background when the cached manifest is older than the

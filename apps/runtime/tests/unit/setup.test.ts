@@ -320,6 +320,30 @@ describe('runtime health', () => {
     expect(report.audit).toEqual({ enabled: false });
   });
 
+  it('includes live external-agent target, age, and state in diagnostics', async () => {
+    const env = await isolatedEnv();
+    const report = await collectRuntimeHealth({
+      runtimeVersion: RUNTIME_VERSION,
+      env,
+      externalAgents: {
+        targets: ['codex'],
+        liveSessionCount: 1,
+        liveSessions: [
+          {
+            sessionId: 'session-1',
+            targetId: 'codex',
+            ageMs: 2_500,
+            state: 'running',
+          },
+        ],
+      },
+    });
+
+    expect(
+      diagnoseRuntimeHealth(report).find((finding) => finding.title === 'External agents')?.detail
+    ).toContain('codex:session-1 running 3s');
+  });
+
   it('fails doctor on a slot nobody has answered for, and names the fix', async () => {
     const env = await isolatedEnv();
     await writeRuntimeSlotConfig('host', { setup: { state: 'pending' } }, env);

@@ -1,4 +1,8 @@
 import { homedir } from 'node:os';
+import type {
+  ExternalAgentTargetId,
+  ExternalIdentityIsolation,
+} from '@mangostudio/shared/external-agents';
 import {
   profileForAllow,
   RUNTIME_CONSENT_PRESETS,
@@ -16,7 +20,11 @@ import { isShellAvailable } from './services/shell';
  * the binary cannot deliver is a worse bug than under-reporting.
  */
 export function createLocalRuntimeManifest(
-  allow: RuntimeCapabilityAllow = RUNTIME_CONSENT_PRESETS.full
+  allow: RuntimeCapabilityAllow = RUNTIME_CONSENT_PRESETS.full,
+  externalAgents: {
+    readonly targetIds?: readonly ExternalAgentTargetId[];
+    readonly identityIsolation?: ExternalIdentityIsolation;
+  } = {}
 ): RuntimeCapabilityManifest {
   const shells = (['bash', 'zsh', 'powershell'] as const).filter(isShellAvailable);
   const git = inspectGit();
@@ -51,7 +59,14 @@ export function createLocalRuntimeManifest(
       fsWrite: allow.fsWrite,
       shell: allow.shell,
       update: allow.update,
+      externalAgents: allow.externalAgents === true,
     },
+    ...(externalAgents.targetIds && externalAgents.targetIds.length > 0
+      ? { externalAgents: [...externalAgents.targetIds] }
+      : {}),
+    ...(externalAgents.identityIsolation
+      ? { identityIsolation: externalAgents.identityIsolation }
+      : {}),
     profile: profileForAllow(allow),
     // This build decodes `hello_ack.hub`. Frame envelopes are closed, so the
     // hub withholds that field until a runtime says it will not choke on it.

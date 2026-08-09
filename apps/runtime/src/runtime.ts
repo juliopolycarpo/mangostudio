@@ -1,3 +1,4 @@
+import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import {
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
@@ -11,6 +12,8 @@ import { RuntimeHost } from './host';
 import { createLocalRuntimeManifest } from './manifest';
 import { createRuntimeMethodHandlers } from './registry';
 import { readRuntimeSlotState } from './runtime-home';
+import type { ExternalAgentAdapter } from './services/external-agents/adapter';
+import type { ExternalAgentSupervisorOptions } from './services/external-agents/supervisor';
 import type { RuntimeUpdateServiceOptions } from './services/runtime-update';
 
 export function createLocalRuntimeHost(options: {
@@ -40,6 +43,13 @@ export function createLocalRuntimeHost(options: {
    * follows `runtime.json` (off for `host`, on for `wsl`/`remote`).
    */
   readonly audit?: RuntimeAuditSink;
+  readonly externalAgents?: Omit<
+    ExternalAgentSupervisorOptions,
+    'registry' | 'runtimeVersion' | 'emit' | 'consent'
+  > & {
+    readonly adapters?: readonly ExternalAgentAdapter[];
+    readonly identityIsolation?: ExternalIdentityIsolation;
+  };
 }): RuntimeHost {
   // The registry needs an emitter and the host needs the registry, so the
   // emitter closes over the host rather than being handed it: events raised
@@ -53,14 +63,22 @@ export function createLocalRuntimeHost(options: {
     emit: (event) => host?.emit(event),
     slot: consent.slot,
     ...(options.update ? { update: options.update } : {}),
+    consent,
+    ...(options.externalAgents ? { externalAgents: options.externalAgents } : {}),
   });
 
   host = new RuntimeHost({
     runtimeVersion: options.runtimeVersion,
-    manifest: () => createLocalRuntimeManifest(consent.current()),
+    manifest: () =>
+      createLocalRuntimeManifest(consent.current(), {
+        targetIds: registry.externalAgentRegistry.targetIds,
+        ...(options.externalAgents?.identityIsolation
+          ? { identityIsolation: options.externalAgents.identityIsolation }
+          : {}),
+      }),
     handlers: gateHandlersByConsent(registry.handlers, consent),
     isUpdateActive: registry.updateActive,
-    onClose: () => void registry.close(),
+    onClose: () => registry.close(),
     ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
     ...(options.audit ? { audit: options.audit } : {}),
   });
@@ -88,6 +106,13 @@ export async function createSlotRuntimeHost(options: {
   readonly update?: Omit<RuntimeUpdateServiceOptions, 'slot'>;
   readonly env?: NodeJS.ProcessEnv;
   readonly audit?: RuntimeAuditSink;
+  readonly externalAgents?: Omit<
+    ExternalAgentSupervisorOptions,
+    'registry' | 'runtimeVersion' | 'emit' | 'consent'
+  > & {
+    readonly adapters?: readonly ExternalAgentAdapter[];
+    readonly identityIsolation?: ExternalIdentityIsolation;
+  };
 }): Promise<SlotRuntimeHost> {
   const audit =
     options.audit ??
@@ -102,6 +127,7 @@ export async function createSlotRuntimeHost(options: {
     audit,
     ...(options.protocolVersion ? { protocolVersion: options.protocolVersion } : {}),
     ...(options.update ? { update: options.update } : {}),
+    ...(options.externalAgents ? { externalAgents: options.externalAgents } : {}),
   });
   return { host, audit };
 }

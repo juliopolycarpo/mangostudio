@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import type {
   ExternalAgentCapabilities,
@@ -8,6 +9,7 @@ import {
   ExternalAgentDescriptorSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
+import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import { Value } from '@sinclair/typebox/value';
 
 import type {
@@ -18,6 +20,8 @@ import {
   type AuthoritativeAgentDiscovery,
   type AuthoritativeAgentStatus,
   createExternalAgentDiscoveryService,
+  createRuntimeAuthoritativeAgentDiscovery,
+  type RuntimeClientResolver,
 } from '../../../../src/modules/external-agents/application/external-agent-discovery';
 
 const SCOPE: ProbeScope = { userId: 'user-1', environmentId: 'env-1' };
@@ -74,6 +78,29 @@ const ALL_CAPABLE: ExternalAgentCapabilities = {
   interactiveApprovals: true,
   cancellation: true,
 };
+
+function runtimeManifest(
+  overrides: Partial<RuntimeCapabilityManifest> = {}
+): RuntimeCapabilityManifest {
+  return {
+    platform: 'linux',
+    arch: 'x64',
+    pathStyle: 'posix',
+    homeDir: '/home/ada',
+    shells: ['bash'],
+    git: { available: true },
+    features: {
+      tools: true,
+      git: true,
+      probing: true,
+      mcp: true,
+      library: true,
+      checkpoints: true,
+      ...overrides.features,
+    },
+    ...overrides,
+  };
+}
 
 describe('external agent discovery — the cheap pass', () => {
   it('maps an installed, signed-in CLI', async () => {
@@ -255,6 +282,14 @@ describe('external agent discovery — the authoritative pass', () => {
           supportedConfigurations: [
             { level: 'read-only', routing: 'user', supported: true, unattended: false },
           ],
+          models: [
+            {
+              id: 'codex-default',
+              displayName: 'Codex Default',
+              supportedReasoningEfforts: [{ id: 'high', displayName: 'High' }],
+            },
+          ],
+          account: { label: 'Ada', planType: 'Team', fingerprint: 'account-v1' },
         },
       ]),
     });
@@ -268,6 +303,18 @@ describe('external agent discovery — the authoritative pass', () => {
       loginCommand: 'codex login',
     });
     expect(codex?.supportedConfigurations).toHaveLength(1);
+    expect(codex?.models).toEqual([
+      {
+        id: 'codex-default',
+        displayName: 'Codex Default',
+        supportedReasoningEfforts: [{ id: 'high', displayName: 'High' }],
+      },
+    ]);
+    expect(codex?.account).toEqual({
+      label: 'Ada',
+      planType: 'Team',
+      fingerprint: 'account-v1',
+    });
   });
 
   it("caps an adapter's version to what the public contract allows", async () => {
@@ -394,6 +441,43 @@ describe('external agent discovery — the authoritative pass', () => {
     expect(calls).toBe(2);
   });
 
+  it('does not let a stale in-flight probe overwrite a reset cache generation', async () => {
+    const stale = Promise.withResolvers<readonly AuthoritativeAgentStatus[]>();
+    const fresh = Promise.withResolvers<readonly AuthoritativeAgentStatus[]>();
+    const staleStarted = Promise.withResolvers<void>();
+    const freshStarted = Promise.withResolvers<void>();
+    let calls = 0;
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      authoritative: {
+        describe() {
+          calls += 1;
+          if (calls === 1) {
+            staleStarted.resolve();
+            return stale.promise;
+          }
+          freshStarted.resolve();
+          return fresh.promise;
+        },
+      },
+    });
+
+    const staleListing = service.listExternalAgents(SCOPE);
+    await staleStarted.promise;
+    service.resetCache('env-1', 'user-1');
+
+    const freshListing = service.listExternalAgents(SCOPE);
+    await freshStarted.promise;
+    fresh.resolve([{ targetId: 'codex', version: '2.0.0', capabilities: ALL_CAPABLE }]);
+    expect((await freshListing)[0]?.version).toBe('2.0.0');
+
+    stale.resolve([{ targetId: 'codex', version: '1.0.0', capabilities: ALL_CAPABLE }]);
+    expect((await staleListing)[0]?.version).toBe('1.0.0');
+
+    expect((await service.listExternalAgents(SCOPE))[0]?.version).toBe('2.0.0');
+    expect(calls).toBe(2);
+  });
+
   it("does not let one user's probe consume another user's concurrency slot", async () => {
     // Environments are per-user rows (pk_environments is (userId, id)), so two
     // users can register the same environment id without it being the same
@@ -466,6 +550,169 @@ describe('external agent discovery — the authoritative pass', () => {
 
     expect(codex?.capabilities.resume).toBe(true);
     expect(codex?.capabilities.steering).toBe(false);
+  });
+});
+
+describe('external agent discovery — runtime authority', () => {
+  it('applies unsupported, denied, then unproven isolation in that order', async () => {
+    const cases: Array<{
+      manifest: RuntimeCapabilityManifest;
+      expected: 'runtime-unsupported' | 'runtime-denied' | 'isolation-unproven';
+    }> = [
+      {
+        manifest: runtimeManifest({
+          features: { ...runtimeManifest().features, externalAgents: false },
+          identityIsolation: {
+            method: 'single-user-host',
+            credentialHomeFingerprint: 'credential-home-v1',
+          },
+        }),
+        expected: 'runtime-unsupported',
+      },
+      {
+        manifest: runtimeManifest({
+          externalAgents: ['codex'],
+          features: { ...runtimeManifest().features, externalAgents: false },
+          identityIsolation: {
+            method: 'single-user-host',
+            credentialHomeFingerprint: 'credential-home-v1',
+          },
+        }),
+        expected: 'runtime-denied',
+      },
+      {
+        manifest: runtimeManifest({
+          externalAgents: ['codex'],
+          features: { ...runtimeManifest().features, externalAgents: true },
+        }),
+        expected: 'isolation-unproven',
+      },
+    ];
+
+    for (const { manifest, expected } of cases) {
+      let calls = 0;
+      const resolveRuntimeClient: RuntimeClientResolver = () =>
+        Promise.resolve({
+          manifest,
+          externalAgents: {
+            discover: () => {
+              calls += 1;
+              return Promise.resolve({ descriptors: [] });
+            },
+          },
+        });
+      const authority = createRuntimeAuthoritativeAgentDiscovery(resolveRuntimeClient);
+
+      const [status] = await authority.describe(SCOPE, ['codex'], {
+        signal: new AbortController().signal,
+      });
+
+      expect(status).toEqual({
+        targetId: 'codex',
+        capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+        unavailableReason: expected,
+      });
+      expect(calls).toBe(0);
+    }
+  });
+
+  it('preserves a consent refusal that races the manifest preflight', async () => {
+    const manifest = runtimeManifest({
+      externalAgents: ['codex'],
+      features: { ...runtimeManifest().features, externalAgents: true },
+      identityIsolation: {
+        method: 'single-user-host',
+        credentialHomeFingerprint: 'credential-home-v1',
+      },
+    });
+    const authority = createRuntimeAuthoritativeAgentDiscovery(() =>
+      Promise.resolve({
+        manifest,
+        externalAgents: {
+          discover: () =>
+            Promise.reject(
+              new RuntimeConsentDeniedError('External agents were revoked.', {
+                capability: 'externalAgents',
+                method: 'external-agent.discover',
+              })
+            ),
+        },
+      })
+    );
+
+    expect(
+      await authority.describe(SCOPE, ['codex'], { signal: new AbortController().signal })
+    ).toEqual([
+      {
+        targetId: 'codex',
+        capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+        unavailableReason: 'runtime-denied',
+      },
+    ]);
+  });
+
+  it('discovers eligible targets and preserves model, account and configuration data', async () => {
+    const calls: unknown[] = [];
+    const manifest = runtimeManifest({
+      externalAgents: ['codex'],
+      features: { ...runtimeManifest().features, externalAgents: true },
+      identityIsolation: {
+        method: 'single-user-host',
+        credentialHomeFingerprint: 'credential-home-v1',
+      },
+    });
+    const resolveRuntimeClient: RuntimeClientResolver = (userId, environmentId) => {
+      expect([userId, environmentId]).toEqual(['user-1', 'env-1']);
+      return Promise.resolve({
+        manifest,
+        externalAgents: {
+          discover(params, options) {
+            calls.push({ params, options });
+            return Promise.resolve({
+              descriptors: [
+                {
+                  targetId: 'codex',
+                  installed: true,
+                  version: '0.147.0',
+                  authState: 'signed-in',
+                  capabilities: ALL_CAPABLE,
+                  supportedConfigurations: [
+                    {
+                      level: 'read-only',
+                      routing: 'user',
+                      supported: true,
+                      unattended: false,
+                    },
+                  ],
+                  models: [{ id: 'codex-default', displayName: 'Codex Default' }],
+                  account: { label: 'Ada', planType: 'Team', fingerprint: 'account-v1' },
+                },
+              ],
+            });
+          },
+        },
+      });
+    };
+    const authority = createRuntimeAuthoritativeAgentDiscovery(resolveRuntimeClient, 4_321);
+    const signal = new AbortController().signal;
+
+    const [status] = await authority.describe(SCOPE, ['codex'], { signal });
+
+    expect(calls).toEqual([
+      {
+        params: { targetIds: ['codex'], timeoutMs: 4_321 },
+        options: { signal, timeoutMs: 4_321 },
+      },
+    ]);
+    expect(status).toMatchObject({
+      targetId: 'codex',
+      capabilities: ALL_CAPABLE,
+      supportedConfigurations: [
+        { level: 'read-only', routing: 'user', supported: true, unattended: false },
+      ],
+      models: [{ id: 'codex-default', displayName: 'Codex Default' }],
+      account: { label: 'Ada', planType: 'Team', fingerprint: 'account-v1' },
+    });
   });
 });
 

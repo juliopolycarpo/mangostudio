@@ -167,6 +167,109 @@ export const ExternalSupportedConfigurationListSchema = ReadonlyArraySchema(
   { maxItems: EXTERNAL_PERMISSION_LEVELS.length * EXTERNAL_APPROVAL_ROUTINGS.length }
 );
 
+/** How a runtime proves that vendor credentials cannot cross MangoStudio users. */
+export const ExternalIdentityIsolationSchema = Type.Object(
+  {
+    method: Type.Union([
+      Type.Literal('single-user-host'),
+      Type.Literal('os-account'),
+      Type.Literal('container'),
+    ]),
+    /** Opaque, non-reversible digest used only to detect a changed credential home. */
+    credentialHomeFingerprint: Type.String({ minLength: 1, maxLength: 128 }),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalIdentityIsolation = Static<typeof ExternalIdentityIsolationSchema>;
+
+/** One vendor-defined reasoning choice retained without flattening it to a MangoStudio enum. */
+export const ExternalAgentReasoningEffortSchema = Type.Object(
+  {
+    id: VendorText('vendorId', { minLength: 1 }),
+    displayName: Type.Optional(VendorText('title', { minLength: 1 })),
+    description: Type.Optional(VendorText('detail')),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentReasoningEffort = Static<typeof ExternalAgentReasoningEffortSchema>;
+
+/** A model as the vendor advertised it, including the per-model reasoning catalog. */
+export const ExternalAgentModelSchema = Type.Object(
+  {
+    id: VendorText('vendorId', { minLength: 1 }),
+    displayName: Type.Optional(VendorText('title', { minLength: 1 })),
+    description: Type.Optional(VendorText('detail')),
+    isDefault: Type.Optional(Type.Boolean()),
+    hidden: Type.Optional(Type.Boolean()),
+    inputModalities: Type.Optional(
+      ReadonlyArraySchema(Type.String({ minLength: 1, maxLength: 64 }), {
+        maxItems: 16,
+        uniqueItems: true,
+      })
+    ),
+    supportedReasoningEfforts: Type.Optional(
+      ReadonlyArraySchema(ExternalAgentReasoningEffortSchema, {
+        maxItems: 32,
+        uniqueItems: true,
+      })
+    ),
+    defaultReasoningEffort: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    serviceTiers: Type.Optional(
+      ReadonlyArraySchema(Type.String({ minLength: 1, maxLength: 128 }), {
+        maxItems: 32,
+        uniqueItems: true,
+      })
+    ),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentModel = Static<typeof ExternalAgentModelSchema>;
+
+export const ExternalAgentModelCatalogSchema = ReadonlyArraySchema(ExternalAgentModelSchema, {
+  maxItems: 256,
+});
+
+/** Settings that can be changed between turns without adopting a new session. */
+export const ExternalAgentConfigurationSchema = Type.Object(
+  {
+    model: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    effort: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    level: ExternalPermissionLevelSchema,
+    routing: ExternalApprovalRoutingSchema,
+    workspaceRoots: ReadonlyArraySchema(Type.String({ minLength: 1, maxLength: 4_096 }), {
+      maxItems: 32,
+      uniqueItems: true,
+    }),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentConfiguration = Static<typeof ExternalAgentConfigurationSchema>;
+
+/** Bytes for one hub-owned attachment crossing to the machine that runs the vendor. */
+export const ExternalAgentAttachmentSchema = Type.Object(
+  {
+    id: Type.String({ minLength: 1, maxLength: 256 }),
+    originalName: Type.String({ minLength: 1, maxLength: 512 }),
+    mimeType: Type.String({ minLength: 1, maxLength: 255 }),
+    sizeBytes: Type.Integer({ minimum: 1, maximum: 2 * 1024 * 1024 }),
+    kind: Type.Union([
+      Type.Literal('image'),
+      Type.Literal('text'),
+      Type.Literal('pdf'),
+      Type.Literal('data'),
+      Type.Literal('unknown'),
+    ]),
+    bytesBase64: Type.String({ minLength: 1, maxLength: 2_796_204 }),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentAttachment = Static<typeof ExternalAgentAttachmentSchema>;
+
 /**
  * A neutral icon bucket for a vendor activity, derived from Codex's 18-member
  * `ThreadItem` union and kept small enough that every vendor can map onto it.
@@ -453,6 +556,8 @@ export const ExternalAgentAccountSchema = Type.Object(
   {
     label: VendorText('accountLabel', { minLength: 1 }),
     planType: Type.Optional(VendorText('accountLabel')),
+    /** Opaque, non-reversible digest for invalidating continuation after an account change. */
+    fingerprint: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false }
 );
@@ -476,6 +581,8 @@ export const ExternalAgentDescriptorSchema = Type.Object(
     loginCommand: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
     capabilities: ExternalAgentCapabilitiesSchema,
     supportedConfigurations: ExternalSupportedConfigurationListSchema,
+    /** Rich model catalog when the adapter can enumerate one; absent on older discovery paths. */
+    models: Type.Optional(ExternalAgentModelCatalogSchema),
     account: Type.Optional(ExternalAgentAccountSchema),
     unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
   },
@@ -497,3 +604,133 @@ export const ExternalAgentDescriptorListResponseSchema = Type.Object(
 export type ExternalAgentDescriptorListResponse = Static<
   typeof ExternalAgentDescriptorListResponseSchema
 >;
+
+/** Runtime-owned discovery omits the hub's environment id, which the hub projects afterwards. */
+export const ExternalAgentRuntimeDescriptorSchema = Type.Omit(ExternalAgentDescriptorSchema, [
+  'environmentId',
+]);
+
+export type ExternalAgentRuntimeDescriptor = Static<typeof ExternalAgentRuntimeDescriptorSchema>;
+
+const ExternalAgentOpaqueIdSchema = VendorText('vendorId', { minLength: 1 });
+const ExternalAgentTimeoutSchema = Type.Integer({ minimum: 1, maximum: 300_000 });
+
+export const ExternalAgentDiscoverParamsSchema = Type.Object(
+  {
+    targetIds: ReadonlyArraySchema(ExternalAgentTargetIdSchema, {
+      minItems: 1,
+      maxItems: EXTERNAL_AGENT_TARGET_IDS.length,
+      uniqueItems: true,
+    }),
+    timeoutMs: ExternalAgentTimeoutSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentDiscoverParams = Static<typeof ExternalAgentDiscoverParamsSchema>;
+
+export const ExternalAgentDiscoverResultSchema = Type.Object(
+  {
+    descriptors: ReadonlyArraySchema(ExternalAgentRuntimeDescriptorSchema, {
+      maxItems: EXTERNAL_AGENT_TARGET_IDS.length,
+    }),
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentDiscoverResult = Static<typeof ExternalAgentDiscoverResultSchema>;
+
+export const ExternalAgentResumeModeSchema = Type.Union([
+  Type.Literal('strict'),
+  Type.Literal('fallback'),
+]);
+export type ExternalAgentResumeMode = Static<typeof ExternalAgentResumeModeSchema>;
+
+export const ExternalAgentOpenParamsSchema = Type.Object(
+  {
+    sessionId: ExternalAgentOpaqueIdSchema,
+    targetId: ExternalAgentTargetIdSchema,
+    workspacePath: Type.String({ minLength: 1, maxLength: 4_096 }),
+    configuration: ExternalAgentConfigurationSchema,
+    resumeRef: Type.Optional(ExternalAgentOpaqueIdSchema),
+    resumeMode: ExternalAgentResumeModeSchema,
+    timeoutMs: ExternalAgentTimeoutSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentOpenParams = Static<typeof ExternalAgentOpenParamsSchema>;
+
+export const ExternalAgentOpenResultSchema = Type.Object(
+  {
+    nativeSessionId: ExternalAgentOpaqueIdSchema,
+    resumed: Type.Boolean(),
+    fallbackReason: Type.Optional(VendorText('errorMessage')),
+    effectiveConfiguration: ExternalAgentConfigurationSchema,
+    capabilities: ExternalAgentCapabilitiesSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentOpenResult = Static<typeof ExternalAgentOpenResultSchema>;
+
+export const ExternalAgentTurnParamsSchema = Type.Object(
+  {
+    sessionId: ExternalAgentOpaqueIdSchema,
+    clientMessageId: ExternalAgentOpaqueIdSchema,
+    input: Type.String({ maxLength: 1024 * 1024 }),
+    configuration: ExternalAgentConfigurationSchema,
+    attachments: Type.Optional(
+      ReadonlyArraySchema(ExternalAgentAttachmentSchema, { maxItems: 4, uniqueItems: true })
+    ),
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentTurnParams = Static<typeof ExternalAgentTurnParamsSchema>;
+
+export const ExternalAgentTurnResultSchema = Type.Object(
+  { nativeTurnId: ExternalAgentOpaqueIdSchema },
+  { additionalProperties: false }
+);
+export type ExternalAgentTurnResult = Static<typeof ExternalAgentTurnResultSchema>;
+
+export const ExternalAgentRespondParamsSchema = Type.Object(
+  {
+    sessionId: ExternalAgentOpaqueIdSchema,
+    nativeTurnId: ExternalAgentOpaqueIdSchema,
+    requestId: ExternalAgentOpaqueIdSchema,
+    optionId: ExternalAgentOpaqueIdSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentRespondParams = Static<typeof ExternalAgentRespondParamsSchema>;
+
+export const ExternalAgentCancelParamsSchema = Type.Object(
+  {
+    sessionId: ExternalAgentOpaqueIdSchema,
+    nativeTurnId: Type.Optional(ExternalAgentOpaqueIdSchema),
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentCancelParams = Static<typeof ExternalAgentCancelParamsSchema>;
+
+export const ExternalAgentCloseParamsSchema = Type.Object(
+  { sessionId: ExternalAgentOpaqueIdSchema },
+  { additionalProperties: false }
+);
+export type ExternalAgentCloseParams = Static<typeof ExternalAgentCloseParamsSchema>;
+
+export const ExternalAgentAckResultSchema = Type.Object(
+  { ok: Type.Literal(true) },
+  { additionalProperties: false }
+);
+export type ExternalAgentAckResult = Static<typeof ExternalAgentAckResultSchema>;
+
+/** Semantic event ordering is per session and starts at one, independently of transport seq. */
+export const ExternalAgentEventEnvelopeSchema = Type.Object(
+  {
+    sessionId: ExternalAgentOpaqueIdSchema,
+    nativeTurnId: Type.Optional(ExternalAgentOpaqueIdSchema),
+    sequence: Type.Integer({ minimum: 1 }),
+    emittedAtMs: Type.Integer({ minimum: 0 }),
+    event: ExternalAgentEventSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentEventEnvelope = Static<typeof ExternalAgentEventEnvelopeSchema>;

@@ -25,6 +25,7 @@ export { createLocalRuntimeManifest } from './manifest';
 export type * from './methods';
 export {
   RUNTIME_ABSENT_HASH,
+  RUNTIME_EXTERNAL_AGENT_TOPIC,
   RUNTIME_INSTALL_OUTPUT_TOPIC,
   RUNTIME_MCP_ELICITATION_TOPIC,
   RUNTIME_MCP_SESSION_TOPIC,
@@ -49,6 +50,16 @@ export {
   serveRuntime,
   tokensEqual,
 } from './serve';
+export type * from './services/external-agents/adapter';
+export { createSingleUserHostExternalAgentIsolation } from './services/external-agents/isolation';
+export {
+  assertExternalAgentAdapterConformance,
+  ExternalAgentAdapterRegistry,
+} from './services/external-agents/registry';
+export {
+  ExternalAgentSessionSupervisor,
+  type ExternalAgentSupervisorOptions,
+} from './services/external-agents/supervisor';
 export {
   assertFresh,
   assertFreshContent,

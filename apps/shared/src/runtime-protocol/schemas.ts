@@ -1,8 +1,12 @@
 import { type Static, Type } from '@sinclair/typebox';
+import {
+  ExternalAgentTargetIdSchema,
+  ExternalIdentityIsolationSchema,
+} from '../external-agents/schemas';
 import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
 
 /** Protocol version shared by every transport in this release. */
-export const RUNTIME_PROTOCOL_VERSION = '1.0' as const;
+export const RUNTIME_PROTOCOL_VERSION = '1.0.1' as const;
 
 export const RuntimeProtocolVersionSchema = Type.String({
   minLength: 3,
@@ -88,7 +92,24 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
     fsWrite: Type.Optional(Type.Boolean()),
     shell: Type.Optional(Type.Boolean()),
     update: Type.Optional(Type.Boolean()),
+    /**
+     * Privileged vendor-process hosting. Absent means false: a peer predating
+     * this key cannot safely be assumed to support or have consent for it.
+     */
+    externalAgents: Type.Optional(Type.Boolean()),
   }),
+  /**
+   * Targets backed by adapters in this runtime. Absent means none; an older
+   * runtime genuinely cannot host an adapter it did not ship.
+   */
+  externalAgents: Type.Optional(
+    Type.Array(ExternalAgentTargetIdSchema, {
+      maxItems: ExternalAgentTargetIdSchema.anyOf.length,
+      uniqueItems: true,
+    })
+  ),
+  /** Positive attestation of per-user vendor credential isolation; absent is unproven. */
+  identityIsolation: Type.Optional(ExternalIdentityIsolationSchema),
   /**
    * Whether this runtime's frame decoder knows the `hub` field on `hello_ack`.
    *

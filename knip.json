@@ -36,7 +36,7 @@
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "apps/runtime": {
-      "entry": ["src/cli.ts", "tests/**/*.test.ts"],
+      "entry": ["src/cli.ts", "tests/**/*.test.ts", "tests/support/external-agent-fixture.ts"],
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "packages/cli": {
