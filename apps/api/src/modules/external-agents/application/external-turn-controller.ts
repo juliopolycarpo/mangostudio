@@ -311,7 +311,13 @@ export function createExternalTurnController(
    */
   const liveTurns = new Map<
     string,
-    { readonly transcript: ExternalTurnTranscript; readonly writer: ExternalTranscriptWriter }
+    {
+      readonly transcript: ExternalTurnTranscript;
+      readonly writer: ExternalTranscriptWriter;
+      readonly sessionId: string;
+      /** Mutable: the vendor's turn id arrives after the send is registered. */
+      readonly external: ActiveExternalTurn;
+    }
   >();
 
   async function start(
@@ -373,7 +379,6 @@ export function createExternalTurnController(
       startedAt,
     });
     const writer = new ExternalTranscriptWriter(db, assistantMessageId, transcript, now);
-    liveTurns.set(input.chatId, { transcript, writer });
 
     const settled = Promise.withResolvers<ExternalTurnTerminalReason>();
     let terminalReason: ExternalTurnTerminalReason | undefined;
@@ -382,6 +387,12 @@ export function createExternalTurnController(
       targetId,
       environmentId: context.chat.environmentId,
     };
+    liveTurns.set(input.chatId, {
+      transcript,
+      writer,
+      sessionId: handle.sessionId,
+      external,
+    });
 
     /** The first terminal writer wins; every later one is a no-op. */
     function terminate(reason: ExternalTurnTerminalReason): void {
@@ -648,14 +659,25 @@ export function createExternalTurnController(
   const instance: ExternalTurnController = {
     start,
     async answerApproval(input) {
-      const result = await approvals.answer(input);
+      // The registry's five-way binding is only as strong as the values the
+      // caller passes, and a client cannot pass the two that matter: the session
+      // id and the vendor's turn id are server-owned and deliberately never
+      // cross the wire. Reading them off the chat's *live* turn is what supplies
+      // them — so an answer can only ever reach the turn running right now, and
+      // a card left over from an earlier turn cannot match a later one that
+      // happened to reuse its request id.
+      const live = liveTurns.get(input.chatId);
+      const result = await approvals.answer({
+        ...input,
+        ...(live ? { sessionId: live.sessionId } : {}),
+        ...(live?.external.nativeTurnId ? { nativeTurnId: live.external.nativeTurnId } : {}),
+      });
       if (result.status !== 'accepted') return result;
       // The vendor's `approval_resolved` echo is optional, and a turn that ends
       // without one would leave the card pending for `finish` to seal as
       // expired — a durable record contradicting the authorization that was
       // actually sent. Applying it here is idempotent: a later echo for the
       // same request finds the decision already recorded and changes nothing.
-      const live = liveTurns.get(input.chatId);
       if (!live) return result;
       live.transcript.resolveApproval(input.requestId, {
         optionId: result.optionId,

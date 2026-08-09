@@ -19,7 +19,7 @@
 import type { ExternalApprovalOption } from '@mangostudio/shared/external-agents';
 import type { ExternalApprovalPart } from '@mangostudio/shared/types';
 import { AlertTriangle, ShieldQuestion } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { answerExternalApproval } from '@/services/external-agent-service';
 
@@ -38,21 +38,32 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
   const [optimisticDecision, setOptimisticDecision] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const expired = useApprovalExpiry(part);
 
   // The persisted part is authoritative: a decision that reached the server wins
   // over anything this card believes about its own click.
   const decisionSource = part.decisionSource;
   const decision = part.decision ?? optimisticDecision;
   const pending = decisionSource === undefined && optimisticDecision === null;
-  const interactive = pending && chatId !== null;
+  const interactive = pending && !expired && chatId !== null;
 
   const answer = async (optionId: string) => {
     if (!interactive || submitting || !chatId) return;
     setSubmitting(true);
     setError(null);
     try {
-      await answerExternalApproval(chatId, { requestId: part.requestId, optionId });
-      setOptimisticDecision(optionId);
+      const result = await answerExternalApproval(chatId, {
+        requestId: part.requestId,
+        optionId,
+      });
+      // A rejection is a value, not a throw: the vendor never received this
+      // authorization. Recording it optimistically would show the option as
+      // chosen, disable every button, and leave the user with no way to retry.
+      if (result.status === 'rejected') {
+        setError(labels.submitError);
+        return;
+      }
+      setOptimisticDecision(result.optionId ?? optionId);
     } catch {
       setError(labels.submitError);
     } finally {
@@ -65,7 +76,7 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
       <div className="flex flex-wrap items-center gap-2 text-on-surface-variant">
         <ShieldQuestion size={16} className="text-primary" />
         <span className="text-xs font-bold uppercase tracking-widest">
-          {headingFor(decisionSource, labels)}
+          {headingFor(decisionSource ?? (expired ? 'expired' : undefined), labels)}
         </span>
       </div>
 
@@ -95,9 +106,9 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
         ))}
       </div>
 
-      {decisionSource === 'expired' || decisionSource === 'cancelled' ? (
+      {decisionSource === 'expired' || decisionSource === 'cancelled' || expired ? (
         <p className="text-xs text-on-surface-variant/70">
-          {decisionSource === 'expired' ? labels.expiredHint : labels.cancelledHint}
+          {decisionSource === 'cancelled' ? labels.cancelledHint : labels.expiredHint}
         </p>
       ) : null}
       {decisionSource === 'auto-review' ? (
@@ -105,6 +116,33 @@ export function ExternalApprovalCard({ part, chatId = null }: ExternalApprovalCa
       ) : null}
     </div>
   );
+}
+
+/**
+ * Whether this approval has outlived its own deadline.
+ *
+ * The server seals an abandoned approval when the turn ends, which is the
+ * durable answer. But a turn can outlive an approval's expiry — the vendor stops
+ * waiting and carries on — and until the turn ends nothing tells the card, so
+ * its buttons would stay live long after pressing one could do anything. The
+ * timer is local and advisory; `decisionSource` still wins when it arrives.
+ */
+function useApprovalExpiry(part: ExternalApprovalPart): boolean {
+  const [expired, setExpired] = useState(() => Date.now() >= part.expiresAtMs);
+
+  useEffect(() => {
+    if (part.decisionSource !== undefined) return;
+    const remaining = part.expiresAtMs - Date.now();
+    if (remaining <= 0) {
+      setExpired(true);
+      return;
+    }
+    setExpired(false);
+    const timer = setTimeout(() => setExpired(true), remaining);
+    return () => clearTimeout(timer);
+  }, [part.expiresAtMs, part.decisionSource]);
+
+  return expired && part.decisionSource === undefined;
 }
 
 function OptionButton({

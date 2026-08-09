@@ -191,6 +191,25 @@ describe('fork with runner', () => {
     });
   });
 
+  it('leaves no half-made chat behind when the fork cannot be completed', async () => {
+    const app = mount(
+      stubController({ status: 'accepted', optionId: 'x', idempotent: false }).controller
+    );
+    const before = await getDb().selectFrom('chats').select('id').execute();
+
+    const response = await app.handle(
+      // `AgentIdSchema` rejects this, so the write fails after `createChat` has
+      // already inserted a row — exactly the window the transaction closes.
+      post(`/chats/${chatId}/fork-with-runner`, {
+        runner: { kind: 'mangostudio', agentId: 'not a valid agent id' },
+      })
+    );
+
+    expect(response.status).not.toBe(201);
+    const after = await getDb().selectFrom('chats').select('id').execute();
+    expect(after).toHaveLength(before.length);
+  });
+
   it('refuses to fork a chat the caller does not own', async () => {
     const other = await insertTestUser();
     const foreignChatId = `chat-${crypto.randomUUID()}`;

@@ -112,34 +112,42 @@ export function createExternalAgentTurnRoutes(
           return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
         }
 
-        const created = await createChat(
-          { title: '', userId, environmentId: source.environmentId },
-          db
-        );
-        // Environment and workdir carry; the transcript does not. That asymmetry
-        // is the whole point — the user keeps their working context and the new
-        // runner starts with a history it did not produce.
-        await updateChat(
-          created.id,
-          userId,
-          {
-            runner: body.runner,
-            workdir: source.workdir,
-            // A forked chat has made no permission choice of its own. Copying the
-            // source's would carry a choice made for a different runner, which
-            // may not even support the pair.
-            runnerPermissions: {},
-          },
-          db
-        );
-        const forked = await getOwnedChat(created.id, userId, db);
+        // One transaction, because a fork is one thing. `createChat` commits a
+        // blank MangoStudio chat and `updateChat` is what makes it the fork the
+        // user asked for; a failure between them would answer with an error and
+        // still leave that blank chat in the sidebar.
+        const { created, forked } = await db.transaction().execute(async (trx) => {
+          const created = await createChat(
+            { title: '', userId, environmentId: source.environmentId },
+            trx
+          );
+          // Environment and workdir carry; the transcript does not. That
+          // asymmetry is the whole point — the user keeps their working context
+          // and the new runner starts with a history it did not produce.
+          await updateChat(
+            created.id,
+            userId,
+            {
+              runner: body.runner,
+              workdir: source.workdir,
+              // A forked chat has made no permission choice of its own. Copying
+              // the source's would carry a choice made for a different runner,
+              // which may not even support the pair.
+              runnerPermissions: {},
+            },
+            trx
+          );
+          const forked = await getOwnedChat(created.id, userId, trx);
+          if (!forked) throw new Error(`Forked chat "${created.id}" was not readable after write.`);
+          return { created, forked };
+        });
 
         set.status = 201;
         return {
           chat: toPublicChat({
             ...created,
-            runner: forked?.runner ?? created.runner,
-            runnerPermissions: forked?.runnerPermissions ?? {},
+            runner: forked.runner,
+            runnerPermissions: forked.runnerPermissions,
             workdir: source.workdir,
           }),
         };

@@ -108,7 +108,16 @@ describe('external agent process teardown', () => {
   it('lets the adapter request graceful shutdown before signals', async () => {
     const child = spawnFixture('graceful');
 
-    await child.terminate({ graceful: () => child.writeLine({ type: 'shutdown' }), graceMs: 100 });
+    // The grace window is a deadline, not a sleep: `terminate` returns the
+    // moment the child exits. A tight 100ms only decided how much scheduler
+    // jitter it took to escalate to a signal and turn a clean `code: 0` into
+    // `signal: 'SIGTERM'` — which is what happened under a loaded full-suite
+    // run. The claim is that the adapter's hook is given its chance first, not
+    // that the child is scheduled within a tenth of a second.
+    await child.terminate({
+      graceful: () => child.writeLine({ type: 'shutdown' }),
+      graceMs: 5_000,
+    });
 
     expect(await child.exit).toEqual({ code: 0, signal: null });
   });

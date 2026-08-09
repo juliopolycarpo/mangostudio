@@ -152,14 +152,24 @@ function pickModel(
   return models.find((model) => model.isDefault && model.hidden !== true)?.id;
 }
 
-/** Same rule for effort, scoped to the model actually chosen. */
+/**
+ * Same rule for effort, scoped to the model actually chosen.
+ *
+ * When the vendor advertised a catalog but no model resolved out of it — a
+ * request naming something unlisted, and no visible default to fall back to —
+ * the requested effort was never vetted against anything, so nothing is sent.
+ * Forwarding it would be this function claiming a scope it does not have.
+ */
 function pickEffort(
   descriptor: ExternalAgentDescriptor,
   modelId: string | undefined,
   requested: string | undefined
 ): string | undefined {
-  const model = descriptor.models?.find((candidate) => candidate.id === modelId);
-  if (!model) return requested;
+  const models = descriptor.models;
+  // No catalog at all: the request is the only signal there is.
+  if (!models || models.length === 0) return requested;
+  const model = models.find((candidate) => candidate.id === modelId);
+  if (!model) return undefined;
   const efforts = model.supportedReasoningEfforts;
   if (!efforts || efforts.length === 0) return undefined;
   if (requested && efforts.some((effort) => effort.id === requested)) return requested;

@@ -92,10 +92,8 @@ function harness(options: { readonly agents?: readonly ExternalAgentDescriptor[]
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     newSessionId: () => `session-${crypto.randomUUID()}`,
   });
-  const controller = createExternalTurnController({
-    sessions,
-    approvals: createExternalApprovalRegistry(),
-  });
+  const approvals = createExternalApprovalRegistry();
+  const controller = createExternalTurnController({ sessions, approvals });
   const resolveConfiguration = createExternalTurnConfigurationResolver({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     discovery: {
@@ -104,7 +102,7 @@ function harness(options: { readonly agents?: readonly ExternalAgentDescriptor[]
     },
   });
   const stream = createExternalTurnStream({ controller, resolveConfiguration });
-  return { runtime, controller, resolveConfiguration, stream };
+  return { runtime, controller, approvals, resolveConfiguration, stream };
 }
 
 /** Reads SSE frames off the response until the stream closes. */
@@ -262,7 +260,7 @@ describe('external turn stream', () => {
   });
 
   it('streams an approval request and its resolution', async () => {
-    const { runtime, controller, stream } = harness();
+    const { runtime, controller, approvals, stream } = harness();
     const result = await stream(
       {
         userId,
@@ -291,10 +289,11 @@ describe('external turn stream', () => {
         expiresAtMs: Date.now() + 60_000,
       },
     });
-    await waitFor(
-      () => controller !== undefined && runtime.calls.turn.length === 1,
-      'the approval to bind'
-    );
+    // The registry binds the approval when the envelope is applied, which the
+    // emit above only *schedules*. Waiting on the registry itself is what makes
+    // the rejection below a statement about the option id rather than a race
+    // with an approval that has not registered yet.
+    await waitFor(() => approvals.pendingCount(chatId) === 1, 'the approval to bind');
 
     const rejected = await controller.answerApproval({
       userId,
@@ -324,6 +323,60 @@ describe('external turn stream', () => {
         { id: 'deny', rawLabel: 'Deny', isDestructive: true },
       ],
     });
+  });
+
+  it('binds an answer to the live turn without the client naming it', async () => {
+    const { runtime, controller, approvals, stream } = harness();
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'delete the build folder',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    if (!result.ok) throw new Error('the send was refused');
+    const reading = readChunks(result.response);
+    await waitForTurnStart(runtime);
+    runtime.emit({
+      type: 'approval_requested',
+      request: {
+        requestId: 'req-1',
+        kind: 'command',
+        title: 'Run `rm -rf build`',
+        options: [{ id: 'approve', isDestructive: false }],
+        expiresAtMs: Date.now() + 60_000,
+      },
+    });
+    await waitFor(() => approvals.pendingCount(chatId) === 1, 'the approval to bind');
+
+    // The client sends only the request and option ids; the session and vendor
+    // turn ids are server-owned and never cross the wire. The controller has to
+    // supply them, or the registry's binding check is vacuous.
+    const accepted = await controller.answerApproval({
+      userId,
+      chatId,
+      requestId: 'req-1',
+      optionId: 'approve',
+    });
+    expect(accepted.status).toBe('accepted');
+    expect(runtime.calls.respond[0]).toMatchObject({ nativeTurnId: 'native-turn-1' });
+
+    runtime.emit({ type: 'completed' });
+    await reading;
+
+    // Once the turn is gone the same answer no longer binds to anything, so a
+    // card left over from it cannot reach a later turn.
+    const afterwards = await controller.answerApproval({
+      userId,
+      chatId,
+      requestId: 'req-1',
+      optionId: 'approve',
+    });
+    expect(afterwards.status).toBe('rejected');
   });
 
   it('preserves a vendor error structure on the wire', async () => {

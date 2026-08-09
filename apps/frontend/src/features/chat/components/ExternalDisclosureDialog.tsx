@@ -13,6 +13,7 @@
 
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, ExternalLink } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 
 export interface ExternalDisclosureDialogProps {
@@ -32,14 +33,17 @@ export function ExternalDisclosureDialog({
   const { t } = useI18n();
   const labels = t.externalAgents.disclosure;
   const vendor = t.externalAgents.target[descriptor.targetId];
+  const dialogRef = useFocusTrap(onCancel);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         aria-label={labels.title.replace('{vendor}', vendor)}
-        className="w-full max-w-lg space-y-4 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-5 text-sm text-on-surface shadow-2xl"
+        className="w-full max-w-lg space-y-4 rounded-2xl border border-outline-variant/15 bg-surface-container-low p-5 text-sm text-on-surface shadow-2xl outline-none"
       >
         <h2 className="text-base font-semibold">{labels.title.replace('{vendor}', vendor)}</h2>
 
@@ -81,4 +85,59 @@ export function ExternalDisclosureDialog({
       </div>
     </div>
   );
+}
+
+/**
+ * Keyboard behaviour `aria-modal` does not supply.
+ *
+ * The attribute tells a screen reader the rest of the page is inert; it does not
+ * move focus, keep Tab inside, or close on Escape. Without this a keyboard user
+ * lands on whatever was focused before, tabs straight past the dialog into the
+ * page behind it, and can reach the very selector this notice is gating. There
+ * is no shared modal primitive to reuse, so it lives here until there is.
+ */
+function useFocusTrap(onEscape: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    // Restored on close, so dismissing the dialog puts the user back where they
+    // were rather than at the top of the document.
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    dialog.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onEscape();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = [...dialog.querySelectorAll<HTMLElement>('button:not([disabled])')];
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || active === dialog)) {
+        event.preventDefault();
+        last.focus();
+        return;
+      }
+      if (!event.shiftKey && active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      previouslyFocused?.focus?.();
+    };
+  }, [onEscape]);
+
+  return ref;
 }

@@ -63,7 +63,8 @@ function approvalPart(overrides: Partial<ExternalApprovalPart> = {}): ExternalAp
       { id: 'approve', rawLabel: 'Approve for this session', isDestructive: false },
       { id: 'deny', rawLabel: 'Deny', isDestructive: true },
     ],
-    expiresAtMs: 1_800_000_000_000,
+    // Far enough out that the local expiry timer never fires mid-test.
+    expiresAtMs: Date.now() + 600_000,
     ...overrides,
   };
 }
@@ -137,6 +138,27 @@ describe('external approval card', () => {
     renderParts([turnPart(), approvalPart({ decisionSource: 'expired' })]);
     expect(screen.getByText(/Permission expired/i)).toBeInTheDocument();
     for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
+  });
+
+  it('stays answerable when the server rejects the decision', async () => {
+    answerExternalApproval.mockResolvedValue({ status: 'rejected', reason: 'expired' });
+    renderParts([turnPart({ status: 'active' }), approvalPart()]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Approve for this session' }));
+    await screen.findByText(/could not be sent/i);
+
+    // The vendor never received that authorization, so the card must not claim
+    // it did — and the user must be able to try the other option.
+    expect(screen.getByRole('button', { name: 'Deny' })).toBeEnabled();
+  });
+
+  it('goes inert once the approval outlives its own deadline', () => {
+    renderParts([
+      turnPart({ status: 'active' }),
+      approvalPart({ expiresAtMs: Date.now() - 1_000 }),
+    ]);
+    for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
+    expect(screen.getByText(/Permission expired/i)).toBeInTheDocument();
   });
 
   it('renders a reloaded pending approval inert when it is not the live chat', () => {
