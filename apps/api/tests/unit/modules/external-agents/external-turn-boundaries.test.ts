@@ -65,6 +65,17 @@ const EXTERNAL_AGENT_ENTRY_POINTS = [
   'src/modules/external-agents/application/external-turn-recovery.ts',
 ];
 
+/**
+ * Every relative specifier a module reaches, in all three forms.
+ *
+ * Not just `from './x'`: a side-effect import (`import './x'`) and a dynamic
+ * one (`import('./x')`) reach a module exactly as well, and a graph that
+ * followed only the first would let an external turn module pull in the tool
+ * executor while the boundary suite still passed. Over-matching is safe here —
+ * an extra edge can only make a "cannot reach" assertion stricter.
+ */
+const RELATIVE_IMPORT = /(?:\bfrom|\bimport)\s*\(?\s*['"](\.[^'"]+)['"]/g;
+
 /** Every module the entry points can reach, following relative imports. */
 function importClosure(entryPoints: readonly string[]): string[] {
   const seen = new Set<string>();
@@ -75,7 +86,7 @@ function importClosure(entryPoints: readonly string[]): string[] {
     if (!file || seen.has(file)) continue;
     seen.add(file);
     const source = readFileSync(file, 'utf8');
-    for (const match of source.matchAll(/from\s+['"](\.[^'"]+)['"]/g)) {
+    for (const match of source.matchAll(RELATIVE_IMPORT)) {
       const specifier = match[1];
       if (!specifier) continue;
       const base = resolve(dirname(file), specifier);
@@ -94,6 +105,11 @@ const CONFIGURATION: ExternalAgentConfiguration = {
   routing: 'user',
   workspaceRoots: ['/work/repo'],
 };
+
+/** The graph is only as strong as the edges it can see. */
+function relativeImportsIn(source: string): string[] {
+  return [...source.matchAll(RELATIVE_IMPORT)].flatMap((match) => match[1] ?? []);
+}
 
 let userId = '';
 
@@ -184,6 +200,26 @@ describe('external turn boundaries', () => {
       FORBIDDEN_MODULES.some((forbidden) => file.startsWith(forbidden))
     );
     expect(violations).toEqual([]);
+  });
+
+  it('rules 1-4: the graph counts side-effect and dynamic imports as edges', () => {
+    // A side-effect import reaches a module exactly as well as a named one, so
+    // a walker that followed only `from` would let an external turn module pull
+    // in `standard-tool-execution` while this suite still passed.
+    expect(
+      relativeImportsIn(
+        [
+          "import '../../generation/application/standard-tool-execution';",
+          "import { executeTool } from './tool-executor';",
+          "const late = await import('../../generation/application/turn-stages');",
+          "import type { Thing } from '@mangostudio/shared';",
+        ].join('\n')
+      )
+    ).toEqual([
+      '../../generation/application/standard-tool-execution',
+      './tool-executor',
+      '../../generation/application/turn-stages',
+    ]);
   });
 
   it('rule 2: nothing but the closed parameter schemas crosses to the vendor', async () => {
