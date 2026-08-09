@@ -113,6 +113,17 @@ export interface RuntimeConnectionManagerOptions {
   readonly publish?: (userId: string) => void;
 }
 
+/**
+ * Told when a peer that used to consent to external agents no longer does.
+ *
+ * The runtime closes its own sessions when its consent poll turns the capability
+ * off, but that close emits no event and does not drop the socket, so nothing
+ * else here would tell the hub that the vendor sessions it believes it owns are
+ * gone. Registered rather than imported: the session manager lives in a module
+ * that already depends on this file.
+ */
+export type ExternalAgentsRevokedObserver = (userId: string, environmentId: string) => void;
+
 interface RuntimeConnectionEntry {
   revision: number;
   status: EnvironmentConnectionStatus;
@@ -279,11 +290,17 @@ export class RuntimeConnectionManager {
   readonly #entries = new Map<string, RuntimeConnectionEntry>();
   readonly #publish: (userId: string) => void;
   readonly #resolveEnvironment: RuntimeEnvironmentResolver;
+  #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
 
   constructor(options: RuntimeConnectionManagerOptions) {
     this.#connectors = options.connectors;
     this.#publish = options.publish ?? (() => undefined);
     this.#resolveEnvironment = options.resolveEnvironment;
+  }
+
+  /** Replaces any previous observer; the hub registers one at startup. */
+  onExternalAgentsRevoked(observer: ExternalAgentsRevokedObserver | undefined): void {
+    this.#externalAgentsRevoked = observer;
   }
 
   getStatus(userId: string, environmentId: string): EnvironmentConnectionStatus {
@@ -722,12 +739,19 @@ export class RuntimeConnectionManager {
     const manifest = capabilityManifestFromHealth(health);
     client.replaceManifest(manifest);
     const changed = !Value.Equal(entry.status.manifest, manifest);
+    // A peer that withdrew this consent has already closed its vendor sessions,
+    // silently. Reported before the status is replaced, so the comparison is
+    // against what the hub last believed rather than what it is about to store.
+    const externalAgentsRevoked =
+      entry.status.manifest?.features.externalAgents === true &&
+      manifest.features.externalAgents !== true;
     entry.status = {
       ...entry.status,
       state: 'connected',
       manifest,
       ...peerRelease(client.runtimeVersion),
     };
+    if (externalAgentsRevoked) this.#externalAgentsRevoked?.(userId, environmentId);
     // Only a real change publishes. The environment read that triggers the
     // background refresh is itself woken by this invalidation, so publishing
     // an identical manifest would make the card refetch on every window.

@@ -17,6 +17,8 @@ import {
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
+import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
+import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { closeAllMcpClients } from '../services/mcp/connection-manager';
@@ -24,7 +26,10 @@ import {
   flushObservabilitySnapshot,
   loadObservabilitySnapshot,
 } from '../services/providers/core/provider-observability';
-import { closeAllRuntimeConnections } from '../services/runtime-client/runtime-connection-manager';
+import {
+  closeAllRuntimeConnections,
+  getRuntimeConnectionManager,
+} from '../services/runtime-client/runtime-connection-manager';
 import { EMBEDDED_FRONTEND_DIR, getEmbeddedFrontend } from './embedded-frontend';
 import { registerFrontend } from './frontend-static';
 import { runMigrations } from './migrations';
@@ -58,8 +63,20 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   const { port, host } = cfg.server;
 
   await runMigrations();
+  // External turns first: they carry their own terminal vocabulary, and the
+  // generic sweep below would clear the same rows without recording why.
+  await reconcileExternalTurns({ reason: 'hub-restarted' }, getDb());
   await reconcileStaleTurns({ reasonCode: 'server_restart' }, getDb());
   await loadObservabilitySnapshot();
+  // A peer that withdraws external-agent consent closes its vendor sessions
+  // without saying so on the wire, so the hub learns it from the next manifest
+  // refresh. Without this the chats it was running would keep a session the
+  // runtime no longer has, and their turns would wait on events that stopped.
+  getRuntimeConnectionManager().onExternalAgentsRevoked((userId, environmentId) => {
+    void externalSessionManager
+      .reapScope({ userId, environmentId }, 'consent-revoked')
+      .catch(() => undefined);
+  });
   const frontendDir = getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getDefaultFrontendDir();
   registerFrontend(app, frontendDir);
 
@@ -129,6 +146,9 @@ function logRunning(host: string, port: number): void {
 async function gracefulStop(): Promise<void> {
   await staleTurnReconcileSweep?.stop();
   staleTurnReconcileSweep = null;
+  // Before the runtime connections close, so each session gets a real close
+  // rather than a dropped socket, and no vendor process outlives the hub.
+  await externalSessionManager.reapAll('hub-restarted');
   await flushObservabilitySnapshot();
   await closeAllMcpClients();
   await closeAllRuntimeConnections();

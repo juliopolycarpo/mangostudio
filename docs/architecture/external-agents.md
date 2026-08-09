@@ -200,6 +200,13 @@ never markdown or HTML**. Before an event is persisted or rendered, at the runti
 
 The limits live in `apps/shared/src/external-agents/vendor-text.ts`.
 
+The transcript keeps vendor prose in ordinary `text` and `thinking` parts, so a partial turn is
+still readable everywhere a message is. What marks it as vendor-authored is the message itself:
+an assistant message whose parts contain an `external_turn` record was produced by a vendor and
+by nothing else, and **that record is the discriminator a renderer keys off** to hold the
+plain-text rule above. There is no mixed message to disambiguate — a chat runs one kind of turn,
+and a MangoStudio turn never writes an `external_turn` part.
+
 ## Credentials
 
 MangoStudio never reads, stores, logs or transmits a credential value.

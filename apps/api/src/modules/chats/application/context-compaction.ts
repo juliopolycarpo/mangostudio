@@ -34,6 +34,23 @@ export class EmptyChatCompactionError extends Error {
   }
 }
 
+/**
+ * Compaction rewrites a conversation MangoStudio owns. An external agent owns
+ * its own: the vendor holds the context, decides what to keep and never hears
+ * about a summary written here, so compacting would be meaningless to the
+ * vendor and destructive to the transcript the user is reading.
+ */
+export class ExternalChatCompactionUnsupportedError extends Error {
+  constructor(chatId: string) {
+    super(`Chat "${chatId}" is run by an external agent, which owns its own context.`);
+    this.name = 'ExternalChatCompactionUnsupportedError';
+  }
+}
+
+function assertCompactable(chat: OwnedChat): void {
+  if (chat.runner.kind === 'external') throw new ExternalChatCompactionUnsupportedError(chat.id);
+}
+
 export interface CompactChatInput {
   chatId: string;
   userId: string;
@@ -181,6 +198,7 @@ export async function compactChatUseCase(
   db: Kysely<Database>
 ): Promise<ContextCompactionResponse> {
   const chat = await loadOwnedChat(input.chatId, input.userId, db);
+  assertCompactable(chat);
   const resolvedModel = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,
@@ -210,6 +228,7 @@ export async function summarizeToNewChatUseCase(
   db: Kysely<Database>
 ): Promise<ContextCompactionResponse> {
   const sourceChat = await loadOwnedChat(input.chatId, input.userId, db);
+  assertCompactable(sourceChat);
   const resolvedModel = await resolveModel({
     requestedModel: input.model,
     userId: input.userId,

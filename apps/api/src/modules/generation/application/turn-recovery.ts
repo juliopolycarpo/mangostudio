@@ -228,16 +228,43 @@ export async function dismissInterruptedTurn(
   if (result.numUpdatedRows === 0n) throw new TurnRecoveryConflictError();
 }
 
-export async function assertCheckpointedTurnCanCancel(
+/**
+ * Whether the stop button may act on this turn, whoever runs it.
+ *
+ * A MangoStudio turn proves it is live with its checkpoint. An external turn has
+ * no checkpoint — it carries an `external_turn` record instead, for the reasons
+ * that part's own documentation gives — so requiring one here would 404 every
+ * stop request against a vendor turn and leave the abort callback the registry
+ * holds for it unreachable.
+ */
+export async function assertTurnCanCancel(
   input: { readonly chatId: string; readonly messageId: string; readonly userId: string },
   db: Kysely<Database>
-): Promise<void> {
+): Promise<{ readonly kind: 'checkpointed' | 'external' }> {
   const message = await getOwnedRecoveryMessage(input.chatId, input.messageId, input.userId, db);
   if (!message) throw new TurnRecoveryNotFoundError();
-  const { checkpoint } = readRecoveryMessage(message);
+  const parts = parseMessageParts(message.parts);
+
+  const externalTurn = parts.find(isExternalTurnPart);
+  if (externalTurn) {
+    if (message.isGenerating !== 1 || externalTurn.status !== 'active') {
+      throw new TurnRecoveryConflictError('This turn is no longer running.');
+    }
+    return { kind: 'external' };
+  }
+
+  const checkpoint = parts.find(isTurnCheckpointPart);
+  if (!checkpoint) throw new TurnRecoveryNotFoundError();
   if (message.isGenerating !== 1 || checkpoint.status !== 'active') {
     throw new TurnRecoveryConflictError('This turn is no longer running.');
   }
+  return { kind: 'checkpointed' };
+}
+
+function isExternalTurnPart(
+  part: MessagePart
+): part is Extract<MessagePart, { type: 'external_turn' }> {
+  return part.type === 'external_turn';
 }
 
 export async function interruptCheckpointedMessage(
