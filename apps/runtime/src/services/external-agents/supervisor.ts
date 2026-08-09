@@ -607,21 +607,38 @@ export class ExternalAgentSessionSupervisor {
   ): Promise<void> {
     const iterator = events[Symbol.asyncIterator]();
     const hardDeadline = this.#now() + this.#hardTurnTimeoutMs;
+    // Approvals awaiting a human, by request id, each with the moment the
+    // adapter said it stops being answerable.
+    const awaitingApproval = new Map<string, number>();
     try {
       while (!turn.controller.signal.aborted) {
         const hardRemaining = hardDeadline - this.#now();
         if (hardRemaining <= 0) throw new Error('External-agent turn exceeded its hard timeout.');
-        const hardDeadlineWins = hardRemaining <= this.#idleTimeoutMs;
+        // A turn blocked on an approval is not a stalled turn — it is a turn
+        // waiting on a person, and the idle timeout would otherwise kill it
+        // while they read the diff. The approval's own `expiresAtMs` bounds the
+        // wait, so nothing here can wait forever, and the hard timeout still
+        // caps the whole turn.
+        const approvalBudget = maxApprovalWait(awaitingApproval, this.#now());
+        const idleBudget = Math.max(this.#idleTimeoutMs, approvalBudget);
+        const hardDeadlineWins = hardRemaining <= idleBudget;
         const next = await raceTimeout(
           iterator.next(),
-          Math.min(this.#idleTimeoutMs, hardRemaining),
+          Math.min(idleBudget, hardRemaining),
           hardDeadlineWins
             ? 'External-agent turn exceeded its hard timeout.'
-            : 'External-agent turn exceeded its idle timeout.'
+            : approvalBudget > 0
+              ? 'External-agent turn expired waiting for an approval.'
+              : 'External-agent turn exceeded its idle timeout.'
         );
         if (turn.controller.signal.aborted) break;
         if (next.done) break;
         const event = normalizeExternalAgentEvent(next.value);
+        if (event.type === 'approval_requested') {
+          awaitingApproval.set(event.request.requestId, event.request.expiresAtMs);
+        } else if (event.type === 'approval_resolved') {
+          awaitingApproval.delete(event.requestId);
+        }
         if (!Value.Check(ExternalAgentEventSchema, event)) {
           throw new Error('External-agent adapter emitted an invalid or unbounded event.');
         }
@@ -1020,6 +1037,19 @@ export class ExternalAgentSessionSupervisor {
       this.#stopConsentWatcherWhenIdle();
     }
   }
+}
+
+/**
+ * How much longer the latest outstanding approval may be answered, or zero when
+ * none is. Expired entries contribute nothing, so an approval nobody answered
+ * falls back to the ordinary idle timeout instead of extending it forever.
+ */
+function maxApprovalWait(awaiting: ReadonlyMap<string, number>, nowMs: number): number {
+  let longest = 0;
+  for (const expiresAtMs of awaiting.values()) {
+    longest = Math.max(longest, expiresAtMs - nowMs);
+  }
+  return longest;
 }
 
 function throwCleanupFailures(failures: readonly unknown[], message: string): void {
