@@ -15,6 +15,7 @@ import {
   ExternalTurnRunnerMismatchError,
   ExternalTurnWorkspaceMissingError,
 } from '../../../../src/modules/external-agents/application/external-turn-controller';
+import { readContinuation } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
 import { cancelActiveTurn } from '../../../../src/modules/generation/application/active-turn-registry';
 import {
   createFakeExternalRuntime,
@@ -392,6 +393,105 @@ describe('external turn controller', () => {
     const result = await startTurn(controller);
     expect(result.reason).toBe('session-lost');
     expect((await readAssistantRow()).generating).toBe(false);
+  });
+
+  it('cancels the vendor when the hub itself ends the turn', async () => {
+    const { runtime, controller } = harness();
+    const running = startTurn(controller);
+    await waitForTurnStart(runtime);
+
+    // A gap is the hub's own verdict: the vendor was never told to stop, and it
+    // is still holding the session's active turn. `limit-exceeded` reaches the
+    // same cancel through the same helper.
+    runtime.emitEnvelope({
+      sessionId: runtime.sessionId(),
+      nativeTurnId: 'native-turn-1',
+      sequence: runtime.nextSequence() + 5,
+      emittedAtMs: 99,
+      event: { type: 'text_delta', text: 'lost' },
+    });
+
+    expect((await running).reason).toBe('sequence-gap');
+    await waitFor(() => runtime.calls.cancel.length === 1, 'the vendor to be cancelled');
+    expect(runtime.calls.cancel).toEqual([
+      { sessionId: 'session-1', nativeTurnId: 'native-turn-1' },
+    ]);
+  });
+
+  it('evicts the session the runtime says it lost', async () => {
+    const { runtime, controller, sessions } = harness({
+      turnFailure: () => Object.assign(new Error('session gone'), { name: 'ToolArgumentError' }),
+    });
+
+    await startTurn(controller);
+
+    // Left cached, the next send would be handed the same dead handle and fail
+    // the same way instead of opening a session it can use.
+    await waitFor(() => runtime.calls.close.length === 1, 'the dead session to be closed');
+    expect(sessions.liveSessionCount()).toBe(0);
+    await expect(readContinuation(chatId, getDb())).resolves.toBeUndefined();
+  });
+
+  it('records an accepted approval without waiting for the vendor to echo it', async () => {
+    const { runtime, controller, approvals } = harness();
+    const running = startTurn(controller);
+    await waitForTurnStart(runtime);
+
+    runtime.emit({
+      type: 'approval_requested',
+      request: {
+        requestId: 'req-1',
+        kind: 'command',
+        title: 'Run the migration',
+        options: [{ id: 'approve', isDestructive: false }],
+        expiresAtMs: Date.now() + 60_000,
+      },
+    });
+    await waitFor(() => approvals.pendingCount(chatId) === 1, 'the approval to reach the registry');
+    await controller.answerApproval({ userId, chatId, requestId: 'req-1', optionId: 'approve' });
+
+    // No `approval_resolved`: the echo is optional, and a transcript that
+    // recorded this card as expired would contradict the authorization the
+    // vendor was actually sent.
+    runtime.emit({ type: 'completed' });
+    await running;
+
+    const approval = (await readAssistantRow()).parts.find(
+      (part): part is ExternalApprovalPart => part.type === 'external_approval'
+    );
+    expect(approval).toMatchObject({ decision: 'approve', decisionSource: 'user' });
+  });
+
+  it('keeps the vendor session handle out of the observer feed', async () => {
+    const { runtime, controller } = harness();
+    const events: string[] = [];
+    const sessionIds: string[] = [];
+    const running = controller.start(
+      {
+        userId,
+        chatId,
+        prompt: 'refactor the parser',
+        configuration: CONFIGURATION,
+        canonicalWorkspacePath: '/work/repo',
+        vendorAccountFingerprint: 'account-a',
+        observer: {
+          onSession: (session) => void sessionIds.push(session.sessionId),
+          onEvent: (event) => void events.push(event.type),
+        },
+      },
+      getDb()
+    );
+    await waitForTurnStart(runtime);
+
+    runtime.emit({ type: 'session_started', sessionId: 'native-session-1', resumed: false });
+    runtime.emit({ type: 'text_delta', text: 'hello' });
+    runtime.emit({ type: 'completed' });
+    await running;
+
+    // The hub-minted id, and only that: `session_started` carries the vendor's
+    // resumable handle, which no client may address.
+    expect(sessionIds).toEqual(['session-1']);
+    expect(events).toEqual(['text_delta', 'completed']);
   });
 });
 

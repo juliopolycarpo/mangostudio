@@ -270,12 +270,20 @@ export interface ExternalTurnController {
    * Answers a pending approval. Delegates the whole decision to the registry —
    * a caller cannot reach the vendor without passing its five-way binding,
    * option, expiry and idempotency checks.
+   *
+   * `sessionId` and `nativeTurnId` are server-owned and optional for the reason
+   * the registry states: a caller that knows them (a live stream does, and so
+   * does anything reading the persisted `external_turn` record) gets them
+   * checked, which is what stops a delayed answer from a previous card matching
+   * a later turn that reused its request id.
    */
   answerApproval(input: {
     readonly userId: string;
     readonly chatId: string;
     readonly requestId: string;
     readonly optionId: string;
+    readonly sessionId?: string;
+    readonly nativeTurnId?: string;
   }): Promise<AnswerExternalApprovalResult>;
 }
 
@@ -286,6 +294,15 @@ export function createExternalTurnController(
   const approvals = dependencies.approvals ?? externalApprovalRegistry;
   const now = dependencies.now ?? Date.now;
   const newId = dependencies.newId ?? generateId;
+  /**
+   * The transcript of each chat's live turn, so an answered approval reaches the
+   * durable record without waiting for the vendor to echo it back. One entry per
+   * chat, because a chat holds one turn at a time.
+   */
+  const liveTurns = new Map<
+    string,
+    { readonly transcript: ExternalTurnTranscript; readonly writer: ExternalTranscriptWriter }
+  >();
 
   async function start(
     input: StartExternalTurnInput,
@@ -346,6 +363,7 @@ export function createExternalTurnController(
       startedAt,
     });
     const writer = new ExternalTranscriptWriter(db, assistantMessageId, transcript, now);
+    liveTurns.set(input.chatId, { transcript, writer });
 
     const settled = Promise.withResolvers<ExternalTurnTerminalReason>();
     let terminalReason: ExternalTurnTerminalReason | undefined;
@@ -361,6 +379,22 @@ export function createExternalTurnController(
       terminalReason = reason;
       transcript.finalize(reason, now());
       settled.resolve(reason);
+    }
+
+    /**
+     * Terminal states the hub declared while the vendor was still talking.
+     *
+     * Every other terminal reason either came from the vendor saying it was done
+     * or arrived with the session already closed. These two are the hub's own
+     * verdict on a turn nobody told the vendor to stop, so without this the
+     * vendor keeps acting after the transcript says it ended, and the runtime
+     * refuses the next send because the session still has an active turn.
+     */
+    function cancelVendorAfter(reason: ExternalTurnTerminalReason): void {
+      if (reason !== 'limit-exceeded' && reason !== 'sequence-gap') return;
+      void handle.cancel(external.nativeTurnId).catch((error: unknown) => {
+        logger.warn('cancel_failed', { sessionId: handle.sessionId, error: String(error) });
+      });
     }
 
     /**
@@ -408,6 +442,7 @@ export function createExternalTurnController(
               received: verdict.received,
             });
             terminate('sequence-gap');
+            cancelVendorAfter('sequence-gap');
             return;
           case 'after-terminal':
             logger.warn('event_after_terminal', {
@@ -429,12 +464,19 @@ export function createExternalTurnController(
           sequence: envelope.sequence,
           at: now(),
         });
-        input.observer?.onEvent?.(envelope.event);
+        // `session_started` carries the vendor's own resumable session handle,
+        // which is server-owned for the same reason the transcript omits it: a
+        // client rendering the turn must see the hub-minted id `onSession`
+        // reports and nothing that could address the vendor directly.
+        if (envelope.event.type !== 'session_started') input.observer?.onEvent?.(envelope.event);
 
         if (application.approvalRequested) bindApproval(application.approvalRequested);
 
         void writer.write({ force: application.durable });
-        if (application.terminal) terminate(application.terminal);
+        if (application.terminal) {
+          terminate(application.terminal);
+          cancelVendorAfter(application.terminal);
+        }
       },
 
       onTeardown(reason) {
@@ -492,7 +534,21 @@ export function createExternalTurnController(
         for (const request of deferredApprovals.splice(0)) bindApproval(request);
       } catch (error) {
         transcript.recordError(vendorErrorFrom(error, 'turn-start'));
-        terminate(terminalReasonForCallFailure(error));
+        const reason = terminalReasonForCallFailure(error);
+        terminate(reason);
+        // The runtime no longer has this session, but the manager still caches
+        // its handle and its continuation row. Left there, every later send is
+        // handed the same dead session instead of opening a usable one. The
+        // reap is not awaited — it drops the record synchronously, and only the
+        // vendor's close call is slow.
+        if (reason === 'session-lost') {
+          void sessions.reapChat(input.chatId, reason).catch((reapError: unknown) => {
+            logger.warn('reap_failed', {
+              sessionId: handle.sessionId,
+              error: String(reapError),
+            });
+          });
+        }
       }
 
       const reason = await settled.promise;
@@ -511,6 +567,7 @@ export function createExternalTurnController(
     } finally {
       unsubscribe();
       unregisterActiveTurn(assistantMessageId);
+      if (liveTurns.get(input.chatId)?.transcript === transcript) liveTurns.delete(input.chatId);
     }
   }
 
@@ -579,8 +636,23 @@ export function createExternalTurnController(
 
   return {
     start,
-    answerApproval(input) {
-      return approvals.answer(input);
+    async answerApproval(input) {
+      const result = await approvals.answer(input);
+      if (result.status !== 'accepted') return result;
+      // The vendor's `approval_resolved` echo is optional, and a turn that ends
+      // without one would leave the card pending for `finish` to seal as
+      // expired — a durable record contradicting the authorization that was
+      // actually sent. Applying it here is idempotent: a later echo for the
+      // same request finds the decision already recorded and changes nothing.
+      const live = liveTurns.get(input.chatId);
+      if (!live) return result;
+      live.transcript.resolveApproval(input.requestId, {
+        optionId: result.optionId,
+        source: 'user',
+        at: now(),
+      });
+      void live.writer.write({ force: true });
+      return result;
     },
   };
 }

@@ -437,22 +437,37 @@ export function createExternalSessionManager(
     },
 
     async reapScope(scope, reason, reapOptions) {
-      const matches = [...sessions.entries()].filter(
-        ([, record]) =>
-          (!scope.userId || record.binding.userId === scope.userId) &&
-          (!scope.environmentId || record.binding.environmentId === scope.environmentId)
-      );
-      for (const [chatId] of matches) {
-        await reap(chatId, reason, reapOptions?.keepContinuation === true);
+      const inScope = (binding: ExternalSessionBinding): boolean =>
+        (!scope.userId || binding.userId === scope.userId) &&
+        (!scope.environmentId || binding.environmentId === scope.environmentId);
+
+      const chatIds = new Set<string>();
+      for (const [chatId, record] of sessions) {
+        if (inScope(record.binding)) chatIds.add(chatId);
       }
+      // A session still opening is not in `sessions` yet, and skipping it would
+      // let the open register a vendor process for a consent, environment or
+      // user that has already been revoked. Reaping by chat id bumps the
+      // generation the open re-reads after its last await, so it closes what it
+      // started instead.
+      for (const [chatId, inflight] of opening) {
+        if (inScope(inflight.binding)) chatIds.add(chatId);
+      }
+
+      await Promise.all(
+        [...chatIds].map((chatId) => reap(chatId, reason, reapOptions?.keepContinuation === true))
+      );
     },
 
     async reapAll(reason) {
-      for (const chatId of [...sessions.keys()]) {
+      // Concurrently: each close can spend the full call timeout on a runtime
+      // that stopped answering, and serializing them would add that to shutdown
+      // once per chat while later vendor processes have not been asked to stop.
+      await Promise.all(
         // Shutdown keeps continuation: the vendor conversation is still the one
         // this chat resumes when the hub comes back.
-        await reap(chatId, reason, true);
-      }
+        [...sessions.keys()].map((chatId) => reap(chatId, reason, true))
+      );
     },
 
     liveSessionCount() {

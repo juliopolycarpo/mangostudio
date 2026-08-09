@@ -239,6 +239,24 @@ describe('external session manager', () => {
     expect(manager.liveSessionCount()).toBe(0);
   });
 
+  it('closes a session still opening when its scope is revoked', async () => {
+    let manager: ReturnType<typeof managerFor> | undefined;
+    const runtime = createFakeExternalRuntime({
+      // A scoped revocation only sees established sessions; this chat exists
+      // only in the single-flight until its slow open returns, and skipping it
+      // would register a vendor process the owner has already refused.
+      onOpen: () => void manager?.reapScope({ userId }, 'consent-revoked'),
+    });
+    manager = managerFor(runtime, ['session-a']);
+
+    await expect(manager.ensureSession(baseInput())).rejects.toBeInstanceOf(
+      ExternalSessionReapedError
+    );
+    expect(runtime.calls.close).toEqual([{ sessionId: 'session-a' }]);
+    expect(manager.liveSessionCount()).toBe(0);
+    await expect(readContinuation(chatId, getDb())).resolves.toBeUndefined();
+  });
+
   it('never sends a MangoStudio tool definition or environment to the vendor', async () => {
     const runtime = createFakeExternalRuntime();
     const manager = managerFor(runtime);
