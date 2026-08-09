@@ -1,5 +1,5 @@
 import type { Environment } from '@mangostudio/shared/environments';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { InputBar } from '../../../src/features/chat/components/InputBar';
@@ -93,7 +93,15 @@ describe('InputBar — chat-only composer', () => {
         name: 'Select execution environment',
       });
       expect(selector).toHaveValue('local');
-      expect(screen.getByTestId('environment-selector')).toHaveAttribute('data-state', 'connected');
+      // The pill renders before the listing lands, wearing the `disconnected`
+      // fallback and an option built from the id alone, so the connected state
+      // is only meaningful once the fetched environment backs it.
+      await waitFor(() =>
+        expect(screen.getByTestId('environment-selector')).toHaveAttribute(
+          'data-state',
+          'connected'
+        )
+      );
       await user.selectOptions(selector, 'remote-dev');
 
       expect(onEnvironmentChange).toHaveBeenCalledWith('remote-dev');
