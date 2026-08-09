@@ -328,6 +328,14 @@ export const RuntimeServiceStatusSchema = Type.Object({
 });
 export type RuntimeServiceStatus = Static<typeof RuntimeServiceStatusSchema>;
 
+/**
+ * How many live sessions health enumerates. A session cap above this is legal —
+ * it is the operator's number — so the reporter truncates the list and keeps
+ * `liveSessionCount` at the true total rather than emitting a payload that
+ * fails its own schema and takes `runtime.health` down with it.
+ */
+export const RUNTIME_HEALTH_LIVE_SESSION_LIMIT = 128;
+
 export const RuntimeExternalAgentHealthSchema = Type.Object(
   {
     targets: ReadonlyArraySchema(ExternalAgentTargetIdSchema, {
@@ -346,7 +354,7 @@ export const RuntimeExternalAgentHealthSchema = Type.Object(
         },
         { additionalProperties: false }
       ),
-      { maxItems: 128 }
+      { maxItems: RUNTIME_HEALTH_LIVE_SESSION_LIMIT }
     ),
   },
   { additionalProperties: false }

@@ -59,10 +59,20 @@ export const RUNTIME_CONSENT_PRESETS: Readonly<
   none: allowWith({ externalAgents: false }, false),
 };
 
-/** Names the stored set, or `custom` when it matches no preset. */
+/**
+ * Names the stored set, or `custom` when it matches no preset.
+ *
+ * An omitted `externalAgents` is read as `false` for the same reason
+ * {@link resolveRuntimeSlotConfig} resolves it that way: absence is a denial,
+ * not an unknown. Without it a `readonly` or `none` set written before the
+ * capability existed would be labelled `custom`, which is a profile nobody
+ * chose. Every other missing key really is unresolved, so it still falls
+ * through to `custom`.
+ */
 export function profileForAllow(allow: RuntimeCapabilityAllow): RuntimeConsentProfile {
+  const resolved = { ...allow, externalAgents: allow.externalAgents ?? false };
   for (const [name, preset] of Object.entries(RUNTIME_CONSENT_PRESETS)) {
-    if (RUNTIME_CAPABILITY_KEYS.every((key) => preset[key] === allow[key])) {
+    if (RUNTIME_CAPABILITY_KEYS.every((key) => preset[key] === resolved[key])) {
       return name as RuntimeConsentProfile;
     }
   }
@@ -103,6 +113,15 @@ export function defaultAuditEnabledForSlot(slot: RuntimeSlot): boolean {
  * newer one that dropped a capability — takes the *slot default* for those
  * keys, not `true`. `externalAgents` is the deliberate exception: an old file
  * never consented to launching vendor processes, so its absence resolves false.
+ *
+ * No file at all is a different question and keeps the slot default, which
+ * grants `externalAgents` on `host` and `wsl`. That asymmetry is intended: an
+ * old file is an answer that predates the capability, while no file means
+ * nobody has been asked, and the same default already grants `shell` — strictly
+ * more power than launching a vendor CLI. Denying only this one capability
+ * there would buy nothing and would take the Docker image, which answers
+ * nothing and is meant to serve, down with it. The privilege gate that matters
+ * for external agents is identity attestation, which is enforced separately.
  */
 export function resolveRuntimeSlotConfig(
   slot: RuntimeSlot,

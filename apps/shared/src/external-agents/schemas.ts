@@ -575,10 +575,16 @@ export const ExternalAgentDescriptorSchema = Type.Object(
     targetId: ExternalAgentTargetIdSchema,
     environmentId: Type.String({ minLength: 1 }),
     installed: Type.Boolean(),
-    version: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    /**
+     * Vendor-supplied, so bounded on `VendorText` terms: the runtime cuts both
+     * fields to `accountLabel`'s 128 **code points**, and a plain
+     * `maxLength: 128` counts UTF-16 units, which would reject a correctly
+     * bounded string that happens to carry an astral character.
+     */
+    version: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
     authState: ExternalAgentAuthStateSchema,
     /** The literal command that signs the user in, e.g. `codex login`. Shown with a copy button. */
-    loginCommand: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    loginCommand: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
     capabilities: ExternalAgentCapabilitiesSchema,
     supportedConfigurations: ExternalSupportedConfigurationListSchema,
     /** Rich model catalog when the adapter can enumerate one; absent on older discovery paths. */

@@ -103,6 +103,16 @@ describe('consent presets', () => {
     expect(profileForAllow({ ...RUNTIME_CONSENT_PRESETS.readonly, shell: true })).toBe('custom');
   });
 
+  it('reads an omitted externalAgents as denied rather than as a custom set', () => {
+    for (const name of ['readonly', 'none'] as const) {
+      const { externalAgents: _omitted, ...withoutExternalAgents } = RUNTIME_CONSENT_PRESETS[name];
+      expect(profileForAllow(withoutExternalAgents)).toBe(name);
+    }
+    // `full` grants it, so its absence really is a different set.
+    const { externalAgents: _granted, ...fullWithout } = RUNTIME_CONSENT_PRESETS.full;
+    expect(profileForAllow(fullWithout)).toBe('custom');
+  });
+
   it('grants nothing beyond reading in readonly', () => {
     const readonly = RUNTIME_CONSENT_PRESETS.readonly;
     expect(readonly.fsRead).toBe(true);
