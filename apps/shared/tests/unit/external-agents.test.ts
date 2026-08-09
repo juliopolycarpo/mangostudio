@@ -59,7 +59,7 @@ const DESCRIPTOR: ExternalAgentDescriptor = {
       defaultReasoningEffort: 'low',
     },
   ],
-  unavailableReason: 'not-yet-available',
+  unavailableReason: 'signed-out',
 };
 
 describe('external agent target identity', () => {
@@ -108,7 +108,6 @@ describe('external agent descriptor', () => {
       'runtime-denied',
       'environment-unreachable',
       'isolation-unproven',
-      'not-yet-available',
     ]);
   });
 

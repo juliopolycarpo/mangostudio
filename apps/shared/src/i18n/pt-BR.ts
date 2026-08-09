@@ -2736,7 +2736,6 @@ export const messages = {
       'runtime-denied': 'O dono desta máquina não liberou agentes externos',
       'environment-unreachable': 'Não foi possível alcançar esta máquina',
       'isolation-unproven': 'Esta máquina não provou que mantém as credenciais separadas',
-      'not-yet-available': 'Ainda não disponível',
     },
     permission: {
       label: 'Permissões',

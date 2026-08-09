@@ -637,7 +637,7 @@ export function normalizeExternalApiSettings(value: unknown): ExternalApiSetting
  * prefer is showing the disclosure once more, not running a third-party agent on
  * the strength of a record nothing can parse.
  */
-export function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
+function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
   if (!isRecord(value) || !isRecord(value.disclosures)) return DEFAULT_EXTERNAL_AGENT_SETTINGS;
 
   const disclosures: Record<string, ExternalAgentDisclosure> = {};

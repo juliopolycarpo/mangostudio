@@ -38,7 +38,6 @@ function descriptorFor(environmentId: string): ExternalAgentDescriptor {
     authState: 'signed-in',
     capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
     supportedConfigurations: [],
-    unavailableReason: 'not-yet-available',
   };
 }
 

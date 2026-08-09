@@ -21,6 +21,7 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { Bot, Check, ChevronDown, Copy, CornerUpRight, Cpu } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -233,7 +234,7 @@ function ExternalRow({
   const reason = descriptor.unavailableReason;
   const signedOut = descriptor.installed && descriptor.authState === 'signed-out';
   const notInstalled = !descriptor.installed && !reason;
-  const selectable = !reason && descriptor.installed && !signedOut;
+  const selectable = externalAgentSelectable(descriptor);
 
   const explanation = reason
     ? reason === 'not-installed'

@@ -2723,7 +2723,6 @@ export const messages: Messages = {
       'runtime-denied': "This machine's owner has not allowed external agents",
       'environment-unreachable': 'Could not reach this machine',
       'isolation-unproven': 'This machine has not proven it keeps credentials separate',
-      'not-yet-available': 'Not available yet',
     },
     permission: {
       label: 'Permissions',
