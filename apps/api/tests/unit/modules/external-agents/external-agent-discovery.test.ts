@@ -141,6 +141,25 @@ describe('external agent discovery — the cheap pass', () => {
     expect(descriptor?.authState).toBe('unknown');
   });
 
+  it('keeps Claude unknown even when its config home is gone, since the keychain outlives it', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: fakeProbing([
+        agentStatus({
+          targetId: 'claude',
+          ...installed('claude'),
+          configHomeExists: false,
+          authenticated: false,
+          authSignal: 'unknown',
+          findings: [{ code: 'config-home-missing', params: { configHome: '/home/ada/.claude' } }],
+        }),
+      ]),
+    });
+
+    const [descriptor] = await service.listExternalAgents(SCOPE);
+
+    expect(descriptor?.authState).toBe('unknown');
+  });
+
   it('reads a missing config home as a machine nobody has signed in on', async () => {
     const service = createExternalAgentDiscoveryService({
       probingService: fakeProbing([

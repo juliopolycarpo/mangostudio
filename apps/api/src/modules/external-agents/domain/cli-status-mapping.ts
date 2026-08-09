@@ -13,7 +13,27 @@
  */
 
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
+// Detection is a separate entrypoint from the `environments` barrel on purpose
+// (it reaches for `node:path`); this module is hub-side, so it may import it.
+import { AGENT_CLI_DEFINITIONS } from '@mangostudio/shared/environments/detection';
 import type { ExternalAgentAuthState } from '@mangostudio/shared/external-agents';
+
+/**
+ * Targets whose credentials can live outside the config home.
+ *
+ * Read off the CLI definitions rather than listed here, so a target that gains
+ * or loses a keychain store changes this in one place. `unknownWhenMissing` is
+ * exactly the definition's way of saying "an absent credential file proves
+ * nothing about this target".
+ */
+const KEYCHAIN_BACKED_TARGET_IDS: ReadonlySet<string> = new Set(
+  AGENT_CLI_DEFINITIONS.filter(
+    (definition) =>
+      definition.kind === 'cli' &&
+      definition.auth.kind === 'file' &&
+      definition.auth.unknownWhenMissing
+  ).map((definition) => definition.targetId)
+);
 
 /** A CLI the scanner could not find is not installed, whatever else it saw. */
 export function isInstalled(status: AgentCliStatus): boolean {
@@ -44,7 +64,14 @@ export function authStateFrom(status: AgentCliStatus): ExternalAgentAuthState {
   }
 
   // A config home that is not there means nothing has been written yet, which
-  // is a signed-out machine rather than an unknowable one.
+  // is a signed-out machine rather than an unknowable one — but only where the
+  // config home is where the credential would be. For a keychain-backed target
+  // the credential outlives the directory, so the absent config home says
+  // nothing the absent credential file did not already say, and `unknown` from
+  // the scan stays `unknown` rather than becoming a login prompt for someone
+  // who is already signed in.
+  if (KEYCHAIN_BACKED_TARGET_IDS.has(status.targetId)) return 'unknown';
+
   return status.findings.some((finding) => finding.code === 'config-home-missing')
     ? 'signed-out'
     : 'unknown';
