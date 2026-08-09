@@ -1,5 +1,6 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { AgentIdSchema } from '../agents/schemas';
+import { ExternalAgentTargetIdSchema } from '../external-agents/schemas';
 
 const InteractionModeSchema = Type.Union([
   Type.Literal('chat'),
@@ -8,17 +9,14 @@ const InteractionModeSchema = Type.Union([
 ]);
 
 /**
- * `Exclude<LibraryTargetId, 'mangostudio'>`, restated here rather than
- * imported so the chat contract does not pull in `library`. Plan for
- * external agents moves this into `external-agents` and re-exports it here.
+ * Re-exported from its own bounded context so the runner union keeps reading in
+ * one place. `external-agents` owns the definition; nothing about *which*
+ * external agents exist belongs to the chat contract.
  */
-export const ExternalAgentTargetIdSchema = Type.Union([
-  Type.Literal('codex'),
-  Type.Literal('cursor'),
-  Type.Literal('claude'),
-]);
-
-export type ExternalAgentTargetId = Static<typeof ExternalAgentTargetIdSchema>;
+export {
+  type ExternalAgentTargetId,
+  ExternalAgentTargetIdSchema,
+} from '../external-agents/schemas';
 
 /**
  * Who runs a chat's turns. Deliberately excludes anything the server owns —
