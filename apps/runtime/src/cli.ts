@@ -634,7 +634,16 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
       log,
       signal: controller.signal,
     });
-    await handle.stopped;
+    // A teardown that rejects — a vendor process tree that would not reap — is
+    // reported, not propagated: the audit sink still has to drain, and a
+    // supervised update restart still has to reach its exit code.
+    try {
+      await handle.stopped;
+    } catch (error) {
+      process.stderr.write(
+        `mangostudio-runtime: runtime host cleanup failed: ${error instanceof Error ? error.message : String(error)}\n`
+      );
+    }
   } finally {
     process.off('SIGINT', stop);
     process.off('SIGTERM', stop);
