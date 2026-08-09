@@ -385,6 +385,32 @@ There is no CSP on the app today, so a hotlinked `https:` image loads without
 one. If a policy is ever added, `img-src` has to permit `https:` or every
 uncached avatar silently becomes a monogram.
 
+## External Agents (Codex, Cursor, Claude Code)
+
+Open these first:
+
+- `docs/architecture/external-agents.md` (ownership, the invariant, permissions, credentials)
+- `apps/shared/src/external-agents/schemas.ts` (identity, capabilities, the neutral event
+  contract, the discovery response — schema-first, browser-safe)
+- `apps/shared/src/external-agents/vendor-text.ts` (the code-point bounds applied to anything a
+  vendor emitted, at the runtime boundary)
+- `apps/shared/src/external-agents/permissions.ts` (reading a persisted choice back, restrictively)
+- `apps/api/src/modules/external-agents/application/external-agent-discovery.ts` (the cheap pass,
+  the authoritative pass, the budget between them)
+- `apps/api/src/modules/external-agents/domain/adapter-descriptors.ts` (names, order, sign-in
+  commands — never capabilities)
+- `apps/api/src/modules/external-agents/domain/cli-status-mapping.ts` (what the environment
+  scanner can honestly say)
+- `apps/api/src/modules/external-agents/http/external-agent-routes.ts`
+  (`GET /api/external-agents?environmentId=…`)
+- `apps/shared/src/environments/detection/agent-cli-definitions.ts` (what the scanner looks for)
+- `apps/api/tests/unit/modules/external-agents/`, `apps/shared/tests/unit/external-agents.test.ts`
+
+The rule that decides most questions here: **external agents never own MangoStudio tools**. Tool
+activity is observational — it is rendered and persisted, and it never reaches the tool registry,
+the executor, the permission engine or budget accounting. Capabilities come from the adapter that
+would run the turn, never from a table in the hub.
+
 ## MCP Servers
 
 Open these first:
