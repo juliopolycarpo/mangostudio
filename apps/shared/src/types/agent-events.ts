@@ -197,8 +197,9 @@ export interface ExternalActivityPart {
  * The option set is the vendor's, in the vendor's order, and it is persisted so
  * that a reloaded transcript can render a resolved card without asking the
  * vendor again. An approval still pending when its turn ends carries
- * `decision: 'expired'`: a dead card is honest, a live control that will never
- * resolve is not.
+ * `decisionSource: 'expired'` and no `decision`: nobody chose an option, and
+ * inventing one would put a decision in the transcript that no user made. A
+ * dead card is honest; a live control that will never resolve is not.
  */
 export interface ExternalApprovalPart {
   type: 'external_approval';
@@ -209,8 +210,9 @@ export interface ExternalApprovalPart {
   detail?: string;
   options: readonly ExternalApprovalOption[];
   expiresAtMs: number;
-  /** Absent while pending. */
+  /** The option that was chosen. Absent while pending, and when nobody chose one. */
   decision?: string;
+  /** How the approval left the pending set. Absent only while it is still pending. */
   decisionSource?: 'user' | 'auto-review' | 'expired' | 'cancelled';
   resolvedAt?: number;
   truncated?: boolean;
