@@ -725,7 +725,16 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
   const closure = await finished.finally(async () => {
     process.off('SIGINT', stopOnSignal);
     process.off('SIGTERM', stopOnSignal);
-    await host.close();
+    // A host close that rejects — a vendor process tree that would not reap —
+    // is reported, not propagated: the audit sink still has to drain and the
+    // closure below still has to produce an exit code.
+    try {
+      await host.close();
+    } catch (error) {
+      process.stderr.write(
+        `mangostudio-runtime: runtime host cleanup failed: ${error instanceof Error ? error.message : String(error)}\n`
+      );
+    }
     // The process-scoped audit sink outlives every host connection and drains
     // after the host has reaped all session-owned resources.
     await audit.close();

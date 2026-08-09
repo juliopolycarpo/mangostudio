@@ -34,6 +34,7 @@ import type {
   RuntimeCapabilityAllow,
   RuntimeExternalAgentHealth,
 } from '@mangostudio/shared/runtime-home';
+import { RUNTIME_HEALTH_LIVE_SESSION_LIMIT } from '@mangostudio/shared/runtime-home';
 import { Value } from '@sinclair/typebox/value';
 import type { RuntimeConsentSource } from '../../consent-source';
 import { RuntimeToolArgumentError } from '../../errors';
@@ -175,16 +176,19 @@ export class ExternalAgentSessionSupervisor {
 
   get health(): RuntimeExternalAgentHealth {
     const now = this.#now();
-    const liveSessions = [...this.#sessions.values()].map((session) => ({
-      sessionId: session.sessionId,
-      targetId: session.adapter.targetId,
-      ageMs: Math.max(0, now - session.openedAtMs),
-      state: session.state,
-    }));
+    const sessions = [...this.#sessions.values()];
     return {
       targets: this.#registry.targetIds,
-      liveSessionCount: liveSessions.length,
-      liveSessions,
+      // The count stays true to the session map; only the enumeration is
+      // bounded, because `sessionCap` is the caller's number and a list longer
+      // than the health schema allows would fail validation for every reader.
+      liveSessionCount: sessions.length,
+      liveSessions: sessions.slice(0, RUNTIME_HEALTH_LIVE_SESSION_LIMIT).map((session) => ({
+        sessionId: session.sessionId,
+        targetId: session.adapter.targetId,
+        ageMs: Math.max(0, now - session.openedAtMs),
+        state: session.state,
+      })),
     };
   }
 
@@ -548,7 +552,13 @@ export class ExternalAgentSessionSupervisor {
     const activeTurn: LiveTurn = { nativeTurnId, controller, payloadBytes: 0 };
     session.activeTurn = activeTurn;
     session.state = 'running';
-    void this.#consumeTurn(session, activeTurn, stream);
+    // Detached, so it needs its own handler: the consumer's own catch block
+    // emits an `error` event, and `#emitEvent` throws when the envelope fails
+    // validation. That throw would escape as an unhandled rejection and can end
+    // the runtime process, so it is recorded and surfaced by `close()` instead.
+    void this.#consumeTurn(session, activeTurn, stream).catch((error: unknown) => {
+      this.#deferredCleanupFailure ??= error;
+    });
     return Promise.resolve({ nativeTurnId });
   }
 

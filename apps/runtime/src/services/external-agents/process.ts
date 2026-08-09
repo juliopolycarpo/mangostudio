@@ -252,7 +252,10 @@ function createBoundedLineReader(
     wake();
   });
   input.on('error', (error: Error) => {
-    failure = error;
+    // First failure wins, like `fail()`: that call pauses the stream, and a
+    // stream error arriving after the pause would otherwise replace the limit
+    // breach the caller needs to see.
+    failure ??= error;
     wake();
   });
 

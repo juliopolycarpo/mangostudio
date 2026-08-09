@@ -61,9 +61,13 @@ export function assertExternalAgentAdapterConformance(
     ]
   >) {
     const implemented = typeof adapter[member] === 'function';
-    if (capabilities[capability] !== implemented) {
+    // One direction only. Method presence is fixed per adapter class while
+    // capabilities are discovered per machine, so an adapter that implements
+    // `steer` may still meet a CLI build that cannot steer and has to report
+    // `steering: false`. Advertising what cannot be called is the bug.
+    if (capabilities[capability] && !implemented) {
       throw new Error(
-        `External-agent adapter "${adapter.targetId}" advertises ${capability}=${capabilities[capability]} but ${String(member)} is ${implemented ? 'implemented' : 'missing'}.`
+        `External-agent adapter "${adapter.targetId}" advertises ${capability}=true but ${String(member)} is missing.`
       );
     }
   }

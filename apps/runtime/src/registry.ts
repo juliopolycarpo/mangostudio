@@ -74,11 +74,15 @@ export function createRuntimeMethodHandlers(
     options.consent ?? staticConsentSource(RUNTIME_CONSENT_PRESETS.full, options.slot ?? 'host');
   const externalAgentRegistry = new ExternalAgentAdapterRegistry(options.externalAgents?.adapters);
   const externalAgents = new ExternalAgentSessionSupervisor({
+    // Caller options first: the four fields below are owned here, and excess
+    // property checking only protects object literals. A caller that passes a
+    // pre-built wider object must not be able to substitute the consent source
+    // the supervisor enforces.
+    ...(options.externalAgents ?? {}),
     registry: externalAgentRegistry,
     runtimeVersion: options.runtimeVersion,
     emit: options.emit,
     consent,
-    ...(options.externalAgents ?? {}),
   });
 
   return {
@@ -169,9 +173,20 @@ export function createRuntimeMethodHandlers(
     }),
     close: async () => {
       install.close();
-      await update.close();
-      await mcp.close();
-      await externalAgents.close();
+      // Settled, not chained: the external-agent supervisor owns spawned vendor
+      // processes and their process trees, so an earlier rejection must not skip
+      // its teardown and leak them for the life of the runtime.
+      const results = await Promise.allSettled([
+        update.close(),
+        mcp.close(),
+        externalAgents.close(),
+      ]);
+      const failures = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : []
+      );
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'Runtime service teardown failed.');
+      }
     },
   };
 }

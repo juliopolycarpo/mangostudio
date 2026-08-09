@@ -191,7 +191,12 @@ async function runOneConnection(
     }
   } finally {
     options.signal?.removeEventListener('abort', abort);
-    await host.close();
+    // Teardown reaps external-agent sessions and vendor process trees, so it
+    // can reject. Contained here: a failed close must not reject
+    // `runOneConnection` and take the whole reconnect loop down with it.
+    await host.close().catch((error: unknown) => {
+      log(`Runtime host cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 }
 

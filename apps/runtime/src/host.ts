@@ -181,10 +181,13 @@ export class RuntimeHost {
     // Flush only — the sink is process-scoped and shared across reconnect /
     // supersede hosts. Closing it here would silence audit for every later
     // session. The CLI owns `audit.close()` at process end.
-    void Promise.all([
-      this.#audit?.flush() ?? Promise.resolve(),
-      Promise.resolve(this.#onClose?.()),
-    ]).then(
+    // Inside an async body, not around a bare `Promise.all`: `onClose` and
+    // `flush` are `() => void | Promise<void>`, so either may throw
+    // synchronously, and a throw that escapes `close()` would leave the
+    // memoized promise pending forever — every later `close()` would hang.
+    void (async () => {
+      await Promise.all([this.#audit?.flush(), this.#onClose?.()]);
+    })().then(
       () => completion.resolve(),
       (error: unknown) => completion.reject(error)
     );

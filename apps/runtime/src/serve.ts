@@ -137,6 +137,11 @@ export function serveRuntime(options: RuntimeServeOptions): RuntimeServeHandle {
   const openCallbackWaiters = new Set<() => void>();
 
   const stopped = Promise.withResolvers<void>();
+  // `stop()` rejects this when cleanup fails, and the abort listener and the
+  // already-aborted call below both discard the returned promise. One attached
+  // handler keeps a failed teardown from surfacing as a process-level unhandled
+  // rejection; callers that await `stopped` or `close()` still observe it.
+  void stopped.promise.catch(() => undefined);
 
   const teardownSession = (session: ActiveSession, notifySocket: boolean): Promise<void> => {
     if (session.teardown) return session.teardown;

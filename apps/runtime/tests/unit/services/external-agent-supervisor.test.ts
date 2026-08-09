@@ -111,6 +111,22 @@ describe('external-agent adapter registry and supervisor', () => {
     await value.supervisor.close();
   });
 
+  it('accepts an implemented capability the machine cannot serve', async () => {
+    // Method presence is fixed per adapter class; capabilities are discovered
+    // per machine. An adapter that can steer must still be able to report a CLI
+    // build that cannot.
+    const adapter = new FakeExternalAgentAdapter({ steerable: true });
+    const value = await fixture({ adapter });
+
+    const result = await value.supervisor.discover(
+      { targetIds: ['codex'], timeoutMs: 1_000 },
+      new AbortController().signal
+    );
+
+    expect(result.descriptors[0]?.capabilities.steering).toBe(false);
+    await value.supervisor.close();
+  });
+
   it('authorizes a canonical workspace before resolving or opening an executable', async () => {
     const value = await fixture({ authorizeWorkspace: () => false });
 

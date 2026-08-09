@@ -23,6 +23,8 @@ export interface FakeExternalAgentOptions {
   readonly closeGate?: Promise<void>;
   readonly nativeTurnId?: string;
   readonly turnError?: Error;
+  /** Implements the optional `steer` member, whatever the descriptor advertises. */
+  readonly steerable?: boolean;
 }
 
 /** Scriptable protocol peer. It never knows or launches a production vendor. */
@@ -41,6 +43,8 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
   readonly #closeGate?: Promise<void>;
   readonly #nativeTurnId?: string;
   readonly #turnError?: Error;
+  /** Assigned in the constructor, so `typeof adapter.steer` follows the option. */
+  steer?: ExternalAgentAdapter['steer'];
 
   constructor(options: FakeExternalAgentOptions = {}) {
     this.#events = options.events ?? [{ type: 'completed' }];
@@ -55,6 +59,7 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
     this.#closeGate = options.closeGate;
     this.#nativeTurnId = options.nativeTurnId;
     this.#turnError = options.turnError;
+    if (options.steerable) this.steer = () => Promise.resolve({ accepted: true });
   }
 
   discover(): Promise<ExternalAgentRuntimeDescriptor> {

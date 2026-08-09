@@ -88,6 +88,24 @@ describe('in-process runtime transport', () => {
     }
   });
 
+  it('settles every close when teardown throws synchronously', async () => {
+    // `onClose` is `() => void | Promise<void>`, so a synchronous throw is in
+    // the type. It has to become a rejection of the memoized promise: a memo
+    // left pending would make every later `close()` — `serve()`'s stop path,
+    // the in-process transport's — wait forever.
+    const host = new RuntimeHost({
+      runtimeVersion: 'runtime-test',
+      manifest,
+      handlers: new Map(),
+      onClose: () => {
+        throw new Error('Teardown refused.');
+      },
+    });
+
+    await expect(host.close()).rejects.toThrow('Teardown refused.');
+    await expect(host.close()).rejects.toThrow('Teardown refused.');
+  });
+
   it('rejects incompatible protocol versions before accepting requests', async () => {
     const ports = createInProcessPortPair({ validateFrames: true });
     const host = createHost(new Map());
