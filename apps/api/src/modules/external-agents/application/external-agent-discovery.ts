@@ -166,16 +166,27 @@ interface DescriptorInput {
   readonly adapterReason: ExternalAgentUnavailableReason | undefined;
 }
 
+/**
+ * Matches `ExternalAgentDescriptorSchema.version`'s `maxLength`. The cheap
+ * pass is already bounded upstream by the same cap on the wire, but an
+ * adapter's `describe()` is this application's own interface, not a schema —
+ * nothing stops a future implementation from forwarding a vendor's version
+ * string unbounded, and a version past 128 characters would fail response
+ * validation and take the whole request down with it.
+ */
+const MAX_VERSION_LENGTH = 128;
+
 /** One place where a descriptor is assembled, whichever tier supplied the facts. */
 function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
   const loginCommand = productDescriptorFor(input.targetId)?.loginCommand;
   const reason = unavailableReasonFor(input.installed, input.authState, input.adapterReason);
+  const version = input.version?.slice(0, MAX_VERSION_LENGTH);
 
   return {
     targetId: input.targetId,
     environmentId: input.environmentId,
     installed: input.installed,
-    ...(input.version && { version: input.version }),
+    ...(version && { version }),
     authState: input.authState,
     // Only worth showing to someone who has the CLI but is not signed in.
     ...(input.installed && input.authState !== 'signed-in' && loginCommand && { loginCommand }),

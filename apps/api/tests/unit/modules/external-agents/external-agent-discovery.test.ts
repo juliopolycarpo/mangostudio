@@ -270,6 +270,24 @@ describe('external agent discovery — the authoritative pass', () => {
     expect(codex?.supportedConfigurations).toHaveLength(1);
   });
 
+  it("caps an adapter's version to what the public contract allows", async () => {
+    // ExternalAgentDescriptorSchema.version caps at 128 characters. Unlike the
+    // cheap pass, an adapter's describe() is this application's own interface,
+    // not a wire schema, so nothing upstream bounds a vendor version string
+    // before it reaches the response.
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      authoritative: authoritative([
+        { targetId: 'codex', version: '9'.repeat(200), capabilities: ALL_CAPABLE },
+      ]),
+    });
+
+    const [codex] = await service.listExternalAgents(SCOPE);
+
+    expect(codex?.version).toHaveLength(128);
+    expect(Value.Check(ExternalAgentDescriptorSchema, codex)).toBe(true);
+  });
+
   it('escalates only the targets the scan found installed', async () => {
     const asked: (readonly ExternalAgentTargetId[])[] = [];
     const service = createExternalAgentDiscoveryService({
