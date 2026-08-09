@@ -37,7 +37,7 @@ export interface RuntimeHostOptions {
    * sessions, and their child processes. Fired once, on close: a handler map
    * with state of its own has no other way to learn the host is going away.
    */
-  readonly onClose?: () => void;
+  readonly onClose?: () => void | Promise<void>;
   /** True between update.begin and update.commit; all other calls are refused. */
   readonly isUpdateActive?: () => boolean;
   /**
@@ -67,10 +67,10 @@ export class RuntimeHost {
   readonly #resolveManifest: () => RuntimeCapabilityManifest;
   readonly #protocolVersion: RuntimeProtocolVersion;
   readonly #runtimeVersion: string;
-  readonly #onClose?: () => void;
+  readonly #onClose?: () => void | Promise<void>;
   readonly #isUpdateActive: () => boolean;
   readonly #audit?: RuntimeAuditSink;
-  #closed = false;
+  #closePromise?: Promise<void>;
   #detach?: () => void;
   #handshake = deferredHandshake();
   #port?: RuntimeFramePort;
@@ -161,7 +161,10 @@ export class RuntimeHost {
     return () => this.#pongListeners.delete(listener);
   }
 
-  close(): void {
+  close(): Promise<void> {
+    if (this.#closePromise) return this.#closePromise;
+    const completion = Promise.withResolvers<void>();
+    this.#closePromise = completion.promise;
     this.#detach?.();
     this.#detach = undefined;
     for (const controller of this.#activeRequests.values()) controller.abort();
@@ -175,13 +178,20 @@ export class RuntimeHost {
     // Closing twice is a normal path — a failed handshake releases the host,
     // and so does the caller that never got the handle — but the sessions
     // `onClose` tears down must only be released once.
-    if (this.#closed) return;
-    this.#closed = true;
     // Flush only — the sink is process-scoped and shared across reconnect /
     // supersede hosts. Closing it here would silence audit for every later
     // session. The CLI owns `audit.close()` at process end.
-    void this.#audit?.flush();
-    this.#onClose?.();
+    // Inside an async body, not around a bare `Promise.all`: `onClose` and
+    // `flush` are `() => void | Promise<void>`, so either may throw
+    // synchronously, and a throw that escapes `close()` would leave the
+    // memoized promise pending forever — every later `close()` would hang.
+    void (async () => {
+      await Promise.all([this.#audit?.flush(), this.#onClose?.()]);
+    })().then(
+      () => completion.resolve(),
+      (error: unknown) => completion.reject(error)
+    );
+    return this.#closePromise;
   }
 
   #receive(frame: RuntimeFrame): void {

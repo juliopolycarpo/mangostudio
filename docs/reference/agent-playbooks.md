@@ -395,6 +395,12 @@ Open these first:
 - `apps/shared/src/external-agents/vendor-text.ts` (the code-point bounds applied to anything a
   vendor emitted, at the runtime boundary)
 - `apps/shared/src/external-agents/permissions.ts` (reading a persisted choice back, restrictively)
+- `apps/runtime/src/services/external-agents/` (semantic adapters, registry, session lifecycle,
+  vendor-output normalization, process framing and descendant cleanup)
+- `apps/runtime/src/registry.ts`, `apps/runtime/src/methods.ts` (the six protocol handlers, event
+  topic, consent and close wiring)
+- `apps/api/src/services/runtime-client/runtime-client.ts` (typed method facade and session-filtered
+  event subscription)
 - `apps/api/src/modules/external-agents/application/external-agent-discovery.ts` (the cheap pass,
   the authoritative pass, the budget between them)
 - `apps/api/src/modules/external-agents/domain/adapter-descriptors.ts` (names, order, sign-in

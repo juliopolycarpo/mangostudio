@@ -5,6 +5,7 @@ import {
   encodeRuntimeFrame,
   narrowRuntimeErrorCode,
   RUNTIME_PROTOCOL_VERSION,
+  RuntimeCapabilityManifestSchema,
   RuntimeFrameCodecError,
   RuntimeFrameDecoder,
   RuntimeFrameSchema,
@@ -71,18 +72,67 @@ describe('runtime protocol frames', () => {
 });
 
 describe('runtime protocol compatibility', () => {
-  it('holds the protocol at 1.0, so a bump is a decision and not a side effect', () => {
-    // `assertRuntimeProtocolCompatible` is strict major+minor equality, and
-    // remote transports are the first place two peers can be on different
-    // releases at all. Every schema change that keeps them talking is therefore
-    // additive-and-optional rather than a version bump: bumping this string
-    // disconnects every runtime nobody has updated yet, which is a migration to
-    // plan, not a line to change in passing.
-    expect(RUNTIME_PROTOCOL_VERSION).toBe('1.0');
+  it('identifies the additive external-agent protocol release', () => {
+    expect(RUNTIME_PROTOCOL_VERSION).toBe('1.0.1');
   });
 
-  it('accepts equal major/minor versions with different patches', () => {
-    expect(() => assertRuntimeProtocolCompatible('1.2.0', '1.2.9')).not.toThrow();
+  it('keeps all four old/new hub and runtime combinations compatible', () => {
+    for (const [hub, runtime] of [
+      ['1.0.1', '1.0'],
+      ['1.0', '1.0.1'],
+      ['1.0.1', '1.0.1'],
+      ['1.0', '1.0'],
+    ] as const) {
+      expect(() => assertRuntimeProtocolCompatible(hub, runtime)).not.toThrow();
+    }
+  });
+
+  it('accepts an old manifest that has no external-agent fields', () => {
+    expect(
+      Value.Check(RuntimeCapabilityManifestSchema, {
+        platform: 'linux',
+        arch: 'x64',
+        pathStyle: 'posix',
+        homeDir: '/home/peer',
+        shells: ['bash'],
+        git: { available: true },
+        features: {
+          tools: true,
+          git: true,
+          probing: true,
+          mcp: true,
+          library: true,
+          checkpoints: true,
+        },
+      })
+    ).toBe(true);
+  });
+
+  it('accepts the optional external-agent capability and isolation attestation', () => {
+    expect(
+      Value.Check(RuntimeCapabilityManifestSchema, {
+        platform: 'linux',
+        arch: 'x64',
+        pathStyle: 'posix',
+        homeDir: '/home/peer',
+        shells: ['bash'],
+        git: { available: true },
+        features: {
+          tools: true,
+          git: true,
+          probing: true,
+          mcp: true,
+          library: true,
+          checkpoints: true,
+          externalAgents: true,
+        },
+        externalAgents: ['codex'],
+        identityIsolation: {
+          method: 'single-user-host',
+          credentialHomeFingerprint: 'sha256:credential-home',
+        },
+      })
+    ).toBe(true);
   });
 
   it('refuses a same-version peer that carries a field this build does not know on a frame envelope', () => {

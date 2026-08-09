@@ -15,6 +15,7 @@
 import {
   deniedCapabilities,
   RUNTIME_CONSENT_PRESETS,
+  type RuntimeExternalAgentHealth,
   type RuntimeHealthReport,
   type RuntimePlatformId,
   type RuntimeSlot,
@@ -44,6 +45,7 @@ export interface RuntimeHealthOptions {
   readonly env?: NodeJS.ProcessEnv;
   /** Which slot to report on; without it, the one this binary sits in. */
   readonly slot?: RuntimeSlot;
+  readonly externalAgents?: RuntimeExternalAgentHealth;
 }
 
 export async function collectRuntimeHealth(
@@ -96,6 +98,7 @@ export async function collectRuntimeHealth(
     lastError: error,
     audit: config.audit,
     ...(auditError ? { auditError } : {}),
+    ...(options.externalAgents ? { externalAgents: options.externalAgents } : {}),
   };
 }
 
@@ -155,6 +158,23 @@ export function diagnoseRuntimeHealth(report: RuntimeHealthReport): RuntimeDocto
   }
 
   findings.push(consentFinding(report, setupCommand));
+
+  if (report.externalAgents) {
+    const sessions = report.externalAgents.liveSessions
+      .map(
+        (session) =>
+          `${session.targetId}:${session.sessionId} ${session.state} ${Math.round(session.ageMs / 1_000)}s`
+      )
+      .join(', ');
+    findings.push({
+      severity: 'ok',
+      title: 'External agents',
+      detail:
+        report.externalAgents.liveSessionCount === 0
+          ? `${report.externalAgents.targets.length} adapter target(s), no live sessions`
+          : `${report.externalAgents.liveSessionCount} live session(s): ${sessions}`,
+    });
+  }
 
   if (report.version && report.version !== report.runtimeVersion) {
     findings.push({

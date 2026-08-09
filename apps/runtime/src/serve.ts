@@ -48,9 +48,10 @@ export interface RuntimeServeOptions {
 export interface RuntimeServeHandle {
   readonly hostname: string;
   readonly port: number;
-  /** Resolves once the server has stopped accepting connections. */
+  /** Resolves after the server stops accepting and the last host finishes cleanup. */
   readonly stopped: Promise<void>;
-  close(): void;
+  /** Stops accepting connections after all session-owned resources are reaped. */
+  close(): Promise<void>;
 }
 
 interface ActiveSession {
@@ -62,6 +63,7 @@ interface ActiveSession {
   readonly host: RuntimeHost;
   stopLiveness?: () => void;
   heartbeat?: ReturnType<typeof setInterval>;
+  teardown?: Promise<void>;
 }
 
 interface ServeSocketData {
@@ -129,21 +131,45 @@ export function serveRuntime(options: RuntimeServeOptions): RuntimeServeHandle {
   let active: ActiveSession | null = null;
   let generation = 0;
   let closed = false;
+  const pendingTeardowns = new Set<Promise<void>>();
+  const cleanupFailures: unknown[] = [];
+  let openCallbacks = 0;
+  const openCallbackWaiters = new Set<() => void>();
 
   const stopped = Promise.withResolvers<void>();
+  // `stop()` rejects this when cleanup fails, and the abort listener and the
+  // already-aborted call below both discard the returned promise. One attached
+  // handler keeps a failed teardown from surfacing as a process-level unhandled
+  // rejection; callers that await `stopped` or `close()` still observe it.
+  void stopped.promise.catch(() => undefined);
 
-  const teardownSession = (session: ActiveSession, notifySocket: boolean): void => {
-    session.stopLiveness?.();
-    if (session.heartbeat) clearInterval(session.heartbeat);
-    session.host.close();
-    session.port.close();
-    if (notifySocket) {
-      try {
-        session.socket.close(RUNTIME_CLOSE_CODES.SUPERSEDED, 'Superseded');
-      } catch {
-        // Already closed.
+  const teardownSession = (session: ActiveSession, notifySocket: boolean): Promise<void> => {
+    if (session.teardown) return session.teardown;
+    session.teardown = (async () => {
+      session.stopLiveness?.();
+      if (session.heartbeat) clearInterval(session.heartbeat);
+      if (notifySocket) {
+        try {
+          session.socket.close(RUNTIME_CLOSE_CODES.SUPERSEDED, 'Superseded');
+        } catch {
+          // Already closed.
+        }
       }
-    }
+      session.port.close();
+      await session.host.close();
+    })();
+    const teardown = session.teardown;
+    pendingTeardowns.add(teardown);
+    void teardown.then(
+      () => pendingTeardowns.delete(teardown),
+      () => pendingTeardowns.delete(teardown)
+    );
+    return teardown;
+  };
+
+  const waitForOpenCallbacks = (): Promise<void> => {
+    if (openCallbacks === 0) return Promise.resolve();
+    return new Promise((resolve) => openCallbackWaiters.add(resolve));
   };
 
   const server = Bun.serve<ServeSocketData, never>({
@@ -177,39 +203,66 @@ export function serveRuntime(options: RuntimeServeOptions): RuntimeServeHandle {
       backpressureLimit: RUNTIME_MAX_FRAME_BYTES,
       closeOnBackpressureLimit: true,
       idleTimeout: 0,
-      open(socket) {
-        if (active) {
+      async open(socket) {
+        openCallbacks += 1;
+        try {
+          if (closed) {
+            socket.close(RUNTIME_CLOSE_CODES.RELEASED, 'Runtime stopped');
+            return;
+          }
           const previous = active;
-          active = null;
-          teardownSession(previous, true);
-          log('A new hub connection superseded the previous one.');
-        }
+          const mine = ++generation;
+          const host = options.createHost();
+          const port = createWebSocketFramePort({
+            sink: serverWebSocketSink(socket),
+            onClosed: (closure) => {
+              if (closure.kind === 'protocol-error') {
+                log(`Protocol framing rejected a message: ${closure.error.message}`);
+                socket.close(RUNTIME_CLOSE_CODES.PROTOCOL_ERROR, 'Protocol error');
+              }
+            },
+          });
 
-        const mine = ++generation;
-        const host = options.createHost();
-        const port = createWebSocketFramePort({
-          sink: serverWebSocketSink(socket),
-          onClosed: (closure) => {
-            if (closure.kind === 'protocol-error') {
-              log(`Protocol framing rejected a message: ${closure.error.message}`);
-              socket.close(RUNTIME_CLOSE_CODES.PROTOCOL_ERROR, 'Protocol error');
+          socket.data.generation = mine;
+          const session: ActiveSession = {
+            generation: mine,
+            socket,
+            port,
+            host,
+          };
+          active = session;
+
+          if (previous) {
+            try {
+              await teardownSession(previous, true);
+            } catch (error) {
+              cleanupFailures.push(error);
+              log(`Superseded runtime host cleanup failed: ${asError(error).message}`);
+              if (active?.generation === mine) active = null;
+              socket.close(1011, 'Runtime host cleanup failed');
+              await teardownSession(session, false).catch((cleanupError: unknown) => {
+                cleanupFailures.push(cleanupError);
+                log(`Replacement runtime host cleanup failed: ${asError(cleanupError).message}`);
+              });
+              return;
             }
-          },
-        });
+            log('A new hub connection superseded the previous one.');
+          }
+          // A newer connection or a close can win while an older host is
+          // asynchronously reaping its sessions. Never start or leak this host
+          // after it ceased to be the active generation.
+          if (closed || active?.generation !== mine) {
+            if (active?.generation === mine) active = null;
+            await teardownSession(session, false).catch((error: unknown) => {
+              cleanupFailures.push(error);
+              log(`Inactive runtime host cleanup failed: ${asError(error).message}`);
+            });
+            return;
+          }
 
-        socket.data.generation = mine;
-        const session: ActiveSession = {
-          generation: mine,
-          socket,
-          port,
-          host,
-        };
-        active = session;
+          host.attach(port);
+          host.start();
 
-        host.attach(port);
-        host.start();
-
-        void (async () => {
           const handshake = await Promise.race([
             host.waitUntilReady().then(
               () => null,
@@ -243,7 +296,13 @@ export function serveRuntime(options: RuntimeServeOptions): RuntimeServeHandle {
           }, HEARTBEAT_INTERVAL_MS);
           (session.heartbeat as { unref?: () => void }).unref?.();
           log('Hub connected.');
-        })();
+        } finally {
+          openCallbacks -= 1;
+          if (openCallbacks === 0) {
+            for (const resolve of [...openCallbackWaiters]) resolve();
+            openCallbackWaiters.clear();
+          }
+        }
       },
       message(socket, message) {
         if (active?.generation !== socket.data.generation) return;
@@ -253,26 +312,51 @@ export function serveRuntime(options: RuntimeServeOptions): RuntimeServeHandle {
         if (active?.generation !== socket.data.generation) return;
         active.port.handleDrain();
       },
-      close(socket) {
+      async close(socket) {
         if (active?.generation !== socket.data.generation) return;
         const session = active;
         active = null;
         session.port.handleSocketClosed();
-        teardownSession(session, false);
+        await teardownSession(session, false).catch((error: unknown) => {
+          cleanupFailures.push(error);
+          log(`Disconnected runtime host cleanup failed: ${asError(error).message}`);
+        });
       },
     },
   });
 
-  const stop = (): void => {
-    if (closed) return;
+  const stop = (): Promise<void> => {
+    if (closed) return stopped.promise;
     closed = true;
+    let activeTeardown: Promise<void> | undefined;
     if (active) {
       const session = active;
       active = null;
-      teardownSession(session, true);
+      activeTeardown = teardownSession(session, true);
     }
     server.stop(true);
-    stopped.resolve();
+    void (async () => {
+      const failures = new Set<unknown>();
+      if (activeTeardown) {
+        try {
+          await activeTeardown;
+        } catch (error) {
+          failures.add(error);
+        }
+      }
+      await waitForOpenCallbacks();
+      while (pendingTeardowns.size > 0) {
+        const results = await Promise.allSettled([...pendingTeardowns]);
+        for (const result of results) {
+          if (result.status === 'rejected') failures.add(result.reason);
+        }
+      }
+      for (const failure of cleanupFailures) failures.add(failure);
+      if (failures.size > 0) {
+        throw new AggregateError([...failures], 'Runtime host cleanup failed.');
+      }
+    })().then(stopped.resolve, stopped.reject);
+    return stopped.promise;
   };
 
   const port = server.port;

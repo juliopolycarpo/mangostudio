@@ -22,6 +22,11 @@
  */
 
 import { type Static, Type } from '@sinclair/typebox';
+import {
+  ExternalAgentTargetIdSchema,
+  ExternalIdentityIsolationSchema,
+} from '../external-agents/schemas';
+import { ReadonlyArraySchema } from '../schema-helpers';
 
 /**
  * Who placed the runtime in this directory — not which transport talks to it.
@@ -91,8 +96,18 @@ export const RuntimeCapabilityAllowSchema = Type.Object({
   checkpoints: Type.Boolean(),
   /** Whether a hub may replace these bytes with a version it offers. */
   update: Type.Boolean(),
+  /**
+   * Whether this runtime may launch vendor-owned agent processes. Optional on
+   * disk for old files; resolution treats absence as false, never as consent.
+   */
+  externalAgents: Type.Optional(Type.Boolean()),
 });
 export type RuntimeCapabilityAllow = Static<typeof RuntimeCapabilityAllowSchema>;
+
+/** Consent after disk defaults are applied; privileged external-agent consent is always explicit. */
+export type ResolvedRuntimeCapabilityAllow = Omit<RuntimeCapabilityAllow, 'externalAgents'> & {
+  readonly externalAgents: boolean;
+};
 
 /**
  * The one sentence every consent surface has to say, in the CLI that writes
@@ -259,7 +274,7 @@ export interface ResolvedRuntimeSlotConfig {
   readonly digest: string | null;
   readonly sourceSha: string | null;
   readonly profile: RuntimeConsentProfile;
-  readonly allow: RuntimeCapabilityAllow;
+  readonly allow: ResolvedRuntimeCapabilityAllow;
   readonly setup: RuntimeSetupRecord;
   readonly installedBy: RuntimeInstaller | null;
   readonly hubUrl: string | null;
@@ -314,6 +329,39 @@ export const RuntimeServiceStatusSchema = Type.Object({
 export type RuntimeServiceStatus = Static<typeof RuntimeServiceStatusSchema>;
 
 /**
+ * How many live sessions health enumerates. A session cap above this is legal —
+ * it is the operator's number — so the reporter truncates the list and keeps
+ * `liveSessionCount` at the true total rather than emitting a payload that
+ * fails its own schema and takes `runtime.health` down with it.
+ */
+export const RUNTIME_HEALTH_LIVE_SESSION_LIMIT = 128;
+
+export const RuntimeExternalAgentHealthSchema = Type.Object(
+  {
+    targets: ReadonlyArraySchema(ExternalAgentTargetIdSchema, {
+      maxItems: ExternalAgentTargetIdSchema.anyOf.length,
+      uniqueItems: true,
+    }),
+    identityIsolation: Type.Optional(ExternalIdentityIsolationSchema),
+    liveSessionCount: Type.Integer({ minimum: 0 }),
+    liveSessions: ReadonlyArraySchema(
+      Type.Object(
+        {
+          sessionId: Type.String({ minLength: 1, maxLength: 256 }),
+          targetId: ExternalAgentTargetIdSchema,
+          ageMs: Type.Integer({ minimum: 0 }),
+          state: Type.String({ minLength: 1, maxLength: 64 }),
+        },
+        { additionalProperties: false }
+      ),
+      { maxItems: RUNTIME_HEALTH_LIVE_SESSION_LIMIT }
+    ),
+  },
+  { additionalProperties: false }
+);
+export type RuntimeExternalAgentHealth = Static<typeof RuntimeExternalAgentHealthSchema>;
+
+/**
  * What `health --json` prints and what the `runtime.health` protocol method
  * returns — one payload, so a terminal on the machine and a card in a browser
  * cannot disagree about what a runtime is allowed to do.
@@ -364,5 +412,7 @@ export const RuntimeHealthReportSchema = Type.Object({
    * permissions). The runtime keeps serving; the receipt is what degraded.
    */
   auditError: Type.Optional(Type.Union([Type.String({ maxLength: 1_024 }), Type.Null()])),
+  /** Optional so health from a 1.0 runtime remains decodable by a 1.0.1 hub. */
+  externalAgents: Type.Optional(RuntimeExternalAgentHealthSchema),
 });
 export type RuntimeHealthReport = Static<typeof RuntimeHealthReportSchema>;

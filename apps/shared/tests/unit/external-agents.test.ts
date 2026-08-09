@@ -8,13 +8,26 @@ import {
   EXTERNAL_AGENT_UNAVAILABLE_REASONS,
   EXTERNAL_TEXT_LIMITS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
+  ExternalAgentAckResultSchema,
+  ExternalAgentCancelParamsSchema,
+  ExternalAgentCloseParamsSchema,
+  ExternalAgentConfigurationSchema,
   type ExternalAgentDescriptor,
   ExternalAgentDescriptorListResponseSchema,
   ExternalAgentDescriptorSchema,
+  ExternalAgentDiscoverParamsSchema,
+  ExternalAgentDiscoverResultSchema,
   type ExternalAgentEvent,
+  ExternalAgentEventEnvelopeSchema,
   ExternalAgentEventSchema,
+  ExternalAgentOpenParamsSchema,
+  ExternalAgentOpenResultSchema,
+  ExternalAgentRespondParamsSchema,
   type ExternalAgentTargetId,
   ExternalAgentTargetIdSchema,
+  ExternalAgentTurnParamsSchema,
+  ExternalAgentTurnResultSchema,
+  ExternalIdentityIsolationSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,
@@ -38,6 +51,14 @@ const DESCRIPTOR: ExternalAgentDescriptor = {
   authState: 'signed-in',
   capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
   supportedConfigurations: [],
+  models: [
+    {
+      id: 'model-1',
+      displayName: 'Model One',
+      supportedReasoningEfforts: [{ id: 'low', description: 'Faster responses' }],
+      defaultReasoningEffort: 'low',
+    },
+  ],
   unavailableReason: 'not-yet-available',
 };
 
@@ -89,6 +110,154 @@ describe('external agent descriptor', () => {
       'isolation-unproven',
       'not-yet-available',
     ]);
+  });
+
+  it('keeps model catalogs rich and bounded', () => {
+    expect(Value.Check(ExternalAgentDescriptorSchema, DESCRIPTOR)).toBe(true);
+    expect(
+      Value.Check(ExternalAgentDescriptorSchema, {
+        ...DESCRIPTOR,
+        models: [{ id: 'x'.repeat(257) }],
+      })
+    ).toBe(false);
+  });
+
+  it('accepts old descriptors that predate model catalogs and account fingerprints', () => {
+    const { models: _models, ...oldDescriptor } = DESCRIPTOR;
+    expect(Value.Check(ExternalAgentDescriptorSchema, oldDescriptor)).toBe(true);
+    expect(
+      Value.Check(ExternalAgentDescriptorSchema, {
+        ...oldDescriptor,
+        account: { label: 'Signed-in account' },
+      })
+    ).toBe(true);
+  });
+});
+
+describe('runtime external-agent protocol payloads', () => {
+  const configuration = {
+    model: 'model-1',
+    effort: 'low',
+    level: 'default',
+    routing: 'user',
+    workspaceRoots: ['/workspace'],
+  } as const;
+
+  it('validates all six method contracts', () => {
+    const { environmentId: _environmentId, ...runtimeDescriptor } = DESCRIPTOR;
+
+    expect(
+      Value.Check(ExternalAgentDiscoverParamsSchema, {
+        targetIds: ['codex'],
+        timeoutMs: 5_000,
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(ExternalAgentDiscoverResultSchema, { descriptors: [runtimeDescriptor] })
+    ).toBe(true);
+    expect(
+      Value.Check(ExternalAgentOpenParamsSchema, {
+        sessionId: 'session-1',
+        targetId: 'codex',
+        workspacePath: '/workspace',
+        configuration,
+        resumeMode: 'fallback',
+        timeoutMs: 30_000,
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(ExternalAgentOpenResultSchema, {
+        nativeSessionId: 'thread-1',
+        resumed: false,
+        effectiveConfiguration: configuration,
+        capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(ExternalAgentTurnParamsSchema, {
+        sessionId: 'session-1',
+        clientMessageId: 'message-1',
+        input: 'Use the attached note.',
+        configuration,
+        attachments: [
+          {
+            id: 'attachment-1',
+            originalName: 'note.txt',
+            mimeType: 'text/plain',
+            sizeBytes: 4,
+            kind: 'text',
+            bytesBase64: 'bm90ZQ==',
+          },
+        ],
+      })
+    ).toBe(true);
+    expect(Value.Check(ExternalAgentTurnResultSchema, { nativeTurnId: 'turn-1' })).toBe(true);
+    expect(
+      Value.Check(ExternalAgentRespondParamsSchema, {
+        sessionId: 'session-1',
+        nativeTurnId: 'turn-1',
+        requestId: 'request-1',
+        optionId: 'allow',
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(ExternalAgentCancelParamsSchema, {
+        sessionId: 'session-1',
+        nativeTurnId: 'turn-1',
+      })
+    ).toBe(true);
+    expect(Value.Check(ExternalAgentCloseParamsSchema, { sessionId: 'session-1' })).toBe(true);
+    expect(Value.Check(ExternalAgentAckResultSchema, { ok: true })).toBe(true);
+  });
+
+  it('keeps configuration, attachments, and method records closed', () => {
+    expect(Value.Check(ExternalAgentConfigurationSchema, { ...configuration, env: {} })).toBe(
+      false
+    );
+    expect(
+      Value.Check(ExternalAgentTurnParamsSchema, {
+        sessionId: 'session-1',
+        clientMessageId: 'message-1',
+        input: '',
+        configuration,
+        attachments: [],
+        secret: 'must-not-cross',
+      })
+    ).toBe(false);
+  });
+
+  it('requires semantic event sequences to be one-based', () => {
+    const envelope = {
+      sessionId: 'session-1',
+      nativeTurnId: 'turn-1',
+      sequence: 1,
+      emittedAtMs: 1_700_000_000_000,
+      event: { type: 'text_delta', text: 'hello' },
+    } as const;
+
+    expect(Value.Check(ExternalAgentEventEnvelopeSchema, envelope)).toBe(true);
+    expect(Value.Check(ExternalAgentEventEnvelopeSchema, { ...envelope, sequence: 0 })).toBe(false);
+    expect(Value.Check(ExternalAgentEventEnvelopeSchema, { ...envelope, transportSeq: 1 })).toBe(
+      false
+    );
+    // Nothing produces this yet. The envelope is closed, so a consumer that
+    // predates a key drops the whole event instead of ignoring it — declaring
+    // the turn controller's key up front is what keeps two builds the protocol
+    // version calls compatible from silently losing every event.
+    expect(
+      Value.Check(ExternalAgentEventEnvelopeSchema, { ...envelope, idempotencyKey: 'message-1' })
+    ).toBe(true);
+  });
+
+  it('requires a closed, positive identity-isolation attestation', () => {
+    const isolation = {
+      method: 'single-user-host',
+      credentialHomeFingerprint: 'sha256:credential-home',
+    } as const;
+    expect(Value.Check(ExternalIdentityIsolationSchema, isolation)).toBe(true);
+    expect(Value.Check(ExternalIdentityIsolationSchema, { ...isolation, inferred: true })).toBe(
+      false
+    );
   });
 });
 

@@ -103,15 +103,38 @@ describe('consent presets', () => {
     expect(profileForAllow({ ...RUNTIME_CONSENT_PRESETS.readonly, shell: true })).toBe('custom');
   });
 
+  it('reads an omitted externalAgents as denied rather than as a custom set', () => {
+    for (const name of ['readonly', 'none'] as const) {
+      const { externalAgents: _omitted, ...withoutExternalAgents } = RUNTIME_CONSENT_PRESETS[name];
+      expect(profileForAllow(withoutExternalAgents)).toBe(name);
+    }
+    // `full` grants it, so its absence really is a different set.
+    const { externalAgents: _granted, ...fullWithout } = RUNTIME_CONSENT_PRESETS.full;
+    expect(profileForAllow(fullWithout)).toBe('custom');
+  });
+
   it('grants nothing beyond reading in readonly', () => {
     const readonly = RUNTIME_CONSENT_PRESETS.readonly;
     expect(readonly.fsRead).toBe(true);
     expect(readonly.git).toBe(true);
     expect(readonly.probing).toBe(true);
     expect(readonly.library).toBe(true);
-    for (const key of ['fsWrite', 'shell', 'mcp', 'update', 'checkpoints'] as const) {
+    for (const key of [
+      'fsWrite',
+      'shell',
+      'mcp',
+      'update',
+      'checkpoints',
+      'externalAgents',
+    ] as const) {
       expect(readonly[key]).toBe(false);
     }
+  });
+
+  it('grants external agents only in the full preset', () => {
+    expect(RUNTIME_CONSENT_PRESETS.full.externalAgents).toBe(true);
+    expect(RUNTIME_CONSENT_PRESETS.readonly.externalAgents).toBe(false);
+    expect(RUNTIME_CONSENT_PRESETS.none.externalAgents).toBe(false);
   });
 
   it('lists what a profile denies', () => {
@@ -182,6 +205,18 @@ describe('resolveRuntimeSlotConfig', () => {
     expect(resolved.allow.fsRead).toBe(true);
     expect(resolved.allow.shell).toBe(false);
     expect(resolved.allow.update).toBe(false);
+  });
+
+  it('default-denies external agents in an old stored file even for a full-default slot', () => {
+    const resolved = resolveRuntimeSlotConfig(
+      'host',
+      { schemaVersion: 1, slot: 'host', allow: { fsRead: true } },
+      { source: 'bundled' }
+    );
+    expect(resolved.allow.fsRead).toBe(true);
+    expect(resolved.allow.shell).toBe(true);
+    expect(resolved.allow.externalAgents).toBe(false);
+    expect(resolved.profile).toBe('custom');
   });
 
   it('carries the identity fields through', () => {
@@ -261,5 +296,25 @@ describe('RuntimeHealthReportSchema', () => {
     expect(
       Value.Check(RuntimeHealthReportSchema, { ...baseReport, audit: { enabled: true } })
     ).toBe(true);
+  });
+
+  it('accepts optional external-agent diagnostics while keeping an old report valid', () => {
+    expect(
+      Value.Check(RuntimeHealthReportSchema, {
+        ...baseReport,
+        externalAgents: {
+          targets: ['codex'],
+          identityIsolation: {
+            method: 'single-user-host',
+            credentialHomeFingerprint: 'sha256:credential-home',
+          },
+          liveSessionCount: 1,
+          liveSessions: [
+            { sessionId: 'session-1', targetId: 'codex', ageMs: 250, state: 'running' },
+          ],
+        },
+      })
+    ).toBe(true);
+    expect(Value.Check(RuntimeHealthReportSchema, baseReport)).toBe(true);
   });
 });

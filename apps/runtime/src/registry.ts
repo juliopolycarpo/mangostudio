@@ -1,8 +1,17 @@
+import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import type { RuntimeSlot } from '@mangostudio/shared/runtime-home';
+import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
+import { type RuntimeConsentSource, staticConsentSource } from './consent-source';
 import { RuntimeToolArgumentError } from './errors';
 import { collectRuntimeHealth } from './health';
 import type { RuntimeEventInput, RuntimeHandlerContext, RuntimeMethodHandler } from './host';
 import type { RuntimeMethod, RuntimeMethodMap } from './methods';
+import type { ExternalAgentAdapter } from './services/external-agents/adapter';
+import { ExternalAgentAdapterRegistry } from './services/external-agents/registry';
+import {
+  ExternalAgentSessionSupervisor,
+  type ExternalAgentSupervisorOptions,
+} from './services/external-agents/supervisor';
 import { runtimeFsService } from './services/fs';
 import { execGit } from './services/git';
 import { createInstallService } from './services/install';
@@ -32,11 +41,20 @@ export interface RuntimeMethodRegistryOptions {
    */
   readonly slot?: RuntimeSlot;
   readonly update?: Omit<RuntimeUpdateServiceOptions, 'slot'>;
+  readonly consent?: RuntimeConsentSource;
+  readonly externalAgents?: Omit<
+    ExternalAgentSupervisorOptions,
+    'registry' | 'runtimeVersion' | 'emit' | 'consent'
+  > & {
+    readonly adapters?: readonly ExternalAgentAdapter[];
+    readonly identityIsolation?: ExternalIdentityIsolation;
+  };
 }
 
 export interface RuntimeMethodRegistry {
   readonly handlers: ReadonlyMap<string, RuntimeMethodHandler>;
   readonly updateActive: () => boolean;
+  readonly externalAgentRegistry: ExternalAgentAdapterRegistry;
   /** Releases everything the handlers hold open — MCP sessions today. */
   close(): Promise<void>;
 }
@@ -50,6 +68,20 @@ export function createRuntimeMethodHandlers(
   const update = createRuntimeUpdateService({
     slot: options.slot ?? 'host',
     ...options.update,
+  });
+  const consent =
+    options.consent ?? staticConsentSource(RUNTIME_CONSENT_PRESETS.full, options.slot ?? 'host');
+  const externalAgentRegistry = new ExternalAgentAdapterRegistry(options.externalAgents?.adapters);
+  const externalAgents = new ExternalAgentSessionSupervisor({
+    // Caller options first: the four fields below are owned here, and excess
+    // property checking only protects object literals. A caller that passes a
+    // pre-built wider object must not be able to substitute the consent source
+    // the supervisor enforces.
+    ...(options.externalAgents ?? {}),
+    registry: externalAgentRegistry,
+    runtimeVersion: options.runtimeVersion,
+    emit: options.emit,
+    consent,
   });
 
   return {
@@ -88,6 +120,16 @@ export function createRuntimeMethodHandlers(
       handler('mcp.get-prompt', (params) => mcp.getPrompt(params)),
       handler('mcp.elicit-response', (params) => mcp.respondToElicitation(params)),
       handler('mcp.disconnect', (params) => mcp.disconnect(params)),
+      handler('external-agent.discover', (params, context) =>
+        externalAgents.discover(params, context.signal)
+      ),
+      handler('external-agent.open', (params, context) =>
+        externalAgents.open(params, context.signal)
+      ),
+      handler('external-agent.turn', (params) => externalAgents.turn(params)),
+      handler('external-agent.respond', (params) => externalAgents.respond(params)),
+      handler('external-agent.cancel', (params) => externalAgents.cancel(params)),
+      handler('external-agent.close', (params) => externalAgents.closeSession(params)),
       handler('probing.runtimes', (params) => probingService.probeRuntimes(params)),
       handler('probing.version-managers', (params) => probingService.probeVersionManagers(params)),
       handler('probing.agent-clis', (params) => probingService.probeAgentClis(params)),
@@ -108,6 +150,12 @@ export function createRuntimeMethodHandlers(
           runtimeVersion: options.runtimeVersion,
           ...(options.slot ? { slot: options.slot } : {}),
           ...(options.update?.env ? { env: options.update.env } : {}),
+          externalAgents: {
+            ...externalAgents.health,
+            ...(options.externalAgents?.identityIsolation
+              ? { identityIsolation: options.externalAgents.identityIsolation }
+              : {}),
+          },
         })
       ),
       handler('runtime.update.begin', (params) => update.begin(params)),
@@ -115,10 +163,25 @@ export function createRuntimeMethodHandlers(
       handler('runtime.update.commit', (params) => update.commit(params)),
     ]),
     updateActive: () => update.active,
+    externalAgentRegistry,
     close: async () => {
-      install.close();
-      await update.close();
-      await mcp.close();
+      // Settled, not chained: the external-agent supervisor owns spawned vendor
+      // processes and their process trees, so an earlier rejection must not skip
+      // its teardown and leak them for the life of the runtime. `install.close`
+      // is in here for the same reason — it aborts hub-supplied argv, and a
+      // throw from one of those aborts must not take the reaper down with it.
+      const results = await Promise.allSettled([
+        (async () => install.close())(),
+        update.close(),
+        mcp.close(),
+        externalAgents.close(),
+      ]);
+      const failures = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : []
+      );
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'Runtime service teardown failed.');
+      }
     },
   };
 }

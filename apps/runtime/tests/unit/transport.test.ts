@@ -62,23 +62,48 @@ describe('in-process runtime transport', () => {
     }
   });
 
-  it('returns a typed error for unsupported methods', async () => {
-    const connection = await connectInProcessRuntime(createHost(new Map()), {
-      hubVersion: 'hub-test',
-      validateFrames: true,
-    });
+  it('keeps an old connection usable after an unsupported external-agent method', async () => {
+    const connection = await connectInProcessRuntime(
+      createHost(new Map([['snapshot.hash', async () => ({ hash: 'still-connected' })]])),
+      {
+        hubVersion: 'hub-test',
+        validateFrames: true,
+      }
+    );
 
     try {
-      const request = connection.client.request('snapshot.hash', {
-        path: '/workspace/file.txt',
+      const request = connection.client.request('external-agent.discover', {
+        targetIds: ['codex'],
+        timeoutMs: 1_000,
       });
       await expect(request).rejects.toMatchObject({
         name: 'RuntimeRemoteError',
         code: 'METHOD_UNSUPPORTED',
       });
+      await expect(
+        connection.client.request('snapshot.hash', { path: '/workspace/file.txt' })
+      ).resolves.toEqual({ hash: 'still-connected' });
     } finally {
-      connection.close();
+      await connection.close();
     }
+  });
+
+  it('settles every close when teardown throws synchronously', async () => {
+    // `onClose` is `() => void | Promise<void>`, so a synchronous throw is in
+    // the type. It has to become a rejection of the memoized promise: a memo
+    // left pending would make every later `close()` — `serve()`'s stop path,
+    // the in-process transport's — wait forever.
+    const host = new RuntimeHost({
+      runtimeVersion: 'runtime-test',
+      manifest,
+      handlers: new Map(),
+      onClose: () => {
+        throw new Error('Teardown refused.');
+      },
+    });
+
+    await expect(host.close()).rejects.toThrow('Teardown refused.');
+    await expect(host.close()).rejects.toThrow('Teardown refused.');
   });
 
   it('rejects incompatible protocol versions before accepting requests', async () => {

@@ -34,6 +34,48 @@ describe('capabilityManifestFromHealth', () => {
     expect(manifest.features.fsRead).toBe(true);
     expect(manifest.features.fsWrite).toBe(false);
     expect(manifest.features.shell).toBe(false);
+    expect(manifest.features.externalAgents).toBe(false);
     expect(manifest.shells).toEqual([]);
+  });
+
+  it('preserves runtime targets and an explicit isolation attestation across refreshes', () => {
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: { ...RUNTIME_CONSENT_PRESETS.full, externalAgents: true },
+      externalAgents: {
+        targets: ['codex'],
+        identityIsolation: {
+          method: 'single-user-host',
+          credentialHomeFingerprint: 'credential-home-v1',
+        },
+        liveSessionCount: 0,
+        liveSessions: [],
+      },
+    };
+
+    expect(capabilityManifestFromHealth(report)).toMatchObject({
+      features: { externalAgents: true },
+      externalAgents: ['codex'],
+      identityIsolation: {
+        method: 'single-user-host',
+        credentialHomeFingerprint: 'credential-home-v1',
+      },
+    });
+  });
+
+  it('does not infer adapter support or isolation from an older health report', () => {
+    const { externalAgents: _externalAgents, ...oldAllow } = RUNTIME_CONSENT_PRESETS.readonly;
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'custom',
+      allow: oldAllow,
+    };
+
+    const manifest = capabilityManifestFromHealth(report);
+
+    expect(manifest.features.externalAgents).toBe(false);
+    expect(manifest.externalAgents).toBeUndefined();
+    expect(manifest.identityIsolation).toBeUndefined();
   });
 });

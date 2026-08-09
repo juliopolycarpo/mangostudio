@@ -1,6 +1,7 @@
 import {
   connectInProcessRuntime,
   createLocalRuntimeHost,
+  createSingleUserHostExternalAgentIsolation,
   createSlotConsentSource,
   type InProcessRuntimeConnection,
   RuntimeRemoteError,
@@ -15,10 +16,12 @@ import {
   LOCAL_ENVIRONMENT_NAME,
   SshFailureReasonSchema,
 } from '@mangostudio/shared/environments';
+import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 import { Value } from '@sinclair/typebox/value';
 import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
+import { getDb } from '../../db/database';
 import { getVersion } from '../../lib/config';
 import { resolveRuntimeLaunchCommand } from '../../lib/runtime-paths';
 import {
@@ -64,6 +67,26 @@ export interface ManagedRuntimeConnection {
   readonly client: RuntimeClient;
   /** May resolve when an out-of-process runtime is gone; in-process is immediate. */
   close(reason?: RuntimeConnectionCloseReason): void | Promise<void>;
+}
+
+/**
+ * Closes a connection the hub is no longer waiting on.
+ *
+ * `close` now reaches the runtime's own teardown — MCP sessions, and vendor
+ * process trees an external-agent session owns — so it can reject. Every site
+ * that drops the returned promise has to say so here instead: an unhandled
+ * rejection from a superseded connection would take the hub process down.
+ */
+function closeDetached(
+  connection: ManagedRuntimeConnection,
+  reason?: RuntimeConnectionCloseReason
+): void {
+  void Promise.resolve(connection.close(reason)).catch((error: unknown) => {
+    console.warn(
+      '[runtime] Releasing a runtime connection failed:',
+      error instanceof Error ? error.message : 'unknown error'
+    );
+  });
 }
 
 export type RuntimeEnvironmentResolver = (
@@ -342,7 +365,7 @@ export class RuntimeConnectionManager {
       })
       .then((connection) => {
         if (entry.revision !== revision) {
-          connection.close();
+          closeDetached(connection);
           throw unavailable('Runtime connection was closed.');
         }
         entry.connection = connection;
@@ -427,7 +450,7 @@ export class RuntimeConnectionManager {
     const superseded = entry.connection;
     entry.connection = undefined;
     entry.connecting = undefined;
-    void superseded?.close('superseded');
+    if (superseded) closeDetached(superseded, 'superseded');
     entry.status = { state: 'connecting', ...this.#cachedPeer(entry) };
     this.#publish(userId);
 
@@ -442,7 +465,7 @@ export class RuntimeConnectionManager {
       throw normalizeUnavailable(error);
     }
     if (entry.revision !== revision) {
-      void connection.close('superseded');
+      closeDetached(connection, 'superseded');
       throw unavailable('Runtime connection was superseded while it was handshaking.');
     }
 
@@ -630,7 +653,7 @@ export class RuntimeConnectionManager {
     if (!entry || entry.revision !== revision || !entry.connection) return;
 
     // The child is already gone; nothing waits on the kill that confirms it.
-    void entry.connection.close();
+    closeDetached(entry.connection);
     entry.connection = undefined;
     if (entry.expectedUpdateDisconnect) {
       entry.expectedUpdateDisconnect = false;
@@ -774,9 +797,17 @@ async function resolveEnvironment(
   return await environmentRepository.find(userId, environmentId);
 }
 
+interface LocalRuntimeOpenOptions {
+  readonly onUnavailable: () => void;
+  readonly authorizeWorkspace: (
+    canonicalPath: string,
+    signal: AbortSignal
+  ) => boolean | Promise<boolean>;
+  readonly identityIsolation?: ExternalIdentityIsolation;
+}
+
 async function connectLocalRuntime(
-  _definition: RuntimeEnvironmentDefinition,
-  onUnavailable: () => void
+  options: LocalRuntimeOpenOptions
 ): Promise<ManagedRuntimeConnection> {
   const version = getVersion();
   // Local runs in this process, but it is still a runtime on somebody's
@@ -787,6 +818,10 @@ async function connectLocalRuntime(
   const [probe] = (await probeRuntimeSlots()).filter((slot) => slot.slot === 'host');
   const host = createLocalRuntimeHost({
     runtimeVersion: version,
+    externalAgents: {
+      authorizeWorkspace: options.authorizeWorkspace,
+      ...(options.identityIsolation ? { identityIsolation: options.identityIsolation } : {}),
+    },
     consent: createSlotConsentSource({
       slot: 'host',
       ...(probe && !probe.error ? { initial: probe.config.allow } : {}),
@@ -796,8 +831,148 @@ async function connectLocalRuntime(
     hubVersion: version,
   });
   return {
-    client: new RuntimeClient(connection.client, onUnavailable),
+    client: new RuntimeClient(connection.client, options.onUnavailable),
     close: () => connection.close(),
+  };
+}
+
+async function isAuthorizedLocalWorkspace(
+  definition: RuntimeEnvironmentDefinition,
+  canonicalPath: string,
+  signal: AbortSignal
+): Promise<boolean> {
+  if (definition.id !== LOCAL_ENVIRONMENT_ID || !definition.userId) return false;
+  signal.throwIfAborted();
+  const query = getDb()
+    .selectFrom('chats')
+    .select('id')
+    .where('userId', '=', definition.userId)
+    .where('environmentId', '=', definition.id)
+    .where('workdir', '=', canonicalPath)
+    .limit(1)
+    .executeTakeFirst();
+  const aborted = Promise.withResolvers<never>();
+  const abort = () =>
+    aborted.reject(
+      signal.reason instanceof Error
+        ? signal.reason
+        : new Error('Local workspace authorization was cancelled.')
+    );
+  signal.addEventListener('abort', abort, { once: true });
+  try {
+    const chat = await Promise.race([query, aborted.promise]);
+    signal.throwIfAborted();
+    return chat !== undefined;
+  } finally {
+    signal.removeEventListener('abort', abort);
+  }
+}
+
+export interface LocalRuntimeConnectorOptions {
+  readonly open?: (options: LocalRuntimeOpenOptions) => Promise<ManagedRuntimeConnection>;
+  readonly isWorkspaceAuthorized?: (
+    definition: RuntimeEnvironmentDefinition,
+    canonicalPath: string,
+    signal: AbortSignal
+  ) => boolean | Promise<boolean>;
+}
+
+/**
+ * Binds the hub process's OS credential home to one MangoStudio user.
+ *
+ * Separate Local RuntimeHost instances still share the same OS account. The
+ * first authenticated owner may be attested while it is the only owner the
+ * process has served. If a second owner appears, every attested connection is
+ * closed before that owner connects and this connector permanently falls back
+ * to unproven isolation. Local filesystem and shell access keep working for
+ * both users, but neither can launch a vendor process through shared credentials.
+ */
+export function createLocalRuntimeConnector(
+  options: LocalRuntimeConnectorOptions = {}
+): RuntimeEnvironmentConnector {
+  const open = options.open ?? connectLocalRuntime;
+  const isWorkspaceAuthorized = options.isWorkspaceAuthorized ?? isAuthorizedLocalWorkspace;
+  let ownerUserId: string | undefined;
+  let multipleOwners = false;
+  let connectSerial: Promise<void> = Promise.resolve();
+  const active = new Set<{
+    readonly connection: ManagedRuntimeConnection;
+    readonly identityAttested: boolean;
+    readonly onUnavailable: () => void;
+  }>();
+
+  return (definition, onUnavailable) => {
+    const attempt = connectSerial.then(async () => {
+      if (definition.id !== LOCAL_ENVIRONMENT_ID) {
+        throw unavailable('Single-user-host attestation is reserved for the Local environment.');
+      }
+      if (!definition.userId) {
+        throw unavailable('The Local runtime requires a bound MangoStudio user.');
+      }
+      // CLI/setup probes use this documented stand-in when no authenticated user
+      // exists. They may inspect Local, but they neither consume nor establish
+      // the one real-user binding and therefore receive no identity attestation.
+      if (definition.userId === 'local') {
+        return await open({
+          onUnavailable,
+          authorizeWorkspace: (canonicalPath, signal) =>
+            isWorkspaceAuthorized(definition, canonicalPath, signal),
+        });
+      }
+      if (ownerUserId !== undefined && ownerUserId !== definition.userId) {
+        multipleOwners = true;
+      }
+      if (multipleOwners) {
+        const attested = [...active].filter((entry) => entry.identityAttested);
+        const closed = await Promise.allSettled(
+          attested.map(async (entry) => {
+            try {
+              await entry.connection.close('released');
+            } finally {
+              entry.onUnavailable();
+            }
+          })
+        );
+        if (closed.some((result) => result.status === 'rejected')) {
+          throw unavailable('Could not revoke Local single-user-host attestation.');
+        }
+        for (const entry of attested) {
+          active.delete(entry);
+        }
+      }
+
+      const identityIsolation = multipleOwners
+        ? undefined
+        : createSingleUserHostExternalAgentIsolation();
+      const connection = await open({
+        onUnavailable,
+        authorizeWorkspace: (canonicalPath, signal) =>
+          isWorkspaceAuthorized(definition, canonicalPath, signal),
+        ...(identityIsolation ? { identityIsolation } : {}),
+      });
+      // Do not let a failed first handshake reserve the OS credential home.
+      // Serialization above makes this the only successful claimant that can
+      // observe the binding as empty.
+      ownerUserId ??= definition.userId;
+      const entry = {
+        connection,
+        identityAttested: identityIsolation !== undefined,
+        onUnavailable,
+      };
+      active.add(entry);
+      return {
+        client: connection.client,
+        async close(reason) {
+          active.delete(entry);
+          await connection.close(reason);
+        },
+      };
+    });
+    connectSerial = attempt.then(
+      () => undefined,
+      () => undefined
+    );
+    return attempt;
   };
 }
 
@@ -885,7 +1060,7 @@ export function getRuntimeConnectionManager(): RuntimeConnectionManager {
   managerInstance ??= new RuntimeConnectionManager({
     resolveEnvironment,
     connectors: {
-      'in-process': connectLocalRuntime,
+      'in-process': createLocalRuntimeConnector(),
       stdio: connectStdioRuntime,
       wsl: connectWslRuntime,
       websocket: refuseDialInRuntime,

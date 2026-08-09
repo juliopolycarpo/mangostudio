@@ -22,12 +22,14 @@
  * worse than one rendering a stale capability.
  */
 
+import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
 import type {
   ExternalAgentAccount,
   ExternalAgentAuthState,
   ExternalAgentCapabilities,
   ExternalAgentDescriptor,
+  ExternalAgentModel,
   ExternalAgentTargetId,
   ExternalAgentUnavailableReason,
   ExternalSupportedConfiguration,
@@ -36,6 +38,8 @@ import {
   EXTERNAL_AGENT_TARGET_IDS,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
+import { onEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation-hooks';
+import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
 import {
   type EnvironmentProbingService,
   environmentProbingService,
@@ -62,6 +66,7 @@ export interface AuthoritativeAgentStatus {
   readonly authState?: ExternalAgentAuthState;
   readonly capabilities: ExternalAgentCapabilities;
   readonly supportedConfigurations?: readonly ExternalSupportedConfiguration[];
+  readonly models?: readonly ExternalAgentModel[];
   readonly account?: ExternalAgentAccount;
   readonly unavailableReason?: ExternalAgentUnavailableReason;
 }
@@ -84,13 +89,13 @@ export interface AuthoritativeAgentDiscovery {
 
 export interface ExternalAgentDiscoveryService {
   listExternalAgents(scope: ProbeScope): Promise<readonly ExternalAgentDescriptor[]>;
-  /** Drops cached authoritative answers; without an environment, for every one of them. */
-  resetCache(environmentId?: string): void;
+  /** Drops cached authoritative answers, optionally narrowed to environment and owner. */
+  resetCache(environmentId?: string, userId?: string): void;
 }
 
 export interface ExternalAgentDiscoveryOptions {
   readonly probingService?: EnvironmentProbingService;
-  /** Absent until plan 003 registers the runtime's adapters. */
+  /** Omit when no runtime adapter can provide an authoritative answer. */
   readonly authoritative?: AuthoritativeAgentDiscovery;
   readonly now?: () => number;
   readonly cacheTtlMs?: number;
@@ -121,6 +126,86 @@ const DEFAULT_TIMEOUT_MS = 5_000;
  * that wanted it has gone.
  */
 const DEFAULT_MAX_CONCURRENT_PER_ENVIRONMENT = 2;
+
+type RuntimeDiscoveryClient = Pick<RuntimeClient, 'manifest'> & {
+  readonly externalAgents: Pick<RuntimeClient['externalAgents'], 'discover'>;
+};
+
+export type RuntimeClientResolver = (
+  userId: string,
+  environmentId: string
+) => Promise<RuntimeDiscoveryClient>;
+
+/**
+ * Bridges product discovery to the runtime that owns the vendor process.
+ *
+ * The manifest checks are deliberately ordered. An old runtime has no target
+ * entry at all; a new runtime may advertise an adapter while its owner refuses
+ * it; and neither is permission to infer an OS-identity guarantee.
+ */
+export function createRuntimeAuthoritativeAgentDiscovery(
+  resolveRuntimeClient: RuntimeClientResolver = getRuntimeClient,
+  timeoutMs = DEFAULT_TIMEOUT_MS
+): AuthoritativeAgentDiscovery {
+  return {
+    async describe(scope, targetIds, { signal }) {
+      const client = await resolveRuntimeClient(scope.userId, scope.environmentId);
+      const supportedTargets = new Set(client.manifest.externalAgents ?? []);
+      const refused = new Map<ExternalAgentTargetId, AuthoritativeAgentStatus>();
+      const discoverable: ExternalAgentTargetId[] = [];
+
+      for (const targetId of targetIds) {
+        let unavailableReason: ExternalAgentUnavailableReason | undefined;
+        if (!supportedTargets.has(targetId)) unavailableReason = 'runtime-unsupported';
+        else if (client.manifest.features.externalAgents !== true) {
+          unavailableReason = 'runtime-denied';
+        } else if (!client.manifest.identityIsolation) {
+          unavailableReason = 'isolation-unproven';
+        }
+
+        if (unavailableReason) {
+          refused.set(targetId, {
+            targetId,
+            capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+            unavailableReason,
+          });
+        } else {
+          discoverable.push(targetId);
+        }
+      }
+
+      const byTarget = new Map<ExternalAgentTargetId, AuthoritativeAgentStatus>();
+      if (discoverable.length > 0) {
+        try {
+          const discovered = await client.externalAgents.discover(
+            { targetIds: discoverable, timeoutMs },
+            { signal, timeoutMs }
+          );
+          for (const descriptor of discovered.descriptors) {
+            byTarget.set(descriptor.targetId, descriptor);
+          }
+        } catch (error) {
+          if (!(error instanceof RuntimeConsentDeniedError)) throw error;
+          // Consent can change after the cached manifest check but before the
+          // request reaches the runtime gate. Preserve that authoritative
+          // refusal instead of degrading it to the optimistic cheap scan.
+          for (const targetId of discoverable) {
+            refused.set(targetId, {
+              targetId,
+              capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+              unavailableReason: 'runtime-denied',
+            });
+          }
+        }
+      }
+
+      return targetIds.flatMap((targetId) => {
+        const status = refused.get(targetId) ?? byTarget.get(targetId);
+        return status ? [status] : [];
+      });
+    },
+  };
+}
 
 // Unit separator, not a plain space: userId/environmentId are unlikely to
 // contain either, but the escaped form keeps this file text, not binary, in
@@ -162,6 +247,7 @@ interface DescriptorInput {
   readonly version: string | undefined;
   readonly capabilities: ExternalAgentCapabilities;
   readonly supportedConfigurations: readonly ExternalSupportedConfiguration[];
+  readonly models: readonly ExternalAgentModel[] | undefined;
   readonly account: ExternalAgentAccount | undefined;
   readonly adapterReason: ExternalAgentUnavailableReason | undefined;
 }
@@ -192,6 +278,7 @@ function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
     ...(input.installed && input.authState !== 'signed-in' && loginCommand && { loginCommand }),
     capabilities: input.capabilities,
     supportedConfigurations: input.supportedConfigurations,
+    ...(input.models && { models: input.models }),
     // Personal data, returned only to the user who owns the environment and
     // never persisted past this response.
     ...(input.account && { account: input.account }),
@@ -215,6 +302,7 @@ function descriptorFrom(
     // No adapter answered, so no capability is real.
     capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
     supportedConfigurations: [],
+    models: undefined,
     account: undefined,
     adapterReason: undefined,
   });
@@ -234,6 +322,7 @@ function mergeAuthoritative(
     version: authoritative.version ?? base.version,
     capabilities: authoritative.capabilities,
     supportedConfigurations: authoritative.supportedConfigurations ?? [],
+    models: authoritative.models,
     account: authoritative.account,
     adapterReason: authoritative.unavailableReason,
   });
@@ -271,6 +360,7 @@ async function baseDescriptors(
         version: undefined,
         capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
         supportedConfigurations: [],
+        models: undefined,
         account: undefined,
         adapterReason: 'environment-unreachable',
       })
@@ -290,7 +380,15 @@ function applyReleaseGate(descriptor: ExternalAgentDescriptor): ExternalAgentDes
 
 interface CacheEntry {
   readonly expiresAt: number;
+  readonly generation: number;
   readonly byTarget: ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>;
+}
+
+interface InflightEntry {
+  readonly promise: Promise<ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>>;
+  readonly generation: number;
+  readonly environmentId: string;
+  readonly userId: string;
 }
 
 export function createExternalAgentDiscoveryService(
@@ -304,11 +402,12 @@ export function createExternalAgentDiscoveryService(
   const maxConcurrent =
     options.maxConcurrentPerEnvironment ?? DEFAULT_MAX_CONCURRENT_PER_ENVIRONMENT;
 
-  const cache = new Map<string, CacheEntry & { readonly environmentId: string }>();
-  const inflight = new Map<
+  const cache = new Map<
     string,
-    Promise<ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>>
+    CacheEntry & { readonly environmentId: string; readonly userId: string }
   >();
+  const inflight = new Map<string, InflightEntry>();
+  const generations = new Map<string, number>();
   const running = new Map<string, number>();
 
   function tryEnter(key: string): boolean {
@@ -374,21 +473,31 @@ export function createExternalAgentDiscoveryService(
     targetIds: readonly ExternalAgentTargetId[]
   ): Promise<ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>> {
     const key = scopeKey(scope);
+    const generation = generations.get(key) ?? 0;
     const cached = cache.get(key);
-    if (cached && cached.expiresAt > now()) return Promise.resolve(cached.byTarget);
+    if (cached && cached.generation === generation && cached.expiresAt > now()) {
+      return Promise.resolve(cached.byTarget);
+    }
 
     const existing = inflight.get(key);
-    if (existing) return existing;
+    if (existing?.generation === generation) return existing.promise;
 
     if (!tryEnter(key)) return Promise.resolve(new Map());
 
     const pending = probeAuthoritative(scope, targetIds, key)
       .then((byTarget) => {
-        cache.set(key, {
-          expiresAt: now() + cacheTtlMs,
-          byTarget,
-          environmentId: scope.environmentId,
-        });
+        // A reset can happen while the subprocess is still answering. Its old
+        // result may satisfy the caller that started it, but must never
+        // repopulate the cache for the newer environment generation.
+        if ((generations.get(key) ?? 0) === generation) {
+          cache.set(key, {
+            expiresAt: now() + cacheTtlMs,
+            generation,
+            byTarget,
+            environmentId: scope.environmentId,
+            userId: scope.userId,
+          });
+        }
         return byTarget;
       })
       .catch((error: unknown) => {
@@ -405,10 +514,15 @@ export function createExternalAgentDiscoveryService(
         // The concurrency slot is released inside `probeAuthoritative`, tied to
         // the underlying `describe()` promise rather than to this wrapper —
         // releasing it here too would double-decrement `running`.
-        inflight.delete(key);
+        if (inflight.get(key)?.generation === generation) inflight.delete(key);
       });
 
-    inflight.set(key, pending);
+    inflight.set(key, {
+      promise: pending,
+      generation,
+      environmentId: scope.environmentId,
+      userId: scope.userId,
+    });
     return pending;
   }
 
@@ -437,16 +551,23 @@ export function createExternalAgentDiscoveryService(
         .sort((left, right) => (order.get(left.targetId) ?? 0) - (order.get(right.targetId) ?? 0));
     },
 
-    resetCache(environmentId) {
-      if (!environmentId) {
-        cache.clear();
-        return;
-      }
-      for (const [key, entry] of [...cache.entries()]) {
-        if (entry.environmentId === environmentId) cache.delete(key);
+    resetCache(environmentId, userId) {
+      const keys = new Set([...cache.keys(), ...inflight.keys()]);
+      for (const key of keys) {
+        const entry = cache.get(key) ?? inflight.get(key);
+        if (!entry) continue;
+        const environmentMatches = !environmentId || entry.environmentId === environmentId;
+        const userMatches = !userId || entry.userId === userId;
+        if (!environmentMatches || !userMatches) continue;
+        generations.set(key, (generations.get(key) ?? 0) + 1);
+        cache.delete(key);
       }
     },
   };
 }
 
-export const externalAgentDiscoveryService = createExternalAgentDiscoveryService();
+export const externalAgentDiscoveryService = createExternalAgentDiscoveryService({
+  authoritative: createRuntimeAuthoritativeAgentDiscovery(),
+});
+
+onEnvironmentInvalidation((userId) => externalAgentDiscoveryService.resetCache(undefined, userId));

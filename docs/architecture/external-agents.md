@@ -41,6 +41,24 @@ Two concrete ways this could be violated, both closed by construction:
 | Contracts                             | Shared           | Schema-first in `apps/shared/src/external-agents/`, browser-safe, imported by hub, runtime and frontend. |
 | Transcript, rendering and persistence | Hub + frontend   | The normalized event stream is stored and drawn; it is never fed back to a MangoStudio model as context. |
 
+## Execution admission
+
+Adapter support, runtime consent and OS identity isolation are separate proofs. A Local runtime
+may attest `single-user-host` only after one authenticated MangoStudio user connects successfully.
+If a second user appears, the hub closes every attested Local connection before continuing without
+an attestation. Ordinary Local runtime features remain available, but external agents stay hidden
+because the credential home is no longer proven to belong to one MangoStudio user.
+
+Workspace access is independently fail-closed. Before an adapter can launch, the runtime requires
+canonical directory paths and asks its host to authorize each one. The production Local host accepts
+only an exact canonical workdir already stored on a Local chat owned by the same user. Hosts without
+an explicit authorization source deny every workspace.
+
+**Opening a session is the only place a workspace root is authorized.** Turn configuration reaches
+the vendor verbatim as its sandbox roots, so a turn may name a subset of the roots its session
+opened with and never a root outside them — including one the host's own policy would otherwise
+allow. An adapter that wants a wider set has to make the caller open a new session for it.
+
 ## Why a separate bounded context
 
 An external agent is not an `AgentProfile` and not an `AIProvider`.
@@ -79,15 +97,18 @@ each one do* takes two tiers, in this order:
 2. **The authoritative pass** — the runtime's discovery operation, which runs the vendor's own
    structured status command and answers from the **adapter that would run the turn**. Where the
    two disagree, this one wins. `unknown` survives only when the status command is unavailable,
-   times out, or returns something unrecognized.
+   times out, or returns something unrecognized. A live runtime consent refusal remains the
+   authoritative `runtime-denied` result even when the handshake manifest was cached before the
+   consent change.
 
 The hub spawns no vendor CLI and keeps no second capability table.
 
 **Discovery is not free.** The authoritative pass is a subprocess on someone else's machine, so it
 carries a stated budget: a per-call timeout, a cache TTL per (user, environment), a single-flight
 so a burst of selector renders produces one probe, and a cap on concurrent discoveries per
-environment. Every failure — refused, timed out, unreachable, over the cap — degrades to the cheap
-pass. Discovery never fails the request: an environment that cannot be reached at all is answered
+environment. Ordinary probe failures — timed out, unreachable, over the cap — degrade to the cheap
+pass; an owner refusal remains unavailable. Discovery never fails the request: an environment that
+cannot be reached at all is answered
 with one unavailable descriptor per target, because a selector that cannot render is worse than
 one showing a greyed row with a reason.
 
@@ -95,6 +116,10 @@ Entry points:
 
 - `apps/shared/src/external-agents/schemas.ts` — the contracts
 - `apps/api/src/modules/external-agents/application/external-agent-discovery.ts` — the two tiers
+- `apps/api/src/services/runtime-client/runtime-client.ts` — the typed hub facade and event filter
+- `apps/runtime/src/services/external-agents/` — adapter registry, session supervisor, output
+  normalization, process framing and process-tree cleanup
+- `apps/runtime/src/registry.ts` — method wiring, consent boundary and lifecycle close
 - `apps/api/src/modules/external-agents/domain/adapter-descriptors.ts` — product declarations
 - `apps/api/src/modules/external-agents/http/external-agent-routes.ts` — `GET /api/external-agents`
 

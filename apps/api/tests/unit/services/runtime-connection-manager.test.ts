@@ -11,16 +11,19 @@ import {
   type RuntimeHealthReport,
 } from '@mangostudio/shared/runtime-home';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
+import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
 import { capabilityManifestFromHealth } from '../../../src/services/runtime-client/manifest-from-health';
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
 import {
+  createLocalRuntimeConnector,
   getRuntimeClient,
   type ManagedRuntimeConnection,
   RuntimeConnectionManager,
   type RuntimeEnvironmentConnector,
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { insertTestChat, insertTestUser } from '../../support/factories';
 
 const TEST_MANIFEST: RuntimeCapabilityManifest = {
   platform: 'linux',
@@ -66,6 +69,17 @@ function definition(transportKind: EnvironmentTransportKind = 'stdio', config: u
     name: 'Devbox',
     transportKind,
     config,
+    enabled: true,
+  };
+}
+
+function localDefinition(userId: string) {
+  return {
+    id: 'local',
+    userId,
+    name: 'Local',
+    transportKind: 'in-process' as const,
+    config: {},
     enabled: true,
   };
 }
@@ -551,6 +565,38 @@ describe('RuntimeConnectionManager', () => {
     expect(manager.getStatus('user-2', 'buildbox').state).toBe('disconnected');
   });
 
+  it('contains a superseded connection whose teardown rejects', async () => {
+    // `close` now reaches the runtime's own teardown, and an external-agent
+    // session owns vendor process trees that can refuse to reap. Nothing awaits
+    // a superseded close, so an unhandled rejection here would end the hub.
+    const rejecting: ManagedRuntimeConnection = {
+      client: { manifest: TEST_MANIFEST } as RuntimeClient,
+      close: () => Promise.reject(new Error('vendor process tree would not reap')),
+    };
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {},
+    });
+    const warnings: string[] = [];
+    const realWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '));
+    };
+
+    try {
+      await manager.adopt('user-1', 'devbox', () => Promise.resolve(rejecting));
+      await manager.adopt('user-1', 'devbox', () =>
+        Promise.resolve(fakeConnection(() => undefined))
+      );
+      await flushMicrotasks();
+    } finally {
+      console.warn = realWarn;
+    }
+
+    expect(warnings.join('\n')).toContain('vendor process tree would not reap');
+    expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+  });
+
   it('reports the runtime error code on the status while still throwing RUNTIME_UNAVAILABLE', async () => {
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
@@ -622,6 +668,184 @@ describe('RuntimeConnectionManager', () => {
     setRuntimeConnectionManagerForTests(manager);
 
     expect(await getRuntimeClient('user-1', 'devbox')).toBe(expected);
+  });
+
+  it('revokes Local attestation before serving a second MangoStudio user', async () => {
+    const connector = createLocalRuntimeConnector();
+    let firstUnavailable = 0;
+    let sameOwnerUnavailable = 0;
+    await expect(
+      connector(
+        { ...localDefinition('user-0'), id: 'not-local' },
+        () => undefined,
+        () => undefined
+      )
+    ).rejects.toMatchObject({
+      code: 'RUNTIME_UNAVAILABLE',
+      message: expect.stringContaining('reserved for the Local environment'),
+    });
+    const systemProbe = await connector(
+      localDefinition('local'),
+      () => undefined,
+      () => undefined
+    );
+    const first = await connector(
+      localDefinition('user-1'),
+      () => {
+        firstUnavailable += 1;
+      },
+      () => undefined
+    );
+    const sameOwner = await connector(
+      localDefinition('user-1'),
+      () => {
+        sameOwnerUnavailable += 1;
+      },
+      () => undefined
+    );
+    const second = await connector(
+      localDefinition('user-2'),
+      () => undefined,
+      () => undefined
+    );
+    const firstAfterTransition = await connector(
+      localDefinition('user-1'),
+      () => undefined,
+      () => undefined
+    );
+
+    try {
+      expect(systemProbe.client.manifest.identityIsolation).toBeUndefined();
+      expect(first.client.manifest.identityIsolation).toMatchObject({
+        method: 'single-user-host',
+      });
+      expect(sameOwner.client.manifest.identityIsolation).toEqual(
+        first.client.manifest.identityIsolation
+      );
+      expect(second.client.manifest.identityIsolation).toBeUndefined();
+      expect(firstAfterTransition.client.manifest.identityIsolation).toBeUndefined();
+      expect({ firstUnavailable, sameOwnerUnavailable }).toEqual({
+        firstUnavailable: 1,
+        sameOwnerUnavailable: 1,
+      });
+    } finally {
+      await firstAfterTransition.close();
+      await second.close();
+      await sameOwner.close();
+      await first.close();
+      await systemProbe.close();
+    }
+  });
+
+  it('authorizes only Local chat workdirs persisted for the same owner', async () => {
+    const [owner, other] = await Promise.all([insertTestUser(), insertTestUser()]);
+    const [ownedChat, otherChat, remoteChat] = await Promise.all([
+      insertTestChat(owner.id),
+      insertTestChat(other.id),
+      insertTestChat(owner.id),
+    ]);
+    const ownedWorkdir = '/workspace/owned';
+    const otherWorkdir = '/workspace/other';
+    const remoteWorkdir = '/workspace/remote';
+    await Promise.all([
+      getDb()
+        .updateTable('chats')
+        .set({ workdir: ownedWorkdir, environmentId: 'local' })
+        .where('id', '=', ownedChat.id)
+        .execute(),
+      getDb()
+        .updateTable('chats')
+        .set({ workdir: otherWorkdir, environmentId: 'local' })
+        .where('id', '=', otherChat.id)
+        .execute(),
+      getDb()
+        .updateTable('chats')
+        .set({ workdir: remoteWorkdir, environmentId: 'devbox' })
+        .where('id', '=', remoteChat.id)
+        .execute(),
+    ]);
+
+    let authorizeWorkspace:
+      | ((canonicalPath: string, signal: AbortSignal) => boolean | Promise<boolean>)
+      | undefined;
+    const connector = createLocalRuntimeConnector({
+      open: (options) => {
+        authorizeWorkspace = options.authorizeWorkspace;
+        return Promise.resolve(
+          fakeConnection(() => undefined, {
+            ...TEST_MANIFEST,
+            ...(options.identityIsolation ? { identityIsolation: options.identityIsolation } : {}),
+          })
+        );
+      },
+    });
+    const connection = await connector(
+      localDefinition(owner.id),
+      () => undefined,
+      () => undefined
+    );
+
+    try {
+      expect(authorizeWorkspace).toBeDefined();
+      const authorize = authorizeWorkspace as NonNullable<typeof authorizeWorkspace>;
+      const signal = new AbortController().signal;
+      expect(await authorize(ownedWorkdir, signal)).toBe(true);
+      expect(await authorize(otherWorkdir, signal)).toBe(false);
+      expect(await authorize(remoteWorkdir, signal)).toBe(false);
+      expect(await authorize('/workspace/missing', signal)).toBe(false);
+      const cancelled = new AbortController();
+      cancelled.abort(new Error('authorization cancelled'));
+      await expect(authorize(ownedWorkdir, cancelled.signal)).rejects.toThrow(
+        'authorization cancelled'
+      );
+    } finally {
+      await connection.close();
+    }
+  });
+
+  it('binds the Local owner only after a successful connection', async () => {
+    const identities: Array<RuntimeCapabilityManifest['identityIsolation']> = [];
+    let attempts = 0;
+    const connector = createLocalRuntimeConnector({
+      isWorkspaceAuthorized: () => true,
+      open: (options) => {
+        identities.push(options.identityIsolation);
+        attempts += 1;
+        if (attempts === 1) {
+          return Promise.reject(new Error('first handshake failed'));
+        }
+        return Promise.resolve(
+          fakeConnection(() => undefined, {
+            ...TEST_MANIFEST,
+            ...(options.identityIsolation ? { identityIsolation: options.identityIsolation } : {}),
+          })
+        );
+      },
+    });
+
+    await expect(
+      connector(
+        localDefinition('user-1'),
+        () => undefined,
+        () => undefined
+      )
+    ).rejects.toThrow('first handshake failed');
+    const second = await connector(
+      localDefinition('user-2'),
+      () => undefined,
+      () => undefined
+    );
+
+    try {
+      expect(identities).toHaveLength(2);
+      expect(identities[0]).toMatchObject({ method: 'single-user-host' });
+      expect(identities[1]).toMatchObject({ method: 'single-user-host' });
+      expect(second.client.manifest.identityIsolation).toMatchObject({
+        method: 'single-user-host',
+      });
+    } finally {
+      await second.close();
+    }
   });
 
   it('re-reads a stale manifest in the background, once, without blocking the read', async () => {

@@ -8,6 +8,19 @@ import type {
 } from '@mangostudio/shared/environments';
 import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
 import type {
+  ExternalAgentAckResult,
+  ExternalAgentCancelParams,
+  ExternalAgentCloseParams,
+  ExternalAgentDiscoverParams,
+  ExternalAgentDiscoverResult,
+  ExternalAgentEventEnvelope,
+  ExternalAgentOpenParams,
+  ExternalAgentOpenResult,
+  ExternalAgentRespondParams,
+  ExternalAgentTurnParams,
+  ExternalAgentTurnResult,
+} from '@mangostudio/shared/external-agents';
+import type {
   LibraryBackupSet,
   LibraryInstance,
   LibraryLocationId,
@@ -41,6 +54,24 @@ import type {
 } from './services/library/write-shapes';
 
 export const RUNTIME_ABSENT_HASH = 'absent';
+
+export type {
+  ExternalAgentAckResult,
+  ExternalAgentCancelParams,
+  ExternalAgentCloseParams,
+  ExternalAgentDiscoverParams,
+  ExternalAgentDiscoverResult,
+  ExternalAgentEventEnvelope,
+  ExternalAgentOpenParams,
+  ExternalAgentOpenResult,
+  ExternalAgentRespondParams,
+  ExternalAgentTurnParams,
+  ExternalAgentTurnResult,
+} from '@mangostudio/shared/external-agents';
+
+/** Topic carrying ordered, semantic vendor-agent events to the hub. */
+export const RUNTIME_EXTERNAL_AGENT_TOPIC = 'external-agent.event' as const;
+export type RuntimeExternalAgentEvent = ExternalAgentEventEnvelope;
 
 export interface RuntimeBeforeSnapshot {
   readonly exists: boolean;
@@ -1014,6 +1045,30 @@ export interface RuntimeMethodMap {
   'mcp.disconnect': {
     readonly params: RuntimeMcpServerParams;
     readonly result: RuntimeMcpAckResult;
+  };
+  'external-agent.discover': {
+    readonly params: ExternalAgentDiscoverParams;
+    readonly result: ExternalAgentDiscoverResult;
+  };
+  'external-agent.open': {
+    readonly params: ExternalAgentOpenParams;
+    readonly result: ExternalAgentOpenResult;
+  };
+  'external-agent.turn': {
+    readonly params: ExternalAgentTurnParams;
+    readonly result: ExternalAgentTurnResult;
+  };
+  'external-agent.respond': {
+    readonly params: ExternalAgentRespondParams;
+    readonly result: ExternalAgentAckResult;
+  };
+  'external-agent.cancel': {
+    readonly params: ExternalAgentCancelParams;
+    readonly result: ExternalAgentAckResult;
+  };
+  'external-agent.close': {
+    readonly params: ExternalAgentCloseParams;
+    readonly result: ExternalAgentAckResult;
   };
   'probing.runtimes': {
     readonly params: RuntimeProbeRuntimesParams;
