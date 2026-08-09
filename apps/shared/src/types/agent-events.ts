@@ -227,6 +227,13 @@ export interface ExternalApprovalPart {
  * `completedCalls` / `incompleteCalls` describe MangoStudio's own tool loop.
  * What an external turn needs recorded instead is which session and native turn
  * produced the transcript, how far the ordered stream got, and why it stopped.
+ *
+ * It is also the message-level marker a renderer keys off. Every `text` and
+ * `thinking` part in a message carrying this one was written by the vendor, not
+ * by MangoStudio, and vendor text is rendered as **plain text, never markdown or
+ * HTML** — see `docs/architecture/external-agents.md`. A renderer that treats
+ * such a message like any other assistant message would interpret vendor-
+ * controlled markup as links, images and formatting.
  */
 export interface ExternalTurnPart {
   type: 'external_turn';
