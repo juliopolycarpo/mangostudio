@@ -17,6 +17,8 @@ import {
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getDefaultFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
+import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
+import { reconcileExternalTurns } from '../modules/external-agents/application/external-turn-recovery';
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { closeAllMcpClients } from '../services/mcp/connection-manager';
@@ -58,15 +60,19 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   const { port, host } = cfg.server;
 
   await runMigrations();
+  // External turns first: they carry their own terminal vocabulary, and the
+  // generic sweep below would clear the same rows without recording why.
+  await reconcileExternalTurns({ reason: 'hub-restarted' }, getDb());
   await reconcileStaleTurns({ reasonCode: 'server_restart' }, getDb());
   await loadObservabilitySnapshot();
   const frontendDir = getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getDefaultFrontendDir();
   registerFrontend(app, frontendDir);
 
   listenOrExit(port, host);
-  staleTurnReconcileSweep = startStaleTurnReconcileSweep(() =>
-    reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb())
-  );
+  staleTurnReconcileSweep = startStaleTurnReconcileSweep(async () => {
+    await reconcileExternalTurns({ reason: 'hub-restarted', isActive: isActiveTurn }, getDb());
+    return reconcileStaleTurns({ reasonCode: 'unknown', isActive: isActiveTurn }, getDb());
+  });
 
   registerShutdown();
 
@@ -129,6 +135,9 @@ function logRunning(host: string, port: number): void {
 async function gracefulStop(): Promise<void> {
   await staleTurnReconcileSweep?.stop();
   staleTurnReconcileSweep = null;
+  // Before the runtime connections close, so each session gets a real close
+  // rather than a dropped socket, and no vendor process outlives the hub.
+  await externalSessionManager.reapAll('hub-restarted');
   await flushObservabilitySnapshot();
   await closeAllMcpClients();
   await closeAllRuntimeConnections();
