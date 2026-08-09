@@ -8,6 +8,8 @@ export {
   ChatListSchema,
   type ChatRunnerConfiguration,
   ChatRunnerConfigurationSchema,
+  type ChatRunnerPermissions,
+  ChatRunnerPermissionsSchema,
   ChatSchema,
   type CompactChatBody,
   CompactChatBodySchema,

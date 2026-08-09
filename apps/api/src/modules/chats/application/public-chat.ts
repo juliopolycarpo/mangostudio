@@ -11,6 +11,7 @@ export function toPublicChat(record: ChatRecord, contextInfo?: Chat['contextInfo
     textModel: record.textModel,
     imageModel: record.imageModel,
     runner: record.runner,
+    runnerPermissions: record.runnerPermissions,
     workdir: record.workdir,
     environmentId: record.environmentId,
     restrictToolsToWorkdir: record.restrictToolsToWorkdir,

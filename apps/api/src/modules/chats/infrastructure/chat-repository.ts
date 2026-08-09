@@ -1,6 +1,10 @@
 import { isAgentId } from '@mangostudio/shared/agents';
-import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type { ChatRunnerConfiguration, ChatRunnerPermissions } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import {
+  normalizeApprovalRouting,
+  normalizePermissionLevel,
+} from '@mangostudio/shared/external-agents';
 import type { Kysely, Selectable, Updateable } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
@@ -37,6 +41,30 @@ type RunnerColumns = Pick<
   Selectable<Database['chats']>,
   'id' | 'runnerKind' | 'runnerAgentId' | 'runnerTargetId'
 >;
+
+/** Exactly what {@link toRunnerPermissions} reads. */
+type RunnerPermissionColumns = Pick<
+  Selectable<Database['chats']>,
+  'runnerPermissionLevel' | 'runnerApprovalRouting'
+>;
+
+/**
+ * Maps the two permission columns to the contract shape.
+ *
+ * NULL stays absent rather than becoming a default: the turn path normalizes an
+ * unmade choice restrictively, and the selector has to be able to tell "nothing
+ * chosen" from "read-only chosen" to show the vendor's own default instead of a
+ * radio the user never pressed. A value that is no longer in the union is
+ * dropped for the same reason — it is not a choice this build can honor.
+ */
+function toRunnerPermissions(row: RunnerPermissionColumns): ChatRunnerPermissions {
+  const level = normalizePermissionLevel(row.runnerPermissionLevel);
+  const routing = normalizeApprovalRouting(row.runnerApprovalRouting);
+  return {
+    ...(level.recognized ? { level: level.value } : {}),
+    ...(routing.recognized ? { routing: routing.value } : {}),
+  };
+}
 
 /**
  * Maps the flat `runnerKind`/`runnerAgentId`/`runnerTargetId` columns to the
@@ -86,6 +114,7 @@ function mapChatRow(row: Selectable<Database['chats']>): ChatRecord {
     textModel: row.textModel,
     imageModel: row.imageModel,
     runner: toRunnerConfiguration(row),
+    runnerPermissions: toRunnerPermissions(row),
     workdir: row.workdir,
     environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
@@ -108,6 +137,7 @@ export interface UpdateChatData {
   textModel?: string;
   imageModel?: string;
   runner?: ChatRunnerConfiguration;
+  runnerPermissions?: ChatRunnerPermissions;
   workdir?: string | null;
   environmentId?: string;
   restrictToolsToWorkdir?: boolean | null;
@@ -122,6 +152,7 @@ export interface ChatRecord {
   textModel: string | null;
   imageModel: string | null;
   runner: ChatRunnerConfiguration;
+  runnerPermissions: ChatRunnerPermissions;
   workdir: string | null;
   environmentId: string;
   restrictToolsToWorkdir: boolean | null;
@@ -166,6 +197,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     textModel: null,
     imageModel: null,
     runner: { kind: 'mangostudio', agentId: 'default' },
+    runnerPermissions: {},
     workdir: null,
     environmentId: data.environmentId ?? LOCAL_ENVIRONMENT_ID,
     restrictToolsToWorkdir: null,
@@ -184,6 +216,8 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
       textModel: chat.textModel,
       imageModel: chat.imageModel,
       ...runnerColumns(chat.runner),
+      runnerPermissionLevel: null,
+      runnerApprovalRouting: null,
       workdir: chat.workdir,
       environmentId: chat.environmentId,
       restrictToolsToWorkdir: null,
@@ -237,6 +271,13 @@ export async function updateChat(
   if (data.textModel !== undefined) dbUpdates.textModel = data.textModel;
   if (data.imageModel !== undefined) dbUpdates.imageModel = data.imageModel;
   if (data.runner !== undefined) Object.assign(dbUpdates, runnerColumns(data.runner));
+  if (data.runnerPermissions !== undefined) {
+    // Written as a pair: the two axes compose into one configuration the adapter
+    // vetted, and patching one while leaving the other stale is how an
+    // unsupported combination reaches a vendor.
+    dbUpdates.runnerPermissionLevel = data.runnerPermissions.level ?? null;
+    dbUpdates.runnerApprovalRouting = data.runnerPermissions.routing ?? null;
+  }
   if (data.workdir !== undefined) dbUpdates.workdir = data.workdir;
   if (data.environmentId !== undefined) dbUpdates.environmentId = data.environmentId;
   if (data.restrictToolsToWorkdir !== undefined) {
@@ -302,6 +343,7 @@ export async function verifyChatOwnership(
 /** Chat fields a generation turn needs; excludes the large persisted state blobs. */
 export interface OwnedChatRecord {
   runner: ChatRunnerConfiguration;
+  runnerPermissions: ChatRunnerPermissions;
   workdir: string | null;
   environmentId: string;
   restrictToolsToWorkdir: boolean | null;
@@ -319,6 +361,8 @@ export async function getOwnedChat(
       'runnerKind',
       'runnerAgentId',
       'runnerTargetId',
+      'runnerPermissionLevel',
+      'runnerApprovalRouting',
       'workdir',
       'environmentId',
       'restrictToolsToWorkdir',
@@ -329,6 +373,7 @@ export async function getOwnedChat(
   if (!row) return undefined;
   return {
     runner: toRunnerConfiguration(row),
+    runnerPermissions: toRunnerPermissions(row),
     workdir: row.workdir,
     environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
