@@ -240,6 +240,13 @@ describe('runtime external-agent protocol payloads', () => {
     expect(Value.Check(ExternalAgentEventEnvelopeSchema, { ...envelope, transportSeq: 1 })).toBe(
       false
     );
+    // Nothing produces this yet. The envelope is closed, so a consumer that
+    // predates a key drops the whole event instead of ignoring it — declaring
+    // the turn controller's key up front is what keeps two builds the protocol
+    // version calls compatible from silently losing every event.
+    expect(
+      Value.Check(ExternalAgentEventEnvelopeSchema, { ...envelope, idempotencyKey: 'message-1' })
+    ).toBe(true);
   });
 
   it('requires a closed, positive identity-isolation attestation', () => {

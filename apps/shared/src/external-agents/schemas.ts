@@ -735,6 +735,16 @@ export const ExternalAgentEventEnvelopeSchema = Type.Object(
     nativeTurnId: Type.Optional(ExternalAgentOpaqueIdSchema),
     sequence: Type.Integer({ minimum: 1 }),
     emittedAtMs: Type.Integer({ minimum: 0 }),
+    /**
+     * Reserved for the hub's turn controller, which deduplicates and retries
+     * against it. Declared before anything produces it on purpose: this
+     * envelope is closed, and a consumer built before the key existed fails
+     * the whole check and drops the event rather than ignoring the key —
+     * silently, since the topic listener has nowhere to report to. Adding it
+     * later would strand every pair of peers the protocol version calls
+     * compatible.
+     */
+    idempotencyKey: Type.Optional(ExternalAgentOpaqueIdSchema),
     event: ExternalAgentEventSchema,
   },
   { additionalProperties: false }

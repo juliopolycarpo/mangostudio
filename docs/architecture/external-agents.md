@@ -54,6 +54,11 @@ canonical directory paths and asks its host to authorize each one. The productio
 only an exact canonical workdir already stored on a Local chat owned by the same user. Hosts without
 an explicit authorization source deny every workspace.
 
+**Opening a session is the only place a workspace root is authorized.** Turn configuration reaches
+the vendor verbatim as its sandbox roots, so a turn may name a subset of the roots its session
+opened with and never a root outside them — including one the host's own policy would otherwise
+allow. An adapter that wants a wider set has to make the caller open a new session for it.
+
 ## Why a separate bounded context
 
 An external agent is not an `AgentProfile` and not an `AIProvider`.
