@@ -2696,6 +2696,7 @@ export const messages: Messages = {
     },
     unsupported: {
       codexProfileDisallowed: "This machine's Codex configuration does not allow that profile",
+      codexVersionTooOld: 'The Codex CLI on this machine is too old — upgrade it to use it here',
     },
     approval: {
       option: {

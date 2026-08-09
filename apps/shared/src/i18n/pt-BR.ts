@@ -2710,6 +2710,7 @@ export const messages = {
     },
     unsupported: {
       codexProfileDisallowed: 'A configuração do Codex nesta máquina não permite esse perfil',
+      codexVersionTooOld: 'O Codex CLI desta máquina é antigo demais — atualize para usá-lo aqui',
     },
     approval: {
       option: {

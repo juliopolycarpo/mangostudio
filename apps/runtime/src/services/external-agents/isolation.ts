@@ -20,6 +20,38 @@ import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-age
 export function createSingleUserHostExternalAgentIsolation(
   credentialHome: string = homedir()
 ): ExternalIdentityIsolation | undefined {
+  const identity = hostIdentity(credentialHome);
+  if (identity === undefined) return undefined;
+  return {
+    method: 'single-user-host',
+    credentialHomeFingerprint: `sha256:${createHash('sha256').update(identity).digest('hex')}`,
+  };
+}
+
+/**
+ * A key for digests that must not be reproducible off this machine.
+ *
+ * Some values an adapter reports are digests of low-entropy personal data — an
+ * email address above all — where a plain hash is not an identifier but a
+ * *confirmation oracle*: anyone holding the digest and a guess can check the
+ * guess offline. Keying the digest with something only this host knows removes
+ * that, while keeping the value stable across restarts so it can still do the
+ * one job it has, which is noticing that the identity behind it changed.
+ *
+ * Derived from the same material as the attestation above — the credential
+ * home's device and inode are the parts an outsider cannot guess — but through
+ * a **separate domain**, so publishing `credentialHomeFingerprint` never
+ * reveals this key. Callers must degrade rather than fall back to an unkeyed
+ * digest when it is `undefined`.
+ */
+export function hostLocalDigestKey(credentialHome: string = homedir()): string | undefined {
+  const identity = hostIdentity(credentialHome);
+  if (identity === undefined) return undefined;
+  return createHash('sha256').update(`mangostudio/host-digest-key\0${identity}`).digest('hex');
+}
+
+/** The unpublished material both digests above are built from. */
+function hostIdentity(credentialHome: string): string | undefined {
   let home: string;
   let info: ReturnType<typeof statSync>;
   try {
@@ -28,15 +60,5 @@ export function createSingleUserHostExternalAgentIsolation(
   } catch {
     return undefined;
   }
-  const identity = [
-    process.platform,
-    process.getuid?.() ?? 'no-uid',
-    home,
-    info.dev,
-    info.ino,
-  ].join('\0');
-  return {
-    method: 'single-user-host',
-    credentialHomeFingerprint: `sha256:${createHash('sha256').update(identity).digest('hex')}`,
-  };
+  return [process.platform, process.getuid?.() ?? 'no-uid', home, info.dev, info.ino].join('\0');
 }

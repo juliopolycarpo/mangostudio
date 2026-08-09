@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import type { ExternalAgentEvent } from '@mangostudio/shared/external-agents';
 import type {
   ExternalAgentAdapterContext,
@@ -6,6 +7,7 @@ import type {
 } from '../../../src/services/external-agents/adapter';
 import { CodexAppServerAdapter } from '../../../src/services/external-agents/codex/adapter';
 import type { ExternalAgentManagedProcess } from '../../../src/services/external-agents/process';
+import { TURN_ID } from '../../support/codex-fixtures';
 import {
   createFakeCodexProcess,
   type FakeCodexOptions,
@@ -105,13 +107,22 @@ describe('codex adapter — discovery', () => {
     expect(descriptor.models?.[0]).toMatchObject({ id: 'gpt-5.6-sol', isDefault: true });
   });
 
-  it('never returns the raw email, and fingerprints it instead', async () => {
+  it('never returns the raw email, and fingerprints it under a host-local key', async () => {
     const adapter = new CodexAppServerAdapter();
     const descriptor = await adapter.discover(harness().context);
 
     expect(JSON.stringify(descriptor)).not.toContain('someone@example.com');
     expect(descriptor.account).toMatchObject({ label: 'ChatGPT', planType: 'plus' });
     expect(descriptor.account?.fingerprint).toMatch(/^[0-9a-f]{32}$/);
+
+    // An email is not enough entropy to hash: an unkeyed digest is reproducible
+    // by anyone holding the descriptor and a guess, which is the personal data
+    // the label was meant to keep on this machine.
+    const unkeyed = createHash('sha256')
+      .update('codex:someone@example.com')
+      .digest('hex')
+      .slice(0, 32);
+    expect(descriptor.account?.fingerprint).not.toBe(unkeyed);
   });
 
   it('reports a disallowed profile as a policy refusal, not a MangoStudio limitation', async () => {
@@ -141,6 +152,34 @@ describe('codex adapter — discovery', () => {
 
     expect(descriptor).toMatchObject({ installed: false, loginCommand: 'codex login' });
     expect(descriptor.supportedConfigurations).toEqual([]);
+  });
+
+  it('offers nothing selectable for a Codex too old to open a session', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness({ banner: 'codex-cli 0.140.0' });
+    const descriptor = await adapter.discover(test.context);
+
+    expect(descriptor).toMatchObject({ installed: true, version: 'codex-cli 0.140.0' });
+    expect(descriptor.supportedConfigurations).toHaveLength(6);
+    for (const entry of descriptor.supportedConfigurations) {
+      expect(entry.supported).toBe(false);
+      expect(entry.unsupportedReasonKey).toBe('externalAgents.unsupported.codexVersionTooOld');
+    }
+    // The selector cannot offer what `openSession` would refuse, and no
+    // `app-server` was launched to find that out.
+    expect(descriptor.capabilities.interactiveApprovals).toBe(false);
+    expect(test.server()).toBeUndefined();
+  });
+
+  it('walks the model catalog past its first page', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const descriptor = await adapter.discover(harness({ modelPages: 3 }).context);
+
+    expect(descriptor.models?.map((model) => model.id)).toEqual([
+      'gpt-5.6-sol',
+      'model-page-1',
+      'model-page-2',
+    ]);
   });
 });
 
@@ -173,6 +212,19 @@ describe('codex adapter — sessions', () => {
       effort: 'high',
     });
     expect(opened.resumed).toBe(false);
+  });
+
+  it('clears an effort Codex did not apply instead of echoing the request back', async () => {
+    const adapter = new CodexAppServerAdapter();
+    // The default fixture echoes `reasoningEffort: null` — a model that applies
+    // no reasoning effort — while the request asked for one.
+    const opened = await adapter.openSession({
+      params: openParams({ configuration: { ...CONFIGURATION, effort: 'high' } }),
+      context: harness().context,
+    });
+
+    expect(opened.effectiveConfiguration.effort).toBeUndefined();
+    expect('effort' in opened.effectiveConfiguration).toBe(false);
   });
 
   it('falls back to a fresh thread and says why when resume is rejected', async () => {
@@ -407,6 +459,41 @@ describe('codex adapter — turns', () => {
   });
 });
 
+describe('codex adapter — cancelling before Codex names the turn', () => {
+  it('still interrupts the vendor turn once its id arrives', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness({ turnStartDelayMs: 40 });
+    await adapter.openSession({ params: openParams(), context: test.context });
+
+    const stream = adapter.startTurn({
+      nativeSessionId: 'thread',
+      params: {
+        sessionId: 'session-1',
+        clientMessageId: 'message-1',
+        input: 'hello',
+        configuration: { ...CONFIGURATION },
+      },
+      context: test.context,
+    });
+
+    // Cancel lands while `turn/start` is still in flight: Codex has accepted the
+    // turn and nothing here knows what it called it.
+    await adapter.cancel({
+      sessionId: 'session-1',
+      nativeSessionId: 'thread',
+      nativeTurnId: 'message-1',
+      reason: 'requested',
+    });
+    expect(await collect(stream)).toEqual([]);
+    expect(test.server()?.called('turn/interrupt')).toBe(false);
+
+    // …and once the id arrives, the interrupt the cancel could not send is sent.
+    await Bun.sleep(120);
+    const interrupt = test.server()?.calls.find((call) => call.method === 'turn/interrupt');
+    expect(interrupt?.params).toMatchObject({ turnId: TURN_ID });
+  });
+});
+
 describe('codex adapter — approvals', () => {
   it('surfaces a command approval with the vendor decision set and answers it', async () => {
     const adapter = new CodexAppServerAdapter();
@@ -479,6 +566,48 @@ describe('codex adapter — approvals', () => {
     }
 
     expect([...(test.server()?.answers.values() ?? [])]).toEqual([{ decision: 'decline' }]);
+  });
+
+  it('refuses an answer that arrives after the approval expired', async () => {
+    // A clock the test drives, so the deadline is crossed rather than waited out.
+    let now = Date.now();
+    const adapter = new CodexAppServerAdapter({ now: () => now });
+    const test = harness({ scenario: 'command-approval' });
+    await adapter.openSession({ params: openParams(), context: test.context });
+    const stream = adapter.startTurn({
+      nativeSessionId: 'thread',
+      params: {
+        sessionId: 'session-1',
+        clientMessageId: 'message-1',
+        input: 'hello',
+        configuration: { ...CONFIGURATION },
+      },
+      context: test.context,
+    });
+
+    const events: ExternalAgentEvent[] = [];
+    for await (const event of stream) {
+      events.push(event);
+      if (event.type !== 'approval_requested') continue;
+      now = event.request.expiresAtMs + 1;
+      await expect(
+        adapter.respond({
+          sessionId: 'session-1',
+          nativeSessionId: 'thread',
+          nativeTurnId: 'message-1',
+          requestId: event.request.requestId,
+          optionId: 'accept',
+        })
+      ).rejects.toThrow(/expired before this answer arrived/);
+    }
+
+    // The action was not granted, and the vendor is not left blocked either.
+    expect([...(test.server()?.answers.values() ?? [])]).toMatchObject([{ code: -32800 }]);
+    expect(
+      events.some(
+        (event) => event.type === 'approval_resolved' && event.decision.source === 'expired'
+      )
+    ).toBe(true);
   });
 
   it('rejects an option Codex never offered without leaving the vendor blocked', async () => {

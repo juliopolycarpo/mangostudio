@@ -53,6 +53,13 @@ export interface FakeCodexOptions {
   readonly scenario?: CodexScenario;
   /** What `codex --version` prints. Drives the version gate. */
   readonly versionBanner?: string;
+  /**
+   * Delay before `turn/start` answers, which is the window a cancel can land in
+   * while Codex has accepted the turn and MangoStudio does not yet know its id.
+   */
+  readonly turnStartDelayMs?: number;
+  /** How many pages `model/list` serves before its cursor goes null. */
+  readonly modelPages?: number;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -66,6 +73,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export class FakeCodexServer {
   readonly #scenario: CodexScenario;
   readonly #send: (message: unknown) => void;
+  readonly #turnStartDelayMs: number;
+  readonly #modelPages: number;
   /** Answers the adapter gave to server→client requests, by request id. */
   readonly answers = new Map<string, unknown>();
   /** Every method the adapter called, in order. */
@@ -75,6 +84,13 @@ export class FakeCodexServer {
   constructor(send: (message: unknown) => void, options: FakeCodexOptions = {}) {
     this.#send = send;
     this.#scenario = options.scenario ?? 'text';
+    this.#turnStartDelayMs = options.turnStartDelayMs ?? 0;
+    this.#modelPages = options.modelPages ?? 1;
+  }
+
+  /** Whether the adapter ever asked for a method, for interrupt assertions. */
+  called(method: string): boolean {
+    return this.calls.some((call) => call.method === method);
   }
 
   receive(line: string): void {
@@ -135,9 +151,19 @@ export class FakeCodexServer {
           requiresOpenaiAuth: true,
         });
         return;
-      case 'model/list':
-        this.#respond(id, { data: [modelFixture()], nextCursor: null });
+      case 'model/list': {
+        // Cursor-paginated exactly as the vendor is: one model per page, and a
+        // cursor until the last one. A client that reads `data` once and stops
+        // sees only the first model.
+        const cursor = (this.calls.at(-1)?.params as { cursor?: string } | undefined)?.cursor;
+        const page = cursor === undefined ? 0 : Number(cursor);
+        const last = page >= this.#modelPages - 1;
+        this.#respond(id, {
+          data: [modelFixture(page === 0 ? 'gpt-5.6-sol' : `model-page-${page}`)],
+          nextCursor: last ? null : String(page + 1),
+        });
         return;
+      }
       case 'permissionProfile/list':
         this.#respond(id, {
           data:
@@ -165,6 +191,14 @@ export class FakeCodexServer {
         );
         return;
       case 'turn/start':
+        if (this.#turnStartDelayMs > 0) {
+          // The vendor has accepted the turn; only its id is still in flight.
+          void sleep(this.#turnStartDelayMs).then(() => {
+            this.#respond(id, turnStartResponse());
+            void this.#runTurn();
+          });
+          return;
+        }
         this.#respond(id, turnStartResponse());
         void this.#runTurn();
         return;

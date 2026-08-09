@@ -17,7 +17,7 @@
  * and invert the ownership model the whole cycle exists to establish.
  */
 
-import { createHash } from 'node:crypto';
+import { createHmac } from 'node:crypto';
 import type {
   ExternalAgentAttachment,
   ExternalAgentCapabilities,
@@ -39,6 +39,7 @@ import type {
   ExternalAgentStartTurnInput,
   ExternalAgentTurnStream,
 } from '../adapter';
+import { hostLocalDigestKey } from '../isolation';
 import type { ExternalAgentManagedProcess } from '../process';
 import { type CodexRequestApproval, planCodexServerRequest } from './approvals';
 import { CodexAdapterError, toExternalAgentError } from './errors';
@@ -51,6 +52,7 @@ import {
   buildSupportedConfigurations,
   encodeApprovalPolicy,
   encodeApprovalsReviewer,
+  unsupportedConfigurations,
 } from './permissions';
 import {
   CODEX_LOGIN_COMMAND,
@@ -73,6 +75,19 @@ import { isCodexVersionSupported, parseCodexVersion, requireCodexVersion } from 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 const SHUTDOWN_GRACE_MS = 2_000;
+
+/** Parsed once: every gate compares structures rather than re-parsing a string. */
+const MINIMUM_CODEX_VERSION_PARSED = requireCodexVersion(MINIMUM_CODEX_VERSION);
+
+/**
+ * How many `model/list` pages discovery will walk.
+ *
+ * The catalog is bounded at 256 entries by the contract, and a page is server-
+ * sized, so this only exists so a server that returned a `nextCursor` forever
+ * could not turn discovery into an unbounded loop.
+ */
+const MODEL_PAGE_LIMIT = 8;
+const MODEL_CATALOG_LIMIT = 256;
 
 /**
  * Notifications tolerated between `turn/start` being sent and its result naming
@@ -118,6 +133,11 @@ interface ActiveTurn {
   /** Set once `turn/start` answers. Until then, notifications buffer. */
   reducer?: CodexTurnReducer;
   turnId?: string;
+  /**
+   * Set by `cancel` — including when it arrives before Codex has named the
+   * turn, which is the case `turnId` alone cannot express.
+   */
+  cancelled?: boolean;
   buffered: Array<{ method: string; params: unknown }>;
 }
 
@@ -201,6 +221,25 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
       };
     }
 
+    // The same gate `openSession` applies, applied where the choice is offered
+    // rather than only where it is taken. Without it a too-old binary whose
+    // `account/read` and `model/list` still answer produces a descriptor with
+    // full capabilities and a selectable configuration, and the version failure
+    // surfaces only after someone picks it and sends a message. It also skips
+    // launching an `app-server` this adapter has already decided not to drive.
+    if (!isCodexVersionSupported(parseCodexVersion(version), MINIMUM_CODEX_VERSION_PARSED)) {
+      return {
+        targetId: this.targetId,
+        installed: true,
+        version,
+        authState: 'unknown',
+        capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+        supportedConfigurations: unsupportedConfigurations(
+          'externalAgents.unsupported.codexVersionTooOld'
+        ),
+      };
+    }
+
     // Everything past this point needs a live `app-server`, which is exactly
     // why discovery is the runtime's job and not the hub's: it is a bounded
     // subprocess, not a file read.
@@ -225,7 +264,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
       const client = launched.client;
       const [account, models, profiles] = await Promise.all([
         this.#tryRequest<GetAccountResponse>(client, 'account/read', {}, context.signal),
-        this.#tryRequest<ModelListResponse>(client, 'model/list', {}, context.signal),
+        this.#readModelCatalog(client, context.signal),
         this.#tryRequest<PermissionProfileListResponse>(
           client,
           'permissionProfile/list',
@@ -243,7 +282,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
         ...(signedIn ? {} : { loginCommand: CODEX_LOGIN_COMMAND }),
         capabilities: CODEX_CAPABILITIES,
         supportedConfigurations: buildSupportedConfigurations(profiles?.data ?? []),
-        ...(models ? { models: models.data.map(mapModel) } : {}),
+        ...(models ? { models } : {}),
         ...(account?.account ? { account: mapAccount(account) } : {}),
       };
     } finally {
@@ -317,17 +356,30 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
         const started = await session.client.request<TurnStartResponse>(
           'turn/start',
           buildTurnStartParams(session.threadId, input),
-          DEFAULT_REQUEST_TIMEOUT_MS,
-          input.context.signal
+          DEFAULT_REQUEST_TIMEOUT_MS
+          // Deliberately **no** abort signal. The per-turn signal is aborted by
+          // `cancel`, and aborting this call would only stop MangoStudio
+          // listening for the id — Codex would keep running the turn it already
+          // accepted, executing commands nobody can see or stop. Waiting for the
+          // id is what makes `turn/interrupt` reachable; `close()` and the
+          // request timeout still bound the wait.
         );
         active.turnId = started.turn.id;
-        active.reducer = new CodexTurnReducer(started.turn.id);
+        // A cancel that arrived before the id did: the interrupt was impossible
+        // then and is possible now. Nothing else about the turn is set up,
+        // because the channel is already finished and nobody is listening.
+        if (active.cancelled) {
+          await this.#interruptTurn(session, started.turn.id);
+          return;
+        }
+        active.reducer = new CodexTurnReducer(started.turn.id, this.#now);
         const buffered = active.buffered;
         active.buffered = [];
         for (const pending of buffered) {
           this.#applyNotification(session, active, pending.method, pending.params);
         }
       } catch (error) {
+        if (active.cancelled) return;
         channel.push({ type: 'error', error: toExternalAgentError(error, 'codex-turn-start') });
         channel.finish();
         if (session.activeTurn === active) session.activeTurn = undefined;
@@ -367,6 +419,30 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     }
     session.approvals.delete(input.requestId);
 
+    // `expiresAtMs` is a promise made to the person looking at the card, and it
+    // has to bind the answer as well as the wait. Nothing else enforces it: the
+    // supervisor reads the deadline only to decide how long to suspend its idle
+    // timeout, so a reply delayed past it — by the network, or by a second
+    // approval holding the turn open — would otherwise still be encoded and
+    // sent, granting an action whose card already said it could not be answered.
+    // Refused rather than converted into a denial: choosing a decline option on
+    // the user's behalf would be MangoStudio answering a vendor question, and
+    // the exchange the vendor is blocked on is settled either way.
+    if (this.#now() >= pending.approval.request.expiresAtMs) {
+      pending.settle({
+        error: { code: -32800, message: 'The approval expired before an answer arrived.' },
+      });
+      session.activeTurn?.channel.push({
+        type: 'approval_resolved',
+        requestId: input.requestId,
+        decision: { optionId: input.optionId, source: 'expired' },
+      });
+      throw new CodexAdapterError(
+        'codex-approval-expired',
+        `Codex approval "${input.requestId}" expired before this answer arrived.`
+      );
+    }
+
     let result: unknown;
     try {
       result = pending.approval.encode(input.optionId);
@@ -387,25 +463,38 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     });
   }
 
+  /**
+   * Stop the turn, including one Codex has not named yet.
+   *
+   * The pre-bind case is the one worth spelling out. `startTurn` returns its
+   * stream before `turn/start` answers, so a cancel can land while the vendor
+   * has accepted the turn and MangoStudio does not yet know its id. Finishing
+   * the local channel there would abandon a live turn: Codex keeps executing
+   * commands and writing files with nothing rendering it and nothing able to
+   * stop it. Marking the turn cancelled hands the interrupt to whichever side
+   * learns the id first — here if it is already known, `startTurn`'s own
+   * continuation if it is not.
+   */
   async cancel(input: ExternalAgentCancelInput): Promise<void> {
     const session = this.#sessions.get(input.sessionId);
     if (!session) return;
     this.#releaseApprovals(session, 'The turn was cancelled.');
 
     const active = session.activeTurn;
-    if (active?.turnId && session.threadId) {
-      await session.client
-        .request(
-          'turn/interrupt',
-          { threadId: session.threadId, turnId: active.turnId },
-          SHUTDOWN_GRACE_MS
-        )
-        .catch(() => undefined);
-    }
+    if (active) active.cancelled = true;
+    if (active?.turnId) await this.#interruptTurn(session, active.turnId);
     if (active) {
       active.channel.finish();
       session.activeTurn = undefined;
     }
+  }
+
+  /** `turn/interrupt`, best effort: a failure here must not fail a cancel. */
+  async #interruptTurn(session: CodexSession, turnId: string): Promise<void> {
+    if (!session.threadId) return;
+    await session.client
+      .request('turn/interrupt', { threadId: session.threadId, turnId }, SHUTDOWN_GRACE_MS)
+      .catch(() => undefined);
   }
 
   async close(input: ExternalAgentCloseInput): Promise<void> {
@@ -499,7 +588,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
   async #assertSupportedVersion(context: ExternalAgentAdapterContext): Promise<void> {
     const raw = await this.#readVersion(context);
     const observed = raw ? parseCodexVersion(raw) : undefined;
-    if (isCodexVersionSupported(observed, requireCodexVersion(MINIMUM_CODEX_VERSION))) return;
+    if (isCodexVersionSupported(observed, MINIMUM_CODEX_VERSION_PARSED)) return;
     throw new CodexAdapterError(
       'codex-version-unsupported',
       raw
@@ -615,6 +704,43 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     }
   }
 
+  /**
+   * The whole model catalog, not just its first page.
+   *
+   * `model/list` is cursor-paginated with a server-chosen page size, so reading
+   * `data` once and stopping silently truncates the selector for anyone whose
+   * Codex offers more models than one page holds — and a missing model is
+   * indistinguishable from an unsupported one to the person looking for it.
+   *
+   * Bounded three ways: the vendor's own cursor, the contract's 256-entry
+   * catalog cap, and a page ceiling, so a server that always returns a cursor
+   * cannot hold discovery open. A page that fails mid-walk keeps what was
+   * already read rather than discarding the catalog.
+   */
+  async #readModelCatalog(
+    client: CodexJsonRpcClient,
+    signal: AbortSignal
+  ): Promise<ExternalAgentModel[] | undefined> {
+    const models: ExternalAgentModel[] = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < MODEL_PAGE_LIMIT; page += 1) {
+      const response: ModelListResponse | undefined = await this.#tryRequest<ModelListResponse>(
+        client,
+        'model/list',
+        cursor === null ? {} : { cursor },
+        signal
+      );
+      if (!response) return models.length > 0 ? models : undefined;
+      for (const model of response.data) {
+        if (models.length >= MODEL_CATALOG_LIMIT) return models;
+        models.push(mapModel(model));
+      }
+      cursor = response.nextCursor;
+      if (cursor === null) break;
+    }
+    return models;
+  }
+
   /** A discovery call that may legitimately be absent rather than fatal. */
   async #tryRequest<T>(
     client: CodexJsonRpcClient,
@@ -726,13 +852,21 @@ function toImageInput(attachment: ExternalAgentAttachment) {
  * response has no field for it at this pinned version: the supervisor
  * authorized those directories, so reporting them back is honest, while
  * reporting a model MangoStudio asked for but Codex overrode would not be.
+ *
+ * `effort` follows the echo in **both** directions, which is why it is removed
+ * before being re-added. A model that applies no reasoning effort echoes
+ * `reasoningEffort: null`, and merely declining to overwrite would leave the
+ * requested value standing — reporting an effort as active because it was asked
+ * for, which is exactly the guess this function exists to avoid, and one that
+ * would then be persisted and carried into the next turn.
  */
 function readEffectiveConfiguration(
   response: ThreadStartResponse,
   requested: ExternalAgentConfiguration
 ): ExternalAgentConfiguration {
+  const { effort: _requestedEffort, ...rest } = requested;
   return {
-    ...requested,
+    ...rest,
     model: response.model,
     ...(response.reasoningEffort ? { effort: response.reasoningEffort } : {}),
   };
@@ -758,16 +892,17 @@ function mapModel(model: Model): ExternalAgentModel {
  *
  * `account/read` returns the signed-in address, which is personal data with no
  * reason to leave the runtime. What crosses instead is a label the owner can
- * recognize plus a fingerprint that is a non-reversible digest, so a changed
- * account invalidates continuation without the address ever being persisted.
+ * recognize plus a fingerprint whose only job is to notice that the account
+ * behind a session changed.
  */
 function mapAccount(response: GetAccountResponse) {
   const account = response.account;
   if (account?.type === 'chatgpt') {
+    const fingerprint = account.email ? fingerprintAccount(account.email) : undefined;
     return {
       label: 'ChatGPT',
       ...(account.planType ? { planType: String(account.planType) } : {}),
-      ...(account.email ? { fingerprint: fingerprintAccount(account.email) } : {}),
+      ...(fingerprint ? { fingerprint } : {}),
     };
   }
   if (account?.type === 'apiKey') return { label: 'API key' };
@@ -775,6 +910,22 @@ function mapAccount(response: GetAccountResponse) {
   return { label: 'Signed in' };
 }
 
-function fingerprintAccount(email: string): string {
-  return createHash('sha256').update(`codex:${email}`).digest('hex').slice(0, 32);
+/**
+ * Keyed, because an email is not enough entropy to hash.
+ *
+ * A plain `sha256(email)` crossing to the hub is not an opaque identifier — it
+ * is something anyone holding it can test a guessed address against offline,
+ * which recovers exactly the personal data leaving the address behind was
+ * meant to protect. An HMAC under a key that never leaves this machine keeps
+ * the value stable and comparable while making it meaningless to anyone who
+ * did not compute it.
+ *
+ * No key, no fingerprint. Falling back to an unkeyed digest would ship the
+ * weaker thing under the stronger name, and the field is optional precisely so
+ * that omitting it is available.
+ */
+function fingerprintAccount(email: string): string | undefined {
+  const key = hostLocalDigestKey();
+  if (!key) return undefined;
+  return createHmac('sha256', key).update(`codex:${email}`).digest('hex').slice(0, 32);
 }

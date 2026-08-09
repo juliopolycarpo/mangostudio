@@ -72,24 +72,41 @@ export function buildSupportedConfigurations(
   profiles: readonly PermissionProfileSummary[]
 ): ExternalSupportedConfiguration[] {
   const byId = new Map(profiles.map((profile) => [profile.id, profile]));
-  const configurations: ExternalSupportedConfiguration[] = [];
+  return matrix((level) => {
+    const allowed = byId.get(CODEX_PERMISSION_PROFILE_IDS[level])?.allowed === true;
+    return allowed ? undefined : 'externalAgents.unsupported.codexProfileDisallowed';
+  });
+}
 
+/**
+ * The same matrix, wholly unavailable for one reason.
+ *
+ * A machine that has Codex but cannot run it — a binary older than the pinned
+ * contract, say — still has to describe the choices it is refusing. Returning
+ * an empty list would read as "this target has no configurations", which is a
+ * different and less useful statement than "these are the configurations, and
+ * here is why none of them can be selected right now".
+ */
+export function unsupportedConfigurations(reasonKey: string): ExternalSupportedConfiguration[] {
+  return matrix(() => reasonKey);
+}
+
+function matrix(
+  unsupportedReasonFor: (level: ExternalPermissionLevel) => string | undefined
+): ExternalSupportedConfiguration[] {
+  const configurations: ExternalSupportedConfiguration[] = [];
   for (const level of EXTERNAL_PERMISSION_LEVELS) {
-    const vendorId = CODEX_PERMISSION_PROFILE_IDS[level];
-    const profile = byId.get(vendorId);
-    const allowed = profile?.allowed === true;
+    const reasonKey = unsupportedReasonFor(level);
     for (const routing of EXTERNAL_APPROVAL_ROUTINGS) {
       configurations.push({
         level,
         routing,
-        supported: allowed,
-        vendorId,
+        supported: reasonKey === undefined,
+        vendorId: CODEX_PERMISSION_PROFILE_IDS[level],
         // Nothing stops to ask: either the sandbox permits everything, or a
         // subagent is answering the prompts instead of a person.
         unattended: level === 'full-access' || routing === 'auto-review',
-        ...(allowed
-          ? {}
-          : { unsupportedReasonKey: 'externalAgents.unsupported.codexProfileDisallowed' }),
+        ...(reasonKey === undefined ? {} : { unsupportedReasonKey: reasonKey }),
       });
     }
   }
