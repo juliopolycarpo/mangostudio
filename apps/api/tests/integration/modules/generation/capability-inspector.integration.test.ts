@@ -158,11 +158,11 @@ function writeSkill(root: string, slug: string): void {
   );
 }
 
-async function allowAllToolsForChatAgent(): Promise<void> {
-  await updateAgentProfile(getDb(), user.id, 'chat', {
-    name: 'Chat',
+async function allowAllToolsForDefaultAgent(): Promise<void> {
+  await updateAgentProfile(getDb(), user.id, 'default', {
+    name: 'Default',
     description: '',
-    role: 'primary',
+    role: 'both',
     systemPrompt: '',
     toolNames: ['*'],
     toolsEnabled: true,
@@ -245,7 +245,7 @@ beforeEach(async () => {
   const chat = await insertTestChat(user.id);
   chatId = chat.id;
   await insertConnectorForModel();
-  await allowAllToolsForChatAgent();
+  await allowAllToolsForDefaultAgent();
 
   try {
     previousProvider = getProvider('openai-compatible');
@@ -412,10 +412,10 @@ describe('inspectChatCapabilities', () => {
   });
 
   it('reports allowlist exclusions as disabled while preserving turn parity', async () => {
-    await updateAgentProfile(getDb(), user.id, 'chat', {
-      name: 'Chat',
+    await updateAgentProfile(getDb(), user.id, 'default', {
+      name: 'Default',
       description: '',
-      role: 'primary',
+      role: 'both',
       systemPrompt: '',
       toolNames: [],
       toolsEnabled: true,

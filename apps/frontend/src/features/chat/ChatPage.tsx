@@ -1,5 +1,5 @@
 import type { Message, ReasoningEffort } from '@mangostudio/shared';
-import type { AgentExecutionMode, AgentProfile } from '@mangostudio/shared/agents';
+import type { AgentProfile } from '@mangostudio/shared/agents';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
@@ -37,11 +37,9 @@ interface ChatPageProps {
   imageToolIntent: boolean;
   onImageToolIntentChange: (active: boolean) => void;
   activeModel?: string | null;
-  agentExecutionMode?: AgentExecutionMode;
   selectedAgentId?: string;
   agents?: ReadonlyArray<AgentProfile>;
   isAgentListLoading?: boolean;
-  onAgentExecutionModeChange?: (mode: AgentExecutionMode) => void;
   onSelectedAgentIdChange?: (agentId: string) => void;
   environmentId?: string | null;
   onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
@@ -101,11 +99,9 @@ export function ChatPage({
   imageToolIntent,
   onImageToolIntentChange,
   activeModel = null,
-  agentExecutionMode = 'chat',
   selectedAgentId = 'default',
   agents = [],
   isAgentListLoading = false,
-  onAgentExecutionModeChange,
   onSelectedAgentIdChange,
   environmentId = null,
   onEnvironmentChange,
@@ -172,13 +168,11 @@ export function ChatPage({
             />
           )}
           {/*
-            Agent mode surfaces todos in the rail instead — but only when the user
-            kept that panel visible, so the pinned panel stays the fallback rather
-            than todos vanishing entirely.
+            The rail surfaces todos instead — but only when the user kept that
+            panel visible, so the pinned panel stays the fallback rather than
+            todos vanishing entirely.
           */}
-          {agentExecutionMode !== 'agent' || !railShowsTodos ? (
-            <PinnedTodoPanel chatId={chatId} />
-          ) : null}
+          {!railShowsTodos ? <PinnedTodoPanel chatId={chatId} /> : null}
           <InputBar
             onSubmit={onSubmit}
             chatId={chatId}
@@ -195,11 +189,9 @@ export function ChatPage({
             imageToolIntent={imageToolIntent}
             onImageToolIntentChange={onImageToolIntentChange}
             activeModel={activeModel}
-            agentExecutionMode={agentExecutionMode}
             selectedAgentId={selectedAgentId}
             agents={agents}
             isAgentListLoading={isAgentListLoading}
-            onAgentExecutionModeChange={onAgentExecutionModeChange}
             onSelectedAgentIdChange={onSelectedAgentIdChange}
             environmentId={environmentId}
             onEnvironmentChange={onEnvironmentChange}
@@ -207,11 +199,10 @@ export function ChatPage({
             onWorkdirClick={onOpenWorkdirPicker}
           />
         </div>
-        {agentExecutionMode === 'agent' && chatId ? (
+        {chatId ? (
           <WorkspaceRail
             key={chatId}
             chatId={chatId}
-            agentExecutionMode={agentExecutionMode}
             workdir={workdir}
             settings={workspaceSettings.sidePanel}
             onWidthChange={onWorkspacePanelWidthChange}

@@ -2,7 +2,7 @@ import type { MarkdownFrontmatter } from '../markdown/frontmatter';
 import { parseMarkdownFrontmatter } from '../markdown/frontmatter';
 import type { AgentId, AgentProfile, AgentRole } from './schemas';
 
-const BUILT_IN_AGENT_IDS = ['chat', 'default', 'explore'] as const;
+const BUILT_IN_AGENT_IDS = ['default', 'explore'] as const;
 const AGENT_ROLE_VALUES = ['primary', 'subagent', 'both'] as const;
 const REASONING_EFFORT_VALUES = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 const USER_AGENT_ID_PATTERN = /^user:[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -18,20 +18,6 @@ export interface ParseAgentMarkdownOptions {
   readonly id: AgentId;
   readonly path?: string;
 }
-
-export const BUILT_IN_CHAT_AGENT: AgentProfile = Object.freeze({
-  id: 'chat',
-  name: 'Chat',
-  description: 'General-purpose conversational chat agent.',
-  kind: 'builtin',
-  role: 'primary',
-  source: { type: 'builtin' as const },
-  systemPrompt: '',
-  toolNames: [],
-  toolsEnabled: true,
-  subagentIds: [],
-  metadata: {},
-});
 
 export const BUILT_IN_DEFAULT_AGENT: AgentProfile = Object.freeze({
   id: 'default',
@@ -63,7 +49,6 @@ export const BUILT_IN_EXPLORE_AGENT: AgentProfile = Object.freeze({
 });
 
 export const BUILT_IN_AGENT_PROFILES: ReadonlyArray<AgentProfile> = Object.freeze([
-  BUILT_IN_CHAT_AGENT,
   BUILT_IN_DEFAULT_AGENT,
   BUILT_IN_EXPLORE_AGENT,
 ]);
@@ -74,7 +59,7 @@ export function isAgentId(value: unknown): value is AgentId {
 
 export function assertAgentProfile(profile: AgentProfile): AgentProfile {
   if (!isValidAgentId(profile.id)) {
-    throw new AgentProfileValidationError('Agent id must be chat, default, or user:<slug>.');
+    throw new AgentProfileValidationError('Agent id must be default, explore, or user:<slug>.');
   }
 
   if (!profile.name.trim()) {
@@ -93,7 +78,7 @@ export function parseAgentMarkdown(
   options: ParseAgentMarkdownOptions
 ): AgentProfile {
   if (!isValidAgentId(options.id)) {
-    throw new AgentProfileValidationError('Agent id must be chat, default, or user:<slug>.');
+    throw new AgentProfileValidationError('Agent id must be default, explore, or user:<slug>.');
   }
 
   const { frontmatter, body } = parseMarkdownFrontmatter(markdown);
@@ -187,10 +172,6 @@ function optionalString(value: unknown): string | undefined {
 }
 
 function slugNameFromId(id: AgentId): string {
-  if (id === 'chat') {
-    return BUILT_IN_CHAT_AGENT.name;
-  }
-
   if (id === 'default') {
     return BUILT_IN_DEFAULT_AGENT.name;
   }
@@ -206,7 +187,7 @@ function isValidAgentId(value: string): value is AgentId {
   return isBuiltInAgentId(value) || USER_AGENT_ID_PATTERN.test(value);
 }
 
-function isBuiltInAgentId(value: string): value is 'chat' | 'default' {
+function isBuiltInAgentId(value: string): value is 'default' | 'explore' {
   return BUILT_IN_AGENT_IDS.some((agentId) => agentId === value);
 }
 

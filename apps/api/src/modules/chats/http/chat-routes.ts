@@ -30,6 +30,7 @@ import { getChatMessagesUseCase } from '../application/get-chat-messages';
 import { listChatsUseCase } from '../application/list-chats';
 import { EnvironmentSelectionError, updateChatUseCase } from '../application/update-chat';
 import { ChatNotFoundError } from '../domain/chat-ownership';
+import { RunnerKindImmutableError } from '../infrastructure/chat-repository';
 
 function apiError(error: string, code: string): ApiErrorResponse {
   return { error, code };
@@ -91,6 +92,13 @@ export const chatRoutes = (app: Elysia) =>
         '/:id',
         async ({ params, body, user, set }) => {
           try {
+            // No external-agent adapter exists yet; an unreachable variant
+            // accepted by this route is an unreachable variant an attacker
+            // can reach first.
+            if (body.runner?.kind === 'external') {
+              set.status = 422;
+              return apiError('External runners are not available yet.', ERROR_CODES.VALIDATION);
+            }
             await updateChatUseCase(
               {
                 chatId: params.id,
@@ -100,8 +108,7 @@ export const chatRoutes = (app: Elysia) =>
                   model: body.model,
                   textModel: body.textModel,
                   imageModel: body.imageModel,
-                  lastUsedMode: body.lastUsedMode,
-                  selectedAgentId: body.selectedAgentId,
+                  runner: body.runner,
                   workdir: body.workdir,
                   environmentId: body.environmentId,
                   restrictToolsToWorkdir: body.restrictToolsToWorkdir,
@@ -113,7 +120,8 @@ export const chatRoutes = (app: Elysia) =>
           } catch (error) {
             if (
               error instanceof WorkdirValidationError ||
-              error instanceof EnvironmentSelectionError
+              error instanceof EnvironmentSelectionError ||
+              error instanceof RunnerKindImmutableError
             ) {
               set.status = 422;
               return apiError(error.message, ERROR_CODES.VALIDATION);

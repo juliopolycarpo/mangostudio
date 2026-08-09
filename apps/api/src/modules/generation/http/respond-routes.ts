@@ -6,7 +6,7 @@ import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { NoModelAvailableError } from '../application/resolve-model';
-import { sendTextMessage } from '../application/send-text-message';
+import { sendTextMessage, UnsupportedChatRunnerError } from '../application/send-text-message';
 import { EmptyTextTurnError } from '../application/text-turn-content';
 
 export const respondRoutes = (app: Elysia) =>
@@ -44,6 +44,10 @@ export const respondRoutes = (app: Elysia) =>
             if (err instanceof ChatAttachmentNotFoundError || err instanceof EmptyTextTurnError) {
               set.status = 400;
               return { error: err.message, code: ERROR_CODES.VALIDATION };
+            }
+            if (err instanceof UnsupportedChatRunnerError) {
+              set.status = 409;
+              return { error: err.message, code: ERROR_CODES.UNSUPPORTED };
             }
             console.error('[respond] Error:', err);
             set.status = 500;

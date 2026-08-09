@@ -44,7 +44,6 @@ function renderRail(overrides: Partial<React.ComponentProps<typeof WorkspaceRail
   return render(
     <WorkspaceRail
       chatId="chat-1"
-      agentExecutionMode="agent"
       workdir="/srv/projects/mango"
       settings={DEFAULT_WORKSPACE_SETTINGS.sidePanel}
       {...overrides}

@@ -8,7 +8,7 @@ import type {
 import { assertAgentProfile, isAgentId, isReasoningEffort } from '@mangostudio/shared/agents';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@mangostudio/shared/app-settings';
 
-const BUILT_IN_AGENT_IDS = ['chat', 'default', 'explore'] as const;
+const BUILT_IN_AGENT_IDS = ['default', 'explore'] as const;
 const RESERVED_AGENT_SLUGS = ['chat', 'default', 'explore', 'agents', 'claude'] as const;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -34,7 +34,7 @@ export function isUserAgentId(value: string): value is UserAgentId {
 export function assertAgentId(value: string): AgentId {
   if (!isAgentId(value)) {
     throw new AgentSettingsError(
-      'Agent id must be chat, default, or user:<slug>.',
+      'Agent id must be default, explore, or user:<slug>.',
       422,
       'VALIDATION'
     );

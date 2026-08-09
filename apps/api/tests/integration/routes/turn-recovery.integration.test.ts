@@ -29,7 +29,7 @@ function createCheckpoint(messageId: string) {
     startedAt: Date.now(),
     provider: 'openai',
     modelName: 'gpt-test',
-    agentId: 'chat',
+    agentId: 'default',
   });
 }
 

@@ -5,7 +5,10 @@ import { dirname, join } from 'node:path';
 import { getDb } from '../../../../src/db/database';
 import { getConfig } from '../../../../src/lib/config';
 import { createChat } from '../../../../src/modules/chats/infrastructure/chat-repository';
-import { sendTextMessage } from '../../../../src/modules/generation/application/send-text-message';
+import {
+  sendTextMessage,
+  UnsupportedChatRunnerError,
+} from '../../../../src/modules/generation/application/send-text-message';
 import { EmptyTextTurnError } from '../../../../src/modules/generation/application/text-turn-content';
 import {
   getProvider,
@@ -239,6 +242,41 @@ describe('sendTextMessage attachments', () => {
     }
 
     expect(caughtError).toBeInstanceOf(EmptyTextTurnError);
+
+    const messages = await db
+      .selectFrom('messages')
+      .select('id')
+      .where('chatId', '=', chatId)
+      .execute();
+    expect(messages).toHaveLength(0);
+  });
+
+  it('rejects turns on a chat configured with a non-default runner', async () => {
+    const db = getDb();
+    const chat = await createChat({ title: 'Send Text Runner Chat', userId: TEST_USER.id }, db);
+    const chatId = chat.id;
+    await db
+      .updateTable('chats')
+      .set({ runnerKind: 'mangostudio', runnerAgentId: 'explore' })
+      .where('id', '=', chatId)
+      .execute();
+
+    let caughtError: unknown;
+    try {
+      await sendTextMessage(
+        {
+          chatId,
+          userId: TEST_USER.id,
+          prompt: 'Should not run through the direct-text path.',
+          model: 'unresolved-model-is-not-used',
+        },
+        db
+      );
+    } catch (error) {
+      caughtError = error;
+    }
+
+    expect(caughtError).toBeInstanceOf(UnsupportedChatRunnerError);
 
     const messages = await db
       .selectFrom('messages')

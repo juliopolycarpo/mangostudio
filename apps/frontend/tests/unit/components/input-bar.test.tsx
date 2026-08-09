@@ -1,5 +1,5 @@
 import type { Environment } from '@mangostudio/shared/environments';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { InputBar } from '../../../src/features/chat/components/InputBar';
@@ -16,14 +16,7 @@ function renderInputBar(overrides: Partial<React.ComponentProps<typeof InputBar>
 }
 
 describe('InputBar — chat-only composer', () => {
-  it('renders the Chat and Agent mode segmented control when mode callbacks are provided', () => {
-    renderInputBar({ onAgentExecutionModeChange: vi.fn() });
-
-    expect(screen.getByRole('button', { name: 'Chat' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Agent' })).toBeInTheDocument();
-  });
-
-  it('shows the agent selector only in Agent mode', () => {
+  it('shows the agent selector only when onSelectedAgentIdChange is provided', () => {
     const agents = [
       {
         id: 'default',
@@ -41,35 +34,20 @@ describe('InputBar — chat-only composer', () => {
     ] as const;
 
     const { unmount } = renderInputBar({
-      agentExecutionMode: 'chat',
       selectedAgentId: 'default',
       agents,
-      onAgentExecutionModeChange: vi.fn(),
-      onSelectedAgentIdChange: vi.fn(),
     });
 
     expect(screen.queryByRole('combobox', { name: 'Select agent' })).toBeNull();
     unmount();
 
     renderInputBar({
-      agentExecutionMode: 'agent',
       selectedAgentId: 'default',
       agents,
-      onAgentExecutionModeChange: vi.fn(),
       onSelectedAgentIdChange: vi.fn(),
     });
 
     expect(screen.getByRole('combobox', { name: 'Select agent' })).toHaveValue('default');
-  });
-
-  it('switches to Agent mode from the segmented control', async () => {
-    const user = userEvent.setup();
-    const onAgentExecutionModeChange = vi.fn();
-    renderInputBar({ onAgentExecutionModeChange });
-
-    await user.click(screen.getByRole('button', { name: 'Agent' }));
-
-    expect(onAgentExecutionModeChange).toHaveBeenCalledWith('agent');
   });
 
   it('changes the chat execution environment from the composer pill', async () => {
@@ -115,7 +93,15 @@ describe('InputBar — chat-only composer', () => {
         name: 'Select execution environment',
       });
       expect(selector).toHaveValue('local');
-      expect(screen.getByTestId('environment-selector')).toHaveAttribute('data-state', 'connected');
+      // The pill renders before the listing lands, wearing the `disconnected`
+      // fallback and an option built from the id alone, so the connected state
+      // is only meaningful once the fetched environment backs it.
+      await waitFor(() =>
+        expect(screen.getByTestId('environment-selector')).toHaveAttribute(
+          'data-state',
+          'connected'
+        )
+      );
       await user.selectOptions(selector, 'remote-dev');
 
       expect(onEnvironmentChange).toHaveBeenCalledWith('remote-dev');
@@ -124,11 +110,10 @@ describe('InputBar — chat-only composer', () => {
     }
   });
 
-  it('shows the active workdir basename in Agent mode and reopens the picker', async () => {
+  it('shows the active workdir basename and reopens the picker', async () => {
     const user = userEvent.setup();
     const onWorkdirClick = vi.fn();
     renderInputBar({
-      agentExecutionMode: 'agent',
       workdir: '/srv/projects/mangostudio',
       onWorkdirClick,
     });

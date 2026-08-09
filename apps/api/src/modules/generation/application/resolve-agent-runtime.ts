@@ -1,4 +1,4 @@
-import type { AgentExecutionMode, AgentId, AgentProfile } from '@mangostudio/shared/agents';
+import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { ProviderRuntimeSettings } from '@mangostudio/shared/provider-settings';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import type { ProviderType } from '@mangostudio/shared/types';
@@ -47,7 +47,6 @@ export interface ResolvedAgentRuntime {
 export interface ResolveAgentRuntimeInput {
   readonly db: Kysely<Database>;
   readonly userId: string;
-  readonly agentMode?: AgentExecutionMode;
   readonly agentId?: AgentId;
   readonly provider: ProviderType;
   readonly requestRuntimeSettings?: Partial<ProviderRuntimeSettings>;
@@ -59,18 +58,13 @@ export interface ResolveAgentRuntimeInput {
   readonly environmentName?: string;
 }
 
-export function resolveRuntimeAgentId(
-  agentMode: AgentExecutionMode | undefined,
-  agentId: AgentId | undefined
-): AgentId {
-  if (agentMode === 'agent') return agentId ?? 'default';
-  return 'chat';
-}
-
 export async function resolveAgentRuntime(
   input: ResolveAgentRuntimeInput
 ): Promise<ResolvedAgentRuntime> {
-  const requestedAgentId = resolveRuntimeAgentId(input.agentMode, input.agentId);
+  // Callers that own a chat resolve the agent against its persisted runner
+  // first (see `resolveRunnerAgentId`); this fallback only covers runtimes
+  // resolved outside a chat, such as subagent delegation.
+  const requestedAgentId = input.agentId ?? 'default';
   const profile =
     input.profile ?? (await getAgentProfile(input.db, input.userId, requestedAgentId));
   const [savedProviderSettings, toolSettings, mcpServerSnapshots] = await Promise.all([

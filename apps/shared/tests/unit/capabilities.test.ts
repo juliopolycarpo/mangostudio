@@ -10,7 +10,7 @@ function makeResponse(overrides: Partial<ChatCapabilitiesResponse> = {}): ChatCa
   return {
     chatId: 'chat-1',
     model: { modelId: 'gpt-test', provider: 'openai' },
-    agent: { id: 'chat', name: 'Chat', kind: 'builtin', mode: 'chat' },
+    agent: { id: 'default', name: 'Default', kind: 'builtin' },
     tools: [
       {
         name: 'generate_image',
@@ -106,11 +106,9 @@ describe('capabilities contracts', () => {
     expect(
       Value.Check(ChatCapabilitiesQuerySchema, {
         model: 'gpt-test',
-        agentMode: 'agent',
         agentId: 'user:my-agent',
       })
     ).toBe(true);
-    expect(Value.Check(ChatCapabilitiesQuerySchema, { agentMode: 'autopilot' })).toBe(false);
     expect(Value.Check(ChatCapabilitiesQuerySchema, { agentId: 'Not A Slug' })).toBe(false);
   });
 });

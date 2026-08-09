@@ -134,9 +134,6 @@ function assertDelegationAllowed(input: SubagentRuntimeInput): void {
   if (!input.settings.enabled) {
     throw new SubagentDelegationError('Multi-agent delegation is disabled.', 'DISABLED');
   }
-  if (input.parentMode === 'chat' && !input.settings.chatDelegationEnabled) {
-    throw new SubagentDelegationError('Chat mode delegation is disabled.', 'CHAT_DISABLED');
-  }
   if (input.depth >= input.settings.maxDepth) {
     throw new SubagentDelegationError('Maximum delegation depth reached.', 'MAX_DEPTH');
   }

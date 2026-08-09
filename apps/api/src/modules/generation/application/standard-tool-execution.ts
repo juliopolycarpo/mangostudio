@@ -108,7 +108,6 @@ export interface DelegationRuntime {
   assistantMessageId?: string;
   parentAgentProfile: AgentProfile;
   parentModelName: string;
-  interactionMode: 'chat' | 'agent';
   workdir?: string;
   workdirPolicy?: WorkdirPolicy;
   settings: MultiAgentSettings;
@@ -530,7 +529,6 @@ export function createDelegationRuntime(
 ): DelegationRuntime | undefined {
   if (
     !shouldExposeDelegateTool({
-      interactionMode: input.interactionMode,
       profile: input.parentAgentProfile,
       settings: input.settings,
     })
@@ -566,7 +564,6 @@ async function executeDelegationToolCall(
     workdirPolicy: runtime.workdirPolicy,
     parentAgentProfile: runtime.parentAgentProfile,
     parentModelName: runtime.parentModelName,
-    parentMode: runtime.interactionMode,
     settings: runtime.settings,
     request,
     depth: 0,

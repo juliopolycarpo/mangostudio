@@ -1,19 +1,97 @@
+import { isAgentId } from '@mangostudio/shared/agents';
+import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Kysely, Selectable, Updateable } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
+
+const EXTERNAL_TARGET_IDS = ['codex', 'cursor', 'claude'] as const;
+
+function isExternalTargetId(
+  value: string
+): value is Extract<ChatRunnerConfiguration, { kind: 'external' }>['targetId'] {
+  return EXTERNAL_TARGET_IDS.some((targetId) => targetId === value);
+}
+
+class ChatRunnerCorruptionError extends Error {
+  constructor(chatId: string, reason: string) {
+    super(`Chat ${chatId} has a corrupt runner configuration: ${reason}`);
+    this.name = 'ChatRunnerCorruptionError';
+  }
+}
+
+export class RunnerKindImmutableError extends Error {
+  constructor(chatId: string) {
+    super(`Chat ${chatId} already has turns; runner kind cannot change.`);
+    this.name = 'RunnerKindImmutableError';
+  }
+}
 
 /** SQLite stores the tri-state override as NULL (inherit) or 0/1. */
 function toOverrideFlag(value: number | null): boolean | null {
   return value === null ? null : value !== 0;
 }
 
+/** Exactly what {@link toRunnerConfiguration} reads, so narrow selects qualify. */
+type RunnerColumns = Pick<
+  Selectable<Database['chats']>,
+  'id' | 'runnerKind' | 'runnerAgentId' | 'runnerTargetId'
+>;
+
+/**
+ * Maps the flat `runnerKind`/`runnerAgentId`/`runnerTargetId` columns to the
+ * typed union at this boundary; nothing above the repository sees the flat
+ * form. A row whose kind/companion-column pairing is impossible is corrupt
+ * and throws loudly. A well-shaped but no-longer-resolvable agent id
+ * (existence is checked when the turn resolves the profile, not here) is a
+ * known shape with a missing referent, so it normalizes to `default` instead.
+ */
+function toRunnerConfiguration(row: RunnerColumns): ChatRunnerConfiguration {
+  if (row.runnerKind === 'mangostudio') {
+    if (!row.runnerAgentId) {
+      throw new ChatRunnerCorruptionError(
+        row.id,
+        "runnerKind='mangostudio' requires a non-null runnerAgentId"
+      );
+    }
+    if (!isAgentId(row.runnerAgentId)) {
+      console.warn(
+        `[chat-repository] chat ${row.id} has unresolvable runnerAgentId '${row.runnerAgentId}'; normalizing to 'default'`
+      );
+      return { kind: 'mangostudio', agentId: 'default' };
+    }
+    return { kind: 'mangostudio', agentId: row.runnerAgentId };
+  }
+
+  if (row.runnerKind === 'external') {
+    if (!row.runnerTargetId || !isExternalTargetId(row.runnerTargetId)) {
+      throw new ChatRunnerCorruptionError(
+        row.id,
+        "runnerKind='external' requires a valid runnerTargetId"
+      );
+    }
+    return { kind: 'external', targetId: row.runnerTargetId };
+  }
+
+  throw new ChatRunnerCorruptionError(row.id, `unknown runnerKind '${row.runnerKind}'`);
+}
+
 function mapChatRow(row: Selectable<Database['chats']>): ChatRecord {
   return {
-    ...row,
-    lastUsedMode: row.lastUsedMode as InteractionMode | null,
+    id: row.id,
+    title: row.title,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    model: row.model,
+    textModel: row.textModel,
+    imageModel: row.imageModel,
+    runner: toRunnerConfiguration(row),
+    workdir: row.workdir,
+    environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
+    userId: row.userId,
+    lastProviderState: row.lastProviderState,
+    lastContextState: row.lastContextState,
   };
 }
 
@@ -29,8 +107,7 @@ export interface UpdateChatData {
   model?: string;
   textModel?: string;
   imageModel?: string;
-  lastUsedMode?: string;
-  selectedAgentId?: string;
+  runner?: ChatRunnerConfiguration;
   workdir?: string | null;
   environmentId?: string;
   restrictToolsToWorkdir?: boolean | null;
@@ -44,8 +121,7 @@ export interface ChatRecord {
   model: string | null;
   textModel: string | null;
   imageModel: string | null;
-  lastUsedMode: InteractionMode | null;
-  selectedAgentId: string | null;
+  runner: ChatRunnerConfiguration;
   workdir: string | null;
   environmentId: string;
   restrictToolsToWorkdir: boolean | null;
@@ -69,6 +145,16 @@ export async function getById(id: string, db: Kysely<Database>): Promise<ChatRec
   return row ? mapChatRow(row) : undefined;
 }
 
+function runnerColumns(
+  runner: ChatRunnerConfiguration
+): Pick<Updateable<Database['chats']>, 'runnerKind' | 'runnerAgentId' | 'runnerTargetId'> {
+  return {
+    runnerKind: runner.kind,
+    runnerAgentId: runner.kind === 'mangostudio' ? runner.agentId : null,
+    runnerTargetId: runner.kind === 'external' ? runner.targetId : null,
+  };
+}
+
 export async function createChat(data: CreateChatData, db: Kysely<Database>): Promise<ChatRecord> {
   const now = Date.now();
   const chat: ChatRecord = {
@@ -79,8 +165,7 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     model: data.model ?? null,
     textModel: null,
     imageModel: null,
-    lastUsedMode: null,
-    selectedAgentId: null,
+    runner: { kind: 'mangostudio', agentId: 'default' },
     workdir: null,
     environmentId: data.environmentId ?? LOCAL_ENVIRONMENT_ID,
     restrictToolsToWorkdir: null,
@@ -90,9 +175,54 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
   };
   await db
     .insertInto('chats')
-    .values({ ...chat, restrictToolsToWorkdir: null })
+    .values({
+      id: chat.id,
+      title: chat.title,
+      createdAt: chat.createdAt,
+      updatedAt: chat.updatedAt,
+      model: chat.model,
+      textModel: chat.textModel,
+      imageModel: chat.imageModel,
+      ...runnerColumns(chat.runner),
+      workdir: chat.workdir,
+      environmentId: chat.environmentId,
+      restrictToolsToWorkdir: null,
+      userId: chat.userId,
+      lastProviderState: chat.lastProviderState,
+      lastContextState: chat.lastContextState,
+    })
     .execute();
   return chat;
+}
+
+/**
+ * D14: a chat's transcript must never mix owners. Once a chat has at least
+ * one persisted message, its runner `kind` is immutable — changing the agent
+ * within `mangostudio` or the target within `external` stays allowed.
+ */
+async function assertRunnerKindChangeAllowed(
+  chatId: string,
+  userId: string,
+  nextKind: ChatRunnerConfiguration['kind'],
+  db: Kysely<Database>
+): Promise<void> {
+  const current = await db
+    .selectFrom('chats')
+    .select('runnerKind')
+    .where('id', '=', chatId)
+    .where('userId', '=', userId)
+    .executeTakeFirst();
+  if (!current || current.runnerKind === nextKind) return;
+
+  const existingMessage = await db
+    .selectFrom('messages')
+    .select('id')
+    .where('chatId', '=', chatId)
+    .limit(1)
+    .executeTakeFirst();
+  if (existingMessage) {
+    throw new RunnerKindImmutableError(chatId);
+  }
 }
 
 export async function updateChat(
@@ -106,8 +236,7 @@ export async function updateChat(
   if (data.model !== undefined) dbUpdates.model = data.model;
   if (data.textModel !== undefined) dbUpdates.textModel = data.textModel;
   if (data.imageModel !== undefined) dbUpdates.imageModel = data.imageModel;
-  if (data.lastUsedMode !== undefined) dbUpdates.lastUsedMode = data.lastUsedMode;
-  if (data.selectedAgentId !== undefined) dbUpdates.selectedAgentId = data.selectedAgentId;
+  if (data.runner !== undefined) Object.assign(dbUpdates, runnerColumns(data.runner));
   if (data.workdir !== undefined) dbUpdates.workdir = data.workdir;
   if (data.environmentId !== undefined) dbUpdates.environmentId = data.environmentId;
   if (data.restrictToolsToWorkdir !== undefined) {
@@ -117,12 +246,30 @@ export async function updateChat(
 
   if (Object.keys(dbUpdates).length === 0) return;
 
-  await db
-    .updateTable('chats')
-    .set(dbUpdates)
-    .where('id', '=', id)
-    .where('userId', '=', userId)
-    .execute();
+  const runner = data.runner;
+  if (runner === undefined) {
+    await db
+      .updateTable('chats')
+      .set(dbUpdates)
+      .where('id', '=', id)
+      .where('userId', '=', userId)
+      .execute();
+    return;
+  }
+
+  // The D14 guard reads `messages` and then writes `chats`, so it only holds
+  // if both happen under one transaction — otherwise the chat's first turn can
+  // commit between the two statements and the kind changes anyway. SQLite
+  // serializes writers, so the transaction alone closes the window.
+  await db.transaction().execute(async (trx) => {
+    await assertRunnerKindChangeAllowed(id, userId, runner.kind, trx);
+    await trx
+      .updateTable('chats')
+      .set(dbUpdates)
+      .where('id', '=', id)
+      .where('userId', '=', userId)
+      .execute();
+  });
 }
 
 export async function deleteChat(id: string, userId: string, db: Kysely<Database>): Promise<void> {
@@ -144,6 +291,7 @@ export async function verifyChatOwnership(
 
 /** Chat fields a generation turn needs; excludes the large persisted state blobs. */
 export interface OwnedChatRecord {
+  runner: ChatRunnerConfiguration;
   workdir: string | null;
   environmentId: string;
   restrictToolsToWorkdir: boolean | null;
@@ -156,12 +304,21 @@ export async function getOwnedChat(
 ): Promise<OwnedChatRecord | undefined> {
   const row = await db
     .selectFrom('chats')
-    .select(['workdir', 'environmentId', 'restrictToolsToWorkdir'])
+    .select([
+      'id',
+      'runnerKind',
+      'runnerAgentId',
+      'runnerTargetId',
+      'workdir',
+      'environmentId',
+      'restrictToolsToWorkdir',
+    ])
     .where('id', '=', chatId)
     .where('userId', '=', userId)
     .executeTakeFirst();
   if (!row) return undefined;
   return {
+    runner: toRunnerConfiguration(row),
     workdir: row.workdir,
     environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),

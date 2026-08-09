@@ -58,7 +58,7 @@ assertType<Equals<ReasoningEffort, Static<typeof ReasoningEffortSchema>>>();
 
 // 2. The `Type.Unsafe` escape hatch keeps `AgentId` precise. A revert to a plain
 //    `Type.String` would collapse this union to `string` and fail here.
-assertType<Equals<AgentId, 'chat' | 'default' | 'explore' | `user:${string}`>>();
+assertType<Equals<AgentId, 'default' | 'explore' | `user:${string}`>>();
 assertType<Equals<AgentProfile, Static<typeof AgentProfileSchema>>>();
 
 // 3. `SSEErrorEvent` is now defined once (errors) and re-exported by streaming.

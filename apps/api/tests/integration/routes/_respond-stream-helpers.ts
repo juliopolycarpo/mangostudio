@@ -1,5 +1,7 @@
 import { mock } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { getDb } from '../../../src/db/database';
 import { getAgentProfile } from '../../../src/modules/agents/application/agent-settings-service';
@@ -153,6 +155,25 @@ export function makeChain(firstValue: unknown): Record<string, unknown> {
   return proxy;
 }
 
+/**
+ * The row `getOwnedChat` reads before a turn resolves anything. It has to
+ * carry the runner columns as well as ownership: the repository maps them
+ * into the typed union at that boundary and treats an impossible pairing as
+ * a corrupt row, so a bare `{ userId }` now fails the pre-flight.
+ */
+function ownedChatRow(userId: string): Record<string, unknown> {
+  return {
+    id: 'chat-1',
+    userId,
+    runnerKind: 'mangostudio',
+    runnerAgentId: 'default',
+    runnerTargetId: null,
+    workdir: null,
+    environmentId: LOCAL_ENVIRONMENT_ID,
+    restrictToolsToWorkdir: null,
+  };
+}
+
 export interface CapturedDbMock {
   insertedMessages: Array<Record<string, unknown>>;
   chatSetCalls: Array<Record<string, unknown>>;
@@ -181,7 +202,6 @@ export interface SubagentProfileMockOptions {
 
 export interface MultiAgentSettingsOverrides {
   enabled?: boolean;
-  chatDelegationEnabled?: boolean;
   traceVisibility?: 'off' | 'summary' | 'full';
   maxDepth?: number;
   maxSubagentCalls?: number;
@@ -205,10 +225,19 @@ export function buildRespondStreamRequest(body: Record<string, unknown>): Reques
  * Mocks chat ownership as verified for streaming route authorization.
  * // Usage: await mockVerifiedChatOwnership()
  */
-export async function mockVerifiedChatOwnership(workdir: string | null = null): Promise<void> {
+export async function mockVerifiedChatOwnership(
+  workdir: string | null = null,
+  runner: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' }
+): Promise<void> {
   await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
     verifyChatOwnership: () => Promise.resolve(true),
-    getOwnedChat: () => Promise.resolve({ workdir, restrictToolsToWorkdir: null }),
+    getOwnedChat: () =>
+      Promise.resolve({
+        runner,
+        workdir,
+        environmentId: LOCAL_ENVIRONMENT_ID,
+        restrictToolsToWorkdir: null,
+      }),
   }));
 }
 
@@ -227,7 +256,7 @@ export function createTestStreamDb(options: TestStreamDbOptions): Record<string,
   const insertedMessages = options.insertedMessages ?? [];
   const chatSetCalls = options.chatSetCalls ?? [];
   const db: Record<string, unknown> = {
-    selectFrom: options.selectFrom ?? (() => makeChain({ userId: options.userId })),
+    selectFrom: options.selectFrom ?? (() => makeChain(ownedChatRow(options.userId))),
     insertInto: (table: string) => createInsertCapture(table, insertedMessages, options.onInsert),
     updateTable: (table: string) => createUpdateCapture(table, insertedMessages, chatSetCalls),
   };
@@ -523,7 +552,6 @@ function multiAgentSettings(
 ): Required<MultiAgentSettingsOverrides> {
   return {
     enabled: true,
-    chatDelegationEnabled: true,
     traceVisibility: 'full',
     maxDepth: 2,
     maxSubagentCalls: 5,

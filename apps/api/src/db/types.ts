@@ -14,8 +14,9 @@ interface ChatsTable {
   model: string | null;
   textModel: string | null;
   imageModel: string | null;
-  lastUsedMode: string | null;
-  selectedAgentId: string | null;
+  runnerKind: Generated<string>;
+  runnerAgentId: string | null;
+  runnerTargetId: string | null;
   workdir: string | null;
   environmentId: Generated<string>;
   /** null = inherit workspace default; 0/1 stored as boolean override */
@@ -376,6 +377,34 @@ interface ObservabilitySnapshotTable {
   updatedAt: number;
 }
 
+/**
+ * Server-owned continuation state for external-agent chats. Deliberately not
+ * part of `ChatRunnerConfiguration`: a chat's runner is user-set, but which
+ * vendor session it resumes is not, so no client request can write here. A
+ * native session is only valid for one (user, environment, target, canonical
+ * workspace, vendor account) tuple, which is why every part of that tuple is
+ * a column rather than a field on `chats`.
+ */
+interface ExternalSessionContinuationsTable {
+  /** Primary key; cascades on chat deletion, which is what reaps the row. */
+  chatId: string;
+  userId: string;
+  environmentId: string;
+  targetId: string;
+  canonicalWorkspacePath: string;
+  /**
+   * Non-reversible digest of the vendor account identity, never the email:
+   * continuation must be invalidated when the user switches accounts, and
+   * that requires comparing identities without storing one.
+   */
+  vendorAccountFingerprint: string | null;
+  runtimeSessionId: string;
+  nativeSessionId: string;
+  /** JSON, vendor-reported, display only. */
+  effectiveConfiguration: string | null;
+  updatedAt: number;
+}
+
 /** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
@@ -404,6 +433,7 @@ export interface Database {
   user_tool_identities: UserToolIdentitiesTable;
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
+  external_session_continuations: ExternalSessionContinuationsTable;
 }
 
 export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;

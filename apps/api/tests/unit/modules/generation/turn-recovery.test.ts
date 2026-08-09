@@ -37,7 +37,7 @@ function checkpoint(turnId: string, status: TurnCheckpointPart['status'] = 'acti
       startedAt: 1_000,
       provider: 'openai',
       modelName: 'gpt-test',
-      agentId: 'chat',
+      agentId: 'default',
     }),
     status,
     ...(status === 'interrupted' ? { reasonCode: 'server_restart' as const } : {}),
@@ -871,7 +871,7 @@ describe('interrupted turn recovery', () => {
         recovery,
         inspected,
         resolvedModel: { modelId: 'gpt-test', providerType: 'openai' },
-        agentId: 'chat',
+        agentId: 'default',
         onTurnReserved: (assistantMessageId) => {
           registeredAssistantMessageIds.push(assistantMessageId);
         },

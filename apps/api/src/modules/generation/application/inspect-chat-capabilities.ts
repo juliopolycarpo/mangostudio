@@ -10,7 +10,7 @@
  * Health itself is read passively (last-known status, no extra probe).
  */
 
-import type { AgentExecutionMode, AgentId } from '@mangostudio/shared/agents';
+import type { AgentId } from '@mangostudio/shared/agents';
 import type {
   CapabilityMcpServerEntry,
   CapabilitySkillEntry,
@@ -29,7 +29,6 @@ import {
 } from '../../../services/providers/core/provider-registry';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
-import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { extractContextInfo } from '../../chats/application/list-chats';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
@@ -39,9 +38,10 @@ import { listSkills } from '../../skills/application/skill-discovery';
 import { SKILL_TOOL_NAME } from '../../skills/domain/skill';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { resolveEnvironmentDisplayName } from './environment-display-name';
-import { resolveAgentRuntime, resolveRuntimeAgentId } from './resolve-agent-runtime';
+import { resolveAgentRuntime } from './resolve-agent-runtime';
 import type { ToolCapabilityCandidate } from './resolve-capability-candidates';
 import { resolveModel } from './resolve-model';
+import { resolveRunnerAgentProfile } from './resolve-runner-agent';
 
 export interface InspectChatCapabilitiesInput {
   readonly db: Kysely<Database>;
@@ -49,7 +49,6 @@ export interface InspectChatCapabilitiesInput {
   readonly chatId: string;
   /** Composer overrides — the same selection inputs a turn would send. */
   readonly model?: string;
-  readonly agentMode?: AgentExecutionMode;
   readonly agentId?: AgentId;
 }
 
@@ -62,8 +61,12 @@ export async function inspectChatCapabilities(
 ): Promise<ChatCapabilitiesResponse> {
   const ownedChat = await getOwnedChatOrThrow(input.chatId, input.userId, input.db);
 
-  const requestedAgentId = resolveRuntimeAgentId(input.agentMode, input.agentId);
-  const profile = await getAgentProfile(input.db, input.userId, requestedAgentId);
+  const { agentId: requestedAgentId, profile } = await resolveRunnerAgentProfile({
+    db: input.db,
+    userId: input.userId,
+    runner: ownedChat.runner,
+    agentId: input.agentId,
+  });
   const resolvedModel = await resolveModel({
     requestedModel: input.model ?? profile.model,
     userId: input.userId,
@@ -82,8 +85,7 @@ export async function inspectChatCapabilities(
     resolveAgentRuntime({
       db: input.db,
       userId: input.userId,
-      agentMode: input.agentMode,
-      agentId: input.agentId,
+      agentId: requestedAgentId,
       provider: provider.providerType,
       profile,
       runtimeManifest: runtimeClient.manifest,
@@ -95,9 +97,7 @@ export async function inspectChatCapabilities(
     listSkills(input.db, input.userId),
   ]);
 
-  const interactionMode = input.agentMode === 'agent' ? 'agent' : 'chat';
   const delegateToolAvailable = shouldExposeDelegateTool({
-    interactionMode,
     profile: agentRuntime.profile,
     settings: appSettings.multiAgentSettings,
   });
@@ -138,7 +138,6 @@ export async function inspectChatCapabilities(
       id: profile.id,
       name: profile.name,
       kind: profile.kind,
-      mode: interactionMode,
     },
     tools,
     mcpServers,

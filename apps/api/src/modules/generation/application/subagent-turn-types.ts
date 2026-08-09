@@ -60,7 +60,6 @@ export interface SubagentRuntimeInput {
   readonly workdirPolicy?: WorkdirPolicy;
   readonly parentAgentProfile: AgentProfile;
   readonly parentModelName: string;
-  readonly parentMode: 'chat' | 'agent';
   readonly settings: MultiAgentSettings;
   readonly request: DelegateToSubagentRequest;
   readonly depth: number;

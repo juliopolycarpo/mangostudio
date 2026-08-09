@@ -178,7 +178,6 @@ function classifySubagentDelegationFailure(
     case 'INVALID_AGENT_ID':
       return { status: 'failed', reasonCode: 'validation_failed' };
     case 'DISABLED':
-    case 'CHAT_DISABLED':
       return { status: 'failed', reasonCode: 'tool_disabled' };
     case 'MAX_CALLS':
     case 'MAX_DEPTH':

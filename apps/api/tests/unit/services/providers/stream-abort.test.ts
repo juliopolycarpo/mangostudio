@@ -31,9 +31,25 @@ function makeChain(firstValue: unknown): Record<string, unknown> {
   return proxy;
 }
 
+/**
+ * Stands in for the owned-chat row the stream route pre-flights: it carries
+ * both ownership and the runner columns the repository maps into the typed
+ * union before any agent resolves.
+ */
+const OWNED_CHAT_ROW = {
+  id: 'chat-2',
+  userId: TEST_USER.id,
+  runnerKind: 'mangostudio',
+  runnerAgentId: 'default',
+  runnerTargetId: null,
+  workdir: null,
+  environmentId: 'local',
+  restrictToolsToWorkdir: null,
+};
+
 function makeDb(): Record<string, unknown> {
   const db: Record<string, unknown> = {
-    selectFrom: () => makeChain({ userId: TEST_USER.id }),
+    selectFrom: () => makeChain(OWNED_CHAT_ROW),
     insertInto: () => ({ values: () => ({ execute: () => Promise.resolve() }) }),
     updateTable: () => makeChain({ numUpdatedRows: 1n }),
   };

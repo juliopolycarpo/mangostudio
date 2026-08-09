@@ -16,7 +16,7 @@ const CHECKPOINT: TurnCheckpointPart = {
   checkpointedAt: 2,
   provider: 'openai',
   modelName: 'gpt-test',
-  agentId: 'chat',
+  agentId: 'default',
   lastAssistantText: 'partial response',
   todoSnapshot: [],
   completedCalls: [

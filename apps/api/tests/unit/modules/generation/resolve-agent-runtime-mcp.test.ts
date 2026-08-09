@@ -72,8 +72,8 @@ function fakeServerWithTools(...toolNames: string[]): McpClientHandle {
 
 function makeProfile(toolNames: string[]): AgentProfile {
   return {
-    id: 'chat',
-    name: 'Chat',
+    id: 'default',
+    name: 'Default',
     description: '',
     kind: 'builtin',
     role: 'primary',

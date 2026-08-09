@@ -1,5 +1,5 @@
 import { type Static, Type } from '@sinclair/typebox';
-import { AgentExecutionModeSchema, AgentIdSchema, AgentKindSchema } from '../agents/schemas';
+import { AgentIdSchema, AgentKindSchema } from '../agents/schemas';
 import { ContextInfoSchema } from '../chat/schemas';
 import { EnvironmentIdSchema } from '../environments/schemas';
 import { McpServerStatusSchema } from '../mcp/schemas';
@@ -120,7 +120,6 @@ export const CapabilitySkillEntrySchema = Type.Object({
 /** Composer overrides accepted by the inspector — the same selection inputs a turn uses. */
 export const ChatCapabilitiesQuerySchema = Type.Object({
   model: Type.Optional(Type.String({ minLength: 1 })),
-  agentMode: Type.Optional(AgentExecutionModeSchema),
   agentId: Type.Optional(AgentIdSchema),
 });
 
@@ -134,7 +133,6 @@ export const ChatCapabilitiesResponseSchema = Type.Object({
     id: AgentIdSchema,
     name: Type.String({ minLength: 1 }),
     kind: AgentKindSchema,
-    mode: AgentExecutionModeSchema,
   }),
   tools: Type.Array(CapabilityToolEntrySchema),
   mcpServers: Type.Array(CapabilityMcpServerEntrySchema),

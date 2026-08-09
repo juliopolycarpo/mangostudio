@@ -108,7 +108,6 @@ export const DEFAULT_CHAT_TITLE_SETTINGS: ChatTitleSettings = {
 
 export const DEFAULT_MULTI_AGENT_SETTINGS: MultiAgentSettings = {
   enabled: true,
-  chatDelegationEnabled: false,
   traceVisibility: 'compact',
   maxDepth: 1,
   maxSubagentCalls: MAX_SUBAGENT_CALLS_DEFAULT,
@@ -353,10 +352,6 @@ export function normalizeMultiAgentSettings(value: unknown): MultiAgentSettings 
   return {
     enabled:
       typeof value.enabled === 'boolean' ? value.enabled : DEFAULT_MULTI_AGENT_SETTINGS.enabled,
-    chatDelegationEnabled:
-      typeof value.chatDelegationEnabled === 'boolean'
-        ? value.chatDelegationEnabled
-        : DEFAULT_MULTI_AGENT_SETTINGS.chatDelegationEnabled,
     traceVisibility: isTraceVisibility(value.traceVisibility)
       ? value.traceVisibility
       : DEFAULT_MULTI_AGENT_SETTINGS.traceVisibility,

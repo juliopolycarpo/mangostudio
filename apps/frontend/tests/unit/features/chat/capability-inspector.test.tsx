@@ -34,7 +34,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
 const RESPONSE: ChatCapabilitiesResponse = {
   chatId: 'chat-1',
   model: { modelId: 'gpt-test', provider: 'openai' },
-  agent: { id: 'chat', name: 'Chat', kind: 'builtin', mode: 'chat' },
+  agent: { id: 'default', name: 'Default', kind: 'builtin' },
   tools: [
     {
       name: 'generate_image',
@@ -132,7 +132,7 @@ function InspectorWithToolSettingMutation() {
         Disable image generation
       </button>
       {mutation.isSuccess && <span>Tool setting saved</span>}
-      <CapabilityInspector chatId="chat-1" activeModel="gpt-test" agentMode="chat" />
+      <CapabilityInspector chatId="chat-1" activeModel="gpt-test" />
     </>
   );
 }
@@ -147,13 +147,11 @@ afterEach(() => {
 
 describe('CapabilityInspector', () => {
   it('fetches and renders the projection when opened', async () => {
-    scenario.respondWithJson(
-      'GET',
-      '/api/chats/chat-1/capabilities?model=gpt-test&agentMode=chat',
-      { body: RESPONSE }
-    );
+    scenario.respondWithJson('GET', '/api/chats/chat-1/capabilities?model=gpt-test', {
+      body: RESPONSE,
+    });
 
-    render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" agentMode="chat" />);
+    render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" />);
 
     await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
 
@@ -186,51 +184,47 @@ describe('CapabilityInspector', () => {
     // `environmentName` is the environment's name in the API — for the hub's
     // own machine a fixed English literal. Interpolating it into a translated
     // sentence would leave a pt-BR reader with "recusada por Local".
-    scenario.respondWithJson(
-      'GET',
-      '/api/chats/chat-1/capabilities?model=gpt-test&agentMode=chat',
-      {
-        body: {
-          ...RESPONSE,
-          tools: [
-            {
-              name: 'write_file',
-              title: 'Write file',
-              source: 'builtin',
-              state: 'unavailable',
-              reason: 'runtime-denied',
-              category: 'system',
-              environmentName: 'Local',
-              environmentId: LOCAL_ENVIRONMENT_ID,
-            },
-            {
-              name: 'read_file',
-              title: 'Read file',
-              source: 'builtin',
-              state: 'unavailable',
-              reason: 'runtime-denied',
-              category: 'system',
-              environmentName: 'Devbox',
-              environmentId: 'devbox',
-            },
-            {
-              // A remote a user chose to call "Local". Keying off the name
-              // rather than the id would silently rename their machine.
-              name: 'grep',
-              title: 'Grep',
-              source: 'builtin',
-              state: 'unavailable',
-              reason: 'runtime-denied',
-              category: 'system',
-              environmentName: 'Local',
-              environmentId: 'devbox-two',
-            },
-          ],
-        },
-      }
-    );
+    scenario.respondWithJson('GET', '/api/chats/chat-1/capabilities?model=gpt-test', {
+      body: {
+        ...RESPONSE,
+        tools: [
+          {
+            name: 'write_file',
+            title: 'Write file',
+            source: 'builtin',
+            state: 'unavailable',
+            reason: 'runtime-denied',
+            category: 'system',
+            environmentName: 'Local',
+            environmentId: LOCAL_ENVIRONMENT_ID,
+          },
+          {
+            name: 'read_file',
+            title: 'Read file',
+            source: 'builtin',
+            state: 'unavailable',
+            reason: 'runtime-denied',
+            category: 'system',
+            environmentName: 'Devbox',
+            environmentId: 'devbox',
+          },
+          {
+            // A remote a user chose to call "Local". Keying off the name
+            // rather than the id would silently rename their machine.
+            name: 'grep',
+            title: 'Grep',
+            source: 'builtin',
+            state: 'unavailable',
+            reason: 'runtime-denied',
+            category: 'system',
+            environmentName: 'Local',
+            environmentId: 'devbox-two',
+          },
+        ],
+      },
+    });
 
-    render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" agentMode="chat" />);
+    render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" />);
     await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
 
     await waitFor(() => {
@@ -254,13 +248,12 @@ describe('CapabilityInspector', () => {
   });
 
   it('surfaces a load error without blocking the composer', async () => {
-    scenario.respondWithJson(
-      'GET',
-      '/api/chats/chat-1/capabilities?model=gpt-test&agentMode=chat',
-      { status: 500, body: { error: 'boom', code: 'INTERNAL' } }
-    );
+    scenario.respondWithJson('GET', '/api/chats/chat-1/capabilities?model=gpt-test', {
+      status: 500,
+      body: { error: 'boom', code: 'INTERNAL' },
+    });
 
-    render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" agentMode="chat" />);
+    render(<CapabilityInspector chatId="chat-1" activeModel="gpt-test" />);
 
     await userEvent.click(screen.getByRole('button', { name: /capabilities/i }));
 
@@ -281,7 +274,7 @@ describe('CapabilityInspector', () => {
       counts: { ...RESPONSE.counts, effectiveTools: RESPONSE.counts.effectiveTools - 1 },
       runtimeHash: 'hash-2',
     };
-    const capabilitiesPath = '/api/chats/chat-1/capabilities?model=gpt-test&agentMode=chat';
+    const capabilitiesPath = '/api/chats/chat-1/capabilities?model=gpt-test';
     scenario.respondWithJson('GET', capabilitiesPath, { body: RESPONSE });
     scenario.respondWithJson('PUT', '/api/settings/tools/generate_image', {
       body: {

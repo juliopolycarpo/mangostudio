@@ -1,7 +1,5 @@
 export * from './profile';
 export {
-  type AgentExecutionMode,
-  AgentExecutionModeSchema,
   type AgentId,
   AgentIdSchema,
   type AgentKind,

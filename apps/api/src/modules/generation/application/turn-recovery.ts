@@ -1,5 +1,5 @@
 import type { MessagePart } from '@mangostudio/shared';
-import type { AgentExecutionMode, AgentId } from '@mangostudio/shared/agents';
+import type { AgentId } from '@mangostudio/shared/agents';
 import {
   applyToolExecutionTransition,
   createToolExecutionSnapshot,
@@ -68,7 +68,6 @@ export interface InspectedTurnResume {
   readonly checkpoint: TurnCheckpointPart;
   readonly effectivePrompt: string;
   readonly modelName: string;
-  readonly agentMode: AgentExecutionMode;
   readonly agentId: AgentId;
 }
 
@@ -102,7 +101,6 @@ export async function inspectInterruptedTurnResume(
     checkpoint,
     effectivePrompt: buildRecoveryPrompt(checkpoint, input.recovery.retryCallIds),
     modelName: checkpoint.modelName,
-    agentMode: checkpoint.agentId === 'chat' ? 'chat' : 'agent',
     agentId: checkpoint.agentId,
   };
 }
@@ -171,7 +169,7 @@ export function reserveInterruptedTurnResume(
         text: input.displayPrompt,
         timestamp: now,
         isGenerating: false,
-        interactionMode: input.agentId === 'chat' ? 'chat' : 'agent',
+        interactionMode: 'agent',
       },
       trx
     );
@@ -197,7 +195,7 @@ export function reserveInterruptedTurnResume(
         timestamp: now + 1,
         isGenerating: true,
         modelName: input.resolvedModel.modelId,
-        interactionMode: input.agentId === 'chat' ? 'chat' : 'agent',
+        interactionMode: 'agent',
         parts: JSON.stringify(nextParts),
       },
       trx

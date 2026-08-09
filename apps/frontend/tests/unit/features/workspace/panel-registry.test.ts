@@ -6,13 +6,12 @@ import {
 } from '../../../../src/features/workspace/rail/panel-registry';
 
 describe('workspace panel registry', () => {
-  it('keeps Git limited to Agent chats with a working directory', () => {
+  it('keeps Git limited to chats with a working directory', () => {
     const panel = WORKSPACE_PANEL_REGISTRY.find(({ id }) => id === 'git');
     expect(panel).toBeDefined();
 
     expect(
       panel?.availability({
-        agentExecutionMode: 'agent',
         chatId: 'chat-1',
         workdir: '/srv/projects/mango',
         todoCount: 0,
@@ -20,15 +19,6 @@ describe('workspace panel registry', () => {
     ).toBe(true);
     expect(
       panel?.availability({
-        agentExecutionMode: 'chat',
-        chatId: 'chat-1',
-        workdir: '/srv/projects/mango',
-        todoCount: 0,
-      })
-    ).toBe(false);
-    expect(
-      panel?.availability({
-        agentExecutionMode: 'agent',
         chatId: 'chat-1',
         workdir: null,
         todoCount: 0,
@@ -36,13 +26,12 @@ describe('workspace panel registry', () => {
     ).toBe(false);
   });
 
-  it('shows tasks only when an Agent chat has todo state', () => {
+  it('shows tasks only when a chat has todo state', () => {
     const panel = WORKSPACE_PANEL_REGISTRY.find(({ id }) => id === 'todos');
     expect(panel).toBeDefined();
 
     expect(
       panel?.availability({
-        agentExecutionMode: 'agent',
         chatId: 'chat-1',
         workdir: null,
         todoCount: 2,
@@ -50,7 +39,6 @@ describe('workspace panel registry', () => {
     ).toBe(true);
     expect(
       panel?.availability({
-        agentExecutionMode: 'agent',
         chatId: 'chat-1',
         workdir: null,
         todoCount: 0,
@@ -61,7 +49,6 @@ describe('workspace panel registry', () => {
   it('resolves visible panels in the persisted order', () => {
     const panels = getAvailableWorkspacePanels(
       {
-        agentExecutionMode: 'agent',
         chatId: 'chat-1',
         workdir: '/srv/projects/mango',
         todoCount: 2,

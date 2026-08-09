@@ -7,19 +7,6 @@ import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 const AGENTS_RESPONSE = {
   agents: [
     {
-      id: 'chat',
-      name: 'Chat',
-      description: 'General-purpose chat.',
-      kind: 'builtin',
-      role: 'primary',
-      source: { type: 'builtin' },
-      systemPrompt: 'Chat prompt.',
-      toolNames: ['read_file'],
-      toolsEnabled: true,
-      subagentIds: [],
-      metadata: {},
-    },
-    {
       id: 'default',
       name: 'Default',
       description: 'Default task agent.',
@@ -80,14 +67,14 @@ describe('AgentSettingsPage integration', () => {
 
     render(<AgentSettingsPage />);
 
-    expect(await screen.findByRole('button', { name: /chat/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /default/i })).toBeInTheDocument();
   });
 
   it('saves built-in agent edits', async () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/settings/agents', { body: AGENTS_RESPONSE });
     fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
-    fetchScenario.respondWithJson('PUT', '/api/settings/agents/chat', {
+    fetchScenario.respondWithJson('PUT', '/api/settings/agents/default', {
       body: { ...AGENTS_RESPONSE.agents[0], systemPrompt: 'Updated chat prompt.' },
     });
 
@@ -98,7 +85,7 @@ describe('AgentSettingsPage integration', () => {
     await user.type(systemPrompt, 'Updated chat prompt.');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(hasFetchCall('PUT', '/api/settings/agents/chat')).toBe(true));
+    await waitFor(() => expect(hasFetchCall('PUT', '/api/settings/agents/default')).toBe(true));
   });
 
   it('creates a markdown-backed user agent', async () => {

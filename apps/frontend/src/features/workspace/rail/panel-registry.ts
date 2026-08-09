@@ -1,4 +1,3 @@
-import type { AgentExecutionMode } from '@mangostudio/shared/agents';
 import type { TodoList } from '@mangostudio/shared/todos';
 import type { WorkspacePanelId, WorkspacePanelSettings } from '@mangostudio/shared/workspaces';
 import { FolderGit2, ListTodo, type LucideIcon } from 'lucide-react';
@@ -7,7 +6,6 @@ import { GitPanel } from '../GitPanel';
 import { TodoRailPanel } from './TodoRailPanel';
 
 export interface RailPanelAvailabilityState {
-  readonly agentExecutionMode: AgentExecutionMode;
   readonly chatId: string | null;
   readonly workdir: string | null;
   readonly todoCount: number;
@@ -29,15 +27,13 @@ export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
   {
     id: 'git',
     icon: FolderGit2,
-    availability: ({ agentExecutionMode, chatId, workdir }) =>
-      agentExecutionMode === 'agent' && Boolean(chatId && workdir),
+    availability: ({ chatId, workdir }) => Boolean(chatId && workdir),
     component: GitPanel,
   },
   {
     id: 'todos',
     icon: ListTodo,
-    availability: ({ agentExecutionMode, chatId, todoCount }) =>
-      agentExecutionMode === 'agent' && Boolean(chatId) && todoCount > 0,
+    availability: ({ chatId, todoCount }) => Boolean(chatId) && todoCount > 0,
     component: TodoRailPanel,
   },
 ];

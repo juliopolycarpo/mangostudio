@@ -51,8 +51,13 @@ describe('POST /respond/stream — provider cursor and switching', () => {
     });
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-      getOwnedChat: () => Promise.resolve({ workdir: null, restrictToolsToWorkdir: null }),
+      getOwnedChat: () =>
+        Promise.resolve({
+          runner: { kind: 'mangostudio', agentId: 'default' },
+          workdir: null,
+          environmentId: 'local',
+          restrictToolsToWorkdir: null,
+        }),
     }));
 
     await mock.module('../../../src/services/providers/core/provider-registry', () => ({
@@ -157,8 +162,13 @@ describe('POST /respond/stream — provider cursor and switching', () => {
     });
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-      getOwnedChat: () => Promise.resolve({ workdir: null, restrictToolsToWorkdir: null }),
+      getOwnedChat: () =>
+        Promise.resolve({
+          runner: { kind: 'mangostudio', agentId: 'default' },
+          workdir: null,
+          environmentId: 'local',
+          restrictToolsToWorkdir: null,
+        }),
     }));
 
     await mock.module('../../../src/services/providers/core/provider-registry', () => ({
@@ -230,8 +240,13 @@ describe('POST /respond/stream — provider cursor and switching', () => {
     });
 
     await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-      verifyChatOwnership: () => Promise.resolve(true),
-      getOwnedChat: () => Promise.resolve({ workdir: null, restrictToolsToWorkdir: null }),
+      getOwnedChat: () =>
+        Promise.resolve({
+          runner: { kind: 'mangostudio', agentId: 'default' },
+          workdir: null,
+          environmentId: 'local',
+          restrictToolsToWorkdir: null,
+        }),
     }));
 
     await mock.module('../../../src/services/providers/core/provider-registry', () => ({

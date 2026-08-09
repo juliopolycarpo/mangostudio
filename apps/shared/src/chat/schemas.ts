@@ -1,10 +1,38 @@
 import { type Static, Type } from '@sinclair/typebox';
+import { AgentIdSchema } from '../agents/schemas';
 
 const InteractionModeSchema = Type.Union([
   Type.Literal('chat'),
   Type.Literal('agent'),
   Type.Literal('image'),
 ]);
+
+/**
+ * `Exclude<LibraryTargetId, 'mangostudio'>`, restated here rather than
+ * imported so the chat contract does not pull in `library`. Plan for
+ * external agents moves this into `external-agents` and re-exports it here.
+ */
+export const ExternalAgentTargetIdSchema = Type.Union([
+  Type.Literal('codex'),
+  Type.Literal('cursor'),
+  Type.Literal('claude'),
+]);
+
+export type ExternalAgentTargetId = Static<typeof ExternalAgentTargetIdSchema>;
+
+/**
+ * Who runs a chat's turns. Deliberately excludes anything the server owns —
+ * the vendor's native session handle, runtime session, canonical workspace,
+ * vendor account, and effective settings live in a separate server-owned
+ * table that no client request can write.
+ */
+export const ChatRunnerConfigurationSchema = Type.Union([
+  Type.Object({ kind: Type.Literal('mangostudio'), agentId: AgentIdSchema }),
+  Type.Object({ kind: Type.Literal('external'), targetId: ExternalAgentTargetIdSchema }),
+]);
+
+export type ChatRunnerConfiguration = Static<typeof ChatRunnerConfigurationSchema>;
+
 export const ChatAttachmentKindSchema = Type.Union([
   Type.Literal('image'),
   Type.Literal('text'),
@@ -56,8 +84,7 @@ export const ChatSchema = Type.Object({
   model: Type.Union([Type.String(), Type.Null()]),
   textModel: Type.Union([Type.String(), Type.Null()]),
   imageModel: Type.Union([Type.String(), Type.Null()]),
-  lastUsedMode: Type.Union([InteractionModeSchema, Type.Null()]),
-  selectedAgentId: Type.Union([Type.String(), Type.Null()]),
+  runner: ChatRunnerConfigurationSchema,
   workdir: Type.Union([Type.String(), Type.Null()]),
   environmentId: Type.String({ minLength: 1 }),
   restrictToolsToWorkdir: Type.Union([Type.Boolean(), Type.Null()]),
@@ -124,8 +151,7 @@ export const UpdateChatBodySchema = Type.Object({
   model: Type.Optional(Type.String()),
   textModel: Type.Optional(Type.String()),
   imageModel: Type.Optional(Type.String()),
-  lastUsedMode: Type.Optional(InteractionModeSchema),
-  selectedAgentId: Type.Optional(Type.String()),
+  runner: Type.Optional(ChatRunnerConfigurationSchema),
   workdir: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   environmentId: Type.Optional(Type.String({ minLength: 1 })),
   restrictToolsToWorkdir: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),

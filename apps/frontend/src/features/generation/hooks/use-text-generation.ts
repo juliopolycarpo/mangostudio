@@ -1,7 +1,7 @@
 /* global console */
 
 import type { Message, MessagePart, ReasoningEffort } from '@mangostudio/shared';
-import { type AgentExecutionMode, isAgentId } from '@mangostudio/shared/agents';
+import { isAgentId } from '@mangostudio/shared/agents';
 import type { ChatTitleSettings } from '@mangostudio/shared/app-settings';
 import {
   type ContextCompactionResponse,
@@ -48,10 +48,20 @@ interface UseTextGenerationOptions {
   chatTitleSettings: ChatTitleSettings;
   currentChatId: string | null;
   getAgentSelection: () => {
-    readonly mode: AgentExecutionMode;
     readonly agentId: string;
     readonly agentName?: string;
   };
+  /**
+   * Applies the selection the empty state was holding — runner and default
+   * workdir — to a chat auto-created by this turn. Awaited before the stream
+   * opens so the first turn resolves against the same configuration every
+   * later turn will, and its return value (not `getAgentSelection`) is what
+   * that first turn runs as.
+   */
+  onChatCreated?: (chatId: string) => Promise<{
+    readonly agentId: string;
+    readonly agentName?: string;
+  }>;
 }
 
 type RecoveryRequest = NonNullable<RespondStreamBody['recovery']>;
@@ -143,6 +153,7 @@ export function useTextGeneration({
   chatTitleSettings,
   currentChatId,
   getAgentSelection,
+  onChatCreated,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
   const { t } = useI18n();
@@ -188,16 +199,17 @@ export function useTextGeneration({
       let activeChatId = chats.currentChatId;
       let createdChatDuringRequest = false;
       let activeChatTitle = chats.currentChat?.title;
+      let boundAgentSelection: { agentId: string; agentName?: string } | null = null;
       if (!activeChatId) {
         const newChat = await chats.createChat();
         activeChatId = newChat.id;
         activeChatTitle = newChat.title;
         createdChatDuringRequest = true;
+        boundAgentSelection = (await onChatCreated?.(newChat.id)) ?? null;
       }
 
       const model = getActiveModel();
-      const agentSelection = getAgentSelection();
-      const interactionMode = agentSelection.mode === 'agent' ? 'agent' : 'chat';
+      const agentSelection = boundAgentSelection ?? getAgentSelection();
 
       if (
         !recovery &&
@@ -221,10 +233,9 @@ export function useTextGeneration({
         role: 'user',
         text: prompt,
         timestamp: Date.now(),
-        interactionMode,
-        ...(interactionMode === 'agent'
-          ? { agentId: agentSelection.agentId, agentName: agentSelection.agentName }
-          : {}),
+        interactionMode: 'agent',
+        agentId: agentSelection.agentId,
+        agentName: agentSelection.agentName,
       };
 
       const optimisticAiMsg: Message = {
@@ -235,10 +246,9 @@ export function useTextGeneration({
         timestamp: Date.now(),
         isGenerating: true,
         modelName: model,
-        interactionMode,
-        ...(interactionMode === 'agent'
-          ? { agentId: agentSelection.agentId, agentName: agentSelection.agentName }
-          : {}),
+        interactionMode: 'agent',
+        agentId: agentSelection.agentId,
+        agentName: agentSelection.agentName,
       };
 
       appendOptimisticMessages(activeChatId, [optimisticUserMsg, optimisticAiMsg]);
@@ -264,7 +274,6 @@ export function useTextGeneration({
             maxToolIterations,
             contextSettings,
             toolIntent,
-            agentMode: agentSelection.mode,
             agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
             recovery,
           },
@@ -365,6 +374,7 @@ export function useTextGeneration({
       contextSettings,
       chatTitleSettings,
       getAgentSelection,
+      onChatCreated,
       stream,
       pendingSubagentName,
     ]

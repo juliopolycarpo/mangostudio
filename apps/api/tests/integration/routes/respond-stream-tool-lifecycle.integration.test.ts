@@ -90,8 +90,8 @@ async function mockRejectedToolPolicy(options: {
     getAgentProfile: () =>
       Promise.resolve(
         makeAgentProfile({
-          id: 'chat',
-          name: 'Chat',
+          id: 'default',
+          name: 'Default',
           role: 'both',
           systemPrompt: 'Chat agent.',
           toolNames: ['policy_probe'],

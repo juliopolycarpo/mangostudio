@@ -3,11 +3,7 @@ import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-lim
 import { ReasoningEffortSchema } from '../provider-settings';
 import { ReadonlyArraySchema } from '../schema-helpers';
 
-export const BuiltInAgentIdSchema = Type.Union([
-  Type.Literal('chat'),
-  Type.Literal('default'),
-  Type.Literal('explore'),
-]);
+export const BuiltInAgentIdSchema = Type.Union([Type.Literal('default'), Type.Literal('explore')]);
 
 /**
  * User agent ids are slugged `user:<slug>` strings. `Type.Unsafe` keeps the
@@ -19,8 +15,6 @@ export const UserAgentIdSchema = Type.Unsafe<`user:${string}`>(
 );
 
 export const AgentIdSchema = Type.Union([BuiltInAgentIdSchema, UserAgentIdSchema]);
-
-export const AgentExecutionModeSchema = Type.Union([Type.Literal('chat'), Type.Literal('agent')]);
 
 export const AgentKindSchema = Type.Union([Type.Literal('builtin'), Type.Literal('user')]);
 
@@ -103,7 +97,6 @@ export const DeleteAgentProfileResponseSchema = Type.Object({
 export type BuiltInAgentId = Static<typeof BuiltInAgentIdSchema>;
 export type UserAgentId = Static<typeof UserAgentIdSchema>;
 export type AgentId = Static<typeof AgentIdSchema>;
-export type AgentExecutionMode = Static<typeof AgentExecutionModeSchema>;
 export type AgentKind = Static<typeof AgentKindSchema>;
 export type AgentRole = Static<typeof AgentRoleSchema>;
 export type AgentSource = Static<typeof AgentSourceSchema>;

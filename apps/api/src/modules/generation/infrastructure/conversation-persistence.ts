@@ -237,13 +237,11 @@ export function finalizeCheckpointedAiResponse(
 export async function updateChatAfterTurn(
   chatId: string,
   aiTimestamp: number,
-  lastUsedMode: InteractionMode,
-  selectedAgentId: string | null,
   db: Kysely<Database>
 ): Promise<void> {
   await db
     .updateTable('chats')
-    .set({ updatedAt: aiTimestamp, lastUsedMode, selectedAgentId })
+    .set({ updatedAt: aiTimestamp })
     .where('id', '=', chatId)
     .where('updatedAt', '<=', aiTimestamp)
     .execute();
@@ -327,7 +325,7 @@ export async function persistImageTurn(
 
     await trx
       .updateTable('chats')
-      .set({ updatedAt: input.aiTimestamp, lastUsedMode: 'image' })
+      .set({ updatedAt: input.aiTimestamp })
       .where('id', '=', input.chatId)
       .where('updatedAt', '<=', input.aiTimestamp)
       .execute();

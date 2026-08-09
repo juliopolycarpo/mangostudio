@@ -41,6 +41,8 @@ import { runtimePairingTokens } from './040_runtime_pairing_tokens';
 import { mcpServerEnvironment } from './041_mcp_server_environment';
 import { environmentAllowInstalls } from './042_environment_allow_installs';
 import { libraryBackups } from './043_library_backups';
+import { chatRunner } from './044_chat_runner';
+import { externalSessionContinuations } from './045_external_session_continuations';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -86,4 +88,6 @@ export const allMigrations = {
   '041_mcp_server_environment': mcpServerEnvironment,
   '042_environment_allow_installs': environmentAllowInstalls,
   '043_library_backups': libraryBackups,
+  '044_chat_runner': chatRunner,
+  '045_external_session_continuations': externalSessionContinuations,
 };
