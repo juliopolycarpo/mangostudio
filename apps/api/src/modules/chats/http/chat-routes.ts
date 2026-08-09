@@ -18,6 +18,7 @@ import { WorkspacePathError } from '../../workspaces/application/workspace-path'
 import {
   compactChatUseCase,
   EmptyChatCompactionError,
+  ExternalChatCompactionUnsupportedError,
   summarizeToNewChatUseCase,
 } from '../application/context-compaction';
 import { createChatUseCase } from '../application/create-chat';
@@ -160,6 +161,10 @@ export const chatRoutes = (app: Elysia) =>
               set.status = 400;
               return { error: err.message, code: ERROR_CODES.VALIDATION };
             }
+            if (err instanceof ExternalChatCompactionUnsupportedError) {
+              set.status = 409;
+              return { error: err.message, code: ERROR_CODES.UNSUPPORTED };
+            }
             if (err instanceof NoModelAvailableError) {
               set.status = 503;
               return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
@@ -189,6 +194,10 @@ export const chatRoutes = (app: Elysia) =>
             if (err instanceof EmptyChatCompactionError) {
               set.status = 400;
               return { error: err.message, code: ERROR_CODES.VALIDATION };
+            }
+            if (err instanceof ExternalChatCompactionUnsupportedError) {
+              set.status = 409;
+              return { error: err.message, code: ERROR_CODES.UNSUPPORTED };
             }
             if (err instanceof NoModelAvailableError) {
               set.status = 503;
