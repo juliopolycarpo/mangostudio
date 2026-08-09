@@ -169,7 +169,7 @@ describe('RuntimeClient', () => {
       expect(events).toHaveLength(1);
     } finally {
       unsubscribe();
-      connection.close();
+      await connection.close();
     }
   });
 
@@ -199,7 +199,7 @@ describe('RuntimeClient', () => {
         client.externalAgents.discover({ targetIds: ['codex'], timeoutMs: 1_000 }, { timeoutMs: 1 })
       ).rejects.toBeInstanceOf(ToolExecutionTimedOutError);
     } finally {
-      connection.close();
+      await connection.close();
     }
   });
 

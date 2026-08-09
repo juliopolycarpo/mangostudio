@@ -16,6 +16,7 @@ import {
   LOCAL_ENVIRONMENT_NAME,
   SshFailureReasonSchema,
 } from '@mangostudio/shared/environments';
+import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
 import { Value } from '@sinclair/typebox/value';
@@ -782,7 +783,7 @@ interface LocalRuntimeOpenOptions {
     canonicalPath: string,
     signal: AbortSignal
   ) => boolean | Promise<boolean>;
-  readonly identityIsolation?: ReturnType<typeof createSingleUserHostExternalAgentIsolation>;
+  readonly identityIsolation?: ExternalIdentityIsolation;
 }
 
 async function connectLocalRuntime(

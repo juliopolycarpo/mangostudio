@@ -432,13 +432,13 @@ export class RuntimeClient {
       close: (params, options) => this.request('external-agent.close', params, options),
       onEvent: (sessionId, listener) =>
         this.protocol.onEvent((frame) => {
-          if (
-            frame.topic === RUNTIME_EXTERNAL_AGENT_TOPIC &&
-            Value.Check(ExternalAgentEventEnvelopeSchema, frame.payload) &&
-            frame.payload.sessionId === sessionId
-          ) {
-            listener(frame.payload);
-          }
+          if (frame.topic !== RUNTIME_EXTERNAL_AGENT_TOPIC) return;
+          // Every open session adds a listener on this topic, so the cheap
+          // session match runs before the envelope validation: a delta stream
+          // otherwise pays one full schema check per unrelated subscriber.
+          if ((frame.payload as { sessionId?: unknown } | null)?.sessionId !== sessionId) return;
+          if (!Value.Check(ExternalAgentEventEnvelopeSchema, frame.payload)) return;
+          listener(frame.payload);
         }),
     };
     this.install = {
