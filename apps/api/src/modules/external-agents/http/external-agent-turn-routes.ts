@@ -75,11 +75,11 @@ export function createExternalAgentTurnRoutes(
   return new Elysia()
     .use(requireAuth)
     .post(
-      '/chats/:chatId/external-agent/respond',
+      '/chats/:id/external-agent/respond',
       async ({ params, body, user, set }) => {
         const result = await controller.answerApproval({
           userId: user?.id ?? '',
-          chatId: params.chatId,
+          chatId: params.id,
           requestId: body.requestId,
           optionId: body.optionId,
         });
@@ -90,7 +90,7 @@ export function createExternalAgentTurnRoutes(
         return { status: 'accepted' as const, optionId: result.optionId };
       },
       {
-        params: t.Object({ chatId: t.String({ minLength: 1, maxLength: 256 }) }),
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
         body: RespondBodySchema,
         response: {
           200: RespondResponseSchema,
@@ -102,11 +102,11 @@ export function createExternalAgentTurnRoutes(
       }
     )
     .post(
-      '/chats/:chatId/fork-with-runner',
+      '/chats/:id/fork-with-runner',
       async ({ params, body, user, set }) => {
         const userId = user?.id ?? '';
         const db = getDb();
-        const source = await getOwnedChat(params.chatId, userId, db);
+        const source = await getOwnedChat(params.id, userId, db);
         if (!source) {
           set.status = 404;
           return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
@@ -145,7 +145,7 @@ export function createExternalAgentTurnRoutes(
         };
       },
       {
-        params: t.Object({ chatId: t.String({ minLength: 1, maxLength: 256 }) }),
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
         body: ForkBodySchema,
         response: {
           201: ForkResponseSchema,

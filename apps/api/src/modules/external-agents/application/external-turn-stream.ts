@@ -18,6 +18,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
   externalAgentEventToStreamChunk,
   externalSessionStartedChunk,
+  externalTurnCompletedChunk,
 } from '@mangostudio/shared/streaming';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -198,12 +199,9 @@ function openStream(
           db
         );
 
-        // The vendor's own failure already streamed as `external_error` and is
-        // recorded on the turn. What the terminal state adds is why MangoStudio
-        // stopped believing the turn would finish, which only some reasons have.
-        const notice = terminalNoticeFor(result.reason);
-        if (notice) send({ type: 'system_event', event: notice, done: false });
-
+        // Before `done`, and always: the same value the durable record keeps, so
+        // a reload does not change what the user was told about this turn.
+        send(externalTurnCompletedChunk(result.reason));
         send({ type: 'done', done: true, messageId: result.assistantMessageId });
       } catch (error) {
         // Everything reachable here failed before or during `start`, so no
@@ -239,32 +237,6 @@ function openStream(
       Connection: 'keep-alive',
     },
   });
-}
-
-/**
- * The terminal reasons a user has to be told about in words.
- *
- * `completed` and `cancelled-by-user` need none — the transcript already shows
- * what happened, and narrating a stop the user pressed is noise. `vendor-error`
- * is omitted for the same reason: its structured error streamed already.
- */
-function terminalNoticeFor(reason: string): string | null {
-  switch (reason) {
-    case 'runtime-disconnected':
-      return 'external_runtime_disconnected';
-    case 'hub-restarted':
-      return 'external_hub_restarted';
-    case 'sequence-gap':
-      return 'external_sequence_gap';
-    case 'limit-exceeded':
-      return 'external_limit_exceeded';
-    case 'consent-revoked':
-      return 'external_consent_revoked';
-    case 'session-lost':
-      return 'external_session_lost';
-    default:
-      return null;
-  }
 }
 
 export const streamExternalTurn = createExternalTurnStream();

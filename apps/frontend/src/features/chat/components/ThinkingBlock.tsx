@@ -20,9 +20,20 @@ interface ThinkingBlockProps {
   messageId: string;
   text: string;
   isStreaming: boolean;
+  /**
+   * True when a vendor process wrote this, not a MangoStudio model. Vendor text
+   * is rendered literally — markdown here would let a third party emit links and
+   * images into MangoStudio's own UI.
+   */
+  plainText?: boolean;
 }
 
-export function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockProps) {
+export function ThinkingBlock({
+  messageId,
+  text,
+  isStreaming,
+  plainText = false,
+}: ThinkingBlockProps) {
   const { t } = useI18n();
   const initialUiStateRef = useRef<ThinkingUiState>(
     thinkingUiStateByMessage.get(messageId) ?? {
@@ -122,12 +133,18 @@ export function ThinkingBlock({ messageId, text, isStreaming }: ThinkingBlockPro
               className="p-4 max-h-48 sm:max-h-72 md:max-h-96 overflow-y-auto app-scrollbar"
             >
               <div className="text-xs text-on-surface-variant/60 leading-relaxed markdown-content--thinking">
-                <MarkdownContent
-                  content={text}
-                  isStreaming={isStreaming}
-                  copyCodeLabel={t.chat.copyCode}
-                  codeCopiedLabel={t.chat.codeCopied}
-                />
+                {plainText ? (
+                  <span data-vendor-text className="block whitespace-pre-wrap break-words">
+                    {text}
+                  </span>
+                ) : (
+                  <MarkdownContent
+                    content={text}
+                    isStreaming={isStreaming}
+                    copyCodeLabel={t.chat.copyCode}
+                    codeCopiedLabel={t.chat.codeCopied}
+                  />
+                )}
                 {isStreaming && (
                   <span className="inline-block w-0.5 h-[1em] bg-primary/40 ml-0.5 align-middle animate-blink" />
                 )}

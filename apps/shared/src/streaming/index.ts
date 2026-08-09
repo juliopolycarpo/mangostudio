@@ -31,6 +31,7 @@ export {
   type ExternalStreamSession,
   externalAgentEventToStreamChunk,
   externalSessionStartedChunk,
+  externalTurnCompletedChunk,
 } from './external-events';
 export {
   SSEContextEventSchema,

@@ -1,0 +1,196 @@
+/**
+ * The live stream and the reloaded transcript must render the same turn.
+ *
+ * Two independent switch statements build message parts from one sequence of
+ * neutral events: the hub's `ExternalTurnTranscript`, which produces what is
+ * stored, and this app's reducer, which produces what is on screen while the
+ * turn runs. A divergence between them is invisible until someone reloads the
+ * page and the turn they just watched looks different.
+ *
+ * So both are driven here from a single event sequence and compared. The hub's
+ * transcript is imported directly rather than re-implemented — a second copy of
+ * the expected output would drift with neither side noticing.
+ */
+
+import { ExternalTurnTranscript } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
+import type { ExternalAgentEvent } from '@mangostudio/shared/external-agents';
+import type { StreamChunk } from '@mangostudio/shared/streaming';
+import {
+  externalAgentEventToStreamChunk,
+  externalSessionStartedChunk,
+  externalTurnCompletedChunk,
+} from '@mangostudio/shared/streaming';
+import type { MessagePart } from '@mangostudio/shared/types';
+import { describe, expect, it } from 'vitest';
+import {
+  createTextGenerationStreamState,
+  reduceTextGenerationStreamChunk,
+} from '../../../../src/features/generation/text-generation-stream-reducer';
+
+const REDUCER_OPTIONS = { pendingSubagentName: 'Pending subagent' };
+
+/**
+ * A turn that exercises every branch, in an order a real vendor produces:
+ * reasoning first, prose split by activity, an approval answered mid-flight,
+ * sparse usage reported before completion.
+ */
+const TURN: readonly ExternalAgentEvent[] = [
+  { type: 'reasoning_delta', text: 'I should look at ' },
+  { type: 'reasoning_delta', text: 'the build script.' },
+  { type: 'text_delta', text: 'Checking the build' },
+  {
+    type: 'activity_started',
+    callId: 'call-1',
+    activity: { name: 'shell', kind: 'command', title: 'bun run build', detail: 'in /work/repo' },
+  },
+  { type: 'activity_updated', callId: 'call-1', update: { detail: 'compiling…' } },
+  { type: 'activity_completed', callId: 'call-1', result: { status: 'completed', detail: 'ok' } },
+  { type: 'text_delta', text: '. It builds.' },
+  {
+    type: 'approval_requested',
+    request: {
+      requestId: 'req-1',
+      kind: 'file-change',
+      title: 'Write dist/index.js',
+      detail: '+120 −0',
+      options: [
+        { id: 'approve', rawLabel: 'Approve for this session', isDestructive: false },
+        { id: 'deny', rawLabel: 'Deny', isDestructive: true },
+      ],
+      expiresAtMs: 1_800_000_000_000,
+    },
+  },
+  {
+    type: 'approval_resolved',
+    requestId: 'req-1',
+    decision: { optionId: 'approve', source: 'user' },
+  },
+  {
+    type: 'activity_started',
+    callId: 'call-2',
+    activity: { name: 'apply_patch', kind: 'file-change', title: 'dist/index.js' },
+  },
+  { type: 'activity_completed', callId: 'call-2', result: { status: 'failed', detail: 'EACCES' } },
+  { type: 'usage', usage: { inputTokens: 900 } },
+  { type: 'usage', usage: { outputTokens: 120 } },
+  { type: 'completed' },
+];
+
+/** What the hub stores, built from the neutral events themselves. */
+function storedParts(events: readonly ExternalAgentEvent[]): MessagePart[] {
+  const transcript = new ExternalTurnTranscript({
+    targetId: 'codex',
+    sessionId: 'hub-session-1',
+    startedAt: 0,
+  });
+  events.forEach((event, index) => {
+    transcript.apply(event, { sequence: index + 1, at: 0 });
+  });
+  return transcript.parts;
+}
+
+/** What the client renders, built from the chunks those events project onto. */
+function streamedParts(events: readonly ExternalAgentEvent[]): MessagePart[] {
+  const chunks: StreamChunk[] = [
+    externalSessionStartedChunk({ sessionId: 'hub-session-1', targetId: 'codex', resumed: false }),
+  ];
+  for (const event of events) {
+    const chunk = externalAgentEventToStreamChunk(event);
+    if (chunk) chunks.push(chunk);
+    if (event.type === 'completed') chunks.push(externalTurnCompletedChunk('completed'));
+  }
+  const state = chunks.reduce(
+    (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),
+    createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+  );
+  return state.parts;
+}
+
+/**
+ * Drops the few fields only the hub can know.
+ *
+ * `lastSequence`, `eventCount` and `persistedBytes` describe what was written to
+ * disk. The timestamps — including an approval's `resolvedAt` — come from the
+ * server's clock, and a client stamping its own would put a time in the
+ * transcript that disagrees with the record by however far the two clocks are
+ * apart. The live view has no honest value for any of them and does not invent
+ * one; everything a user actually reads is compared exactly.
+ */
+function comparable(parts: readonly MessagePart[]): unknown[] {
+  return parts.map((part) => {
+    if (part.type === 'external_turn') {
+      const { lastSequence, eventCount, persistedBytes, startedAt, updatedAt, ...rest } = part;
+      return rest;
+    }
+    if (part.type === 'external_approval') {
+      const { resolvedAt, ...rest } = part;
+      return rest;
+    }
+    return part;
+  });
+}
+
+describe('external turn: live stream vs reloaded transcript', () => {
+  it('produces the same parts from the same events', () => {
+    expect(comparable(streamedParts(TURN))).toEqual(comparable(storedParts(TURN)));
+  });
+
+  it('splits prose where the vendor split it, rather than collapsing it', () => {
+    const texts = streamedParts(TURN).filter((part) => part.type === 'text');
+    expect(texts).toEqual([
+      { type: 'text', text: 'Checking the build' },
+      { type: 'text', text: '. It builds.' },
+    ]);
+    expect(comparable(streamedParts(TURN))).toEqual(comparable(storedParts(TURN)));
+  });
+
+  it('keeps the vendor option set in the vendor order on both paths', () => {
+    for (const parts of [streamedParts(TURN), storedParts(TURN)]) {
+      const approval = parts.find((part) => part.type === 'external_approval');
+      expect(approval).toMatchObject({
+        options: [
+          { id: 'approve', rawLabel: 'Approve for this session', isDestructive: false },
+          { id: 'deny', rawLabel: 'Deny', isDestructive: true },
+        ],
+        decision: 'approve',
+        decisionSource: 'user',
+      });
+    }
+  });
+
+  it('merges sparse usage rather than letting a later report erase an earlier field', () => {
+    const turn = streamedParts(TURN).find((part) => part.type === 'external_turn');
+    expect(turn).toMatchObject({ usage: { inputTokens: 900, outputTokens: 120 } });
+  });
+
+  it('agrees on a turn that ends the way only the hub can decide', () => {
+    const interrupted = TURN.slice(0, 6);
+    const stored = new ExternalTurnTranscript({
+      targetId: 'codex',
+      sessionId: 'hub-session-1',
+      startedAt: 0,
+    });
+    interrupted.forEach((event, index) => {
+      stored.apply(event, { sequence: index + 1, at: 0 });
+    });
+    stored.finalize('runtime-disconnected', 0);
+
+    const chunks: StreamChunk[] = [
+      externalSessionStartedChunk({
+        sessionId: 'hub-session-1',
+        targetId: 'codex',
+        resumed: false,
+      }),
+      ...interrupted
+        .map(externalAgentEventToStreamChunk)
+        .filter((chunk): chunk is StreamChunk => chunk !== null),
+      externalTurnCompletedChunk('runtime-disconnected'),
+    ];
+    const live = chunks.reduce(
+      (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),
+      createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+    );
+
+    expect(comparable(live.parts)).toEqual(comparable(stored.parts));
+  });
+});

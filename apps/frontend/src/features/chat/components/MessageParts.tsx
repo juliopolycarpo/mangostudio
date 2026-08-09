@@ -1,12 +1,15 @@
 import type { MessagePart } from '@mangostudio/shared';
 import { ASK_USER_QUESTION_TOOL_NAME } from '@mangostudio/shared/questions';
 import { TODO_WRITE_TOOL_NAME } from '@mangostudio/shared/todos';
+import type { ExternalTurnPart } from '@mangostudio/shared/types';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { MarkdownContent } from '@/components/MarkdownContent';
 import { useI18n } from '@/hooks/use-i18n';
 import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
+import { ExternalActivityBlock } from './ExternalActivityBlock';
+import { ExternalApprovalCard } from './ExternalApprovalCard';
 import { findLatestFileChangeId } from './file-change-preview';
 import { GeneratedImagePart } from './GeneratedImagePart';
 import { McpMediaPartBlock } from './McpMediaPartBlock';
@@ -22,6 +25,8 @@ interface MessagePartsProps {
   parts: MessagePart[];
   messageId: string;
   isStreaming: boolean;
+  /** The chat an approval would be answered against; absent makes cards inert. */
+  chatId?: string | null;
   /** Present only while question cards are answerable (last message, idle). */
   onQuestionSubmit?: (prompt: string) => void;
 }
@@ -30,6 +35,7 @@ export function MessageParts({
   parts,
   messageId,
   isStreaming,
+  chatId = null,
   onQuestionSubmit,
 }: MessagePartsProps) {
   const { t } = useI18n();
@@ -38,10 +44,30 @@ export function MessageParts({
     [parts, isStreaming]
   );
   const latestFileChangeId = useMemo(() => findLatestFileChangeId(parts), [parts]);
+  // The turn record is written first so nothing is ever a bare text blob with no
+  // record of who produced it, but it *reads* as a summary, so it renders last.
+  const externalTurn = useMemo(() => parts.find((part) => part.type === 'external_turn'), [parts]);
+  // The turn record is also the message-level marker for *who wrote the prose*.
+  // Every `text` and `thinking` part in a message carrying it came from a vendor
+  // process, and vendor text renders as plain text — markdown here would let a
+  // third party emit links, images and formatting into MangoStudio's own UI.
+  const vendorAuthored = externalTurn !== undefined;
   return (
     <>
       {parts.map((part, idx) => {
         switch (part.type) {
+          case 'external_turn':
+            return null;
+          case 'external_activity':
+            return <ExternalActivityBlock key={`${part.callId}-activity`} part={part} />;
+          case 'external_approval':
+            return (
+              <ExternalApprovalCard
+                key={`${part.requestId}-approval`}
+                part={part}
+                chatId={chatId}
+              />
+            );
           case 'thinking': {
             const blockId = `${messageId}-thinking-${idx}`;
             const isLastThinking =
@@ -52,6 +78,7 @@ export function MessageParts({
                 messageId={blockId}
                 text={part.text}
                 isStreaming={isLastThinking}
+                plainText={vendorAuthored}
               />
             );
           }
@@ -119,12 +146,18 @@ export function MessageParts({
                 key={`${messageId}-text-${idx}`}
                 className="bg-surface-container-low p-5 rounded-2xl border border-outline-variant/10 font-body text-sm leading-relaxed text-on-surface max-w-2xl"
               >
-                <MarkdownContent
-                  content={part.text}
-                  isStreaming={isStreaming}
-                  copyCodeLabel={t.chat.copyCode}
-                  codeCopiedLabel={t.chat.codeCopied}
-                />
+                {vendorAuthored ? (
+                  <span data-vendor-text className="block whitespace-pre-wrap break-words">
+                    {part.text}
+                  </span>
+                ) : (
+                  <MarkdownContent
+                    content={part.text}
+                    isStreaming={isStreaming}
+                    copyCodeLabel={t.chat.copyCode}
+                    codeCopiedLabel={t.chat.codeCopied}
+                  />
+                )}
                 {isStreaming && idx === parts.length - 1 && (
                   <span className="inline-block w-0.5 h-[1em] bg-primary ml-0.5 align-middle animate-blink" />
                 )}
@@ -167,8 +200,83 @@ export function MessageParts({
             return null;
         }
       })}
+      {externalTurn?.type === 'external_turn' ? (
+        <ExternalTurnFooter part={externalTurn} isStreaming={isStreaming} />
+      ) : null}
     </>
   );
+}
+
+/**
+ * What the vendor spent and why the turn stopped.
+ *
+ * Usage renders only the fields the vendor reported, and no total is computed
+ * from them: an adapter reports what its vendor reports, and a sum MangoStudio
+ * invented would read as the vendor's own number. Cost is out of scope entirely.
+ */
+function ExternalTurnFooter({
+  part,
+  isStreaming,
+}: {
+  part: ExternalTurnPart;
+  isStreaming: boolean;
+}) {
+  const { t } = useI18n();
+  const labels = t.externalAgents.turn;
+  const usage = part.usage;
+  const fields: Array<[string, number]> = usage
+    ? (
+        [
+          [labels.usageInput, usage.inputTokens],
+          [labels.usageOutput, usage.outputTokens],
+          [labels.usageReasoning, usage.reasoningTokens],
+          [labels.usageCacheRead, usage.cacheReadTokens],
+          [labels.usageCacheWrite, usage.cacheWriteTokens],
+          [labels.usageTotal, usage.totalTokens],
+        ] as const
+      ).filter((entry): entry is [string, number] => typeof entry[1] === 'number')
+    : [];
+
+  const terminalNotice =
+    part.status === 'terminal' && part.terminalReason && part.terminalReason !== 'completed'
+      ? labels.terminal[part.terminalReason]
+      : null;
+
+  if (fields.length === 0 && !terminalNotice && !part.error) return null;
+
+  return (
+    <div className="max-w-2xl space-y-1.5">
+      {fields.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {fields.map(([label, value]) => (
+            <span
+              key={label}
+              className="rounded-full border border-outline-variant/20 bg-surface-container-lowest px-2 py-0.5 text-[10px] tabular-nums text-on-surface-variant"
+            >
+              {`${label} ${formatTokensCompact(value)}`}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {part.error ? (
+        <p className="rounded-xl border border-error/20 bg-error/10 px-3 py-2 text-xs text-error">
+          {/* The vendor's own code and message, inert and unflattened. */}
+          <span className="font-mono">{part.error.code}</span>
+          {` — ${part.error.message}`}
+        </p>
+      ) : null}
+      {terminalNotice && !isStreaming ? (
+        <p className="text-xs text-on-surface-variant/70">{terminalNotice}</p>
+      ) : null}
+    </div>
+  );
+}
+
+/** Same compaction the composer's context chip uses, so one turn reads one way. */
+function formatTokensCompact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}k`;
+  return String(n);
 }
 
 function SubagentTraceBlock({ part }: { part: Extract<MessagePart, { type: 'subagent_trace' }> }) {

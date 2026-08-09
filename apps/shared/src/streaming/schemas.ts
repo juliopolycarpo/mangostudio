@@ -8,6 +8,7 @@ import {
   ExternalAgentTargetIdSchema,
   ExternalApprovalDecisionSchema,
   ExternalApprovalOptionSchema,
+  ExternalTurnTerminalReasonSchema,
   ExternalUsageSchema,
 } from '../external-agents/schemas';
 import {
@@ -431,6 +432,21 @@ const SSEExternalErrorEventSchema = Type.Object({
   done: Type.Literal(false),
 });
 
+/**
+ * How the turn ended, as data rather than as prose.
+ *
+ * The vendor's own `completed` and `error` are only two of nine ways a turn
+ * stops — the other seven are the hub's verdict on a vendor that stopped being
+ * reachable, answerable or affordable. The durable record keeps all nine on
+ * `external_turn.terminalReason`, so the live stream has to carry the same value
+ * or a reload changes what the user is told about a turn they just watched.
+ */
+const SSEExternalTurnCompletedEventSchema = Type.Object({
+  type: Type.Literal('external_turn_completed'),
+  reason: ExternalTurnTerminalReasonSchema,
+  done: Type.Literal(false),
+});
+
 export const SSEDoneEventSchema = Type.Object({
   type: Type.Literal('done'),
   done: Type.Literal(true),
@@ -478,6 +494,7 @@ export const StreamChunkSchema = Type.Union([
   SSEExternalApprovalStatusEventSchema,
   SSEExternalUsageEventSchema,
   SSEExternalErrorEventSchema,
+  SSEExternalTurnCompletedEventSchema,
   SSEDoneEventSchema,
   SSEErrorEventSchema,
 ]);

@@ -254,6 +254,7 @@ describe('external turn stream', () => {
       'external_activity_started',
       'external_activity_completed',
       'external_usage',
+      'external_turn_completed',
       'done',
     ]);
     // The vendor's own session handle never reaches the client.
@@ -358,7 +359,7 @@ describe('external turn stream', () => {
     });
   });
 
-  it('reports a mid-turn cancel and a dropped runtime as system events', async () => {
+  it('reports the terminal reason for a cancel and for a dropped runtime', async () => {
     const cancelled = harness();
     const cancelledResult = await cancelled.stream(
       {
@@ -376,8 +377,11 @@ describe('external turn stream', () => {
     await waitForTurnStart(cancelled.runtime);
     expect(cancelActiveTurnForChat(chatId)).toBe(true);
     const cancelledChunks = await cancelledReading;
-    // A stop the user pressed needs no narration; the transcript shows it.
-    expect(cancelledChunks.some((chunk) => chunk.type === 'system_event')).toBe(false);
+    expect(cancelledChunks).toContainEqual({
+      type: 'external_turn_completed',
+      reason: 'cancelled-by-user',
+      done: false,
+    });
     expect(cancelledChunks.at(-1)?.type).toBe('done');
 
     const droppedChatId = await insertExternalChat();
@@ -399,8 +403,8 @@ describe('external turn stream', () => {
     dropped.runtime.dropConnection();
     const droppedChunks = await droppedReading;
     expect(droppedChunks).toContainEqual({
-      type: 'system_event',
-      event: 'external_runtime_disconnected',
+      type: 'external_turn_completed',
+      reason: 'runtime-disconnected',
       done: false,
     });
   });

@@ -16,7 +16,11 @@
  * Browser-safe: no Node builtins, directly or transitively.
  */
 
-import type { ExternalAgentEvent, ExternalAgentTargetId } from '../external-agents/schemas';
+import type {
+  ExternalAgentEvent,
+  ExternalAgentTargetId,
+  ExternalTurnTerminalReason,
+} from '../external-agents/schemas';
 import type { StreamChunk } from './events';
 
 /** What the hub knows about a session once the runtime has opened one. */
@@ -26,6 +30,18 @@ export interface ExternalStreamSession {
   readonly targetId: ExternalAgentTargetId;
   readonly resumed: boolean;
   readonly fallbackReason?: string;
+}
+
+/**
+ * Announces how the turn ended, with the same value the durable record keeps.
+ *
+ * `done` says the stream is over; this says why. Without it a live view could
+ * only ever show the vendor's own two outcomes, and reloading the page would
+ * replace them with one of the hub's seven — a turn whose explanation changes
+ * when the user refreshes.
+ */
+export function externalTurnCompletedChunk(reason: ExternalTurnTerminalReason): StreamChunk {
+  return { type: 'external_turn_completed', reason, done: false };
 }
 
 /** Announces the session a turn is running in, before any vendor output. */
@@ -47,8 +63,10 @@ export function externalSessionStartedChunk(session: ExternalStreamSession): Str
  *
  * - `session_started` carries the vendor's resumable handle and is announced
  *   instead through {@link externalSessionStartedChunk} with the hub's id.
- * - `completed` is the turn ending, which the route reports as the ordinary
- *   `done` chunk every turn finishes with.
+ * - `completed` is one of nine ways a turn ends, and the hub decides seven of
+ *   them, so the terminal state is announced once through
+ *   {@link externalTurnCompletedChunk} instead of twice with different
+ *   vocabularies.
  */
 export function externalAgentEventToStreamChunk(event: ExternalAgentEvent): StreamChunk | null {
   switch (event.type) {

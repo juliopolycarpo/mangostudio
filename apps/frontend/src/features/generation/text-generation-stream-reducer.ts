@@ -1,6 +1,17 @@
 import type { GeneratedImagePart, Message, MessagePart } from '@mangostudio/shared';
+import type {
+  ExternalAgentError,
+  ExternalAgentTargetId,
+  ExternalTurnTerminalReason,
+  ExternalUsage,
+} from '@mangostudio/shared/external-agents';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
-import type { SubagentTraceEvent, SubagentTraceEventName } from '@mangostudio/shared/types';
+import type {
+  ExternalActivityPart,
+  ExternalTurnPart,
+  SubagentTraceEvent,
+  SubagentTraceEventName,
+} from '@mangostudio/shared/types';
 import { mergeSubagentTraceEvents } from '@mangostudio/shared/types';
 
 interface TextGenerationStreamReducerOptions {
@@ -128,6 +139,28 @@ export function reduceTextGenerationStreamChunk(
       return reduceContinuationTransition(nextState, chunk);
     case 'system_event':
       return reduceSystemEvent(nextState, chunk.event, chunk.detail, options.pendingSubagentName);
+    case 'external_session_started':
+      return reduceExternalSessionStarted(nextState, chunk);
+    case 'external_text':
+      return reduceExternalText(nextState, chunk.text);
+    case 'external_reasoning':
+      return reduceExternalReasoning(nextState, chunk.text);
+    case 'external_activity_started':
+      return reduceExternalActivityStarted(nextState, chunk);
+    case 'external_activity_updated':
+      return reduceExternalActivityUpdated(nextState, chunk);
+    case 'external_activity_completed':
+      return reduceExternalActivityCompleted(nextState, chunk);
+    case 'external_approval_request':
+      return reduceExternalApprovalRequest(nextState, chunk);
+    case 'external_approval_status':
+      return reduceExternalApprovalStatus(nextState, chunk);
+    case 'external_usage':
+      return reduceExternalUsage(nextState, chunk.usage);
+    case 'external_error':
+      return reduceExternalError(nextState, chunk.error);
+    case 'external_turn_completed':
+      return reduceExternalTurnCompleted(nextState, chunk.reason);
     case 'done':
       return reduceDone(nextState, chunk.messageId, chunk.generationTime);
     case 'context_info':
@@ -524,6 +557,224 @@ function reduceDone(
     messageId,
     messageId ? true : state.receivedServerAiMessageId
   );
+}
+
+/**
+ * An external turn's own reduction, deliberately separate from the internal one.
+ *
+ * The hub builds the durable transcript from the same neutral events these
+ * chunks were projected from, so every function below has an exact counterpart
+ * in `ExternalTurnTranscript` and has to agree with it — including the parts
+ * that look like details, such as appending a delta to the *trailing* part
+ * rather than to the first `text` part found. `upsertTextPart` moves the text
+ * block to the end, which is right for a MangoStudio turn whose prose is one
+ * block, and wrong for a vendor that interleaves prose with its own activity.
+ *
+ * `apps/frontend/tests/unit/external-turn-live-vs-reload.test.ts` drives both
+ * paths from one event sequence and compares the results.
+ */
+function reduceExternalSessionStarted(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'external_session_started' }>
+) {
+  if (state.parts.some((part) => part.type === 'external_turn')) return state;
+  const parts = [
+    ...state.parts,
+    {
+      type: 'external_turn',
+      version: 1,
+      targetId: chunk.targetId,
+      sessionId: chunk.sessionId,
+      status: 'active',
+      // Server-owned bookkeeping. The live view has no honest value for any of
+      // them — the hub counts what it persisted, not what it sent — and the
+      // stored record replaces this part wholesale on the next read.
+      startedAt: 0,
+      updatedAt: 0,
+      lastSequence: 0,
+      eventCount: 0,
+      persistedBytes: 0,
+    } satisfies MessagePart,
+  ];
+  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+}
+
+function reduceExternalText(state: TextGenerationStreamState, textDelta: string) {
+  const text = `${state.text}${textDelta}`;
+  const parts = appendExternalText(state.parts, 'text', textDelta);
+  return withAiMessageUpdate({ ...state, text, parts, activeThinkingIndex: null }, { text, parts });
+}
+
+function reduceExternalReasoning(state: TextGenerationStreamState, textDelta: string) {
+  const parts = appendExternalText(state.parts, 'thinking', textDelta);
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceExternalActivityStarted(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'external_activity_started' }>
+) {
+  const parts = [
+    ...state.parts,
+    {
+      type: 'external_activity',
+      targetId: externalTargetId(state.parts),
+      callId: chunk.callId,
+      name: chunk.name,
+      kind: chunk.kind,
+      title: chunk.title,
+      ...(chunk.detail !== undefined ? { detail: chunk.detail } : {}),
+      status: 'running',
+      ...(chunk.truncated ? { truncated: true } : {}),
+    } satisfies MessagePart,
+  ];
+  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+}
+
+function reduceExternalActivityUpdated(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'external_activity_updated' }>
+) {
+  const parts = updateExternalActivity(state.parts, chunk.callId, (part) => ({
+    ...part,
+    ...(chunk.update.title !== undefined ? { title: chunk.update.title } : {}),
+    ...(chunk.update.detail !== undefined ? { detail: chunk.update.detail } : {}),
+    ...(chunk.update.truncated ? { truncated: true } : {}),
+  }));
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceExternalActivityCompleted(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'external_activity_completed' }>
+) {
+  const parts = updateExternalActivity(state.parts, chunk.callId, (part) => ({
+    ...part,
+    status: chunk.status,
+    ...(chunk.detail !== undefined ? { detail: chunk.detail } : {}),
+    ...(chunk.isError ? { isError: true } : {}),
+    ...(chunk.truncated ? { truncated: true } : {}),
+  }));
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceExternalApprovalRequest(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'external_approval_request' }>
+) {
+  const exists = state.parts.some(
+    (part) => part.type === 'external_approval' && part.requestId === chunk.requestId
+  );
+  if (exists) return state;
+  const parts = [
+    ...state.parts,
+    {
+      type: 'external_approval',
+      targetId: externalTargetId(state.parts),
+      requestId: chunk.requestId,
+      kind: chunk.kind,
+      title: chunk.title,
+      ...(chunk.detail !== undefined ? { detail: chunk.detail } : {}),
+      // The vendor's option set, in the vendor's order, untouched.
+      options: chunk.options,
+      expiresAtMs: chunk.expiresAtMs,
+      ...(chunk.truncated ? { truncated: true } : {}),
+    } satisfies MessagePart,
+  ];
+  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
+}
+
+function reduceExternalApprovalStatus(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'external_approval_status' }>
+) {
+  // The first resolution wins, exactly as it does on the transcript: a late echo
+  // must not rewrite a decision that is already recorded.
+  const parts = state.parts.map((part) =>
+    part.type === 'external_approval' &&
+    part.requestId === chunk.requestId &&
+    part.decisionSource === undefined
+      ? {
+          ...part,
+          decision: chunk.decision.optionId,
+          decisionSource: chunk.decision.source,
+        }
+      : part
+  );
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceExternalUsage(state: TextGenerationStreamState, usage: ExternalUsage) {
+  // Sparse by design: a later report that omits a field must not erase it.
+  const parts = updateExternalTurn(state.parts, (part) => ({
+    ...part,
+    usage: { ...part.usage, ...usage },
+  }));
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceExternalError(state: TextGenerationStreamState, error: ExternalAgentError) {
+  const parts = updateExternalTurn(state.parts, (part) => ({ ...part, error }));
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceExternalTurnCompleted(
+  state: TextGenerationStreamState,
+  reason: ExternalTurnTerminalReason
+) {
+  const parts = updateExternalTurn(state.parts, (part) =>
+    part.status === 'terminal' ? part : { ...part, status: 'terminal', terminalReason: reason }
+  );
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+/**
+ * Which vendor produced this turn.
+ *
+ * Read off the turn part rather than carried on every chunk: the session chunk
+ * always precedes vendor output, and repeating the target on each event would
+ * be a second place for it to be wrong. `codex` is a last resort that only a
+ * malformed stream can reach.
+ */
+function externalTargetId(parts: readonly MessagePart[]): ExternalAgentTargetId {
+  const turn = parts.find((part) => part.type === 'external_turn');
+  return turn?.type === 'external_turn' ? turn.targetId : 'codex';
+}
+
+function updateExternalTurn(
+  parts: MessagePart[],
+  update: (current: ExternalTurnPart) => ExternalTurnPart
+): MessagePart[] {
+  return parts.map((part) => (part.type === 'external_turn' ? update(part) : part));
+}
+
+function updateExternalActivity(
+  parts: MessagePart[],
+  callId: string,
+  update: (current: ExternalActivityPart) => ExternalActivityPart
+): MessagePart[] {
+  return parts.map((part) =>
+    part.type === 'external_activity' && part.callId === callId ? update(part) : part
+  );
+}
+
+/**
+ * Appends to the trailing part when it is already of this kind.
+ *
+ * A stream of deltas becomes one block, and interleaved activity still splits
+ * the prose where the vendor split it — which is what the persisted transcript
+ * records, so it is what a live render has to produce.
+ */
+function appendExternalText(
+  parts: MessagePart[],
+  kind: 'text' | 'thinking',
+  text: string
+): MessagePart[] {
+  const last = parts.at(-1);
+  if (last?.type === kind) {
+    return [...parts.slice(0, -1), { ...last, text: `${last.text}${text}` }];
+  }
+  return [...parts, kind === 'text' ? { type: 'text', text } : { type: 'thinking', text }];
 }
 
 function withUserMessageUpdate(
