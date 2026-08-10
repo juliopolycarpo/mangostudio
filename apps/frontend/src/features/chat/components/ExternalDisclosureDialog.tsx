@@ -20,6 +20,8 @@ export interface ExternalDisclosureDialogProps {
   descriptor: ExternalAgentDescriptor;
   /** True when this is a review rather than a first activation. */
   reviewOnly?: boolean;
+  /** True while the acknowledgement is being stored, which gates the vendor. */
+  busy?: boolean;
   onAccept: () => void;
   onCancel: () => void;
 }
@@ -27,6 +29,7 @@ export interface ExternalDisclosureDialogProps {
 export function ExternalDisclosureDialog({
   descriptor,
   reviewOnly = false,
+  busy = false,
   onAccept,
   onCancel,
 }: ExternalDisclosureDialogProps) {
@@ -68,7 +71,8 @@ export function ExternalDisclosureDialog({
           <button
             type="button"
             onClick={onCancel}
-            className="cursor-pointer rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high"
+            disabled={busy}
+            className="cursor-pointer rounded-xl border border-outline-variant/20 px-3 py-2 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high disabled:cursor-default disabled:opacity-50"
           >
             {reviewOnly ? labels.close : labels.cancel}
           </button>
@@ -76,9 +80,10 @@ export function ExternalDisclosureDialog({
             <button
               type="button"
               onClick={onAccept}
-              className="cursor-pointer rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90"
+              disabled={busy}
+              className="cursor-pointer rounded-xl bg-primary px-4 py-2 text-sm font-medium text-on-primary transition-opacity hover:opacity-90 disabled:cursor-default disabled:opacity-50"
             >
-              {labels.accept}
+              {busy ? labels.accepting : labels.accept}
             </button>
           )}
         </div>

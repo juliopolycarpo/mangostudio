@@ -143,7 +143,7 @@ export function useGlobalSettings() {
    * whenever its dependency changes, so an unstable one would flush the pending
    * save on every re-render and the debounce would never coalesce anything.
    */
-  const { mutate } = mutation;
+  const { mutate, mutateAsync } = mutation;
 
   const flushPendingSave = useCallback(() => {
     if (saveTimerRef.current) {
@@ -191,6 +191,35 @@ export function useGlobalSettings() {
       }, SETTINGS_SAVE_DEBOUNCE_MS);
     },
     [flushPendingSave, queryClient]
+  );
+
+  /**
+   * The same write, without the debounce and with a promise the caller can wait
+   * on.
+   *
+   * Auto-save is fire-and-forget because every control it backs is a preference:
+   * a failed write toasts, rolls back, and costs the user a re-click. A record
+   * that gates something — consent before a third party runs a turn — cannot be
+   * queued that way, because the thing it gates would start while the write is
+   * still in the debounce window and could still fail.
+   *
+   * Everything `saveSettings` establishes still applies: the same normalization,
+   * the same rollback baseline, the same echo window. Only the timer is skipped,
+   * so an edit already queued rides along rather than being dropped.
+   */
+  const saveSettingsNow = useCallback(
+    async (updater: (current: AppSettings) => AppSettings) => {
+      saveSettings(updater);
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      const pendingSettings = pendingSaveRef.current;
+      if (!pendingSettings) return;
+      pendingSaveRef.current = null;
+      await mutateAsync(pendingSettings);
+    },
+    [mutateAsync, saveSettings]
   );
 
   const updatePromptSettings = useCallback(
@@ -317,14 +346,19 @@ export function useGlobalSettings() {
     [saveSettings]
   );
 
+  /**
+   * Awaited rather than queued: this is where a disclosure acknowledgement is
+   * recorded, and the caller must not point a chat at a vendor until the record
+   * of being told about it has actually persisted.
+   */
   const updateExternalAgentSettings = useCallback(
     (updates: Partial<AppSettings['externalAgentSettings']>) => {
-      saveSettings((current) => ({
+      return saveSettingsNow((current) => ({
         ...current,
         externalAgentSettings: { ...current.externalAgentSettings, ...updates },
       }));
     },
-    [saveSettings]
+    [saveSettingsNow]
   );
 
   const updateCommitMessageSettings = useCallback(

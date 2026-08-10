@@ -30,6 +30,7 @@ export function RunnerSelectorContainer() {
   const disclosures = useExternalDisclosures();
   const messages = useMessagesQuery(app.currentChatId);
   const [pendingDisclosure, setPendingDisclosure] = useState<ExternalAgentDescriptor | null>(null);
+  const [isAccepting, setAccepting] = useState(false);
 
   const environmentName =
     environments.data?.find((environment) => environment.id === app.currentEnvironmentId)?.name ??
@@ -38,7 +39,16 @@ export function RunnerSelectorContainer() {
 
   // D14 turns on whether the chat already carries turns, so a new, empty chat can
   // still be pointed at either kind without a fork.
-  const hasTurns = messages.data?.pages.some((page) => page.messages.length > 0) === true;
+  //
+  // An *unloaded* transcript is not an empty one. `useMessagesQuery` answers
+  // `undefined` both for a chat with no turns and for one whose turns have not
+  // arrived yet, and reading the second as the first would switch an existing
+  // chat's runner kind in place — the one thing D14 exists to prevent, since the
+  // transcript that survives the switch was produced by the other owner. So an
+  // existing chat requires a fork until its transcript says otherwise. A chat
+  // that has no id yet has no turns by construction, and its query never runs.
+  const transcriptIsEmpty = messages.data?.pages.every((page) => page.messages.length === 0);
+  const hasTurns = app.currentChatId ? transcriptIsEmpty !== true : false;
 
   const activate = (descriptor: ExternalAgentDescriptor) => {
     app.setRunnerTarget(descriptor.targetId);
@@ -84,12 +94,27 @@ export function RunnerSelectorContainer() {
       {pendingDisclosure ? (
         <ExternalDisclosureDialog
           descriptor={pendingDisclosure}
+          busy={isAccepting}
           onCancel={() => setPendingDisclosure(null)}
           onAccept={() => {
+            // Persist first, activate second. The other order points the chat at
+            // a third party on the strength of a write that can still fail, and
+            // a failed one leaves the vendor already reachable with nothing on
+            // record saying the user was ever shown the notice.
             const descriptor = pendingDisclosure;
-            setPendingDisclosure(null);
-            void disclosures.accept(descriptor.targetId, descriptor.capabilities);
-            activate(descriptor);
+            setAccepting(true);
+            void disclosures
+              .accept(descriptor.targetId, descriptor.capabilities)
+              .then(() => {
+                setPendingDisclosure(null);
+                activate(descriptor);
+              })
+              .catch(() => {
+                // The settings mutation raises its own toast. The dialog stays
+                // open so the only way forward is still through the notice.
+                toast(t.externalAgents.disclosure.acceptFailed, 'error');
+              })
+              .finally(() => setAccepting(false));
           }}
         />
       ) : null}

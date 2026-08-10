@@ -21,7 +21,18 @@ import { useApp } from '@/lib/app-context';
 
 export interface ExternalDisclosuresView {
   forTarget: (targetId: ExternalAgentTargetId) => ExternalAgentDisclosure | undefined;
-  accept: (targetId: ExternalAgentTargetId, capabilities: ExternalAgentCapabilities) => void;
+  /**
+   * Resolves once the acknowledgement is stored, and rejects when it is not.
+   *
+   * The caller has to wait: activating the vendor is what sends the user's
+   * conversation to a third party, and doing that on the strength of a write
+   * still in flight means a failed write leaves data already sent with no record
+   * that the notice was ever shown.
+   */
+  accept: (
+    targetId: ExternalAgentTargetId,
+    capabilities: ExternalAgentCapabilities
+  ) => Promise<void>;
 }
 
 export function useExternalDisclosures(): ExternalDisclosuresView {
@@ -31,7 +42,7 @@ export function useExternalDisclosures(): ExternalDisclosuresView {
 
   const accept = useCallback(
     (targetId: ExternalAgentTargetId, capabilities: ExternalAgentCapabilities) => {
-      settings.updateExternalAgentSettings({
+      return settings.updateExternalAgentSettings({
         disclosures: {
           ...disclosures,
           [targetId]: {
