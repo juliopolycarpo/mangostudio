@@ -10,9 +10,9 @@ import type {
   ExternalAgentDescriptor,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
-import { ENVIRONMENTS_TOPIC } from '@mangostudio/shared/realtime';
+import { ENVIRONMENTS_TOPIC, EXTERNAL_AGENTS_TOPIC } from '@mangostudio/shared/realtime';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { externalAgentKeys, externalAgentsQueryOptions } from './queries';
 
@@ -24,11 +24,17 @@ export interface ExternalAgentsView {
 
 export function useExternalAgents(environmentId: string | null): ExternalAgentsView {
   const queryClient = useQueryClient();
+  const invalidate = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: externalAgentKeys.all });
+  }, [queryClient]);
+
   // A runtime connecting or dropping, an environment edited or removed: exactly
   // when "is Codex installed and signed in over there" stops being true.
-  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, async () => {
-    await queryClient.invalidateQueries({ queryKey: externalAgentKeys.all });
-  });
+  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, invalidate);
+  // The machine did not change, but the hub finished probing it. The first
+  // render after a cold cache shows the capability-free scan — no model or
+  // permission picker — and this is what fills them in once the vendor answers.
+  useRealtimeInvalidation(EXTERNAL_AGENTS_TOPIC, invalidate);
 
   const { data, isLoading } = useQuery(externalAgentsQueryOptions(environmentId));
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);

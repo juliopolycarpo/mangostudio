@@ -1,11 +1,12 @@
 /**
  * External agents, scoped to the environment the chat runs in.
  *
- * The selector does not poll. Environment state changes already publish a
- * user-scoped invalidation on the environments realtime topic — a runtime
- * connecting or dropping, an environment added, edited or removed — and that is
- * exactly when these answers go stale, so the client refetches on a signal it is
- * already subscribed to.
+ * The selector does not poll. Two user-scoped realtime signals keep it honest:
+ * the environments topic, for a runtime connecting or dropping and an
+ * environment added, edited or removed; and the external-agents topic, for the
+ * hub's own background discovery probe finishing with a better answer than the
+ * one it served. The first says the machine changed, the second says only that
+ * what we know about it did.
  *
  * Keyed by environment, because a descriptor is only true of one machine: Codex
  * being signed in on the laptop says nothing about the build server.
