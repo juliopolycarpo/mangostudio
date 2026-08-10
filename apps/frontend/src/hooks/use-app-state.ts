@@ -53,6 +53,22 @@ export function useAppState() {
     return request.model === undefined && request.effort === undefined ? undefined : request;
   }, []);
 
+  // Read through a ref for the same reason the vendor options are: the send
+  // path has to see the runner the composer shows now, not the one it showed
+  // when the callback was created.
+  //
+  // This is the *selected* runner, which is what the turn header should name
+  // while the turn streams. It can be ahead of the stored one — the selector
+  // writes optimistically — but only a write that is then rejected leaves the
+  // two permanently disagreeing; `whenRunnerPersisted` settles the rest before
+  // the stream opens, so the hub dispatches on the runner shown here.
+  const runnerRef = useRef(runnerSelection.runner);
+  runnerRef.current = runnerSelection.runner;
+  const getExternalRunnerTargetId = useCallback(() => {
+    const runner = runnerRef.current;
+    return runner.kind === 'external' ? runner.targetId : undefined;
+  }, []);
+
   const textGen = useTextGeneration({
     chats,
     getActiveModel: modelState.getActiveModel,
@@ -70,6 +86,8 @@ export function useAppState() {
       agentName: runnerSelection.selectedAgent?.name,
     }),
     getExternalTurnRequest,
+    getExternalRunnerTargetId,
+    whenRunnerPersisted: runnerSelection.whenRunnerPersisted,
     onChatCreated: runnerSelection.bindNewChat,
   });
   useChatContextSync(chats.chats, textGen.seedContextInfo);

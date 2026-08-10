@@ -67,6 +67,15 @@ export function useRunnerSelection({
     [agents, selectedAgentId]
   );
 
+  /**
+   * The runner write that has been sent but not yet answered, if any.
+   *
+   * Held so a send can wait for it. The hub dispatches a turn on the *stored*
+   * runner, and this selector writes optimistically, so a turn submitted inside
+   * that window would run on the runner the user just replaced.
+   */
+  const pendingRunnerWrite = useRef<Promise<void> | null>(null);
+
   const persistRunner = useCallback(
     (runner: ChatRunnerConfiguration) => {
       setRunnerOverride({ chatId: currentChatId, runner });
@@ -74,14 +83,31 @@ export function useRunnerSelection({
       // The override is optimistic, so a rejected write has to take it back:
       // otherwise the picker keeps showing an agent the chat does not store,
       // and turns keep being sent against it.
-      void updateChatRunner(currentChatId, runner).catch(() => {
+      const write = updateChatRunner(currentChatId, runner).catch(() => {
         setRunnerOverride((current) =>
           current?.chatId === currentChatId && current.runner === runner ? null : current
         );
       });
+      pendingRunnerWrite.current = write;
+      void write.finally(() => {
+        if (pendingRunnerWrite.current === write) pendingRunnerWrite.current = null;
+      });
     },
     [currentChatId, updateChatRunner]
   );
+
+  /**
+   * Settles an open runner write before the caller acts on the selection.
+   *
+   * Free unless a write is actually open, which is only the moment right after
+   * the picker was used. This closes the dispatch half of the race — the turn
+   * runs on the runner the user chose. The label half survives a *rejected*
+   * write: the turn header is already on screen by then, and closing that would
+   * take the hub naming the runner it actually used on the wire.
+   */
+  const whenRunnerPersisted = useCallback(async () => {
+    await pendingRunnerWrite.current;
+  }, []);
 
   const runnerAgentSelection = useCallback(
     (runner: ChatRunnerConfiguration) => {
@@ -224,6 +250,7 @@ export function useRunnerSelection({
     currentWorkdir: currentChat?.workdir ?? null,
     isWorkdirPickerOpen,
     bindNewChat,
+    whenRunnerPersisted,
     setRunnerAgentId,
     setRunnerTarget,
     setRunnerPermissions,

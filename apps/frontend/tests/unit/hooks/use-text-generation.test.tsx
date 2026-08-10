@@ -360,6 +360,143 @@ describe('useTextGeneration — maxToolIterations forwarding', () => {
   });
 });
 
+describe('useTextGeneration — external turn header model', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+    mockGenerateChatTitle.mockReset();
+  });
+
+  async function respondAndReadOptimisticModel(
+    overrides: Partial<TextGenerationProps>
+  ): Promise<string | undefined> {
+    const props = makeProps(overrides);
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    await act(async () => {
+      await result.current.handleRespond('ping');
+    });
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const appendCall = (props.optimistic.appendOptimisticMessages as ReturnType<typeof vi.fn>).mock
+      .calls[0];
+    expect(appendCall).toBeDefined();
+    const appended = (appendCall?.[1] ?? []) as { role: string; modelName?: string }[];
+    return appended.find((message) => message.role === 'ai')?.modelName;
+  }
+
+  it('names the vendor model the composer chose, not the MangoStudio one', async () => {
+    expect(
+      await respondAndReadOptimisticModel({
+        getExternalRunnerTargetId: () => 'codex',
+        getExternalTurnRequest: () => ({ model: 'gpt-5-codex' }),
+      })
+    ).toBe('gpt-5-codex');
+  });
+
+  // The vendor options are absent whenever the user left both alone, but the
+  // turn is still external — the hub falls back to the vendor id there, and a
+  // live label that disagreed would flip on reload.
+  it('falls back to the vendor when no model was picked', async () => {
+    expect(
+      await respondAndReadOptimisticModel({
+        getExternalRunnerTargetId: () => 'codex',
+        getExternalTurnRequest: () => undefined,
+      })
+    ).toBe('codex');
+  });
+
+  it('keeps the MangoStudio model for a turn MangoStudio runs', async () => {
+    expect(
+      await respondAndReadOptimisticModel({ getExternalRunnerTargetId: () => undefined })
+    ).toBe('test-model');
+  });
+
+  // The getter is optional, and a consumer that never wired it must not lose the
+  // MangoStudio label it had before the external path existed.
+  it('keeps the MangoStudio model when the runner getter is not wired', async () => {
+    expect(await respondAndReadOptimisticModel({})).toBe('test-model');
+  });
+});
+
+describe('useTextGeneration — a runner switch still being written', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+    mockGenerateChatTitle.mockReset();
+  });
+
+  /**
+   * The hub dispatches on the runner it has stored, so the stream must not open
+   * until an optimistic switch has been answered — otherwise the turn runs on
+   * the runner the user just replaced.
+   *
+   * The echo is deliberately not held back with it: the composer has to stay
+   * immediate, and the label it writes is the runner the user chose.
+   */
+  it('opens the stream only after an in-flight runner switch settles', async () => {
+    let settleRunnerWrite: (() => void) | undefined;
+    const props = makeProps({
+      getExternalRunnerTargetId: () => 'codex',
+      whenRunnerPersisted: () =>
+        new Promise<void>((resolve) => {
+          settleRunnerWrite = resolve;
+        }),
+    });
+    mockStream.mockImplementation(
+      makeStreamFn([{ type: 'done', done: true, generationTime: '0.5s' }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    let responded: Promise<void> | undefined;
+    await act(async () => {
+      responded = result.current.handleRespond('ping');
+      await Promise.resolve();
+    });
+
+    expect(mockStream).not.toHaveBeenCalled();
+    expect(props.optimistic.appendOptimisticMessages).toHaveBeenCalled();
+
+    await act(async () => {
+      settleRunnerWrite?.();
+      await responded;
+    });
+
+    expect(mockStream).toHaveBeenCalled();
+  });
+
+  // A stop pressed while the switch is still open must still cancel the turn:
+  // the abort controller is registered before the wait, not after it.
+  it('still honours a stop pressed during the wait', async () => {
+    let settleRunnerWrite: (() => void) | undefined;
+    const props = makeProps({
+      whenRunnerPersisted: () =>
+        new Promise<void>((resolve) => {
+          settleRunnerWrite = resolve;
+        }),
+    });
+    mockStream.mockImplementation(
+      makeAbortableStreamFn([{ type: 'text', text: 'partial answer', done: false }])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    await act(async () => {
+      const responded = result.current.handleRespond('stop me');
+      result.current.handleStop();
+      settleRunnerWrite?.();
+      await responded;
+    });
+
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+    expect(props.optimistic.updateOptimisticMessage).toHaveBeenCalledWith(
+      'chat-1',
+      expect.stringContaining('optimistic-ai'),
+      { isGenerating: false }
+    );
+  });
+});
+
 describe('useTextGeneration — subagent lifecycle events', () => {
   beforeEach(() => {
     mockStream.mockReset();

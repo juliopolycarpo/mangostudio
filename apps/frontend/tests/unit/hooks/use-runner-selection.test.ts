@@ -290,3 +290,79 @@ describe('useRunnerSelection agent selection', () => {
     await waitFor(() => expect(result.current.selectedAgentId).toBe('default'));
   });
 });
+
+describe('useRunnerSelection whenRunnerPersisted', () => {
+  const updateChatWorkdir = vi.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
+  const addRecentWorkdir = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function renderSelection(updateChatRunner: () => Promise<void>) {
+    return renderHook(() =>
+      useRunnerSelection({
+        currentChatId: CHAT.id,
+        currentChat: { ...CHAT, workdir: '/srv/projects/bound' },
+        defaultWorkdir: '/srv/projects/default',
+        updateChatRunner,
+        updateChatRunnerPermissions,
+        updateChatWorkdir,
+        addRecentWorkdir,
+      })
+    );
+  }
+
+  // The hub dispatches on the stored runner, so a turn opened while the switch
+  // is still in flight would run on the runner being replaced.
+  it('waits for a switch that has not been answered yet', async () => {
+    let settle: (() => void) | undefined;
+    const updateChatRunner = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        })
+    );
+    const { result } = renderSelection(updateChatRunner);
+
+    act(() => result.current.setRunnerTarget('codex'));
+
+    let waited = false;
+    const pending = result.current.whenRunnerPersisted().then(() => {
+      waited = true;
+    });
+    await Promise.resolve();
+    expect(waited).toBe(false);
+
+    await act(async () => {
+      settle?.();
+      await pending;
+    });
+    expect(waited).toBe(true);
+  });
+
+  it('resolves immediately when no switch is open', async () => {
+    const updateChatRunner = vi.fn(() => Promise.resolve());
+    const { result } = renderSelection(updateChatRunner);
+
+    await expect(result.current.whenRunnerPersisted()).resolves.toBeUndefined();
+    expect(updateChatRunner).not.toHaveBeenCalled();
+  });
+
+  // A rejected write must not leave the gate closed for every later send.
+  it('stops waiting once a rejected switch settles', async () => {
+    const updateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
+    const { result } = renderSelection(updateChatRunner);
+
+    act(() => result.current.setRunnerTarget('codex'));
+
+    await expect(result.current.whenRunnerPersisted()).resolves.toBeUndefined();
+    await waitFor(() =>
+      expect(result.current.runner).toEqual({
+        kind: 'mangostudio',
+        agentId: 'default',
+      })
+    );
+  });
+});
