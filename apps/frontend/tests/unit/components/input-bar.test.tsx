@@ -1,4 +1,6 @@
 import type { Environment } from '@mangostudio/shared/environments';
+import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -178,5 +180,74 @@ describe('InputBar — chat-only composer', () => {
     await user.type(screen.getByRole('textbox'), 'hello');
 
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+});
+
+/**
+ * A persisted external runner outlives the conditions that made it selectable.
+ * The composer has to notice, because the descriptor is the only thing that
+ * knows and nothing else in here reads it.
+ */
+describe('InputBar — an external runner that cannot host a turn', () => {
+  const EXTERNAL_RUNNER = { kind: 'external', targetId: 'codex' } as const;
+
+  function descriptor(overrides: Partial<ExternalAgentDescriptor> = {}): ExternalAgentDescriptor {
+    return {
+      targetId: 'codex',
+      environmentId: 'local',
+      installed: true,
+      authState: 'signed-in',
+      capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+      supportedConfigurations: [],
+      ...overrides,
+    };
+  }
+
+  it('blocks the composer while discovery has not answered yet', () => {
+    renderInputBar({ runner: EXTERNAL_RUNNER, externalDescriptor: undefined });
+
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent(/cannot run here right now/i);
+  });
+
+  it('names the reason a discovered agent cannot run', () => {
+    renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      externalDescriptor: descriptor({ installed: false, unavailableReason: 'not-installed' }),
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent(/not installed on this machine/i);
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+  });
+
+  it('blocks a runner whose agent has signed out since it was chosen', () => {
+    renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      externalDescriptor: descriptor({ authState: 'signed-out' }),
+    });
+
+    expect(screen.getByRole('textbox')).toBeDisabled();
+  });
+
+  it('leaves the composer alone when the agent can host a turn', async () => {
+    const user = userEvent.setup();
+    const { props } = renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      externalDescriptor: descriptor(),
+    });
+
+    await user.type(screen.getByRole('textbox'), 'hello');
+    await user.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(props.onSubmit).toHaveBeenCalledWith('hello', undefined);
+  });
+
+  it('leaves a MangoStudio runner alone whatever discovery says', () => {
+    renderInputBar({ runner: { kind: 'mangostudio', agentId: 'default' } });
+
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(screen.queryByRole('status')).toBeNull();
   });
 });
