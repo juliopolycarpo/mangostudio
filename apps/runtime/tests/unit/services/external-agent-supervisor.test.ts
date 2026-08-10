@@ -895,8 +895,21 @@ describe('external-agent adapter registry and supervisor', () => {
   });
 });
 
+/**
+ * Waits for fixture state to settle.
+ *
+ * The deadline is harness headroom, not an assertion about how fast anything
+ * has to be — every caller is waiting on an ordering guarantee, and none of
+ * them cares whether it takes one millisecond or one second. It is generous
+ * because it is wall-clock and shared with everything else in the process: at
+ * one second, adding unrelated test files to the same run was enough to fail
+ * the late-open reaper case under coverage instrumentation, which is a
+ * statement about machine load rather than about the supervisor.
+ */
+const FIXTURE_SETTLE_TIMEOUT_MS = 10_000;
+
 async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + FIXTURE_SETTLE_TIMEOUT_MS;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error('Timed out waiting for fixture state.');
     await Bun.sleep(5);
