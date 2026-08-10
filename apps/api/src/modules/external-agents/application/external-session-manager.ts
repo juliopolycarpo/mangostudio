@@ -141,9 +141,21 @@ export interface ExternalSessionManager {
     reason: ExternalTurnTerminalReason,
     options?: { readonly keepContinuation?: boolean }
   ): Promise<void>;
-  /** Reaps every session matching a scope. Used by consent, environment and user changes. */
+  /**
+   * Reaps every session matching a scope. Used by consent, environment and user
+   * changes.
+   *
+   * Every field narrows; an omitted one matches everything. `targetId` exists
+   * because a disclosure is withdrawn from *one vendor*: without it, refusing
+   * Anthropic would also kill the OpenAI turn running in the next tab, which is
+   * a different company's consent that nobody withdrew.
+   */
   reapScope(
-    scope: { readonly userId?: string; readonly environmentId?: string },
+    scope: {
+      readonly userId?: string;
+      readonly environmentId?: string;
+      readonly targetId?: ExternalAgentTargetId;
+    },
     reason: ExternalTurnTerminalReason,
     options?: { readonly keepContinuation?: boolean }
   ): Promise<void>;
@@ -450,7 +462,8 @@ export function createExternalSessionManager(
     async reapScope(scope, reason, reapOptions) {
       const inScope = (binding: ExternalSessionBinding): boolean =>
         (!scope.userId || binding.userId === scope.userId) &&
-        (!scope.environmentId || binding.environmentId === scope.environmentId);
+        (!scope.environmentId || binding.environmentId === scope.environmentId) &&
+        (!scope.targetId || binding.targetId === scope.targetId);
 
       const chatIds = new Set<string>();
       for (const [chatId, record] of sessions) {

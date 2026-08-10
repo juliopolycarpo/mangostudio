@@ -23,9 +23,7 @@ import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/e
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   type ExternalAgentDescriptor,
-  type ExternalAgentDescriptorListResponse,
   ExternalAgentDescriptorListResponseSchema,
-  ExternalAgentTargetIdSchema,
   isExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
 import { Elysia, t } from 'elysia';
@@ -204,7 +202,14 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
         // is mid-turn would leave the exact thing the user just refused still
         // running, so live sessions go with the row — continuation is kept,
         // because the conversation is still theirs if they acknowledge again.
-        await sessions.reapScope({ userId }, 'consent-revoked', { keepContinuation: true });
+        //
+        // Scoped to the vendor that was withdrawn, not to the user. The
+        // acknowledgement is per company by design, and reaping the whole user
+        // would kill an unrelated Codex or Cursor turn on a consent nobody
+        // touched.
+        await sessions.reapScope({ userId, targetId: params.targetId }, 'consent-revoked', {
+          keepContinuation: true,
+        });
         return { revoked: true as const };
       },
       {
@@ -251,7 +256,3 @@ async function withDisclosureReasons(
 }
 
 export const externalAgentRoutes = createExternalAgentRoutes();
-
-/** Kept for callers that constructed the routes with a bare discovery service. */
-export type { ExternalAgentDiscoveryService };
-export { ExternalAgentTargetIdSchema };
