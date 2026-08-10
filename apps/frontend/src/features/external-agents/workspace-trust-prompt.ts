@@ -62,11 +62,25 @@ export function promptExternalWorkspaceTrust(
   });
 }
 
-/** Subscribes the dialog. Returns the unsubscribe. */
+/**
+ * Subscribes the dialog. Returns the unsubscribe.
+ *
+ * Losing the last subscriber settles the open request as declined, because at
+ * that point nobody can answer it. This module outlives every component that
+ * uses it, and the one that unmounts it is the authenticated layout: when a
+ * session expires mid-dialog, a surviving `pending` would be handed straight to
+ * the next account's gate on sign-in — showing them the previous user's chat id
+ * and absolute workspace path, in a dialog whose grant could only fail against
+ * their credentials. Declining is also the right answer for the send still
+ * awaiting it: it re-throws the refusal instead of hanging forever.
+ */
 export function onExternalWorkspaceTrustPrompt(listener: Listener): () => void {
   listeners.add(listener);
   listener(pending ? { chatId: pending.chatId, workspacePath: pending.workspacePath } : null);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) settleExternalWorkspaceTrust(false);
+  };
 }
 
 /** Answers the open prompt. A no-op when nothing is waiting. */
