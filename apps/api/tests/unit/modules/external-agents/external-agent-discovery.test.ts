@@ -270,9 +270,44 @@ describe('external agent discovery — the authoritative pass', () => {
     agentStatus({ targetId: 'claude', findings: [{ code: 'cli-not-installed' }] }),
   ]);
 
+  /**
+   * A stand-in for the realtime publish, and the sync point tests wait on.
+   *
+   * Nothing awaits the background probe by design, so a test that wants the
+   * refreshed answer waits for the signal the probe sends when it lands rather
+   * than for a timer. Publishes are recorded so "exactly once" and "not at all"
+   * are both assertable.
+   */
+  function refreshSignal() {
+    const published: string[] = [];
+    let notify: (() => void) | undefined;
+    return {
+      published,
+      publishRefresh(userId: string) {
+        published.push(userId);
+        notify?.();
+      },
+      /** Settles once `publishRefresh` has fired at least `count` times. */
+      async untilPublished(count: number): Promise<void> {
+        while (published.length < count) {
+          await new Promise<void>((resolve) => {
+            notify = resolve;
+          });
+        }
+      },
+    };
+  }
+
+  /** Lets a detached probe run to completion when it publishes nothing to wait on. */
+  async function drainBackgroundWork(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
   it('replaces the scan wherever the adapter has an answer', async () => {
+    const signal = refreshSignal();
     const service = createExternalAgentDiscoveryService({
       probingService: PROBING,
+      publishRefresh: signal.publishRefresh,
       authoritative: authoritative([
         {
           targetId: 'codex',
@@ -294,6 +329,9 @@ describe('external agent discovery — the authoritative pass', () => {
       ]),
     });
 
+    // The first call answers from the cheap pass and probes behind it.
+    await service.listExternalAgents(SCOPE);
+    await signal.untilPublished(1);
     const [codex] = await service.listExternalAgents(SCOPE);
 
     expect(codex).toMatchObject({
@@ -322,13 +360,17 @@ describe('external agent discovery — the authoritative pass', () => {
     // cheap pass, an adapter's describe() is this application's own interface,
     // not a wire schema, so nothing upstream bounds a vendor version string
     // before it reaches the response.
+    const signal = refreshSignal();
     const service = createExternalAgentDiscoveryService({
       probingService: PROBING,
+      publishRefresh: signal.publishRefresh,
       authoritative: authoritative([
         { targetId: 'codex', version: '9'.repeat(200), capabilities: ALL_CAPABLE },
       ]),
     });
 
+    await service.listExternalAgents(SCOPE);
+    await signal.untilPublished(1);
     const [codex] = await service.listExternalAgents(SCOPE);
 
     expect(codex?.version).toHaveLength(128);
@@ -403,10 +445,12 @@ describe('external agent discovery — the authoritative pass', () => {
   it('probes again once the cached answer has expired', async () => {
     let calls = 0;
     let clock = 1_000;
+    const signal = refreshSignal();
     const service = createExternalAgentDiscoveryService({
       probingService: PROBING,
       cacheTtlMs: 100,
       now: () => clock,
+      publishRefresh: signal.publishRefresh,
       authoritative: authoritative([{ targetId: 'codex', capabilities: ALL_CAPABLE }], {
         onCall: () => {
           calls += 1;
@@ -415,10 +459,38 @@ describe('external agent discovery — the authoritative pass', () => {
     });
 
     await service.listExternalAgents(SCOPE);
+    // Wait for the first probe to land, or the second call joins it in flight
+    // instead of starting the new probe this test is about.
+    await signal.untilPublished(1);
     clock += 101;
     await service.listExternalAgents(SCOPE);
 
     expect(calls).toBe(2);
+  });
+
+  it('serves the expired answer while the probe that replaces it runs', async () => {
+    // An expired entry is still an adapter's answer about this machine, so it
+    // beats falling back to the capability-free scan. Only a cold miss does that.
+    let clock = 1_000;
+    const signal = refreshSignal();
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      cacheTtlMs: 100,
+      now: () => clock,
+      publishRefresh: signal.publishRefresh,
+      authoritative: authoritative([
+        { targetId: 'codex', version: '0.147.0', capabilities: ALL_CAPABLE },
+      ]),
+    });
+
+    await service.listExternalAgents(SCOPE);
+    await signal.untilPublished(1);
+    clock += 101;
+
+    const [codex] = await service.listExternalAgents(SCOPE);
+
+    expect(codex?.version).toBe('0.147.0');
+    expect(codex?.capabilities).toEqual(ALL_CAPABLE);
   });
 
   it('drops a cached answer for one environment on request', async () => {
@@ -447,8 +519,10 @@ describe('external agent discovery — the authoritative pass', () => {
     const staleStarted = Promise.withResolvers<void>();
     const freshStarted = Promise.withResolvers<void>();
     let calls = 0;
+    const signal = refreshSignal();
     const service = createExternalAgentDiscoveryService({
       probingService: PROBING,
+      publishRefresh: signal.publishRefresh,
       authoritative: {
         describe() {
           calls += 1;
@@ -462,19 +536,25 @@ describe('external agent discovery — the authoritative pass', () => {
       },
     });
 
-    const staleListing = service.listExternalAgents(SCOPE);
+    // Both listings answer from the cheap pass; their probes run behind them.
+    expect((await service.listExternalAgents(SCOPE))[0]?.version).toBe('0.100.0');
     await staleStarted.promise;
     service.resetCache('env-1', 'user-1');
 
-    const freshListing = service.listExternalAgents(SCOPE);
+    expect((await service.listExternalAgents(SCOPE))[0]?.version).toBe('0.100.0');
     await freshStarted.promise;
     fresh.resolve([{ targetId: 'codex', version: '2.0.0', capabilities: ALL_CAPABLE }]);
-    expect((await freshListing)[0]?.version).toBe('2.0.0');
+    await signal.untilPublished(1);
+    expect((await service.listExternalAgents(SCOPE))[0]?.version).toBe('2.0.0');
 
     stale.resolve([{ targetId: 'codex', version: '1.0.0', capabilities: ALL_CAPABLE }]);
-    expect((await staleListing)[0]?.version).toBe('1.0.0');
+    await drainBackgroundWork();
 
+    // The retired probe neither repopulated the cache nor announced its answer:
+    // a refresh signal for a result that was discarded would send the client
+    // back for something this probe is no longer allowed to give.
     expect((await service.listExternalAgents(SCOPE))[0]?.version).toBe('2.0.0');
+    expect(signal.published).toEqual(['user-1']);
     expect(calls).toBe(2);
   });
 
@@ -484,10 +564,12 @@ describe('external agent discovery — the authoritative pass', () => {
     // machine. The concurrency cap is scoped like the cache and single-flight
     // are — by (user, environment) — so it must not treat these two as one.
     let calls = 0;
+    const signal = refreshSignal();
     const service = createExternalAgentDiscoveryService({
       probingService: PROBING,
       maxConcurrentPerEnvironment: 1,
       cacheTtlMs: 0,
+      publishRefresh: signal.publishRefresh,
       authoritative: authoritative([{ targetId: 'codex', capabilities: ALL_CAPABLE }], {
         onCall: () => {
           calls += 1;
@@ -496,14 +578,20 @@ describe('external agent discovery — the authoritative pass', () => {
       }),
     });
 
-    const [first, second] = await Promise.all([
+    await Promise.all([
       service.listExternalAgents({ userId: 'user-1', environmentId: 'env-1' }),
       service.listExternalAgents({ userId: 'user-2', environmentId: 'env-1' }),
     ]);
 
     expect(calls).toBe(2);
-    expect(first[0]?.capabilities).toEqual(ALL_CAPABLE);
-    expect(second[0]?.capabilities).toEqual(ALL_CAPABLE);
+    await signal.untilPublished(2);
+    // Each owner is told about their own machine and nobody else's.
+    expect([...signal.published].sort()).toEqual(['user-1', 'user-2']);
+
+    const [first] = await service.listExternalAgents({ userId: 'user-1', environmentId: 'env-1' });
+    const [second] = await service.listExternalAgents({ userId: 'user-2', environmentId: 'env-1' });
+    expect(first?.capabilities).toEqual(ALL_CAPABLE);
+    expect(second?.capabilities).toEqual(ALL_CAPABLE);
   });
 
   it('holds the concurrency slot until the ignored-abort discovery actually settles', async () => {
@@ -539,17 +627,189 @@ describe('external agent discovery — the authoritative pass', () => {
   });
 
   it('renders only capabilities an adapter returned', async () => {
+    const signal = refreshSignal();
     const service = createExternalAgentDiscoveryService({
       probingService: PROBING,
+      publishRefresh: signal.publishRefresh,
       authoritative: authoritative([
         { targetId: 'codex', capabilities: { ...NO_EXTERNAL_AGENT_CAPABILITIES, resume: true } },
       ]),
     });
 
+    await service.listExternalAgents(SCOPE);
+    await signal.untilPublished(1);
     const [codex] = await service.listExternalAgents(SCOPE);
 
     expect(codex?.capabilities.resume).toBe(true);
     expect(codex?.capabilities.steering).toBe(false);
+  });
+
+  describe('the background refresh', () => {
+    it('answers a cold request without waiting for the authoritative pass', async () => {
+      const probeStarted = Promise.withResolvers<void>();
+      const openProbe = Promise.withResolvers<readonly AuthoritativeAgentStatus[]>();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        timeoutMs: 60_000,
+        publishRefresh: () => undefined,
+        authoritative: {
+          describe() {
+            probeStarted.resolve();
+            return openProbe.promise;
+          },
+        },
+      });
+
+      const agents = await service.listExternalAgents(SCOPE);
+
+      // This resolved while the probe is still open — the whole point of the
+      // change. A vendor with no account-level model list can hold that probe
+      // for the better part of ten seconds, and no picker should render behind it.
+      await probeStarted.promise;
+      expect(agents[0]?.version).toBe('0.100.0');
+      expect(agents[0]?.capabilities).toEqual(NO_EXTERNAL_AGENT_CAPABILITIES);
+
+      openProbe.resolve([]);
+    });
+
+    it('publishes one refresh when the probe improves on what was served', async () => {
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        publishRefresh: signal.publishRefresh,
+        authoritative: authoritative([
+          { targetId: 'codex', version: '0.147.0', capabilities: ALL_CAPABLE },
+        ]),
+      });
+
+      await service.listExternalAgents(SCOPE);
+      await signal.untilPublished(1);
+      await drainBackgroundWork();
+
+      expect(signal.published).toEqual(['user-1']);
+    });
+
+    it('stays silent when a refresh reproduces the answer it already served', async () => {
+      let clock = 1_000;
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        cacheTtlMs: 100,
+        now: () => clock,
+        publishRefresh: signal.publishRefresh,
+        authoritative: authoritative([
+          { targetId: 'codex', version: '0.147.0', capabilities: ALL_CAPABLE },
+        ]),
+      });
+
+      await service.listExternalAgents(SCOPE);
+      await signal.untilPublished(1);
+
+      // Expire the entry and let the refresh find exactly the same catalog.
+      clock += 101;
+      await service.listExternalAgents(SCOPE);
+      await drainBackgroundWork();
+
+      // Still one. Otherwise every cache expiry is a refetch for every client
+      // with a selector open, which is worse than the latency this replaced.
+      expect(signal.published).toEqual(['user-1']);
+    });
+
+    it('does not count probe diagnostics as a change', async () => {
+      // `discovery` carries `source` — `live` for the probe that ran, `cache`
+      // for one the adapter answered from memory — and `probedAtMs`. Both differ
+      // between runs that found an identical catalog, and neither reaches the
+      // picker, so counting them would make the silence above unreachable.
+      let clock = 1_000;
+      let probes = 0;
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        cacheTtlMs: 100,
+        now: () => clock,
+        publishRefresh: signal.publishRefresh,
+        authoritative: {
+          describe() {
+            probes += 1;
+            return Promise.resolve([
+              {
+                targetId: 'codex' as const,
+                version: '0.147.0',
+                capabilities: ALL_CAPABLE,
+                discovery: {
+                  source: probes === 1 ? ('live' as const) : ('cache' as const),
+                  probedAtMs: 1_000 * probes,
+                  attempts: probes,
+                },
+              },
+            ]);
+          },
+        },
+      });
+
+      await service.listExternalAgents(SCOPE);
+      await signal.untilPublished(1);
+      clock += 101;
+      await service.listExternalAgents(SCOPE);
+      await drainBackgroundWork();
+
+      expect(probes).toBe(2);
+      expect(signal.published).toEqual(['user-1']);
+    });
+
+    it('announces nothing when the probe degrades to the cheap pass', async () => {
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        publishRefresh: signal.publishRefresh,
+        authoritative: {
+          describe: () => Promise.reject(new Error('runtime refused')),
+        } satisfies AuthoritativeAgentDiscovery,
+      });
+
+      await service.listExternalAgents(SCOPE);
+      await drainBackgroundWork();
+
+      // A failed probe is not a better answer and was not cached. Announcing it
+      // would send the client back into the very miss that probes again.
+      expect(signal.published).toEqual([]);
+    });
+
+    it('does not let one background probe induce another', async () => {
+      // The trap this whole design routes around: publishing on a topic that
+      // resets this cache would make the refetch miss, probe, publish and reset
+      // again — one vendor subprocess per cycle, per user, without end. Neither
+      // the single-flight nor the per-environment cap stops that, because both
+      // collapse a burst rather than breaking a sequential cycle. What breaks it
+      // is that the refresh signal leaves the entry the probe just wrote intact,
+      // so the refetch it asks for is a cache hit.
+      let probes = 0;
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        publishRefresh: signal.publishRefresh,
+        authoritative: authoritative(
+          [{ targetId: 'codex', version: '0.147.0', capabilities: ALL_CAPABLE }],
+          {
+            onCall: () => {
+              probes += 1;
+            },
+          }
+        ),
+      });
+
+      await service.listExternalAgents(SCOPE);
+      await signal.untilPublished(1);
+
+      // Exactly what the frontend does when the signal arrives.
+      for (let refetch = 0; refetch < 3; refetch += 1) {
+        await service.listExternalAgents(SCOPE);
+        await drainBackgroundWork();
+      }
+
+      expect(probes).toBe(1);
+      expect(signal.published).toEqual(['user-1']);
+    });
   });
 });
 

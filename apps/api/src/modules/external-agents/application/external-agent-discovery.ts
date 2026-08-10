@@ -20,6 +20,21 @@
  * environment runs at once. Every failure mode degrades to the cheap pass —
  * discovery never fails the request, because a selector that cannot render is
  * worse than one rendering a stale capability.
+ *
+ * **Nothing waits for the authoritative pass.** Its honest budget is 20s per
+ * target, because a cold Cursor has no account-level model list and must open a
+ * throwaway session just to see a catalog. That is a defensible cost to pay in
+ * the background and an indefensible one to pay on the path to rendering a
+ * picker. So a request answers from what is already known — a fresh cache entry,
+ * an expired one, or the cheap pass on a genuine cold miss — and the probe runs
+ * behind the response. When it finds something better than what was served, the
+ * owner gets one user-scoped refresh signal on `EXTERNAL_AGENTS_TOPIC` and the
+ * client refetches into the now-warm cache.
+ *
+ * That topic is not the environments one, and the difference is load-bearing:
+ * environment invalidation drops this very cache, so publishing it here would
+ * make each probe delete its own result and induce the next. See
+ * `publishExternalAgentsInvalidation`.
  */
 
 import { RuntimeConsentDeniedError } from '@mangostudio/runtime';
@@ -40,6 +55,7 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import { onEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation-hooks';
+import { publishExternalAgentsInvalidation } from '../../../services/realtime/external-agents-invalidation';
 import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
 import {
   type EnvironmentProbingService,
@@ -103,6 +119,13 @@ export interface ExternalAgentDiscoveryOptions {
   readonly cacheTtlMs?: number;
   readonly timeoutMs?: number;
   readonly maxConcurrentPerEnvironment?: number;
+  /**
+   * How a finished background probe tells the owner its answer improved.
+   *
+   * Must not be anything that invalidates this service's own cache — see
+   * `publishExternalAgentsInvalidation` for why that loops.
+   */
+  readonly publishRefresh?: (userId: string) => void;
 }
 
 /**
@@ -397,14 +420,65 @@ async function baseDescriptors(
   }
 }
 
+type AuthoritativeAnswers = ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>;
+
+/** No adapter answered: every descriptor stands on the cheap pass alone. */
+const NO_ANSWERS: AuthoritativeAnswers = new Map();
+
+/** Product order is fixed, so the selector's row order never depends on probe timing. */
+const TARGET_ORDER = new Map(
+  EXTERNAL_AGENT_PRODUCT_DESCRIPTORS.map((product, index) => [product.targetId, index])
+);
+
+/** The descriptors exactly as the selector will render them. */
+function mergeAll(
+  base: readonly ExternalAgentDescriptor[],
+  answers: AuthoritativeAnswers
+): readonly ExternalAgentDescriptor[] {
+  return base
+    .map((descriptor) => {
+      const answer = answers.get(descriptor.targetId);
+      return answer ? mergeAuthoritative(descriptor, answer) : descriptor;
+    })
+    .sort(
+      (left, right) =>
+        (TARGET_ORDER.get(left.targetId) ?? 0) - (TARGET_ORDER.get(right.targetId) ?? 0)
+    );
+}
+
+/**
+ * Whether a refresh changed anything the user can see.
+ *
+ * `discovery` is excluded deliberately. It reports `source` — `live` for the
+ * probe that ran, `cache` for the next one the adapter answers from memory —
+ * and `probedAtMs`, so two runs that found an identical catalog differ there
+ * almost every time. None of it reaches the picker; it exists for the Logs page.
+ * Comparing it would make every cache expiry look like a change and turn the
+ * refresh signal into a guaranteed round trip, which is the cost this check
+ * exists to avoid.
+ */
+function sameRenderedDescriptors(
+  left: readonly ExternalAgentDescriptor[],
+  right: readonly ExternalAgentDescriptor[]
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((descriptor, index) => {
+    const other = right[index];
+    if (!other) return false;
+    const { discovery: _leftDiagnostics, ...leftRendered } = descriptor;
+    const { discovery: _rightDiagnostics, ...rightRendered } = other;
+    return Bun.deepEquals(leftRendered, rightRendered);
+  });
+}
+
 interface CacheEntry {
   readonly expiresAt: number;
   readonly generation: number;
-  readonly byTarget: ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>;
+  readonly byTarget: AuthoritativeAnswers;
 }
 
 interface InflightEntry {
-  readonly promise: Promise<ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>>;
+  readonly promise: Promise<AuthoritativeAnswers>;
   readonly generation: number;
   readonly environmentId: string;
   readonly userId: string;
@@ -420,6 +494,7 @@ export function createExternalAgentDiscoveryService(
   const timeoutMs = options.timeoutMs ?? DEFAULT_TARGET_TIMEOUT_MS + DISCOVERY_REPLY_OVERHEAD_MS;
   const maxConcurrent =
     options.maxConcurrentPerEnvironment ?? DEFAULT_MAX_CONCURRENT_PER_ENVIRONMENT;
+  const publishRefresh = options.publishRefresh ?? publishExternalAgentsInvalidation;
 
   const cache = new Map<
     string,
@@ -487,10 +562,23 @@ export function createExternalAgentDiscoveryService(
     }
   }
 
+  /**
+   * What this scope already knows, expired or not, provided a reset has not
+   * retired it. An expired entry is still a real adapter answer and beats the
+   * capability-free scan, so freshness is reported rather than enforced.
+   */
+  function rememberedAnswers(
+    key: string
+  ): { readonly byTarget: AuthoritativeAnswers; readonly fresh: boolean } | undefined {
+    const cached = cache.get(key);
+    if (!cached || cached.generation !== (generations.get(key) ?? 0)) return undefined;
+    return { byTarget: cached.byTarget, fresh: cached.expiresAt > now() };
+  }
+
   function authoritativeFor(
     scope: ProbeScope,
     targetIds: readonly ExternalAgentTargetId[]
-  ): Promise<ReadonlyMap<ExternalAgentTargetId, AuthoritativeAgentStatus>> {
+  ): Promise<AuthoritativeAnswers> {
     const key = scopeKey(scope);
     const generation = generations.get(key) ?? 0;
     const cached = cache.get(key);
@@ -545,6 +633,53 @@ export function createExternalAgentDiscoveryService(
     return pending;
   }
 
+  /**
+   * Runs the authoritative pass behind an answer that has already been sent,
+   * and tells the owner only if it learned something better.
+   *
+   * Nothing awaits this, which is the entire point: the probe is a vendor
+   * subprocess on someone else's machine that can legitimately take ten seconds,
+   * and no selector render should sit behind it.
+   */
+  function refreshInBackground(
+    scope: ProbeScope,
+    base: readonly ExternalAgentDescriptor[],
+    targetIds: readonly ExternalAgentTargetId[],
+    served: readonly ExternalAgentDescriptor[]
+  ): void {
+    const key = scopeKey(scope);
+    const generation = generations.get(key) ?? 0;
+
+    void authoritativeFor(scope, targetIds)
+      .then((byTarget) => {
+        // A reset landing while the subprocess was still answering retires this
+        // result — `authoritativeFor` already refused to cache it. Announcing it
+        // anyway would send the client back for an answer this probe is no
+        // longer allowed to give, and the refetch would miss and probe again.
+        if ((generations.get(key) ?? 0) !== generation) return;
+        // Every degraded path lands here as an empty map: a probe that threw or
+        // timed out, and one that never started because the environment was at
+        // its concurrency cap. None of them is a better answer than what was
+        // served, and none is cached — so announcing one would ask the client
+        // to refetch straight back into the miss that started another probe.
+        if (byTarget.size === 0) return;
+        // A refresh that reproduced the served answer must stay silent, or the
+        // cache expiring becomes a refetch for every open selector.
+        if (sameRenderedDescriptors(served, mergeAll(base, byTarget))) return;
+        publishRefresh(scope.userId);
+      })
+      .catch((error: unknown) => {
+        // `authoritativeFor` already absorbs probe failures into an empty map,
+        // so this covers the comparison and the publish themselves. Detached
+        // work has no caller to reject to; without this the process would take
+        // an unhandled rejection.
+        console.warn(
+          `[external-agents] Background discovery refresh failed for environment ${scope.environmentId}:`,
+          error instanceof Error ? error.message : 'unknown error'
+        );
+      });
+  }
+
   return {
     async listExternalAgents(scope) {
       const base = await baseDescriptors(probing, scope);
@@ -552,22 +687,18 @@ export function createExternalAgentDiscoveryService(
       const escalate = base
         .filter((descriptor) => descriptor.installed)
         .map((descriptor) => descriptor.targetId);
-      const answers =
-        escalate.length > 0 && authoritative
-          ? await authoritativeFor(scope, escalate)
-          : new Map<ExternalAgentTargetId, AuthoritativeAgentStatus>();
+      if (escalate.length === 0 || !authoritative) return mergeAll(base, NO_ANSWERS);
 
-      const order = new Map(
-        EXTERNAL_AGENT_PRODUCT_DESCRIPTORS.map((product, index) => [product.targetId, index])
-      );
+      const remembered = rememberedAnswers(scopeKey(scope));
+      if (remembered?.fresh) return mergeAll(base, remembered.byTarget);
 
-      return base
-        .map((descriptor) => {
-          const answer = answers.get(descriptor.targetId);
-          const merged = answer ? mergeAuthoritative(descriptor, answer) : descriptor;
-          return merged;
-        })
-        .sort((left, right) => (order.get(left.targetId) ?? 0) - (order.get(right.targetId) ?? 0));
+      // Stale while revalidate. A cold miss can only offer the cheap pass, but
+      // an expired entry still describes this machine from the adapter that
+      // would run the turn, so it is served while the probe replacing it runs
+      // behind the response.
+      const served = mergeAll(base, remembered?.byTarget ?? NO_ANSWERS);
+      refreshInBackground(scope, base, escalate, served);
+      return served;
     },
 
     resetCache(environmentId, userId) {

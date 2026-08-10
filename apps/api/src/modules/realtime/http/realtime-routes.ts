@@ -2,6 +2,7 @@ import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import {
   ENVIRONMENTS_TOPIC,
+  EXTERNAL_AGENTS_TOPIC,
   parseGitTopic,
   REALTIME_CLOSE_CODES,
   REALTIME_IDLE_TIMEOUT_SECONDS,
@@ -34,6 +35,22 @@ export const REALTIME_WEBSOCKET_OPTIONS = {
   backpressureLimit: 64 * 1024,
   closeOnBackpressureLimit: true,
 } as const;
+
+/**
+ * Topics whose entire audience is the one authenticated user.
+ *
+ * They need no ownership check beyond the session that opened the socket,
+ * unlike `git:<chatId>`, which names a resource the user may not own.
+ */
+const USER_SCOPED_TOPICS: ReadonlySet<string> = new Set<string>([
+  SETTINGS_TOPIC,
+  ENVIRONMENTS_TOPIC,
+  EXTERNAL_AGENTS_TOPIC,
+]);
+
+function isUserScopedTopic(topic: string): boolean {
+  return USER_SCOPED_TOPICS.has(topic);
+}
 
 type RejectionReason = 'unauthorized' | 'forbidden' | 'internal' | null;
 
@@ -186,7 +203,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
 
     for (const topic of message.topics) {
       if (state.topics.has(topic) || accepted.has(topic)) continue;
-      if (topic === SETTINGS_TOPIC || topic === ENVIRONMENTS_TOPIC) {
+      if (isUserScopedTopic(topic)) {
         accepted.add(topic);
         continue;
       }
@@ -368,11 +385,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
             }
             if (message.type === 'unsubscribe') {
               for (const topic of message.topics) {
-                if (
-                  topic === SETTINGS_TOPIC ||
-                  topic === ENVIRONMENTS_TOPIC ||
-                  parseGitTopic(topic)
-                ) {
+                if (isUserScopedTopic(topic) || parseGitTopic(topic)) {
                   state.topics.delete(topic);
                 } else {
                   socket.send(errorMessage('Unsupported realtime topic', ERROR_CODES.UNSUPPORTED));
