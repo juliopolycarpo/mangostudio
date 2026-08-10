@@ -400,6 +400,22 @@ describe('cursor adapter — sessions', () => {
     const page = await adapter.listSessions({});
     expect(page.sessionIds).toEqual(['7e0059d1-e5a9-46cf-aba5-1261aaeb2324']);
   });
+
+  it('will not guess which connection answers a listing', async () => {
+    // One `cursor-agent` per session, each with its own cwd: asking whichever
+    // opened first would answer about a workspace nobody named.
+    const adapter = new CursorAcpAdapter();
+    const probe = harness();
+    await adapter.openSession({ params: openParams(), context: probe.context });
+    await adapter.openSession({
+      params: openParams({ sessionId: 'session-2' }),
+      context: probe.context,
+    });
+
+    await expect(adapter.listSessions({})).rejects.toThrow(/more than one is open/);
+    const page = await adapter.listSessions({ sessionId: 'session-2' });
+    expect(page.sessionIds).toEqual(['7e0059d1-e5a9-46cf-aba5-1261aaeb2324']);
+  });
 });
 
 describe('cursor adapter — turns', () => {

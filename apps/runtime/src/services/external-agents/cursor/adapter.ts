@@ -467,17 +467,17 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
    * run did. So nothing here assumes a just-created session is listable, and
    * plan 013 re-reads a session's metadata when it adopts one rather than
    * trusting this page.
+   *
+   * *Which* connection answers is the caller's to say. This adapter runs one
+   * `cursor-agent` per session, each with its own cwd and environment, so
+   * asking whichever opened first would answer a question about one workspace
+   * with another workspace's sessions. With no id given there is either a single
+   * session or an ambiguity worth failing on.
    */
   async listSessions(
     input: ExternalAgentListSessionsInput
   ): Promise<ExternalAgentNativeSessionPage> {
-    const session = [...this.#sessions.values()][0];
-    if (!session) {
-      throw new ExternalAgentAdapterError(
-        'cursor-no-connection',
-        'Listing Cursor sessions needs an open ACP connection.'
-      );
-    }
+    const session = this.#listingSession(input.sessionId);
     const listed = await session.client.request<AcpSessionListResponse>(
       'session/list',
       input.cursor === undefined ? {} : { cursor: input.cursor },
@@ -492,6 +492,18 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
         ? { nextCursor: listed.nextCursor }
         : {}),
     };
+  }
+
+  #listingSession(sessionId: string | undefined): CursorSession {
+    if (sessionId !== undefined) return this.#requireSession(sessionId);
+    const open = [...this.#sessions.values()];
+    if (open.length === 1) return open[0] as CursorSession;
+    throw new ExternalAgentAdapterError(
+      'cursor-no-connection',
+      open.length === 0
+        ? 'Listing Cursor sessions needs an open ACP connection.'
+        : 'Listing Cursor sessions needs the session to list them on; more than one is open.'
+    );
   }
 
   #respond(input: ExternalAgentApprovalResponseInput): void {
