@@ -4,28 +4,38 @@
  * D14 says a chat has one runner kind for life once it carries turns, and the
  * disclosure says a vendor is not reachable until the acknowledgement is stored.
  * Both are decided here, and both are decided against state that arrives late —
- * a transcript still loading, a settings write still in flight — so both are
+ * a transcript still loading, an acknowledgement still in flight — so both are
  * asserted against that window rather than against the settled case.
+ *
+ * *Whether* the notice is needed is no longer decided here at all: the server
+ * computes it and says so on the descriptor as
+ * `unavailableReason: 'disclosure-required'`, from the same row the turn-start
+ * refusal reads. So these drive the gate by setting that reason rather than by
+ * mocking a client-side rule that could disagree with the server's.
  */
 
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
-import {
-  EXTERNAL_DISCLOSURE_VERSION,
-  externalCapabilitiesFingerprint,
-  NO_EXTERNAL_AGENT_CAPABILITIES,
-} from '@mangostudio/shared/external-agents';
+import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunnerSelectorContainer } from '../../../../src/features/external-agents/RunnerSelectorContainer';
 import { render } from '../../../support/harness/render';
 
-const DESCRIPTOR: ExternalAgentDescriptor = {
+const BASE_DESCRIPTOR: ExternalAgentDescriptor = {
   targetId: 'codex',
   environmentId: 'local',
   installed: true,
   authState: 'signed-in',
   capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
   supportedConfigurations: [],
+};
+
+/** Mutable, so a test can put the server's verdict on the descriptor. */
+const descriptorState: { current: ExternalAgentDescriptor } = { current: BASE_DESCRIPTOR };
+
+const NEEDS_DISCLOSURE: ExternalAgentDescriptor = {
+  ...BASE_DESCRIPTOR,
+  unavailableReason: 'disclosure-required',
 };
 
 const setRunnerTarget = vi.fn();
@@ -49,7 +59,6 @@ const appState = {
 const messagesQuery: { data: { pages: { messages: unknown[] }[] } | undefined } = {
   data: undefined,
 };
-const disclosureRecord: { accepted: boolean } = { accepted: false };
 
 vi.mock('@/lib/app-context', () => ({ useApp: () => appState }));
 vi.mock('@/features/chat/queries', () => ({ useMessagesQuery: () => messagesQuery }));
@@ -66,22 +75,20 @@ vi.mock('@/services/external-agent-service', () => ({
   forkChatWithRunner: (chatId: string, runner: unknown) => forkChatWithRunner(chatId, runner),
 }));
 vi.mock('../../../../src/features/external-agents/useExternalAgents', () => ({
-  useExternalAgents: () => ({ agents: [DESCRIPTOR], isLoading: false, find: () => DESCRIPTOR }),
+  useExternalAgents: () => ({
+    agents: [descriptorState.current],
+    isLoading: false,
+    find: () => descriptorState.current,
+  }),
   externalAgentSelectable: () => true,
 }));
 vi.mock('../../../../src/features/external-agents/useExternalDisclosures', () => ({
   useExternalDisclosures: () => ({
-    forTarget: () =>
-      disclosureRecord.accepted
-        ? {
-            version: EXTERNAL_DISCLOSURE_VERSION,
-            acceptedAt: 1,
-            capabilitiesFingerprint: externalCapabilitiesFingerprint(
-              NO_EXTERNAL_AGENT_CAPABILITIES
-            ),
-          }
-        : undefined,
+    records: [],
+    isLoading: false,
+    forTarget: () => undefined,
     accept,
+    revoke: vi.fn(() => Promise.resolve()),
   }),
 }));
 
@@ -95,7 +102,7 @@ describe('RunnerSelectorContainer', () => {
     vi.clearAllMocks();
     appState.currentChatId = 'chat-1';
     messagesQuery.data = undefined;
-    disclosureRecord.accepted = true;
+    descriptorState.current = BASE_DESCRIPTOR;
   });
 
   it('forks rather than switching in place while the transcript is still loading', () => {
@@ -130,7 +137,7 @@ describe('RunnerSelectorContainer', () => {
   });
 
   it('activates the vendor only after the acknowledgement has persisted', async () => {
-    disclosureRecord.accepted = false;
+    descriptorState.current = NEEDS_DISCLOSURE;
     messagesQuery.data = { pages: [{ messages: [] }] };
     // Held open so the assertions below run inside the window the fix closes.
     let persist: (() => void) | undefined;
@@ -145,7 +152,10 @@ describe('RunnerSelectorContainer', () => {
     fireEvent.click(screen.getByRole('option', { name: /codex cli/i }));
     fireEvent.click(await screen.findByRole('button', { name: /got it, continue/i }));
 
-    expect(accept).toHaveBeenCalledWith('codex', NO_EXTERNAL_AGENT_CAPABILITIES);
+    // The environment, not the capability set: the server derives what was
+    // agreed to from that machine's descriptor, so a client cannot acknowledge a
+    // disclosure it was never shown.
+    expect(accept).toHaveBeenCalledWith('codex', 'local');
     // The whole point: the write is open, so the vendor is not reachable yet.
     expect(setRunnerTarget).not.toHaveBeenCalled();
 
@@ -154,7 +164,7 @@ describe('RunnerSelectorContainer', () => {
   });
 
   it('leaves the notice up and the vendor unreachable when the write fails', async () => {
-    disclosureRecord.accepted = false;
+    descriptorState.current = NEEDS_DISCLOSURE;
     messagesQuery.data = { pages: [{ messages: [] }] };
     accept.mockImplementationOnce(() => Promise.reject(new Error('offline')));
 
