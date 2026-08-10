@@ -119,6 +119,18 @@ describe('normalizing stored settings', () => {
     expect(settings.externalAgentSettings.workspaceTrust).toEqual([good]);
   });
 
+  it('keeps the grants when the disclosures beside them are missing', () => {
+    // Two independent records of two different questions: a settings row that
+    // never stored a disclosure must not read as consent withdrawn.
+    const good = { ...KEY, version: EXTERNAL_WORKSPACE_TRUST_VERSION, acceptedAt: 1_000 };
+    const settings = normalizeAppSettings({
+      externalAgentSettings: { workspaceTrust: [good] },
+    });
+
+    expect(settings.externalAgentSettings.workspaceTrust).toEqual([good]);
+    expect(settings.externalAgentSettings.disclosures).toEqual({});
+  });
+
   it('reads a non-array as no grants at all', () => {
     const settings = normalizeAppSettings({
       externalAgentSettings: { disclosures: {}, workspaceTrust: { '/repo': true } },

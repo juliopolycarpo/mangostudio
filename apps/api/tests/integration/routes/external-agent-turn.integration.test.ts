@@ -329,6 +329,22 @@ describe('trusting a workspace for an external agent', () => {
     ).toBe(false);
   });
 
+  it('stores nothing for a vendor the gate never consults', async () => {
+    // The list is capped, so a row `requiresWorkspaceTrust` will never read is
+    // not merely useless: it evicts a grant somebody actually gave, and the
+    // user pays for it with a re-prompt on the vendor that does need one.
+    const codexChatId = await insertExternalChat('/work/repo', 'codex');
+    const app = mount(anyController());
+
+    const response = await app.handle(
+      post(`/chats/${codexChatId}/external-agent/trust-workspace`, {})
+    );
+
+    expect(response.status).toBe(200);
+    const settings = await getAppSettings(getDb(), user.id);
+    expect(settings.externalAgentSettings.workspaceTrust).toEqual([]);
+  });
+
   it('refuses a chat with no folder chosen', async () => {
     const cursorChatId = await insertExternalChat(null, 'cursor');
     const app = mount(anyController());

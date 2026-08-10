@@ -63,6 +63,11 @@ export async function requiresWorkspaceTrust(
 /**
  * Records the acknowledgement, replacing any earlier one for the same key.
  *
+ * A target that never loads a workspace's configuration is dropped rather than
+ * stored: `requiresWorkspaceTrust` would never read the row back, and the list
+ * is capped, so an unreadable row can still evict a grant somebody actually
+ * gave — paying for a Codex grant with a Cursor re-prompt.
+ *
  * Read-modify-write on the whole settings row, which is what every other
  * settings mutation does; two concurrent trust grants for different workspaces
  * would have one overwrite the other, and the loser re-prompts. That is
@@ -74,6 +79,7 @@ export async function grantWorkspaceTrust(
   db: Kysely<Database>,
   now: () => number = Date.now
 ): Promise<void> {
+  if (!targetLoadsWorkspaceConfiguration(scope.targetId)) return;
   const settings = await getAppSettings(db, scope.userId);
   const workspaceTrust = withWorkspaceTrust(
     settings.externalAgentSettings.workspaceTrust,

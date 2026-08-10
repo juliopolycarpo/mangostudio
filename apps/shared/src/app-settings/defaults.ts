@@ -647,9 +647,14 @@ export function normalizeExternalApiSettings(value: unknown): ExternalApiSetting
  * row into a settings save that fails for reasons no control on screen explains.
  */
 function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
-  if (!isRecord(value) || !isRecord(value.disclosures)) return DEFAULT_EXTERNAL_AGENT_SETTINGS;
+  if (!isRecord(value)) return DEFAULT_EXTERNAL_AGENT_SETTINGS;
 
+  // The two fields are independent records of two different questions, so a
+  // missing or malformed `disclosures` is not a reason to forget which
+  // workspaces the user trusted.
   const workspaceTrust = normalizeWorkspaceTrust(value.workspaceTrust);
+  if (!isRecord(value.disclosures)) return { disclosures: {}, workspaceTrust };
+
   const disclosures: ExternalAgentSettings['disclosures'] = {};
   for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
     const entry = value.disclosures[targetId];
