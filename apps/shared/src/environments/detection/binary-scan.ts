@@ -76,6 +76,24 @@ type CandidateProbeResult =
 const WINDOWS_EXECUTABLE_EXTENSIONS = new Set(['.exe', '.cmd', '.bat', '.com']);
 const WINDOWS_PATHEXT_FALLBACK = '.EXE;.CMD;.BAT;.COM';
 
+/**
+ * How long one `--version` call may take before the candidate is discarded.
+ *
+ * Windows gets longer because what sits on `PATH` there is usually not the
+ * program. Vendor CLIs install as a `.cmd` shim that starts a runtime that
+ * loads a bundled script: `cursor-agent --version` measured **~2.1 s** on
+ * Windows against well under a second for the same version on Linux, where the
+ * binary is native. At the POSIX budget the shim was killed mid-answer and the
+ * CLI was reported as not installed — a real install, on `PATH`, signed in.
+ *
+ * Both numbers are still a bound on a subprocess that sits on the path to
+ * rendering a selector, which is why Windows gets a bigger allowance rather
+ * than no deadline.
+ */
+function defaultProbeTimeoutMs(platform: string): number {
+  return platform === 'win32' ? 5_000 : 2_000;
+}
+
 export function binaryCandidateNames(
   definition: RuntimeDefinition,
   env: Pick<PathEnv, 'platform' | 'env'>
@@ -282,7 +300,10 @@ export async function scanRuntime(
         };
       }
 
-      const timeoutMs = Math.min(deps.probeTimeoutMs ?? 2_000, remainingMs);
+      const timeoutMs = Math.min(
+        deps.probeTimeoutMs ?? defaultProbeTimeoutMs(deps.platform),
+        remainingMs
+      );
       const probe = await probeWithTimeout(
         deps.probeVersion(candidate.path, definition.versionArgs, timeoutMs),
         timeoutMs

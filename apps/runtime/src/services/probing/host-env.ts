@@ -55,10 +55,47 @@ export function createRuntimePathEnv(
   return {
     platform: process.platform,
     homeDir: homedir(),
-    env: { ...process.env, ...overrides.env },
+    env: withCanonicalPathKey({ ...process.env, ...overrides.env }),
     ...(overrides.workspaceRoot !== undefined && { workspaceRoot: overrides.workspaceRoot }),
   };
 }
+
+/**
+ * Restores `PATH` after the spread that loses it on Windows.
+ *
+ * Windows names the variable `Path`, and `process.env` only answers to `PATH`
+ * because the runtime proxies it case-insensitively. Spreading into a plain
+ * object drops the proxy, so every consumer below — all of which read `PATH` —
+ * looks up a key that is not there and finds an empty search path.
+ *
+ * The symptom is not subtle and was not theoretical: on Windows the binary scan
+ * enumerated nothing, so **every** external agent reported `cli-not-installed`
+ * with the CLI sitting on `PATH`, signed in.
+ *
+ * The canonical key is added rather than the original renamed: something
+ * downstream may reasonably read `Path` on Windows, and both should agree.
+ */
+function withCanonicalPathKey(
+  env: Record<string, string | undefined>
+): Record<string, string | undefined> {
+  if (env.PATH !== undefined) return env;
+  const key = Object.keys(env).find((candidate) => candidate.toUpperCase() === 'PATH');
+  return key === undefined ? env : { ...env, PATH: env[key] };
+}
+
+/**
+ * How much longer than the caller's budget the child is allowed to live.
+ *
+ * The scan races this call against a timer of its own and reports
+ * `probe-timeout` when that timer wins. Giving `execFile` the *same* deadline
+ * makes the two race each other: whichever fires first decides whether the user
+ * is told the probe timed out or that the file is not executable, and on
+ * Windows the `execFile` kill won consistently — sending anyone who read the
+ * finding to check file permissions on a binary that was merely slow. The grace
+ * makes the scan's own timer authoritative; this one is only a backstop for a
+ * child that ignores it.
+ */
+const VERSION_PROBE_GRACE_MS = 250;
 
 async function probeBinaryVersion(
   binary: string,
@@ -67,7 +104,7 @@ async function probeBinaryVersion(
 ): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync(binary, [...args], {
-      timeout: timeoutMs,
+      timeout: timeoutMs + VERSION_PROBE_GRACE_MS,
       ...HIDDEN_WINDOW,
     });
     return stdout.trim() || null;

@@ -321,3 +321,68 @@ describe('runtime version parsing', () => {
     expect(parseBunVersion('v1.2.3')).toBeNull();
   });
 });
+
+describe('probe budget by platform', () => {
+  /**
+   * Measured on a real install: `cursor-agent --version` answers in ~2.1s on
+   * Windows, where `PATH` holds a `.cmd` shim that starts a runtime that loads
+   * a bundled script, against well under a second for the same version on
+   * Linux. At the POSIX budget the shim was killed mid-answer and a working,
+   * signed-in CLI was reported as not installed.
+   */
+  const WINDOWS_SHIM_ANSWER_MS = 2_100;
+
+  function slowProbe(afterMs: number) {
+    return (_path: string, _args: readonly string[], timeoutMs: number) =>
+      new Promise<string | null>((resolve) => {
+        // Stands in for a child killed at its own deadline.
+        setTimeout(() => resolve(afterMs <= timeoutMs ? 'v22.13.0' : null), 0);
+      });
+  }
+
+  it('gives a Windows shim long enough to answer', async () => {
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'win32',
+        env: { PATH: 'C:\\tools', PATHEXT: '.COM;.EXE;.BAT;.CMD' },
+        pathExists: (path) => path === 'C:\\tools\\node.cmd',
+        probeVersion: slowProbe(WINDOWS_SHIM_ANSWER_MS),
+      })
+    );
+
+    expect(result.installations.map((install) => install.path)).toEqual(['C:\\tools\\node.cmd']);
+  });
+
+  it('keeps the tighter budget where the binary is native', async () => {
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        env: { PATH: '/usr/bin' },
+        pathExists: (path) => path === '/usr/bin/node',
+        probeVersion: slowProbe(WINDOWS_SHIM_ANSWER_MS),
+      })
+    );
+
+    expect(result.installations).toEqual([]);
+  });
+
+  it('lets an explicit budget override the platform default', async () => {
+    const seen: number[] = [];
+    await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'win32',
+        env: { PATH: 'C:\\tools', PATHEXT: '.CMD' },
+        pathExists: (path) => path === 'C:\\tools\\node.cmd',
+        probeTimeoutMs: 750,
+        probeVersion: (_path, _args, timeoutMs) => {
+          seen.push(timeoutMs);
+          return Promise.resolve('v22.13.0');
+        },
+      })
+    );
+
+    expect(seen).toEqual([750]);
+  });
+});
