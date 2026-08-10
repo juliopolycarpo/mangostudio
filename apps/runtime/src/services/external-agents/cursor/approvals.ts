@@ -177,6 +177,17 @@ export function planCursorServerRequest(
   nowMs: number
 ): CursorServerRequestPlan {
   if (method === 'session/request_permission') {
+    // JSON-RPC lets a request omit `params` entirely. Reading through the cast
+    // would throw inside the request handler, and a handler that throws answers
+    // nothing — leaving the vendor blocked on a reply that never comes, which is
+    // the one outcome every refusal here exists to avoid.
+    if (params === null || typeof params !== 'object') {
+      return {
+        outcome: 'refuse',
+        code: CURSOR_ERROR_CODES.invalidRequest,
+        message: 'MangoStudio cannot read a permission request without parameters.',
+      };
+    }
     return planCursorPermissionRequest(params as AcpRequestPermissionParams, requestId, nowMs);
   }
   if (method.startsWith('fs/') || method.startsWith('terminal/')) {
