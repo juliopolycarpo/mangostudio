@@ -401,11 +401,36 @@ interface ExternalSessionContinuationsTable {
    * that requires comparing identities without storing one.
    */
   vendorAccountFingerprint: string | null;
+  /**
+   * Non-reversible digest of the OS credential home the vendor reads from.
+   *
+   * One level below `vendorAccountFingerprint`, and not implied by it: a
+   * container recreated with a fresh volume, or an SSH environment repointed at
+   * another host, leaves the vendor account looking identical while the identity
+   * behind the conversation has changed. Null on rows written before the column
+   * existed, and on runtimes that attest nothing; both read as "not established".
+   */
+  credentialHomeFingerprint: string | null;
   runtimeSessionId: string;
   nativeSessionId: string;
   /** JSON, vendor-reported, display only. */
   effectiveConfiguration: string | null;
   updatedAt: number;
+}
+
+/**
+ * One user's acknowledgement of one vendor's third-party disclosure.
+ *
+ * Read on the authorization path, not the rendering path: a turn does not start
+ * without a current row, whichever client asked for it.
+ */
+interface ExternalAgentDisclosuresTable {
+  userId: string;
+  targetId: string;
+  disclosureVersion: number;
+  /** Digest of text version, declared capabilities and resolved permission default. */
+  contextFingerprint: string;
+  acknowledgedAt: number;
 }
 
 /** Root Kysely Database interface. */
@@ -437,6 +462,7 @@ export interface Database {
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
   external_session_continuations: ExternalSessionContinuationsTable;
+  external_agent_disclosures: ExternalAgentDisclosuresTable;
 }
 
 export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;

@@ -86,6 +86,7 @@ function startTurn(
       configuration: CONFIGURATION,
       canonicalWorkspacePath: '/work/repo',
       vendorAccountFingerprint: 'account-a',
+      credentialHomeFingerprint: 'sha256:home-a',
     },
     getDb()
   );
@@ -474,6 +475,7 @@ describe('external turn controller', () => {
         configuration: CONFIGURATION,
         canonicalWorkspacePath: '/work/repo',
         vendorAccountFingerprint: 'account-a',
+        credentialHomeFingerprint: 'sha256:home-a',
         observer: {
           onSession: (session) => void sessionIds.push(session.sessionId),
           onEvent: (event) => void events.push(event.type),

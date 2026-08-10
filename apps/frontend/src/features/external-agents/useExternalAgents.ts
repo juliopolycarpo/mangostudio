@@ -58,7 +58,13 @@ export function useExternalAgents(environmentId: string | null): ExternalAgentsV
  * is a verdict, and is not selectable.
  */
 export function externalAgentSelectable(descriptor: ExternalAgentDescriptor): boolean {
-  if (descriptor.unavailableReason) return false;
+  // `disclosure-required` is the one reason the user can clear from here, so it
+  // must not disable the row: the notice is reached by picking the agent, and a
+  // greyed-out row would leave the only way through it unreachable. Every other
+  // reason needs an install, a login, or somebody else's change to a machine.
+  if (descriptor.unavailableReason && descriptor.unavailableReason !== 'disclosure-required') {
+    return false;
+  }
   if (!descriptor.installed) return false;
   return descriptor.authState !== 'signed-out';
 }

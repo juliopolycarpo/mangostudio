@@ -162,6 +162,7 @@ function runTurn(controller: ReturnType<typeof harness>['controller'], chatId: s
       prompt: 'do the thing',
       configuration: CONFIGURATION,
       canonicalWorkspacePath: '/work/repo',
+      credentialHomeFingerprint: 'sha256:home-a',
     },
     getDb()
   );
@@ -338,6 +339,7 @@ describe('external turn boundaries', () => {
           prompt: 'do the thing',
           configuration: CONFIGURATION,
           canonicalWorkspacePath: '/work/repo',
+          credentialHomeFingerprint: 'sha256:home-a',
         },
         getDb()
       )

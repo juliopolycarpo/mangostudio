@@ -8,7 +8,6 @@
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
-import { needsExternalDisclosure } from '@mangostudio/shared/external-agents';
 import { useState } from 'react';
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
 import { useToast } from '@/components/ui/Toast';
@@ -77,12 +76,11 @@ export function RunnerSelectorContainer() {
           // first activation of a vendor rather than the first turn: the user
           // should see it before the chat is pointed at a third party, not
           // after.
-          if (
-            needsExternalDisclosure(
-              disclosures.forTarget(descriptor.targetId),
-              descriptor.capabilities
-            )
-          ) {
+          // The server decides, and says so on the descriptor. A second rule
+          // here could disagree with the one the turn-start refusal applies,
+          // which is either a dialog that never satisfies the gate or an agent
+          // the selector offers and every send refuses.
+          if (descriptor.unavailableReason === 'disclosure-required') {
             setPendingDisclosure(descriptor);
             return;
           }
@@ -104,7 +102,7 @@ export function RunnerSelectorContainer() {
             const descriptor = pendingDisclosure;
             setAccepting(true);
             void disclosures
-              .accept(descriptor.targetId, descriptor.capabilities)
+              .accept(descriptor.targetId, descriptor.environmentId)
               .then(() => {
                 setPendingDisclosure(null);
                 activate(descriptor);

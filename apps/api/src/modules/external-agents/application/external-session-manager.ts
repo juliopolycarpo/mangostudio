@@ -75,6 +75,15 @@ interface ExternalSessionBinding {
   readonly canonicalWorkspacePath: string;
   /** Absent when the adapter reported no account identity to compare. */
   readonly vendorAccountFingerprint: string | null;
+  /**
+   * The attested credential home behind this environment's vendor logins.
+   *
+   * Part of the binding, so a session opened against one OS identity is never
+   * resumed against another. Null only on rows written before the attestation
+   * existed; a live session cannot reach here without one, because the turn
+   * controller refuses to start without an attestation.
+   */
+  readonly credentialHomeFingerprint: string | null;
 }
 
 export interface EnsureExternalSessionInput extends ExternalSessionBinding {
@@ -176,7 +185,8 @@ function sameBinding(left: ExternalSessionBinding, right: ExternalSessionBinding
     left.environmentId === right.environmentId &&
     left.targetId === right.targetId &&
     left.canonicalWorkspacePath === right.canonicalWorkspacePath &&
-    left.vendorAccountFingerprint === right.vendorAccountFingerprint
+    left.vendorAccountFingerprint === right.vendorAccountFingerprint &&
+    left.credentialHomeFingerprint === right.credentialHomeFingerprint
   );
 }
 
@@ -311,6 +321,7 @@ export function createExternalSessionManager(
       targetId: input.targetId,
       canonicalWorkspacePath: input.canonicalWorkspacePath,
       vendorAccountFingerprint: input.vendorAccountFingerprint,
+      credentialHomeFingerprint: input.credentialHomeFingerprint,
     };
 
     const generation = reapGenerations.get(input.chatId) ?? 0;

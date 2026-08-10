@@ -126,6 +126,21 @@ export function createFakeExternalRuntime(
     paths: {
       canonical: (path: string) => path.replace(/\/+$/, '') || '/',
     },
+    // An attesting runtime, so the isolation gate is *passed* rather than
+    // bypassed: the turn tests are about turns, and a fake that attested nothing
+    // would make every one of them assert the refusal instead.
+    //
+    // The fingerprint is unique per fake. The hub's registry withdraws an
+    // attestation whenever one credential home turns up under two MangoStudio
+    // users, and it is process-scoped — so a shared constant here would have the
+    // second test that uses a different user id silently contest the first and
+    // fail on a refusal it never asked for.
+    manifest: {
+      identityIsolation: {
+        method: 'single-user-host' as const,
+        credentialHomeFingerprint: `sha256:fake-runtime-${crypto.randomUUID()}`,
+      },
+    },
     onClose(listener: () => void) {
       closeListeners.add(listener);
       return () => closeListeners.delete(listener);

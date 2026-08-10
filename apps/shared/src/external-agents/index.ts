@@ -12,7 +12,9 @@ export {
   type ExternalWorkspaceTrust,
   type ExternalWorkspaceTrustKey,
   ExternalWorkspaceTrustSchema,
+  effectivePermissionDefaultOf,
   externalCapabilitiesFingerprint,
+  externalDisclosureContextFingerprint,
   needsExternalDisclosure,
   needsWorkspaceTrust,
   withWorkspaceTrust,
@@ -129,3 +131,8 @@ export {
   sanitizeVendorText,
   schemaMaxLengthFor,
 } from './vendor-text';
+export {
+  EXTERNAL_AGENT_VENDORS,
+  type ExternalAgentVendor,
+  externalAgentVendor,
+} from './vendors';

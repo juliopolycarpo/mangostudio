@@ -48,6 +48,7 @@ async function insertExternalChat(): Promise<void> {
       targetId: 'codex',
       canonicalWorkspacePath: '/work/repo',
       vendorAccountFingerprint: 'account-a',
+      credentialHomeFingerprint: 'sha256:home-a',
       runtimeSessionId: 'session-1',
       nativeSessionId: 'native-session-1',
       effectiveConfiguration: CONFIGURATION,

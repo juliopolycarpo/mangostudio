@@ -51,7 +51,7 @@ function createTestRoutes() {
     resetCache: () => undefined,
   };
 
-  return { routes: createExternalAgentRoutes(discovery), getScopes: () => scopes };
+  return { routes: createExternalAgentRoutes({ discovery }), getScopes: () => scopes };
 }
 
 describe('external agent discovery routes', () => {

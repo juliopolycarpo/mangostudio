@@ -146,6 +146,14 @@ interface StartExternalTurnInput {
   readonly canonicalWorkspacePath: string;
   /** From discovery; absent when the adapter reported no account identity. */
   readonly vendorAccountFingerprint?: string | null;
+  /**
+   * The environment's attested credential home.
+   *
+   * Required, not optional. A turn that reached here without one is a turn the
+   * isolation gate should have refused, and making the field optional would let
+   * a future call site omit it and silently opt out of the check.
+   */
+  readonly credentialHomeFingerprint: string;
   readonly observer?: ExternalTurnObserver;
 }
 
@@ -345,6 +353,7 @@ export function createExternalTurnController(
       targetId,
       canonicalWorkspacePath: input.canonicalWorkspacePath,
       vendorAccountFingerprint: input.vendorAccountFingerprint ?? null,
+      credentialHomeFingerprint: input.credentialHomeFingerprint,
       configuration: input.configuration,
     });
     input.observer?.onSession?.({

@@ -8,6 +8,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getDb } from '../../../../src/db/database';
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
+import { acknowledgeExternalDisclosure } from '../../../../src/modules/external-agents/application/external-disclosure-gate';
 import { createExternalSessionManager } from '../../../../src/modules/external-agents/application/external-session-manager';
 import { createExternalTurnConfigurationResolver } from '../../../../src/modules/external-agents/application/external-turn-configuration';
 import { createExternalTurnController } from '../../../../src/modules/external-agents/application/external-turn-controller';
@@ -131,6 +132,62 @@ beforeEach(async () => {
   const user = await insertTestUser();
   userId = user.id;
   chatId = await insertExternalChat();
+  // The third-party disclosure is a precondition of *every* send, so a suite
+  // about what a turn streams has to satisfy it or every case below would assert
+  // the refusal instead. The refusal itself is exercised in its own describe.
+  await acknowledgeExternalDisclosure(
+    { userId, targetId: 'codex' },
+    { capabilities: descriptor().capabilities, supportedConfigurations: EVERY_PAIR },
+    getDb()
+  );
+});
+
+describe('the third-party disclosure gate', () => {
+  /**
+   * Authoritative, and not the descriptor's cached `disclosure-required`: this
+   * is the check the external API hits too, which is what makes the gate a
+   * safeguard rather than a courtesy the browser extends to itself.
+   */
+  it('refuses a send from a user who has not acknowledged the vendor', async () => {
+    const stranger = await insertTestUser();
+    const strangerChat = await insertExternalChat();
+
+    const { stream } = harness();
+    const result = await stream(
+      {
+        userId: stranger.id,
+        chat: chatRecord(),
+        chatId: strangerChat,
+        prompt: 'hello',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('disclosure-required');
+  });
+
+  it('does not let one vendor stand in for another', async () => {
+    // Codex is acknowledged for this user; Cursor is not. One dialog must never
+    // stand in for another company's terms.
+    const { stream } = harness({ agents: [descriptor({ targetId: 'cursor' })] });
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord({ runner: { kind: 'external', targetId: 'cursor' } }),
+        chatId,
+        prompt: 'hello',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('disclosure-required');
+  });
 });
 
 describe('external turn configuration', () => {
@@ -538,6 +595,19 @@ function cancelActiveTurnForChat(id: string): boolean {
 }
 
 describe('workspace trust', () => {
+  /**
+   * The disclosure runs first, deliberately: nobody should be asked whether a
+   * vendor may read a folder before they have agreed to use that vendor at all.
+   * So these cases acknowledge Cursor and then assert the *workspace* gate.
+   */
+  beforeEach(async () => {
+    await acknowledgeExternalDisclosure(
+      { userId, targetId: 'cursor' },
+      { capabilities: descriptor().capabilities, supportedConfigurations: EVERY_PAIR },
+      getDb()
+    );
+  });
+
   it('refuses a Cursor turn against a workspace nobody has trusted', async () => {
     // Not a validation failure and not a conflict: the request is well-formed
     // and will stay refused until a person makes one decision.
