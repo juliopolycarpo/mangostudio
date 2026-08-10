@@ -28,6 +28,12 @@ export type {
   StreamChunk,
 } from './events';
 export {
+  type ExternalStreamSession,
+  externalAgentEventToStreamChunk,
+  externalSessionStartedChunk,
+  externalTurnCompletedChunk,
+} from './external-events';
+export {
   SSEContextEventSchema,
   SSEContinuationTransitionEventSchema,
   SSEDoneEventSchema,

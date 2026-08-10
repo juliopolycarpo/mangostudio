@@ -1,40 +1,29 @@
-import type { ModelCatalogResponse, ModelOption, ProviderType } from '@mangostudio/shared';
 import { useNavigate } from '@tanstack/react-router';
 import { Menu, Plus, Settings } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
 import { useI18n } from '@/hooks/use-i18n';
 import { authClient } from '@/lib/auth-client';
-import { ModelSelector } from './ModelSelector';
 
 export interface HeaderProps {
-  activeModel: string;
-  activeModels: ModelOption[];
-  isModelSelectorDisabled: boolean;
-  currentChatId: string | null;
   currentPage: AppPage;
-  onUpdateChatModel: (chatId: string, model: string) => void;
-  onSetPageModel: (model: string) => void;
   onNewChat: () => void;
   onNavigateToSettings: () => void;
-  modelCatalog: ModelCatalogResponse;
-  lockedProvider?: ProviderType | null;
+  /**
+   * The runner selector. Passed as a node rather than as the props it needs:
+   * the header is chrome, and it has no business knowing about agent profiles,
+   * external descriptors or D14 forking.
+   */
+  runnerSelector?: ReactNode;
   onMobileMenuToggle?: () => void;
 }
 
 export function Header({
-  activeModel,
-  activeModels,
-  isModelSelectorDisabled,
-  currentChatId,
   currentPage,
-  onUpdateChatModel,
-  onSetPageModel,
   onNewChat,
   onNavigateToSettings,
-  modelCatalog,
-  lockedProvider,
+  runnerSelector,
   onMobileMenuToggle,
 }: HeaderProps) {
   const navigate = useNavigate();
@@ -77,20 +66,9 @@ export function Header({
         >
           <Menu size={20} />
         </button>
-        {currentPage !== 'studio' && (
-          <div className="min-w-0 flex-1 max-w-[60vw] sm:max-w-none">
-            <ModelSelector
-              activeModel={activeModel}
-              activeModels={activeModels}
-              isDisabled={isModelSelectorDisabled}
-              onSelect={(modelId) =>
-                currentChatId ? onUpdateChatModel(currentChatId, modelId) : onSetPageModel(modelId)
-              }
-              modelCatalog={modelCatalog}
-              lockedProvider={lockedProvider}
-            />
-          </div>
-        )}
+        {currentPage !== 'studio' && runnerSelector ? (
+          <div className="min-w-0 flex-1 max-w-[60vw] sm:max-w-none">{runnerSelector}</div>
+        ) : null}
       </div>
       <div className="flex items-center gap-2 sm:gap-3 shrink-0 ml-2">
         {currentPage === 'chat' && (

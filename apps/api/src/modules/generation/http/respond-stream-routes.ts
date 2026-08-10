@@ -21,6 +21,10 @@ import {
   ChatAttachmentNotFoundError,
 } from '../../attachments/infrastructure/attachment-repository';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
+import {
+  type ExternalTurnPreflightFailure,
+  streamExternalTurn,
+} from '../../external-agents/application/external-turn-stream';
 import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
 import {
   NoModelAvailableError,
@@ -46,6 +50,27 @@ import {
 } from '../application/turn-recovery';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
+
+/**
+ * How a refused external send reads over HTTP.
+ *
+ * Every one of these is decided before the response becomes a stream, so they
+ * are status codes rather than error frames — a refusal after the 200 is
+ * committed reads to a user as a turn that failed, not as one that never began.
+ */
+const EXTERNAL_PREFLIGHT_STATUS = {
+  conflict: 409,
+  unsupported: 409,
+  unavailable: 503,
+  validation: 400,
+} as const satisfies Record<ExternalTurnPreflightFailure['kind'], number>;
+
+const EXTERNAL_PREFLIGHT_CODE = {
+  conflict: ERROR_CODES.CONFLICT,
+  unsupported: ERROR_CODES.UNSUPPORTED,
+  unavailable: ERROR_CODES.PROVIDER_ERROR,
+  validation: ERROR_CODES.VALIDATION,
+} as const satisfies Record<ExternalTurnPreflightFailure['kind'], string>;
 
 function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -301,6 +326,30 @@ export const respondStreamRoutes = (app: Elysia) =>
               return { error: err.message, code: ERROR_CODES.VALIDATION };
             }
             throw err;
+          }
+
+          // Before the model, agent and provider preflight below, not after. An
+          // external turn resolves no MangoStudio model, so running that first
+          // answers a chat that needs no model with `NoModelAvailableError` —
+          // a 503 about a provider the user never chose.
+          if (ownedChat.runner.kind === 'external') {
+            const result = await streamExternalTurn(
+              {
+                userId,
+                chat: ownedChat,
+                chatId: body.chatId,
+                prompt: body.prompt,
+                attachmentIds,
+                externalTurn: body.externalTurn,
+              },
+              db
+            );
+            if (result.ok) return result.response;
+            set.status = EXTERNAL_PREFLIGHT_STATUS[result.failure.kind];
+            return {
+              error: result.failure.message,
+              code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
+            };
           }
 
           let inspectedRecovery: Awaited<ReturnType<typeof inspectInterruptedTurnResume>> | null =

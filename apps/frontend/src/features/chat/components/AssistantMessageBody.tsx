@@ -5,6 +5,8 @@ import { messagePartsFromMessage } from './message-content';
 
 interface BodyProps {
   msg: Message;
+  /** Threaded down so an approval card knows which chat to answer against. */
+  chatId?: string | null;
 }
 
 /**
@@ -13,7 +15,11 @@ interface BodyProps {
  *
  * Usage: <StreamingMessageBody msg={msg} isImageTurn={isImageTurn} />
  */
-export function StreamingMessageBody({ msg, isImageTurn }: BodyProps & { isImageTurn: boolean }) {
+export function StreamingMessageBody({
+  msg,
+  chatId = null,
+  isImageTurn,
+}: BodyProps & { isImageTurn: boolean }) {
   const { t } = useI18n();
   const parts = messagePartsFromMessage(msg);
   const hasContent = parts.some(
@@ -21,7 +27,9 @@ export function StreamingMessageBody({ msg, isImageTurn }: BodyProps & { isImage
       p.type === 'thinking' ||
       p.type === 'text' ||
       p.type === 'tool_call' ||
-      p.type === 'mcp_elicitation'
+      p.type === 'mcp_elicitation' ||
+      p.type === 'external_activity' ||
+      p.type === 'external_approval'
   );
 
   if (isImageTurn || !hasContent) {
@@ -45,7 +53,7 @@ export function StreamingMessageBody({ msg, isImageTurn }: BodyProps & { isImage
     );
   }
 
-  return <MessageParts parts={parts} messageId={msg.id} isStreaming />;
+  return <MessageParts parts={parts} messageId={msg.id} chatId={chatId} isStreaming />;
 }
 
 /**
@@ -56,6 +64,7 @@ export function StreamingMessageBody({ msg, isImageTurn }: BodyProps & { isImage
  */
 export function CompletedMessageBody({
   msg,
+  chatId = null,
   onQuestionSubmit,
 }: BodyProps & { onQuestionSubmit?: (prompt: string) => void }) {
   const { t } = useI18n();
@@ -67,6 +76,7 @@ export function CompletedMessageBody({
       <MessageParts
         parts={parts}
         messageId={msg.id}
+        chatId={chatId}
         isStreaming={false}
         onQuestionSubmit={onQuestionSubmit}
       />

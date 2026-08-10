@@ -1,4 +1,4 @@
-import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type { ChatRunnerConfiguration, ChatRunnerPermissions } from '@mangostudio/shared/chat';
 import { createTimestampChatTitle } from '@mangostudio/shared/chat';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -65,6 +65,13 @@ export function useChats() {
     [updateMutation]
   );
 
+  const updateChatRunnerPermissions = useCallback(
+    async (chatId: string, runnerPermissions: ChatRunnerPermissions) => {
+      await updateMutation.mutateAsync({ id: chatId, updates: { runnerPermissions } });
+    },
+    [updateMutation]
+  );
+
   const updateChatWorkdir = useCallback(
     async (chatId: string, workdir: string | null) => {
       await updateMutation.mutateAsync({
@@ -123,6 +130,7 @@ export function useChats() {
     updateChatModel,
     updateChatTitle,
     updateChatRunner,
+    updateChatRunnerPermissions,
     updateChatWorkdir,
     updateChatEnvironment,
     updateChatRestrictToolsToWorkdir,

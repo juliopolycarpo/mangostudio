@@ -716,8 +716,8 @@ describe('external agent discovery — runtime authority', () => {
   });
 });
 
-describe('the availability gate', () => {
-  it('reports every target as not yet available, whatever else is true of it', async () => {
+describe('after the availability gate', () => {
+  it('reports each target on its own merits rather than one blanket refusal', async () => {
     const service = createExternalAgentDiscoveryService({
       probingService: fakeProbing([
         agentStatus({ targetId: 'codex', ...installed('codex') }),
@@ -731,10 +731,12 @@ describe('the availability gate', () => {
     });
 
     const agents = await service.listExternalAgents(SCOPE);
+    const byTarget = new Map(agents.map((agent) => [agent.targetId, agent]));
 
     expect(agents).toHaveLength(3);
-    for (const agent of agents) {
-      expect(agent.unavailableReason).toBe('not-yet-available');
-    }
+    // An installed, signed-in target is now genuinely selectable.
+    expect(byTarget.get('codex')?.unavailableReason).toBeUndefined();
+    expect(byTarget.get('cursor')?.unavailableReason).toBe('not-installed');
+    expect(byTarget.get('claude')?.unavailableReason).toBe('signed-out');
   });
 });

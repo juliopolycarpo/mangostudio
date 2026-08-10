@@ -1,4 +1,15 @@
 export {
+  DEFAULT_EXTERNAL_AGENT_SETTINGS,
+  EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
+  EXTERNAL_DISCLOSURE_VERSION,
+  type ExternalAgentDisclosure,
+  ExternalAgentDisclosureSchema,
+  type ExternalAgentSettings,
+  ExternalAgentSettingsSchema,
+  externalCapabilitiesFingerprint,
+  needsExternalDisclosure,
+} from './disclosure';
+export {
   type NormalizedPermissionValue,
   normalizeApprovalRouting,
   normalizePermissionLevel,
@@ -94,6 +105,7 @@ export {
   ExternalTurnTerminalReasonSchema,
   type ExternalUsage,
   ExternalUsageSchema,
+  isExternalAgentTargetId,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from './schemas';
 export {
@@ -104,4 +116,5 @@ export {
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
   type ExternalTextLimit,
   sanitizeVendorText,
+  schemaMaxLengthFor,
 } from './vendor-text';

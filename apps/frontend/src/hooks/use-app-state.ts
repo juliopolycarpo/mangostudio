@@ -1,10 +1,13 @@
+import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import { useNavigate } from '@tanstack/react-router';
+import { useCallback, useRef, useState } from 'react';
 import { useChats } from '@/features/chat/hooks/use-chats';
 import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import { useTextGeneration } from '@/features/generation/hooks/use-text-generation';
 import { useActiveChatModel } from './use-active-chat-model';
 import { useChatContextSync } from './use-chat-context-sync';
 import { useChatRouteActions } from './use-chat-route-actions';
+import { useExternalTurnRequest } from './use-external-turn-request';
 import { useGenerationControls } from './use-generation-controls';
 import { useGlobalSettings } from './use-global-settings';
 import { useModelCatalog } from './use-model-catalog';
@@ -26,10 +29,30 @@ export function useAppState() {
     currentChatId: chats.currentChatId,
     currentChat,
     updateChatRunner: chats.updateChatRunner,
+    updateChatRunnerPermissions: chats.updateChatRunnerPermissions,
     defaultWorkdir: settings.workspaceSettings.defaultWorkdir,
     updateChatWorkdir: chats.updateChatWorkdir,
     addRecentWorkdir: settings.addRecentWorkdir,
   });
+
+  const { externalTurnRequest, setExternalTurnRequest, getExternalTurnRequest } =
+    useExternalTurnRequest(chats.currentChatId);
+
+  // Read through a ref for the same reason the vendor options are: the send
+  // path has to see the runner the composer shows now, not the one it showed
+  // when the callback was created.
+  //
+  // This is the *selected* runner, which is what the turn header should name
+  // while the turn streams. It can be ahead of the stored one — the selector
+  // writes optimistically — but only a write that is then rejected leaves the
+  // two permanently disagreeing; `whenRunnerPersisted` settles the rest before
+  // the stream opens, so the hub dispatches on the runner shown here.
+  const runnerRef = useRef(runnerSelection.runner);
+  runnerRef.current = runnerSelection.runner;
+  const getExternalRunnerTargetId = useCallback(() => {
+    const runner = runnerRef.current;
+    return runner.kind === 'external' ? runner.targetId : undefined;
+  }, []);
 
   const textGen = useTextGeneration({
     chats,
@@ -47,6 +70,9 @@ export function useAppState() {
       agentId: runnerSelection.selectedAgentId ?? 'default',
       agentName: runnerSelection.selectedAgent?.name,
     }),
+    getExternalTurnRequest,
+    getExternalRunnerTargetId,
+    whenRunnerPersisted: runnerSelection.whenRunnerPersisted,
     onChatCreated: runnerSelection.bindNewChat,
   });
   useChatContextSync(chats.chats, textGen.seedContextInfo);
@@ -60,6 +86,9 @@ export function useAppState() {
   return {
     imageToolIntent: generationControls.imageToolIntent,
     runner: runnerSelection.runner,
+    runnerPermissions: runnerSelection.runnerPermissions,
+    externalTurnRequest,
+    setExternalTurnRequest,
     selectedAgentId: runnerSelection.selectedAgentId,
     agents: runnerSelection.agents,
     isAgentListLoading: runnerSelection.isAgentListLoading,
@@ -83,6 +112,8 @@ export function useAppState() {
 
     setImageToolIntent: generationControls.setImageToolIntent,
     setSelectedAgentId: runnerSelection.setRunnerAgentId,
+    setRunnerTarget: runnerSelection.setRunnerTarget,
+    setRunnerPermissions: runnerSelection.setRunnerPermissions,
     openWorkdirPicker: runnerSelection.openWorkdirPicker,
     closeWorkdirPicker: runnerSelection.closeWorkdirPicker,
     selectWorkdir: runnerSelection.selectWorkdir,

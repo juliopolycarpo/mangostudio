@@ -32,24 +32,9 @@ function buildProps(
   overrides: Partial<ComponentProps<typeof Header>> = {}
 ): ComponentProps<typeof Header> {
   return {
-    activeModel: 'gpt-4',
-    activeModels: [],
-    isModelSelectorDisabled: false,
-    currentChatId: null,
     currentPage: 'chat',
-    onUpdateChatModel: vi.fn(),
-    onSetPageModel: vi.fn(),
     onNewChat: vi.fn(),
     onNavigateToSettings: vi.fn(),
-    modelCatalog: {
-      configured: true,
-      status: 'ready',
-      allModels: [],
-      textModels: [],
-      imageModels: [],
-      discoveredTextModels: [],
-      discoveredImageModels: [],
-    },
     ...overrides,
   };
 }

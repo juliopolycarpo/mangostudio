@@ -55,6 +55,19 @@ export const EXTERNAL_AGENT_TARGET_IDS: readonly ExternalAgentTargetId[] =
   ExternalAgentTargetIdSchema.anyOf.map((literal) => literal.const);
 
 /**
+ * Narrows a string that may or may not name a vendor.
+ *
+ * Both sides of the wire need this and neither may keep its own list: the hub
+ * reads a `runnerTargetId` column that predates any given target, and the chat
+ * feed reads a stored `modelName` that falls back to the bare target id. A copy
+ * that fell behind {@link ExternalAgentTargetIdSchema} would reject a value this
+ * same schema had already accepted on write.
+ */
+export function isExternalAgentTargetId(value: string): value is ExternalAgentTargetId {
+  return EXTERNAL_AGENT_TARGET_IDS.some((targetId) => targetId === value);
+}
+
+/**
  * What an adapter can actually do.
  *
  * Nothing is true by default. A flag is the adapter's way of refusing to fake
@@ -88,8 +101,9 @@ export type ExternalAgentCapabilities = Static<typeof ExternalAgentCapabilitiesS
 /**
  * What the hub reports before any adapter has answered.
  *
- * Every flag false is the only honest answer with no adapter in the loop, and
- * it is what the discovery surface returns while the release gate is closed.
+ * Every flag false is the only honest answer with no adapter in the loop, which
+ * is what the cheap discovery pass has: it can see a binary on disk, not what
+ * that binary is willing to do.
  */
 export const NO_EXTERNAL_AGENT_CAPABILITIES: ExternalAgentCapabilities = {
   structuredStreaming: false,
@@ -518,14 +532,7 @@ export const ExternalAgentAuthStateSchema = Type.Union([
 
 export type ExternalAgentAuthState = Static<typeof ExternalAgentAuthStateSchema>;
 
-/**
- * Why a target cannot be selected.
- *
- * `not-yet-available` is the availability gate: hosting a turn arrives in
- * stages, and until the last of them a selectable external runner could block on
- * an approval nobody can answer. That member — and the constant that sets it —
- * is deleted once a turn can complete.
- */
+/** Why a target cannot be selected. */
 export const ExternalAgentUnavailableReasonSchema = Type.Union([
   Type.Literal('not-installed'),
   Type.Literal('signed-out'),
@@ -536,7 +543,6 @@ export const ExternalAgentUnavailableReasonSchema = Type.Union([
   Type.Literal('environment-unreachable'),
   /** The transport has not attested an isolated OS identity. */
   Type.Literal('isolation-unproven'),
-  Type.Literal('not-yet-available'),
 ]);
 
 export type ExternalAgentUnavailableReason = Static<typeof ExternalAgentUnavailableReasonSchema>;

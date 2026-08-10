@@ -1,6 +1,17 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { SSEErrorEventSchema } from '../errors';
 import {
+  ExternalActivityKindSchema,
+  ExternalActivityStatusSchema,
+  ExternalActivityUpdateSchema,
+  ExternalAgentErrorSchema,
+  ExternalAgentTargetIdSchema,
+  ExternalApprovalDecisionSchema,
+  ExternalApprovalOptionSchema,
+  ExternalTurnTerminalReasonSchema,
+  ExternalUsageSchema,
+} from '../external-agents/schemas';
+import {
   McpElicitationFieldSchema,
   McpElicitationStatusSchema,
   McpElicitationTerminalReasonSchema,
@@ -317,6 +328,125 @@ export const SSEContinuationTransitionEventSchema = Type.Object({
 
 export type SSEContinuationTransitionEvent = Static<typeof SSEContinuationTransitionEventSchema>;
 
+/**
+ * An external turn's vocabulary, deliberately parallel to the internal one.
+ *
+ * Every member is prefixed `external_` and none of them reuses `text`,
+ * `thinking`, `tool_call_started` or `mcp_elicitation_request`. The internal
+ * chunks carry MangoStudio's own assumptions — a tool the executor can re-run, a
+ * thinking block the model produced, an elicitation MangoStudio's MCP client
+ * owns — and a vendor's output entering any of those paths is precisely the
+ * failure the whole external-agents contract exists to prevent.
+ *
+ * The pair below mirrors `mcp_elicitation_request` / `mcp_elicitation_status`:
+ * a mid-turn question asked over the stream and answered on a separate endpoint,
+ * with a status chunk so a mounted card goes inert without a refetch.
+ */
+const SSEExternalSessionStartedEventSchema = Type.Object({
+  type: Type.Literal('external_session_started'),
+  /** The hub-minted session id. The vendor's own handle never leaves the server. */
+  sessionId: Type.String(),
+  targetId: ExternalAgentTargetIdSchema,
+  resumed: Type.Boolean(),
+  fallbackReason: Type.Optional(Type.String()),
+  done: Type.Literal(false),
+});
+
+const SSEExternalTextEventSchema = Type.Object({
+  type: Type.Literal('external_text'),
+  text: Type.String(),
+  done: Type.Literal(false),
+});
+
+const SSEExternalReasoningEventSchema = Type.Object({
+  type: Type.Literal('external_reasoning'),
+  text: Type.String(),
+  done: Type.Literal(false),
+});
+
+const SSEExternalActivityStartedEventSchema = Type.Object({
+  type: Type.Literal('external_activity_started'),
+  callId: Type.String(),
+  /** The vendor's own tool name, verbatim. Rendered as plain text, never markdown. */
+  name: Type.String(),
+  kind: ExternalActivityKindSchema,
+  title: Type.String(),
+  detail: Type.Optional(Type.String()),
+  truncated: Type.Optional(Type.Boolean()),
+  done: Type.Literal(false),
+});
+
+const SSEExternalActivityUpdatedEventSchema = Type.Object({
+  type: Type.Literal('external_activity_updated'),
+  callId: Type.String(),
+  update: ExternalActivityUpdateSchema,
+  done: Type.Literal(false),
+});
+
+const SSEExternalActivityCompletedEventSchema = Type.Object({
+  type: Type.Literal('external_activity_completed'),
+  callId: Type.String(),
+  status: ExternalActivityStatusSchema,
+  detail: Type.Optional(Type.String()),
+  isError: Type.Optional(Type.Boolean()),
+  truncated: Type.Optional(Type.Boolean()),
+  done: Type.Literal(false),
+});
+
+const SSEExternalApprovalRequestEventSchema = Type.Object({
+  type: Type.Literal('external_approval_request'),
+  requestId: Type.String(),
+  kind: ExternalActivityKindSchema,
+  title: Type.String(),
+  detail: Type.Optional(Type.String()),
+  /** The vendor's option set, in the vendor's order. Never reordered or renamed. */
+  options: Type.Array(ExternalApprovalOptionSchema, { minItems: 1, maxItems: 16 }),
+  expiresAtMs: Type.Integer({ minimum: 0 }),
+  truncated: Type.Optional(Type.Boolean()),
+  done: Type.Literal(false),
+});
+
+const SSEExternalApprovalStatusEventSchema = Type.Object({
+  type: Type.Literal('external_approval_status'),
+  requestId: Type.String(),
+  decision: ExternalApprovalDecisionSchema,
+  done: Type.Literal(false),
+});
+
+const SSEExternalUsageEventSchema = Type.Object({
+  type: Type.Literal('external_usage'),
+  usage: ExternalUsageSchema,
+  done: Type.Literal(false),
+});
+
+/**
+ * A vendor failure with its structure intact, distinct from `error`.
+ *
+ * `SSEErrorEvent` is terminal (`done: true`) and carries a flat message. A
+ * vendor error has a code, a request id and a retry hint that the turn record
+ * keeps, and the turn still ends through its own terminal path afterwards.
+ */
+const SSEExternalErrorEventSchema = Type.Object({
+  type: Type.Literal('external_error'),
+  error: ExternalAgentErrorSchema,
+  done: Type.Literal(false),
+});
+
+/**
+ * How the turn ended, as data rather than as prose.
+ *
+ * The vendor's own `completed` and `error` are only two of nine ways a turn
+ * stops — the other seven are the hub's verdict on a vendor that stopped being
+ * reachable, answerable or affordable. The durable record keeps all nine on
+ * `external_turn.terminalReason`, so the live stream has to carry the same value
+ * or a reload changes what the user is told about a turn they just watched.
+ */
+const SSEExternalTurnCompletedEventSchema = Type.Object({
+  type: Type.Literal('external_turn_completed'),
+  reason: ExternalTurnTerminalReasonSchema,
+  done: Type.Literal(false),
+});
+
 export const SSEDoneEventSchema = Type.Object({
   type: Type.Literal('done'),
   done: Type.Literal(true),
@@ -354,6 +484,17 @@ export const StreamChunkSchema = Type.Union([
   SSEFallbackEventSchema,
   SSESystemEventSchema,
   SSEContinuationTransitionEventSchema,
+  SSEExternalSessionStartedEventSchema,
+  SSEExternalTextEventSchema,
+  SSEExternalReasoningEventSchema,
+  SSEExternalActivityStartedEventSchema,
+  SSEExternalActivityUpdatedEventSchema,
+  SSEExternalActivityCompletedEventSchema,
+  SSEExternalApprovalRequestEventSchema,
+  SSEExternalApprovalStatusEventSchema,
+  SSEExternalUsageEventSchema,
+  SSEExternalErrorEventSchema,
+  SSEExternalTurnCompletedEventSchema,
   SSEDoneEventSchema,
   SSEErrorEventSchema,
 ]);

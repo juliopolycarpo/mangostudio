@@ -22,6 +22,7 @@ const CHAT: ChatWithContext = createMockChat({
 
 describe('useRunnerSelection workdir binding', () => {
   const updateChatRunner = vi.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
   const updateChatWorkdir = vi.fn(() => Promise.resolve());
   const addRecentWorkdir = vi.fn();
 
@@ -36,6 +37,7 @@ describe('useRunnerSelection workdir binding', () => {
         currentChat: CHAT,
         defaultWorkdir: '/srv/projects/default',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -54,6 +56,7 @@ describe('useRunnerSelection workdir binding', () => {
         currentChat: CHAT,
         defaultWorkdir: '',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -69,6 +72,7 @@ describe('useRunnerSelection workdir binding', () => {
         currentChat: CHAT,
         defaultWorkdir: '',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -91,6 +95,7 @@ describe('useRunnerSelection workdir binding', () => {
           currentChat: props.currentChat,
           defaultWorkdir: '/srv/projects/default',
           updateChatRunner,
+          updateChatRunnerPermissions,
           updateChatWorkdir,
           addRecentWorkdir,
         }),
@@ -109,6 +114,7 @@ describe('useRunnerSelection workdir binding', () => {
 
 describe('useRunnerSelection binding a chat created mid-submit', () => {
   const updateChatRunner = vi.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
   const updateChatWorkdir = vi.fn(() => Promise.resolve());
   const addRecentWorkdir = vi.fn();
 
@@ -130,6 +136,7 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
           ...props,
           defaultWorkdir,
           updateChatRunner,
+          updateChatRunnerPermissions,
           updateChatWorkdir,
           addRecentWorkdir,
         }),
@@ -171,6 +178,7 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
           ...props,
           defaultWorkdir: '/srv/projects/default',
           updateChatRunner: rejectingUpdateChatRunner,
+          updateChatRunnerPermissions,
           updateChatWorkdir,
           addRecentWorkdir,
         }),
@@ -188,6 +196,67 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
     // stores — not the optimistic pick `getAgentSelection` would otherwise
     // have kept reading from a stale closure.
     expect(selection).toEqual({ agentId: 'default', agentName: undefined });
+  });
+
+  it('persists the permissions picked before any chat existed', async () => {
+    const { result, rerender } = renderOnEmptyState('/srv/projects/default');
+
+    act(() => result.current.setRunnerTarget('codex'));
+    act(() =>
+      result.current.setRunnerPermissions({ level: 'full-access', routing: 'auto-review' })
+    );
+    expect(updateChatRunnerPermissions).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.bindNewChat('chat-new');
+    });
+
+    // Awaited inside `bindNewChat`, so the pair is stored before the caller
+    // opens the first turn — otherwise that turn runs on the chat defaults and
+    // the composer chip claims a level the vendor never received.
+    expect(updateChatRunnerPermissions).toHaveBeenCalledWith('chat-new', {
+      level: 'full-access',
+      routing: 'auto-review',
+    });
+
+    rerender({
+      currentChatId: 'chat-new',
+      currentChat: { ...CHAT, id: 'chat-new', workdir: '/srv/projects/default' },
+    });
+
+    expect(result.current.runnerPermissions).toEqual({
+      level: 'full-access',
+      routing: 'auto-review',
+    });
+  });
+
+  it('takes the optimistic permissions back when the bind write is rejected', async () => {
+    const rejecting = vi.fn(() => Promise.reject(new Error('nope')));
+    const { result } = renderHook(
+      (props: SelectionProps) =>
+        useRunnerSelection({
+          ...props,
+          defaultWorkdir: '/srv/projects/default',
+          updateChatRunner,
+          updateChatRunnerPermissions: rejecting,
+          updateChatWorkdir,
+          addRecentWorkdir,
+        }),
+      { initialProps: EMPTY_STATE }
+    );
+
+    act(() =>
+      result.current.setRunnerPermissions({ level: 'full-access', routing: 'auto-review' })
+    );
+    await act(async () => {
+      await result.current.bindNewChat('chat-new');
+    });
+
+    expect(rejecting).toHaveBeenCalled();
+    expect(result.current.runnerPermissions).not.toEqual({
+      level: 'full-access',
+      routing: 'auto-review',
+    });
   });
 
   it('applies the default workdir before the first turn opens', async () => {
@@ -238,12 +307,14 @@ describe('useRunnerSelection agent selection', () => {
 
   it('shows the chosen agent optimistically', async () => {
     const updateChatRunner = vi.fn(() => Promise.resolve());
+    const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
     const { result } = renderHook(() =>
       useRunnerSelection({
         currentChatId: CHAT.id,
         currentChat: { ...CHAT, workdir: '/srv/projects/bound' },
         defaultWorkdir: '/srv/projects/default',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -260,12 +331,14 @@ describe('useRunnerSelection agent selection', () => {
 
   it('takes the optimistic selection back when the write is rejected', async () => {
     const updateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
+    const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
     const { result } = renderHook(() =>
       useRunnerSelection({
         currentChatId: CHAT.id,
         currentChat: { ...CHAT, workdir: '/srv/projects/bound' },
         defaultWorkdir: '/srv/projects/default',
         updateChatRunner,
+        updateChatRunnerPermissions,
         updateChatWorkdir,
         addRecentWorkdir,
       })
@@ -276,5 +349,81 @@ describe('useRunnerSelection agent selection', () => {
     // Falling back to the persisted runner keeps the picker and every
     // subsequent turn agreeing with what the chat actually stores.
     await waitFor(() => expect(result.current.selectedAgentId).toBe('default'));
+  });
+});
+
+describe('useRunnerSelection whenRunnerPersisted', () => {
+  const updateChatWorkdir = vi.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
+  const addRecentWorkdir = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function renderSelection(updateChatRunner: () => Promise<void>) {
+    return renderHook(() =>
+      useRunnerSelection({
+        currentChatId: CHAT.id,
+        currentChat: { ...CHAT, workdir: '/srv/projects/bound' },
+        defaultWorkdir: '/srv/projects/default',
+        updateChatRunner,
+        updateChatRunnerPermissions,
+        updateChatWorkdir,
+        addRecentWorkdir,
+      })
+    );
+  }
+
+  // The hub dispatches on the stored runner, so a turn opened while the switch
+  // is still in flight would run on the runner being replaced.
+  it('waits for a switch that has not been answered yet', async () => {
+    let settle: (() => void) | undefined;
+    const updateChatRunner = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        })
+    );
+    const { result } = renderSelection(updateChatRunner);
+
+    act(() => result.current.setRunnerTarget('codex'));
+
+    let waited = false;
+    const pending = result.current.whenRunnerPersisted().then(() => {
+      waited = true;
+    });
+    await Promise.resolve();
+    expect(waited).toBe(false);
+
+    await act(async () => {
+      settle?.();
+      await pending;
+    });
+    expect(waited).toBe(true);
+  });
+
+  it('resolves immediately when no switch is open', async () => {
+    const updateChatRunner = vi.fn(() => Promise.resolve());
+    const { result } = renderSelection(updateChatRunner);
+
+    await expect(result.current.whenRunnerPersisted()).resolves.toBeUndefined();
+    expect(updateChatRunner).not.toHaveBeenCalled();
+  });
+
+  // A rejected write must not leave the gate closed for every later send.
+  it('stops waiting once a rejected switch settles', async () => {
+    const updateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
+    const { result } = renderSelection(updateChatRunner);
+
+    act(() => result.current.setRunnerTarget('codex'));
+
+    await expect(result.current.whenRunnerPersisted()).resolves.toBeUndefined();
+    await waitFor(() =>
+      expect(result.current.runner).toEqual({
+        kind: 'mangostudio',
+        agentId: 'default',
+      })
+    );
   });
 });

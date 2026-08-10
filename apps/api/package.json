@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "module",
   "exports": {
-    ".": "./src/app.ts"
+    ".": "./src/app.ts",
+    "./internal/*": "./src/*.ts"
   },
   "scripts": {
     "dev": "bun run --watch src/index.ts serve",

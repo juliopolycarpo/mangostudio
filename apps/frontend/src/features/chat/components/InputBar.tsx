@@ -1,10 +1,23 @@
-import type { ReasoningEffort } from '@mangostudio/shared';
+import type {
+  ModelCatalogResponse,
+  ModelOption,
+  ProviderType,
+  ReasoningEffort,
+} from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
-import type { ChatAttachment } from '@mangostudio/shared/chat';
-import { FileText, FolderOpen, Image, Mic, Send, Square, X } from 'lucide-react';
+import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type {
+  ExternalAgentDescriptor,
+  ExternalApprovalRouting,
+  ExternalPermissionLevel,
+} from '@mangostudio/shared/external-agents';
+import { AlertTriangle, FileText, FolderOpen, Image, Mic, Send, Square, X } from 'lucide-react';
 import { useState } from 'react';
+import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
+import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
+import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
 import { CapabilityInspector } from './CapabilityInspector';
@@ -40,6 +53,24 @@ interface Props {
   onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
   workdir?: string | null;
   onWorkdirClick?: () => void;
+  /** Who runs the turn. Decides which of the two control sets renders at all. */
+  runner?: ChatRunnerConfiguration;
+  activeModels?: ModelOption[];
+  modelCatalog?: ModelCatalogResponse;
+  lockedProvider?: ProviderType | null;
+  isModelSelectorDisabled?: boolean;
+  onModelChange?: (model: string) => void;
+  externalDescriptor?: ExternalAgentDescriptor;
+  externalModel?: string | null;
+  externalEffort?: string | null;
+  externalLevel?: ExternalPermissionLevel;
+  externalRouting?: ExternalApprovalRouting;
+  onExternalModelChange?: (model: string | null) => void;
+  onExternalEffortChange?: (effort: string | null) => void;
+  onExternalPermissionsChange?: (next: {
+    level: ExternalPermissionLevel;
+    routing: ExternalApprovalRouting;
+  }) => void;
 }
 
 function getWorkdirName(workdir: string): string {
@@ -72,6 +103,20 @@ export function InputBar({
   onEnvironmentChange,
   workdir = null,
   onWorkdirClick,
+  runner,
+  activeModels = [],
+  modelCatalog,
+  lockedProvider,
+  isModelSelectorDisabled = false,
+  onModelChange,
+  externalDescriptor,
+  externalModel = null,
+  externalEffort = null,
+  externalLevel = 'read-only',
+  externalRouting = 'user',
+  onExternalModelChange,
+  onExternalEffortChange,
+  onExternalPermissionsChange,
 }: Props) {
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
@@ -79,11 +124,33 @@ export function InputBar({
   const selectableAgents = agents.filter(
     (agent) => agent.role === 'primary' || agent.role === 'both'
   );
+  // The model moved here from the header, and it renders per runner: MangoStudio
+  // always has a catalog, an external agent only when its vendor advertised one.
+  const isExternalRunner = runner?.kind === 'external';
   const workdirName = workdir ? getWorkdirName(workdir) : null;
+
+  /**
+   * A persisted external runner that cannot start a turn right now.
+   *
+   * The runner outlives the conditions that made it selectable — discovery is
+   * still loading, the runtime dropped, the vendor signed out — and the composer
+   * would otherwise stay fully enabled, because nothing else here depends on the
+   * descriptor. The turn would be refused server-side, so the cost of not
+   * blocking is a send that reads as accepted and comes back as an error with
+   * nothing on screen explaining which of those four things happened.
+   *
+   * A missing descriptor is included deliberately: whether discovery has not
+   * answered yet or the environment has no such agent, this runner cannot host a
+   * turn either way.
+   */
+  const externalRunnerBlocked =
+    isExternalRunner && (!externalDescriptor || !externalAgentSelectable(externalDescriptor));
+  const externalUnavailableReason = externalDescriptor?.unavailableReason;
+  const cannotSubmit = submitDisabled || externalRunnerBlocked;
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    if (!prompt.trim() || disabled || submitDisabled) return;
+    if (!prompt.trim() || disabled || cannotSubmit) return;
     const attachmentIds = pendingAttachments.map((attachment) => attachment.id);
     onSubmit(prompt, attachmentIds.length > 0 ? attachmentIds : undefined);
     setPrompt('');
@@ -116,7 +183,7 @@ export function InputBar({
               />
             ) : null}
 
-            {onSelectedAgentIdChange ? (
+            {!isExternalRunner && onSelectedAgentIdChange ? (
               <label className="sr-only" htmlFor="chat-agent-selector">
                 {t.chat.input.selectAgent}
               </label>
@@ -139,7 +206,7 @@ export function InputBar({
                 <span className="truncate">{workdirName ?? t.workspace.chooseWorkdir}</span>
               </button>
             ) : null}
-            {onSelectedAgentIdChange ? (
+            {!isExternalRunner && onSelectedAgentIdChange ? (
               <select
                 id="chat-agent-selector"
                 value={selectedAgentId}
@@ -159,7 +226,37 @@ export function InputBar({
               </select>
             ) : null}
 
-            {onThinkingToggle && onReasoningEffortChange ? (
+            {!isExternalRunner && modelCatalog && onModelChange ? (
+              <ModelSelector
+                activeModel={activeModel ?? ''}
+                activeModels={activeModels}
+                isDisabled={isModelSelectorDisabled || disabled === true}
+                onSelect={onModelChange}
+                modelCatalog={modelCatalog}
+                lockedProvider={lockedProvider}
+              />
+            ) : null}
+
+            {isExternalRunner &&
+            onExternalModelChange &&
+            onExternalEffortChange &&
+            onExternalPermissionsChange ? (
+              <ExternalComposerControls
+                descriptor={externalDescriptor}
+                model={externalModel}
+                effort={externalEffort}
+                level={externalLevel}
+                routing={externalRouting}
+                disabled={disabled || isGenerating}
+                onModelChange={onExternalModelChange}
+                onEffortChange={onExternalEffortChange}
+                onPermissionsChange={onExternalPermissionsChange}
+              />
+            ) : null}
+
+            {/* MangoStudio's own thinking control. An external agent's effort
+                comes from its vendor's per-model catalog instead. */}
+            {!isExternalRunner && onThinkingToggle && onReasoningEffortChange ? (
               <ThinkingToggle
                 enabled={thinkingEnabled}
                 effort={reasoningEffort}
@@ -225,6 +322,19 @@ export function InputBar({
           </div>
         </div>
 
+        {externalRunnerBlocked && (
+          // Named, not just disabled: "install it", "sign in", "wake that
+          // machine" and "wait for discovery" are four different things to do,
+          // and a composer that goes quiet without saying which leaves the user
+          // clicking Send at nothing.
+          <p role="status" className="mb-2 flex items-center gap-1.5 text-[11px] text-warning">
+            <AlertTriangle size={12} className="shrink-0" />
+            {externalUnavailableReason
+              ? `${t.externalAgents.unavailable[externalUnavailableReason]} — ${t.externalAgents.selector.unavailableHere}`
+              : t.externalAgents.selector.unavailableHere}
+          </p>
+        )}
+
         {pendingAttachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {pendingAttachments.map((attachment) => (
@@ -259,7 +369,7 @@ export function InputBar({
             type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            disabled={disabled}
+            disabled={disabled || externalRunnerBlocked}
             className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none min-w-0"
             placeholder={t.chat.input.placeholder}
           />
@@ -287,7 +397,7 @@ export function InputBar({
             ) : (
               <button
                 type="submit"
-                disabled={disabled || submitDisabled || !prompt.trim()}
+                disabled={disabled || cannotSubmit || !prompt.trim()}
                 className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl text-on-primary font-bold text-xs flex items-center gap-1.5 sm:gap-2 hover:brightness-110 transition-all active:scale-95 shadow-lg shadow-primary-container/20 disabled:opacity-50 shrink-0"
                 style={{ background: 'var(--gradient-primary)' }}
               >

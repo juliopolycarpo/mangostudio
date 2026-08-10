@@ -1,5 +1,9 @@
 import { isAgentId } from '@mangostudio/shared/agents';
-import type { ChatRunnerConfiguration, ExternalAgentTargetId } from '@mangostudio/shared/chat';
+import type {
+  ChatRunnerConfiguration,
+  ChatRunnerPermissions,
+  ExternalAgentTargetId,
+} from '@mangostudio/shared/chat';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatWithContext } from '@/features/chat/queries';
@@ -7,16 +11,27 @@ import { agentSettingsListQueryOptions } from '@/features/settings/agents/querie
 
 const DEFAULT_AGENT_ID = 'default';
 const DEFAULT_RUNNER: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: DEFAULT_AGENT_ID };
+/** No choice made. Resolved restrictively server-side, never to a vendor default. */
+const EMPTY_PERMISSIONS: ChatRunnerPermissions = {};
 
 interface RunnerSelectionOverride {
   readonly chatId: string | null;
   readonly runner: ChatRunnerConfiguration;
 }
 
+interface RunnerPermissionsOverride {
+  readonly chatId: string | null;
+  readonly permissions: ChatRunnerPermissions;
+}
+
 interface UseRunnerSelectionParams {
   readonly currentChatId: string | null;
   readonly currentChat: ChatWithContext | null;
   readonly updateChatRunner: (chatId: string, runner: ChatRunnerConfiguration) => Promise<void>;
+  readonly updateChatRunnerPermissions: (
+    chatId: string,
+    permissions: ChatRunnerPermissions
+  ) => Promise<void>;
   readonly defaultWorkdir: string;
   readonly updateChatWorkdir: (chatId: string, workdir: string | null) => Promise<void>;
   readonly addRecentWorkdir: (workdir: string) => void;
@@ -26,22 +41,40 @@ export function useRunnerSelection({
   currentChatId,
   currentChat,
   updateChatRunner,
+  updateChatRunnerPermissions,
   defaultWorkdir,
   updateChatWorkdir,
   addRecentWorkdir,
 }: UseRunnerSelectionParams) {
   const [runnerOverride, setRunnerOverride] = useState<RunnerSelectionOverride | null>(null);
+  const [permissionsOverride, setPermissionsOverride] = useState<RunnerPermissionsOverride | null>(
+    null
+  );
   const [isWorkdirPickerOpen, setWorkdirPickerOpen] = useState(false);
   const agentsQuery = useQuery(agentSettingsListQueryOptions());
   const agents = useMemo(() => agentsQuery.data?.agents ?? [], [agentsQuery.data?.agents]);
   const persistedRunner = currentChat?.runner ?? DEFAULT_RUNNER;
   const activeRunner =
     runnerOverride?.chatId === currentChatId ? runnerOverride.runner : persistedRunner;
+  const persistedPermissions = currentChat?.runnerPermissions ?? EMPTY_PERMISSIONS;
+  const runnerPermissions =
+    permissionsOverride?.chatId === currentChatId
+      ? permissionsOverride.permissions
+      : persistedPermissions;
   const selectedAgentId = activeRunner.kind === 'mangostudio' ? activeRunner.agentId : null;
   const selectedAgent = useMemo(
     () => agents.find((agent) => agent.id === selectedAgentId) ?? null,
     [agents, selectedAgentId]
   );
+
+  /**
+   * The runner write that has been sent but not yet answered, if any.
+   *
+   * Held so a send can wait for it. The hub dispatches a turn on the *stored*
+   * runner, and this selector writes optimistically, so a turn submitted inside
+   * that window would run on the runner the user just replaced.
+   */
+  const pendingRunnerWrite = useRef<Promise<void> | null>(null);
 
   const persistRunner = useCallback(
     (runner: ChatRunnerConfiguration) => {
@@ -50,14 +83,31 @@ export function useRunnerSelection({
       // The override is optimistic, so a rejected write has to take it back:
       // otherwise the picker keeps showing an agent the chat does not store,
       // and turns keep being sent against it.
-      void updateChatRunner(currentChatId, runner).catch(() => {
+      const write = updateChatRunner(currentChatId, runner).catch(() => {
         setRunnerOverride((current) =>
           current?.chatId === currentChatId && current.runner === runner ? null : current
         );
       });
+      pendingRunnerWrite.current = write;
+      void write.finally(() => {
+        if (pendingRunnerWrite.current === write) pendingRunnerWrite.current = null;
+      });
     },
     [currentChatId, updateChatRunner]
   );
+
+  /**
+   * Settles an open runner write before the caller acts on the selection.
+   *
+   * Free unless a write is actually open, which is only the moment right after
+   * the picker was used. This closes the dispatch half of the race — the turn
+   * runs on the runner the user chose. The label half survives a *rejected*
+   * write: the turn header is already on screen by then, and closing that would
+   * take the hub naming the runner it actually used on the wire.
+   */
+  const whenRunnerPersisted = useCallback(async () => {
+    await pendingRunnerWrite.current;
+  }, []);
 
   const runnerAgentSelection = useCallback(
     (runner: ChatRunnerConfiguration) => {
@@ -74,11 +124,33 @@ export function useRunnerSelection({
     [persistRunner]
   );
 
-  // No external adapter exists yet; kept as a stub the runner selector can
-  // wire up once one does.
-  const setRunnerTarget = useCallback((_targetId: ExternalAgentTargetId) => {
-    // Intentionally a no-op until an external-agent adapter is reachable.
-  }, []);
+  const setRunnerTarget = useCallback(
+    (targetId: ExternalAgentTargetId) => {
+      persistRunner({ kind: 'external', targetId });
+    },
+    [persistRunner]
+  );
+
+  /**
+   * The permission pair, optimistically applied.
+   *
+   * Local first because the composer chip has to move the moment it is pressed,
+   * and reverted on a rejected write for the same reason the runner override is:
+   * a control showing a choice the chat does not store would keep sending turns
+   * under a permission level the user thinks they changed.
+   */
+  const setRunnerPermissions = useCallback(
+    (permissions: ChatRunnerPermissions) => {
+      setPermissionsOverride({ chatId: currentChatId, permissions });
+      if (!currentChatId) return;
+      void updateChatRunnerPermissions(currentChatId, permissions).catch(() => {
+        setPermissionsOverride((current) =>
+          current?.chatId === currentChatId && current.permissions === permissions ? null : current
+        );
+      });
+    },
+    [currentChatId, updateChatRunnerPermissions]
+  );
 
   const openWorkdirPicker = useCallback(() => setWorkdirPickerOpen(true), []);
   const closeWorkdirPicker = useCallback(() => setWorkdirPickerOpen(false), []);
@@ -107,6 +179,12 @@ export function useRunnerSelection({
    * against the server's `default` runner with no workdir, so a configured
    * `restrictToolsToWorkdir` has nothing to contain.
    *
+   * The permission pair binds here for the same reason the runner does. A user
+   * who set it on the empty state left an override with a null chat id, and the
+   * server has no record of it, so without this the very first turn — the one
+   * whose permissions are most likely to have been chosen deliberately — runs on
+   * the chat defaults instead.
+   *
    * Returns the agent selection that was actually bound, rather than leaving
    * the caller to re-read `selectedAgentId` afterwards: that value is a stale
    * closure captured before this awaited call, so it can still show the
@@ -115,6 +193,8 @@ export function useRunnerSelection({
   const bindNewChat = useCallback(
     async (chatId: string) => {
       const pendingRunner = runnerOverride?.chatId === null ? runnerOverride.runner : null;
+      const pendingPermissions =
+        permissionsOverride?.chatId === null ? permissionsOverride.permissions : null;
       let effectiveRunner: ChatRunnerConfiguration = DEFAULT_RUNNER;
       if (pendingRunner) {
         setRunnerOverride({ chatId, runner: pendingRunner });
@@ -124,6 +204,15 @@ export function useRunnerSelection({
             setRunnerOverride((current) => (current?.chatId === chatId ? null : current));
             return DEFAULT_RUNNER;
           });
+      }
+
+      if (pendingPermissions) {
+        setPermissionsOverride({ chatId, permissions: pendingPermissions });
+        // Awaited before the caller opens the turn stream, so the hub reads the
+        // chosen pair rather than racing the write it was sent alongside.
+        await updateChatRunnerPermissions(chatId, pendingPermissions).catch(() => {
+          setPermissionsOverride((current) => (current?.chatId === chatId ? null : current));
+        });
       }
 
       if (!workdirDefaultedChatIds.current.has(chatId)) {
@@ -142,9 +231,11 @@ export function useRunnerSelection({
     [
       addRecentWorkdir,
       defaultWorkdir,
+      permissionsOverride,
       runnerAgentSelection,
       runnerOverride,
       updateChatRunner,
+      updateChatRunnerPermissions,
       updateChatWorkdir,
     ]
   );
@@ -172,13 +263,16 @@ export function useRunnerSelection({
     agents,
     isAgentListLoading: agentsQuery.isLoading,
     runner: activeRunner,
+    runnerPermissions,
     selectedAgentId,
     selectedAgent,
     currentWorkdir: currentChat?.workdir ?? null,
     isWorkdirPickerOpen,
     bindNewChat,
+    whenRunnerPersisted,
     setRunnerAgentId,
     setRunnerTarget,
+    setRunnerPermissions,
     openWorkdirPicker,
     closeWorkdirPicker,
     selectWorkdir,

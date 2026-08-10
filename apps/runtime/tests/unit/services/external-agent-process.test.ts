@@ -108,7 +108,16 @@ describe('external agent process teardown', () => {
   it('lets the adapter request graceful shutdown before signals', async () => {
     const child = spawnFixture('graceful');
 
-    await child.terminate({ graceful: () => child.writeLine({ type: 'shutdown' }), graceMs: 100 });
+    // The grace window is a deadline, not a sleep: `terminate` returns the
+    // moment the child exits. A tight 100ms only decided how much scheduler
+    // jitter it took to escalate to a signal and turn a clean `code: 0` into
+    // `signal: 'SIGTERM'` — which is what happened under a loaded full-suite
+    // run. The claim is that the adapter's hook is given its chance first, not
+    // that the child is scheduled within a tenth of a second.
+    await child.terminate({
+      graceful: () => child.writeLine({ type: 'shutdown' }),
+      graceMs: 5_000,
+    });
 
     expect(await child.exit).toEqual({ code: 0, signal: null });
   });
@@ -123,8 +132,13 @@ describe('external agent process teardown', () => {
 
       await child.terminate({ graceMs: 20 });
 
-      expect(isAlive(child.pid)).toBe(false);
-      expect(isAlive(descendantPid)).toBe(false);
+      // `terminate` resolves on the *child's* exit. Every other member of the
+      // process group was signalled at the same moment, but the kernel delivers
+      // and reaps on its own schedule, so a descendant can still be winding down
+      // here — reliably on a loaded machine, rarely on an idle one. The claim
+      // under test is that the group dies, not that it dies within one tick.
+      await waitUntilDead(child.pid);
+      await waitUntilDead(descendantPid);
     }
   );
 
@@ -233,6 +247,17 @@ describe('external agent process teardown', () => {
     }
   );
 });
+
+/** Waits for a signalled process to actually be gone, rather than assuming it is. */
+async function waitUntilDead(pid: number, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (isAlive(pid)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`Process ${pid} was still alive ${timeoutMs}ms after its group was killed.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 
 function isAlive(pid: number): boolean {
   try {

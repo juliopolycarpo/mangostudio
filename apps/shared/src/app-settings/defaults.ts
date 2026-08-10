@@ -12,6 +12,12 @@ import {
 import type { ContextCompactionBehavior, ContextSettings } from '../chat';
 import { CHAT_TITLE_PROMPT_LENGTH_DEFAULT, clampChatTitlePromptLength } from '../chat/title';
 import {
+  DEFAULT_EXTERNAL_AGENT_SETTINGS,
+  EXTERNAL_AGENT_TARGET_IDS,
+  EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
+  type ExternalAgentSettings,
+} from '../external-agents';
+import {
   COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
   COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
@@ -174,6 +180,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   gitSettings: DEFAULT_GIT_SETTINGS,
   chatDisplaySettings: DEFAULT_CHAT_DISPLAY_SETTINGS,
   externalApiSettings: DEFAULT_EXTERNAL_API_SETTINGS,
+  externalAgentSettings: DEFAULT_EXTERNAL_AGENT_SETTINGS,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -623,6 +630,45 @@ export function normalizeExternalApiSettings(value: unknown): ExternalApiSetting
   };
 }
 
+/**
+ * Keeps only well-formed acknowledgements.
+ *
+ * A malformed row reads as "never asked" rather than as consent: the failure to
+ * prefer is showing the disclosure once more, not running a third-party agent on
+ * the strength of a record nothing can parse.
+ *
+ * "Well-formed" is exactly what `ExternalAgentDisclosureSchema` says, not a
+ * looser approximation of it. A row this function passes through is one the
+ * settings PUT body has to accept — `externalAgentSettings` is part of that
+ * schema — so anything admitted here that the schema rejects turns a malformed
+ * row into a settings save that fails for reasons no control on screen explains.
+ */
+function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
+  if (!isRecord(value) || !isRecord(value.disclosures)) return DEFAULT_EXTERNAL_AGENT_SETTINGS;
+
+  const disclosures: ExternalAgentSettings['disclosures'] = {};
+  for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
+    const entry = value.disclosures[targetId];
+    if (!isRecord(entry)) continue;
+    const { version, acceptedAt, capabilitiesFingerprint } = entry;
+    if (!Number.isInteger(version) || (version as number) < 1) continue;
+    if (!Number.isInteger(acceptedAt) || (acceptedAt as number) < 0) continue;
+    if (typeof capabilitiesFingerprint !== 'string') continue;
+    if (
+      capabilitiesFingerprint.length === 0 ||
+      capabilitiesFingerprint.length > EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH
+    ) {
+      continue;
+    }
+    disclosures[targetId] = {
+      version: version as number,
+      acceptedAt: acceptedAt as number,
+      capabilitiesFingerprint,
+    };
+  }
+  return { disclosures };
+}
+
 export function normalizeAppSettings(
   value: unknown,
   libraryLocationDefaults: LibraryLocationSettings = DEFAULT_LIBRARY_LOCATION_SETTINGS
@@ -663,5 +709,6 @@ export function normalizeAppSettings(
     gitSettings: normalizeGitSettings(value.gitSettings),
     chatDisplaySettings: normalizeChatDisplaySettings(value.chatDisplaySettings),
     externalApiSettings: normalizeExternalApiSettings(value.externalApiSettings),
+    externalAgentSettings: normalizeExternalAgentSettings(value.externalAgentSettings),
   };
 }

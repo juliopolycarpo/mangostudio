@@ -2687,6 +2687,50 @@ export const messages = {
   },
 
   externalAgents: {
+    target: {
+      codex: 'Codex CLI',
+      cursor: 'Cursor CLI',
+      claude: 'Claude Code',
+    },
+    selector: {
+      label: 'Quem executa este chat',
+      mangostudioGroup: 'MangoStudio',
+      externalGroup: 'Agentes externos',
+      loading: 'Carregando agentes…',
+      noneDiscovered: 'Nenhum agente externo encontrado nesta máquina.',
+      signedIn: 'sessão iniciada',
+      authUnknown: 'estado de login desconhecido',
+      notInstalledIn: 'Não instalado em {environment}',
+      continueInNewChat: 'Continuar em um novo chat',
+      copyLoginCommand: 'Copiar comando de login',
+      ownership: '{vendor} controla as próprias ferramentas e permissões.',
+      unavailableHere: 'Este agente não pode rodar aqui agora — escolha outro.',
+      forkFailed: 'Não foi possível criar o novo chat.',
+    },
+    model: {
+      label: 'Modelo do agente',
+      effortLabel: 'Esforço de raciocínio',
+      vendorDefault: 'Padrão do fornecedor',
+    },
+    disclosure: {
+      title: 'Antes de usar o {vendor}',
+      thirdParty:
+        'O {vendor} é um produto de terceiros, com termos próprios, rodando na máquina que você escolheu.',
+      dataFlow:
+        'O que você enviar neste chat vai para o {vendor}, que decide o que fazer com isso e para onde mandar.',
+      billing: 'O uso é cobrado na sua conta do {vendor}, não no MangoStudio.',
+      ownership:
+        'O {vendor} usa as próprias ferramentas, permissões e sandbox. As configurações de ferramentas do MangoStudio não valem aqui.',
+      autoExecution:
+        'Dependendo do nível escolhido, o {vendor} pode editar arquivos e rodar comandos sem perguntar de novo.',
+      termsHint: 'Consulte os termos do {vendor} para os detalhes completos.',
+      accept: 'Entendi, continuar',
+      accepting: 'Salvando…',
+      acceptFailed: 'Não foi possível salvar seu aceite, então o agente não foi ativado.',
+      cancel: 'Cancelar',
+      close: 'Fechar',
+      review: 'Rever o aviso',
+    },
     unavailable: {
       'not-installed': 'Não instalado nesta máquina',
       'signed-out': 'Instalado, mas sem sessão iniciada',
@@ -2694,9 +2738,23 @@ export const messages = {
       'runtime-denied': 'O dono desta máquina não liberou agentes externos',
       'environment-unreachable': 'Não foi possível alcançar esta máquina',
       'isolation-unproven': 'Esta máquina não provou que mantém as credenciais separadas',
-      'not-yet-available': 'Ainda não disponível',
     },
     permission: {
+      label: 'Permissões',
+      whatItCanDo: 'O que ele pode fazer',
+      whoApproves: 'Quem aprova',
+      unattendedLevelWarning: 'este agente pode editar e rodar qualquer coisa',
+      unattendedRoutingWarning: 'aprovações respondidas sem você',
+      unsupportedGeneric: 'Este agente não oferece esta combinação',
+      levelName: {
+        'read-only': 'Somente leitura',
+        default: 'Padrão',
+        'full-access': 'Acesso total',
+      },
+      routingName: {
+        user: 'Você',
+        'auto-review': 'Revisão automática',
+      },
       level: {
         'read-only': 'Somente leitura — pode olhar o workspace, mas não alterá-lo.',
         default:
@@ -2713,6 +2771,15 @@ export const messages = {
       codexVersionTooOld: 'O Codex CLI desta máquina é antigo demais — atualize para usá-lo aqui',
     },
     approval: {
+      title: 'O agente está pedindo permissão',
+      answered: 'Permissão respondida',
+      expired: 'Permissão expirada',
+      cancelled: 'Permissão cancelada',
+      expiredHint: 'O turno terminou antes de alguém responder, então este pedido morreu.',
+      cancelledHint: 'O turno foi cancelado antes de alguém responder.',
+      autoReviewedHint: 'Respondido pelo revisor automático do agente, sem você.',
+      truncatedHint: 'O agente enviou mais texto do que cabe aqui; foi cortado.',
+      submitError: 'Não foi possível enviar sua resposta.',
       option: {
         accept: 'Permitir uma vez',
         acceptForSession: 'Permitir pelo resto desta sessão',
@@ -2721,6 +2788,33 @@ export const messages = {
         grantTurn: 'Conceder para este turno',
         grantSession: 'Conceder pelo resto desta sessão',
         deny: 'Negar',
+      },
+    },
+    activity: {
+      attribution: 'Executado por {agent}.',
+      statusRunning: 'Em andamento.',
+      statusCompleted: 'Concluído.',
+      statusFailed: 'Falhou.',
+      statusCancelled: 'Cancelado.',
+      truncatedHint: 'O agente enviou mais texto do que cabe aqui; foi cortado.',
+    },
+    turn: {
+      usageInput: 'entrada',
+      usageOutput: 'saída',
+      usageReasoning: 'raciocínio',
+      usageCacheRead: 'cache lido',
+      usageCacheWrite: 'cache escrito',
+      usageTotal: 'total',
+      terminal: {
+        completed: 'Concluído.',
+        'cancelled-by-user': 'Você interrompeu este turno.',
+        'vendor-error': 'O agente relatou uma falha.',
+        'runtime-disconnected': 'A conexão com a máquina caiu no meio do turno.',
+        'hub-restarted': 'O MangoStudio reiniciou enquanto este turno rodava.',
+        'sequence-gap': 'Parte do fluxo do agente se perdeu, então este registro está incompleto.',
+        'limit-exceeded': 'Este turno passou do limite de tamanho e foi interrompido.',
+        'consent-revoked': 'O dono da máquina retirou a permissão para agentes externos.',
+        'session-lost': 'A máquina não tem mais a sessão deste turno.',
       },
     },
     loginHint: 'Rode isto naquela máquina para entrar:',

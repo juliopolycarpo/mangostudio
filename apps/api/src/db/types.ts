@@ -17,6 +17,9 @@ interface ChatsTable {
   runnerKind: Generated<string>;
   runnerAgentId: string | null;
   runnerTargetId: string | null;
+  /** External permission axes. NULL means unchosen; the read path resolves it restrictively. */
+  runnerPermissionLevel: string | null;
+  runnerApprovalRouting: string | null;
   workdir: string | null;
   environmentId: Generated<string>;
   /** null = inherit workspace default; 0/1 stored as boolean override */

@@ -4,7 +4,7 @@ import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
-import { useMemo } from 'react';
+import { type ComponentProps, useMemo } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 import { WorkspaceRail } from '@/features/workspace/rail/WorkspaceRail';
 import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
@@ -44,6 +44,8 @@ interface ChatPageProps {
   environmentId?: string | null;
   onEnvironmentChange?: (environmentId: string) => void | Promise<void>;
   workdir?: string | null;
+  /** Everything the composer needs to render the right controls for the runner. */
+  composer?: ComposerRunnerProps;
   workspaceSettings?: WorkspaceSettings;
   onWorkspacePanelWidthChange?: (width: number) => void;
   isWorkdirPickerOpen?: boolean;
@@ -55,6 +57,31 @@ interface ChatPageProps {
   onResumeInterruptedTurn: (messageId: string, retryCallIds: string[]) => Promise<void>;
   onDismissInterruptedTurn: (messageId: string) => Promise<void>;
 }
+
+/**
+ * The runner-shaped half of the composer.
+ *
+ * Grouped rather than spread across a dozen sibling props: they are one
+ * decision — which runner this chat has — and splitting them would let a caller
+ * pass an external descriptor alongside a MangoStudio runner.
+ */
+type ComposerRunnerProps = Pick<
+  ComponentProps<typeof InputBar>,
+  | 'runner'
+  | 'activeModels'
+  | 'modelCatalog'
+  | 'lockedProvider'
+  | 'isModelSelectorDisabled'
+  | 'onModelChange'
+  | 'externalDescriptor'
+  | 'externalModel'
+  | 'externalEffort'
+  | 'externalLevel'
+  | 'externalRouting'
+  | 'onExternalModelChange'
+  | 'onExternalEffortChange'
+  | 'onExternalPermissionsChange'
+>;
 
 interface InterruptedTurn {
   readonly messageId: string;
@@ -106,6 +133,7 @@ export function ChatPage({
   environmentId = null,
   onEnvironmentChange,
   workdir = null,
+  composer,
   workspaceSettings = DEFAULT_WORKSPACE_SETTINGS,
   onWorkspacePanelWidthChange,
   isWorkdirPickerOpen = false,
@@ -197,6 +225,7 @@ export function ChatPage({
             onEnvironmentChange={onEnvironmentChange}
             workdir={workdir}
             onWorkdirClick={onOpenWorkdirPicker}
+            {...composer}
           />
         </div>
         {chatId ? (

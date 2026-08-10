@@ -9,6 +9,7 @@ import {
 } from '../agentic-limits';
 import { ContextSettingsSchema } from '../chat';
 import { CHAT_TITLE_PROMPT_LENGTH_MAX, CHAT_TITLE_PROMPT_LENGTH_MIN } from '../chat/title';
+import { ExternalAgentSettingsSchema } from '../external-agents/disclosure';
 import {
   COMMIT_MESSAGE_MAX_DIFF_KB_MAX,
   COMMIT_MESSAGE_MAX_DIFF_KB_MIN,
@@ -140,6 +141,7 @@ const AppSettingsFieldsSchema = {
   gitSettings: GitSettingsSchema,
   chatDisplaySettings: ChatDisplaySettingsSchema,
   externalApiSettings: ExternalApiSettingsSchema,
+  externalAgentSettings: ExternalAgentSettingsSchema,
 } as const;
 
 export const AppSettingsSchema = Type.Object({

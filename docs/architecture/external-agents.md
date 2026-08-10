@@ -231,10 +231,49 @@ an isolated OS identity and vendor credential home. Logical ownership of a `(use
 environmentId)` pair is not an operating-system identity, and two users sharing one machine
 account would share one vendor sign-in.
 
-## Availability gate
+## Hosting a turn
 
-Discovery currently reports every target as unavailable with reason `not-yet-available`. Hosting a
-turn arrives in stages, and a selectable runner that could block on an approval nobody can answer
-is worse than no runner at all. The gate is one constant
-(`apps/api/src/modules/external-agents/domain/release-gate.ts`) with one call site, so lifting it
-is a reviewable diff rather than a promise.
+An external turn takes the same SSE transport as an internal one — same framing, same keepalive,
+same `done` terminator — because the client renders one chat. Only the producer differs. The
+streaming route branches on the chat's runner **before** the model, agent and provider preflight:
+an external turn resolves no MangoStudio model, and running that preflight first would answer a
+chat that needs no model with `NoModelAvailableError`.
+
+The wire vocabulary is a parallel set of `external_*` chunks rather than a reuse of `text`,
+`tool_call_started` or `mcp_elicitation_request`. Those carry MangoStudio's own assumptions — a
+tool the executor can re-run, an elicitation its MCP client owns — and a vendor's output entering
+any of them is the failure this whole context exists to prevent.
+
+The projection from a neutral event to a chunk lives in `apps/shared/src/streaming/external-events.ts`.
+The hub builds the durable transcript from the *same* events, through a second projection —
+`ExternalTurnTranscript` — so there are two of them, not one: the live render and the reloaded one
+each have their own path from the same source. `apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts`
+drives both from one event sequence and compares the results, which is what keeps them from
+disagreeing.
+
+`external_turn_completed` carries the terminal reason. The vendor's own `completed` and `error` are
+two of nine ways a turn ends and the hub decides the other seven, so without it a live view could
+only ever show two outcomes and a reload would replace them with a third.
+
+## Deliberately out of scope
+
+Present in a vendor's contract, not surfaced. Named here so a later cycle finds them without
+protocol archaeology:
+
+- **Codex service tiers.** `model/list` reports `serviceTiers` per model. Nothing renders or sends
+  one; the account's own default applies.
+- **Codex personality / collaboration modes.** Reachable through the app-server, not exposed.
+- **Multi-root workspaces.** `thread/start` accepts several roots and `workspaceWrite` accepts
+  several `writableRoots`. A chat has one workdir, so exactly one root is sent.
+- **`AskForApproval`'s granular object.** The neutral levels use the coarse policy. The granular
+  form (`mcp_elicitations`, `rules`, `sandbox_approval`, and the optional `request_permissions` and
+  `skill_approval`) is where a finer-grained mode would go.
+- **Attachments.** `ExternalAgentAttachment` crosses the protocol, but the composer does not yet
+  offer images to an external runner.
+
+## Availability
+
+Discovery reports each target on its own merits — installed, signed out, unreachable, isolation
+unproven — and the blanket `not-yet-available` gate is gone. It existed while hosting a turn
+arrived in stages, because a selectable runner that could block on an approval nobody can answer is
+worse than no runner at all. Its removal was the release-unit boundary.

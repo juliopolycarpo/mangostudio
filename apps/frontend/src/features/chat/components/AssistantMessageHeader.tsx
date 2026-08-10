@@ -1,4 +1,5 @@
 import type { Message } from '@mangostudio/shared';
+import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { format } from 'date-fns';
 import { Sparkles } from 'lucide-react';
@@ -7,6 +8,7 @@ import { CopyMessageButton } from './CopyMessageButton';
 import { RevertFileChangesButton } from './RevertFileChangesButton';
 
 type FeedLabels = Messages['chat']['feed'];
+type TargetLabels = Messages['externalAgents']['target'];
 
 interface AssistantMessageHeaderProps {
   msg: Message;
@@ -19,6 +21,18 @@ interface AssistantMessageHeaderProps {
 function statusVerb(msg: Message, isImageTurn: boolean, labels: FeedLabels): string {
   if (msg.isGenerating) return isImageTurn ? labels.statusGenerating : labels.statusThinking;
   return isImageTurn ? labels.statusGenerated : labels.statusReplied;
+}
+
+/**
+ * What to call the thing that produced the turn.
+ *
+ * An external turn stores `configuration.model ?? targetId`, so a vendor that
+ * resolved no model leaves its own id here. That id is a wire value, not a
+ * name — rendering it raw would put `codex` in front of the user where the
+ * vendor already has a translated label.
+ */
+function modelDisplayName(modelName: string, targets: TargetLabels): string {
+  return isExternalAgentTargetId(modelName) ? targets[modelName] : modelName;
 }
 
 /**
@@ -35,10 +49,11 @@ export function AssistantMessageHeader({
 }: AssistantMessageHeaderProps) {
   const { t } = useI18n();
   const labels = t.chat.feed;
-  const statusLabel = msg.modelName
+  const modelName = msg.modelName;
+  const statusLabel = modelName
     ? labels.modelStatus
         .replace('{status}', statusVerb(msg, isImageTurn, labels))
-        .replace('{model}', () => msg.modelName ?? '')
+        .replace('{model}', () => modelDisplayName(modelName, t.externalAgents.target))
     : labels.modelFallback;
 
   return (

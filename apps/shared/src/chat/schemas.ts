@@ -1,6 +1,10 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { AgentIdSchema } from '../agents/schemas';
-import { ExternalAgentTargetIdSchema } from '../external-agents/schemas';
+import {
+  ExternalAgentTargetIdSchema,
+  ExternalApprovalRoutingSchema,
+  ExternalPermissionLevelSchema,
+} from '../external-agents/schemas';
 
 const InteractionModeSchema = Type.Union([
   Type.Literal('chat'),
@@ -30,6 +34,26 @@ export const ChatRunnerConfigurationSchema = Type.Union([
 ]);
 
 export type ChatRunnerConfiguration = Static<typeof ChatRunnerConfigurationSchema>;
+
+/**
+ * The permission choice a chat carries into every external turn.
+ *
+ * Kept out of {@link ChatRunnerConfigurationSchema} because the two answer
+ * different questions and change on different schedules: the runner is who runs
+ * the turn, this is what that runner may do. A MangoStudio chat simply never
+ * sets it — MangoStudio's own tool permissions are settings, not a per-chat pair.
+ *
+ * Both axes are optional. Absent means "not chosen yet", which the server
+ * resolves to the restrictive end of each axis rather than to a vendor default;
+ * writing one in on chat creation would make an unmade choice indistinguishable
+ * from a deliberate one.
+ */
+export const ChatRunnerPermissionsSchema = Type.Object({
+  level: Type.Optional(ExternalPermissionLevelSchema),
+  routing: Type.Optional(ExternalApprovalRoutingSchema),
+});
+
+export type ChatRunnerPermissions = Static<typeof ChatRunnerPermissionsSchema>;
 
 export const ChatAttachmentKindSchema = Type.Union([
   Type.Literal('image'),
@@ -83,6 +107,7 @@ export const ChatSchema = Type.Object({
   textModel: Type.Union([Type.String(), Type.Null()]),
   imageModel: Type.Union([Type.String(), Type.Null()]),
   runner: ChatRunnerConfigurationSchema,
+  runnerPermissions: ChatRunnerPermissionsSchema,
   workdir: Type.Union([Type.String(), Type.Null()]),
   environmentId: Type.String({ minLength: 1 }),
   restrictToolsToWorkdir: Type.Union([Type.Boolean(), Type.Null()]),
@@ -150,6 +175,7 @@ export const UpdateChatBodySchema = Type.Object({
   textModel: Type.Optional(Type.String()),
   imageModel: Type.Optional(Type.String()),
   runner: Type.Optional(ChatRunnerConfigurationSchema),
+  runnerPermissions: Type.Optional(ChatRunnerPermissionsSchema),
   workdir: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   environmentId: Type.Optional(Type.String({ minLength: 1 })),
   restrictToolsToWorkdir: Type.Optional(Type.Union([Type.Boolean(), Type.Null()])),

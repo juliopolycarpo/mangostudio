@@ -1,0 +1,305 @@
+/**
+ * Who runs this chat's turns.
+ *
+ * The header used to name a model. It now names a runner, because with an
+ * external agent the model is the vendor's business and the only thing the user
+ * is really choosing is whose software runs the turn. The model picker moved to
+ * the composer, where it renders only when the active runner actually has a
+ * catalog.
+ *
+ * Two groups, and one rule that shapes the whole component: **a chat has one
+ * runner kind for life** (D14). A transcript that mixed owners would replay a
+ * vendor's assistant text to MangoStudio's own model as its own prior output, so
+ * once a chat has turns the other kind is offered as "continue in a new chat"
+ * rather than disabled or — worse — silently switched.
+ *
+ * Nothing here renders an executable path. Discovery does not carry one.
+ */
+
+import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import { Bot, Check, ChevronDown, Copy, CornerUpRight, Cpu } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
+import { useClipboard } from '@/hooks/use-clipboard';
+import { useI18n } from '@/hooks/use-i18n';
+
+export interface RunnerSelectorProps {
+  runner: ChatRunnerConfiguration;
+  agents: ReadonlyArray<AgentProfile>;
+  isAgentListLoading: boolean;
+  externalAgents: readonly ExternalAgentDescriptor[];
+  /** The environment the descriptors describe, named in the unavailability copy. */
+  environmentName: string;
+  /** True once the chat has turns, which is what makes the kind immutable. */
+  hasTurns: boolean;
+  disabled?: boolean;
+  onSelectAgent: (agentId: string) => void;
+  onSelectExternal: (descriptor: ExternalAgentDescriptor) => void;
+  /** Offered instead of a switch when the chat already has turns. */
+  onForkWithRunner: (runner: ChatRunnerConfiguration) => void;
+}
+
+export function RunnerSelector({
+  runner,
+  agents,
+  isAgentListLoading,
+  externalAgents,
+  environmentName,
+  hasTurns,
+  disabled = false,
+  onSelectAgent,
+  onSelectExternal,
+  onForkWithRunner,
+}: RunnerSelectorProps) {
+  const { t } = useI18n();
+  const labels = t.externalAgents.selector;
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  // Exactly the filter the composer's agent picker already applies: a subagent
+  // is not something a chat can be handed to.
+  const selectableAgents = agents.filter(
+    (agent) => agent.role === 'primary' || agent.role === 'both'
+  );
+
+  const activeLabel =
+    runner.kind === 'mangostudio'
+      ? (selectableAgents.find((agent) => agent.id === runner.agentId)?.name ?? runner.agentId)
+      : (externalAgents.find((agent) => agent.targetId === runner.targetId)?.targetId ??
+        runner.targetId);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen((value) => !value)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={labels.label}
+        className="flex h-9 max-w-full items-center gap-2 rounded-full border border-outline-variant/20 bg-surface-container-lowest px-3 text-sm font-medium text-on-surface transition-colors hover:border-primary/30 disabled:opacity-50"
+      >
+        {runner.kind === 'mangostudio' ? (
+          <Cpu size={14} className="shrink-0 text-primary/80" />
+        ) : (
+          <Bot size={14} className="shrink-0 text-primary/80" />
+        )}
+        <span className="truncate">{activeLabel}</span>
+        <ChevronDown size={14} className="shrink-0 text-on-surface-variant" />
+      </button>
+
+      {open ? (
+        <div
+          role="listbox"
+          aria-label={labels.label}
+          className="absolute left-0 z-50 mt-2 max-h-[70vh] w-80 overflow-auto rounded-2xl border border-outline-variant/15 bg-surface-container-low p-2 shadow-2xl"
+        >
+          <GroupHeading>{labels.mangostudioGroup}</GroupHeading>
+          {isAgentListLoading ? (
+            <p className="px-3 py-2 text-xs text-on-surface-variant/70">{labels.loading}</p>
+          ) : null}
+          {selectableAgents.map((agent) => {
+            const active = runner.kind === 'mangostudio' && runner.agentId === agent.id;
+            const forks = hasTurns && runner.kind !== 'mangostudio';
+            return (
+              <RunnerRow
+                key={agent.id}
+                name={agent.name}
+                active={active}
+                forkLabel={forks ? labels.continueInNewChat : null}
+                onSelect={() => {
+                  setOpen(false);
+                  if (forks) {
+                    onForkWithRunner({
+                      kind: 'mangostudio',
+                      agentId: agent.id as AgentProfile['id'],
+                    });
+                    return;
+                  }
+                  onSelectAgent(agent.id);
+                }}
+              />
+            );
+          })}
+
+          <GroupHeading>{labels.externalGroup}</GroupHeading>
+          {externalAgents.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-on-surface-variant/70">{labels.noneDiscovered}</p>
+          ) : null}
+          {externalAgents.map((descriptor) => (
+            <ExternalRow
+              key={descriptor.targetId}
+              descriptor={descriptor}
+              environmentName={environmentName}
+              active={runner.kind === 'external' && runner.targetId === descriptor.targetId}
+              forks={hasTurns && runner.kind !== 'external'}
+              onSelect={(forking) => {
+                setOpen(false);
+                if (forking) {
+                  onForkWithRunner({ kind: 'external', targetId: descriptor.targetId });
+                  return;
+                }
+                onSelectExternal(descriptor);
+              }}
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function GroupHeading({ children }: { children: string }) {
+  return (
+    <p className="px-3 pb-1 pt-2 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
+      {children}
+    </p>
+  );
+}
+
+function RunnerRow({
+  name,
+  active,
+  forkLabel,
+  onSelect,
+}: {
+  name: string;
+  active: boolean;
+  forkLabel: string | null;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="option"
+      aria-selected={active}
+      onClick={onSelect}
+      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface transition-colors hover:bg-surface-container-high"
+    >
+      <span className="min-w-0 flex-1 truncate">{name}</span>
+      {forkLabel ? (
+        <span className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
+          <CornerUpRight size={11} />
+          {forkLabel}
+        </span>
+      ) : null}
+      {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
+    </button>
+  );
+}
+
+/**
+ * One external agent, in whatever state that machine reports.
+ *
+ * The eight availability states are not decorations. Each of them is a different
+ * thing the user has to do — install it, sign in, update the runtime, ask the
+ * machine's owner — and collapsing them into "unavailable" leaves someone
+ * staring at a disabled row with nothing to try.
+ */
+function ExternalRow({
+  descriptor,
+  environmentName,
+  active,
+  forks,
+  onSelect,
+}: {
+  descriptor: ExternalAgentDescriptor;
+  environmentName: string;
+  active: boolean;
+  forks: boolean;
+  onSelect: (forking: boolean) => void;
+}) {
+  const { t } = useI18n();
+  const labels = t.externalAgents;
+  const { copy, copied } = useClipboard();
+
+  const reason = descriptor.unavailableReason;
+  const signedOut = descriptor.installed && descriptor.authState === 'signed-out';
+  const notInstalled = !descriptor.installed && !reason;
+  const selectable = externalAgentSelectable(descriptor);
+
+  const explanation = reason
+    ? reason === 'not-installed'
+      ? labels.selector.notInstalledIn.replace('{environment}', environmentName)
+      : labels.unavailable[reason]
+    : signedOut
+      ? labels.unavailable['signed-out']
+      : notInstalled
+        ? labels.selector.notInstalledIn.replace('{environment}', environmentName)
+        : null;
+
+  return (
+    <div className="rounded-xl px-1">
+      <button
+        type="button"
+        role="option"
+        aria-selected={active}
+        disabled={!selectable}
+        onClick={() => onSelect(forks)}
+        className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors enabled:hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <span className="min-w-0 flex-1 truncate">{labels.target[descriptor.targetId]}</span>
+        {descriptor.authState === 'signed-in' ? (
+          <span className="flex shrink-0 items-center gap-1 text-[10px] text-success">
+            <Check size={11} />
+            {descriptor.account?.label ?? labels.selector.signedIn}
+          </span>
+        ) : null}
+        {selectable && descriptor.authState === 'unknown' ? (
+          <span className="shrink-0 text-[10px] text-on-surface-variant/70">
+            {labels.selector.authUnknown}
+          </span>
+        ) : null}
+        {selectable && forks ? (
+          <span className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
+            <CornerUpRight size={11} />
+            {labels.selector.continueInNewChat}
+          </span>
+        ) : null}
+        {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
+      </button>
+
+      {explanation ? (
+        <p className="px-2 pb-2 text-[10px] leading-relaxed text-on-surface-variant/70">
+          {explanation}
+        </p>
+      ) : null}
+
+      {/* The vendor's own login command, with a copy button: the user has to run
+          it on *that* machine, which MangoStudio cannot do for them. */}
+      {signedOut && descriptor.loginCommand ? (
+        <div className="mb-2 flex items-center gap-2 px-2">
+          <code className="min-w-0 flex-1 truncate rounded-lg bg-surface-container-high px-2 py-1 text-[10px] text-on-surface-variant">
+            {descriptor.loginCommand}
+          </code>
+          <button
+            type="button"
+            onClick={() => copy(descriptor.loginCommand ?? '')}
+            aria-label={labels.selector.copyLoginCommand}
+            className="shrink-0 rounded-lg p-1 text-on-surface-variant transition-colors hover:bg-surface-container-high"
+          >
+            {copied ? <Check size={12} /> : <Copy size={12} />}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}

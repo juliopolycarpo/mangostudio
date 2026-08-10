@@ -7,9 +7,14 @@ import {
   type ContextCompactionResponse,
   type ContextSettings,
   createPromptChatTitle,
+  type ExternalAgentTargetId,
   isTimestampChatTitle,
 } from '@mangostudio/shared/chat';
-import type { RespondStreamBody, ToolIntent } from '@mangostudio/shared/generation';
+import type {
+  ExternalTurnRequest,
+  RespondStreamBody,
+  ToolIntent,
+} from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
@@ -51,6 +56,26 @@ interface UseTextGenerationOptions {
     readonly agentId: string;
     readonly agentName?: string;
   };
+  /** The vendor model and effort the composer chose, read at send time. */
+  getExternalTurnRequest?: () => ExternalTurnRequest | undefined;
+  /**
+   * The vendor this turn runs on, when the chat's runner is external.
+   *
+   * Separate from `getExternalTurnRequest`, which is absent whenever the user
+   * left both vendor options alone — an external turn on the vendor's own
+   * defaults is still external, so the runner is what decides that.
+   */
+  getExternalRunnerTargetId?: () => ExternalAgentTargetId | undefined;
+  /**
+   * Waits out a runner write the composer may have just started.
+   *
+   * The hub dispatches on the runner it has stored, so this has to settle
+   * before the stream opens — otherwise a send that follows the picker closely
+   * enough runs on the runner the user just replaced, whatever the composer
+   * shows. Resolves immediately when no write is open, which is every send but
+   * the one right after a switch.
+   */
+  whenRunnerPersisted?: () => Promise<void>;
   /**
    * Applies the selection the empty state was holding — runner and default
    * workdir — to a chat auto-created by this turn. Awaited before the stream
@@ -153,6 +178,9 @@ export function useTextGeneration({
   chatTitleSettings,
   currentChatId,
   getAgentSelection,
+  getExternalTurnRequest,
+  getExternalRunnerTargetId,
+  whenRunnerPersisted,
   onChatCreated,
 }: UseTextGenerationOptions) {
   const queryClient = useQueryClient();
@@ -209,6 +237,27 @@ export function useTextGeneration({
       }
 
       const model = getActiveModel();
+      const externalTargetId = getExternalRunnerTargetId?.();
+      // Read once: the request body below sends the same value, and the two
+      // must describe one turn.
+      const externalTurnRequest = getExternalTurnRequest?.();
+      // What the turn header names while the turn streams. MangoStudio does not
+      // run an external turn, so its own model must not be reported for one, and
+      // the vendor itself is the only name available until the user picks a
+      // model.
+      //
+      // Approximate on purpose, and known to be: the hub persists
+      // `configuration.model ?? target`, where `configuration.model` is the
+      // catalog default the *adapter* resolved when the request named none. The
+      // bare target id agrees either way — the header renders it as the vendor's
+      // name — but a vendor that advertises a catalog makes this read as the
+      // vendor live and as a model id once the stored record replaces it.
+      // Closing that gap needs the effective model on the wire: the hub knows
+      // it, the `external_session_started` chunk does not carry it yet (see
+      // issue #816).
+      const displayModel = externalTargetId
+        ? (externalTurnRequest?.model ?? externalTargetId)
+        : model;
       const agentSelection = boundAgentSelection ?? getAgentSelection();
 
       if (
@@ -245,7 +294,7 @@ export function useTextGeneration({
         text: '',
         timestamp: Date.now(),
         isGenerating: true,
-        modelName: model,
+        modelName: displayModel,
         interactionMode: 'agent',
         agentId: agentSelection.agentId,
         agentName: agentSelection.agentName,
@@ -261,6 +310,13 @@ export function useTextGeneration({
       });
 
       try {
+        // Late on purpose. The turn is dispatched on the runner the hub has
+        // stored, so an optimistic switch has to be answered before the stream
+        // opens — but the echo above and the abort controller are what make the
+        // composer feel immediate, and a stop pressed during this wait still
+        // lands because the controller is already registered.
+        await whenRunnerPersisted?.();
+
         await respondTextStream(
           {
             chatId: activeChatId,
@@ -274,6 +330,10 @@ export function useTextGeneration({
             maxToolIterations,
             contextSettings,
             toolIntent,
+            // Vendor ids, not MangoStudio's: a Codex model and one of that
+            // model's own efforts. Absent on an internal turn, where the closed
+            // `model`/`reasoningEffort` pair is the right vocabulary.
+            externalTurn: externalTurnRequest,
             agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
             recovery,
           },
@@ -374,6 +434,9 @@ export function useTextGeneration({
       contextSettings,
       chatTitleSettings,
       getAgentSelection,
+      getExternalTurnRequest,
+      getExternalRunnerTargetId,
+      whenRunnerPersisted,
       onChatCreated,
       stream,
       pendingSubagentName,

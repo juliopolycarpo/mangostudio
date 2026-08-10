@@ -15,13 +15,18 @@ interface AssistantMessageBlockProps {
 }
 
 /** Renders the body for an assistant turn based on its generation state. */
-function AssistantMessageBody({ msg, isImageTurn, onQuestionSubmit }: AssistantMessageBlockProps) {
+function AssistantMessageBody({
+  msg,
+  isImageTurn,
+  chatId,
+  onQuestionSubmit,
+}: AssistantMessageBlockProps) {
   const { t } = useI18n();
 
   if (msg.isGenerating) {
     return (
       <div className="flex flex-col gap-3 py-4 pl-9">
-        <StreamingMessageBody msg={msg} isImageTurn={isImageTurn} />
+        <StreamingMessageBody msg={msg} chatId={chatId} isImageTurn={isImageTurn} />
       </div>
     );
   }
@@ -38,7 +43,7 @@ function AssistantMessageBody({ msg, isImageTurn, onQuestionSubmit }: AssistantM
           <span>{t.chat.feed.respondedIn.replace('{time}', msg.generationTime)}</span>
         </div>
       )}
-      <CompletedMessageBody msg={msg} onQuestionSubmit={onQuestionSubmit} />
+      <CompletedMessageBody msg={msg} chatId={chatId} onQuestionSubmit={onQuestionSubmit} />
     </div>
   );
 }
@@ -67,6 +72,7 @@ export function AssistantMessageBlock({
       <AssistantMessageBody
         msg={msg}
         isImageTurn={isImageTurn}
+        chatId={chatId}
         onQuestionSubmit={onQuestionSubmit}
       />
     </div>

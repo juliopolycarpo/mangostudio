@@ -50,7 +50,6 @@ import {
   productDescriptorFor,
 } from '../domain/adapter-descriptors';
 import { authStateFrom, isInstalled, versionFrom } from '../domain/cli-status-mapping';
-import { EXTERNAL_AGENTS_NOT_YET_AVAILABLE } from '../domain/release-gate';
 
 /**
  * One target, as the adapter that would run it describes itself.
@@ -368,16 +367,6 @@ async function baseDescriptors(
   }
 }
 
-/**
- * The one place the availability gate is applied, and the whole of what has to
- * be deleted to lift it.
- */
-function applyReleaseGate(descriptor: ExternalAgentDescriptor): ExternalAgentDescriptor {
-  return EXTERNAL_AGENTS_NOT_YET_AVAILABLE
-    ? { ...descriptor, unavailableReason: 'not-yet-available' }
-    : descriptor;
-}
-
 interface CacheEntry {
   readonly expiresAt: number;
   readonly generation: number;
@@ -546,7 +535,7 @@ export function createExternalAgentDiscoveryService(
         .map((descriptor) => {
           const answer = answers.get(descriptor.targetId);
           const merged = answer ? mergeAuthoritative(descriptor, answer) : descriptor;
-          return applyReleaseGate(merged);
+          return merged;
         })
         .sort((left, right) => (order.get(left.targetId) ?? 0) - (order.get(right.targetId) ?? 0));
     },
