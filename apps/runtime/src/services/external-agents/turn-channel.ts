@@ -35,9 +35,10 @@ export class TurnChannel<T> {
 
   async *drain(): AsyncGenerator<T> {
     while (true) {
-      const next = this.#queue.shift();
-      if (next) {
-        yield next;
+      // Emptiness is a property of the queue, never of the value at its head: a
+      // `T` that is falsy is still something the turn pushed.
+      if (this.#queue.length > 0) {
+        yield this.#queue.shift() as T;
         continue;
       }
       if (this.#done) return;
