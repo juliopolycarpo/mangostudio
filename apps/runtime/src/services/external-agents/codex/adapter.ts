@@ -39,15 +39,15 @@ import type {
   ExternalAgentStartTurnInput,
   ExternalAgentTurnStream,
 } from '../adapter';
+import { ExternalAgentAdapterError, toExternalAgentError } from '../errors';
 import { hostLocalDigestKey } from '../isolation';
+import {
+  type JsonRpcHandlers,
+  type JsonRpcServerRequestOutcome,
+  StdioJsonRpcClient,
+} from '../jsonrpc';
 import type { ExternalAgentManagedProcess } from '../process';
 import { type CodexRequestApproval, planCodexServerRequest } from './approvals';
-import { CodexAdapterError, toExternalAgentError } from './errors';
-import {
-  CodexJsonRpcClient,
-  type CodexJsonRpcHandlers,
-  type CodexServerRequestOutcome,
-} from './jsonrpc';
 import {
   buildSupportedConfigurations,
   encodeApprovalPolicy,
@@ -75,6 +75,9 @@ import { isCodexVersionSupported, parseCodexVersion, requireCodexVersion } from 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const HANDSHAKE_TIMEOUT_MS = 30_000;
 const SHUTDOWN_GRACE_MS = 2_000;
+
+/** How the shared JSON-RPC client names this peer in timeouts and teardowns. */
+const CODEX_PEER_NAME = 'Codex app-server';
 
 /** Parsed once: every gate compares structures rather than re-parsing a string. */
 const MINIMUM_CODEX_VERSION_PARSED = requireCodexVersion(MINIMUM_CODEX_VERSION);
@@ -117,7 +120,7 @@ const CODEX_CAPABILITIES: ExternalAgentCapabilities = {
 
 interface PendingApproval {
   readonly approval: CodexRequestApproval;
-  settle(outcome: CodexServerRequestOutcome): void;
+  settle(outcome: JsonRpcServerRequestOutcome): void;
 }
 
 /**
@@ -142,7 +145,7 @@ interface ActiveTurn {
 }
 
 interface CodexSession {
-  readonly client: CodexJsonRpcClient;
+  readonly client: StdioJsonRpcClient;
   readonly process: ExternalAgentManagedProcess;
   threadId: string;
   /** Approvals awaiting `respond`, keyed by the vendor's own JSON-RPC request id. */
@@ -243,7 +246,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     // Everything past this point needs a live `app-server`, which is exactly
     // why discovery is the runtime's job and not the hub's: it is a bounded
     // subprocess, not a file read.
-    let launched: { client: CodexJsonRpcClient; process: ExternalAgentManagedProcess } | undefined;
+    let launched: { client: StdioJsonRpcClient; process: ExternalAgentManagedProcess } | undefined;
     try {
       launched = await this.#launch(context, {
         onNotification: () => undefined,
@@ -412,7 +415,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     const session = this.#requireSession(input.sessionId);
     const pending = session.approvals.get(input.requestId);
     if (!pending) {
-      throw new CodexAdapterError(
+      throw new ExternalAgentAdapterError(
         'codex-approval-unknown',
         `Codex approval "${input.requestId}" is no longer awaiting an answer.`
       );
@@ -437,7 +440,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
         requestId: input.requestId,
         decision: { optionId: input.optionId, source: 'expired' },
       });
-      throw new CodexAdapterError(
+      throw new ExternalAgentAdapterError(
         'codex-approval-expired',
         `Codex approval "${input.requestId}" expired before this answer arrived.`
       );
@@ -519,7 +522,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
   #requireSession(sessionId: string): CodexSession {
     const session = this.#sessions.get(sessionId);
     if (!session) {
-      throw new CodexAdapterError(
+      throw new ExternalAgentAdapterError(
         'codex-session-missing',
         `Codex session "${sessionId}" is not open.`
       );
@@ -564,7 +567,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     method: string,
     params: unknown,
     requestId: string
-  ): Promise<CodexServerRequestOutcome> {
+  ): Promise<JsonRpcServerRequestOutcome> {
     const plan = planCodexServerRequest(method, params, requestId, this.#now());
     if (plan.outcome === 'refuse') {
       return { error: { code: plan.code, message: plan.message } };
@@ -579,7 +582,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     // `respond` arrives, when the turn is cancelled, or when the session
     // closes. `expiresAtMs` on the request is what stops it being forever, and
     // the supervisor suspends its idle timeout for exactly that long.
-    return await new Promise<CodexServerRequestOutcome>((settle) => {
+    return await new Promise<JsonRpcServerRequestOutcome>((settle) => {
       session.approvals.set(requestId, { approval: plan, settle });
       active.channel.push({ type: 'approval_requested', request: plan.request });
     });
@@ -589,7 +592,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     const raw = await this.#readVersion(context);
     const observed = raw ? parseCodexVersion(raw) : undefined;
     if (isCodexVersionSupported(observed, MINIMUM_CODEX_VERSION_PARSED)) return;
-    throw new CodexAdapterError(
+    throw new ExternalAgentAdapterError(
       'codex-version-unsupported',
       raw
         ? `Codex ${raw} predates the ${MINIMUM_CODEX_VERSION} this runtime speaks. Upgrade the Codex CLI.`
@@ -621,17 +624,17 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
 
   async #launch(
     context: ExternalAgentAdapterContext,
-    handlers: CodexJsonRpcHandlers
-  ): Promise<{ client: CodexJsonRpcClient; process: ExternalAgentManagedProcess }> {
+    handlers: JsonRpcHandlers
+  ): Promise<{ client: StdioJsonRpcClient; process: ExternalAgentManagedProcess }> {
     const executable = context.executablePath;
     if (!executable) {
-      throw new CodexAdapterError('codex-not-installed', 'The Codex CLI was not found.');
+      throw new ExternalAgentAdapterError('codex-not-installed', 'The Codex CLI was not found.');
     }
     // stdio JSONL, never the WebSocket listener: the supervisor owns the pipe,
     // the byte caps and the process tree, and a listening socket would be a
     // second way in that none of those cover.
     const managed = context.spawn({ argv: [executable, 'app-server'] });
-    const client = new CodexJsonRpcClient(managed, handlers);
+    const client = new StdioJsonRpcClient(managed, handlers, CODEX_PEER_NAME);
     try {
       await client.request(
         'initialize',
@@ -660,7 +663,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
   }
 
   async #startOrResumeThread(
-    client: CodexJsonRpcClient,
+    client: StdioJsonRpcClient,
     params: ExternalAgentOpenSessionInput['params'],
     context: ExternalAgentAdapterContext
   ): Promise<{ thread: ThreadStartResponse; resumed: boolean; fallbackReason?: string }> {
@@ -689,7 +692,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
       // by name; quietly starting a different thread there is the bug the mode
       // was added to prevent.
       if (params.resumeMode === 'strict') {
-        throw new CodexAdapterError(
+        throw new ExternalAgentAdapterError(
           'codex-resume-failed',
           `Codex could not resume thread "${params.resumeRef}": ${errorText(error)}`
         );
@@ -718,7 +721,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
    * already read rather than discarding the catalog.
    */
   async #readModelCatalog(
-    client: CodexJsonRpcClient,
+    client: StdioJsonRpcClient,
     signal: AbortSignal
   ): Promise<ExternalAgentModel[] | undefined> {
     const models: ExternalAgentModel[] = [];
@@ -743,7 +746,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
 
   /** A discovery call that may legitimately be absent rather than fatal. */
   async #tryRequest<T>(
-    client: CodexJsonRpcClient,
+    client: StdioJsonRpcClient,
     method: string,
     params: unknown,
     signal: AbortSignal

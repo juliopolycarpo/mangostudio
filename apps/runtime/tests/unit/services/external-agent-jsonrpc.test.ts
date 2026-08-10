@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { CodexJsonRpcClient } from '../../../src/services/external-agents/codex/jsonrpc';
+import { StdioJsonRpcClient } from '../../../src/services/external-agents/jsonrpc';
 import type { ExternalAgentManagedProcess } from '../../../src/services/external-agents/process';
 
 /**
@@ -45,12 +45,16 @@ async function withUnhandledRejectionWatch(body: () => Promise<void>): Promise<u
   return seen;
 }
 
-describe('codex json-rpc — a request whose write never lands', () => {
+describe('stdio json-rpc — a request whose write never lands', () => {
   it('fails the call without orphaning it', async () => {
-    const client = new CodexJsonRpcClient(brokenStdinProcess(), {
-      onNotification: () => undefined,
-      onServerRequest: () => ({ result: null }),
-    });
+    const client = new StdioJsonRpcClient(
+      brokenStdinProcess(),
+      {
+        onNotification: () => undefined,
+        onServerRequest: () => ({ result: null }),
+      },
+      'Codex app-server'
+    );
 
     const unhandled = await withUnhandledRejectionWatch(async () => {
       await expect(client.request('thread/start', {}, 1_000)).rejects.toThrow(/EPIPE/);
