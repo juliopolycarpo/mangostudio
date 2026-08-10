@@ -22,7 +22,11 @@
 
 import { type Static, Type } from '@sinclair/typebox';
 import { ReadonlyArraySchema } from '../schema-helpers';
-import { type ExternalTextLimit, schemaMaxLengthFor } from './vendor-text';
+import {
+  EXTERNAL_APPROVAL_MAX_OPTIONS,
+  type ExternalTextLimit,
+  schemaMaxLengthFor,
+} from './vendor-text';
 
 /**
  * Vendor-supplied text, bounded.
@@ -388,7 +392,10 @@ export const ExternalApprovalRequestSchema = Type.Object(
     kind: ExternalActivityKindSchema,
     title: VendorText('title'),
     detail: Type.Optional(VendorText('detail')),
-    options: ReadonlyArraySchema(ExternalApprovalOptionSchema, { minItems: 1, maxItems: 16 }),
+    options: ReadonlyArraySchema(ExternalApprovalOptionSchema, {
+      minItems: 1,
+      maxItems: EXTERNAL_APPROVAL_MAX_OPTIONS,
+    }),
     /** Every approval expires; an unanswered one must not hold a turn open forever. */
     expiresAtMs: Type.Integer({ minimum: 0 }),
     truncated: Type.Optional(Type.Boolean()),

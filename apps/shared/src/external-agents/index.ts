@@ -121,6 +121,7 @@ export {
 export {
   type BoundedVendorText,
   boundVendorText,
+  EXTERNAL_APPROVAL_MAX_OPTIONS,
   EXTERNAL_TEXT_LIMITS,
   EXTERNAL_TURN_MAX_EVENTS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,

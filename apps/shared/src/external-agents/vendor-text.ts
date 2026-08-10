@@ -70,6 +70,16 @@ export const EXTERNAL_TURN_PAYLOAD_MAX_BYTES = 2 * 1024 * 1024;
  */
 export const EXTERNAL_TURN_MAX_EVENTS = 10_000;
 
+/**
+ * How many choices one approval may carry.
+ *
+ * An adapter that passes a vendor's option set through has to refuse a larger
+ * one at its own boundary rather than emit it: the neutral event would fail
+ * validation in the supervisor, which ends the whole turn — a far worse answer
+ * to an unrenderable permission request than refusing that one request.
+ */
+export const EXTERNAL_APPROVAL_MAX_OPTIONS = 16;
+
 export interface BoundedVendorText {
   readonly text: string;
   /** True when stripping or truncation changed the input. */

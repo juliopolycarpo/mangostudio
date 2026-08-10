@@ -21,10 +21,13 @@
  * MangoStudio answering a vendor's question about the user's machine.
  */
 
-import type {
-  ExternalActivityKind,
-  ExternalApprovalOption,
-  ExternalApprovalRequest,
+import {
+  boundVendorText,
+  EXTERNAL_APPROVAL_MAX_OPTIONS,
+  EXTERNAL_TEXT_LIMITS,
+  type ExternalActivityKind,
+  type ExternalApprovalOption,
+  type ExternalApprovalRequest,
 } from '@mangostudio/shared/external-agents';
 import type { AcpRequestPermissionParams, AcpRequestPermissionResponse } from './protocol';
 import { activityKindFor, detailFields, toolCallDetail, toolCallTitle } from './tool-calls';
@@ -56,6 +59,15 @@ interface CursorRequestRefusal {
 
 export interface CursorRequestApproval {
   readonly outcome: 'approval';
+  /**
+   * The ACP session the vendor said this question is about.
+   *
+   * Kept beside the neutral request rather than inside it: the caller has to
+   * correlate on it before the request is shown to anyone, and the shared
+   * contract has no room for a vendor's own session id. Absent when the request
+   * named no session at all, which correlates against nothing.
+   */
+  readonly nativeSessionId?: string;
   readonly request: ExternalApprovalRequest;
   /** Builds the ACP response for a chosen option, or throws for an id Cursor did not offer. */
   encode(optionId: string): AcpRequestPermissionResponse;
@@ -74,6 +86,21 @@ export function cursorCancelledOutcome(): AcpRequestPermissionResponse {
 }
 
 /**
+ * The answer for a question about a session this connection is not holding.
+ *
+ * An error rather than `cancelled`: `cancelled` says "nobody answered", which
+ * would be a lie about a request that was understood and rejected — and the
+ * distinction is what appears in the vendor's log when a mis-addressed request
+ * comes back refused.
+ */
+export function cursorForeignSessionRefusal(): { readonly code: number; readonly message: string } {
+  return {
+    code: CURSOR_ERROR_CODES.invalidRequest,
+    message: 'MangoStudio will not answer a permission request for another session.',
+  };
+}
+
+/**
  * Which of Cursor's option kinds grants standing permission.
  *
  * Only `allow_always` does. A reject is never destructive however sticky it is,
@@ -82,6 +109,19 @@ export function cursorCancelledOutcome(): AcpRequestPermissionResponse {
  */
 function isDestructiveOption(kind: string | undefined): boolean {
   return kind === 'allow_always';
+}
+
+/**
+ * Whether an opaque vendor id survives the crossing unchanged.
+ *
+ * Exactly the condition the runtime's own normalization applies before it
+ * throws: an id that would be stripped, shortened or emptied is not one this
+ * client can echo back to the vendor, so the request it belongs to is refused
+ * rather than emitted.
+ */
+function isCarryableVendorId(raw: string): boolean {
+  const bounded = boundVendorText(raw, 'vendorId');
+  return !bounded.truncated && bounded.text.length > 0;
 }
 
 function toNeutralOption(option: {
@@ -130,12 +170,44 @@ function planCursorPermissionRequest(
     };
   }
 
+  // The neutral contract's own bounds, applied where the vendor's values enter
+  // rather than where they are validated. Everything above is a shape this file
+  // can refuse; these two are sizes, and a size the contract cannot carry is
+  // rejected by the supervisor *after* the event is emitted — which ends the
+  // turn rather than this one request. Refusing here costs the user an
+  // unanswerable approval; not refusing costs them the turn.
+  if (options.length > EXTERNAL_APPROVAL_MAX_OPTIONS) {
+    return {
+      outcome: 'refuse',
+      code: CURSOR_ERROR_CODES.invalidRequest,
+      message: `MangoStudio cannot present more than ${EXTERNAL_APPROVAL_MAX_OPTIONS} options for one permission request.`,
+    };
+  }
+  // Ids travel to the client and come back to be echoed to the vendor, so a
+  // shortened one would answer a different question. `requestId` is in the same
+  // position: it is the vendor's own JSON-RPC id, stringified. The predicate is
+  // `safeVendorId`'s own — anything it would reject downstream is refused here,
+  // where the answer is still a refusal rather than a dead turn.
+  if (
+    !isCarryableVendorId(requestId) ||
+    !options.every((option) => isCarryableVendorId(option.id))
+  ) {
+    return {
+      outcome: 'refuse',
+      code: CURSOR_ERROR_CODES.invalidRequest,
+      message: `MangoStudio cannot carry a permission request or option id past ${EXTERNAL_TEXT_LIMITS.vendorId} characters.`,
+    };
+  }
+
   const toolCall = params.toolCall;
   const kind: ExternalActivityKind = activityKindFor(toolCall?.kind);
   const detail = toolCallDetail(toolCall?.content, toolCall?.rawInput);
 
   return {
     outcome: 'approval',
+    ...(typeof params.sessionId === 'string' && params.sessionId.length > 0
+      ? { nativeSessionId: params.sessionId }
+      : {}),
     request: {
       requestId,
       kind,

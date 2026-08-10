@@ -20,6 +20,8 @@ export type CursorScenario =
   | 'text'
   | 'permission'
   | 'permission-no-options'
+  /** Asks about an ACP session this connection is not holding. */
+  | 'permission-foreign-session'
   | 'unknown-additive'
   | 'dangling-tool-call'
   | 'refusal'
@@ -198,6 +200,18 @@ export class FakeCursorAcpServer {
         const requestId = this.#ask('session/request_permission', {
           ...CURSOR_TRANSCRIPT.requestPermission,
           options: [],
+        });
+        while (!this.answers.has(requestId)) await sleep(2);
+        continue;
+      }
+      if (
+        this.#scenario === 'permission-foreign-session' &&
+        update.sessionUpdate === 'tool_call_update' &&
+        update.status === 'in_progress'
+      ) {
+        const requestId = this.#ask('session/request_permission', {
+          ...CURSOR_TRANSCRIPT.requestPermission,
+          sessionId: 'a-session-this-connection-never-opened',
         });
         while (!this.answers.has(requestId)) await sleep(2);
         continue;

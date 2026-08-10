@@ -599,6 +599,27 @@ describe('cursor adapter — approvals', () => {
     expect(answered[0]).toMatchObject({ code: -32600 });
   });
 
+  it('refuses a permission request that names another session', async () => {
+    // `session/update` correlates on the native session id; this path has to as
+    // well, or a question about another conversation is rendered as this turn's
+    // and answered with this user's click.
+    const adapter = new CursorAcpAdapter();
+    const probe = harness({ scenario: 'permission-foreign-session' });
+    await adapter.openSession({ params: openParams(), context: probe.context });
+
+    const events = await collect(
+      adapter.startTurn({
+        nativeSessionId: CURSOR_TRANSCRIPT.sessionId,
+        params: turnParams(),
+        context: probe.context,
+      })
+    );
+
+    expect(events.some((event) => event.type === 'approval_requested')).toBe(false);
+    const answered = [...(probe.server()?.answers.values() ?? [])];
+    expect(answered[0]).toMatchObject({ code: -32600 });
+  });
+
   it('refuses to touch the machine on the agent behalf', async () => {
     // `fs/*` and `terminal/*` are ACP asking the client to act. This client
     // advertises none of those capabilities, and the refusal is what makes that

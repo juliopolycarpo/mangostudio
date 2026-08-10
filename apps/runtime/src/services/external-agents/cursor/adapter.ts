@@ -69,6 +69,7 @@ import { TurnChannel } from '../turn-channel';
 import {
   type CursorRequestApproval,
   cursorCancelledOutcome,
+  cursorForeignSessionRefusal,
   planCursorServerRequest,
 } from './approvals';
 import {
@@ -627,6 +628,16 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
       // is nobody to ask, and an error frame would read to the vendor as a
       // protocol fault rather than as an unanswered prompt.
       return { result: cursorCancelledOutcome() };
+    }
+
+    // The same correlation `#onNotification` performs, for the path where
+    // getting it wrong costs more than a stray pill: a request that named
+    // another ACP session — or named none — would be rendered as this turn's
+    // question and answered with this user's click, authorizing an operation in
+    // a conversation and a workspace they were never shown. There is no id to
+    // fall back to, so an unmatched request is refused rather than adopted.
+    if (plan.nativeSessionId !== session.nativeSessionId) {
+      return { error: cursorForeignSessionRefusal() };
     }
 
     // The vendor stays blocked here on purpose: this promise resolves when
