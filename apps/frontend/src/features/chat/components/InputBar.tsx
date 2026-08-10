@@ -143,9 +143,17 @@ export function InputBar({
    * answered yet or the environment has no such agent, this runner cannot host a
    * turn either way.
    */
-  const externalRunnerBlocked =
-    isExternalRunner && (!externalDescriptor || !externalAgentSelectable(externalDescriptor));
   const externalUnavailableReason = externalDescriptor?.unavailableReason;
+  // `disclosure-required` is checked on top of `externalAgentSelectable`, which
+  // deliberately leaves it selectable so the *selector* can route the user into
+  // the notice. There is no such route from here: the turn-start gate refuses
+  // the send with a 403 nothing on this screen handles, so a composer that
+  // stayed enabled would accept a message and lose it to a bare error.
+  const externalRunnerBlocked =
+    isExternalRunner &&
+    (!externalDescriptor ||
+      !externalAgentSelectable(externalDescriptor) ||
+      externalUnavailableReason === 'disclosure-required');
   const cannotSubmit = submitDisabled || externalRunnerBlocked;
 
   const handleSubmit = (e: { preventDefault: () => void }) => {
