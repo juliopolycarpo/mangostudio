@@ -13,6 +13,7 @@
  * nothing to report and are listed as such.
  */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { Card } from '@/components/ui/Card';
 import { useExternalAgents } from '@/features/external-agents/useExternalAgents';
@@ -23,7 +24,13 @@ import { formatTimestamp } from '../utils';
 export function ExternalAgentDiscoveryLog() {
   const { t } = useI18n();
   const app = useApp();
-  const external = useExternalAgents(app.currentEnvironmentId);
+  // `currentEnvironmentId` is derived from the open chat, and Settings is not a
+  // chat. Without a fallback the query never runs for a user with no chats — a
+  // new install, or one whose only chat was deleted — and the card answers "no
+  // external agents" about a machine it never probed. That is precisely the user
+  // this card exists for, so it falls back to the machine the hub runs on, which
+  // is also the server's own default for this query.
+  const external = useExternalAgents(app.currentEnvironmentId ?? LOCAL_ENVIRONMENT_ID);
   const labels = t.settings.logs.externalAgentDiscovery;
 
   return (

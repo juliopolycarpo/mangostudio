@@ -14,8 +14,8 @@ import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
  * runner selector does. Only that one field is supplied: a fuller stub would
  * assert a shape this page does not depend on.
  */
-function withApp(children: React.ReactNode) {
-  return <AppContext value={{ currentEnvironmentId: 'local' } as never}>{children}</AppContext>;
+function withApp(children: React.ReactNode, currentEnvironmentId: string | null = 'local') {
+  return <AppContext value={{ currentEnvironmentId } as never}>{children}</AppContext>;
 }
 
 vi.mock('@tanstack/react-router', () => {
@@ -244,6 +244,48 @@ describe('Observability settings pages', () => {
 
     await screen.findByText('From cache');
     expect(screen.getByText(/2 attempts/)).toBeInTheDocument();
+  });
+
+  it('probes the local machine when no chat is open', async () => {
+    // `currentEnvironmentId` comes from the open chat, and a user with no chats
+    // is exactly who needs this card. Without a fallback the query never runs
+    // and the page prints "no external agents" about a machine it never asked.
+    fetchScenario.respondWithJson('GET', '/api/settings/logs', {
+      body: { generatedAt: 1_700_000_000_000, entries: [] },
+    });
+    fetchScenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: {
+        environmentId: 'local',
+        agents: [
+          {
+            targetId: 'cursor',
+            environmentId: 'local',
+            installed: true,
+            authState: 'signed-in',
+            capabilities: {
+              structuredStreaming: true,
+              reasoningStream: true,
+              interactiveApprovals: true,
+              resume: true,
+              modelCatalog: true,
+              images: true,
+              usageReporting: false,
+              cancellation: true,
+              steering: false,
+              sessionListing: true,
+              nativeReview: false,
+              accountUsage: false,
+            },
+            supportedConfigurations: [],
+            discovery: { source: 'live', probedAtMs: 1_700_000_000_000, attempts: 1 },
+          },
+        ],
+      },
+    });
+
+    render(withApp(<LogsSettingsPage />, null));
+
+    await screen.findByText('Probed');
   });
 });
 
