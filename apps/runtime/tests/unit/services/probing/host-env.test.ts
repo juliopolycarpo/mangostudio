@@ -52,9 +52,12 @@ describe('createRuntimePathEnv', () => {
   });
 
   it('leaves an explicit PATH alone when both spellings exist', () => {
-    withEnv({ PATH: '/usr/bin', Path: 'C:\\stale' }, () => {
-      expect(createRuntimePathEnv().env.PATH).toBe('/usr/bin');
-    });
+    // Not through `process.env`: on Windows the two spellings are one
+    // case-insensitive variable, so writing `Path` there would overwrite `PATH`
+    // and the test would fail on the platform it exists for. `overrides.env` is
+    // a plain object and merges into the same map the canonicalization reads.
+    const env = createRuntimePathEnv({ env: { PATH: '/usr/bin', Path: 'C:\\stale' } }).env;
+    expect(env.PATH).toBe('/usr/bin');
   });
 
   it('still lets the hub pin its own variables over the host', () => {
