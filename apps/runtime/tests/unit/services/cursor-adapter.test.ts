@@ -88,6 +88,7 @@ function linesProcess(lines: readonly string[]): ExternalAgentManagedProcess {
     },
     exit: Promise.resolve({ code: 0, signal: null }),
     writeLine: () => Promise.resolve(),
+    endInput: () => undefined,
     stderrTail: () => '',
     terminate: () => Promise.resolve(),
   };

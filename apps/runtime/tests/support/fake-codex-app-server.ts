@@ -359,6 +359,7 @@ export function createFakeCodexProcess(options: FakeCodexOptions = {}): FakeCode
       server.receive(JSON.stringify(value));
       return Promise.resolve();
     },
+    endInput: () => undefined,
     stderrTail: () => '',
     terminate() {
       terminated = true;

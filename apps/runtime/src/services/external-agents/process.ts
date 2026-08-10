@@ -48,6 +48,17 @@ export interface ExternalAgentManagedProcess {
   readonly stdout: ExternalAgentLineReader;
   readonly exit: Promise<ExternalAgentProcessExit>;
   writeLine(value: unknown): Promise<void>;
+  /**
+   * Closes the child's stdin.
+   *
+   * A persistent JSON-RPC peer never wants this — the pipe *is* the session.
+   * A print-mode vendor does: `claude --print --input-format stream-json` reads
+   * until end-of-input, so a turn that never closes stdin is a process that
+   * never finishes, and the only thing that would eventually end it is the
+   * supervisor's hard timeout. Idempotent, so a cancel racing a normal finish
+   * cannot double-end the stream.
+   */
+  endInput(): void;
   stderrTail(): string;
   terminate(options?: {
     readonly graceful?: () => void | Promise<void>;
@@ -156,6 +167,10 @@ export function spawnExternalAgentProcess(
       await new Promise<void>((resolve, reject) => {
         child.stdin.write(line, (error) => (error ? reject(error) : resolve()));
       });
+    },
+    endInput() {
+      if (child.stdin.writableEnded) return;
+      child.stdin.end();
     },
     stderrTail: () => redactExternalAgentStderr(stderr.read()),
     terminate(terminateOptions = {}) {
