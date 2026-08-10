@@ -2776,6 +2776,20 @@ export const messages = {
         'auto-review': 'O agente revisa os próprios pedidos.',
       },
     },
+    workspaceTrust: {
+      title: 'Permitir que este agente leia a configura\u00e7\u00e3o desta pasta?',
+      rules:
+        'Ele carrega as regras e a configura\u00e7\u00e3o de projeto versionadas nesta pasta e as segue.',
+      mcp: 'Ele inicia os servidores MCP definidos nesta pasta, com o acesso que esses servidores t\u00eam.',
+      scope:
+        'Vale para esta pasta nesta m\u00e1quina, at\u00e9 voc\u00ea limpar nas configura\u00e7\u00f5es.',
+      warning:
+        'Quem escreveu este reposit\u00f3rio escreveu essas instru\u00e7\u00f5es. S\u00f3 continue se confiar nele.',
+      accept: 'Confiar nesta pasta',
+      saving: 'Salvando\u2026',
+      cancel: 'Agora n\u00e3o',
+      saveFailed: 'N\u00e3o foi poss\u00edvel salvar sua escolha, ent\u00e3o nada foi enviado.',
+    },
     unsupported: {
       codexProfileDisallowed: 'A configuração do Codex nesta máquina não permite esse perfil',
       codexVersionTooOld: 'O Codex CLI desta máquina é antigo demais — atualize para usá-lo aqui',

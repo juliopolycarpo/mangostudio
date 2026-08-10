@@ -192,6 +192,22 @@ Because the API union is closed while the columns that persist a choice are `TEX
 normalizes an unrecognized stored value to the **restrictive** end — `read-only` and `user` — and
 records that it did. A downgrade must never widen privilege.
 
+## Workspace trust
+
+Choosing a folder for a chat says where files live. For some vendors it also decides something
+else: opening a Cursor ACP session against a directory makes the CLI load that directory's rules,
+project configuration and MCP server definitions — instructions written by whoever wrote the
+repository — and follow them. ACP offers no flag to decline it.
+
+That is a decision about **executing third-party configuration**, so it is asked separately from
+the vendor disclosure and recorded per `(user, environment, canonical workspace)`. The first turn
+in an untrusted workspace is refused before the stream opens, with the canonical path the target
+machine spells, and the client turns that refusal into one dialog and one retry. The grant covers
+exactly that directory: a parent's grant does not cover a child.
+
+Only vendors that have declared what they load are gated. Extending that list is how another
+adapter opts in — a disclosure that cannot name what it covers is a dialog people learn to dismiss.
+
 ## Vendor text is bounded
 
 Everything a vendor emits is text MangoStudio did not write, rendered in MangoStudio's UI and

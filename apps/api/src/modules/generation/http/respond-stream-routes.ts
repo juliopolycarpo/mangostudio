@@ -63,6 +63,10 @@ const EXTERNAL_PREFLIGHT_STATUS = {
   unsupported: 409,
   unavailable: 503,
   validation: 400,
+  // Not 409: nothing about the request is wrong, and nothing about it will
+  // change. What is missing is a decision only the user can make, which the
+  // client turns into one dialog and one retry.
+  'workspace-trust': 403,
 } as const satisfies Record<ExternalTurnPreflightFailure['kind'], number>;
 
 const EXTERNAL_PREFLIGHT_CODE = {
@@ -70,6 +74,7 @@ const EXTERNAL_PREFLIGHT_CODE = {
   unsupported: ERROR_CODES.UNSUPPORTED,
   unavailable: ERROR_CODES.PROVIDER_ERROR,
   validation: ERROR_CODES.VALIDATION,
+  'workspace-trust': ERROR_CODES.EXTERNAL_WORKSPACE_UNTRUSTED,
 } as const satisfies Record<ExternalTurnPreflightFailure['kind'], string>;
 
 function sseEvent(data: object): Uint8Array {
@@ -349,6 +354,12 @@ export const respondStreamRoutes = (app: Elysia) =>
             return {
               error: result.failure.message,
               code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
+              // The disclosure has to name what gets loaded, and only the
+              // machine that runs the vendor can spell the directory it will
+              // read. The client renders this; it never composes one.
+              ...(result.failure.kind === 'workspace-trust'
+                ? { details: { workspacePath: result.failure.workspacePath } }
+                : {}),
             };
           }
 

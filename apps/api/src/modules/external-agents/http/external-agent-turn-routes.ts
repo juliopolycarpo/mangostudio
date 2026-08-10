@@ -1,5 +1,5 @@
 /**
- * The two writes an external turn needs beyond the stream itself.
+ * The three writes an external turn needs beyond the stream itself.
  *
  * `respond` answers a mid-turn approval. It authenticates and validates a shape,
  * and then delegates the entire decision to the approval registry — the five-way
@@ -12,6 +12,12 @@
  * new chat carrying environment and workdir instead of a switch, and this is the
  * endpoint behind that offer.
  *
+ * `trust-workspace` records that the user agreed to let this vendor load the
+ * chat's workspace configuration. It takes **no path**: the server re-derives
+ * the canonical one exactly as the turn does, so the string that gets stored is
+ * the string the next check reads, and a client cannot widen the grant by
+ * spelling a directory differently.
+ *
  * Cancellation is deliberately absent: the existing stop endpoint reaches an
  * external turn through the active-turn registry, and a second one would be a
  * second way to end a turn with its own bugs.
@@ -23,12 +29,14 @@ import { schemaMaxLengthFor } from '@mangostudio/shared/external-agents';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { getRuntimeClient } from '../../../services/runtime-client';
 import { toPublicChat } from '../../chats/application/public-chat';
 import { createChat, getOwnedChat, updateChat } from '../../chats/infrastructure/chat-repository';
 import {
   type ExternalTurnController,
   externalTurnController,
 } from '../application/external-turn-controller';
+import { grantWorkspaceTrust } from '../application/external-workspace-trust';
 
 /** Vendor ids, bounded exactly as they are everywhere else they cross the wire. */
 const VendorIdSchema = t.String({ minLength: 1, maxLength: schemaMaxLengthFor('vendorId') });
@@ -51,6 +59,11 @@ const ForkBodySchema = t.Object({
 
 const ForkResponseSchema = t.Object({ chat: ChatSchema });
 
+const TrustWorkspaceResponseSchema = t.Object({
+  /** The canonical directory the grant covers, as the target machine spells it. */
+  workspacePath: t.String({ minLength: 1, maxLength: 4_096 }),
+});
+
 /**
  * A rejected answer is the request's fault or the turn's, never the server's.
  *
@@ -69,9 +82,21 @@ function statusForRejection(reason: string): number {
   }
 }
 
+export interface ExternalAgentTurnRouteDependencies {
+  /**
+   * How the canonical workspace is spelled. Injectable because it is the one
+   * thing in these routes that reaches another machine, and a test that could
+   * not replace it would either need a live runtime or would skip the only
+   * step that makes a trust grant match the check that reads it.
+   */
+  readonly resolveRuntimeClient?: typeof getRuntimeClient;
+}
+
 export function createExternalAgentTurnRoutes(
-  controller: ExternalTurnController = externalTurnController
+  controller: ExternalTurnController = externalTurnController,
+  dependencies: ExternalAgentTurnRouteDependencies = {}
 ) {
+  const resolveRuntimeClient = dependencies.resolveRuntimeClient ?? getRuntimeClient;
   return new Elysia()
     .use(requireAuth)
     .post(
@@ -159,6 +184,68 @@ export function createExternalAgentTurnRoutes(
           201: ForkResponseSchema,
           401: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/chats/:id/external-agent/trust-workspace',
+      async ({ params, user, set }) => {
+        const userId = user?.id ?? '';
+        const db = getDb();
+        const chat = await getOwnedChat(params.id, userId, db);
+        if (!chat) {
+          set.status = 404;
+          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+        }
+        if (chat.runner.kind !== 'external') {
+          set.status = 400;
+          return {
+            error: 'This chat is not configured for an external agent.',
+            code: ERROR_CODES.VALIDATION,
+          };
+        }
+        if (!chat.workdir) {
+          set.status = 400;
+          return {
+            error: 'Choose a folder for this chat before trusting it.',
+            code: ERROR_CODES.VALIDATION,
+          };
+        }
+
+        let workspacePath: string;
+        try {
+          // The same canonicalization the turn performs, on the same machine's
+          // path semantics. Anything else would trust a directory the check
+          // will not recognize.
+          const client = await resolveRuntimeClient(userId, chat.environmentId);
+          workspacePath = client.paths.canonical(chat.workdir);
+        } catch {
+          set.status = 503;
+          return {
+            error: 'Could not reach the machine this chat runs on.',
+            code: ERROR_CODES.PROVIDER_ERROR,
+          };
+        }
+
+        await grantWorkspaceTrust(
+          {
+            userId,
+            targetId: chat.runner.targetId,
+            environmentId: chat.environmentId,
+            workspacePath,
+          },
+          db
+        );
+        return { workspacePath };
+      },
+      {
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        response: {
+          200: TrustWorkspaceResponseSchema,
+          400: ApiErrorResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       }
     );

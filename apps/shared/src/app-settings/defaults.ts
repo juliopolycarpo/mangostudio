@@ -15,7 +15,10 @@ import {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,
   EXTERNAL_AGENT_TARGET_IDS,
   EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
+  EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES,
   type ExternalAgentSettings,
+  type ExternalWorkspaceTrust,
+  isExternalAgentTargetId,
 } from '../external-agents';
 import {
   COMMIT_MESSAGE_MAX_DIFF_KB_DEFAULT,
@@ -646,6 +649,7 @@ export function normalizeExternalApiSettings(value: unknown): ExternalApiSetting
 function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
   if (!isRecord(value) || !isRecord(value.disclosures)) return DEFAULT_EXTERNAL_AGENT_SETTINGS;
 
+  const workspaceTrust = normalizeWorkspaceTrust(value.workspaceTrust);
   const disclosures: ExternalAgentSettings['disclosures'] = {};
   for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
     const entry = value.disclosures[targetId];
@@ -666,7 +670,46 @@ function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
       capabilitiesFingerprint,
     };
   }
-  return { disclosures };
+  return { disclosures, workspaceTrust };
+}
+
+/**
+ * Keeps only well-formed workspace-trust rows.
+ *
+ * Same rule as the disclosures above, and the same reason: a row nothing can
+ * parse reads as "never agreed", which re-prompts. The alternative — admitting a
+ * malformed row — would let a vendor load a workspace's third-party
+ * configuration on the strength of a record that says nothing.
+ *
+ * The list is also capped here rather than only at the schema, because a saved
+ * value longer than `EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES` would fail the
+ * settings PUT for a reason no control on screen explains. The **newest**
+ * entries survive a trim, matching `withWorkspaceTrust`.
+ */
+function normalizeWorkspaceTrust(value: unknown): ExternalWorkspaceTrust[] {
+  if (!Array.isArray(value)) return [];
+  const entries: ExternalWorkspaceTrust[] = [];
+  for (const row of value) {
+    if (!isRecord(row)) continue;
+    const { targetId, environmentId, workspacePath, version, acceptedAt } = row;
+    if (typeof targetId !== 'string' || !isExternalAgentTargetId(targetId)) continue;
+    if (typeof environmentId !== 'string' || environmentId.length === 0) continue;
+    if (environmentId.length > 128) continue;
+    if (typeof workspacePath !== 'string' || workspacePath.length === 0) continue;
+    if (workspacePath.length > 4_096) continue;
+    if (!Number.isInteger(version) || (version as number) < 1) continue;
+    if (!Number.isInteger(acceptedAt) || (acceptedAt as number) < 0) continue;
+    entries.push({
+      targetId,
+      environmentId,
+      workspacePath,
+      version: version as number,
+      acceptedAt: acceptedAt as number,
+    });
+  }
+  return entries.length <= EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES
+    ? entries
+    : entries.slice(entries.length - EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES);
 }
 
 export function normalizeAppSettings(

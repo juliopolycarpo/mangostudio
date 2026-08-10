@@ -2762,6 +2762,19 @@ export const messages: Messages = {
         'auto-review': 'The agent reviews its own requests.',
       },
     },
+    workspaceTrust: {
+      title: 'Let this agent read this folder\u2019s own setup?',
+      rules:
+        'It loads the rules and project configuration committed in this folder, and follows them.',
+      mcp: 'It starts the MCP servers this folder defines, with the access those servers have.',
+      scope: 'This applies to this folder on this machine, until you clear it in settings.',
+      warning:
+        'Whoever wrote this repository wrote those instructions. Only continue if you trust it.',
+      accept: 'Trust this folder',
+      saving: 'Saving\u2026',
+      cancel: 'Not now',
+      saveFailed: 'Your choice could not be saved, so nothing was sent.',
+    },
     unsupported: {
       codexProfileDisallowed: "This machine's Codex configuration does not allow that profile",
       codexVersionTooOld: 'The Codex CLI on this machine is too old — upgrade it to use it here',

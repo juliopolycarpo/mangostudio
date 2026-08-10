@@ -10,6 +10,7 @@ import {
   type ExternalAgentTargetId,
   isTimestampChatTitle,
 } from '@mangostudio/shared/chat';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   ExternalTurnRequest,
   RespondStreamBody,
@@ -25,6 +26,7 @@ import type { useChats } from '@/features/chat/hooks/use-chats';
 import { messageKeys } from '@/features/chat/queries';
 import { generateChatTitleSuggestion } from '@/features/chat/services/chat-title';
 import { compactChat, summarizeToNewChat } from '@/features/chat/services/context-compaction';
+import { promptExternalWorkspaceTrust } from '@/features/external-agents/workspace-trust-prompt';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import {
   createTextGenerationStreamState,
@@ -33,12 +35,41 @@ import {
 } from '@/features/generation/text-generation-stream-reducer';
 import { invalidateGitState } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import {
   cancelInterruptedTurn,
   dismissInterruptedTurn,
   respondTextStream,
 } from '@/services/generation-service';
+
+/**
+ * Runs a send, and gives a refused workspace one chance to be trusted.
+ *
+ * The refusal is decided before any of the stream exists — the server answers
+ * 403 rather than opening one — so a retry here re-sends a turn that never
+ * started rather than resuming one that half did. Exactly one retry: a second
+ * refusal after the grant was recorded is a real failure, and looping on it
+ * would hide it behind a dialog the user keeps answering.
+ */
+async function sendWithWorkspaceTrust(chatId: string, send: () => Promise<void>): Promise<void> {
+  try {
+    await send();
+  } catch (error) {
+    const workspacePath = untrustedWorkspacePath(error);
+    if (workspacePath === undefined) throw error;
+    const granted = await promptExternalWorkspaceTrust({ chatId, workspacePath });
+    if (!granted) throw error;
+    await send();
+  }
+}
+
+/** The directory a refusal named, or `undefined` when it was some other failure. */
+function untrustedWorkspacePath(error: unknown): string | undefined {
+  if (!(error instanceof ApiError)) return undefined;
+  if (error.code !== ERROR_CODES.EXTERNAL_WORKSPACE_UNTRUSTED) return undefined;
+  const workspacePath = error.details?.workspacePath;
+  return typeof workspacePath === 'string' && workspacePath.length > 0 ? workspacePath : undefined;
+}
 
 interface UseTextGenerationOptions {
   chats: ReturnType<typeof useChats>;
@@ -317,67 +348,69 @@ export function useTextGeneration({
         // lands because the controller is already registered.
         await whenRunnerPersisted?.();
 
-        await respondTextStream(
-          {
-            chatId: activeChatId,
-            prompt,
-            attachmentIds,
-            model,
-            systemPrompt: systemPrompt || undefined,
-            promptSettings,
-            thinkingEnabled,
-            reasoningEffort,
-            maxToolIterations,
-            contextSettings,
-            toolIntent,
-            // Vendor ids, not MangoStudio's: a Codex model and one of that
-            // model's own efforts. Absent on an internal turn, where the closed
-            // `model`/`reasoningEffort` pair is the right vocabulary.
-            externalTurn: externalTurnRequest,
-            agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
-            recovery,
-          },
-          (chunk) => {
-            streamState = reduceTextGenerationStreamChunk(streamState, chunk, {
-              pendingSubagentName,
-            });
-            applyStreamMessageUpdate(
-              activeChatId,
-              streamState.userMessageUpdate,
-              updateOptimisticMessage
-            );
-            applyStreamMessageUpdate(
-              activeChatId,
-              streamState.aiMessageUpdate,
-              updateOptimisticMessage
-            );
-
-            if (chunk.type === 'assistant_message_id') {
-              activeTurnRef.current = { chatId: activeChatId, messageId: chunk.messageId };
-              if (recovery) {
-                void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
-              }
-            }
-
-            if (chunk.type === 'context_info') {
-              stream.updateContextInfo(activeChatId, {
-                estimatedInputTokens: chunk.estimatedInputTokens,
-                contextLimit: chunk.contextLimit,
-                estimatedUsageRatio: chunk.estimatedUsageRatio,
-                mode: chunk.mode,
-                severity: chunk.severity,
+        await sendWithWorkspaceTrust(activeChatId, () =>
+          respondTextStream(
+            {
+              chatId: activeChatId,
+              prompt,
+              attachmentIds,
+              model,
+              systemPrompt: systemPrompt || undefined,
+              promptSettings,
+              thinkingEnabled,
+              reasoningEffort,
+              maxToolIterations,
+              contextSettings,
+              toolIntent,
+              // Vendor ids, not MangoStudio's: a Codex model and one of that
+              // model's own efforts. Absent on an internal turn, where the closed
+              // `model`/`reasoningEffort` pair is the right vocabulary.
+              externalTurn: externalTurnRequest,
+              agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
+              recovery,
+            },
+            (chunk) => {
+              streamState = reduceTextGenerationStreamChunk(streamState, chunk, {
+                pendingSubagentName,
               });
-            }
+              applyStreamMessageUpdate(
+                activeChatId,
+                streamState.userMessageUpdate,
+                updateOptimisticMessage
+              );
+              applyStreamMessageUpdate(
+                activeChatId,
+                streamState.aiMessageUpdate,
+                updateOptimisticMessage
+              );
 
-            if (chunk.type === 'fallback_notice') {
-              stream.setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
-            }
+              if (chunk.type === 'assistant_message_id') {
+                activeTurnRef.current = { chatId: activeChatId, messageId: chunk.messageId };
+                if (recovery) {
+                  void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
+                }
+              }
 
-            if (chunk.type === 'todo_update') {
-              setChatTodos(queryClient, activeChatId, chunk.todos);
-            }
-          },
-          controller.signal
+              if (chunk.type === 'context_info') {
+                stream.updateContextInfo(activeChatId, {
+                  estimatedInputTokens: chunk.estimatedInputTokens,
+                  contextLimit: chunk.contextLimit,
+                  estimatedUsageRatio: chunk.estimatedUsageRatio,
+                  mode: chunk.mode,
+                  severity: chunk.severity,
+                });
+              }
+
+              if (chunk.type === 'fallback_notice') {
+                stream.setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
+              }
+
+              if (chunk.type === 'todo_update') {
+                setChatTodos(queryClient, activeChatId, chunk.todos);
+              }
+            },
+            controller.signal
+          )
         );
       } catch (error: unknown) {
         const isAbort = error instanceof Error && error.name === 'AbortError';

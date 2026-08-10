@@ -71,3 +71,19 @@ export async function forkChatWithRunner(
   if (error) throw new ApiError(error.value);
   return (data as { chat: Chat }).chat;
 }
+
+/**
+ * Records that this vendor may load the chat workspace's own configuration.
+ *
+ * No path is sent. The server re-derives the canonical directory the same way
+ * the turn does, on the machine that actually runs the vendor, so the string it
+ * stores is the string the next check reads — and a client cannot widen the
+ * grant by spelling a directory differently.
+ */
+export async function trustExternalWorkspace(chatId: string): Promise<string> {
+  const { data, error } = await client.api
+    .chats({ id: chatId })
+    ['external-agent']['trust-workspace'].post();
+  if (error) throw new ApiError(error.value);
+  return (data as { workspacePath: string }).workspacePath;
+}

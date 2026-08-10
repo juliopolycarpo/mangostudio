@@ -20,7 +20,8 @@
  */
 
 import { type Static, Type } from '@sinclair/typebox';
-import type { ExternalAgentCapabilities } from './schemas';
+import { ReadonlyArraySchema } from '../schema-helpers';
+import type { ExternalAgentCapabilities, ExternalAgentTargetId } from './schemas';
 import { ExternalAgentTargetIdSchema } from './schemas';
 
 /**
@@ -54,9 +55,70 @@ export const ExternalAgentDisclosureSchema = Type.Object({
 export type ExternalAgentDisclosure = Static<typeof ExternalAgentDisclosureSchema>;
 
 /**
- * One acknowledgement per vendor. Absent means the user has not been asked —
- * which is why every key is optional, and why a missing key can never read as
- * consent.
+ * Bump when the workspace-trust text changes materially.
+ *
+ * Independent of {@link EXTERNAL_DISCLOSURE_VERSION} because the two say
+ * different things: the vendor disclosure is about handing a conversation to a
+ * third party, this one is about that third party loading configuration out of
+ * a specific directory.
+ */
+export const EXTERNAL_WORKSPACE_TRUST_VERSION = 1;
+
+/**
+ * Which vendors need a workspace trusted before they may run in it.
+ *
+ * Cursor only, for now, and the narrowness is the point. Opening an ACP session
+ * against a directory makes `cursor-agent` load that directory's Cursor rules,
+ * project configuration and MCP server definitions — a decision about
+ * **executing third-party configuration**, which is not the same decision as
+ * choosing where files live. The previous revision of this plan called `--trust`
+ * "effectively path selection"; it is not.
+ *
+ * The other two adapters read project files too, and extending this list is how
+ * they would opt in. They are absent because nobody has yet written down what
+ * each of them loads, and a disclosure that cannot name what it covers is a
+ * dialog people learn to dismiss.
+ */
+export const EXTERNAL_WORKSPACE_TRUST_TARGETS: readonly ExternalAgentTargetId[] = ['cursor'];
+
+/**
+ * How many trusted workspaces one user keeps.
+ *
+ * Settings are one row and one PUT, so this is a real bound rather than a
+ * theoretical one. The oldest entry is dropped when the list is full, which
+ * re-prompts for a workspace nobody has touched in a long time — the safe
+ * direction to fail in.
+ */
+export const EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES = 200;
+
+/**
+ * One `(target, environment, canonical workspace)` the user has agreed to.
+ *
+ * The path is the **canonical** one, as the machine that runs the vendor spells
+ * it. A hub-side or client-side spelling would let the same directory be
+ * trusted under two names, and the check that matters happens where the vendor
+ * is actually started.
+ */
+export const ExternalWorkspaceTrustSchema = Type.Object(
+  {
+    targetId: ExternalAgentTargetIdSchema,
+    environmentId: Type.String({ minLength: 1, maxLength: 128 }),
+    workspacePath: Type.String({ minLength: 1, maxLength: 4_096 }),
+    version: Type.Integer({ minimum: 1 }),
+    acceptedAt: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalWorkspaceTrust = Static<typeof ExternalWorkspaceTrustSchema>;
+
+/**
+ * One acknowledgement per vendor, plus the workspaces they may load
+ * configuration from.
+ *
+ * Absent means the user has not been asked — which is why every disclosure key
+ * is optional and why the trust list starts empty. A missing entry can never
+ * read as consent.
  */
 export const ExternalAgentSettingsSchema = Type.Object({
   disclosures: Type.Partial(
@@ -64,11 +126,67 @@ export const ExternalAgentSettingsSchema = Type.Object({
       additionalProperties: false,
     })
   ),
+  workspaceTrust: ReadonlyArraySchema(ExternalWorkspaceTrustSchema, {
+    maxItems: EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES,
+  }),
 });
 
 export type ExternalAgentSettings = Static<typeof ExternalAgentSettingsSchema>;
 
-export const DEFAULT_EXTERNAL_AGENT_SETTINGS: ExternalAgentSettings = { disclosures: {} };
+export const DEFAULT_EXTERNAL_AGENT_SETTINGS: ExternalAgentSettings = {
+  disclosures: {},
+  workspaceTrust: [],
+};
+
+export interface ExternalWorkspaceTrustKey {
+  readonly targetId: ExternalAgentTargetId;
+  readonly environmentId: string;
+  readonly workspacePath: string;
+}
+
+function matchesKey(entry: ExternalWorkspaceTrust, key: ExternalWorkspaceTrustKey): boolean {
+  return (
+    entry.targetId === key.targetId &&
+    entry.environmentId === key.environmentId &&
+    entry.workspacePath === key.workspacePath
+  );
+}
+
+/**
+ * True when this vendor still needs the workspace disclosure before it may run
+ * here.
+ *
+ * A target that loads nothing third-party never needs it, so the list is
+ * consulted first — asking about a workspace for a vendor that does not read it
+ * would be a dialog with no claim behind it.
+ */
+export function needsWorkspaceTrust(
+  entries: readonly ExternalWorkspaceTrust[],
+  key: ExternalWorkspaceTrustKey
+): boolean {
+  if (!EXTERNAL_WORKSPACE_TRUST_TARGETS.includes(key.targetId)) return false;
+  const accepted = entries.find((entry) => matchesKey(entry, key));
+  return !accepted || accepted.version !== EXTERNAL_WORKSPACE_TRUST_VERSION;
+}
+
+/**
+ * The list with this workspace trusted, replacing any earlier entry for it.
+ *
+ * Pure, and returns a new array, so the settings mutation stays a single write
+ * of a value the caller can validate before sending.
+ */
+export function withWorkspaceTrust(
+  entries: readonly ExternalWorkspaceTrust[],
+  key: ExternalWorkspaceTrustKey,
+  acceptedAt: number
+): ExternalWorkspaceTrust[] {
+  const kept = entries.filter((entry) => !matchesKey(entry, key));
+  const next = [...kept, { ...key, version: EXTERNAL_WORKSPACE_TRUST_VERSION, acceptedAt }];
+  // Oldest first, so the slice keeps the most recently agreed ones.
+  return next.length <= EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES
+    ? next
+    : next.slice(next.length - EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES);
+}
 
 /**
  * A stable, order-independent summary of what a vendor said it can do.
