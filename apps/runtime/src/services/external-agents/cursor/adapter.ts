@@ -388,6 +388,9 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
         this.#finishTurn(session, active, answered.stopReason);
       } catch (error) {
         if (active.cancelled) return;
+        // A turn that failed cannot answer an approval, and an unanswered one
+        // blocks the whole connection rather than just this turn.
+        this.#releaseApprovals(session);
         // Close the pills before the error, so a failed turn does not leave a
         // tool call rendering as still running.
         for (const event of active.reducer.finish('error')) {
@@ -556,11 +559,26 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     return session;
   }
 
+  /**
+   * Ends a turn, and with it every question the turn was still asking.
+   *
+   * The same release `cancel` and `close` perform, for the ending they do not
+   * cover. It is the error path that needs it: `session/prompt` rejecting on its
+   * own timeout leaves a parked request unanswered, and because the pump answers
+   * server requests one at a time, one unanswered request blocks every later
+   * frame on that connection — the session never recovers, and a later `respond`
+   * pushes `approval_resolved` into a channel this call already finished.
+   *
+   * Releasing on the success path costs nothing and is where the rule belongs.
+   * Today it cannot fire — a serial pump cannot read the prompt's response while
+   * an approval is parked — so it holds the invariant rather than the pump.
+   */
   #finishTurn(
     session: CursorSession,
     active: ActiveTurn,
     stopReason: AcpStopReason | undefined
   ): void {
+    this.#releaseApprovals(session);
     for (const event of active.reducer.finish(stopReason)) active.channel.push(event);
     active.channel.finish();
     if (session.activeTurn === active) session.activeTurn = undefined;
