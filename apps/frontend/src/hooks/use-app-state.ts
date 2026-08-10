@@ -7,6 +7,7 @@ import { useTextGeneration } from '@/features/generation/hooks/use-text-generati
 import { useActiveChatModel } from './use-active-chat-model';
 import { useChatContextSync } from './use-chat-context-sync';
 import { useChatRouteActions } from './use-chat-route-actions';
+import { useExternalTurnRequest } from './use-external-turn-request';
 import { useGenerationControls } from './use-generation-controls';
 import { useGlobalSettings } from './use-global-settings';
 import { useModelCatalog } from './use-model-catalog';
@@ -34,24 +35,8 @@ export function useAppState() {
     addRecentWorkdir: settings.addRecentWorkdir,
   });
 
-  /**
-   * The vendor model and effort for the next send.
-   *
-   * Per-chat and ephemeral, like the image intent: the durable choice is the
-   * permission pair, which the chat persists. A model the user picked for one
-   * conversation should not follow them into the next one, and the vendor's own
-   * default is the right answer for a chat nobody has chosen one for.
-   *
-   * Held in a ref as well so the send path reads what is on screen now rather
-   * than what was on screen when the callback was created.
-   */
-  const [externalTurnRequest, setExternalTurnRequest] = useState<ExternalTurnRequest>({});
-  const externalTurnRequestRef = useRef(externalTurnRequest);
-  externalTurnRequestRef.current = externalTurnRequest;
-  const getExternalTurnRequest = useCallback(() => {
-    const request = externalTurnRequestRef.current;
-    return request.model === undefined && request.effort === undefined ? undefined : request;
-  }, []);
+  const { externalTurnRequest, setExternalTurnRequest, getExternalTurnRequest } =
+    useExternalTurnRequest(chats.currentChatId);
 
   // Read through a ref for the same reason the vendor options are: the send
   // path has to see the runner the composer shows now, not the one it showed
