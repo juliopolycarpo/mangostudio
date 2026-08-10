@@ -216,7 +216,7 @@ export class StdioJsonRpcClient {
       return;
     }
     if (typeof method === 'string') {
-      await this.#answer(String(id), method, message.params);
+      await this.#answer(id, method, message.params);
       return;
     }
     if (id === undefined) return;
@@ -233,7 +233,23 @@ export class StdioJsonRpcClient {
     });
   }
 
-  async #answer(id: string, method: string, params: unknown): Promise<void> {
+  /**
+   * Answers a server→client request, echoing its id **exactly as it arrived**.
+   *
+   * The id is passed through untouched rather than normalized, and that is
+   * load-bearing rather than tidy. JSON-RPC ids may be strings or numbers, and
+   * Cursor's ACP server numbers its requests from zero: replying to request `0`
+   * with `"0"` is a different id, so the vendor never matches the answer to the
+   * question and blocks forever — which presents as a turn that renders an
+   * approval, accepts a click, and then simply never finishes. Found against a
+   * live `cursor-agent`, not in a fixture, because a fixture that echoed ids
+   * loosely would have agreed with the bug.
+   *
+   * The handler still receives the stringified form, because that is a map key
+   * on this side and never goes back on the wire.
+   */
+  async #answer(rawId: unknown, method: string, params: unknown): Promise<void> {
+    const id = String(rawId);
     let outcome: JsonRpcServerRequestOutcome;
     try {
       outcome = await this.#handlers.onServerRequest(method, params, id);
@@ -246,7 +262,7 @@ export class StdioJsonRpcClient {
       };
     }
     try {
-      await this.#process.writeLine({ jsonrpc: '2.0', id, ...outcome });
+      await this.#process.writeLine({ jsonrpc: '2.0', id: rawId, ...outcome });
     } catch {
       // The process died between the request and our reply; `#run` surfaces it.
     }

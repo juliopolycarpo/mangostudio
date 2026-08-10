@@ -162,14 +162,14 @@ and that reviewer applies at *any* sandbox level. A flat list of four choices co
 Roughly, per vendor:
 
 ```text
-LEVEL         codex                          cursor              claude
+LEVEL         codex                          cursor (ACP)        claude
 read-only     sandbox read-only              plan mode           plan
 default       workspace-write + on-request   agent mode          the account's own default
-full-access   full access + never ask        agent mode + config bypass permissions
+full-access   full access + never ask        unsupported         bypass permissions
 
-ROUTING       codex                          cursor              claude
+ROUTING       codex                          cursor (ACP)        claude
 user          reviewer = user                permission request  default / manual
-auto-review   reviewer = auto review         see the adapter     auto, where the account allows it
+auto-review   reviewer = auto review         unsupported         auto, where the account allows it
 ```
 
 But the axes are **not freely composable everywhere**: Cursor exposes a fixed set of session
@@ -179,6 +179,14 @@ combinations it actually supports**, each marked `supported`, `unattended`, and 
 with a reason. The UI renders that list and nothing else; it never composes two independent
 controls into a pair no adapter offered. That is what stops an impossible state from being
 offered for a vendor whose two axes are really one.
+
+Cursor is where "the adapter decides" stops being theoretical. Over ACP it has one control where
+Codex has three — a session mode, changeable on a live session — and no reviewer field at all. Its
+print mode has `--force` and `--auto-review`, and its own `cli-config.json` carries an approval
+mode, but neither is reachable through the protocol. The only way to fake either would be to
+auto-answer every permission request, which would make MangoStudio the thing granting the
+permission. So both come back `supported: false` with a reason that says where the setting actually
+lives, and **no code path answers a permission request on the user's behalf**.
 
 Because the API union is closed while the columns that persist a choice are `TEXT`, the read path
 normalizes an unrecognized stored value to the **restrictive** end — `read-only` and `user` — and

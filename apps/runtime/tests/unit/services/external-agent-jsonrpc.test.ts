@@ -45,6 +45,63 @@ async function withUnhandledRejectionWatch(body: () => Promise<void>): Promise<u
   return seen;
 }
 
+/** A process that asks one question and records the frame it gets back. */
+function askingProcess(serverRequestId: unknown): {
+  readonly managed: ExternalAgentManagedProcess;
+  readonly replies: unknown[];
+} {
+  const replies: unknown[] = [];
+  const lines = [JSON.stringify({ jsonrpc: '2.0', id: serverRequestId, method: 'session/ask' })];
+  let ended = false;
+  return {
+    replies,
+    managed: {
+      pid: -1,
+      stdout: {
+        next: async (timeoutMs) => {
+          const line = lines.shift();
+          if (line !== undefined) return { kind: 'line', line } as const;
+          if (ended) return { kind: 'eof' } as const;
+          await Bun.sleep(Math.min(timeoutMs, 5));
+          return { kind: 'timeout' } as const;
+        },
+        close: () => {
+          ended = true;
+        },
+      },
+      exit: Promise.resolve({ code: 0, signal: null }),
+      writeLine: (value) => {
+        replies.push(value);
+        return Promise.resolve();
+      },
+      stderrTail: () => '',
+      terminate: () => Promise.resolve(),
+    },
+  };
+}
+
+describe('stdio json-rpc — answering what the vendor asked', () => {
+  it('echoes the request id with its original type', async () => {
+    // ACP numbers its server->client requests from zero. Answering `0` with
+    // `"0"` is a different id: the vendor never matches the reply and stays
+    // blocked, which reads as a turn that hangs after an approval is clicked.
+    const asking = askingProcess(0);
+    const client = new StdioJsonRpcClient(
+      asking.managed,
+      {
+        onNotification: () => undefined,
+        onServerRequest: (_method, _params, requestId) => ({ result: { echoed: requestId } }),
+      },
+      'Cursor ACP server'
+    );
+
+    await Bun.sleep(30);
+    await client.close();
+
+    expect(asking.replies).toEqual([{ jsonrpc: '2.0', id: 0, result: { echoed: '0' } }]);
+  });
+});
+
 describe('stdio json-rpc — a request whose write never lands', () => {
   it('fails the call without orphaning it', async () => {
     const client = new StdioJsonRpcClient(

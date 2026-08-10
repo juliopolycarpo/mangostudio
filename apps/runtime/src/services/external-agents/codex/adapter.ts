@@ -47,6 +47,7 @@ import {
   StdioJsonRpcClient,
 } from '../jsonrpc';
 import type { ExternalAgentManagedProcess } from '../process';
+import { TurnChannel } from '../turn-channel';
 import { type CodexRequestApproval, planCodexServerRequest } from './approvals';
 import {
   buildSupportedConfigurations,
@@ -132,7 +133,7 @@ interface PendingApproval {
  */
 interface ActiveTurn {
   readonly handle: string;
-  readonly channel: TurnChannel;
+  readonly channel: TurnChannel<ExternalAgentEvent>;
   /** Set once `turn/start` answers. Until then, notifications buffer. */
   reducer?: CodexTurnReducer;
   turnId?: string;
@@ -151,44 +152,6 @@ interface CodexSession {
   /** Approvals awaiting `respond`, keyed by the vendor's own JSON-RPC request id. */
   readonly approvals: Map<string, PendingApproval>;
   activeTurn?: ActiveTurn;
-}
-
-/** An async queue: notifications push, the turn's iterator pulls. */
-class TurnChannel {
-  readonly #queue: ExternalAgentEvent[] = [];
-  #waiter?: () => void;
-  #done = false;
-
-  push(event: ExternalAgentEvent): void {
-    if (this.#done) return;
-    this.#queue.push(event);
-    this.#wake();
-  }
-
-  finish(): void {
-    this.#done = true;
-    this.#wake();
-  }
-
-  #wake(): void {
-    const waiter = this.#waiter;
-    this.#waiter = undefined;
-    waiter?.();
-  }
-
-  async *drain(): AsyncGenerator<ExternalAgentEvent> {
-    while (true) {
-      const next = this.#queue.shift();
-      if (next) {
-        yield next;
-        continue;
-      }
-      if (this.#done) return;
-      await new Promise<void>((resolve) => {
-        this.#waiter = resolve;
-      });
-    }
-  }
 }
 
 export class CodexAppServerAdapter implements ExternalAgentAdapter {
@@ -350,7 +313,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
   startTurn(input: ExternalAgentStartTurnInput): ExternalAgentTurnStream {
     const session = this.#requireSession(input.params.sessionId);
     const handle = input.params.clientMessageId;
-    const channel = new TurnChannel();
+    const channel = new TurnChannel<ExternalAgentEvent>();
     const active: ActiveTurn = { handle, channel, buffered: [] };
     session.activeTurn = active;
 

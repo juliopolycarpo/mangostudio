@@ -22,10 +22,7 @@ import type {
   ExternalPermissionLevel,
   ExternalSupportedConfiguration,
 } from '@mangostudio/shared/external-agents';
-import {
-  EXTERNAL_APPROVAL_ROUTINGS,
-  EXTERNAL_PERMISSION_LEVELS,
-} from '@mangostudio/shared/external-agents';
+import { externalConfigurationMatrix } from '../permission-matrix';
 import type { ApprovalsReviewer } from './protocol/v2/ApprovalsReviewer';
 import type { AskForApproval } from './protocol/v2/AskForApproval';
 import type { PermissionProfileSummary } from './protocol/v2/PermissionProfileSummary';
@@ -78,6 +75,18 @@ export function buildSupportedConfigurations(
   });
 }
 
+function matrix(
+  unsupportedReasonFor: (level: ExternalPermissionLevel) => string | undefined
+): ExternalSupportedConfiguration[] {
+  return externalConfigurationMatrix((level) => {
+    const vendorId = CODEX_PERMISSION_PROFILE_IDS[level];
+    const reasonKey = unsupportedReasonFor(level);
+    return reasonKey === undefined
+      ? { supported: true, vendorId }
+      : { supported: false, reasonKey, vendorId };
+  });
+}
+
 /**
  * The same matrix, wholly unavailable for one reason.
  *
@@ -89,26 +98,4 @@ export function buildSupportedConfigurations(
  */
 export function unsupportedConfigurations(reasonKey: string): ExternalSupportedConfiguration[] {
   return matrix(() => reasonKey);
-}
-
-function matrix(
-  unsupportedReasonFor: (level: ExternalPermissionLevel) => string | undefined
-): ExternalSupportedConfiguration[] {
-  const configurations: ExternalSupportedConfiguration[] = [];
-  for (const level of EXTERNAL_PERMISSION_LEVELS) {
-    const reasonKey = unsupportedReasonFor(level);
-    for (const routing of EXTERNAL_APPROVAL_ROUTINGS) {
-      configurations.push({
-        level,
-        routing,
-        supported: reasonKey === undefined,
-        vendorId: CODEX_PERMISSION_PROFILE_IDS[level],
-        // Nothing stops to ask: either the sandbox permits everything, or a
-        // subagent is answering the prompts instead of a person.
-        unattended: level === 'full-access' || routing === 'auto-review',
-        ...(reasonKey === undefined ? {} : { unsupportedReasonKey: reasonKey }),
-      });
-    }
-  }
-  return configurations;
 }

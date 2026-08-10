@@ -57,6 +57,8 @@ export {
   ExternalAgentDiscoverParamsSchema,
   type ExternalAgentDiscoverResult,
   ExternalAgentDiscoverResultSchema,
+  type ExternalAgentDiscoveryReport,
+  ExternalAgentDiscoveryReportSchema,
   type ExternalAgentError,
   ExternalAgentErrorSchema,
   type ExternalAgentEvent,

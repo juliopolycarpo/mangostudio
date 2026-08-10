@@ -29,6 +29,7 @@ import type {
   ExternalAgentAuthState,
   ExternalAgentCapabilities,
   ExternalAgentDescriptor,
+  ExternalAgentDiscoveryReport,
   ExternalAgentModel,
   ExternalAgentTargetId,
   ExternalAgentUnavailableReason,
@@ -68,6 +69,8 @@ export interface AuthoritativeAgentStatus {
   readonly models?: readonly ExternalAgentModel[];
   readonly account?: ExternalAgentAccount;
   readonly unavailableReason?: ExternalAgentUnavailableReason;
+  /** Whether this answer was probed or remembered, when the adapter caches. */
+  readonly discovery?: ExternalAgentDiscoveryReport;
 }
 
 /**
@@ -249,6 +252,7 @@ interface DescriptorInput {
   readonly models: readonly ExternalAgentModel[] | undefined;
   readonly account: ExternalAgentAccount | undefined;
   readonly adapterReason: ExternalAgentUnavailableReason | undefined;
+  readonly discovery: ExternalAgentDiscoveryReport | undefined;
 }
 
 /**
@@ -282,6 +286,8 @@ function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
     // never persisted past this response.
     ...(input.account && { account: input.account }),
     ...(reason && { unavailableReason: reason }),
+    // Diagnostics only. The selector renders none of this; the Logs page does.
+    ...(input.discovery && { discovery: input.discovery }),
   };
 }
 
@@ -304,6 +310,7 @@ function descriptorFrom(
     models: undefined,
     account: undefined,
     adapterReason: undefined,
+    discovery: undefined,
   });
 }
 
@@ -324,6 +331,7 @@ function mergeAuthoritative(
     models: authoritative.models,
     account: authoritative.account,
     adapterReason: authoritative.unavailableReason,
+    discovery: authoritative.discovery,
   });
 }
 
@@ -362,6 +370,7 @@ async function baseDescriptors(
         models: undefined,
         account: undefined,
         adapterReason: 'environment-unreachable',
+        discovery: undefined,
       })
     );
   }

@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/Card';
 import { useI18n } from '@/hooks/use-i18n';
 import { observabilityLogsQueryOptions } from '../queries';
 import { formatTimestamp } from '../utils';
+import { ExternalAgentDiscoveryLog } from './ExternalAgentDiscoveryLog';
 
 export function LogsSettingsPage() {
   const { t } = useI18n();
@@ -25,14 +26,20 @@ export function LogsSettingsPage() {
 
   if (error) {
     return (
-      <Card variant="solid" className="p-4 sm:p-6 text-sm text-error">
-        {labels.failedToLoad}
-      </Card>
+      <div className="space-y-4">
+        <Card variant="solid" className="p-4 sm:p-6 text-sm text-error">
+          {labels.failedToLoad}
+        </Card>
+        {/* Independent of the provider probe log: an unreachable metrics
+            endpoint says nothing about how the agents were discovered. */}
+        <ExternalAgentDiscoveryLog />
+      </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      <ExternalAgentDiscoveryLog />
       <Card variant="solid" className="space-y-4 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="space-y-1">

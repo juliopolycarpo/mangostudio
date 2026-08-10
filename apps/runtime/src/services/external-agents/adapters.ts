@@ -10,7 +10,8 @@
 
 import type { ExternalAgentAdapter } from './adapter';
 import { CodexAppServerAdapter } from './codex/adapter';
+import { CursorAcpAdapter } from './cursor/adapter';
 
 export function createDefaultExternalAgentAdapters(): readonly ExternalAgentAdapter[] {
-  return [new CodexAppServerAdapter()];
+  return [new CodexAppServerAdapter(), new CursorAcpAdapter()];
 }

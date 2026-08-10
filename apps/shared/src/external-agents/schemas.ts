@@ -571,6 +571,35 @@ export const ExternalAgentAccountSchema = Type.Object(
 export type ExternalAgentAccount = Static<typeof ExternalAgentAccountSchema>;
 
 /**
+ * How a descriptor was arrived at, for diagnostics rather than for the selector.
+ *
+ * Discovery is not free for every vendor. Codex answers from three calls on one
+ * connection; Cursor exposes its model catalog only on a live session, so a full
+ * answer costs a process launch, a protocol handshake and a session. Adapters
+ * that pay that cost cache the result, and a cache nobody can see is a cache
+ * nobody can debug — "why is this agent still showing the old version" has no
+ * answer without knowing whether the last answer was probed or remembered.
+ *
+ * Optional because it is a claim only an adapter that actually caches can make.
+ * Nothing here changes what the selector renders.
+ */
+export const ExternalAgentDiscoveryReportSchema = Type.Object(
+  {
+    /** `live` means a probe ran for this answer; `cache` means it was remembered. */
+    source: Type.Union([Type.Literal('live'), Type.Literal('cache')]),
+    /** When the underlying probe ran — not when this response was built. */
+    probedAtMs: Type.Integer({ minimum: 0 }),
+    /** Handshake attempts the probe took. Above one means something was retried. */
+    attempts: Type.Integer({ minimum: 1, maximum: 16 }),
+    /** The adapter's own code for a probe that failed. Never vendor text. */
+    failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAgentDiscoveryReport = Static<typeof ExternalAgentDiscoveryReportSchema>;
+
+/**
  * One external agent, in one environment, as the selector needs it.
  *
  * `executablePath` is deliberately absent. A path the client can never
@@ -597,6 +626,7 @@ export const ExternalAgentDescriptorSchema = Type.Object(
     models: Type.Optional(ExternalAgentModelCatalogSchema),
     account: Type.Optional(ExternalAgentAccountSchema),
     unavailableReason: Type.Optional(ExternalAgentUnavailableReasonSchema),
+    discovery: Type.Optional(ExternalAgentDiscoveryReportSchema),
   },
   { additionalProperties: false }
 );

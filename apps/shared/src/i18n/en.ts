@@ -1126,6 +1126,16 @@ export const messages: Messages = {
       empty: 'No recent provider probe timeout events.',
       providerLabel: 'Provider',
       operationLabel: 'Operation',
+      externalAgentDiscovery: {
+        title: 'External agent discovery',
+        description:
+          'How each agent in the selected environment was last described \u2014 probed now, or remembered from an earlier probe.',
+        empty: 'No external agents were described for this environment.',
+        live: 'Probed',
+        cached: 'From cache',
+        notReported: 'Not reported by this adapter',
+        attempts: '{count} attempts',
+      },
       eventKinds: {
         probeTimeout: 'Probe timeout',
       },
@@ -2755,6 +2765,13 @@ export const messages: Messages = {
     unsupported: {
       codexProfileDisallowed: "This machine's Codex configuration does not allow that profile",
       codexVersionTooOld: 'The Codex CLI on this machine is too old — upgrade it to use it here',
+      cursorVersionTooOld: 'The Cursor CLI on this machine is too old — upgrade it to use it here',
+      cursorAcpUnavailable:
+        "This machine's Cursor CLI did not answer the protocol MangoStudio speaks",
+      cursorModeMissing: 'This Cursor account does not offer the mode this level needs',
+      cursorNoFullAccess:
+        'Cursor does not expose this over its protocol — set it in the Cursor CLI itself',
+      cursorNoAutoReview: 'Cursor answers approvals itself only when its own configuration says so',
     },
     approval: {
       title: 'The agent is asking for permission',
