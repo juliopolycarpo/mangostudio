@@ -36,6 +36,19 @@ export const GIT_SCOPES: readonly GitScope[] = GitScopeSchema.anyOf.map((literal
 
 export const SETTINGS_TOPIC = 'settings' as const;
 export const ENVIRONMENTS_TOPIC = 'environments' as const;
+/**
+ * External-agent discovery answers, separate from the environments topic on
+ * purpose.
+ *
+ * The two mean different things. `environments` means the machine changed —
+ * a runtime connected or dropped, an environment was edited — and every
+ * in-process cache keyed on it is dropped in response. This topic means only
+ * that a background probe learned something better about a machine that did not
+ * change, so nothing may reset a cache on it: a signal that invalidated the
+ * discovery cache would make the next request miss, probe, publish and reset
+ * again, one vendor subprocess per cycle, per user, without end.
+ */
+export const EXTERNAL_AGENTS_TOPIC = 'external-agents' as const;
 
 const GIT_TOPIC_PREFIX = 'git:' as const;
 const MAX_REALTIME_TOPICS_PER_MESSAGE = 32;
@@ -156,9 +169,20 @@ const RealtimeEnvironmentsInvalidateMessageSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const RealtimeExternalAgentsInvalidateMessageSchema = Type.Object(
+  {
+    type: Type.Literal('invalidate'),
+    topic: Type.Literal(EXTERNAL_AGENTS_TOPIC),
+    /** Keeps the invalidate union ergonomic while rejecting scopes on this topic. */
+    scopes: Type.Optional(Type.Never()),
+  },
+  { additionalProperties: false }
+);
+
 export const RealtimeInvalidateMessageSchema = Type.Union([
   RealtimeSettingsInvalidateMessageSchema,
   RealtimeEnvironmentsInvalidateMessageSchema,
+  RealtimeExternalAgentsInvalidateMessageSchema,
   RealtimeGitInvalidateMessageSchema,
 ]);
 export type RealtimeInvalidateMessage = Static<typeof RealtimeInvalidateMessageSchema>;
