@@ -2767,7 +2767,11 @@ export const messages: Messages = {
       rules:
         'It loads the rules and project configuration committed in this folder, and follows them.',
       mcp: 'It starts the MCP servers this folder defines, with the access those servers have.',
-      scope: 'This applies to this folder on this machine, until you clear it in settings.',
+      // No revocation control exists yet, so this no longer promises one. It
+      // names the real breadth of the grant instead: the key is the user, the
+      // machine and the folder, which means every chat pointed at this folder,
+      // not just this one.
+      scope: 'This applies to this folder on this machine, in every chat that uses it.',
       warning:
         'Whoever wrote this repository wrote those instructions. Only continue if you trust it.',
       accept: 'Trust this folder',

@@ -2781,8 +2781,7 @@ export const messages = {
       rules:
         'Ele carrega as regras e a configura\u00e7\u00e3o de projeto versionadas nesta pasta e as segue.',
       mcp: 'Ele inicia os servidores MCP definidos nesta pasta, com o acesso que esses servidores t\u00eam.',
-      scope:
-        'Vale para esta pasta nesta m\u00e1quina, at\u00e9 voc\u00ea limpar nas configura\u00e7\u00f5es.',
+      scope: 'Vale para esta pasta nesta m\u00e1quina, em todas as conversas que a utilizam.',
       warning:
         'Quem escreveu este reposit\u00f3rio escreveu essas instru\u00e7\u00f5es. S\u00f3 continue se confiar nele.',
       accept: 'Confiar nesta pasta',
