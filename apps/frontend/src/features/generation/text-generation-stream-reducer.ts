@@ -570,8 +570,8 @@ function reduceDone(
  * block to the end, which is right for a MangoStudio turn whose prose is one
  * block, and wrong for a vendor that interleaves prose with its own activity.
  *
- * `apps/frontend/tests/unit/external-turn-live-vs-reload.test.ts` drives both
- * paths from one event sequence and compares the results.
+ * `apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts`
+ * drives both paths from one event sequence and compares the results.
  */
 function reduceExternalSessionStarted(
   state: TextGenerationStreamState,

@@ -244,10 +244,12 @@ The wire vocabulary is a parallel set of `external_*` chunks rather than a reuse
 tool the executor can re-run, an elicitation its MCP client owns — and a vendor's output entering
 any of them is the failure this whole context exists to prevent.
 
-The projection from a neutral event to a chunk lives in `apps/shared/src/streaming/external-events.ts`,
-because the hub builds the durable transcript from the *same* events. One function, driven from one
-event sequence by `apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts`,
-is what keeps a live render and a reloaded one from disagreeing.
+The projection from a neutral event to a chunk lives in `apps/shared/src/streaming/external-events.ts`.
+The hub builds the durable transcript from the *same* events, through a second projection —
+`ExternalTurnTranscript` — so there are two of them, not one: the live render and the reloaded one
+each have their own path from the same source. `apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts`
+drives both from one event sequence and compares the results, which is what keeps them from
+disagreeing.
 
 `external_turn_completed` carries the terminal reason. The vendor's own `completed` and `error` are
 two of nine ways a turn ends and the hub decides the other seven, so without it a live view could
