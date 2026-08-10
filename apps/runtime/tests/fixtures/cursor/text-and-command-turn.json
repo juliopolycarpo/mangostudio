@@ -1,5 +1,5 @@
 {
-  "$comment": "Captured verbatim from `cursor-agent acp` 2026.08.04-aaa8809 on 2026-08-10, driving one turn that ran a shell command. Emails, machine paths and the tail of the assistant text are the only things trimmed; every frame is otherwise as it arrived. The `toolCallId` newline is real and is why the reducer mints its own call handles.",
+  "$comment": "Captured verbatim from `cursor-agent acp` 2026.08.04-aaa8809 on 2026-08-10, driving one turn that ran a shell command. Emails, the account identifier, machine paths and the tail of the assistant text are the only things trimmed; every frame is otherwise as it arrived. The `toolCallId` newline is real and is why the reducer mints its own call handles.",
   "initialize": {
     "protocolVersion": 1,
     "agentCapabilities": {
@@ -95,6 +95,6 @@
     "isAuthenticated": true,
     "hasAccessToken": true,
     "hasRefreshToken": true,
-    "userInfo": { "email": "someone@example.com", "userId": 353916799 }
+    "userInfo": { "email": "someone@example.com", "userId": 1 }
   }
 }
