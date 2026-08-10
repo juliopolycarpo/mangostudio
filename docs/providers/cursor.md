@@ -2,6 +2,78 @@
 
 Cursor is integrated as a first-class MangoStudio provider that runs the **local Cursor SDK agent** against a MangoStudio-managed workspace. It is an adapter, not a thin SDK wrapper: MangoStudio owns connector storage, model discovery, chat orchestration, tool policy, and streaming, while the Cursor SDK runs the local coding-agent loop in a Node.js sidecar.
 
+## Two Cursor paths, and which owns the tools
+
+MangoStudio can reach Cursor two ways. They are different products, and the
+difference is **who owns the tool loop**.
+
+|                      | Cursor **provider** (this document)                                                                     | Cursor **CLI** external agent                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| What runs            | `@cursor/sdk` in a Node sidecar                                                                         | `cursor-agent acp`, the Agent Client Protocol server Cursor ships                                       |
+| Who owns tools       | MangoStudio. Cursor built-ins are hard-denied by managed hooks; the registry executes allowlisted tools | Cursor. MangoStudio renders its tool activity and answers its permission requests, and executes nothing |
+| Who owns permissions | MangoStudio's tool settings and workdir policy                                                          | Cursor's own session mode, plus the user's `cli-config.json`                                            |
+| Credentials          | `CURSOR_API_KEY` in `~/.mango/config.toml`                                                              | The user's own `cursor-agent login`; MangoStudio never reads the token                                  |
+| Model choice         | MangoStudio's catalog                                                                                   | The vendor's session model list, passed through verbatim                                                |
+| Selected as          | a model in the composer                                                                                 | a runner in the header (`Cursor CLI`)                                                                   |
+
+The external agent is documented with the rest of that surface in
+[`docs/architecture/external-agents.md`](../architecture/external-agents.md);
+what follows here is only what a reader of *this* file needs in order not to
+confuse the two.
+
+### The external agent, in one paragraph
+
+`cursor-agent acp` speaks newline-delimited JSON-RPC over stdio: one persistent
+process per session, `session/new` or `session/load` to open, `session/prompt` to
+run a turn, `session/update` notifications for text, reasoning and tool calls,
+and `session/request_permission` when the agent wants to do something its
+allowlist does not already cover. MangoStudio answers that request with the
+option the user pressed and nothing else. The subcommand is **absent from
+`cursor-agent --help`** but documented at
+[cursor.com/docs/cli/acp](https://cursor.com/docs/cli/acp); the adapter pins a
+minimum version and probes the handshake at discovery rather than assuming it
+exists.
+
+### Workspace trust is a consent decision
+
+Opening an ACP session against a directory makes `cursor-agent` load that
+directory's Cursor rules, project configuration and MCP server definitions — and
+follow them. That is a decision about **executing third-party configuration**,
+not about choosing where files live, and ACP exposes no flag to decline it. So
+the first turn in a workspace is refused with a disclosure naming the exact
+canonical directory, and the acknowledgement is recorded per
+`(user, environment, canonical workspace)`.
+
+### What the external agent does not offer
+
+Both gaps are reported to the UI as `supported: false` with a reason, never
+approximated:
+
+- **`full-access`** — ACP has no session option or response policy equivalent to
+  print mode's `--force`/`--yolo`. Synthesizing it would mean auto-answering
+  every permission request, which would make MangoStudio the thing granting the
+  permission.
+- **`auto-review`** — likewise no ACP equivalent to `--auto-review`. The setting
+  lives in the user's own Cursor configuration.
+
+Usage reporting is also absent: ACP has no usage channel and a live turn
+reported no token figures.
+
+### Print mode, recorded and deliberately not built
+
+Kept here so a future minimum-version fallback does not have to rediscover it.
+Per Cursor's [output-format reference](https://cursor.com/docs/cli/reference/output-format):
+
+- Buffered and final flushes **duplicate** partial text; only timestamped events
+  without `model_call_id` carry new text, so concatenating every assistant
+  partial produces duplicated output.
+- A run may **exit nonzero with no result event**, so any supervisor must
+  synthesize a terminal error rather than waiting for one.
+- The prompt is **positional**, not stdin ([parameters reference](https://cursor.com/docs/cli/reference/parameters)).
+
+It is also per-invocation rather than a persistent session, so it could not share
+the ACP adapter's process policy.
+
 ## Provider Type
 
 - **Provider ID:** `cursor`

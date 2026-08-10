@@ -36,6 +36,12 @@ export const ERROR_CODES = {
   API_KEY_SCOPE_FORBIDDEN: 'API_KEY_SCOPE_FORBIDDEN',
   /** The account already owns the maximum number of active API keys. */
   API_KEY_LIMIT_REACHED: 'API_KEY_LIMIT_REACHED',
+  /**
+   * An external agent would load third-party configuration out of a workspace
+   * the user has not yet agreed to trust. Distinct from a plain permission
+   * failure because the fix is one explicit choice, not a settings change.
+   */
+  EXTERNAL_WORKSPACE_UNTRUSTED: 'EXTERNAL_WORKSPACE_UNTRUSTED',
   INTERNAL: 'INTERNAL',
 } as const;
 

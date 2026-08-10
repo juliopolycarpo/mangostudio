@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { ExternalAgentEvent } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentEvent,
+  ExternalAgentRuntimeDescriptor,
+  ExternalAgentTargetId,
+} from '@mangostudio/shared/external-agents';
 import {
   EXTERNAL_TEXT_LIMITS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
@@ -9,6 +13,7 @@ import {
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import type { RuntimeEventInput } from '../../../src/host';
 import { createLocalRuntimeManifest } from '../../../src/manifest';
+import type { ExternalAgentAdapter } from '../../../src/services/external-agents/adapter';
 import { ExternalAgentAdapterRegistry } from '../../../src/services/external-agents/registry';
 import { ExternalAgentSessionSupervisor } from '../../../src/services/external-agents/supervisor';
 import { FakeExternalAgentAdapter } from '../../support/fake-external-agent-adapter';
@@ -18,6 +23,29 @@ const CONFIGURATION = {
   routing: 'user' as const,
   workspaceRoots: [] as readonly string[],
 };
+
+/** A second registered target whose discovery never settles. */
+class HangingExternalAgentAdapter implements ExternalAgentAdapter {
+  constructor(readonly targetId: ExternalAgentTargetId) {}
+  discover(): Promise<ExternalAgentRuntimeDescriptor> {
+    return new Promise<never>(() => undefined);
+  }
+  openSession(): never {
+    throw new Error('This adapter only exists to hang discovery.');
+  }
+  startTurn(): never {
+    throw new Error('This adapter only exists to hang discovery.');
+  }
+  respond(): never {
+    throw new Error('This adapter only exists to hang discovery.');
+  }
+  cancel(): never {
+    throw new Error('This adapter only exists to hang discovery.');
+  }
+  close(): never {
+    throw new Error('This adapter only exists to hang discovery.');
+  }
+}
 
 async function fixture(
   options: {
@@ -196,6 +224,39 @@ describe('external-agent adapter registry and supervisor', () => {
       )
     ).rejects.toThrow(/Deadline exceeded/);
     await value.supervisor.close();
+  });
+
+  it('keeps a healthy target when a sibling target never answers discovery', async () => {
+    // `timeoutMs` is a per-target budget, so one vendor's slow handshake must
+    // cost only its own descriptor. Rejecting the batch would hand the hub
+    // nothing, and the hub cannot tell that apart from a runtime that said
+    // nothing at all -- so it would degrade every healthy target to the
+    // capability-free cheap scan and hide their model and permission pickers.
+    const registry = new ExternalAgentAdapterRegistry([
+      new FakeExternalAgentAdapter(),
+      new HangingExternalAgentAdapter('cursor'),
+    ]);
+    const supervisor = new ExternalAgentSessionSupervisor({
+      registry,
+      runtimeVersion: 'test',
+      emit: () => undefined,
+      consent: {
+        slot: 'host',
+        current: () => RUNTIME_CONSENT_PRESETS.full,
+        refresh: async () => RUNTIME_CONSENT_PRESETS.full,
+      },
+      resolveExecutable: async () => ({ path: process.execPath }),
+      consentPollMs: 5,
+      authorizeWorkspace: () => true,
+    });
+
+    const result = await supervisor.discover(
+      { targetIds: ['codex', 'cursor'], timeoutMs: 50 },
+      new AbortController().signal
+    );
+
+    expect(result.descriptors.map((descriptor) => descriptor.targetId)).toEqual(['codex']);
+    await supervisor.close();
   });
 
   it('aborts a pending workspace authorization through the open shutdown signal', async () => {
@@ -895,8 +956,21 @@ describe('external-agent adapter registry and supervisor', () => {
   });
 });
 
+/**
+ * Waits for fixture state to settle.
+ *
+ * The deadline is harness headroom, not an assertion about how fast anything
+ * has to be — every caller is waiting on an ordering guarantee, and none of
+ * them cares whether it takes one millisecond or one second. It is generous
+ * because it is wall-clock and shared with everything else in the process: at
+ * one second, adding unrelated test files to the same run was enough to fail
+ * the late-open reaper case under coverage instrumentation, which is a
+ * statement about machine load rather than about the supervisor.
+ */
+const FIXTURE_SETTLE_TIMEOUT_MS = 10_000;
+
 async function waitFor(predicate: () => boolean): Promise<void> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + FIXTURE_SETTLE_TIMEOUT_MS;
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error('Timed out waiting for fixture state.');
     await Bun.sleep(5);

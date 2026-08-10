@@ -1146,6 +1146,16 @@ export const messages = {
       empty: 'Nenhum evento recente de timeout de probe de provider.',
       providerLabel: 'Provider',
       operationLabel: 'Operação',
+      externalAgentDiscovery: {
+        title: 'Descoberta de agentes externos',
+        description:
+          'Como cada agente do ambiente selecionado foi descrito pela \u00faltima vez \u2014 consultado agora ou lembrado de uma consulta anterior.',
+        empty: 'Nenhum agente externo foi descrito para este ambiente.',
+        live: 'Consultado',
+        cached: 'Do cache',
+        notReported: 'N\u00e3o informado por este adaptador',
+        attempts: '{count} tentativas',
+      },
       eventKinds: {
         probeTimeout: 'Timeout de probe',
       },
@@ -2766,9 +2776,30 @@ export const messages = {
         'auto-review': 'O agente revisa os próprios pedidos.',
       },
     },
+    workspaceTrust: {
+      title: 'Permitir que este agente leia a configura\u00e7\u00e3o desta pasta?',
+      rules:
+        'Ele carrega as regras e a configura\u00e7\u00e3o de projeto versionadas nesta pasta e as segue.',
+      mcp: 'Ele inicia os servidores MCP definidos nesta pasta, com o acesso que esses servidores t\u00eam.',
+      scope: 'Vale para esta pasta nesta m\u00e1quina, em todas as conversas que a utilizam.',
+      warning:
+        'Quem escreveu este reposit\u00f3rio escreveu essas instru\u00e7\u00f5es. S\u00f3 continue se confiar nele.',
+      accept: 'Confiar nesta pasta',
+      saving: 'Salvando\u2026',
+      cancel: 'Agora n\u00e3o',
+      saveFailed: 'N\u00e3o foi poss\u00edvel salvar sua escolha, ent\u00e3o nada foi enviado.',
+    },
     unsupported: {
       codexProfileDisallowed: 'A configuração do Codex nesta máquina não permite esse perfil',
       codexVersionTooOld: 'O Codex CLI desta máquina é antigo demais — atualize para usá-lo aqui',
+      cursorVersionTooOld: 'O Cursor CLI desta máquina é antigo demais — atualize para usá-lo aqui',
+      cursorAcpUnavailable:
+        'O Cursor CLI desta máquina não respondeu ao protocolo que o MangoStudio fala',
+      cursorModeMissing: 'Esta conta do Cursor não oferece o modo que este nível exige',
+      cursorNoFullAccess:
+        'O Cursor não expõe isso pelo protocolo — configure no próprio Cursor CLI',
+      cursorNoAutoReview:
+        'O Cursor só responde às aprovações sozinho quando a configuração dele permite',
     },
     approval: {
       title: 'O agente está pedindo permissão',

@@ -1126,6 +1126,16 @@ export const messages: Messages = {
       empty: 'No recent provider probe timeout events.',
       providerLabel: 'Provider',
       operationLabel: 'Operation',
+      externalAgentDiscovery: {
+        title: 'External agent discovery',
+        description:
+          'How each agent in the selected environment was last described \u2014 probed now, or remembered from an earlier probe.',
+        empty: 'No external agents were described for this environment.',
+        live: 'Probed',
+        cached: 'From cache',
+        notReported: 'Not reported by this adapter',
+        attempts: '{count} attempts',
+      },
       eventKinds: {
         probeTimeout: 'Probe timeout',
       },
@@ -2752,9 +2762,33 @@ export const messages: Messages = {
         'auto-review': 'The agent reviews its own requests.',
       },
     },
+    workspaceTrust: {
+      title: 'Let this agent read this folder\u2019s own setup?',
+      rules:
+        'It loads the rules and project configuration committed in this folder, and follows them.',
+      mcp: 'It starts the MCP servers this folder defines, with the access those servers have.',
+      // No revocation control exists yet, so this no longer promises one. It
+      // names the real breadth of the grant instead: the key is the user, the
+      // machine and the folder, which means every chat pointed at this folder,
+      // not just this one.
+      scope: 'This applies to this folder on this machine, in every chat that uses it.',
+      warning:
+        'Whoever wrote this repository wrote those instructions. Only continue if you trust it.',
+      accept: 'Trust this folder',
+      saving: 'Saving\u2026',
+      cancel: 'Not now',
+      saveFailed: 'Your choice could not be saved, so nothing was sent.',
+    },
     unsupported: {
       codexProfileDisallowed: "This machine's Codex configuration does not allow that profile",
       codexVersionTooOld: 'The Codex CLI on this machine is too old — upgrade it to use it here',
+      cursorVersionTooOld: 'The Cursor CLI on this machine is too old — upgrade it to use it here',
+      cursorAcpUnavailable:
+        "This machine's Cursor CLI did not answer the protocol MangoStudio speaks",
+      cursorModeMissing: 'This Cursor account does not offer the mode this level needs',
+      cursorNoFullAccess:
+        'Cursor does not expose this over its protocol — set it in the Cursor CLI itself',
+      cursorNoAutoReview: 'Cursor answers approvals itself only when its own configuration says so',
     },
     approval: {
       title: 'The agent is asking for permission',

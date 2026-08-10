@@ -82,6 +82,15 @@ export interface ExternalAgentSteerResult {
 
 export interface ExternalAgentListSessionsInput {
   readonly cursor?: string;
+  /**
+   * Which open session's connection answers the listing.
+   *
+   * An adapter that keeps one vendor process per session — Cursor does, because
+   * each session carries its own cwd and environment — has no single connection
+   * to ask. Optional because an adapter with one shared process has nothing to
+   * choose between.
+   */
+  readonly sessionId?: string;
 }
 
 export interface ExternalAgentNativeSessionPage {

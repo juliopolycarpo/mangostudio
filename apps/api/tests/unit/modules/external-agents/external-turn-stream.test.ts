@@ -12,6 +12,7 @@ import { createExternalSessionManager } from '../../../../src/modules/external-a
 import { createExternalTurnConfigurationResolver } from '../../../../src/modules/external-agents/application/external-turn-configuration';
 import { createExternalTurnController } from '../../../../src/modules/external-agents/application/external-turn-controller';
 import { createExternalTurnStream } from '../../../../src/modules/external-agents/application/external-turn-stream';
+import { grantWorkspaceTrust } from '../../../../src/modules/external-agents/application/external-workspace-trust';
 import {
   cancelActiveTurn,
   findActiveTurnByChat,
@@ -535,3 +536,96 @@ function cancelActiveTurnForChat(id: string): boolean {
   if (!active) return false;
   return cancelActiveTurn(active.messageId, userId, id, 'user_cancelled');
 }
+
+describe('workspace trust', () => {
+  it('refuses a Cursor turn against a workspace nobody has trusted', async () => {
+    // Not a validation failure and not a conflict: the request is well-formed
+    // and will stay refused until a person makes one decision.
+    const cursorChatId = await insertExternalChat();
+    await getDb()
+      .updateTable('chats')
+      .set({ runnerTargetId: 'cursor' })
+      .where('id', '=', cursorChatId)
+      .execute();
+    const { stream } = harness({ agents: [descriptor({ targetId: 'cursor' })] });
+
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord({ runner: { kind: 'external', targetId: 'cursor' } }),
+        chatId: cursorChatId,
+        prompt: 'hello',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('workspace-trust');
+    // The disclosure has to name what gets loaded, and only the machine running
+    // the vendor can spell it. The vendor and machine travel with the path
+    // because the grant is checked against this whole scope, not just the part
+    // the dialog prints.
+    expect(result.failure).toMatchObject({
+      workspacePath: '/work/repo',
+      targetId: 'cursor',
+      environmentId: 'local',
+    });
+  });
+
+  it('lets the same turn through once the workspace is trusted', async () => {
+    const cursorChatId = await insertExternalChat();
+    await getDb()
+      .updateTable('chats')
+      .set({ runnerTargetId: 'cursor' })
+      .where('id', '=', cursorChatId)
+      .execute();
+    await grantWorkspaceTrust(
+      { userId, targetId: 'cursor', environmentId: 'local', workspacePath: '/work/repo' },
+      getDb()
+    );
+    const { stream, runtime } = harness({ agents: [descriptor({ targetId: 'cursor' })] });
+
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord({ runner: { kind: 'external', targetId: 'cursor' } }),
+        chatId: cursorChatId,
+        prompt: 'hello',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const reading = readChunks(result.response);
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'completed' });
+    await reading;
+    expect(runtime.calls.turn).toHaveLength(1);
+  });
+
+  it('never gates a vendor that has not declared what it loads', async () => {
+    // The Codex chat above runs untouched: adding the gate must not re-prompt
+    // every existing user of an adapter this disclosure says nothing about.
+    const { stream } = harness();
+
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'hello',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+
+    expect(result.ok).toBe(true);
+  });
+});

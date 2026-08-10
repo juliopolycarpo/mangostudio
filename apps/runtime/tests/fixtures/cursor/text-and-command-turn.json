@@ -1,0 +1,100 @@
+{
+  "$comment": "Captured verbatim from `cursor-agent acp` 2026.08.04-aaa8809 on 2026-08-10, driving one turn that ran a shell command. Emails, the account identifier, machine paths and the tail of the assistant text are the only things trimmed; every frame is otherwise as it arrived. The `toolCallId` newline is real and is why the reducer mints its own call handles.",
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "loadSession": true,
+      "mcpCapabilities": { "http": true, "sse": true },
+      "promptCapabilities": { "audio": false, "embeddedContext": false, "image": true },
+      "sessionCapabilities": { "list": {} }
+    },
+    "authMethods": [
+      {
+        "id": "cursor_login",
+        "name": "Cursor Login",
+        "description": "Authenticate using existing Cursor login credentials. Run 'agent login' first if not logged in."
+      }
+    ]
+  },
+  "sessionId": "64acf477-37c4-4448-88e4-410e9a04c721",
+  "updates": [
+    { "sessionUpdate": "session_info_update", "title": "Shell Command Output" },
+    {
+      "sessionUpdate": "available_commands_update",
+      "availableCommands": [
+        { "name": "copy-request-id", "description": "Copy the last request ID to clipboard" }
+      ]
+    },
+    {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": { "type": "text", "text": "Running the shell command" }
+    },
+    {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": { "type": "text", "text": " `echo hello-from-acp`" }
+    },
+    { "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "I'll" } },
+    { "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": " run" } },
+    {
+      "sessionUpdate": "tool_call",
+      "toolCallId": "call-e84f3ea5-ca51-4f67-968b-39323e395738-0\nfc_032f9c24-82e5-9f09-98a7-0f1da99ed55a_0",
+      "title": "`echo hello-from-acp`",
+      "kind": "execute",
+      "status": "pending",
+      "rawInput": { "command": "echo hello-from-acp" }
+    },
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "call-e84f3ea5-ca51-4f67-968b-39323e395738-0\nfc_032f9c24-82e5-9f09-98a7-0f1da99ed55a_0",
+      "status": "in_progress"
+    },
+    {
+      "sessionUpdate": "tool_call_update",
+      "toolCallId": "call-e84f3ea5-ca51-4f67-968b-39323e395738-0\nfc_032f9c24-82e5-9f09-98a7-0f1da99ed55a_0",
+      "status": "completed",
+      "rawOutput": { "exitCode": 0, "stdout": "hello-from-acp\n", "stderr": "" }
+    },
+    {
+      "sessionUpdate": "agent_thought_chunk",
+      "content": { "type": "text", "text": "The command ran successfully." }
+    },
+    {
+      "sessionUpdate": "agent_message_chunk",
+      "content": { "type": "text", "text": "hello-from-acp" }
+    }
+  ],
+  "requestPermission": {
+    "sessionId": "64acf477-37c4-4448-88e4-410e9a04c721",
+    "toolCall": {
+      "toolCallId": "call-e84f3ea5-ca51-4f67-968b-39323e395738-0\nfc_032f9c24-82e5-9f09-98a7-0f1da99ed55a_0",
+      "title": "`echo hello-from-acp`",
+      "kind": "execute",
+      "status": "pending",
+      "content": [
+        { "type": "content", "content": { "type": "text", "text": "Not in allowlist: echo" } }
+      ]
+    },
+    "options": [
+      { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
+      { "optionId": "allow-always", "name": "Allow always", "kind": "allow_always" },
+      { "optionId": "reject-once", "name": "Reject", "kind": "reject_once" }
+    ]
+  },
+  "promptResult": { "stopReason": "end_turn" },
+  "sessionList": {
+    "sessions": [
+      {
+        "sessionId": "7e0059d1-e5a9-46cf-aba5-1261aaeb2324",
+        "cwd": "/workspace",
+        "updatedAt": "2026-08-10T07:01:24.590Z"
+      }
+    ]
+  },
+  "status": {
+    "status": "authenticated",
+    "isAuthenticated": true,
+    "hasAccessToken": true,
+    "hasRefreshToken": true,
+    "userInfo": { "email": "someone@example.com", "userId": 1 }
+  }
+}

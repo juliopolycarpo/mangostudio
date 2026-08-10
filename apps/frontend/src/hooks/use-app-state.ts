@@ -1,6 +1,5 @@
-import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import { useNavigate } from '@tanstack/react-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useRef } from 'react';
 import { useChats } from '@/features/chat/hooks/use-chats';
 import { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
 import { useTextGeneration } from '@/features/generation/hooks/use-text-generation';

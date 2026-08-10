@@ -10,6 +10,7 @@ import { Header } from '@/components/layout/Header';
 import { Layout } from '@/components/layout/Layout';
 import { Spinner } from '@/components/ui/Spinner';
 import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
+import { ExternalWorkspaceTrustGate } from '@/features/external-agents/ExternalWorkspaceTrustGate';
 import { RunnerSelectorContainer } from '@/features/external-agents/RunnerSelectorContainer';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
@@ -105,6 +106,11 @@ function AuthenticatedLayout() {
             <Outlet />
           </Suspense>
         </div>
+
+        {/* Mounted once, above every page: the send it gates can be raised from
+            the composer on any of them, and the answer belongs to the workspace
+            rather than to the view. */}
+        <ExternalWorkspaceTrustGate />
       </Layout>
     </AppContext>
   );

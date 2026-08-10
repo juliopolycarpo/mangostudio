@@ -1,52 +1,59 @@
 /**
- * A JSON-RPC peer over the vendor process's stdio, in both directions.
+ * A JSON-RPC peer over a vendor process's stdio, in both directions.
  *
- * "Both directions" is the requirement that shaped it. Codex does not merely
- * stream at the client — it *asks the client things*, and blocks until it gets
- * an answer: five approval requests plus `item/tool/call`. A codec that only
- * turned lines into events could never reply, which is why plan 003's adapter
- * interface is semantic rather than a reducer, and why correlating request ids
- * is the adapter's job rather than the supervisor's.
+ * "Both directions" is the requirement that shaped it. These vendors do not
+ * merely stream at the client — they *ask the client things*, and block until
+ * they get an answer: Codex's five approval requests plus `item/tool/call`, and
+ * Cursor's `session/request_permission`. A codec that only turned lines into
+ * events could never reply, which is why plan 003's adapter interface is
+ * semantic rather than a reducer, and why correlating request ids is the
+ * adapter's job rather than the supervisor's.
+ *
+ * Vendor-neutral on purpose. Codex `app-server` and Cursor ACP both speak
+ * newline-delimited JSON-RPC 2.0 over stdio, so a second copy of this file would
+ * be two implementations of one wire format drifting apart — and the drift would
+ * show up as a hung turn rather than as a failing test. What each vendor calls
+ * itself enters only through `peerName`, which appears in timeout and teardown
+ * messages a user may read.
  *
  * The framing, byte caps and process-tree teardown all belong to the supervisor's
  * `ExternalAgentManagedProcess`; this only speaks the protocol on top of them.
  */
 
-import type { ExternalAgentManagedProcess } from '../process';
+import type { ExternalAgentManagedProcess } from './process';
 
 /** How long a single pump read waits before looping to re-check liveness. */
 const PUMP_POLL_MS = 250;
 
-export interface CodexJsonRpcError {
+export interface JsonRpcErrorBody {
   readonly code: number;
   readonly message: string;
   readonly data?: unknown;
 }
 
 /** A failed JSON-RPC call, with the vendor's own structure intact. */
-export class CodexRpcError extends Error {
+export class JsonRpcCallError extends Error {
   readonly code: number;
   readonly data: unknown;
   readonly requestId: string;
+  readonly method: string;
 
-  constructor(method: string, requestId: string, error: CodexJsonRpcError) {
+  constructor(method: string, requestId: string, error: JsonRpcErrorBody) {
     super(error.message);
-    this.name = 'CodexRpcError';
+    this.name = 'JsonRpcCallError';
     this.code = error.code;
     this.data = error.data;
     this.requestId = requestId;
     this.method = method;
   }
-
-  readonly method: string;
 }
 
 /** What a server→client request handler answers with. */
-export type CodexServerRequestOutcome =
+export type JsonRpcServerRequestOutcome =
   | { readonly result: unknown }
-  | { readonly error: CodexJsonRpcError };
+  | { readonly error: JsonRpcErrorBody };
 
-export interface CodexJsonRpcHandlers {
+export interface JsonRpcHandlers {
   onNotification(method: string, params: unknown): void;
   /**
    * Answers a server→client request.
@@ -59,7 +66,7 @@ export interface CodexJsonRpcHandlers {
     method: string,
     params: unknown,
     requestId: string
-  ): Promise<CodexServerRequestOutcome> | CodexServerRequestOutcome;
+  ): Promise<JsonRpcServerRequestOutcome> | JsonRpcServerRequestOutcome;
 }
 
 interface Pending {
@@ -68,18 +75,24 @@ interface Pending {
   reject(error: Error): void;
 }
 
-export class CodexJsonRpcClient {
+export class StdioJsonRpcClient {
   readonly #process: ExternalAgentManagedProcess;
-  readonly #handlers: CodexJsonRpcHandlers;
+  readonly #handlers: JsonRpcHandlers;
+  readonly #peerName: string;
   readonly #pending = new Map<string, Pending>();
   readonly #pump: Promise<void>;
   #nextId = 1;
   #stopped = false;
   #failure?: Error;
 
-  constructor(managed: ExternalAgentManagedProcess, handlers: CodexJsonRpcHandlers) {
+  constructor(
+    managed: ExternalAgentManagedProcess,
+    handlers: JsonRpcHandlers,
+    peerName = 'external agent'
+  ) {
     this.#process = managed;
     this.#handlers = handlers;
+    this.#peerName = peerName;
     this.#pump = this.#run();
   }
 
@@ -95,7 +108,7 @@ export class CodexJsonRpcClient {
     signal?: AbortSignal
   ): Promise<T> {
     if (this.#failure) throw this.#failure;
-    if (this.#stopped) throw new Error('The Codex app-server connection is closed.');
+    if (this.#stopped) throw new Error(`The ${this.#peerName} connection is closed.`);
     const id = String(this.#nextId++);
 
     const settled = new Promise<unknown>((resolve, reject) => {
@@ -116,12 +129,16 @@ export class CodexJsonRpcClient {
 
     const timer = setTimeout(() => {
       this.#settle(id, (pending) =>
-        pending.reject(new Error(`Codex "${method}" did not answer within ${timeoutMs}ms.`))
+        pending.reject(
+          new Error(`The ${this.#peerName} "${method}" did not answer within ${timeoutMs}ms.`)
+        )
       );
     }, timeoutMs);
     timer.unref?.();
     const onAbort = () => {
-      this.#settle(id, (pending) => pending.reject(new Error(`Codex "${method}" was cancelled.`)));
+      this.#settle(id, (pending) =>
+        pending.reject(new Error(`The ${this.#peerName} "${method}" was cancelled.`))
+      );
     };
     signal?.addEventListener('abort', onAbort, { once: true });
 
@@ -142,7 +159,7 @@ export class CodexJsonRpcClient {
   async close(): Promise<void> {
     this.#stopped = true;
     this.#process.stdout.close();
-    this.#rejectAll(new Error('The Codex app-server connection was closed.'));
+    this.#rejectAll(new Error(`The ${this.#peerName} connection was closed.`));
     await this.#pump;
   }
 
@@ -166,7 +183,7 @@ export class CodexJsonRpcClient {
         if (read.kind === 'timeout') continue;
         if (read.kind === 'eof') {
           this.#failure ??= new Error(
-            `The Codex app-server exited. ${this.#process.stderrTail()}`.trim()
+            `The ${this.#peerName} exited. ${this.#process.stderrTail()}`.trim()
           );
           this.#rejectAll(this.#failure);
           return;
@@ -199,7 +216,7 @@ export class CodexJsonRpcClient {
       return;
     }
     if (typeof method === 'string') {
-      await this.#answer(String(id), method, message.params);
+      await this.#answer(id, method, message.params);
       return;
     }
     if (id === undefined) return;
@@ -208,7 +225,7 @@ export class CodexJsonRpcClient {
       const error = message.error;
       if (error && typeof error === 'object') {
         pending.reject(
-          new CodexRpcError(pending.method, String(id), error as unknown as CodexJsonRpcError)
+          new JsonRpcCallError(pending.method, String(id), error as unknown as JsonRpcErrorBody)
         );
         return;
       }
@@ -216,8 +233,24 @@ export class CodexJsonRpcClient {
     });
   }
 
-  async #answer(id: string, method: string, params: unknown): Promise<void> {
-    let outcome: CodexServerRequestOutcome;
+  /**
+   * Answers a server→client request, echoing its id **exactly as it arrived**.
+   *
+   * The id is passed through untouched rather than normalized, and that is
+   * load-bearing rather than tidy. JSON-RPC ids may be strings or numbers, and
+   * Cursor's ACP server numbers its requests from zero: replying to request `0`
+   * with `"0"` is a different id, so the vendor never matches the answer to the
+   * question and blocks forever — which presents as a turn that renders an
+   * approval, accepts a click, and then simply never finishes. Found against a
+   * live `cursor-agent`, not in a fixture, because a fixture that echoed ids
+   * loosely would have agreed with the bug.
+   *
+   * The handler still receives the stringified form, because that is a map key
+   * on this side and never goes back on the wire.
+   */
+  async #answer(rawId: unknown, method: string, params: unknown): Promise<void> {
+    const id = String(rawId);
+    let outcome: JsonRpcServerRequestOutcome;
     try {
       outcome = await this.#handlers.onServerRequest(method, params, id);
     } catch (error) {
@@ -229,7 +262,7 @@ export class CodexJsonRpcClient {
       };
     }
     try {
-      await this.#process.writeLine({ jsonrpc: '2.0', id, ...outcome });
+      await this.#process.writeLine({ jsonrpc: '2.0', id: rawId, ...outcome });
     } catch {
       // The process died between the request and our reply; `#run` surfaces it.
     }

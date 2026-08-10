@@ -13,6 +13,7 @@
  * controller. This module knows how to put bytes on a socket.
  */
 
+import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
@@ -34,6 +35,7 @@ import {
   type ExternalTurnController,
   externalTurnController,
 } from './external-turn-controller';
+import { requiresWorkspaceTrust } from './external-workspace-trust';
 
 const logger = createDiagnosticLogger('external-turn-stream');
 
@@ -72,7 +74,20 @@ export type ExternalTurnPreflightFailure =
   | { readonly kind: 'conflict'; readonly message: string }
   | { readonly kind: 'unsupported'; readonly message: string }
   | { readonly kind: 'unavailable'; readonly message: string }
-  | { readonly kind: 'validation'; readonly message: string };
+  | { readonly kind: 'validation'; readonly message: string }
+  /**
+   * The vendor would load this workspace's own configuration and the user has
+   * not agreed to that yet. Carries the whole scope the grant would cover, not
+   * just the path the dialog prints: the client echoes it back when recording
+   * consent, and the grant is refused if the chat no longer resolves to it.
+   */
+  | {
+      readonly kind: 'workspace-trust';
+      readonly message: string;
+      readonly workspacePath: string;
+      readonly targetId: ExternalAgentTargetId;
+      readonly environmentId: string;
+    };
 
 export type ExternalTurnStreamResult =
   | { readonly ok: true; readonly response: Response }
@@ -139,6 +154,33 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
     }
     if (!resolution.ok) {
       return { ok: false, failure: { kind: 'unsupported', message: resolution.message } };
+    }
+
+    // After resolution, because the canonical path is what gets trusted and only
+    // the runtime that owns the machine can spell it. Before the stream, because
+    // a refusal after the 200 is committed reads as a turn that failed rather
+    // than as one that never began.
+    if (
+      await requiresWorkspaceTrust(
+        {
+          userId: input.userId,
+          targetId: input.chat.runner.targetId,
+          environmentId: input.chat.environmentId,
+          workspacePath: resolution.canonicalWorkspacePath,
+        },
+        db
+      )
+    ) {
+      return {
+        ok: false,
+        failure: {
+          kind: 'workspace-trust',
+          message: 'This workspace has not been trusted for this agent yet.',
+          workspacePath: resolution.canonicalWorkspacePath,
+          targetId: input.chat.runner.targetId,
+          environmentId: input.chat.environmentId,
+        },
+      };
     }
 
     return { ok: true, response: openStream(input, resolution, db, controller) };
