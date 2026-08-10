@@ -27,7 +27,7 @@ import type {
   ExternalApprovalRequest,
 } from '@mangostudio/shared/external-agents';
 import type { AcpRequestPermissionParams, AcpRequestPermissionResponse } from './protocol';
-import { activityKindFor, toolCallDetail, toolCallTitle } from './tool-calls';
+import { activityKindFor, detailFields, toolCallDetail, toolCallTitle } from './tool-calls';
 
 /**
  * How long an unanswered approval stays answerable.
@@ -140,7 +140,7 @@ function planCursorPermissionRequest(
       requestId,
       kind,
       title: toolCallTitle(toolCall),
-      ...(detail ? { detail } : {}),
+      ...detailFields(detail),
       options,
       expiresAtMs: nowMs + CURSOR_APPROVAL_TTL_MS,
     },

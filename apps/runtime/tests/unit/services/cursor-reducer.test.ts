@@ -75,6 +75,30 @@ describe('cursor reducer — a recorded turn', () => {
     expect(detail).toContain('hello-from-acp');
   });
 
+  it('reports truncation by what was cut, not by how wide the result reads', () => {
+    // A cut counts code points; `String.length` counts UTF-16 units. Measuring
+    // the result would call 1,100 astral characters truncated although nothing
+    // was dropped, and would miss a cut that landed exactly on the bound.
+    const wide = '\u{1F600}'.repeat(1_100);
+    const long = 'a'.repeat(5_000);
+    const call = (text: string) => ({
+      sessionUpdate: 'tool_call',
+      toolCallId: `call-${text.length}`,
+      kind: 'execute',
+      status: 'in_progress',
+      content: [{ type: 'content', content: { type: 'text', text } }],
+    });
+
+    const [intact] = replay([call(wide)]);
+    expect(intact).toMatchObject({ type: 'activity_started' });
+    expect(intact?.type === 'activity_started' ? intact.activity.truncated : 'missing').toBe(
+      undefined
+    );
+
+    const [cut] = replay([call(long)]);
+    expect(cut?.type === 'activity_started' ? cut.activity.truncated : undefined).toBe(true);
+  });
+
   it('ignores additive variants and the ones that are not the turn talking', () => {
     const events = replay([
       { sessionUpdate: 'quantum_update', payload: { anything: true } },

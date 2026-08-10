@@ -21,7 +21,13 @@ import type { ExternalActivityKind } from '@mangostudio/shared/external-agents';
 import type { AcpToolCallContent, AcpToolCallFields, AcpToolKind } from './protocol';
 
 /** How much of a tool call's own output one rendered field carries. */
-export const CURSOR_DETAIL_MAX_CHARS = 2_000;
+const CURSOR_DETAIL_MAX_CHARS = 2_000;
+
+/** A rendered detail and whether producing it dropped anything. */
+export interface CursorDetail {
+  readonly detail: string;
+  readonly truncated: boolean;
+}
 
 /**
  * ACP's ten tool kinds, mapped onto the neutral icon buckets.
@@ -102,11 +108,16 @@ function textOf(block: AcpToolCallContent): string | undefined {
  * ACP's, and a reader that special-cased `stdout` would show nothing at all for
  * every other tool. Showing what the vendor actually returned is the honest
  * option, and it is the same class of data the content blocks carry.
+ *
+ * Truncation is reported rather than left to be inferred from the returned
+ * string: the cut counts code points and `String.length` counts UTF-16 units,
+ * so a caller re-measuring the result marks 1,000 emoji as truncated and a
+ * string cut at exactly the bound as intact — wrong in both directions.
  */
 export function toolCallDetail(
   content: readonly AcpToolCallContent[] | undefined,
   raw: unknown
-): string | undefined {
+): CursorDetail | undefined {
   const fromContent = (content ?? [])
     .map(textOf)
     .filter((text): text is string => text !== undefined)
@@ -132,9 +143,18 @@ export function toolCallDetail(
  * but it strips it by *removing a character the user typed*, and marks the
  * whole field truncated for a reason that never existed.
  */
-function truncate(value: string): string {
+function truncate(value: string): CursorDetail {
   const points = [...value];
   return points.length <= CURSOR_DETAIL_MAX_CHARS
-    ? value
-    : points.slice(0, CURSOR_DETAIL_MAX_CHARS).join('');
+    ? { detail: value, truncated: false }
+    : { detail: points.slice(0, CURSOR_DETAIL_MAX_CHARS).join(''), truncated: true };
+}
+
+/** The `detail` / `truncated` pair, shaped for spreading into a rendered view. */
+export function detailFields(value: CursorDetail | undefined): {
+  detail?: string;
+  truncated?: boolean;
+} {
+  if (!value) return {};
+  return { detail: value.detail, ...(value.truncated ? { truncated: true } : {}) };
 }

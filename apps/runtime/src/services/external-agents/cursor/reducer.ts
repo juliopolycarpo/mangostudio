@@ -43,7 +43,7 @@ import type {
 import {
   activityKindFor,
   activityNameFor,
-  CURSOR_DETAIL_MAX_CHARS,
+  detailFields,
   toolCallDetail,
   toolCallOutcome,
   toolCallTitle,
@@ -204,7 +204,7 @@ export class CursorTurnReducer {
         name,
         kind: activityKindFor(update.kind),
         title: toolCallTitle(update),
-        ...(detail ? { detail } : {}),
+        ...detailFields(detail),
       },
     });
   }
@@ -228,7 +228,7 @@ export class CursorTurnReducer {
       return only({
         type: 'activity_completed',
         callId: handle,
-        result: { status: outcome, ...(detail ? { detail } : {}) },
+        result: { status: outcome, ...detailFields(detail) },
       });
     }
 
@@ -240,10 +240,7 @@ export class CursorTurnReducer {
     return only({
       type: 'activity_updated',
       callId: handle,
-      update: {
-        detail,
-        ...(detail.length >= CURSOR_DETAIL_MAX_CHARS ? { truncated: true } : {}),
-      },
+      update: detailFields(detail),
     });
   }
 
