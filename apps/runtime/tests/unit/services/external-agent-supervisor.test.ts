@@ -279,6 +279,24 @@ describe('external-agent adapter registry and supervisor', () => {
     expect(value.adapter.opens).toHaveLength(0);
   });
 
+  it('hands every turn the executable that open resolved', async () => {
+    const value = await fixture({ resolveExecutable: async () => ({ path: process.execPath }) });
+    await openSession(value);
+
+    await value.supervisor.turn({
+      sessionId: 'session-1',
+      clientMessageId: 'message-1',
+      input: 'hello',
+      configuration: CONFIGURATION,
+    });
+
+    // A vendor that spawns a process per turn — Claude Code's headless stream —
+    // has nothing else to spawn from, and cannot re-resolve one itself.
+    expect(value.adapter.opens[0]?.context.executablePath).toBe(process.execPath);
+    expect(value.adapter.turns[0]?.context.executablePath).toBe(process.execPath);
+    await value.supervisor.close();
+  });
+
   it('streams ordered semantic events and coalesces a retried client message id', async () => {
     const adapter = new FakeExternalAgentAdapter({
       events: [
