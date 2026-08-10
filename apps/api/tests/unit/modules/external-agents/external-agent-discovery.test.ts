@@ -689,6 +689,72 @@ describe('external agent discovery — the authoritative pass', () => {
       expect(signal.published).toEqual(['user-1']);
     });
 
+    it('publishes once per probe, not once per caller waiting on it', async () => {
+      // The single-flight collapses a burst of selector renders onto one vendor
+      // subprocess, but every caller reaching it would otherwise attach its own
+      // completion handler and announce the same conclusion. One probe has to
+      // mean one signal, or a burst of renders fans out into a burst of
+      // refetches for every socket the owner has open.
+      let probes = 0;
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        publishRefresh: signal.publishRefresh,
+        authoritative: authoritative(
+          [{ targetId: 'codex', version: '0.147.0', capabilities: ALL_CAPABLE }],
+          {
+            onCall: () => {
+              probes += 1;
+            },
+            delayMs: 10,
+          }
+        ),
+      });
+
+      await Promise.all([
+        service.listExternalAgents(SCOPE),
+        service.listExternalAgents(SCOPE),
+        service.listExternalAgents(SCOPE),
+      ]);
+      await signal.untilPublished(1);
+      await drainBackgroundWork();
+
+      expect(probes).toBe(1);
+      expect(signal.published).toEqual(['user-1']);
+    });
+
+    it('still probes after a reset retires the probe already being watched', async () => {
+      // The one-watcher-per-probe guard is keyed on the cache generation too. A
+      // reset makes the running probe's result unusable, so the request that
+      // follows it must be able to start and watch a replacement rather than
+      // being mistaken for another caller of the probe it just retired.
+      let probes = 0;
+      const signal = refreshSignal();
+      const service = createExternalAgentDiscoveryService({
+        probingService: PROBING,
+        authoritative: authoritative(
+          [{ targetId: 'codex', version: '0.147.0', capabilities: ALL_CAPABLE }],
+          {
+            onCall: () => {
+              probes += 1;
+            },
+            delayMs: 10,
+          }
+        ),
+        publishRefresh: signal.publishRefresh,
+      });
+
+      await service.listExternalAgents(SCOPE);
+      service.resetCache('env-1', 'user-1');
+      await service.listExternalAgents(SCOPE);
+      await signal.untilPublished(1);
+      await drainBackgroundWork();
+
+      expect(probes).toBe(2);
+      // Only the surviving generation's probe announced itself.
+      expect(signal.published).toEqual(['user-1']);
+    });
+
     it('stays silent when a refresh reproduces the answer it already served', async () => {
       let clock = 1_000;
       const signal = refreshSignal();

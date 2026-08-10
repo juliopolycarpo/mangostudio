@@ -503,6 +503,8 @@ export function createExternalAgentDiscoveryService(
   const inflight = new Map<string, InflightEntry>();
   const generations = new Map<string, number>();
   const running = new Map<string, number>();
+  /** Probes that already have someone watching to announce their result. */
+  const watched = new Set<string>();
 
   function tryEnter(key: string): boolean {
     const current = running.get(key) ?? 0;
@@ -640,6 +642,13 @@ export function createExternalAgentDiscoveryService(
    * Nothing awaits this, which is the entire point: the probe is a vendor
    * subprocess on someone else's machine that can legitimately take ten seconds,
    * and no selector render should sit behind it.
+   *
+   * One watcher per (scope, generation). The single-flight already collapses
+   * concurrent callers onto one subprocess, but each of them would otherwise
+   * attach its own completion handler and publish the same conclusion — three
+   * renders of one selector becoming three identical signals for one probe.
+   * Keying on the generation as well as the scope keeps a reset's replacement
+   * probe watchable rather than mistaking it for the one it retired.
    */
   function refreshInBackground(
     scope: ProbeScope,
@@ -649,6 +658,9 @@ export function createExternalAgentDiscoveryService(
   ): void {
     const key = scopeKey(scope);
     const generation = generations.get(key) ?? 0;
+    const watchKey = `${key}${SEPARATOR}${generation}`;
+    if (watched.has(watchKey)) return;
+    watched.add(watchKey);
 
     void authoritativeFor(scope, targetIds)
       .then((byTarget) => {
@@ -677,7 +689,8 @@ export function createExternalAgentDiscoveryService(
           `[external-agents] Background discovery refresh failed for environment ${scope.environmentId}:`,
           error instanceof Error ? error.message : 'unknown error'
         );
-      });
+      })
+      .finally(() => watched.delete(watchKey));
   }
 
   return {
