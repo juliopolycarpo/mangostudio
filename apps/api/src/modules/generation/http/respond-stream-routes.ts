@@ -356,9 +356,17 @@ export const respondStreamRoutes = (app: Elysia) =>
               code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
               // The disclosure has to name what gets loaded, and only the
               // machine that runs the vendor can spell the directory it will
-              // read. The client renders this; it never composes one.
+              // read. The client renders this; it never composes one. The
+              // vendor and machine travel with it so the grant that follows can
+              // be checked against the scope this refusal disclosed.
               ...(result.failure.kind === 'workspace-trust'
-                ? { details: { workspacePath: result.failure.workspacePath } }
+                ? {
+                    details: {
+                      workspacePath: result.failure.workspacePath,
+                      targetId: result.failure.targetId,
+                      environmentId: result.failure.environmentId,
+                    },
+                  }
                 : {}),
             };
           }

@@ -13,10 +13,12 @@
  * endpoint behind that offer.
  *
  * `trust-workspace` records that the user agreed to let this vendor load the
- * chat's workspace configuration. It takes **no path**: the server re-derives
- * the canonical one exactly as the turn does, so the string that gets stored is
- * the string the next check reads, and a client cannot widen the grant by
- * spelling a directory differently.
+ * chat's workspace configuration. Every value it stores is re-derived from the
+ * chat — the canonical path exactly as the turn derives it — so a client cannot
+ * widen the grant by spelling a directory differently. The scope in the body is
+ * not an input to that derivation; it is the scope the refusal disclosed, and
+ * the request is refused when the two no longer agree. Consent names a
+ * workspace, and the workspace can change while the dialog is open.
  *
  * Cancellation is deliberately absent: the existing stop endpoint reaches an
  * external turn through the active-turn registry, and a second one would be a
@@ -59,9 +61,26 @@ const ForkBodySchema = t.Object({
 
 const ForkResponseSchema = t.Object({ chat: ChatSchema });
 
+const WorkspacePathSchema = t.String({ minLength: 1, maxLength: 4_096 });
+
+/**
+ * The scope the refusal disclosed, as the dialog rendered it.
+ *
+ * Not an input to the grant — every value stored is still derived from the chat
+ * — but the expectation the grant is checked against. Without it the endpoint
+ * grants whatever the chat says *now*, and a chat edited from another tab while
+ * the dialog was open would have the user's consent applied to a workspace,
+ * machine or vendor they never saw.
+ */
+const TrustWorkspaceBodySchema = t.Object({
+  workspacePath: WorkspacePathSchema,
+  targetId: VendorIdSchema,
+  environmentId: t.String({ minLength: 1, maxLength: 256 }),
+});
+
 const TrustWorkspaceResponseSchema = t.Object({
   /** The canonical directory the grant covers, as the target machine spells it. */
-  workspacePath: t.String({ minLength: 1, maxLength: 4_096 }),
+  workspacePath: WorkspacePathSchema,
 });
 
 /**
@@ -189,7 +208,7 @@ export function createExternalAgentTurnRoutes(
     )
     .post(
       '/chats/:id/external-agent/trust-workspace',
-      async ({ params, user, set }) => {
+      async ({ params, body, user, set }) => {
         const userId = user?.id ?? '';
         const db = getDb();
         const chat = await getOwnedChat(params.id, userId, db);
@@ -227,6 +246,24 @@ export function createExternalAgentTurnRoutes(
           };
         }
 
+        // The scope the refusal disclosed, echoed back by the dialog that
+        // displayed it. Never used to derive anything — the three values above
+        // still come from the chat — only to check that the answer belongs to
+        // the question. A chat's workdir, environment or runner can change from
+        // another tab while this dialog is open, and the grant would otherwise
+        // cover a workspace the user was never shown.
+        if (
+          body.workspacePath !== workspacePath ||
+          body.targetId !== chat.runner.targetId ||
+          body.environmentId !== chat.environmentId
+        ) {
+          set.status = 409;
+          return {
+            error: 'This chat changed while you were deciding. Try the message again.',
+            code: ERROR_CODES.CONFLICT,
+          };
+        }
+
         await grantWorkspaceTrust(
           {
             userId,
@@ -240,11 +277,13 @@ export function createExternalAgentTurnRoutes(
       },
       {
         params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        body: TrustWorkspaceBodySchema,
         response: {
           200: TrustWorkspaceResponseSchema,
           400: ApiErrorResponseSchema,
           401: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
           503: ApiErrorResponseSchema,
         },
       }

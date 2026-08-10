@@ -565,8 +565,14 @@ describe('workspace trust', () => {
     if (result.ok) return;
     expect(result.failure.kind).toBe('workspace-trust');
     // The disclosure has to name what gets loaded, and only the machine running
-    // the vendor can spell it.
-    expect(result.failure).toMatchObject({ workspacePath: '/work/repo' });
+    // the vendor can spell it. The vendor and machine travel with the path
+    // because the grant is checked against this whole scope, not just the part
+    // the dialog prints.
+    expect(result.failure).toMatchObject({
+      workspacePath: '/work/repo',
+      targetId: 'cursor',
+      environmentId: 'local',
+    });
   });
 
   it('lets the same turn through once the workspace is trusted', async () => {

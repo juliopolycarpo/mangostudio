@@ -55,20 +55,32 @@ async function sendWithWorkspaceTrust(chatId: string, send: () => Promise<void>)
   try {
     await send();
   } catch (error) {
-    const workspacePath = untrustedWorkspacePath(error);
-    if (workspacePath === undefined) throw error;
-    const granted = await promptExternalWorkspaceTrust({ chatId, workspacePath });
+    const scope = untrustedWorkspaceScope(error);
+    if (scope === undefined) throw error;
+    const granted = await promptExternalWorkspaceTrust({ chatId, ...scope });
     if (!granted) throw error;
     await send();
   }
 }
 
-/** The directory a refusal named, or `undefined` when it was some other failure. */
-function untrustedWorkspacePath(error: unknown): string | undefined {
+/**
+ * The scope a refusal named, or `undefined` when it was some other failure.
+ *
+ * All three fields or none: the grant is checked against the scope this
+ * disclosed, and a partial one could only be checked partially.
+ */
+function untrustedWorkspaceScope(error: unknown):
+  | {
+      readonly workspacePath: string;
+      readonly targetId: string;
+      readonly environmentId: string;
+    }
+  | undefined {
   if (!(error instanceof ApiError)) return undefined;
   if (error.code !== ERROR_CODES.EXTERNAL_WORKSPACE_UNTRUSTED) return undefined;
-  const workspacePath = error.details?.workspacePath;
-  return typeof workspacePath === 'string' && workspacePath.length > 0 ? workspacePath : undefined;
+  const { workspacePath, targetId, environmentId } = error.details ?? {};
+  if (!workspacePath || !targetId || !environmentId) return undefined;
+  return { workspacePath, targetId, environmentId };
 }
 
 interface UseTextGenerationOptions {

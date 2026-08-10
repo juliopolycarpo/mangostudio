@@ -14,7 +14,12 @@ import {
   settleExternalWorkspaceTrust,
 } from '@/features/external-agents/workspace-trust-prompt';
 
-const request = { chatId: 'chat-1', workspacePath: '/home/someone/repo' };
+const request = {
+  chatId: 'chat-1',
+  workspacePath: '/home/someone/repo',
+  targetId: 'cursor',
+  environmentId: 'local',
+};
 
 describe('workspace trust prompt', () => {
   it('publishes the open request to a subscriber and resolves on the answer', async () => {

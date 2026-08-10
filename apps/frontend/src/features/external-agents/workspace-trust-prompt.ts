@@ -19,6 +19,16 @@ export interface ExternalWorkspaceTrustRequest {
   readonly chatId: string;
   /** The canonical directory the vendor will read, as the server spelled it. */
   readonly workspacePath: string;
+  /**
+   * The rest of the scope the grant would cover, as the refusal disclosed it.
+   *
+   * The dialog prints the path, but the grant is keyed on the vendor and the
+   * machine too. Carrying them means the answer can be checked against the
+   * question that was asked rather than against whatever the chat says by the
+   * time the user clicks.
+   */
+  readonly targetId: string;
+  readonly environmentId: string;
 }
 
 interface PendingPrompt extends ExternalWorkspaceTrustRequest {
@@ -30,11 +40,16 @@ type Listener = (pending: ExternalWorkspaceTrustRequest | null) => void;
 let pending: PendingPrompt | null = null;
 const listeners = new Set<Listener>();
 
+/** The request without the resolver, which is nobody else's to hold. */
+function snapshot(): ExternalWorkspaceTrustRequest | null {
+  if (!pending) return null;
+  const { settle: _settle, ...request } = pending;
+  return request;
+}
+
 function publish(): void {
-  const snapshot = pending
-    ? { chatId: pending.chatId, workspacePath: pending.workspacePath }
-    : null;
-  for (const listener of [...listeners]) listener(snapshot);
+  const current = snapshot();
+  for (const listener of [...listeners]) listener(current);
 }
 
 /**
@@ -76,7 +91,7 @@ export function promptExternalWorkspaceTrust(
  */
 export function onExternalWorkspaceTrustPrompt(listener: Listener): () => void {
   listeners.add(listener);
-  listener(pending ? { chatId: pending.chatId, workspacePath: pending.workspacePath } : null);
+  listener(snapshot());
   return () => {
     listeners.delete(listener);
     if (listeners.size === 0) settleExternalWorkspaceTrust(false);

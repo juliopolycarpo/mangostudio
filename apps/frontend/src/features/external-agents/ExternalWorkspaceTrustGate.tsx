@@ -45,7 +45,13 @@ export function ExternalWorkspaceTrustGate() {
     // Recorded first, retried second. The other order runs a vendor against a
     // workspace on the strength of a write that can still fail, leaving nothing
     // on record saying the user was ever asked.
-    void trustExternalWorkspace(request.chatId)
+    void trustExternalWorkspace(request.chatId, {
+      // The scope this dialog displayed, sent back so the server can refuse a
+      // grant for a chat that changed while it was open.
+      workspacePath: request.workspacePath,
+      targetId: request.targetId,
+      environmentId: request.environmentId,
+    })
       .then(() => settleExternalWorkspaceTrust(true))
       .catch(() => toast(labels.saveFailed, 'error'))
       .finally(() => setSaving(false));

@@ -13,6 +13,7 @@
  * controller. This module knows how to put bytes on a socket.
  */
 
+import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
@@ -76,14 +77,16 @@ export type ExternalTurnPreflightFailure =
   | { readonly kind: 'validation'; readonly message: string }
   /**
    * The vendor would load this workspace's own configuration and the user has
-   * not agreed to that yet. Carries the canonical path so the client can show
-   * what it is being asked about and record consent for the same string the
-   * check will re-read.
+   * not agreed to that yet. Carries the whole scope the grant would cover, not
+   * just the path the dialog prints: the client echoes it back when recording
+   * consent, and the grant is refused if the chat no longer resolves to it.
    */
   | {
       readonly kind: 'workspace-trust';
       readonly message: string;
       readonly workspacePath: string;
+      readonly targetId: ExternalAgentTargetId;
+      readonly environmentId: string;
     };
 
 export type ExternalTurnStreamResult =
@@ -174,6 +177,8 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
           kind: 'workspace-trust',
           message: 'This workspace has not been trusted for this agent yet.',
           workspacePath: resolution.canonicalWorkspacePath,
+          targetId: input.chat.runner.targetId,
+          environmentId: input.chat.environmentId,
         },
       };
     }

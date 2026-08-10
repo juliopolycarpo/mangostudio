@@ -271,12 +271,24 @@ describe('trusting a workspace for an external agent', () => {
   const anyController = () =>
     stubController({ status: 'accepted', optionId: 'x', idempotent: false }).controller;
 
+  /**
+   * The scope a refusal would have disclosed for these fixtures.
+   *
+   * Sent on every grant: the endpoint checks the answer against the question,
+   * so a request that carries no scope carries no consent to check.
+   */
+  const trustBody = (targetId: 'cursor' | 'codex' = 'cursor') => ({
+    workspacePath: '/canonical/work/repo',
+    targetId,
+    environmentId: 'local',
+  });
+
   it('records the canonical path the runtime spells, not the one the chat stored', async () => {
     const cursorChatId = await insertExternalChat('/work/repo', 'cursor');
     const app = mount(anyController());
 
     const response = await app.handle(
-      post(`/chats/${cursorChatId}/external-agent/trust-workspace`, {})
+      post(`/chats/${cursorChatId}/external-agent/trust-workspace`, trustBody())
     );
 
     expect(response.status).toBe(200);
@@ -305,7 +317,7 @@ describe('trusting a workspace for an external agent', () => {
     expect(await requiresWorkspaceTrust(scope, getDb())).toBe(true);
 
     const app = mount(anyController());
-    await app.handle(post(`/chats/${cursorChatId}/external-agent/trust-workspace`, {}));
+    await app.handle(post(`/chats/${cursorChatId}/external-agent/trust-workspace`, trustBody()));
 
     expect(await requiresWorkspaceTrust(scope, getDb())).toBe(false);
     // The grant is one directory on one machine, never a blanket.
@@ -337,10 +349,35 @@ describe('trusting a workspace for an external agent', () => {
     const app = mount(anyController());
 
     const response = await app.handle(
-      post(`/chats/${codexChatId}/external-agent/trust-workspace`, {})
+      post(`/chats/${codexChatId}/external-agent/trust-workspace`, trustBody('codex'))
     );
 
     expect(response.status).toBe(200);
+    const settings = await getAppSettings(getDb(), user.id);
+    expect(settings.externalAgentSettings.workspaceTrust).toEqual([]);
+  });
+
+  it('refuses a grant for a scope the dialog did not show', async () => {
+    // The dialog names one folder, on one machine, for one vendor. If any of
+    // the three changed while it was open — the chat edited from another tab —
+    // recording the grant would apply the user's consent to a workspace they
+    // were never shown, and the retry would start the vendor in it.
+    const cursorChatId = await insertExternalChat('/work/repo', 'cursor');
+    const app = mount(anyController());
+
+    const stale = [
+      { ...trustBody(), workspacePath: '/canonical/somewhere/else' },
+      { ...trustBody(), targetId: 'codex' },
+      { ...trustBody(), environmentId: 'build-server' },
+    ];
+
+    for (const body of stale) {
+      const response = await app.handle(
+        post(`/chats/${cursorChatId}/external-agent/trust-workspace`, body)
+      );
+      expect(response.status).toBe(409);
+    }
+
     const settings = await getAppSettings(getDb(), user.id);
     expect(settings.externalAgentSettings.workspaceTrust).toEqual([]);
   });
@@ -350,7 +387,7 @@ describe('trusting a workspace for an external agent', () => {
     const app = mount(anyController());
 
     const response = await app.handle(
-      post(`/chats/${cursorChatId}/external-agent/trust-workspace`, {})
+      post(`/chats/${cursorChatId}/external-agent/trust-workspace`, trustBody())
     );
     expect(response.status).toBe(400);
   });
@@ -376,7 +413,7 @@ describe('trusting a workspace for an external agent', () => {
 
     const app = mount(anyController());
     const response = await app.handle(
-      post(`/chats/${foreignChatId}/external-agent/trust-workspace`, {})
+      post(`/chats/${foreignChatId}/external-agent/trust-workspace`, trustBody())
     );
     expect(response.status).toBe(404);
   });
@@ -388,7 +425,7 @@ describe('trusting a workspace for an external agent', () => {
     });
 
     const response = await app.handle(
-      post(`/chats/${cursorChatId}/external-agent/trust-workspace`, {})
+      post(`/chats/${cursorChatId}/external-agent/trust-workspace`, trustBody())
     );
 
     expect(response.status).toBe(503);

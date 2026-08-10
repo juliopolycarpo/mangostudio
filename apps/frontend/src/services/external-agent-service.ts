@@ -75,15 +75,23 @@ export async function forkChatWithRunner(
 /**
  * Records that this vendor may load the chat workspace's own configuration.
  *
- * No path is sent. The server re-derives the canonical directory the same way
- * the turn does, on the machine that actually runs the vendor, so the string it
- * stores is the string the next check reads — and a client cannot widen the
- * grant by spelling a directory differently.
+ * The scope travels as an expectation, never as an input. The server re-derives
+ * every value it stores from the chat — the canonical directory on the machine
+ * that actually runs the vendor — so a client cannot widen the grant by spelling
+ * a directory differently. What the body does is let the server refuse when the
+ * chat no longer resolves to the scope the user was shown.
  */
-export async function trustExternalWorkspace(chatId: string): Promise<string> {
+export async function trustExternalWorkspace(
+  chatId: string,
+  scope: {
+    readonly workspacePath: string;
+    readonly targetId: string;
+    readonly environmentId: string;
+  }
+): Promise<string> {
   const { data, error } = await client.api
     .chats({ id: chatId })
-    ['external-agent']['trust-workspace'].post();
+    ['external-agent']['trust-workspace'].post(scope);
   if (error) throw new ApiError(error.value);
   return (data as { workspacePath: string }).workspacePath;
 }
