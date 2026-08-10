@@ -205,7 +205,7 @@ export class ExternalAgentSessionSupervisor {
     requestSignal: AbortSignal
   ): Promise<ExternalAgentDiscoverResult> {
     assertExternalAgentParams('external-agent.discover', ExternalAgentDiscoverParamsSchema, params);
-    const descriptors = await Promise.all(
+    const settled = await Promise.allSettled(
       params.targetIds.map(async (targetId) => {
         const adapter = this.#registry.require(targetId);
         const processes = new Set<ExternalAgentManagedProcess>();
@@ -250,6 +250,31 @@ export class ExternalAgentSessionSupervisor {
         }
       })
     );
+
+    /**
+     * One target's failure is that target's answer, not the batch's.
+     *
+     * `timeoutMs` is a **per-target** budget, so a slow or broken vendor has to
+     * cost only its own descriptor. Rejecting the whole batch would discard
+     * every healthy target alongside it, and the hub cannot tell that apart
+     * from "the runtime said nothing" — it would degrade Codex to the
+     * capability-free cheap scan because Cursor's handshake was slow, hiding
+     * the model and permission pickers for a vendor that answered fine.
+     *
+     * An omitted target is exactly what the hub already handles: it keeps the
+     * cheap pass for that one target and renders the rest.
+     */
+    const descriptors = settled.flatMap((outcome) =>
+      outcome.status === 'fulfilled' ? [outcome.value] : []
+    );
+    // A batch where nothing at all answered is still a failure, so a caller
+    // asking about a single target keeps hearing why it did not work.
+    if (descriptors.length === 0) {
+      throw settled[0]?.status === 'rejected'
+        ? (settled[0].reason as Error)
+        : new Error('External-agent discovery returned no descriptors.');
+    }
+
     const result = { descriptors };
     if (!Value.Check(ExternalAgentDiscoverResultSchema, result)) {
       throw new Error('External-agent discovery produced an invalid or unbounded result.');
