@@ -134,11 +134,12 @@ export interface ClaudeRunInit {
 }
 
 export function readClaudeInit(record: ClaudeInitRecord): ClaudeRunInit {
+  const capabilities = initCapabilities(record);
   return {
     ...(typeof record.session_id === 'string' && record.session_id.length > 0
       ? { sessionId: record.session_id }
       : {}),
-    ...(initCapabilities(record) ? { capabilities: initCapabilities(record) } : {}),
+    ...(capabilities ? { capabilities } : {}),
     ...(typeof record.permissionMode === 'string' ? { permissionMode: record.permissionMode } : {}),
     ...(typeof record.model === 'string' ? { model: record.model } : {}),
   };

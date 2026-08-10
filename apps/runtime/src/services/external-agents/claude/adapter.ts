@@ -338,9 +338,9 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
         if (reduction.finished) sawResult = true;
       }
 
-      // A session only becomes resumable once a run has actually created it.
-      // Marking it earlier would make the next turn pass `--resume` for a
-      // conversation that does not exist.
+      // Belt and braces alongside `applyInit`: a run that somehow produced a
+      // result without an init record still created the conversation, and the
+      // next turn has to resume it rather than mint the same id again.
       if (sawResult) session.established = true;
 
       if (!sawResult && !active.cancelled) {
@@ -356,6 +356,17 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
         })) {
           channel.push(event);
         }
+      }
+    } catch (error) {
+      // Emitted here rather than by the caller's `.catch`, because the `finally`
+      // below closes the channel and `TurnChannel` drops everything pushed after
+      // that. A stdout line over the reader's byte limit, an aborted turn, or an
+      // EPIPE on the prompt write would otherwise end the stream with neither an
+      // `error` nor a `completed` event, leaving open activity pills spinning in
+      // a turn the supervisor sees simply stop.
+      if (active.cancelled) return;
+      for (const event of reducer.abort(toExternalAgentError(error, 'claude-turn'))) {
+        channel.push(event);
       }
     } finally {
       channel.finish();
@@ -551,19 +562,24 @@ async function readManagedSettingsFile(): Promise<unknown> {
 /**
  * Folds a run's `system/init` back into the session.
  *
- * Two things are learned here that discovery could not know, because both need
- * a live process: the session id the vendor actually used, and the permission
- * mode this account resolves its default to. The second is what makes
- * MangoStudio's `default` level follow the account through the 2026-08-14 flip
- * instead of pinning a mode the user sees nowhere else.
+ * The session id is the one thing here discovery could not know, because it
+ * takes a live process to learn it — and the record proves the conversation now
+ * exists on disk, which is what makes the *next* turn a `--resume` rather than
+ * another attempt to mint an id the CLI has already taken.
+ *
+ * `init.permissionMode` is deliberately **not** folded back into
+ * `availability.effectiveDefaultIsAuto`. Every run is launched with an explicit
+ * `--permission-mode`, so the record echoes the mode MangoStudio chose rather
+ * than the account's own default — it can never establish the 2026-08-14 flip,
+ * and reading it as if it could is actively unsafe: one turn at
+ * `default` + `auto-review` passes `auto`, sees `auto` echoed back, and would
+ * then silently resolve the plain `default` level to `auto` for the rest of the
+ * session. A user who asked to be asked would stop being asked.
  */
 function applyInit(session: ClaudeSession, init: ClaudeRunInit): void {
-  if (init.sessionId && init.sessionId.length > 0) session.sessionId = init.sessionId;
-  if (init.permissionMode !== undefined) {
-    session.availability = {
-      ...session.availability,
-      effectiveDefaultIsAuto: init.permissionMode === 'auto',
-    };
+  if (init.sessionId && init.sessionId.length > 0) {
+    session.sessionId = init.sessionId;
+    session.established = true;
   }
   if (init.model && init.model.length > 0) {
     session.configuration = { ...session.configuration, model: init.model };
