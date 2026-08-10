@@ -447,7 +447,11 @@ describe('release workflow binary gate', () => {
     const verifyReleaseBlock = extractJobBlock(workflow, 'verify-release');
     expect(verifyReleaseBlock).toContain('name: Verify npm wrapper platform resolution');
     expect(verifyReleaseBlock).toContain('MANGOSTUDIO_WRAPPER_INFO=1 mangostudio');
-    expect(verifyReleaseBlock).toContain('raw_runtime="mangostudio-runtime-${VERSION}-${PLATFORM}');
+    // Split the same way `platformVar` below is: these are shell expansions in
+    // a workflow, and biome reads `${...}` in a plain string as a template
+    // literal someone forgot to tag.
+    const runtimeArtifact = 'mangostudio-runtime-$' + '{VERSION}-$' + '{PLATFORM}';
+    expect(verifyReleaseBlock).toContain(`raw_runtime="${runtimeArtifact}`);
     expect(verifyReleaseBlock).toContain('Expected raw runtime version');
     const platformVar = '$' + '{PLATFORM/windows/win32}';
     expect(verifyReleaseBlock).toContain(`expected_package="@mangostudio/cli-${platformVar}"`);
