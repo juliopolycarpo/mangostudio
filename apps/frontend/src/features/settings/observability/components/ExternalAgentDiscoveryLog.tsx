@@ -33,7 +33,12 @@ export function ExternalAgentDiscoveryLog() {
         <p className="text-sm text-on-surface-variant/70">{labels.description}</p>
       </div>
 
-      {external.agents.length === 0 ? (
+      {external.isLoading ? (
+        // "No agents" is a verdict, and this query outlives the page's other
+        // one: claiming it before discovery answers would read as a machine
+        // with nothing installed.
+        <p className="text-sm text-on-surface-variant/70">{t.common.loading}</p>
+      ) : external.agents.length === 0 ? (
         <p className="text-sm text-on-surface-variant/70">{labels.empty}</p>
       ) : (
         <ul className="space-y-2">

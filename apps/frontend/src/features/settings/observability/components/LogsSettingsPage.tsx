@@ -18,9 +18,15 @@ export function LogsSettingsPage() {
 
   if (isLoading) {
     return (
-      <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
-        {t.common.loading}
-      </Card>
+      <div className="space-y-4">
+        {/* Same independence as the error branch below: the discovery query is
+            this component's, not the probe log's, and gating it behind that
+            request only delays it. */}
+        <ExternalAgentDiscoveryLog />
+        <Card variant="solid" className="p-4 sm:p-6 text-sm text-on-surface-variant/70">
+          {t.common.loading}
+        </Card>
+      </div>
     );
   }
 
