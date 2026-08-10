@@ -2,20 +2,13 @@ import { isAgentId } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration, ChatRunnerPermissions } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
+  isExternalAgentTargetId,
   normalizeApprovalRouting,
   normalizePermissionLevel,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely, Selectable, Updateable } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
-
-const EXTERNAL_TARGET_IDS = ['codex', 'cursor', 'claude'] as const;
-
-function isExternalTargetId(
-  value: string
-): value is Extract<ChatRunnerConfiguration, { kind: 'external' }>['targetId'] {
-  return EXTERNAL_TARGET_IDS.some((targetId) => targetId === value);
-}
 
 class ChatRunnerCorruptionError extends Error {
   constructor(chatId: string, reason: string) {
@@ -92,7 +85,11 @@ function toRunnerConfiguration(row: RunnerColumns): ChatRunnerConfiguration {
   }
 
   if (row.runnerKind === 'external') {
-    if (!row.runnerTargetId || !isExternalTargetId(row.runnerTargetId)) {
+    // Narrowed through the contract's own guard, never a list restated here:
+    // the update route accepts any target `ExternalAgentTargetIdSchema` admits,
+    // so a copy that fell behind it would make a chat this hub happily wrote
+    // unreadable on every later read.
+    if (!row.runnerTargetId || !isExternalAgentTargetId(row.runnerTargetId)) {
       throw new ChatRunnerCorruptionError(
         row.id,
         "runnerKind='external' requires a valid runnerTargetId"

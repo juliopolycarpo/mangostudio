@@ -104,6 +104,7 @@ export {
   ExternalTurnTerminalReasonSchema,
   type ExternalUsage,
   ExternalUsageSchema,
+  isExternalAgentTargetId,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from './schemas';
 export {

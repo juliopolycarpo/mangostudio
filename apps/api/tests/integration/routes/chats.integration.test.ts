@@ -439,6 +439,10 @@ describe('PUT /chats/:id', () => {
         updatedAt: Date.now(),
         model: null,
         runnerKind: 'external',
+        // Null, not the column default: `runnerColumns` clears the companion
+        // column the kind does not use, so a fixture that kept 'default' would
+        // be a row shape the hub never writes.
+        runnerAgentId: null,
         runnerTargetId: 'codex',
         userId: TEST_USER.id,
       })
