@@ -22,6 +22,7 @@ import type {
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
 import { Cpu } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import { PermissionSelector } from '@/features/chat/components/PermissionSelector';
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -53,13 +54,40 @@ export function ExternalComposerControls({
 }: ExternalComposerControlsProps) {
   const { t } = useI18n();
   const labels = t.externalAgents;
-  if (!descriptor) return null;
 
-  const models = (descriptor.models ?? []).filter((candidate) => candidate.hidden !== true);
+  const models = (descriptor?.models ?? []).filter((candidate) => candidate.hidden !== true);
   const selectedModel =
     models.find((candidate) => candidate.id === model) ??
     models.find((candidate) => candidate.isDefault);
   const efforts = selectedModel?.supportedReasoningEfforts ?? [];
+
+  /**
+   * A selection the refreshed catalog no longer offers is dropped, not merely
+   * hidden.
+   *
+   * Falling back to the default for *display* while the request still names the
+   * old model is the case that matters: the hub honours an explicitly requested
+   * model even when the vendor marked it `hidden`, so a model that goes hidden
+   * between two turns would keep running while the picker shows the default —
+   * the turn and the control disagreeing about what is running it.
+   *
+   * A catalog that is momentarily empty is a refetch, not a removal, so it
+   * reconciles nothing.
+   */
+  const selectionIsGone =
+    model !== null && models.length > 0 && !models.some((candidate) => candidate.id === model);
+  // Held in a ref because the call sites are inline closures: depending on them
+  // directly would re-run this on every parent render.
+  const changeRef = useRef({ onModelChange, onEffortChange });
+  changeRef.current = { onModelChange, onEffortChange };
+  useEffect(() => {
+    if (!selectionIsGone) return;
+    changeRef.current.onModelChange(null);
+    // The effort vocabulary belonged to the model that just went away.
+    changeRef.current.onEffortChange(null);
+  }, [selectionIsGone]);
+
+  if (!descriptor) return null;
 
   return (
     <>
