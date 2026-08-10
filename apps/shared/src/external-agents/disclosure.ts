@@ -31,11 +31,24 @@ import { ExternalAgentTargetIdSchema } from './schemas';
  */
 export const EXTERNAL_DISCLOSURE_VERSION = 1;
 
+/**
+ * The fingerprint's upper bound, shared so the schema and the settings
+ * normalizer cannot drift apart.
+ *
+ * The current material list produces about 104 characters, and a normalizer
+ * that admitted a longer one would hand `AppSettingsPutBodySchema` a value it
+ * rejects on the next save.
+ */
+export const EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH = 256;
+
 export const ExternalAgentDisclosureSchema = Type.Object({
   version: Type.Integer({ minimum: 1 }),
   acceptedAt: Type.Integer({ minimum: 0 }),
   /** What the adapter declared when this was accepted. */
-  capabilitiesFingerprint: Type.String({ minLength: 1, maxLength: 128 }),
+  capabilitiesFingerprint: Type.String({
+    minLength: 1,
+    maxLength: EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
+  }),
 });
 
 export type ExternalAgentDisclosure = Static<typeof ExternalAgentDisclosureSchema>;

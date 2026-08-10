@@ -1,5 +1,6 @@
 export {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,
+  EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
   EXTERNAL_DISCLOSURE_VERSION,
   type ExternalAgentDisclosure,
   ExternalAgentDisclosureSchema,

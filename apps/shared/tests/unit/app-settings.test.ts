@@ -36,6 +36,12 @@ import {
   SUBAGENT_MAX_TURNS_MIN,
   withLibraryLocations,
 } from '../../src/app-settings';
+import {
+  DEFAULT_EXTERNAL_AGENT_SETTINGS,
+  EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
+  externalCapabilitiesFingerprint,
+  NO_EXTERNAL_AGENT_CAPABILITIES,
+} from '../../src/external-agents';
 import { DEFAULT_PROFILE_ID } from '../../src/profiles';
 import { CHAT_SIDEBAR_WIDTH_MAX, WORKSPACE_PANEL_WIDTH_MAX } from '../../src/workspaces';
 
@@ -526,6 +532,49 @@ describe('normalizeAppSettings', () => {
     expect(normalizeAppSettings({ externalApiSettings: 'nope' }).externalApiSettings).toEqual(
       DEFAULT_EXTERNAL_API_SETTINGS
     );
+  });
+
+  it('keeps a well-formed disclosure and drops every shape the schema rejects', () => {
+    const wellFormed = {
+      version: 1,
+      acceptedAt: 0,
+      capabilitiesFingerprint: externalCapabilitiesFingerprint(NO_EXTERNAL_AGENT_CAPABILITIES),
+    };
+
+    // Each of these is a value the old `typeof === 'number'` check let through
+    // and `AppSettingsPutBodySchema` then refused on the next save.
+    const rejected: Record<string, unknown> = {
+      zeroVersion: { ...wellFormed, version: 0 },
+      fractionalVersion: { ...wellFormed, version: 1.5 },
+      notANumberVersion: { ...wellFormed, version: Number.NaN },
+      negativeAcceptedAt: { ...wellFormed, acceptedAt: -1 },
+      fractionalAcceptedAt: { ...wellFormed, acceptedAt: 1.5 },
+      emptyFingerprint: { ...wellFormed, capabilitiesFingerprint: '' },
+      overLongFingerprint: {
+        ...wellFormed,
+        capabilitiesFingerprint: 'x'.repeat(EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH + 1),
+      },
+    };
+
+    for (const [label, disclosure] of Object.entries(rejected)) {
+      const normalized = normalizeAppSettings({
+        externalAgentSettings: { disclosures: { codex: disclosure, cursor: wellFormed } },
+      });
+      expect(normalized.externalAgentSettings.disclosures.codex, label).toBeUndefined();
+      // The malformed neighbour must not take the valid one down with it.
+      expect(normalized.externalAgentSettings.disclosures.cursor, label).toEqual(wellFormed);
+      expect(Value.Check(AppSettingsPutBodySchema, normalized), label).toBe(true);
+    }
+  });
+
+  it('normalizes malformed external agent settings to no acknowledgement at all', () => {
+    expect(normalizeAppSettings({}).externalAgentSettings).toEqual(DEFAULT_EXTERNAL_AGENT_SETTINGS);
+    expect(normalizeAppSettings({ externalAgentSettings: 'nope' }).externalAgentSettings).toEqual(
+      DEFAULT_EXTERNAL_AGENT_SETTINGS
+    );
+    expect(
+      normalizeAppSettings({ externalAgentSettings: { disclosures: 7 } }).externalAgentSettings
+    ).toEqual(DEFAULT_EXTERNAL_AGENT_SETTINGS);
   });
 
   it('merges dynamic library defaults while keeping MangoStudio native locations enabled', () => {

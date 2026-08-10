@@ -14,7 +14,7 @@ import { CHAT_TITLE_PROMPT_LENGTH_DEFAULT, clampChatTitlePromptLength } from '..
 import {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,
   EXTERNAL_AGENT_TARGET_IDS,
-  type ExternalAgentDisclosure,
+  EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,
   type ExternalAgentSettings,
 } from '../external-agents';
 import {
@@ -636,29 +636,37 @@ export function normalizeExternalApiSettings(value: unknown): ExternalApiSetting
  * A malformed row reads as "never asked" rather than as consent: the failure to
  * prefer is showing the disclosure once more, not running a third-party agent on
  * the strength of a record nothing can parse.
+ *
+ * "Well-formed" is exactly what `ExternalAgentDisclosureSchema` says, not a
+ * looser approximation of it. A row this function passes through is one the
+ * settings PUT body has to accept — `externalAgentSettings` is part of that
+ * schema — so anything admitted here that the schema rejects turns a malformed
+ * row into a settings save that fails for reasons no control on screen explains.
  */
 function normalizeExternalAgentSettings(value: unknown): ExternalAgentSettings {
   if (!isRecord(value) || !isRecord(value.disclosures)) return DEFAULT_EXTERNAL_AGENT_SETTINGS;
 
-  const disclosures: Record<string, ExternalAgentDisclosure> = {};
+  const disclosures: ExternalAgentSettings['disclosures'] = {};
   for (const targetId of EXTERNAL_AGENT_TARGET_IDS) {
     const entry = value.disclosures[targetId];
     if (!isRecord(entry)) continue;
+    const { version, acceptedAt, capabilitiesFingerprint } = entry;
+    if (!Number.isInteger(version) || (version as number) < 1) continue;
+    if (!Number.isInteger(acceptedAt) || (acceptedAt as number) < 0) continue;
+    if (typeof capabilitiesFingerprint !== 'string') continue;
     if (
-      typeof entry.version !== 'number' ||
-      typeof entry.acceptedAt !== 'number' ||
-      typeof entry.capabilitiesFingerprint !== 'string' ||
-      entry.capabilitiesFingerprint.length === 0
+      capabilitiesFingerprint.length === 0 ||
+      capabilitiesFingerprint.length > EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH
     ) {
       continue;
     }
     disclosures[targetId] = {
-      version: entry.version,
-      acceptedAt: entry.acceptedAt,
-      capabilitiesFingerprint: entry.capabilitiesFingerprint,
+      version: version as number,
+      acceptedAt: acceptedAt as number,
+      capabilitiesFingerprint,
     };
   }
-  return { disclosures } as ExternalAgentSettings;
+  return { disclosures };
 }
 
 export function normalizeAppSettings(

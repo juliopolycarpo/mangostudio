@@ -101,8 +101,9 @@ export type ExternalAgentCapabilities = Static<typeof ExternalAgentCapabilitiesS
 /**
  * What the hub reports before any adapter has answered.
  *
- * Every flag false is the only honest answer with no adapter in the loop, and
- * it is what the discovery surface returns while the release gate is closed.
+ * Every flag false is the only honest answer with no adapter in the loop, which
+ * is what the cheap discovery pass has: it can see a binary on disk, not what
+ * that binary is willing to do.
  */
 export const NO_EXTERNAL_AGENT_CAPABILITIES: ExternalAgentCapabilities = {
   structuredStreaming: false,
