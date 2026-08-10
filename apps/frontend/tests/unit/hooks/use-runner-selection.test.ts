@@ -198,6 +198,67 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
     expect(selection).toEqual({ agentId: 'default', agentName: undefined });
   });
 
+  it('persists the permissions picked before any chat existed', async () => {
+    const { result, rerender } = renderOnEmptyState('/srv/projects/default');
+
+    act(() => result.current.setRunnerTarget('codex'));
+    act(() =>
+      result.current.setRunnerPermissions({ level: 'full-access', routing: 'auto-review' })
+    );
+    expect(updateChatRunnerPermissions).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.bindNewChat('chat-new');
+    });
+
+    // Awaited inside `bindNewChat`, so the pair is stored before the caller
+    // opens the first turn — otherwise that turn runs on the chat defaults and
+    // the composer chip claims a level the vendor never received.
+    expect(updateChatRunnerPermissions).toHaveBeenCalledWith('chat-new', {
+      level: 'full-access',
+      routing: 'auto-review',
+    });
+
+    rerender({
+      currentChatId: 'chat-new',
+      currentChat: { ...CHAT, id: 'chat-new', workdir: '/srv/projects/default' },
+    });
+
+    expect(result.current.runnerPermissions).toEqual({
+      level: 'full-access',
+      routing: 'auto-review',
+    });
+  });
+
+  it('takes the optimistic permissions back when the bind write is rejected', async () => {
+    const rejecting = vi.fn(() => Promise.reject(new Error('nope')));
+    const { result } = renderHook(
+      (props: SelectionProps) =>
+        useRunnerSelection({
+          ...props,
+          defaultWorkdir: '/srv/projects/default',
+          updateChatRunner,
+          updateChatRunnerPermissions: rejecting,
+          updateChatWorkdir,
+          addRecentWorkdir,
+        }),
+      { initialProps: EMPTY_STATE }
+    );
+
+    act(() =>
+      result.current.setRunnerPermissions({ level: 'full-access', routing: 'auto-review' })
+    );
+    await act(async () => {
+      await result.current.bindNewChat('chat-new');
+    });
+
+    expect(rejecting).toHaveBeenCalled();
+    expect(result.current.runnerPermissions).not.toEqual({
+      level: 'full-access',
+      routing: 'auto-review',
+    });
+  });
+
   it('applies the default workdir before the first turn opens', async () => {
     const { result } = renderOnEmptyState('/srv/projects/default');
 

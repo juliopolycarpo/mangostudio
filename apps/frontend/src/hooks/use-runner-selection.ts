@@ -179,6 +179,12 @@ export function useRunnerSelection({
    * against the server's `default` runner with no workdir, so a configured
    * `restrictToolsToWorkdir` has nothing to contain.
    *
+   * The permission pair binds here for the same reason the runner does. A user
+   * who set it on the empty state left an override with a null chat id, and the
+   * server has no record of it, so without this the very first turn — the one
+   * whose permissions are most likely to have been chosen deliberately — runs on
+   * the chat defaults instead.
+   *
    * Returns the agent selection that was actually bound, rather than leaving
    * the caller to re-read `selectedAgentId` afterwards: that value is a stale
    * closure captured before this awaited call, so it can still show the
@@ -187,6 +193,8 @@ export function useRunnerSelection({
   const bindNewChat = useCallback(
     async (chatId: string) => {
       const pendingRunner = runnerOverride?.chatId === null ? runnerOverride.runner : null;
+      const pendingPermissions =
+        permissionsOverride?.chatId === null ? permissionsOverride.permissions : null;
       let effectiveRunner: ChatRunnerConfiguration = DEFAULT_RUNNER;
       if (pendingRunner) {
         setRunnerOverride({ chatId, runner: pendingRunner });
@@ -196,6 +204,15 @@ export function useRunnerSelection({
             setRunnerOverride((current) => (current?.chatId === chatId ? null : current));
             return DEFAULT_RUNNER;
           });
+      }
+
+      if (pendingPermissions) {
+        setPermissionsOverride({ chatId, permissions: pendingPermissions });
+        // Awaited before the caller opens the turn stream, so the hub reads the
+        // chosen pair rather than racing the write it was sent alongside.
+        await updateChatRunnerPermissions(chatId, pendingPermissions).catch(() => {
+          setPermissionsOverride((current) => (current?.chatId === chatId ? null : current));
+        });
       }
 
       if (!workdirDefaultedChatIds.current.has(chatId)) {
@@ -214,9 +231,11 @@ export function useRunnerSelection({
     [
       addRecentWorkdir,
       defaultWorkdir,
+      permissionsOverride,
       runnerAgentSelection,
       runnerOverride,
       updateChatRunner,
+      updateChatRunnerPermissions,
       updateChatWorkdir,
     ]
   );
