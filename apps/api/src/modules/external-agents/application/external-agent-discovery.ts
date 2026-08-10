@@ -112,11 +112,32 @@ export interface ExternalAgentDiscoveryOptions {
 const DEFAULT_CACHE_TTL_MS = 30_000;
 
 /**
- * The vendor's status command is a subprocess on a possibly remote machine, and
- * it is on the path to rendering a selector. A slow one is dropped rather than
- * waited on.
+ * The **per-target** budget the runtime enforces around one vendor's probe.
+ *
+ * A vendor's status command is a subprocess on a possibly remote machine, and
+ * it is on the path to rendering a selector, so a slow one is dropped rather
+ * than waited on. The number has to fit the slowest supported vendor's *cold*
+ * probe, though: Cursor has no account-level model list, so its discovery pays
+ * `--version`, `status`, an `acp` handshake and a throwaway `session/new`
+ * before a catalog exists — measured at roughly 8s end to end on a warm
+ * developer machine. At the old 5s a cold Cursor could never finish, so it
+ * never wrote its own 10-minute discovery cache, and the model picker it
+ * feeds had nothing to render on any render.
  */
-const DEFAULT_TIMEOUT_MS = 5_000;
+const DEFAULT_TARGET_TIMEOUT_MS = 20_000;
+
+/**
+ * Headroom between the runtime's per-target budget and the hub's own patience.
+ *
+ * The two must not be equal. The runtime discovers every target in parallel
+ * under that per-target deadline and then still has to tear down whatever
+ * subprocesses it spawned before it can answer, so its reply legitimately
+ * lands *after* the slowest target's budget expires. A hub racing on the same
+ * number gives up first and throws away the healthy targets that were already
+ * in the reply — which is the cheap-pass degradation this module works to
+ * avoid, triggered by the hub itself rather than by any vendor.
+ */
+const DISCOVERY_REPLY_OVERHEAD_MS = 5_000;
 
 /**
  * Two at a time per (user, environment) — the same scope the cache and the
@@ -147,7 +168,7 @@ export type RuntimeClientResolver = (
  */
 export function createRuntimeAuthoritativeAgentDiscovery(
   resolveRuntimeClient: RuntimeClientResolver = getRuntimeClient,
-  timeoutMs = DEFAULT_TIMEOUT_MS
+  timeoutMs = DEFAULT_TARGET_TIMEOUT_MS
 ): AuthoritativeAgentDiscovery {
   return {
     async describe(scope, targetIds, { signal }) {
@@ -396,7 +417,7 @@ export function createExternalAgentDiscoveryService(
   const authoritative = options.authoritative;
   const now = options.now ?? Date.now;
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TARGET_TIMEOUT_MS + DISCOVERY_REPLY_OVERHEAD_MS;
   const maxConcurrent =
     options.maxConcurrentPerEnvironment ?? DEFAULT_MAX_CONCURRENT_PER_ENVIRONMENT;
 
