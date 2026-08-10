@@ -111,6 +111,25 @@ const HANDSHAKE_TIMEOUT_MS = 30_000;
 const SHUTDOWN_GRACE_MS = 2_000;
 
 /**
+ * How long a cancel waits for `session/prompt` to answer before ending the turn
+ * without the vendor's acknowledgement.
+ *
+ * Short, because it is on the path of a user pressing stop, and generous
+ * relative to what the acknowledgement costs: Cursor only has to resolve a
+ * request it is already holding. The expiry is not a failure to report — it
+ * degrades to the unsynchronised ending rather than to a hang.
+ */
+const CANCEL_ACK_TIMEOUT_MS = 5_000;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    // Unref'd: a cancel that already got its answer must not hold the runtime
+    // process open for the rest of this timer.
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+
+/**
  * The ceiling on `session/prompt`, which is the whole turn.
  *
  * Effectively "never" — a day — because this request *is* the turn, not a call
@@ -161,6 +180,16 @@ interface ActiveTurn {
   readonly channel: TurnChannel<ExternalAgentEvent>;
   readonly reducer: CursorTurnReducer;
   cancelled?: boolean;
+  /**
+   * Resolves when `session/prompt` has settled, however it settled.
+   *
+   * `cancel` waits on this before letting the session go idle: the response to
+   * that request *is* the vendor's acknowledgement, and the turn is not over
+   * until it arrives.
+   */
+  settled?: Promise<void>;
+  /** Set by whichever path ended the turn, so no later one can end it twice. */
+  ended?: boolean;
 }
 
 interface CursorSession {
@@ -388,7 +417,16 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
         );
         this.#finishTurn(session, active, answered.stopReason);
       } catch (error) {
-        if (active.cancelled) return;
+        // A cancelled turn ends as a cancelled turn even when the vendor
+        // rejected the prompt rather than resolving it — `cancel` is waiting on
+        // exactly this, and returning without ending would leave the channel
+        // open for the rest of the session.
+        if (active.cancelled) {
+          this.#finishTurn(session, active, 'cancelled');
+          return;
+        }
+        if (active.ended) return;
+        active.ended = true;
         // A turn that failed cannot answer an approval, and an unanswered one
         // blocks the whole connection rather than just this turn.
         this.#releaseApprovals(session);
@@ -405,7 +443,7 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
         if (session.activeTurn === active) session.activeTurn = undefined;
       }
     };
-    void run();
+    active.settled = run();
 
     return {
       nativeTurnId: handle,
@@ -427,6 +465,24 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     }
   }
 
+  /**
+   * Cancels the running turn, and does not report the session free until Cursor
+   * says the turn is over.
+   *
+   * The order is what makes this work. Approvals are released **first**: the
+   * pump answers server requests one at a time, so a parked approval means no
+   * further frame is read on this connection at all — including the response
+   * this method then waits for.
+   *
+   * The wait is the point. `session/cancel` is a notification, and the
+   * acknowledgement is `session/prompt` resolving with `cancelled`. Ending the
+   * turn on the write instead of on that response reports the session idle
+   * while the vendor is still running the old prompt, and the supervisor will
+   * accept a second turn on it. Cursor's updates carry only a session id, so
+   * everything still in flight from the first prompt is then attributed to the
+   * second — one transcript containing two turns, with two `session/prompt`
+   * requests live on one native session.
+   */
   async cancel(input: ExternalAgentCancelInput): Promise<void> {
     const session = this.#sessions.get(input.sessionId);
     if (!session) return;
@@ -435,17 +491,18 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     const active = session.activeTurn;
     if (active) active.cancelled = true;
     if (session.nativeSessionId) {
-      // A notification, not a request: ACP defines `session/cancel` as one, and
-      // the acknowledgement is `session/prompt` resolving with `cancelled`.
       await session.client
         .notify('session/cancel', { sessionId: session.nativeSessionId })
         .catch(() => undefined);
     }
-    if (active) {
-      for (const event of active.reducer.finish('cancelled')) active.channel.push(event);
-      active.channel.finish();
-      session.activeTurn = undefined;
-    }
+    if (!active) return;
+
+    // Bounded, because a vendor that never answers must not hold cancel open
+    // forever. On expiry this ends the turn here — the behaviour before this
+    // wait existed — which is the lesser of the two failures: a turn that
+    // outlives its cancellation is worse when it is silent.
+    await Promise.race([active.settled ?? Promise.resolve(), sleep(CANCEL_ACK_TIMEOUT_MS)]);
+    this.#finishTurn(session, active, 'cancelled');
   }
 
   async close(input: ExternalAgentCloseInput): Promise<void> {
@@ -453,7 +510,12 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     if (!session) return;
     this.#sessions.delete(input.sessionId);
     this.#releaseApprovals(session);
-    session.activeTurn?.channel.finish();
+    if (session.activeTurn) {
+      // Marked before the channel closes, so a `session/prompt` that resolves
+      // after the process is gone cannot reopen the ending.
+      session.activeTurn.ended = true;
+      session.activeTurn.channel.finish();
+    }
     session.activeTurn = undefined;
     await session.client.close().catch(() => undefined);
     await session.process.terminate({ graceMs: SHUTDOWN_GRACE_MS }).catch(() => undefined);
@@ -591,6 +653,10 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     active: ActiveTurn,
     stopReason: AcpStopReason | undefined
   ): void {
+    // Two paths can reach the same ending — the prompt resolving and `cancel`
+    // giving up on it — and only one of them may close the turn.
+    if (active.ended) return;
+    active.ended = true;
     this.#releaseApprovals(session);
     for (const event of active.reducer.finish(stopReason)) active.channel.push(event);
     active.channel.finish();

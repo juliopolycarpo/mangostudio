@@ -498,6 +498,46 @@ describe('cursor adapter — turns', () => {
     expect(probe.server()?.called('session/cancel')).toBe(true);
     expect(events.some((event) => event.type === 'error')).toBe(false);
   });
+
+  it('holds the turn open until the cancelled prompt answers', async () => {
+    // `session/cancel` is a notification; the acknowledgement is the
+    // `session/prompt` response. Ending the turn on the write would report the
+    // session idle while the vendor is still running the first prompt, and
+    // everything still in flight from it would land on the next turn.
+    const adapter = new CursorAcpAdapter();
+    const probe = harness({ promptDelayMs: 200 });
+    await adapter.openSession({ params: openParams(), context: probe.context });
+
+    const stream = adapter.startTurn({
+      nativeSessionId: CURSOR_TRANSCRIPT.sessionId,
+      params: turnParams(),
+      context: probe.context,
+    });
+    const collecting = collect(stream);
+    await Bun.sleep(20);
+
+    let streamClosed = false;
+    void collecting.then(() => {
+      streamClosed = true;
+    });
+    const cancelling = adapter.cancel({
+      sessionId: 'session-1',
+      nativeSessionId: CURSOR_TRANSCRIPT.sessionId,
+      reason: 'requested',
+    });
+
+    // The prompt has ~180ms left to run. Neither the cancel nor the stream may
+    // have finished while the vendor still owes an answer.
+    await Bun.sleep(50);
+    expect(streamClosed).toBe(false);
+
+    await cancelling;
+    await collecting;
+    expect(streamClosed).toBe(true);
+    expect(probe.server()?.paramsFor('session/cancel')).toMatchObject({
+      sessionId: CURSOR_TRANSCRIPT.sessionId,
+    });
+  });
 });
 
 describe('cursor adapter — approvals', () => {
