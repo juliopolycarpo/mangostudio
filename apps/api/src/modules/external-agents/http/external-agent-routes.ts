@@ -74,6 +74,28 @@ export interface ExternalAgentRouteDependencies {
   readonly sessions?: Pick<ExternalSessionManager, 'reapScope'>;
 }
 
+/**
+ * The signed-in user, or nothing.
+ *
+ * `requireAuth` already rejects an unauthenticated request, so this is a second
+ * line — but it is not redundant, because the value it replaces was `?? ''`, and
+ * an empty user id is not merely useless here: `reapScope` treats a falsy
+ * `userId` as "no filter" and would close **every live external session for
+ * every user on the hub**. A sentinel that widens a scope has to be refused
+ * rather than passed on.
+ */
+function authenticatedUserId(
+  user: { readonly id?: string } | null | undefined
+): string | undefined {
+  const id = user?.id;
+  return id && id.length > 0 ? id : undefined;
+}
+
+const UNAUTHENTICATED = {
+  error: 'Authentication required.',
+  code: ERROR_CODES.UNAUTHORIZED,
+} as const;
+
 export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDependencies = {}) {
   const discovery = dependencies.discovery ?? externalAgentDiscoveryService;
   const sessions = dependencies.sessions ?? externalSessionManager;
@@ -82,8 +104,12 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
     .use(requireAuth)
     .get(
       '/external-agents',
-      async ({ query, user }): Promise<ExternalAgentDescriptorListResponse> => {
-        const userId = user?.id ?? '';
+      async ({ query, user, set }) => {
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          set.status = 401;
+          return UNAUTHENTICATED;
+        }
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
         // Discovery answers for an environment it could not reach rather than
         // throwing, so there is no failure arm here to write.
@@ -100,9 +126,14 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
     )
     .get(
       '/external-agents/disclosures',
-      async ({ user }) => ({
-        disclosures: [...(await listExternalDisclosures(user?.id ?? '', getDb()))],
-      }),
+      async ({ user, set }) => {
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          set.status = 401;
+          return UNAUTHENTICATED;
+        }
+        return { disclosures: [...(await listExternalDisclosures(userId, getDb()))] };
+      },
       {
         response: {
           200: DisclosureListResponseSchema,
@@ -113,7 +144,11 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
     .post(
       '/external-agents/:targetId/disclosure',
       async ({ params, query, user, set }) => {
-        const userId = user?.id ?? '';
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          set.status = 401;
+          return UNAUTHENTICATED;
+        }
         if (!isExternalAgentTargetId(params.targetId)) {
           set.status = 404;
           return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
@@ -155,7 +190,11 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
     .delete(
       '/external-agents/:targetId/disclosure',
       async ({ params, user, set }) => {
-        const userId = user?.id ?? '';
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          set.status = 401;
+          return UNAUTHENTICATED;
+        }
         if (!isExternalAgentTargetId(params.targetId)) {
           set.status = 404;
           return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };

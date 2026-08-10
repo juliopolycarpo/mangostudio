@@ -9,7 +9,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { buildTurnArgv } from '../../../src/services/external-agents/claude/adapter';
+import {
+  buildTurnArgv,
+  safeClaudeModel,
+} from '../../../src/services/external-agents/claude/adapter';
 import { parseClaudeAuthStatus } from '../../../src/services/external-agents/claude/auth';
 import {
   buildSupportedConfigurations,
@@ -21,6 +24,7 @@ import {
   claudePermissionMode,
   readAutoModeDisabled,
 } from '../../../src/services/external-agents/claude/permissions';
+import { claudeManagedSettingsPath } from '../../../src/services/external-agents/claude/pinned';
 import {
   compareClaudeVersions,
   parseClaudeVersion,
@@ -112,6 +116,68 @@ describe('buildTurnArgv', () => {
       configuration: { ...CONFIGURATION, model: 'claude-sonnet-5' },
     });
     expect(withModel[withModel.indexOf('--model') + 1]).toBe('claude-sonnet-5');
+  });
+
+  /**
+   * Claude advertises no catalog, so a requested model reaches argv unvetted.
+   * An argv array stops *shell* injection, not **argument** injection: a value
+   * beginning with `-` is read by the CLI's parser as a new flag.
+   */
+  it('never lets a model value become another flag', () => {
+    const hostile = argv({
+      ...base,
+      configuration: { ...CONFIGURATION, model: '--dangerously-skip-permissions' },
+    });
+    expect(hostile).not.toContain('--model');
+    expect(hostile.join(' ')).not.toContain('dangerously-skip-permissions');
+  });
+});
+
+describe('safeClaudeModel', () => {
+  it.each(['claude-sonnet-5', 'opus', 'anthropic.claude-3@20240229', 'us.anthropic/claude'])(
+    'accepts %s',
+    (model) => {
+      expect(safeClaudeModel(model)).toBe(model);
+    }
+  );
+
+  it.each([
+    ['a leading dash', '--permission-mode'],
+    ['a single dash', '-p'],
+    ['an embedded space', 'sonnet --bare'],
+    ['a shell metacharacter', 'sonnet;rm -rf /'],
+    ['a newline', 'sonnet\n--bare'],
+    ['an empty string', ''],
+  ])('drops %s', (_label, model) => {
+    expect(safeClaudeModel(model)).toBeUndefined();
+  });
+
+  it('drops an absurdly long value rather than passing it on', () => {
+    expect(safeClaudeModel('a'.repeat(500))).toBeUndefined();
+  });
+});
+
+describe('claudeManagedSettingsPath', () => {
+  it('reads the Windows location from the environment', () => {
+    // Relocatable, and the failure is silent and unsafe: an unreadable path is
+    // caught, reads as "no policy", and leaves `auto` available for an account
+    // whose administrator disabled it.
+    expect(claudeManagedSettingsPath('win32', { PROGRAMDATA: 'D:\\Corp\\ProgramData' })).toBe(
+      'D:\\Corp\\ProgramData\\ClaudeCode\\managed-settings.json'
+    );
+  });
+
+  it('falls back to the conventional Windows location', () => {
+    expect(claudeManagedSettingsPath('win32', {})).toBe(
+      'C:\\ProgramData\\ClaudeCode\\managed-settings.json'
+    );
+  });
+
+  it.each([
+    ['darwin', '/Library/Application Support/ClaudeCode/managed-settings.json'],
+    ['linux', '/etc/claude-code/managed-settings.json'],
+  ] as const)('uses the documented %s location', (platform, expected) => {
+    expect(claudeManagedSettingsPath(platform, {})).toBe(expected);
   });
 });
 

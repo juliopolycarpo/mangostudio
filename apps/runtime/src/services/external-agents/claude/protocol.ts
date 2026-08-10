@@ -81,19 +81,20 @@ export interface ClaudeStreamEventRecord extends ClaudeStreamRecord {
   };
 }
 
-/** One entry of `result.permission_denials`. */
-export interface ClaudePermissionDenial {
-  readonly tool_name?: unknown;
-  readonly tool_use_id?: unknown;
-  readonly tool_input?: unknown;
-}
-
 /** `result` — the last record of a completed run. */
 export interface ClaudeResultRecord extends ClaudeStreamRecord {
   readonly is_error?: unknown;
   readonly result?: unknown;
   readonly stop_reason?: unknown;
   readonly terminal_reason?: unknown;
+  /**
+   * The refusals this run accumulated.
+   *
+   * Read by nothing: a denied call already arrives as a `tool_result` with
+   * `is_error: true` and closes its own activity, so projecting this list too
+   * would render one refusal twice. Declared because it is part of the record
+   * shape and the next person to look will otherwise wonder where it went.
+   */
   readonly permission_denials?: unknown;
   readonly api_error_status?: unknown;
   readonly usage?: {
@@ -131,11 +132,6 @@ export function initCapabilities(record: ClaudeInitRecord): readonly string[] | 
   const capabilities = record.capabilities;
   if (!Array.isArray(capabilities)) return undefined;
   return capabilities.filter((value): value is string => typeof value === 'string');
-}
-
-export function permissionDenials(record: ClaudeResultRecord): readonly ClaudePermissionDenial[] {
-  const denials = record.permission_denials;
-  return Array.isArray(denials) ? (denials as readonly ClaudePermissionDenial[]) : [];
 }
 
 /**

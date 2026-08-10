@@ -376,6 +376,18 @@ export const respondStreamRoutes = (app: Elysia) =>
                     },
                   }
                 : {}),
+              // Same reasoning, one level up: the acknowledgement is recorded
+              // against a specific machine's descriptor, so a client that only
+              // learned "a disclosure is required" could not record one. The
+              // vendor and machine travel with the refusal that disclosed them.
+              ...(result.failure.kind === 'disclosure-required'
+                ? {
+                    details: {
+                      targetId: result.failure.targetId,
+                      environmentId: result.failure.environmentId,
+                    },
+                  }
+                : {}),
             };
           }
 

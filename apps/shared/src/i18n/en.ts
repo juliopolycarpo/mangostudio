@@ -2727,11 +2727,12 @@ export const messages: Messages = {
       cancel: 'Cancel',
       close: 'Close',
       review: 'Review the notice',
-      // The vendor's own configuration runs inside a MangoStudio turn. Stated
-      // plainly rather than softened: it is the one limit a user cannot
-      // discover from the interface.
-      inheritedConfiguration:
-        '{vendor} also loads any hooks, plugins and MCP servers configured on that machine outside MangoStudio, and runs them as part of your turn.',
+      // Claude-specific, and rendered only for Claude. Codex and Cursor read
+      // project files too, but nobody has written down what each of them loads,
+      // and a disclosure that names the wrong sources for a vendor is worse than
+      // one that stays quiet about it.
+      inheritedConfigurationClaude:
+        'Claude Code also loads the hooks, skills, plugins, MCP servers, auto memory and CLAUDE.md configured on that machine outside MangoStudio, and runs them as part of your turn.',
       permissionNow: 'Right now this chat is set to: {level}.',
       terms: "{vendor}'s terms of service",
       privacy: "{vendor}'s privacy policy",

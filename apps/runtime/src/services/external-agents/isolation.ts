@@ -46,11 +46,31 @@ import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-age
  */
 const VENDOR_CREDENTIAL_PATHS = [
   '.claude',
+  '.claude.json',
   '.codex',
   '.cursor',
   '.config/claude',
+  '.config/codex',
   '.config/cursor',
 ] as const;
+
+/**
+ * Environment variables that move a vendor's credential home somewhere else.
+ *
+ * These are the same variables the adapters pass through to their child
+ * processes, so a runtime started with `CODEX_HOME=/mnt/host-codex` reads its
+ * credentials from a directory none of the paths above name. Checking only the
+ * defaults would leave the relocation as a way to bind-mount host credentials
+ * past this function without tripping it.
+ *
+ * `XDG_CONFIG_HOME` is a base directory rather than a vendor's own, so its
+ * vendor subdirectories are guarded rather than the base itself: a mount at
+ * `$XDG_CONFIG_HOME` alone exposes no vendor credentials by itself, and
+ * treating it as guarded would refuse ordinary containers that mount a config
+ * volume.
+ */
+const VENDOR_HOME_VARIABLES = ['CLAUDE_CONFIG_DIR', 'CODEX_HOME'] as const;
+const XDG_VENDOR_SUBDIRECTORIES = ['claude', 'codex', 'cursor'] as const;
 
 /**
  * Positive attestation for the in-process connector, which serves one signed-in
@@ -109,10 +129,11 @@ export function createOsAccountExternalAgentIsolation(
  */
 export function createContainerExternalAgentIsolation(
   credentialHome: string,
-  mountInfo: string | undefined
+  mountInfo: string | undefined,
+  env: NodeJS.ProcessEnv = process.env
 ): ExternalIdentityIsolation | undefined {
   if (mountInfo === undefined) return undefined;
-  if (hasVendorCredentialMount(credentialHome, mountInfo)) return undefined;
+  if (hasVendorCredentialMount(credentialHome, mountInfo, env)) return undefined;
   return attestation('container', credentialHome);
 }
 
@@ -134,12 +155,17 @@ export function resolveExternalAgentIsolation(
     readonly credentialHome?: string;
     readonly containerized?: boolean;
     readonly mountInfo?: string;
+    readonly env?: NodeJS.ProcessEnv;
   } = {}
 ): ExternalIdentityIsolation | undefined {
   const credentialHome = options.credentialHome ?? homedir();
   const containerized = options.containerized ?? isContainerized();
   return containerized
-    ? createContainerExternalAgentIsolation(credentialHome, options.mountInfo ?? readMountInfo())
+    ? createContainerExternalAgentIsolation(
+        credentialHome,
+        options.mountInfo ?? readMountInfo(),
+        options.env ?? process.env
+      )
     : createOsAccountExternalAgentIsolation(credentialHome);
 }
 
@@ -186,21 +212,69 @@ function isContainerized(): boolean {
 }
 
 /**
- * True when a vendor credential directory is its own mount point.
+ * The vendor credential directories themselves, defaults plus relocations.
+ *
+ * Separate from the credential home because the two are checked differently. A
+ * mount *inside* one of these exposes a credential — mounting
+ * `~/.claude/.credentials.json` shares the login itself. A mount inside the
+ * *home* does not: `~/.claude-backup` and `~/projects` are ordinary
+ * directories, and refusing them would reject almost every real container.
+ */
+function vendorCredentialPaths(home: string, env: NodeJS.ProcessEnv): readonly string[] {
+  const paths = VENDOR_CREDENTIAL_PATHS.map((path) => join(home, path));
+
+  for (const variable of VENDOR_HOME_VARIABLES) {
+    const relocated = env[variable];
+    if (relocated && relocated.length > 0) paths.push(resolvePathSafely(relocated) ?? relocated);
+  }
+  const xdg = env.XDG_CONFIG_HOME;
+  if (xdg && xdg.length > 0) {
+    const base = resolvePathSafely(xdg) ?? xdg;
+    for (const vendor of XDG_VENDOR_SUBDIRECTORIES) paths.push(join(base, vendor));
+  }
+  return paths;
+}
+
+/** True when `candidate` is `parent` or sits underneath it. */
+function isAtOrUnder(candidate: string, parent: string): boolean {
+  if (candidate === parent) return true;
+  const boundary = parent.endsWith('/') ? parent : `${parent}/`;
+  return candidate.startsWith(boundary);
+}
+
+/**
+ * True when a vendor credential path is exposed by a mount.
  *
  * The test is the mount table rather than the filesystem, because a bind mount
  * is invisible from the directory itself: it has ordinary permissions, an
  * ordinary owner and ordinary contents. `/proc/self/mountinfo` lists the mount
- * points this namespace actually has, and a vendor directory appearing there is
- * a directory that came from outside the container.
+ * points this namespace actually has, and a vendor path appearing there is one
+ * that came from outside the container.
  *
- * The credential home itself counts too. Mounting the whole home exposes every
- * vendor directory at once, and checking only the children would miss it.
+ * Two rules, and they are deliberately not the same rule:
+ *
+ * - **At or under a vendor directory** refuses. A single file is enough to
+ *   defeat the isolation — `-v ~/.claude/.credentials.json:...` mounts the login
+ *   itself — so equality alone would miss the cheapest way to share one.
+ * - **At or above the credential home** refuses, because mounting an ancestor
+ *   brings every vendor directory underneath it along. What is *inside* the home
+ *   is not covered: `~/projects` is an ordinary bind mount and refusing it would
+ *   reject nearly every real container.
+ *
+ * The filesystem root is the one exception to the ancestor rule, and it has to
+ * be. Every container has `/` in its mount table — its own rootfs, not evidence
+ * that anything was shared in — so counting it would refuse every container that
+ * exists and make this check useless rather than strict.
  */
-export function hasVendorCredentialMount(credentialHome: string, mountInfo: string): boolean {
+export function hasVendorCredentialMount(
+  credentialHome: string,
+  mountInfo: string,
+  env: NodeJS.ProcessEnv = process.env
+): boolean {
   const home = resolvePathSafely(credentialHome);
   if (home === undefined) return false;
-  const guarded = new Set([home, ...VENDOR_CREDENTIAL_PATHS.map((path) => join(home, path))]);
+  const vendorPaths = vendorCredentialPaths(home, env);
+  const ancestorTargets = [home, ...vendorPaths];
 
   for (const line of mountInfo.split('\n')) {
     // mountinfo columns: id parent major:minor root mountPoint ...
@@ -212,7 +286,9 @@ export function hasVendorCredentialMount(credentialHome: string, mountInfo: stri
     const decoded = mountPoint.replace(/\\(040|011|012|134)/g, (_match, code: string) =>
       String.fromCharCode(Number.parseInt(code, 8))
     );
-    if (guarded.has(decoded)) return true;
+    if (decoded === '/') continue;
+    if (vendorPaths.some((path) => isAtOrUnder(decoded, path))) return true;
+    if (ancestorTargets.some((path) => isAtOrUnder(path, decoded))) return true;
   }
   return false;
 }

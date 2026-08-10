@@ -13,14 +13,10 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExternalAgentEvent } from '@mangostudio/shared/external-agents';
-import {
-  type ClaudeResultRecord,
-  parseClaudeStreamLine,
-} from '../../../src/services/external-agents/claude/protocol';
+import { parseClaudeStreamLine } from '../../../src/services/external-agents/claude/protocol';
 import {
   ClaudeTurnReducer,
   claudeActivityKind,
-  claudeDeniedToolNames,
   type readClaudeInit,
 } from '../../../src/services/external-agents/claude/reducer';
 
@@ -160,11 +156,14 @@ describe('ClaudeTurnReducer, on a recorded denied write', () => {
     expect(events.some((event) => event.type === 'error')).toBe(false);
   });
 
-  it('names the denied tool from the result record', () => {
-    const result = records('claude-denied-write-turn.jsonl').find(
-      (record) => record.type === 'result'
-    ) as ClaudeResultRecord;
-    expect(claudeDeniedToolNames(result)).toEqual(['Write']);
+  /**
+   * The result record's `permission_denials` is deliberately not turned into an
+   * event of its own: the denied call already closed as a failed activity, and a
+   * second rendering of the same refusal would read as two things going wrong.
+   */
+  it('reports the denial once, through the activity that was refused', () => {
+    const { events } = reduceAll('claude-denied-write-turn.jsonl');
+    expect(events.filter((event) => event.type === 'activity_completed')).toHaveLength(1);
   });
 });
 

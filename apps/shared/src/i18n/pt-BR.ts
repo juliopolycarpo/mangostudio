@@ -2740,8 +2740,8 @@ export const messages = {
       cancel: 'Cancelar',
       close: 'Fechar',
       review: 'Rever o aviso',
-      inheritedConfiguration:
-        'O {vendor} também carrega quaisquer hooks, plugins e servidores MCP configurados naquela máquina fora do MangoStudio, e os executa como parte do seu turno.',
+      inheritedConfigurationClaude:
+        'O Claude Code também carrega os hooks, skills, plugins, servidores MCP, memória automática e o CLAUDE.md configurados naquela máquina fora do MangoStudio, e os executa como parte do seu turno.',
       permissionNow: 'Agora este chat está em: {level}.',
       terms: 'Termos de serviço do {vendor}',
       privacy: 'Política de privacidade do {vendor}',

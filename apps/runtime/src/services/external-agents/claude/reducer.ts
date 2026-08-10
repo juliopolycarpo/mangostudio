@@ -42,7 +42,6 @@ import {
   contentBlocks,
   initCapabilities,
   parentToolUseId,
-  permissionDenials,
   recordSubtype,
   recordType,
 } from './protocol';
@@ -157,6 +156,8 @@ export class ClaudeTurnReducer {
   readonly #onInit: ((init: ClaudeRunInit) => void) | undefined;
   /** Tool calls this run has opened, so a result can be matched to a name. */
   readonly #openActivities = new Map<string, string>();
+  /** Forwarded subagent text per parent call, so updates accumulate rather than replace. */
+  readonly #nestedText = new Map<string, string>();
   #sessionStarted = false;
   #finished = false;
 
@@ -249,18 +250,28 @@ export class ClaudeTurnReducer {
         if (started) events.push(started);
         continue;
       }
-      if (parent === undefined) continue;
+      // Only under a call that is still open. A completed activity has been
+      // removed from the map, and both consumers *replace* an activity's detail
+      // on update — so a late message would reopen a closed pill, and one for a
+      // parent that never existed would address a pill that is not there.
+      if (parent === undefined || !this.#openActivities.has(parent)) continue;
       // A subagent's text, nested under the `Task` call that spawned it. The
       // parent activity is the unit the user sees; promoting this would render
       // a second agent's narration as MangoStudio's own.
       const text = block.type === 'text' ? block.text : undefined;
       if (typeof text === 'string' && text.length > 0) {
+        // Accumulated, not replaced. `update.detail` overwrites downstream, so
+        // emitting each block on its own would leave only the last one — a
+        // subagent that reported three findings would render as having found
+        // the third.
+        const merged = appendNested(this.#nestedText.get(parent), text);
+        this.#nestedText.set(parent, merged);
         events.push({
           type: 'activity_updated',
           callId: parent,
           update: {
-            detail: text.slice(0, NESTED_TEXT_MAX_CHARS),
-            ...(text.length > NESTED_TEXT_MAX_CHARS ? { truncated: true } : {}),
+            detail: merged.slice(0, NESTED_TEXT_MAX_CHARS),
+            ...(merged.length > NESTED_TEXT_MAX_CHARS ? { truncated: true } : {}),
           },
         });
       }
@@ -301,6 +312,7 @@ export class ClaudeTurnReducer {
       const callId = typeof block.tool_use_id === 'string' ? block.tool_use_id : '';
       if (callId.length === 0 || !this.#openActivities.has(callId)) continue;
       this.#openActivities.delete(callId);
+      this.#nestedText.delete(callId);
       const detail = readToolResultText(block.content);
       events.push({
         type: 'activity_completed',
@@ -367,11 +379,19 @@ export class ClaudeTurnReducer {
   }
 }
 
-/** Denials, as the result record lists them. Used for the diagnostic, not the pill. */
-export function claudeDeniedToolNames(record: ClaudeResultRecord): readonly string[] {
-  return permissionDenials(record)
-    .map((denial) => (typeof denial.tool_name === 'string' ? denial.tool_name : ''))
-    .filter((name) => name.length > 0);
+/**
+ * Bounded concatenation of a subagent's forwarded blocks.
+ *
+ * Capped at twice the render limit so a long-running subagent cannot grow an
+ * unbounded string in memory for a field that is sliced to `NESTED_TEXT_MAX_CHARS`
+ * on the way out. Keeping the head rather than the tail matches what the reader
+ * is following.
+ */
+function appendNested(previous: string | undefined, text: string): string {
+  const merged = previous === undefined ? text : `${previous}\n${text}`;
+  return merged.length > NESTED_TEXT_MAX_CHARS * 2
+    ? merged.slice(0, NESTED_TEXT_MAX_CHARS * 2)
+    : merged;
 }
 
 function readUsage(record: ClaudeResultRecord): ExternalUsage | undefined {

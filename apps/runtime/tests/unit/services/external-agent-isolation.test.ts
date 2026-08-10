@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   createContainerExternalAgentIsolation,
   createOsAccountExternalAgentIsolation,
@@ -57,12 +57,16 @@ describe('os-account identity isolation', () => {
     );
   });
 
-  it('leaks neither the username nor the home path', () => {
+  /**
+   * The path assertion only. A per-segment check would compare short path
+   * components against 64 characters of hex, and a segment like `ada` — or any
+   * one- or two-character hex-shaped name — appears inside a random digest often
+   * enough to fail a correct implementation.
+   */
+  it('leaks the home path into neither the digest nor its prefix', () => {
     const fingerprint = createOsAccountExternalAgentIsolation()?.credentialHomeFingerprint ?? '';
     expect(fingerprint).not.toContain(homedir());
-    for (const segment of homedir().split('/').filter(Boolean)) {
-      expect(fingerprint).not.toContain(segment);
-    }
+    expect(fingerprint).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 });
 
@@ -107,6 +111,72 @@ describe('container identity isolation', () => {
 
   it('is unmoved by a mount that is merely near a vendor directory', () => {
     expect(hasVendorCredentialMount(home, mountLine(join(home, '.claude-backup')))).toBe(false);
+  });
+
+  /**
+   * Equality matching would miss this, and it is the *cheapest* way to share a
+   * login: mounting the credential file itself rather than its directory.
+   */
+  it.each([
+    ['.claude/.credentials.json', 'the Claude credential file'],
+    ['.codex/auth.json', 'the Codex credential file'],
+    ['.claude/settings.json/deeper', 'anything nested below a vendor directory'],
+  ])('refuses a mount at %s (%s)', (relative) => {
+    expect(hasVendorCredentialMount(home, mountLine(join(home, relative)))).toBe(true);
+  });
+
+  /** Mounting an ancestor brings the vendor directories underneath it along. */
+  it('refuses a mount above the credential home', () => {
+    expect(hasVendorCredentialMount(home, mountLine(dirname(home)))).toBe(true);
+  });
+
+  /**
+   * Every container has `/` in its mount table — its own rootfs. Counting that
+   * as an ancestor of the credential home would refuse every container in
+   * existence and make the check useless rather than strict.
+   */
+  it('does not treat the container rootfs as a shared credential mount', () => {
+    expect(hasVendorCredentialMount(home, mountLine('/'))).toBe(false);
+    expect(
+      createContainerExternalAgentIsolation(home, `${mountLine('/')}\n${mountLine('/proc')}`)
+    ).toMatchObject({ method: 'container' });
+  });
+
+  /**
+   * The vendors let a user move their credential home, and the adapters pass
+   * those variables through. Checking only the defaults would leave relocation
+   * as a way to mount host credentials past this function untouched.
+   */
+  it('guards a relocated Codex home', () => {
+    expect(
+      hasVendorCredentialMount(home, mountLine('/mnt/host-codex'), {
+        CODEX_HOME: '/mnt/host-codex',
+      })
+    ).toBe(true);
+  });
+
+  it('guards a relocated Claude configuration directory', () => {
+    expect(
+      hasVendorCredentialMount(home, mountLine('/mnt/host-claude/.credentials.json'), {
+        CLAUDE_CONFIG_DIR: '/mnt/host-claude',
+      })
+    ).toBe(true);
+  });
+
+  it('guards vendor subdirectories of a relocated XDG config home', () => {
+    expect(
+      hasVendorCredentialMount(home, mountLine('/mnt/xdg/cursor'), {
+        XDG_CONFIG_HOME: '/mnt/xdg',
+      })
+    ).toBe(true);
+    // The base itself is not guarded: a config volume that carries no vendor
+    // directory exposes no credential, and refusing it would reject ordinary
+    // containers for nothing.
+    expect(
+      hasVendorCredentialMount(home, mountLine('/mnt/xdg/some-other-app'), {
+        XDG_CONFIG_HOME: '/mnt/xdg',
+      })
+    ).toBe(false);
   });
 });
 

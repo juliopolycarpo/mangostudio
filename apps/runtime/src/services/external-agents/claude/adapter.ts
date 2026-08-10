@@ -25,11 +25,14 @@
  *   put a failure in the transcript for something the user asked for.
  *
  * Deliberately **not** used: `--bare`, which would make the turn deterministic
- * but never reads OAuth credentials or the system keychain and therefore
- * requires `ANTHROPIC_API_KEY`. Determinism and subscription auth are mutually
- * exclusive today and v1 takes subscription auth — so the runtime host's own
- * `~/.claude` is inherited, hooks, plugins, MCP servers and all. That is a
- * limit, not a feature, and it is disclosed rather than papered over.
+ * but never reads OAuth credentials or the system keychain — it authenticates
+ * from `ANTHROPIC_API_KEY`, from an `apiKeyHelper` passed through `--settings`,
+ * or from a third-party provider's own credentials. None of those is the
+ * subscription sign-in this adapter hosts, so for a subscription-backed account
+ * determinism and authentication are mutually exclusive, and v1 takes
+ * authentication — the runtime host's own `~/.claude` is inherited, hooks,
+ * plugins, MCP servers and all. That is a limit, not a feature, and it is
+ * disclosed rather than papered over.
  */
 
 import { randomUUID } from 'node:crypto';
@@ -567,6 +570,28 @@ function applyInit(session: ClaudeSession, init: ClaudeRunInit): void {
   }
 }
 
+/**
+ * Model identifiers, as a shape rather than as a promise.
+ *
+ * `configuration.model` is caller-owned: Claude advertises no catalog, so
+ * `pickModel` has nothing to vet a requested value against and passes it
+ * straight through. An argv array stops *shell* injection, not **argument**
+ * injection — a value beginning with `-` is read by the CLI's parser as a new
+ * flag rather than as `--model`'s value, which is how a stored chat
+ * configuration could put `--dangerously-skip-permissions` on the command line.
+ *
+ * An unrecognized value is dropped rather than refused: the vendor's own
+ * default is a working turn, and failing a send over a model string is a worse
+ * answer than ignoring one.
+ */
+const CLAUDE_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/;
+
+export function safeClaudeModel(model: string | undefined): string | undefined {
+  return model !== undefined && model.length <= 128 && CLAUDE_MODEL_PATTERN.test(model)
+    ? model
+    : undefined;
+}
+
 /** The turn's argv. Everything that is not a flag comes from server-owned state. */
 export function buildTurnArgv(input: {
   readonly executable: string;
@@ -605,8 +630,13 @@ export function buildTurnArgv(input: {
     ...(input.session.established
       ? ['--resume', input.session.sessionId]
       : ['--session-id', input.session.sessionId]),
-    ...(input.configuration.model ? ['--model', input.configuration.model] : []),
+    ...modelArguments(input.configuration.model),
   ];
+}
+
+function modelArguments(model: string | undefined): string[] {
+  const safe = safeClaudeModel(model);
+  return safe ? ['--model', safe] : [];
 }
 
 /** What to say about a process that ended without a `result` record. */

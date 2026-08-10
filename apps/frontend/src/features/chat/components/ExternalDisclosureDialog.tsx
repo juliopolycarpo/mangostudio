@@ -60,12 +60,13 @@ export function ExternalDisclosureDialog({
           <li>{labels.billing.replace('{vendor}', vendor)}</li>
           <li>{labels.ownership.replace('{vendor}', vendor)}</li>
           {/*
-            The vendor loads the machine's own hooks, plugins and MCP servers and
-            runs them inside the turn. It is the one exposure a user cannot see
-            from anywhere in MangoStudio, so it is stated here rather than left
-            for them to discover.
+            Claude only. It runs the machine's own hooks, skills, plugins and MCP
+            servers inside the turn — the one exposure a user cannot see from
+            anywhere in MangoStudio. Codex and Cursor read project files too, but
+            what each of them loads has not been characterized, and naming the
+            wrong sources for a vendor is worse than staying quiet.
           */}
-          <li>{labels.inheritedConfiguration.replace('{vendor}', vendor)}</li>
+          {descriptor.targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
         </ul>
 
         <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">

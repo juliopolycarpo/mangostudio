@@ -78,9 +78,20 @@ export const CLAUDE_POST_RESULT_GRACE_MS = 2_000;
  * being rejected at startup is indistinguishable from any other startup
  * failure, and guessing wrong means passing a mode the user's organization
  * deliberately turned off.
+ *
+ * `%PROGRAMDATA%` is read rather than hard-coded because the directory is
+ * relocatable, and the failure is silent and unsafe: an unreadable path is
+ * caught, reads as "no policy", and leaves `auto` available for the adapter to
+ * pass to a CLI whose administrator disabled it.
  */
-export function claudeManagedSettingsPath(platform: NodeJS.Platform = process.platform): string {
+export function claudeManagedSettingsPath(
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env
+): string {
   if (platform === 'darwin') return '/Library/Application Support/ClaudeCode/managed-settings.json';
-  if (platform === 'win32') return 'C:\\ProgramData\\ClaudeCode\\managed-settings.json';
+  if (platform === 'win32') {
+    const programData = env.PROGRAMDATA ?? env.ProgramData ?? 'C:\\ProgramData';
+    return `${programData}\\ClaudeCode\\managed-settings.json`;
+  }
   return '/etc/claude-code/managed-settings.json';
 }

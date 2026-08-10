@@ -356,10 +356,13 @@ interactive session would: hooks, skills, plugins, MCP servers, auto memory and 
 working directory and from the runtime host's own `~/.claude`. A hook or MCP server configured on
 that machine, outside MangoStudio, executes inside a MangoStudio turn.
 
-This is not an oversight and it is not currently fixable. `--bare` skips all of it, but bare mode
-never reads OAuth credentials or the system keychain and requires `ANTHROPIC_API_KEY` — so
-determinism and subscription auth are mutually exclusive today, and v1 takes subscription auth. The
-disclosure states the inheritance rather than papering over it.
+This is not an oversight, and it is not fixable **for this adapter**. `--bare` skips all of it, but
+bare mode never reads OAuth credentials or the system keychain: it authenticates from
+`ANTHROPIC_API_KEY`, from an `apiKeyHelper` supplied through `--settings`, or from a third-party
+provider's own credentials (Bedrock, Vertex, Foundry). None of those is the subscription sign-in this
+adapter hosts, so for a subscription-backed account determinism and authentication are mutually
+exclusive, and v1 takes authentication. The disclosure states the inheritance rather than papering
+over it.
 
 Two consequences for the drift work in plan 010: the vendor documents that `--bare` "will become the
 default for `-p` in a future release", which would break subscription-backed turns without warning,
