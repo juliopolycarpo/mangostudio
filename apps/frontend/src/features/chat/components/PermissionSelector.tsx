@@ -175,6 +175,10 @@ export function PermissionSelector({
 function Axis({ heading, children }: { heading: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
+      {/* The capitals are this element's, not the catalog's: a screen reader
+          announcing an all-caps string letter by letter is reading styling, and
+          a locale that does not want capitals for this role can drop the class
+          without rewriting its copy. */}
       <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
         {heading}
       </p>
