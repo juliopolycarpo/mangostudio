@@ -1,5 +1,6 @@
 export {
   ENVIRONMENTS_TOPIC,
+  EXTERNAL_AGENTS_TOPIC,
   GIT_SCOPES,
   type GitScope,
   GitScopeSchema,

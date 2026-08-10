@@ -3,6 +3,7 @@ import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   ENVIRONMENTS_TOPIC,
+  EXTERNAL_AGENTS_TOPIC,
   gitTopic,
   REALTIME_CLOSE_CODES,
   type RealtimeServerMessage,
@@ -345,6 +346,40 @@ describe('realtime WebSocket subscriptions', () => {
       type: 'invalidate',
       topic: ENVIRONMENTS_TOPIC,
     });
+  });
+
+  it('carries external-agent refreshes on their own topic, not the environments one', async () => {
+    // The two must stay distinct on the wire. Environment invalidation drops the
+    // hub's discovery cache; a background probe announcing itself through that
+    // topic would delete the answer it had just written and induce the next
+    // probe. A subscriber to one must therefore not receive the other.
+    const { bus, httpUrl, wsUrl } = startServer();
+    const user = await signUp(httpUrl);
+    const client = connect(wsUrl, { Cookie: user.cookie });
+
+    await client.opened;
+    await client.nextMessage();
+    send(client.socket, { type: 'subscribe', topics: [EXTERNAL_AGENTS_TOPIC] });
+    expect(await client.nextMessage()).toEqual({
+      type: 'subscribed',
+      topics: [EXTERNAL_AGENTS_TOPIC],
+    });
+
+    bus.publish(user.id, { type: 'invalidate', topic: ENVIRONMENTS_TOPIC });
+    await Bun.sleep(50);
+    expect(client.messages.some((message) => message.type === 'invalidate')).toBe(false);
+
+    bus.publish(user.id, { type: 'invalidate', topic: EXTERNAL_AGENTS_TOPIC });
+    expect(await client.nextMessage()).toEqual({
+      type: 'invalidate',
+      topic: EXTERNAL_AGENTS_TOPIC,
+    });
+
+    send(client.socket, { type: 'unsubscribe', topics: [EXTERNAL_AGENTS_TOPIC] });
+    await Bun.sleep(50);
+    bus.publish(user.id, { type: 'invalidate', topic: EXTERNAL_AGENTS_TOPIC });
+    await Bun.sleep(50);
+    expect(client.messages.filter((message) => message.type === 'invalidate')).toHaveLength(1);
   });
 
   it('delivers settings invalidations only to subscribed sockets for the same user', async () => {

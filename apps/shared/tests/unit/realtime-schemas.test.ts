@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
   ENVIRONMENTS_TOPIC,
+  EXTERNAL_AGENTS_TOPIC,
   GIT_SCOPES,
   gitTopic,
   parseGitTopic,
@@ -17,6 +18,11 @@ describe('realtime topic helpers', () => {
   it('round-trips settings and git topics', () => {
     expect(SETTINGS_TOPIC).toBe('settings');
     expect(ENVIRONMENTS_TOPIC).toBe('environments');
+    // Separate from the environments topic on purpose: that one means the
+    // machine changed and drops the discovery cache, this one means only that a
+    // background probe learned something better about a machine that did not.
+    expect(EXTERNAL_AGENTS_TOPIC).toBe('external-agents');
+    expect(EXTERNAL_AGENTS_TOPIC).not.toBe(ENVIRONMENTS_TOPIC);
     expect(gitTopic('chat-abc')).toBe('git:chat-abc');
     expect(parseGitTopic(gitTopic('chat-abc'))).toBe('chat-abc');
     expect(parseGitTopic('settings')).toBeUndefined();
@@ -144,6 +150,12 @@ describe('realtime server messages', () => {
     expect(
       Value.Check(RealtimeServerMessageSchema, {
         type: 'invalidate',
+        topic: EXTERNAL_AGENTS_TOPIC,
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'invalidate',
         topic: SETTINGS_TOPIC,
         scopes: ['app'],
       })
@@ -216,6 +228,15 @@ describe('realtime server messages', () => {
       Value.Check(RealtimeInvalidateMessageSchema, {
         type: 'invalidate',
         topic: 'unknown-topic',
+        scopes: ['app'],
+      })
+    ).toBe(false);
+    // The external-agents topic carries no scopes: the whole descriptor list is
+    // what changed, and there is nothing narrower to name.
+    expect(
+      Value.Check(RealtimeInvalidateMessageSchema, {
+        type: 'invalidate',
+        topic: EXTERNAL_AGENTS_TOPIC,
         scopes: ['app'],
       })
     ).toBe(false);
