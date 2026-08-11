@@ -1,0 +1,63 @@
+{
+  "configOptions": [
+    {
+      "category": "<string>",
+      "currentValue": "<string>",
+      "description": "<string>",
+      "id": "mode",
+      "name": "<string>",
+      "options": [
+        {
+          "description": "<string>",
+          "name": "<string>",
+          "value": "<string>"
+        }
+      ],
+      "type": "<string>"
+    },
+    {
+      "category": "<string>",
+      "currentValue": "<string>",
+      "description": "<string>",
+      "id": "model",
+      "name": "<string>",
+      "options": [
+        {
+          "name": "<string>",
+          "value": "<string>"
+        }
+      ],
+      "type": "<string>"
+    }
+  ],
+  "models": {
+    "availableModels": [
+      {
+        "modelId": "<string>",
+        "name": "<string>"
+      }
+    ],
+    "currentModelId": "<string>"
+  },
+  "modes": {
+    "availableModes": [
+      {
+        "description": "<string>",
+        "id": "agent",
+        "name": "<string>"
+      },
+      {
+        "description": "<string>",
+        "id": "ask",
+        "name": "<string>"
+      },
+      {
+        "description": "<string>",
+        "id": "plan",
+        "name": "<string>"
+      }
+    ],
+    "currentModeId": "agent"
+  },
+  "sessionId": "<string>"
+}

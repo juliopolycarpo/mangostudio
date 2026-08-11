@@ -6,7 +6,7 @@
  *
  * `CODEX_PROTOCOL_PACKAGE` is the **regeneration** pin. It names a published
  * npm tarball by version and integrity digest, and it exists so that
- * `bun run vendor:codex-protocol` produces byte-identical output on any machine
+ * `bun run vendor-contracts:regen` produces byte-identical output on any machine
  * — including a CI runner with no Codex installed at all. It is never a launch
  * path: nothing in the adapter shells out to `bunx`, and a user whose `codex`
  * came from npm, from Bun, from Homebrew or from a downloaded binary is served

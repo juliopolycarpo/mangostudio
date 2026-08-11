@@ -1,0 +1,7 @@
+{
+  "set": "codex-protocol",
+  "command": "bunx @openai/codex@<pinned> app-server generate-ts",
+  "capturedFrom": "@openai/codex@0.147.0",
+  "capturedAt": "2026-08-11",
+  "checksum": "sha256:25c7c8e3b56b2f3210417e9de71fc2a7854359728ada91a7b8d9f07cad47523d"
+}

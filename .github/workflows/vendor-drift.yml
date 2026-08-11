@@ -1,13 +1,20 @@
 name: Vendor drift
 
-# The Codex `app-server` contract under
-# apps/runtime/src/services/external-agents/codex/protocol is emitted by the
-# vendor's own generator and committed verbatim. This job regenerates it from
-# the pinned package and fails if the result differs, so the committed tree can
-# never quietly diverge from the version the adapter claims to speak.
+# Three vendor surfaces are pinned and committed, so a version bump shows up as
+# a reviewable diff instead of a silent behaviour change: the Codex
+# `app-server` contract emitted by the vendor's own generator, the Cursor ACP
+# handshake, and the Claude Code CLI surface.
 #
-# On a version bump the resulting diff is the changelog, which is the reason
-# the output is committed rather than generated during the build.
+# This job regenerates each one and compares. A vendor *removing or changing*
+# something a capture recorded fails — that is the case where an adapter is
+# reading a field that is gone. A vendor *adding* something is reported and
+# nothing more, because every one of these CLIs ships constantly and a job that
+# failed on all of it would be red most weeks.
+#
+# Only the Codex set can run here. Its generator is a pinned npm package, so it
+# reproduces on a runner with nothing installed; Cursor and Claude need a
+# signed-in CLI and are skipped loudly, which the summary reports rather than
+# passing over in silence.
 #
 # Path-filtered on purpose: the check downloads the pinned vendor package, and
 # every other PR has no reason to pay for that.
@@ -16,9 +23,10 @@ on:
   pull_request:
     branches: [main]
     paths:
+      - "apps/runtime/src/services/external-agents/*/contract/**"
       - "apps/runtime/src/services/external-agents/codex/protocol/**"
-      - "apps/runtime/src/services/external-agents/codex/pinned.ts"
-      - "scripts/vendor/codex-protocol.ts"
+      - "apps/runtime/src/services/external-agents/*/pinned.ts"
+      - "scripts/vendor/**"
   workflow_dispatch:
 
 permissions:
@@ -29,8 +37,8 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  codex-protocol:
-    name: Codex app-server contract is regenerable
+  contracts:
+    name: Committed vendor contracts are reproducible
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -42,5 +50,5 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - name: Regenerate and diff the vendored contract
-        run: bun run vendor:codex-protocol --check
+      - name: Recapture and diff the committed contracts
+        run: bun run vendor-contracts:check
