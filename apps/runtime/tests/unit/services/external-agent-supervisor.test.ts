@@ -146,7 +146,7 @@ describe('external-agent adapter registry and supervisor', () => {
     // build that cannot.
     const adapter = new FakeExternalAgentAdapter({
       steerable: true,
-      capabilities: { steering: true },
+      capabilities: { steering: false },
     });
     const value = await fixture({ adapter });
 
@@ -352,7 +352,10 @@ describe('external-agent adapter registry and supervisor', () => {
   });
 
   it('forwards a steer to the adapter with the native session id attached', async () => {
-    const adapter = new FakeExternalAgentAdapter({ steerable: true });
+    const adapter = new FakeExternalAgentAdapter({
+      steerable: true,
+      capabilities: { steering: true },
+    });
     const value = await fixture({ adapter });
     await openSession(value);
 
