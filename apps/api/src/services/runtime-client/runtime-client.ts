@@ -8,6 +8,8 @@ import {
   type ExternalAgentOpenParams,
   type ExternalAgentOpenResult,
   type ExternalAgentRespondParams,
+  type ExternalAgentSteerParams,
+  type ExternalAgentSteerResult,
   type ExternalAgentTurnParams,
   type ExternalAgentTurnResult,
   FileNotReadError,
@@ -267,6 +269,10 @@ interface RuntimeExternalAgentsClient {
     params: ExternalAgentRespondParams,
     options?: RuntimeRequestOptions
   ): Promise<ExternalAgentAckResult>;
+  steer(
+    params: ExternalAgentSteerParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentSteerResult>;
   cancel(
     params: ExternalAgentCancelParams,
     options?: RuntimeRequestOptions
@@ -428,6 +434,7 @@ export class RuntimeClient {
       open: (params, options) => this.request('external-agent.open', params, options),
       turn: (params, options) => this.request('external-agent.turn', params, options),
       respond: (params, options) => this.request('external-agent.respond', params, options),
+      steer: (params, options) => this.request('external-agent.steer', params, options),
       cancel: (params, options) => this.request('external-agent.cancel', params, options),
       close: (params, options) => this.request('external-agent.close', params, options),
       onEvent: (sessionId, listener) =>

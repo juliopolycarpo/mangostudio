@@ -37,8 +37,10 @@ import type {
   ExternalAgentConfiguration,
   ExternalAgentError,
   ExternalAgentEvent,
+  ExternalAgentSteerResult,
   ExternalAgentTargetId,
   ExternalApprovalRequest,
+  ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
@@ -130,6 +132,18 @@ interface ExternalTurnObserver {
     readonly assistantMessageId: string;
   }): void;
   onEvent?(event: ExternalAgentEvent): void;
+  /**
+   * Reported once per steer, with the resolved outcome only — never the
+   * optimistic intermediate state the durable record briefly holds while the
+   * vendor call is in flight, because nothing live could have acted on it
+   * anyway.
+   */
+  onSteer?(steer: {
+    readonly clientMessageId: string;
+    readonly text: string;
+    readonly status: 'accepted' | 'rejected';
+    readonly reasonCode?: ExternalSteerRejectionReason;
+  }): void;
   onTerminal?(reason: ExternalTurnTerminalReason, error?: ExternalAgentError): void;
 }
 
@@ -303,6 +317,23 @@ export interface ExternalTurnController {
     readonly sessionId?: string;
     readonly nativeTurnId?: string;
   }): Promise<AnswerExternalApprovalResult>;
+  /**
+   * Sends more input into the chat's currently running turn.
+   *
+   * `turn-already-completed` covers three histories the caller cannot tell
+   * apart: no turn is running, one was but it ended, and `userId` does not
+   * own the turn that is. The last one is deliberate — distinguishing it from
+   * the other two would confirm that another user's turn is live on this
+   * chat, the same reason a rejected approval answer never says "not yours."
+   * `clientMessageId` is the idempotency key: a repeat returns the outcome
+   * already recorded for it, without a second vendor call.
+   */
+  steer(input: {
+    readonly userId: string;
+    readonly chatId: string;
+    readonly clientMessageId: string;
+    readonly text: string;
+  }): Promise<ExternalAgentSteerResult>;
 }
 
 export function createExternalTurnController(
@@ -325,6 +356,12 @@ export function createExternalTurnController(
       readonly sessionId: string;
       /** Mutable: the vendor's turn id arrives after the send is registered. */
       readonly external: ActiveExternalTurn;
+      readonly handle: ExternalSessionHandle;
+      readonly observer: ExternalTurnObserver | undefined;
+      /** Who started this turn — `steer` refuses a caller this does not match. */
+      readonly userId: string;
+      /** Idempotency: a repeated `clientMessageId` returns the recorded outcome. */
+      readonly steerOutcomes: Map<string, ExternalAgentSteerResult>;
     }
   >();
 
@@ -401,6 +438,10 @@ export function createExternalTurnController(
       writer,
       sessionId: handle.sessionId,
       external,
+      handle,
+      observer: input.observer,
+      userId: input.userId,
+      steerOutcomes: new Map(),
     });
 
     /** The first terminal writer wins; every later one is a no-op. */
@@ -696,8 +737,83 @@ export function createExternalTurnController(
       void live.writer.write({ force: true });
       return result;
     },
+    async steer(input) {
+      const live = liveTurns.get(input.chatId);
+      if (!live || live.transcript.terminated || live.userId !== input.userId) {
+        return { accepted: false, reasonCode: 'turn-already-completed' };
+      }
+
+      const cached = live.steerOutcomes.get(input.clientMessageId);
+      if (cached) return cached;
+
+      // Durable *and awaited* before any vendor call is attempted: a write
+      // still queued when the process died would be exactly the acknowledgement
+      // loss this exists to prevent. Every rejection below corrects this same
+      // record in place rather than leaving it silently absent.
+      live.transcript.recordSteerAttempt(
+        { clientMessageId: input.clientMessageId, text: input.text },
+        now()
+      );
+      await live.writer.write({ force: true });
+
+      const outcome = await resolveSteerOutcome(live, input);
+
+      // The turn may have ended while the vendor call was in flight; the
+      // terminal writer already sealed the transcript, and nothing may write
+      // to it after that.
+      if (live.transcript.terminated) {
+        live.steerOutcomes.set(input.clientMessageId, outcome);
+        return outcome;
+      }
+
+      if (!outcome.accepted) {
+        live.transcript.resolveSteerRejected(input.clientMessageId, outcome.reasonCode);
+        await live.writer.write({ force: true });
+      }
+      live.steerOutcomes.set(input.clientMessageId, outcome);
+      live.observer?.onSteer?.({
+        clientMessageId: input.clientMessageId,
+        text: input.text,
+        status: outcome.accepted ? 'accepted' : 'rejected',
+        ...(outcome.accepted ? {} : { reasonCode: outcome.reasonCode }),
+      });
+      return outcome;
+    },
   };
   return instance;
+}
+
+/**
+ * The two reasons only the vendor call can decide, plus the two the hub
+ * already knows the answer to without making one.
+ *
+ * `not-supported` and a missing native turn id are checked first because
+ * neither needs the runtime asked: a session whose capabilities never claimed
+ * steering, or a turn the vendor has not named yet, cannot be steered no
+ * matter what the call would say.
+ */
+async function resolveSteerOutcome(
+  live: { readonly handle: ExternalSessionHandle; readonly external: ActiveExternalTurn },
+  input: { readonly clientMessageId: string; readonly text: string }
+): Promise<ExternalAgentSteerResult> {
+  if (!live.handle.capabilities.steering) return { accepted: false, reasonCode: 'not-supported' };
+  const nativeTurnId = live.external.nativeTurnId;
+  if (!nativeTurnId) return { accepted: false, reasonCode: 'turn-already-completed' };
+  try {
+    return await live.handle.steer({
+      nativeTurnId,
+      clientMessageId: input.clientMessageId,
+      text: input.text,
+    });
+  } catch (error) {
+    // Mirrors `terminalReasonForCallFailure`: an argument the runtime rejects
+    // is the session it no longer has, because the session id is the only
+    // argument the hub itself chose.
+    if (error instanceof Error && error.name === 'ToolArgumentError') {
+      return { accepted: false, reasonCode: 'session-lost' };
+    }
+    throw error;
+  }
 }
 
 /**

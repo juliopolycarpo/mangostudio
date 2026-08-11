@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentConfiguration,
+  ExternalAgentSteerResult,
+} from '@mangostudio/shared/external-agents';
+import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import type {
   ExternalApprovalPart,
+  ExternalSteerPart,
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
@@ -124,6 +129,15 @@ async function readAssistantRow(): Promise<{
 function turnPartOf(parts: readonly MessagePart[]): ExternalTurnPart {
   const part = parts.find((entry): entry is ExternalTurnPart => entry.type === 'external_turn');
   if (!part) throw new Error('the transcript has no external_turn part');
+  return part;
+}
+
+function steerPartOf(parts: readonly MessagePart[], clientMessageId: string): ExternalSteerPart {
+  const part = parts.find(
+    (entry): entry is ExternalSteerPart =>
+      entry.type === 'external_steer' && entry.clientMessageId === clientMessageId
+  );
+  if (!part) throw new Error(`the transcript has no external_steer part for "${clientMessageId}"`);
   return part;
 }
 
@@ -494,6 +508,183 @@ describe('external turn controller', () => {
     // resumable handle, which no client may address.
     expect(sessionIds).toEqual(['session-1']);
     expect(events).toEqual(['text_delta', 'completed']);
+  });
+
+  describe('steer', () => {
+    it('persists the steered text before the vendor call resolves', async () => {
+      const held = Promise.withResolvers<ExternalAgentSteerResult>();
+      const { runtime, controller } = harness({ steerResult: () => held.promise });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const steering = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'actually use the existing helper',
+      });
+      await waitFor(() => runtime.calls.steer.length === 1, 'the steer to reach the runtime');
+
+      // The vendor call is still open, but the durable record already exists —
+      // a lost acknowledgement must not erase what the user said.
+      const midFlight = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      expect(midFlight).toMatchObject({
+        text: 'actually use the existing helper',
+        status: 'accepted',
+      });
+
+      held.resolve({ accepted: true });
+      await expect(steering).resolves.toEqual({ accepted: true });
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('corrects the durable record in place when Codex refuses the turn', async () => {
+      const { runtime, controller } = harness({
+        steerResult: () => ({ accepted: false, reasonCode: 'turn-not-steerable' }),
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'switch to plan mode',
+      });
+      expect(result).toEqual({ accepted: false, reasonCode: 'turn-not-steerable' });
+
+      const part = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      expect(part).toMatchObject({
+        text: 'switch to plan mode',
+        status: 'rejected',
+        reasonCode: 'turn-not-steerable',
+      });
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('applies a repeated clientMessageId once and returns the recorded outcome', async () => {
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const input = { userId, chatId, clientMessageId: 'steer-1', text: 'once' };
+      const first = await controller.steer(input);
+      const second = await controller.steer(input);
+
+      expect(first).toEqual({ accepted: true });
+      expect(second).toEqual(first);
+      expect(runtime.calls.steer).toHaveLength(1);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('refuses with turn-already-completed when no turn is running', async () => {
+      const { runtime, controller } = harness();
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'hello?',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'turn-already-completed' });
+      expect(runtime.calls.steer).toHaveLength(0);
+    });
+
+    it('refuses a steer from a user who did not start the turn, indistinguishably from no turn', async () => {
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+      const other = await insertTestUser();
+
+      const result = await controller.steer({
+        userId: other.id,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'hijacked',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'turn-already-completed' });
+      expect(runtime.calls.steer).toHaveLength(0);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('refuses to write after the turn has already ended', async () => {
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+      runtime.emit({ type: 'completed' });
+      await running;
+      const finishedParts = (await readAssistantRow()).parts;
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'too late',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'turn-already-completed' });
+      expect(runtime.calls.steer).toHaveLength(0);
+      expect((await readAssistantRow()).parts).toEqual(finishedParts);
+    });
+
+    it('refuses with not-supported when the session capabilities never claimed steering', async () => {
+      const { runtime, controller } = harness({
+        capabilities: {
+          ...NO_EXTERNAL_AGENT_CAPABILITIES,
+          structuredStreaming: true,
+          interactiveApprovals: true,
+          cancellation: true,
+          resume: true,
+        },
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'hello?',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'not-supported' });
+      expect(runtime.calls.steer).toHaveLength(0);
+      const part = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      expect(part.status).toBe('rejected');
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('maps a session the runtime no longer has to session-lost', async () => {
+      const { runtime, controller } = harness({
+        steerFailure: () => Object.assign(new Error('session gone'), { name: 'ToolArgumentError' }),
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'hello?',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'session-lost' });
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
   });
 });
 

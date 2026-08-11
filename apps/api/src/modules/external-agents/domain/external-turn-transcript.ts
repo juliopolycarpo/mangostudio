@@ -17,6 +17,7 @@ import type {
   ExternalAgentEvent,
   ExternalAgentTargetId,
   ExternalApprovalRequest,
+  ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
@@ -27,6 +28,7 @@ import {
 import type {
   ExternalActivityPart,
   ExternalApprovalPart,
+  ExternalSteerPart,
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
@@ -61,6 +63,7 @@ export class ExternalTurnTranscript {
   readonly #turnPart: ExternalTurnPart;
   readonly #activityByCallId = new Map<string, ExternalActivityPart>();
   readonly #approvalByRequestId = new Map<string, ExternalApprovalPart>();
+  readonly #steerByClientMessageId = new Map<string, ExternalSteerPart>();
   readonly #maxBytes: number;
   readonly #maxEvents: number;
   #text = '';
@@ -176,6 +179,41 @@ export class ExternalTurnTranscript {
 
   recordError(error: ExternalAgentError): void {
     this.#turnPart.error = error;
+  }
+
+  /**
+   * Records that a steer was sent, before the vendor call it feeds is made.
+   *
+   * Deliberately outside {@link apply}: a steer is the user talking to the
+   * turn, not the vendor reporting something, so there is no envelope
+   * sequence to advance and no event budget to charge it against — the
+   * caller has already decided this write is happening before it knows
+   * whether the vendor will honour it. `status` starts `'accepted'`
+   * optimistically; {@link resolveSteerRejected} corrects it in place if the
+   * vendor call comes back refused. The text itself never changes either way.
+   */
+  recordSteerAttempt(
+    input: { readonly clientMessageId: string; readonly text: string },
+    at: number
+  ): void {
+    const part: ExternalSteerPart = {
+      type: 'external_steer',
+      targetId: this.#turnPart.targetId,
+      clientMessageId: input.clientMessageId,
+      text: input.text,
+      status: 'accepted',
+      createdAt: at,
+    };
+    this.#steerByClientMessageId.set(input.clientMessageId, part);
+    this.#parts.push(part);
+  }
+
+  /** Corrects an already-recorded steer to `'rejected'`. A no-op once corrected. */
+  resolveSteerRejected(clientMessageId: string, reasonCode: ExternalSteerRejectionReason): void {
+    const part = this.#steerByClientMessageId.get(clientMessageId);
+    if (!part || part.status === 'rejected') return;
+    part.status = 'rejected';
+    part.reasonCode = reasonCode;
   }
 
   #budgetExceeded(): boolean {

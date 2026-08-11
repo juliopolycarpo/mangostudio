@@ -27,6 +27,7 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentConfiguration,
   ExternalAgentEventEnvelope,
+  ExternalAgentSteerResult,
   ExternalAgentTargetId,
   ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
@@ -126,6 +127,11 @@ export interface ExternalSessionHandle {
     readonly requestId: string;
     readonly optionId: string;
   }): Promise<void>;
+  steer(input: {
+    readonly nativeTurnId: string;
+    readonly clientMessageId: string;
+    readonly text: string;
+  }): Promise<ExternalAgentSteerResult>;
   cancel(nativeTurnId?: string): Promise<void>;
 }
 
@@ -271,6 +277,17 @@ export function createExternalSessionManager(
             nativeTurnId: input.nativeTurnId,
             requestId: input.requestId,
             optionId: input.optionId,
+          },
+          { timeoutMs: callTimeoutMs }
+        );
+      },
+      async steer(input) {
+        return await record.client.externalAgents.steer(
+          {
+            sessionId: record.sessionId,
+            nativeTurnId: input.nativeTurnId,
+            clientMessageId: input.clientMessageId,
+            input: input.text,
           },
           { timeoutMs: callTimeoutMs }
         );
