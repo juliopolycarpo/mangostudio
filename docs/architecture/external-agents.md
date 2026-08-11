@@ -393,6 +393,37 @@ disagreeing.
 two of nine ways a turn ends and the hub decides the other seven, so without it a live view could
 only ever show two outcomes and a reload would replace them with a third.
 
+## Steering
+
+Codex only. `turn/steer` is a first-class client operation in Codex's own protocol — the user
+sends more input into a turn that is still running, and the vendor redirects rather than queuing
+it behind the current work. Cursor and Claude have no equivalent: a second message to either is a
+new turn, or dies with no owner to answer it. Composing "steering" on top of that would give the
+same button two different meanings depending on which vendor happened to be selected, so the
+capability flag comes from whether the adapter implements the optional `steer` member, and the
+composer reads it from there rather than assuming.
+
+The composer gates the affordance on the adapter's static capability alone. Codex's own protocol
+gives no advance signal that a specific in-flight turn — a review, a compaction — will refuse a
+steer; `Turn` carries no such field. So a refusal is discovered by attempting it, not predicted
+before the button is shown, and `turn-not-steerable` is what a rejected attempt reports back.
+
+**Persistence order is the whole feature.** The hub writes the steered text into the running
+turn's transcript — optimistically, as accepted — *before* calling the runtime, not after. A vendor
+call that succeeds but whose acknowledgement is lost must never make the user's own words
+disappear from what they see on reload; writing first and correcting the record in place on an
+actual rejection is what keeps that true. The four rejection reasons —
+`turn-already-completed | not-supported | session-lost | turn-not-steerable` — are answered from
+cheapest to most expensive: a missing live turn, a session's own capabilities, and a stale
+`nativeTurnId` are all decided by the hub without a runtime round trip; only Codex's own turn state
+needs one.
+
+The Codex adapter refuses locally, before any request, when an approval is currently outstanding on
+the same turn. The shared JSON-RPC client answers one message at a time and does not read past an
+unanswered server→client request, so a `turn/steer` sent into that window could never see its own
+response — the adapter reports `turn-not-steerable` instead of leaving the caller to hit the
+request's own timeout.
+
 ## Deliberately out of scope
 
 Present in a vendor's contract, not surfaced. Named here so a later cycle finds them without
@@ -419,6 +450,11 @@ protocol archaeology:
   it belongs behind a visible per-chat control rather than as an invisible default.
 - **Claude session browsing.** The internal JSONL lives under an encoded `~/.claude/projects/<cwd>/`
   path the vendor documents as subject to change. Parsing it would be reading a private format.
+- **Queuing a follow-up message for Cursor or Claude.** Sending input to either while a turn is
+  running starts a new turn or has no owner to answer it — the model already working never sees
+  it. That is a different product promise from steering ("redirects what is running now") and
+  deserves its own name and its own copy, not the same button doing two things depending on the
+  vendor.
 
 ## Availability
 
