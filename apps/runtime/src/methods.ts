@@ -17,6 +17,8 @@ import type {
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
   ExternalAgentRespondParams,
+  ExternalAgentSteerParams,
+  ExternalAgentSteerResult,
   ExternalAgentTurnParams,
   ExternalAgentTurnResult,
 } from '@mangostudio/shared/external-agents';
@@ -65,6 +67,8 @@ export type {
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
   ExternalAgentRespondParams,
+  ExternalAgentSteerParams,
+  ExternalAgentSteerResult,
   ExternalAgentTurnParams,
   ExternalAgentTurnResult,
 } from '@mangostudio/shared/external-agents';
@@ -1061,6 +1065,10 @@ export interface RuntimeMethodMap {
   'external-agent.respond': {
     readonly params: ExternalAgentRespondParams;
     readonly result: ExternalAgentAckResult;
+  };
+  'external-agent.steer': {
+    readonly params: ExternalAgentSteerParams;
+    readonly result: ExternalAgentSteerResult;
   };
   'external-agent.cancel': {
     readonly params: ExternalAgentCancelParams;

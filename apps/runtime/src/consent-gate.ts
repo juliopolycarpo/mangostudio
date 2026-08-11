@@ -78,6 +78,7 @@ export const RUNTIME_METHOD_CAPABILITIES: Readonly<
   'external-agent.open': ['externalAgents'],
   'external-agent.turn': ['externalAgents'],
   'external-agent.respond': ['externalAgents'],
+  'external-agent.steer': ['externalAgents'],
   'external-agent.cancel': ['externalAgents'],
   'external-agent.close': ['externalAgents'],
   'probing.runtimes': ['probing'],

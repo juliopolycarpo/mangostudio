@@ -71,14 +71,27 @@ export interface ExternalAgentCloseInput {
 }
 
 export interface ExternalAgentSteerInput {
+  readonly sessionId: string;
   readonly nativeSessionId: string;
+  /** The hub's own turn handle — see {@link ExternalAgentTurnStream.nativeTurnId}. */
   readonly nativeTurnId: string;
+  readonly clientMessageId: string;
   readonly input: string;
 }
 
-export interface ExternalAgentSteerResult {
-  readonly accepted: boolean;
-}
+/**
+ * Named apart from the shared `ExternalAgentSteerResult` wire type, which this
+ * would otherwise collide with under `export type *`. `not-supported` and
+ * `session-lost` are never produced here: the supervisor refuses those before
+ * an adapter is called at all, because neither is a fact about the vendor's
+ * turn. Only the two reasons a vendor can actually decide.
+ */
+export type ExternalAgentSteerOutcome =
+  | { readonly accepted: true }
+  | {
+      readonly accepted: false;
+      readonly reasonCode: 'turn-already-completed' | 'turn-not-steerable';
+    };
 
 export interface ExternalAgentListSessionsInput {
   readonly cursor?: string;
@@ -121,7 +134,7 @@ export interface ExternalAgentAdapter {
   respond(input: ExternalAgentApprovalResponseInput): Promise<void>;
   cancel(input: ExternalAgentCancelInput): Promise<void>;
   close(input: ExternalAgentCloseInput): Promise<void>;
-  steer?(input: ExternalAgentSteerInput): Promise<ExternalAgentSteerResult>;
+  steer?(input: ExternalAgentSteerInput): Promise<ExternalAgentSteerOutcome>;
   listSessions?(input: ExternalAgentListSessionsInput): Promise<ExternalAgentNativeSessionPage>;
   startReview?(input: ExternalAgentStartReviewInput): ExternalAgentTurnStream;
   refreshAccountUsage?(input: ExternalAgentRefreshUsageInput): Promise<ExternalAgentAccountUsage>;

@@ -352,7 +352,7 @@ function mapTokenUsage(breakdown: TokenUsageBreakdown): ExternalUsage {
 }
 
 /** `CodexErrorInfo` is a string in most members and a single-key object in the rest. */
-function codexErrorCode(info: unknown): string {
+export function codexErrorCode(info: unknown): string {
   if (typeof info === 'string') return info;
   if (info && typeof info === 'object') {
     const [key] = Object.keys(info);

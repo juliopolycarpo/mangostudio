@@ -11,6 +11,8 @@ import type {
   ExternalAgentCloseInput,
   ExternalAgentOpenSessionInput,
   ExternalAgentStartTurnInput,
+  ExternalAgentSteerInput,
+  ExternalAgentSteerOutcome,
   ExternalAgentTurnStream,
 } from '../../src/services/external-agents/adapter';
 
@@ -25,6 +27,8 @@ export interface FakeExternalAgentOptions {
   readonly turnError?: Error;
   /** Implements the optional `steer` member, whatever the descriptor advertises. */
   readonly steerable?: boolean;
+  /** What `steer` resolves with once `steerable` is set. Defaults to accepted. */
+  readonly steerResult?: ExternalAgentSteerOutcome;
 }
 
 /** Scriptable protocol peer. It never knows or launches a production vendor. */
@@ -33,6 +37,7 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
   readonly opens: ExternalAgentOpenSessionInput[] = [];
   readonly turns: ExternalAgentStartTurnInput[] = [];
   readonly responses: ExternalAgentApprovalResponseInput[] = [];
+  readonly steers: ExternalAgentSteerInput[] = [];
   readonly cancellations: ExternalAgentCancelInput[] = [];
   readonly closes: ExternalAgentCloseInput[] = [];
   readonly #events: readonly ExternalAgentEvent[];
@@ -59,7 +64,12 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
     this.#closeGate = options.closeGate;
     this.#nativeTurnId = options.nativeTurnId;
     this.#turnError = options.turnError;
-    if (options.steerable) this.steer = () => Promise.resolve({ accepted: true });
+    if (options.steerable) {
+      this.steer = (input) => {
+        this.steers.push(input);
+        return Promise.resolve(options.steerResult ?? { accepted: true });
+      };
+    }
   }
 
   discover(): Promise<ExternalAgentRuntimeDescriptor> {
