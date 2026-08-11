@@ -88,6 +88,15 @@ interface LiveSession {
    * time would be a sandbox root nobody authorized.
    */
   readonly authorizedWorkspaceRoots: ReadonlySet<string>;
+  /**
+   * What `open` resolved the target to, kept for every later turn.
+   *
+   * A vendor hosted over a long-lived protocol process only needs this once,
+   * but one that runs a process per turn — Claude Code's headless stream — needs
+   * it on every send, and re-resolving would put a scanner probe on the path of
+   * each message and let a session change binaries halfway through.
+   */
+  readonly executablePath: string;
   readonly openedAtMs: number;
   readonly openResult: ExternalAgentOpenResult;
   readonly turns: Map<string, TurnReceipt>;
@@ -495,7 +504,8 @@ export class ExternalAgentSessionSupervisor {
         `Resolving external-agent target "${params.targetId}" timed out.`
       );
       throwIfAborted(controller.signal);
-      if (!executable.path) {
+      const executablePath = executable.path;
+      if (!executablePath) {
         throw new RuntimeToolArgumentError(
           `External-agent executable for "${params.targetId}" is not installed.`
         );
@@ -505,7 +515,7 @@ export class ExternalAgentSessionSupervisor {
         context: this.#context(
           adapter,
           controller.signal,
-          executable.path,
+          executablePath,
           workspacePath,
           processes
         ),
@@ -556,6 +566,7 @@ export class ExternalAgentSessionSupervisor {
         adapter,
         workspacePath,
         authorizedWorkspaceRoots,
+        executablePath,
         openedAtMs: this.#now(),
         openResult,
         turns: new Map(),
@@ -592,7 +603,7 @@ export class ExternalAgentSessionSupervisor {
       context: this.#context(
         session.adapter,
         controller.signal,
-        undefined,
+        session.executablePath,
         session.workspacePath,
         session.processes
       ),

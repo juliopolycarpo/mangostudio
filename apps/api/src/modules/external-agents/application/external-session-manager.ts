@@ -75,6 +75,15 @@ interface ExternalSessionBinding {
   readonly canonicalWorkspacePath: string;
   /** Absent when the adapter reported no account identity to compare. */
   readonly vendorAccountFingerprint: string | null;
+  /**
+   * The attested credential home behind this environment's vendor logins.
+   *
+   * Part of the binding, so a session opened against one OS identity is never
+   * resumed against another. Null only on rows written before the attestation
+   * existed; a live session cannot reach here without one, because the turn
+   * controller refuses to start without an attestation.
+   */
+  readonly credentialHomeFingerprint: string | null;
 }
 
 export interface EnsureExternalSessionInput extends ExternalSessionBinding {
@@ -132,9 +141,21 @@ export interface ExternalSessionManager {
     reason: ExternalTurnTerminalReason,
     options?: { readonly keepContinuation?: boolean }
   ): Promise<void>;
-  /** Reaps every session matching a scope. Used by consent, environment and user changes. */
+  /**
+   * Reaps every session matching a scope. Used by consent, environment and user
+   * changes.
+   *
+   * Every field narrows; an omitted one matches everything. `targetId` exists
+   * because a disclosure is withdrawn from *one vendor*: without it, refusing
+   * Anthropic would also kill the OpenAI turn running in the next tab, which is
+   * a different company's consent that nobody withdrew.
+   */
   reapScope(
-    scope: { readonly userId?: string; readonly environmentId?: string },
+    scope: {
+      readonly userId?: string;
+      readonly environmentId?: string;
+      readonly targetId?: ExternalAgentTargetId;
+    },
     reason: ExternalTurnTerminalReason,
     options?: { readonly keepContinuation?: boolean }
   ): Promise<void>;
@@ -176,7 +197,8 @@ function sameBinding(left: ExternalSessionBinding, right: ExternalSessionBinding
     left.environmentId === right.environmentId &&
     left.targetId === right.targetId &&
     left.canonicalWorkspacePath === right.canonicalWorkspacePath &&
-    left.vendorAccountFingerprint === right.vendorAccountFingerprint
+    left.vendorAccountFingerprint === right.vendorAccountFingerprint &&
+    left.credentialHomeFingerprint === right.credentialHomeFingerprint
   );
 }
 
@@ -311,6 +333,7 @@ export function createExternalSessionManager(
       targetId: input.targetId,
       canonicalWorkspacePath: input.canonicalWorkspacePath,
       vendorAccountFingerprint: input.vendorAccountFingerprint,
+      credentialHomeFingerprint: input.credentialHomeFingerprint,
     };
 
     const generation = reapGenerations.get(input.chatId) ?? 0;
@@ -439,7 +462,8 @@ export function createExternalSessionManager(
     async reapScope(scope, reason, reapOptions) {
       const inScope = (binding: ExternalSessionBinding): boolean =>
         (!scope.userId || binding.userId === scope.userId) &&
-        (!scope.environmentId || binding.environmentId === scope.environmentId);
+        (!scope.environmentId || binding.environmentId === scope.environmentId) &&
+        (!scope.targetId || binding.targetId === scope.targetId);
 
       const chatIds = new Set<string>();
       for (const [chatId, record] of sessions) {

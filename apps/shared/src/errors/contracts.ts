@@ -42,6 +42,22 @@ export const ERROR_CODES = {
    * failure because the fix is one explicit choice, not a settings change.
    */
   EXTERNAL_WORKSPACE_UNTRUSTED: 'EXTERNAL_WORKSPACE_UNTRUSTED',
+  /**
+   * The machine an external agent would run on has not proved that vendor
+   * logins belong to the MangoStudio user whose turn it is.
+   *
+   * Its own code because nothing the user can do in MangoStudio fixes it: the
+   * remedy is a per-user OS account, a per-user container or a single-user hub,
+   * which is an operator's change. A generic permission error would send people
+   * looking through their own settings for a switch that does not exist.
+   */
+  EXTERNAL_ISOLATION_UNPROVEN: 'EXTERNAL_ISOLATION_UNPROVEN',
+  /**
+   * The user has not acknowledged this vendor's third-party disclosure, or has
+   * acknowledged a materially different one. Distinct from a validation failure
+   * because the request is well-formed and the fix is one explicit choice.
+   */
+  EXTERNAL_DISCLOSURE_REQUIRED: 'EXTERNAL_DISCLOSURE_REQUIRED',
   INTERNAL: 'INTERNAL',
 } as const;
 

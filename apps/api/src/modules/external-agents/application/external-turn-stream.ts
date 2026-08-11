@@ -26,6 +26,7 @@ import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
+import { requiresExternalDisclosure } from './external-disclosure-gate';
 import {
   type ExternalTurnConfigurationResolution,
   resolveExternalTurnConfiguration,
@@ -73,6 +74,24 @@ export interface ExternalTurnStreamDependencies {
 export type ExternalTurnPreflightFailure =
   | { readonly kind: 'conflict'; readonly message: string }
   | { readonly kind: 'unsupported'; readonly message: string }
+  /**
+   * The environment has not proved that vendor credentials belong to the user
+   * whose turn this is. Refused here as well as in discovery because discovery
+   * is cached and this is not.
+   */
+  | { readonly kind: 'isolation-unproven'; readonly message: string }
+  /**
+   * The user has not acknowledged this vendor's third-party disclosure, or has
+   * acknowledged a materially different one. Carries the vendor so the client
+   * knows which disclosure to render, and the environment because the
+   * acknowledgement is recorded against the descriptor the user was shown.
+   */
+  | {
+      readonly kind: 'disclosure-required';
+      readonly message: string;
+      readonly targetId: ExternalAgentTargetId;
+      readonly environmentId: string;
+    }
   | { readonly kind: 'unavailable'; readonly message: string }
   | { readonly kind: 'validation'; readonly message: string }
   /**
@@ -153,7 +172,44 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       };
     }
     if (!resolution.ok) {
-      return { ok: false, failure: { kind: 'unsupported', message: resolution.message } };
+      // Two different refusals with two different remedies. "Change a setting"
+      // is on the user; "this machine cannot keep vendor logins separate" is on
+      // whoever administers it, and flattening them into one message would send
+      // people to the wrong place.
+      return {
+        ok: false,
+        failure: {
+          kind: resolution.isolationUnproven ? 'isolation-unproven' : 'unsupported',
+          message: resolution.message,
+        },
+      };
+    }
+
+    // Authoritative, and deliberately not the descriptor's cached
+    // `disclosure-required`: the selector's copy of that answer can be minutes
+    // old, and an acknowledgement revoked in another tab has to take effect on
+    // the next send rather than on the next cache expiry. The external API
+    // reaches this same check, which is what makes the gate a safeguard instead
+    // of a courtesy the browser extends to itself.
+    if (
+      await requiresExternalDisclosure(
+        { userId: input.userId, targetId: input.chat.runner.targetId },
+        {
+          capabilities: resolution.descriptor.capabilities,
+          supportedConfigurations: resolution.descriptor.supportedConfigurations,
+        },
+        db
+      )
+    ) {
+      return {
+        ok: false,
+        failure: {
+          kind: 'disclosure-required',
+          message: 'This agent needs its third-party disclosure acknowledged before it can run.',
+          targetId: input.chat.runner.targetId,
+          environmentId: input.chat.environmentId,
+        },
+      };
     }
 
     // After resolution, because the canonical path is what gets trusted and only
@@ -220,6 +276,7 @@ function openStream(
             configuration: resolution.configuration,
             canonicalWorkspacePath: resolution.canonicalWorkspacePath,
             vendorAccountFingerprint: resolution.vendorAccountFingerprint,
+            credentialHomeFingerprint: resolution.credentialHomeFingerprint,
             observer: {
               onSession(session) {
                 send(externalSessionStartedChunk(session));

@@ -23,6 +23,7 @@ export function SettingsTabs() {
         { to: '/settings/skills', label: t.settings.tabs.skills },
         { to: '/settings/mcp', label: t.settings.tabs.mcp },
         { to: '/settings/external-api', label: t.settings.tabs.externalApi },
+        { to: '/settings/external-agents', label: t.settings.tabs.externalAgents },
         { to: '/settings/metrics', label: t.settings.tabs.metrics },
         { to: '/settings/logs', label: t.settings.tabs.logs },
       ]}

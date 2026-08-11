@@ -6,18 +6,35 @@
  * account, and — at some permission levels — edits files and runs commands
  * without asking again. Saying that once, plainly, is the point.
  *
- * The acknowledgement records which vendor, which disclosure version and when,
- * plus what the adapter claimed it could do. A later version or a materially
- * different capability set asks again; see `needsExternalDisclosure`.
+ * The acknowledgement is recorded server-side, per vendor, and is a
+ * precondition the turn-start path enforces rather than a preference this dialog
+ * remembers. A later text version, a vendor that gained a capability, or an
+ * account whose effective permission default changed all ask again — see
+ * `external-disclosure-gate.ts` for what makes an acknowledgement stale.
  */
 
-import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentTargetId,
+  ExternalPermissionLevel,
+} from '@mangostudio/shared/external-agents';
+import { externalAgentVendor } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, ExternalLink } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 
 export interface ExternalDisclosureDialogProps {
-  descriptor: ExternalAgentDescriptor;
+  /**
+   * The vendor, rather than its descriptor.
+   *
+   * Nothing here reads a capability, a version or an account — the notice is
+   * about the company, not about what its CLI reported this minute. Taking the
+   * id means the send-time gate can raise the same dialog from a 403 that names
+   * only the target and the machine, without first finding a descriptor that a
+   * revoked acknowledgement may already have changed.
+   */
+  targetId: ExternalAgentTargetId;
+  /** The level this chat is set to, when one is known. Shown, never chosen here. */
+  permissionLevel?: ExternalPermissionLevel;
   /** True when this is a review rather than a first activation. */
   reviewOnly?: boolean;
   /** True while the acknowledgement is being stored, which gates the vendor. */
@@ -27,7 +44,8 @@ export interface ExternalDisclosureDialogProps {
 }
 
 export function ExternalDisclosureDialog({
-  descriptor,
+  targetId,
+  permissionLevel,
   reviewOnly = false,
   busy = false,
   onAccept,
@@ -35,7 +53,8 @@ export function ExternalDisclosureDialog({
 }: ExternalDisclosureDialogProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.disclosure;
-  const vendor = t.externalAgents.target[descriptor.targetId];
+  const vendor = t.externalAgents.target[targetId];
+  const links = externalAgentVendor(targetId);
   const dialogRef = useFocusTrap(onCancel);
 
   return (
@@ -55,6 +74,14 @@ export function ExternalDisclosureDialog({
           <li>{labels.dataFlow.replace('{vendor}', vendor)}</li>
           <li>{labels.billing.replace('{vendor}', vendor)}</li>
           <li>{labels.ownership.replace('{vendor}', vendor)}</li>
+          {/*
+            Claude only. It runs the machine's own hooks, skills, plugins and MCP
+            servers inside the turn — the one exposure a user cannot see from
+            anywhere in MangoStudio. Codex and Cursor read project files too, but
+            what each of them loads has not been characterized, and naming the
+            wrong sources for a vendor is worse than staying quiet.
+          */}
+          {targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
         </ul>
 
         <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
@@ -62,9 +89,42 @@ export function ExternalDisclosureDialog({
           {labels.autoExecution.replace('{vendor}', vendor)}
         </p>
 
-        <p className="flex items-center gap-1.5 text-[11px] text-on-surface-variant/70">
+        {/*
+          The warning above says the level decides how much runs unattended.
+          Naming the level the chat is actually on turns that from a general
+          caution into something the user can check before agreeing.
+        */}
+        {permissionLevel ? (
+          <p className="text-xs text-on-surface-variant">
+            {labels.permissionNow.replace(
+              '{level}',
+              t.externalAgents.permission.levelName[permissionLevel]
+            )}
+          </p>
+        ) : null}
+
+        {/*
+          Linked, never summarized. Paraphrasing another company's terms would be
+          MangoStudio making a claim about obligations that are not its to state.
+        */}
+        <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-on-surface-variant/70">
           <ExternalLink size={12} className="shrink-0" />
-          {labels.termsHint.replace('{vendor}', vendor)}
+          <a
+            href={links.termsUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-on-surface"
+          >
+            {labels.terms.replace('{vendor}', vendor)}
+          </a>
+          <a
+            href={links.privacyUrl}
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:text-on-surface"
+          >
+            {labels.privacy.replace('{vendor}', vendor)}
+          </a>
         </p>
 
         <div className="flex justify-end gap-2">

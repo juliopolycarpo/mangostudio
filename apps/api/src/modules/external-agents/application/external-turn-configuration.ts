@@ -16,9 +16,18 @@
  * 3. **Which account the vendor is signed in as.** The session's continuation is
  *    only valid for the account it was opened under, so the fingerprint travels
  *    with the turn.
+ * 4. **That the vendor's credentials are this user's to spend.** The environment
+ *    has to have attested an isolated OS identity, and that identity must not be
+ *    one another MangoStudio user also reaches.
  *
  * Discovery answers 2 and 3 from the adapter that would run the turn and is
  * cached per (user, environment), so the ordinary send costs no extra probe.
+ *
+ * 4 is deliberately **not** taken from that cache. The descriptor carries an
+ * `isolation-unproven` reason and it is checked, but a cached descriptor is a
+ * statement about the past: a second user can arrive on a shared credential home
+ * in the seconds between a probe and a send. Discovery is cached; authorization
+ * is not, so the attestation is re-resolved here against the live manifest.
  */
 
 import type {
@@ -39,6 +48,10 @@ import {
   type ExternalAgentDiscoveryService,
   externalAgentDiscoveryService,
 } from './external-agent-discovery';
+import {
+  type ExternalIdentityIsolationRegistry,
+  externalIdentityIsolationRegistry,
+} from './external-identity-isolation';
 
 export type ExternalTurnConfigurationResolution =
   | {
@@ -46,9 +59,21 @@ export type ExternalTurnConfigurationResolution =
       readonly configuration: ExternalAgentConfiguration;
       readonly canonicalWorkspacePath: string;
       readonly vendorAccountFingerprint: string | null;
+      /** The attested credential home. Never null on an `ok` resolution. */
+      readonly credentialHomeFingerprint: string;
       readonly descriptor: ExternalAgentDescriptor;
     }
-  | { readonly ok: false; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly message: string;
+      /**
+       * Set when the refusal is the isolation gate rather than a configuration
+       * one. The two read very differently to a user — one is "change a
+       * setting", the other is "this machine cannot keep logins apart" — and
+       * only the second has an operator action behind it.
+       */
+      readonly isolationUnproven?: true;
+    };
 
 export interface ResolveExternalTurnConfigurationInput {
   readonly userId: string;
@@ -61,6 +86,7 @@ export interface ResolveExternalTurnConfigurationInput {
 export interface ExternalTurnConfigurationDependencies {
   readonly discovery?: ExternalAgentDiscoveryService;
   readonly resolveRuntimeClient?: typeof getRuntimeClient;
+  readonly isolationRegistry?: ExternalIdentityIsolationRegistry;
 }
 
 export function createExternalTurnConfigurationResolver(
@@ -68,6 +94,7 @@ export function createExternalTurnConfigurationResolver(
 ) {
   const discovery = dependencies.discovery ?? externalAgentDiscoveryService;
   const resolveRuntimeClient = dependencies.resolveRuntimeClient ?? getRuntimeClient;
+  const isolationRegistry = dependencies.isolationRegistry ?? externalIdentityIsolationRegistry;
 
   return async function resolveExternalTurnConfiguration(
     input: ResolveExternalTurnConfigurationInput
@@ -76,6 +103,26 @@ export function createExternalTurnConfigurationResolver(
     // an unavailable machine rather than as a refused configuration.
     const client = await resolveRuntimeClient(input.userId, input.chat.environmentId);
     const canonicalWorkspacePath = client.paths.canonical(input.workdir);
+
+    // Before anything else that costs a probe: an environment that cannot keep
+    // vendor logins apart per user has no configuration worth resolving.
+    const isolation = isolationRegistry.resolve({
+      userId: input.userId,
+      environmentId: input.chat.environmentId,
+      // Optional all the way down: a client with no manifest has attested
+      // nothing, which is a refusal rather than a crash. A 500 here would read
+      // to the user as MangoStudio breaking, not as the machine being ineligible.
+      ...(client.manifest?.identityIsolation
+        ? { isolation: client.manifest.identityIsolation }
+        : {}),
+    });
+    if (!isolation) {
+      return {
+        ok: false,
+        isolationUnproven: true,
+        message: 'This machine has not proved it can keep vendor logins separate per user.',
+      };
+    }
 
     const agents = await discovery.listExternalAgents({
       userId: input.userId,
@@ -117,6 +164,7 @@ export function createExternalTurnConfigurationResolver(
       },
       canonicalWorkspacePath,
       vendorAccountFingerprint: descriptor.account?.fingerprint ?? null,
+      credentialHomeFingerprint: isolation.credentialHomeFingerprint,
       descriptor,
     };
   };

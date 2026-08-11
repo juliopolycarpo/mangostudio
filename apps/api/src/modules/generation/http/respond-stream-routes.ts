@@ -67,6 +67,12 @@ const EXTERNAL_PREFLIGHT_STATUS = {
   // change. What is missing is a decision only the user can make, which the
   // client turns into one dialog and one retry.
   'workspace-trust': 403,
+  // Also 403, and also not 409: the request is fine and retrying changes
+  // nothing. What is missing is an operator's change to the machine.
+  'isolation-unproven': 403,
+  // 403 for the same reason `workspace-trust` is: the request is well-formed,
+  // and what is missing is one explicit choice the client turns into a dialog.
+  'disclosure-required': 403,
 } as const satisfies Record<ExternalTurnPreflightFailure['kind'], number>;
 
 const EXTERNAL_PREFLIGHT_CODE = {
@@ -75,6 +81,8 @@ const EXTERNAL_PREFLIGHT_CODE = {
   unavailable: ERROR_CODES.PROVIDER_ERROR,
   validation: ERROR_CODES.VALIDATION,
   'workspace-trust': ERROR_CODES.EXTERNAL_WORKSPACE_UNTRUSTED,
+  'isolation-unproven': ERROR_CODES.EXTERNAL_ISOLATION_UNPROVEN,
+  'disclosure-required': ERROR_CODES.EXTERNAL_DISCLOSURE_REQUIRED,
 } as const satisfies Record<ExternalTurnPreflightFailure['kind'], string>;
 
 function sseEvent(data: object): Uint8Array {
@@ -363,6 +371,18 @@ export const respondStreamRoutes = (app: Elysia) =>
                 ? {
                     details: {
                       workspacePath: result.failure.workspacePath,
+                      targetId: result.failure.targetId,
+                      environmentId: result.failure.environmentId,
+                    },
+                  }
+                : {}),
+              // Same reasoning, one level up: the acknowledgement is recorded
+              // against a specific machine's descriptor, so a client that only
+              // learned "a disclosure is required" could not record one. The
+              // vendor and machine travel with the refusal that disclosed them.
+              ...(result.failure.kind === 'disclosure-required'
+                ? {
+                    details: {
                       targetId: result.failure.targetId,
                       environmentId: result.failure.environmentId,
                     },

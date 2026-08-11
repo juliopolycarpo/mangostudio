@@ -343,6 +343,7 @@ export function createFakeCursorProcess(options: FakeCursorOptions = {}): FakeCu
       server.receive(JSON.stringify(value));
       return Promise.resolve();
     },
+    endInput: () => undefined,
     stderrTail: () => '',
     terminate() {
       terminated = true;

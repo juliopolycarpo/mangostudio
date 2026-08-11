@@ -10,6 +10,7 @@
 
 import { Console } from 'node:console';
 import { createInterface } from 'node:readline/promises';
+import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import {
   isRuntimeSlot,
   RUNTIME_CONSENT_PRESETS,
@@ -46,6 +47,7 @@ import {
   writeRuntimeSlotConfig,
 } from './runtime-home';
 import { parseListenAddress, serveRuntime } from './serve';
+import { resolveExternalAgentIsolation } from './services/external-agents/isolation';
 import { createRuntimeServiceManager, resolveInstallMode } from './services/runtime-service';
 import { RUNTIME_UPDATE_EXIT_CODE } from './services/runtime-update';
 import {
@@ -545,6 +547,7 @@ async function runConnect(args: RuntimeConnectArgs, runtimeVersion: string): Pro
           runtimeVersion,
           consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
           audit,
+          externalAgents: externalAgentIsolationOptions(),
           ...supervisedRestart.hostOptions,
         }),
       log,
@@ -629,6 +632,7 @@ async function runServe(args: RuntimeServeArgs, runtimeVersion: string): Promise
           runtimeVersion,
           consent: createSlotConsentSource({ slot: PAIRED_SLOT, initial: consent.allow }),
           audit,
+          externalAgents: externalAgentIsolationOptions(),
           ...supervisedRestart.hostOptions,
         }),
       log,
@@ -709,6 +713,7 @@ async function serveStdio(runtimeVersion: string): Promise<number> {
   const { host, audit } = await createSlotRuntimeHost({
     runtimeVersion,
     consent: createSlotConsentSource({ slot: consent.slot, initial: consent.allow }),
+    externalAgents: externalAgentIsolationOptions(),
     update: {
       // A hub-spawned slot binary is relaunched through `current`; a custom
       // stdio path would restart the same old path, so publish there but leave
@@ -1025,4 +1030,25 @@ function redirectConsoleToStderr(): void {
 
 if (import.meta.main) {
   process.exitCode = await runRuntimeCli(process.argv.slice(2));
+}
+
+/**
+ * What this process can prove about the OS identity behind its vendor logins.
+ *
+ * Every long-lived CLI mode goes through here — `connect`, `serve` and the
+ * hub-launched stdio host that SSH and WSL use — because all three are the same
+ * thing from the isolation contract's side: a real process, running as a real
+ * account, with a real credential home. Which of those transports carried it is
+ * the hub's business, not this process's.
+ *
+ * Absence is a supported answer and never an error. A runtime whose credential
+ * home is unreadable, or a container whose mount table is not visible, simply
+ * does not attest — the hub maps that to `isolation-unproven` and external
+ * agents stay unavailable there, while files, shell and git keep working.
+ */
+function externalAgentIsolationOptions():
+  | { readonly identityIsolation: ExternalIdentityIsolation }
+  | undefined {
+  const identityIsolation = resolveExternalAgentIsolation();
+  return identityIsolation ? { identityIsolation } : undefined;
 }

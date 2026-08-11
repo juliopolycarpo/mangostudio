@@ -95,3 +95,40 @@ export async function trustExternalWorkspace(
   if (error) throw new ApiError(error.value);
   return (data as { workspacePath: string }).workspacePath;
 }
+
+/** One vendor the user has been shown the third-party notice for. */
+export interface ExternalDisclosureRecord {
+  readonly targetId: string;
+  readonly disclosureVersion: number;
+  readonly acknowledgedAt: number;
+}
+
+export async function listExternalDisclosures(): Promise<readonly ExternalDisclosureRecord[]> {
+  const { data, error } = await client.api['external-agents'].disclosures.get();
+  if (error) throw new ApiError(error.value);
+  return (data as { disclosures: ExternalDisclosureRecord[] }).disclosures;
+}
+
+/**
+ * Records the acknowledgement server-side.
+ *
+ * The body carries no fingerprint on purpose. What the user agreed to is
+ * whatever the descriptor for `environmentId` says the agent can do, and the
+ * server derives that itself — a client that could supply its own would be able
+ * to acknowledge a disclosure it was never shown.
+ */
+export async function acknowledgeExternalDisclosure(
+  targetId: string,
+  environmentId: string
+): Promise<void> {
+  const { error } = await client.api['external-agents']({ targetId }).disclosure.post(undefined, {
+    query: { environmentId },
+  });
+  if (error) throw new ApiError(error.value);
+}
+
+/** Withdraws it, which also stops whatever is running for this user right now. */
+export async function revokeExternalDisclosure(targetId: string): Promise<void> {
+  const { error } = await client.api['external-agents']({ targetId }).disclosure.delete();
+  if (error) throw new ApiError(error.value);
+}

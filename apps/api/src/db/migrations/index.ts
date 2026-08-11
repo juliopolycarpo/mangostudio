@@ -44,6 +44,8 @@ import { libraryBackups } from './043_library_backups';
 import { chatRunner } from './044_chat_runner';
 import { externalSessionContinuations } from './045_external_session_continuations';
 import { chatRunnerPermissions } from './046_chat_runner_permissions';
+import { externalSessionIsolation } from './047_external_session_isolation';
+import { externalAgentDisclosures } from './048_external_agent_disclosures';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -92,4 +94,6 @@ export const allMigrations = {
   '044_chat_runner': chatRunner,
   '045_external_session_continuations': externalSessionContinuations,
   '046_chat_runner_permissions': chatRunnerPermissions,
+  '047_external_session_isolation': externalSessionIsolation,
+  '048_external_agent_disclosures': externalAgentDisclosures,
 };

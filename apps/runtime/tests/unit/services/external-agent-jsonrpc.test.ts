@@ -22,6 +22,7 @@ function brokenStdinProcess(): ExternalAgentManagedProcess {
     },
     exit: Promise.resolve({ code: 1, signal: null }),
     writeLine: () => Promise.reject(new Error('EPIPE: the vendor process is gone')),
+    endInput: () => undefined,
     stderrTail: () => '',
     terminate: () => Promise.resolve(),
   };
@@ -74,6 +75,7 @@ function askingProcess(serverRequestId: unknown): {
         replies.push(value);
         return Promise.resolve();
       },
+      endInput: () => undefined,
       stderrTail: () => '',
       terminate: () => Promise.resolve(),
     },

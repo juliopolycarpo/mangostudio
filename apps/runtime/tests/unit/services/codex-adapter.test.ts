@@ -62,6 +62,7 @@ function versionProcess(banner: string): ExternalAgentManagedProcess {
     },
     exit: Promise.resolve({ code: 0, signal: null }),
     writeLine: () => Promise.resolve(),
+    endInput: () => undefined,
     stderrTail: () => '',
     terminate: () => Promise.resolve(),
   };

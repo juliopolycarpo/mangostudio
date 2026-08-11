@@ -26,6 +26,14 @@ export interface ExternalContinuationBinding {
   readonly canonicalWorkspacePath: string;
   /** Absent when the adapter reported no account identity to compare. */
   readonly vendorAccountFingerprint: string | null;
+  /**
+   * The attested credential home this session was opened against.
+   *
+   * Null when the environment attested nothing — which, since plan 008, means
+   * the turn would not have been authorized in the first place, so a null here
+   * is a row from before the column existed rather than a live unproven one.
+   */
+  readonly credentialHomeFingerprint: string | null;
 }
 
 export interface ExternalSessionContinuation extends ExternalContinuationBinding {
@@ -54,6 +62,7 @@ export async function readContinuation(
     targetId: row.targetId,
     canonicalWorkspacePath: row.canonicalWorkspacePath,
     vendorAccountFingerprint: row.vendorAccountFingerprint,
+    credentialHomeFingerprint: row.credentialHomeFingerprint,
     runtimeSessionId: row.runtimeSessionId,
     nativeSessionId: row.nativeSessionId,
     effectiveConfiguration: parseEffectiveConfiguration(row.effectiveConfiguration),
@@ -86,6 +95,7 @@ export async function writeContinuation(
     targetId: input.targetId,
     canonicalWorkspacePath: input.canonicalWorkspacePath,
     vendorAccountFingerprint: input.vendorAccountFingerprint,
+    credentialHomeFingerprint: input.credentialHomeFingerprint,
     runtimeSessionId: input.runtimeSessionId,
     nativeSessionId: input.nativeSessionId,
     effectiveConfiguration: input.effectiveConfiguration
@@ -112,6 +122,12 @@ export async function deleteContinuation(chatId: string, db: Kysely<Database>): 
  * tuple: Codex accepts them per turn and Cursor's session mode applies to a
  * live session, so restarting on a permission change would be a regression
  * rather than a safeguard.
+ *
+ * The credential home fingerprint *is* part of it. A resumed vendor session that
+ * silently moved to a different OS identity is exactly the failure the
+ * attestation exists to detect, and a row written under one identity must not be
+ * handed to another — including the null-to-attested transition, which is how a
+ * pre-008 row looks and is not something to resume blind.
  */
 export function continuationMatches(
   continuation: ExternalContinuationBinding,
@@ -122,7 +138,8 @@ export function continuationMatches(
     continuation.environmentId === binding.environmentId &&
     continuation.targetId === binding.targetId &&
     continuation.canonicalWorkspacePath === binding.canonicalWorkspacePath &&
-    continuation.vendorAccountFingerprint === binding.vendorAccountFingerprint
+    continuation.vendorAccountFingerprint === binding.vendorAccountFingerprint &&
+    continuation.credentialHomeFingerprint === binding.credentialHomeFingerprint
   );
 }
 

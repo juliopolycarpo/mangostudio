@@ -8,6 +8,7 @@
  */
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
+import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type {
   ExternalAgentDescriptor,
   ExternalAgentUnavailableReason,
@@ -129,6 +130,51 @@ describe('external availability states', () => {
   it('never renders an executable path', () => {
     const { container } = renderSelector();
     expect(container.textContent ?? '').not.toMatch(/\/usr\/|\.exe|\/bin\//);
+  });
+});
+
+/**
+ * The one refusal whose fix is an administrative change to a machine rather
+ * than a click, so the one-line reason is not enough on its own.
+ *
+ * The advice is chosen from the transport because the server will not say *why*
+ * isolation failed — telling "attested nothing" apart from "attested a
+ * credential home somebody else reaches" would confirm that another person uses
+ * the machine.
+ */
+describe('isolation-unproven guidance', () => {
+  function renderUnproven(transportKind?: EnvironmentTransportKind) {
+    renderSelector({
+      externalAgents: [descriptor({ unavailableReason: 'isolation-unproven' })],
+      ...(transportKind ? { environmentTransportKind: transportKind } : {}),
+    });
+  }
+
+  it.each([
+    ['in-process', /single MangoStudio user/i],
+    ['stdio', /single MangoStudio user/i],
+    ['wsl', /own WSL user account/i],
+    ['ssh', /own account on the remote host/i],
+    ['container', /own container/i],
+    ['websocket', /belongs to the person who paired it/i],
+  ] as const)('tells a %s machine what would fix it', (transportKind, copy) => {
+    renderUnproven(transportKind);
+    expect(screen.getByText(/cannot keep vendor logins separate/i)).toBeInTheDocument();
+    expect(screen.getByText(copy)).toBeInTheDocument();
+  });
+
+  /**
+   * A Direct URL machine was configured, not paired, so "pair your own" would
+   * name a flow its owner never used.
+   */
+  it('falls back to the generic fix for a transport with no specific advice', () => {
+    renderUnproven('http');
+    expect(screen.getByText(/own operating-system account/i)).toBeInTheDocument();
+  });
+
+  it('says nothing extra when the machine is available', () => {
+    renderSelector({ environmentTransportKind: 'ssh' });
+    expect(screen.queryByText(/cannot keep vendor logins separate/i)).toBeNull();
   });
 });
 

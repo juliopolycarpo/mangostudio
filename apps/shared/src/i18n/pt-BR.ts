@@ -334,6 +334,7 @@ export const messages = {
       skills: 'Skills',
       mcp: 'MCP',
       externalApi: 'API externa',
+      externalAgents: 'Agentes externos',
       metrics: 'Métricas',
       logs: 'Logs',
     },
@@ -2740,6 +2741,20 @@ export const messages = {
       cancel: 'Cancelar',
       close: 'Fechar',
       review: 'Rever o aviso',
+      inheritedConfigurationClaude:
+        'O Claude Code também carrega os hooks, skills, plugins, servidores MCP, memória automática e o CLAUDE.md configurados naquela máquina fora do MangoStudio, e os executa como parte do seu turno.',
+      permissionNow: 'Agora este chat está em: {level}.',
+      terms: 'Termos de serviço do {vendor}',
+      privacy: 'Política de privacidade do {vendor}',
+      required: 'Este agente precisa que o aviso seja aceito antes de rodar.',
+      manageTitle: 'Avisos de agentes de terceiros',
+      manageEmpty: 'Você ainda não aceitou nenhum agente externo.',
+      acknowledgedAt: 'Aceito em {date}',
+      revoke: 'Retirar',
+      revoking: 'Retirando…',
+      revokeFailed: 'Não foi possível retirar seu aceite.',
+      revokeHint:
+        'Retirar interrompe qualquer turno em andamento e pergunta de novo na próxima vez.',
     },
     unavailable: {
       'not-installed': 'Não instalado nesta máquina',
@@ -2748,6 +2763,24 @@ export const messages = {
       'runtime-denied': 'O dono desta máquina não liberou agentes externos',
       'environment-unreachable': 'Não foi possível alcançar esta máquina',
       'isolation-unproven': 'Esta máquina não provou que mantém as credenciais separadas',
+      'disclosure-required': 'Leia e aceite o aviso de terceiros deste agente primeiro',
+    },
+    isolation: {
+      title: 'Esta máquina não consegue separar os logins do fornecedor',
+      why: 'O MangoStudio só roda um agente externo onde dá para provar que a conta usada no login é sua.',
+      nextStep: 'Como resolver',
+      next: {
+        local:
+          'Use este hub com um único usuário do MangoStudio, ou dê a cada um a sua própria máquina.',
+        wsl: 'Dê a cada usuário do MangoStudio uma conta de usuário própria dentro da distribuição WSL.',
+        ssh: 'Dê a cada usuário do MangoStudio uma conta própria na máquina remota, em vez de um login compartilhado.',
+        container:
+          'Dê a cada usuário do MangoStudio um contêiner próprio e remova qualquer montagem que exponha as credenciais dos agentes do host dentro dele.',
+        paired:
+          'Uma máquina pareada pertence a quem a pareou. Pareie a sua, ou use um ambiente que seja seu.',
+        generic:
+          'Dê a cada usuário do MangoStudio uma conta de sistema operacional própria naquela máquina.',
+      },
     },
     permission: {
       label: 'Permissões',
@@ -2800,6 +2833,17 @@ export const messages = {
         'O Cursor não expõe isso pelo protocolo — configure no próprio Cursor CLI',
       cursorNoAutoReview:
         'O Cursor só responde às aprovações sozinho quando a configuração dele permite',
+      claudeVersionTooOld:
+        'O Claude Code CLI desta máquina é antigo demais — atualize para usá-lo aqui',
+      claudeAutoNeedsSubscription:
+        'A auto-revisão exige um plano de assinatura do Claude; esta máquina entra de outro jeito',
+      claudeAutoDisabledByPolicy: 'Sua organização desativou o modo automático do Claude Code',
+      claudeAutoUnverified:
+        'O MangoStudio não conseguiu confirmar que esta conta do Claude permite o modo automático',
+      claudeReadOnlyHasNoReviewer:
+        'O Claude Code não tem o que revisar no modo somente leitura — ele nunca age',
+      claudeFullAccessHasNoReviewer:
+        'O Claude Code não revisa nada quando tudo já é permitido sem perguntar',
     },
     approval: {
       title: 'O agente está pedindo permissão',

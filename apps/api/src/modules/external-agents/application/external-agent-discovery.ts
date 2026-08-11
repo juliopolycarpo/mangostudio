@@ -67,6 +67,10 @@ import {
   productDescriptorFor,
 } from '../domain/adapter-descriptors';
 import { authStateFrom, isInstalled, versionFrom } from '../domain/cli-status-mapping';
+import {
+  type ExternalIdentityIsolationRegistry,
+  externalIdentityIsolationRegistry,
+} from './external-identity-isolation';
 
 /**
  * One target, as the adapter that would run it describes itself.
@@ -191,12 +195,23 @@ export type RuntimeClientResolver = (
  */
 export function createRuntimeAuthoritativeAgentDiscovery(
   resolveRuntimeClient: RuntimeClientResolver = getRuntimeClient,
-  timeoutMs = DEFAULT_TARGET_TIMEOUT_MS
+  timeoutMs = DEFAULT_TARGET_TIMEOUT_MS,
+  isolationRegistry: ExternalIdentityIsolationRegistry = externalIdentityIsolationRegistry
 ): AuthoritativeAgentDiscovery {
   return {
     async describe(scope, targetIds, { signal }) {
       const client = await resolveRuntimeClient(scope.userId, scope.environmentId);
       const supportedTargets = new Set(client.manifest.externalAgents ?? []);
+      // The runtime's claim, checked against every other user's. A shared SSH
+      // account attests exactly like a per-user one, so this is where the two
+      // stop being indistinguishable.
+      const isolation = isolationRegistry.resolve({
+        userId: scope.userId,
+        environmentId: scope.environmentId,
+        ...(client.manifest.identityIsolation
+          ? { isolation: client.manifest.identityIsolation }
+          : {}),
+      });
       const refused = new Map<ExternalAgentTargetId, AuthoritativeAgentStatus>();
       const discoverable: ExternalAgentTargetId[] = [];
 
@@ -205,7 +220,11 @@ export function createRuntimeAuthoritativeAgentDiscovery(
         if (!supportedTargets.has(targetId)) unavailableReason = 'runtime-unsupported';
         else if (client.manifest.features.externalAgents !== true) {
           unavailableReason = 'runtime-denied';
-        } else if (!client.manifest.identityIsolation) {
+        } else if (!isolation) {
+          // Two ways to land here, and the distinction is deliberately not
+          // exposed: the runtime attested nothing, or it attested a credential
+          // home another MangoStudio user also reaches. Telling the second case
+          // apart would confirm that somebody else uses this machine.
           unavailableReason = 'isolation-unproven';
         }
 

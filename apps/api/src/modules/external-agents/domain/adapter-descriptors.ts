@@ -6,6 +6,11 @@
  * what each permission level means. None of it is a claim about what a vendor
  * can do.
  *
+ * Who owns each vendor and where its terms live is in
+ * `@mangostudio/shared/external-agents` instead, because the disclosure that
+ * needs it is rendered by the client and enforced by the server — a copy here
+ * would be a third place for the same three URLs to drift.
+ *
  * Capabilities and supported permission combinations are deliberately absent.
  * A hub-side capability table cannot be the truth: it is the adapter that will
  * run the turn, on a runtime that may be older or newer than this hub, and a

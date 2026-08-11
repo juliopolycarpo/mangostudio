@@ -255,6 +255,120 @@ an isolated OS identity and vendor credential home. Logical ownership of a `(use
 environmentId)` pair is not an operating-system identity, and two users sharing one machine
 account would share one vendor sign-in.
 
+## Isolation
+
+The whole model rests on the vendor owning authentication. That is only true if the vendor's
+credentials belong to the person whose turn is running, so an environment has to **prove** it —
+absence is default-deny, and there is no configuration flag that fabricates a proof.
+
+The proof has two halves, in two places, because neither side can supply the other's.
+
+The **runtime** attests what it can establish about itself, in
+`apps/runtime/src/services/external-agents/isolation.ts`:
+
+| Method             | What it means                                                          | Who makes it                                                 |
+| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `single-user-host` | The hub process serves exactly one MangoStudio user on this OS account | The in-process connector, and a paired machine for its owner |
+| `os-account`       | This process has its own uid and its own credential home               | ssh, wsl, and a hub-launched stdio runtime                   |
+| `container`        | A container whose credential home is genuinely its own                 | Container environments                                       |
+
+`container` is a *check*, not a label. Containerization alone proves nothing: a
+`-v ~/.claude:/root/.claude` bind mount puts the host's vendor logins inside a container whose uid
+namespace and filesystem both still say "isolated". So the mount table is read and any mount at the
+credential home — or at `~/.claude`, `~/.codex`, `~/.cursor` and their XDG equivalents — withdraws
+the attestation. A container whose mount table cannot be read attests nothing.
+
+The attestation carries a `credentialHomeFingerprint`: a non-reversible digest of the credential
+home's identity, never its contents and never a path that would leak a username. It exists so the
+hub can notice that the identity behind a session changed.
+
+The **hub** supplies the half a runtime cannot. From inside, a dedicated per-user SSH account and a
+shared service account four people's keys land in are indistinguishable — same uid, same `$HOME`,
+same everything. The hub is the only party that sees both the OS identity and which MangoStudio
+user each connection belongs to, so
+`apps/api/src/modules/external-agents/application/external-identity-isolation.ts` watches for one
+fingerprint claimed by two users and withdraws the attestation from **both**.
+
+Withdrawing from everyone, rather than keeping it for whoever arrived first, is deliberate. The
+danger is not that the newcomer reaches the incumbent's `~/.claude`; it is that one vendor login
+sits in that shared home and nobody can say whose it is, so the incumbent is as likely to be
+spending the newcomer's subscription seat as their own. Once contested, a fingerprint stays
+contested for the life of the process: a user closing a laptop does not un-share a credential home.
+Sessions already running on a newly contested home are closed, because refusing only the next turn
+would leave the thing just decided to be unaccountable still running.
+
+**Discovery is cached; authorization is not.** Both paths consult the registry. A turn is refused
+with `EXTERNAL_ISOLATION_UNPROVEN` even when a stale descriptor said otherwise, and the
+`credentialHomeFingerprint` is part of a continuation's binding, so a resumed vendor session that
+silently moved to a different OS identity starts fresh instead.
+
+### What an operator does about it
+
+The remedy is never in MangoStudio's settings — it is a change to the machine:
+
+| Environment | What makes it eligible                                                    |
+| ----------- | ------------------------------------------------------------------------- |
+| Local       | Run the hub for a single MangoStudio user                                 |
+| WSL         | A distinct WSL user account per MangoStudio user                          |
+| SSH         | A per-user account on the remote host, not one shared login               |
+| Container   | A container per user, with no mount exposing the host's agent credentials |
+| Paired      | Pairing does not transfer credentials; a paired machine serves its owner  |
+
+An operator override is deliberately **not** provided. If one is ever added it belongs in managed
+configuration with an audit record, not a runtime environment variable — the point is that the
+attestation cannot be asserted by the party that benefits from asserting it.
+
+## Third-party ownership
+
+Every external agent is another company's software, running under its own terms, billed to its own
+account. The disclosure that says so is a **precondition the hub enforces**, not a modal the
+browser decides to show: a gate only one client honors is a courtesy, and the external API sends
+the same conversation to the same company.
+
+| Target   | Company   | Owns auth | Owns billing | Owns tools & permissions |
+| -------- | --------- | --------- | ------------ | ------------------------ |
+| `codex`  | OpenAI    | Yes       | Yes          | Yes                      |
+| `cursor` | Anysphere | Yes       | Yes          | Yes                      |
+| `claude` | Anthropic | Yes       | Yes          | Yes                      |
+
+Vendor names, terms URLs and privacy-policy URLs are **data**, in
+`apps/shared/src/external-agents/vendors.ts` — not translated strings, because a localized URL is a
+different URL and a paraphrased term of service is MangoStudio making a claim about obligations
+that are not its to state. Branding is nominative use only: the name identifies the tool being
+launched, with no logos, no wordmarks and nothing implying an endorsed or partner integration.
+
+An acknowledgement is recorded per `(user, vendor)` and goes stale on any of three things: the
+disclosure text version, the vendor's declared capability set, and **the resolved effective
+permission default**. The third is why the record carries a context fingerprint rather than a
+boolean. Claude Code's default permission mode moves from `manual` to `auto` for Pro, Max and Team
+accounts on 2026-08-14; nothing about MangoStudio changes and no capability flag changes, but what
+runs without asking goes from "reads only" to "everything, with a classifier reviewing each
+action". Consent given for the first must not silently cover the second.
+
+Revoking blocks new starts and closes live sessions, so withdrawing never leaves a vendor process
+running that the owner has just refused. No configuration flag or environment variable satisfies
+the gate.
+
+### The `~/.claude` inheritance limit
+
+Claude Code is hosted **without** `--bare`, which means a MangoStudio turn loads the same context an
+interactive session would: hooks, skills, plugins, MCP servers, auto memory and `CLAUDE.md` from the
+working directory and from the runtime host's own `~/.claude`. A hook or MCP server configured on
+that machine, outside MangoStudio, executes inside a MangoStudio turn.
+
+This is not an oversight, and it is not fixable **for this adapter**. `--bare` skips all of it, but
+bare mode never reads OAuth credentials or the system keychain: it authenticates from
+`ANTHROPIC_API_KEY`, from an `apiKeyHelper` supplied through `--settings`, or from a third-party
+provider's own credentials (Bedrock, Vertex, Foundry). None of those is the subscription sign-in this
+adapter hosts, so for a subscription-backed account determinism and authentication are mutually
+exclusive, and v1 takes authentication. The disclosure states the inheritance rather than papering
+over it.
+
+Two consequences for the drift work in plan 010: the vendor documents that `--bare` "will become the
+default for `-p` in a future release", which would break subscription-backed turns without warning,
+and `system/init.plugins`, `plugin_errors`, `mcp_servers` and `mcp_server_errors` are the fields
+that reveal what actually loaded.
+
 ## Hosting a turn
 
 An external turn takes the same SSE transport as an internal one — same framing, same keepalive,
@@ -294,6 +408,17 @@ protocol archaeology:
   `skill_approval`) is where a finer-grained mode would go.
 - **Attachments.** `ExternalAgentAttachment` crosses the protocol, but the composer does not yet
   offer images to an external runner.
+- **Claude's `--permission-prompt-tool`.** It exists and is documented, and it is the only way
+  headless Claude could deliver an answerable approval. Hosting one makes MangoStudio part of the
+  authorization path for an agent it does not own, which needs authenticated request ids, replay
+  protection, expiry, owner binding, fail-closed behaviour and a threat model — its own security
+  feature, not a flag in an adapter.
+- **Claude's `--safe-mode`.** Disables the machine's own hooks, plugins, MCP servers and `CLAUDE.md`
+  while auth, model selection and permissions keep working. It would close the inheritance limit
+  above, at the cost of silently dropping the project memory and skills a workspace depends on, so
+  it belongs behind a visible per-chat control rather than as an invisible default.
+- **Claude session browsing.** The internal JSONL lives under an encoded `~/.claude/projects/<cwd>/`
+  path the vendor documents as subject to change. Parsing it would be reading a private format.
 
 ## Availability
 

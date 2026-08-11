@@ -9,9 +9,10 @@
  */
 
 import type { ExternalAgentAdapter } from './adapter';
+import { ClaudeCodeAdapter } from './claude/adapter';
 import { CodexAppServerAdapter } from './codex/adapter';
 import { CursorAcpAdapter } from './cursor/adapter';
 
 export function createDefaultExternalAgentAdapters(): readonly ExternalAgentAdapter[] {
-  return [new CodexAppServerAdapter(), new CursorAcpAdapter()];
+  return [new CodexAppServerAdapter(), new CursorAcpAdapter(), new ClaudeCodeAdapter()];
 }

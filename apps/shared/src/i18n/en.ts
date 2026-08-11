@@ -330,6 +330,7 @@ export const messages: Messages = {
       skills: 'Skills',
       mcp: 'MCP',
       externalApi: 'External API',
+      externalAgents: 'External agents',
       metrics: 'Metrics',
       logs: 'Logs',
     },
@@ -2727,6 +2728,23 @@ export const messages: Messages = {
       cancel: 'Cancel',
       close: 'Close',
       review: 'Review the notice',
+      // Claude-specific, and rendered only for Claude. Codex and Cursor read
+      // project files too, but nobody has written down what each of them loads,
+      // and a disclosure that names the wrong sources for a vendor is worse than
+      // one that stays quiet about it.
+      inheritedConfigurationClaude:
+        'Claude Code also loads the hooks, skills, plugins, MCP servers, auto memory and CLAUDE.md configured on that machine outside MangoStudio, and runs them as part of your turn.',
+      permissionNow: 'Right now this chat is set to: {level}.',
+      terms: "{vendor}'s terms of service",
+      privacy: "{vendor}'s privacy policy",
+      required: 'This agent needs its notice acknowledged before it can run.',
+      manageTitle: 'Third-party agent notices',
+      manageEmpty: 'You have not acknowledged any external agent yet.',
+      acknowledgedAt: 'Acknowledged {date}',
+      revoke: 'Withdraw',
+      revoking: 'Withdrawing…',
+      revokeFailed: 'Your acknowledgement could not be withdrawn.',
+      revokeHint: 'Withdrawing stops any turn running now and asks again next time.',
     },
     unavailable: {
       'not-installed': 'Not installed on this machine',
@@ -2735,6 +2753,22 @@ export const messages: Messages = {
       'runtime-denied': "This machine's owner has not allowed external agents",
       'environment-unreachable': 'Could not reach this machine',
       'isolation-unproven': 'This machine has not proven it keeps credentials separate',
+      'disclosure-required': 'Read and accept this agent\u2019s third-party notice first',
+    },
+    isolation: {
+      title: 'This machine cannot keep vendor logins separate',
+      why: 'MangoStudio can only run an external agent where the vendor account it signs in with is provably yours.',
+      nextStep: 'What fixes it',
+      next: {
+        local: 'Run this hub for a single MangoStudio user, or give each user their own machine.',
+        wsl: 'Give each MangoStudio user their own WSL user account inside the distribution.',
+        ssh: 'Give each MangoStudio user their own account on the remote host, instead of one shared login.',
+        container:
+          'Give each MangoStudio user their own container, and remove any mount that exposes the host\u2019s agent credentials into it.',
+        paired:
+          'A paired machine belongs to the person who paired it. Pair your own, or use an environment you own.',
+        generic: 'Give each MangoStudio user their own operating-system account on that machine.',
+      },
     },
     permission: {
       label: 'Permissions',
@@ -2789,6 +2823,16 @@ export const messages: Messages = {
       cursorNoFullAccess:
         'Cursor does not expose this over its protocol — set it in the Cursor CLI itself',
       cursorNoAutoReview: 'Cursor answers approvals itself only when its own configuration says so',
+      claudeVersionTooOld:
+        'The Claude Code CLI on this machine is too old — upgrade it to use it here',
+      claudeAutoNeedsSubscription:
+        'Auto-review needs a Claude subscription plan; this machine signs in another way',
+      claudeAutoDisabledByPolicy: 'Your organization has turned auto mode off for Claude Code',
+      claudeAutoUnverified: 'MangoStudio could not confirm this Claude account allows auto mode',
+      claudeReadOnlyHasNoReviewer:
+        'Claude Code has nothing to review in read-only mode — it never acts',
+      claudeFullAccessHasNoReviewer:
+        'Claude Code reviews nothing once everything is allowed without asking',
     },
     approval: {
       title: 'The agent is asking for permission',

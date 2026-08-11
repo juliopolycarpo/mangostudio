@@ -18,7 +18,9 @@
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
+import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import type { Messages } from '@mangostudio/shared/i18n';
 import { Bot, Check, ChevronDown, Copy, CornerUpRight, Cpu } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
@@ -32,6 +34,16 @@ export interface RunnerSelectorProps {
   externalAgents: readonly ExternalAgentDescriptor[];
   /** The environment the descriptors describe, named in the unavailability copy. */
   environmentName: string;
+  /**
+   * How MangoStudio reaches that machine.
+   *
+   * Only used to pick which fix an `isolation-unproven` machine needs. The
+   * server deliberately will not say why isolation failed — distinguishing
+   * "attested nothing" from "attested a credential home somebody else reaches"
+   * would confirm that another person uses the machine — so the actionable half
+   * of that answer is derived here, from a transport the client already knows.
+   */
+  environmentTransportKind?: EnvironmentTransportKind;
   /** True once the chat has turns, which is what makes the kind immutable. */
   hasTurns: boolean;
   disabled?: boolean;
@@ -47,6 +59,7 @@ export function RunnerSelector({
   isAgentListLoading,
   externalAgents,
   environmentName,
+  environmentTransportKind,
   hasTurns,
   disabled = false,
   onSelectAgent,
@@ -149,6 +162,7 @@ export function RunnerSelector({
               key={descriptor.targetId}
               descriptor={descriptor}
               environmentName={environmentName}
+              transportKind={environmentTransportKind}
               active={runner.kind === 'external' && runner.targetId === descriptor.targetId}
               forks={hasTurns && runner.kind !== 'external'}
               onSelect={(forking) => {
@@ -207,6 +221,36 @@ function RunnerRow({
 }
 
 /**
+ * Which fix an unproven machine needs, from how MangoStudio reaches it.
+ *
+ * The transport is a fair proxy because it *is* the thing that decides whose OS
+ * account the vendor signs in as: an in-process or stdio runtime runs as the hub
+ * user, ssh lands on whatever login the environment carries, a container has
+ * whatever the image and its mounts give it. `http` falls to the generic advice
+ * rather than to `paired` — a Direct URL machine was configured, not paired, and
+ * telling its owner to "pair your own" would name a flow they never used.
+ */
+function isolationFixFor(
+  transportKind: EnvironmentTransportKind | undefined
+): keyof Messages['externalAgents']['isolation']['next'] {
+  switch (transportKind) {
+    case 'in-process':
+    case 'stdio':
+      return 'local';
+    case 'wsl':
+      return 'wsl';
+    case 'ssh':
+      return 'ssh';
+    case 'container':
+      return 'container';
+    case 'websocket':
+      return 'paired';
+    default:
+      return 'generic';
+  }
+}
+
+/**
  * One external agent, in whatever state that machine reports.
  *
  * The eight availability states are not decorations. Each of them is a different
@@ -217,12 +261,14 @@ function RunnerRow({
 function ExternalRow({
   descriptor,
   environmentName,
+  transportKind,
   active,
   forks,
   onSelect,
 }: {
   descriptor: ExternalAgentDescriptor;
   environmentName: string;
+  transportKind?: EnvironmentTransportKind;
   active: boolean;
   forks: boolean;
   onSelect: (forking: boolean) => void;
@@ -281,6 +327,24 @@ function ExternalRow({
         <p className="px-2 pb-2 text-[10px] leading-relaxed text-on-surface-variant/70">
           {explanation}
         </p>
+      ) : null}
+
+      {/* The one refusal whose fix is an administrative change to a machine
+          rather than a click. A one-line "this machine has not proven it keeps
+          credentials separate" leaves the reader with nothing to do about it. */}
+      {reason === 'isolation-unproven' ? (
+        <div className="mx-2 mb-2 space-y-1 rounded-xl border border-outline-variant/15 bg-surface-container-lowest px-2 py-2">
+          <p className="text-[10px] font-medium text-on-surface">{labels.isolation.title}</p>
+          <p className="text-[10px] leading-relaxed text-on-surface-variant/70">
+            {labels.isolation.why}
+          </p>
+          <p className="pt-1 text-[10px] font-medium text-on-surface">
+            {labels.isolation.nextStep}
+          </p>
+          <p className="text-[10px] leading-relaxed text-on-surface-variant/70">
+            {labels.isolation.next[isolationFixFor(transportKind)]}
+          </p>
+        </div>
       ) : null}
 
       {/* The vendor's own login command, with a copy button: the user has to run

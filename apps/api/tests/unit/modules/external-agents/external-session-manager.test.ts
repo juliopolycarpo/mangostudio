@@ -49,6 +49,7 @@ function baseInput(overrides: Partial<EnsureExternalSessionInput> = {}) {
     targetId: 'codex',
     canonicalWorkspacePath: '/work/repo',
     vendorAccountFingerprint: 'account-a',
+    credentialHomeFingerprint: 'sha256:home-a',
     configuration: CONFIGURATION,
     ...overrides,
   } satisfies EnsureExternalSessionInput;
@@ -137,6 +138,7 @@ describe('external session manager', () => {
     ['environment', { environmentId: 'remote' }],
     ['workspace', { canonicalWorkspacePath: '/work/other' }],
     ['vendor account', { vendorAccountFingerprint: 'account-b' }],
+    ['credential home', { credentialHomeFingerprint: 'sha256:home-b' }],
     ['owning user', { userId: 'someone-else' }],
   ])('invalidates the continuation when the %s changes', async (_label, change) => {
     const first = createFakeExternalRuntime();

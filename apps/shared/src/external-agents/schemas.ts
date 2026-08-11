@@ -550,6 +550,14 @@ export const ExternalAgentUnavailableReasonSchema = Type.Union([
   Type.Literal('environment-unreachable'),
   /** The transport has not attested an isolated OS identity. */
   Type.Literal('isolation-unproven'),
+  /**
+   * The user has not acknowledged this vendor's third-party disclosure.
+   *
+   * Advisory here, so the selector knows to prompt. The authoritative refusal
+   * happens at turn start, because this descriptor is cached and an
+   * acknowledgement can be revoked while a stale one is still being rendered.
+   */
+  Type.Literal('disclosure-required'),
 ]);
 
 export type ExternalAgentUnavailableReason = Static<typeof ExternalAgentUnavailableReasonSchema>;

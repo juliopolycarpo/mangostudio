@@ -108,6 +108,7 @@ describe('external agent descriptor', () => {
       'runtime-denied',
       'environment-unreachable',
       'isolation-unproven',
+      'disclosure-required',
     ]);
   });
 

@@ -8,7 +8,7 @@
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
-import { needsExternalDisclosure } from '@mangostudio/shared/external-agents';
+import { normalizePermissionLevel } from '@mangostudio/shared/external-agents';
 import { useState } from 'react';
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
 import { useToast } from '@/components/ui/Toast';
@@ -32,10 +32,10 @@ export function RunnerSelectorContainer() {
   const [pendingDisclosure, setPendingDisclosure] = useState<ExternalAgentDescriptor | null>(null);
   const [isAccepting, setAccepting] = useState(false);
 
-  const environmentName =
-    environments.data?.find((environment) => environment.id === app.currentEnvironmentId)?.name ??
-    app.currentEnvironmentId ??
-    '';
+  const environment = environments.data?.find(
+    (candidate) => candidate.id === app.currentEnvironmentId
+  );
+  const environmentName = environment?.name ?? app.currentEnvironmentId ?? '';
 
   // D14 turns on whether the chat already carries turns, so a new, empty chat can
   // still be pointed at either kind without a fork.
@@ -69,6 +69,7 @@ export function RunnerSelectorContainer() {
         isAgentListLoading={app.isAgentListLoading}
         externalAgents={external.agents}
         environmentName={environmentName}
+        environmentTransportKind={environment?.transportKind}
         hasTurns={hasTurns}
         disabled={app.isGenerating}
         onSelectAgent={app.setSelectedAgentId}
@@ -77,12 +78,11 @@ export function RunnerSelectorContainer() {
           // first activation of a vendor rather than the first turn: the user
           // should see it before the chat is pointed at a third party, not
           // after.
-          if (
-            needsExternalDisclosure(
-              disclosures.forTarget(descriptor.targetId),
-              descriptor.capabilities
-            )
-          ) {
+          // The server decides, and says so on the descriptor. A second rule
+          // here could disagree with the one the turn-start refusal applies,
+          // which is either a dialog that never satisfies the gate or an agent
+          // the selector offers and every send refuses.
+          if (descriptor.unavailableReason === 'disclosure-required') {
             setPendingDisclosure(descriptor);
             return;
           }
@@ -93,7 +93,8 @@ export function RunnerSelectorContainer() {
 
       {pendingDisclosure ? (
         <ExternalDisclosureDialog
-          descriptor={pendingDisclosure}
+          targetId={pendingDisclosure.targetId}
+          permissionLevel={normalizePermissionLevel(app.runnerPermissions.level).value}
           busy={isAccepting}
           onCancel={() => setPendingDisclosure(null)}
           onAccept={() => {
@@ -104,7 +105,7 @@ export function RunnerSelectorContainer() {
             const descriptor = pendingDisclosure;
             setAccepting(true);
             void disclosures
-              .accept(descriptor.targetId, descriptor.capabilities)
+              .accept(descriptor.targetId, descriptor.environmentId)
               .then(() => {
                 setPendingDisclosure(null);
                 activate(descriptor);

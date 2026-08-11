@@ -219,3 +219,70 @@ export function needsExternalDisclosure(
   if (accepted.version !== EXTERNAL_DISCLOSURE_VERSION) return true;
   return accepted.capabilitiesFingerprint !== externalCapabilitiesFingerprint(capabilities);
 }
+
+/**
+ * Everything a re-prompt should depend on, in one value.
+ *
+ * Three materials, and the third is why this exists rather than reusing
+ * {@link externalCapabilitiesFingerprint} alone:
+ *
+ * 1. **The disclosure text version** — MangoStudio changed what it said.
+ * 2. **The vendor's declared capability set** — the CLI can now do something it
+ *    could not when the user agreed. An agent that could not run commands then
+ *    and can now is a different disclosure.
+ * 3. **The resolved effective permission default** — what actually runs without
+ *    asking, right now, on this account.
+ *
+ * (3) is the one that would otherwise slip through. Claude Code's default
+ * permission mode moves from `manual` to `auto` for Pro, Max and Team accounts
+ * on 2026-08-14. Nothing about MangoStudio changes and nothing about the CLI's
+ * capability flags changes — but the risk the user acknowledged goes from "reads
+ * only without asking" to "everything, with a classifier reviewing each action".
+ * Consent given for the first must not silently cover the second.
+ *
+ * Order-independent by construction and stable across processes: it is compared
+ * against a stored string, so a `Set` iteration order or a locale-sensitive
+ * sort would make every restart look like a change.
+ */
+export function externalDisclosureContextFingerprint(input: {
+  readonly capabilities: ExternalAgentCapabilities;
+  /**
+   * The vendor's own id for the `(default, user)` combination this account
+   * resolves to — `default` or `auto` for Claude, a profile id for Codex.
+   *
+   * Absent when the adapter did not name one, which is itself a stable input:
+   * an adapter that starts naming one has told the user something new.
+   */
+  readonly effectivePermissionDefault?: string;
+}): string {
+  return [
+    `v:${EXTERNAL_DISCLOSURE_VERSION}`,
+    `caps:${externalCapabilitiesFingerprint(input.capabilities)}`,
+    `default:${input.effectivePermissionDefault ?? 'unknown'}`,
+  ].join('|');
+}
+
+/**
+ * The `(default, user)` pair's vendor id, which is what the fingerprint tracks.
+ *
+ * `default` + `user` specifically: it is the combination almost everyone runs,
+ * and it is the one whose meaning the vendor can change underneath a stored
+ * acknowledgement. An unsupported cell contributes nothing rather than a
+ * misleading id, because a combination that cannot be selected describes no risk
+ * anyone is exposed to.
+ */
+export function effectivePermissionDefaultOf(
+  configurations: readonly {
+    readonly level: string;
+    readonly routing: string;
+    readonly supported: boolean;
+    readonly vendorId?: string;
+  }[]
+): string | undefined {
+  return configurations.find(
+    (configuration) =>
+      configuration.level === 'default' &&
+      configuration.routing === 'user' &&
+      configuration.supported
+  )?.vendorId;
+}
