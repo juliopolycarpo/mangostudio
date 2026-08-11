@@ -13,14 +13,28 @@
  * `external-disclosure-gate.ts` for what makes an acknowledgement stale.
  */
 
-import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentTargetId,
+  ExternalPermissionLevel,
+} from '@mangostudio/shared/external-agents';
 import { externalAgentVendor } from '@mangostudio/shared/external-agents';
 import { AlertTriangle, ExternalLink } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 
 export interface ExternalDisclosureDialogProps {
-  descriptor: ExternalAgentDescriptor;
+  /**
+   * The vendor, rather than its descriptor.
+   *
+   * Nothing here reads a capability, a version or an account — the notice is
+   * about the company, not about what its CLI reported this minute. Taking the
+   * id means the send-time gate can raise the same dialog from a 403 that names
+   * only the target and the machine, without first finding a descriptor that a
+   * revoked acknowledgement may already have changed.
+   */
+  targetId: ExternalAgentTargetId;
+  /** The level this chat is set to, when one is known. Shown, never chosen here. */
+  permissionLevel?: ExternalPermissionLevel;
   /** True when this is a review rather than a first activation. */
   reviewOnly?: boolean;
   /** True while the acknowledgement is being stored, which gates the vendor. */
@@ -30,7 +44,8 @@ export interface ExternalDisclosureDialogProps {
 }
 
 export function ExternalDisclosureDialog({
-  descriptor,
+  targetId,
+  permissionLevel,
   reviewOnly = false,
   busy = false,
   onAccept,
@@ -38,8 +53,8 @@ export function ExternalDisclosureDialog({
 }: ExternalDisclosureDialogProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.disclosure;
-  const vendor = t.externalAgents.target[descriptor.targetId];
-  const links = externalAgentVendor(descriptor.targetId);
+  const vendor = t.externalAgents.target[targetId];
+  const links = externalAgentVendor(targetId);
   const dialogRef = useFocusTrap(onCancel);
 
   return (
@@ -66,13 +81,27 @@ export function ExternalDisclosureDialog({
             what each of them loads has not been characterized, and naming the
             wrong sources for a vendor is worse than staying quiet.
           */}
-          {descriptor.targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
+          {targetId === 'claude' ? <li>{labels.inheritedConfigurationClaude}</li> : null}
         </ul>
 
         <p className="flex items-start gap-2 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-relaxed text-warning">
           <AlertTriangle size={14} className="mt-px shrink-0" />
           {labels.autoExecution.replace('{vendor}', vendor)}
         </p>
+
+        {/*
+          The warning above says the level decides how much runs unattended.
+          Naming the level the chat is actually on turns that from a general
+          caution into something the user can check before agreeing.
+        */}
+        {permissionLevel ? (
+          <p className="text-xs text-on-surface-variant">
+            {labels.permissionNow.replace(
+              '{level}',
+              t.externalAgents.permission.levelName[permissionLevel]
+            )}
+          </p>
+        ) : null}
 
         {/*
           Linked, never summarized. Paraphrasing another company's terms would be

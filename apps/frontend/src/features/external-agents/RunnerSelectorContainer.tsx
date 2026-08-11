@@ -8,6 +8,7 @@
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import { normalizePermissionLevel } from '@mangostudio/shared/external-agents';
 import { useState } from 'react';
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
 import { useToast } from '@/components/ui/Toast';
@@ -31,10 +32,10 @@ export function RunnerSelectorContainer() {
   const [pendingDisclosure, setPendingDisclosure] = useState<ExternalAgentDescriptor | null>(null);
   const [isAccepting, setAccepting] = useState(false);
 
-  const environmentName =
-    environments.data?.find((environment) => environment.id === app.currentEnvironmentId)?.name ??
-    app.currentEnvironmentId ??
-    '';
+  const environment = environments.data?.find(
+    (candidate) => candidate.id === app.currentEnvironmentId
+  );
+  const environmentName = environment?.name ?? app.currentEnvironmentId ?? '';
 
   // D14 turns on whether the chat already carries turns, so a new, empty chat can
   // still be pointed at either kind without a fork.
@@ -68,6 +69,7 @@ export function RunnerSelectorContainer() {
         isAgentListLoading={app.isAgentListLoading}
         externalAgents={external.agents}
         environmentName={environmentName}
+        environmentTransportKind={environment?.transportKind}
         hasTurns={hasTurns}
         disabled={app.isGenerating}
         onSelectAgent={app.setSelectedAgentId}
@@ -91,7 +93,8 @@ export function RunnerSelectorContainer() {
 
       {pendingDisclosure ? (
         <ExternalDisclosureDialog
-          descriptor={pendingDisclosure}
+          targetId={pendingDisclosure.targetId}
+          permissionLevel={normalizePermissionLevel(app.runnerPermissions.level).value}
           busy={isAccepting}
           onCancel={() => setPendingDisclosure(null)}
           onAccept={() => {

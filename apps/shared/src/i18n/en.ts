@@ -2758,10 +2758,6 @@ export const messages: Messages = {
     isolation: {
       title: 'This machine cannot keep vendor logins separate',
       why: 'MangoStudio can only run an external agent where the vendor account it signs in with is provably yours.',
-      // Only shown when the vendor account is subscription-backed, because that
-      // is the case the vendor's own terms name directly.
-      subscriptionNote:
-        'This account is a paid subscription seat, and sharing one is something the vendor\u2019s terms forbid outright.',
       nextStep: 'What fixes it',
       next: {
         local: 'Run this hub for a single MangoStudio user, or give each user their own machine.',

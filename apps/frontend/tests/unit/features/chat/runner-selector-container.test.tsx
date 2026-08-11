@@ -54,6 +54,9 @@ const appState = {
   setSelectedAgentId: vi.fn(),
   setRunnerTarget,
   handleSelectChat: vi.fn(),
+  // What the chat is set to, shown in the notice so the user can check the
+  // level before agreeing rather than after.
+  runnerPermissions: { level: 'default', routing: 'user' },
 };
 
 const messagesQuery: { data: { pages: { messages: unknown[] }[] } | undefined } = {
@@ -67,7 +70,9 @@ vi.mock('@/features/chat/queries', () => ({ useMessagesQuery: () => messagesQuer
 vi.mock(import('@/features/environments/queries'), async (importOriginal) => ({
   ...(await importOriginal()),
   useEnvironmentEntitiesQuery: () =>
-    ({ data: [{ id: 'local', name: 'this laptop' }] }) as unknown as ReturnType<
+    ({
+      data: [{ id: 'local', name: 'this laptop', transportKind: 'in-process' }],
+    }) as unknown as ReturnType<
       typeof import('@/features/environments/queries').useEnvironmentEntitiesQuery
     >,
 }));

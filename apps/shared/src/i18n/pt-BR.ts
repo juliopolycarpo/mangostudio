@@ -2768,8 +2768,6 @@ export const messages = {
     isolation: {
       title: 'Esta máquina não consegue separar os logins do fornecedor',
       why: 'O MangoStudio só roda um agente externo onde dá para provar que a conta usada no login é sua.',
-      subscriptionNote:
-        'Esta conta é uma assinatura paga, e compartilhar uma é algo que os termos do fornecedor proíbem expressamente.',
       nextStep: 'Como resolver',
       next: {
         local:
