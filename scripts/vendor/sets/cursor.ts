@@ -57,6 +57,36 @@ async function resolveCursorVersion(): Promise<string | undefined> {
   return banner && banner.length > 0 ? banner : undefined;
 }
 
+/**
+ * Whether this machine has cursor-agent credentials, asked in JSON.
+ *
+ * The text banner cannot answer it. `cursor-agent status` prints
+ * `✓ Logged in as <email>` when signed in and `Not logged in` when it is not,
+ * and a substring test for "logged in" matches **both** — so the signed-out
+ * machine this guard exists for would be read as signed in and the capture
+ * would die inside `session/new` instead of skipping cleanly.
+ *
+ * `status --format json` is declared by `cursor-agent status --help` and
+ * answers `{ status, isAuthenticated, hasAccessToken, hasRefreshToken,
+ * userInfo }`. A non-zero exit, output that does not parse, and
+ * `isAuthenticated: false` all mean the same thing here: do not spawn `acp`.
+ */
+async function isCursorSignedIn(): Promise<boolean> {
+  const result = await captureCommand(['cursor-agent', 'status', '--format', 'json'], {
+    cwd: ROOT_DIR,
+  }).catch(() => undefined);
+  if (result?.exitCode !== 0) return false;
+  try {
+    const parsed = JSON.parse(result.stdout) as {
+      readonly isAuthenticated?: unknown;
+      readonly status?: unknown;
+    };
+    return parsed.isAuthenticated === true || parsed.status === 'authenticated';
+  } catch {
+    return false;
+  }
+}
+
 export const cursorContractSet: VendorContractSet = {
   id: 'cursor-acp',
   vendor: 'cursor',
@@ -73,10 +103,7 @@ export const cursorContractSet: VendorContractSet = {
     // answers `initialize` and then fails `session/new`, which would surface as
     // a crashed capture rather than as the "this machine has no credentials"
     // it actually is — the normal state of a CI runner.
-    const status = await captureCommand(['cursor-agent', 'status'], { cwd: ROOT_DIR }).catch(
-      () => undefined
-    );
-    if (!/logged in/i.test(status?.stdout ?? '')) {
+    if (!(await isCursorSignedIn())) {
       throw new ContractCaptureSkipped(
         'cursor-agent is signed out, and `session/new` needs an account.'
       );
@@ -135,11 +162,23 @@ export const cursorContractSet: VendorContractSet = {
  * vendor produced, and it is identical on every machine because it is new.
  * Everything outside `sessions` is kept as it arrived, so a `nextCursor` or a
  * renamed envelope key is still visible.
+ *
+ * Narrowing to a `sessionId` that is not there would filter the page down to
+ * nothing and commit an envelope with no element, quietly retiring the element
+ * shape this artifact exists to hold. Falling back to the whole page is not the
+ * answer either — that is exactly the machine-state capture the paragraphs
+ * above reject. So it fails, loudly: `session/new` answering without a
+ * `sessionId` is a broken contract, not a capture to paper over.
  */
 function pageForCreatedSession(listed: unknown, created: unknown): unknown {
   const page = listed as { readonly sessions?: unknown } | null;
   const sessionId = (created as { readonly sessionId?: unknown } | null)?.sessionId;
   if (!page || typeof page !== 'object' || !Array.isArray(page.sessions)) return listed;
+  if (typeof sessionId !== 'string' || sessionId.length === 0) {
+    throw new Error(
+      '`session/new` returned no `sessionId`, so `session/list` cannot be narrowed to this capture’s own session.'
+    );
+  }
   const mine = page.sessions.filter(
     (entry) => (entry as { readonly sessionId?: unknown } | null)?.sessionId === sessionId
   );
