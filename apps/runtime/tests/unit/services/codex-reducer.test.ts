@@ -99,6 +99,17 @@ describe('codex reducer — the captured real turn', () => {
 });
 
 describe('codex reducer — item correlation', () => {
+  it('adopts a continuation turn id after steering', () => {
+    const reducer = new CodexTurnReducer(TURN_ID);
+    reducer.adoptTurnId('continued-turn-id');
+    expect(
+      reducer.reduce('turn/completed', {
+        ...turnCompleted(),
+        turn: { ...turnCompleted().turn, id: 'continued-turn-id' },
+      }).events
+    ).toEqual([{ type: 'completed' }]);
+  });
+
   it('correlates deltas by itemId while two items are open at once', () => {
     const events = replay([
       ['item/started', itemStarted(reasoningItem('think', []))],

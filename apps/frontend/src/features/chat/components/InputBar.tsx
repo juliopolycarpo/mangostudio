@@ -22,7 +22,7 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
@@ -134,6 +134,7 @@ export function InputBar({
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
   const [steering, setSteering] = useState(false);
   const [steerError, setSteerError] = useState<string | null>(null);
+  const pendingSteerId = useRef<string | null>(null);
   const selectableAgents = agents.filter(
     (agent) => agent.role === 'primary' || agent.role === 'both'
   );
@@ -186,10 +187,14 @@ export function InputBar({
     setSteering(true);
     setSteerError(null);
     try {
+      const clientMessageId = pendingSteerId.current ?? crypto.randomUUID();
+      pendingSteerId.current = clientMessageId;
       const result = await steerExternalTurn(chatId, {
-        clientMessageId: crypto.randomUUID(),
+        clientMessageId,
         text,
       });
+      pendingSteerId.current = null;
+      setPrompt('');
       // The outcome itself renders inline in the turn once the live stream
       // reports it; this is only for a rejection nobody else will surface.
       if (!result.accepted) setSteerError(t.externalAgents.steer.reason[result.reasonCode]);
@@ -209,7 +214,6 @@ export function InputBar({
     if (showSteerAffordance) {
       if (!chatId || steering) return;
       void handleSteer(prompt);
-      setPrompt('');
       return;
     }
     if (disabled || cannotSubmit) return;

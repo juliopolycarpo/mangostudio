@@ -731,18 +731,26 @@ function reduceExternalSteer(
   ) {
     return state;
   }
-  const parts = [
-    ...state.parts,
-    {
-      type: 'external_steer',
-      targetId: externalTargetId(state.parts),
-      clientMessageId: chunk.clientMessageId,
-      text: chunk.text,
-      status: chunk.status,
-      ...(chunk.reasonCode !== undefined ? { reasonCode: chunk.reasonCode } : {}),
-      createdAt: 0,
-    } satisfies MessagePart,
-  ];
+  const steerPart =
+    chunk.status === 'rejected'
+      ? {
+          type: 'external_steer' as const,
+          targetId: externalTargetId(state.parts),
+          clientMessageId: chunk.clientMessageId,
+          text: chunk.text,
+          status: 'rejected' as const,
+          reasonCode: chunk.reasonCode,
+          createdAt: 0,
+        }
+      : {
+          type: 'external_steer' as const,
+          targetId: externalTargetId(state.parts),
+          clientMessageId: chunk.clientMessageId,
+          text: chunk.text,
+          status: 'accepted' as const,
+          createdAt: 0,
+        };
+  const parts = [...state.parts, steerPart satisfies MessagePart];
   return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
 }
 

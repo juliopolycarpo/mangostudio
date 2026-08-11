@@ -566,21 +566,51 @@ describe('external turn controller', () => {
       await running;
     });
 
-    it('applies a repeated clientMessageId once and returns the recorded outcome', async () => {
-      const { runtime, controller } = harness();
+    it('shares an in-flight clientMessageId and calls the runtime once', async () => {
+      const held = Promise.withResolvers<ExternalAgentSteerResult>();
+      const { runtime, controller } = harness({ steerResult: () => held.promise });
       const running = startTurn(controller);
       await waitForTurnStart(runtime);
 
       const input = { userId, chatId, clientMessageId: 'steer-1', text: 'once' };
-      const first = await controller.steer(input);
-      const second = await controller.steer(input);
+      const first = controller.steer(input);
+      await waitFor(() => runtime.calls.steer.length === 1, 'the first steer to reach the runtime');
+      const second = controller.steer(input);
+      held.resolve({ accepted: true });
 
-      expect(first).toEqual({ accepted: true });
-      expect(second).toEqual(first);
+      expect(await first).toEqual({ accepted: true });
+      expect(await second).toEqual({ accepted: true });
       expect(runtime.calls.steer).toHaveLength(1);
 
       runtime.emit({ type: 'completed' });
       await running;
+    });
+
+    it('persists a rejected steer before terminal finalization', async () => {
+      const held = Promise.withResolvers<ExternalAgentSteerResult>();
+      const { runtime, controller } = harness({ steerResult: () => held.promise });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const steering = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'switch to plan mode',
+      });
+      await waitFor(() => runtime.calls.steer.length === 1, 'the steer to reach the runtime');
+      runtime.emit({ type: 'completed' });
+      held.resolve({ accepted: false, reasonCode: 'turn-not-steerable' });
+
+      await expect(steering).resolves.toEqual({
+        accepted: false,
+        reasonCode: 'turn-not-steerable',
+      });
+      await running;
+      expect(steerPartOf((await readAssistantRow()).parts, 'steer-1')).toMatchObject({
+        status: 'rejected',
+        reasonCode: 'turn-not-steerable',
+      });
     });
 
     it('refuses with turn-already-completed when no turn is running', async () => {

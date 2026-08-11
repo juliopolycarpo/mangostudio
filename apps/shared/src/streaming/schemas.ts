@@ -431,14 +431,29 @@ const SSEExternalUsageEventSchema = Type.Object({
  * corrected in place on a rejection, but the client only needs the resolved
  * outcome, not the intermediate state nobody could have acted on anyway.
  */
-const SSEExternalSteerEventSchema = Type.Object({
-  type: Type.Literal('external_steer'),
-  clientMessageId: Type.String(),
-  text: Type.String(),
-  status: Type.Union([Type.Literal('accepted'), Type.Literal('rejected')]),
-  reasonCode: Type.Optional(ExternalSteerRejectionReasonSchema),
-  done: Type.Literal(false),
-});
+const SSEExternalSteerEventSchema = Type.Union([
+  Type.Object(
+    {
+      type: Type.Literal('external_steer'),
+      clientMessageId: Type.String(),
+      text: Type.String(),
+      status: Type.Literal('accepted'),
+      done: Type.Literal(false),
+    },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    {
+      type: Type.Literal('external_steer'),
+      clientMessageId: Type.String(),
+      text: Type.String(),
+      status: Type.Literal('rejected'),
+      reasonCode: ExternalSteerRejectionReasonSchema,
+      done: Type.Literal(false),
+    },
+    { additionalProperties: false }
+  ),
+]);
 
 /**
  * A vendor failure with its structure intact, distinct from `error`.

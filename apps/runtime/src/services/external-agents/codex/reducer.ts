@@ -88,7 +88,7 @@ function only(event: ExternalAgentEvent): CodexTurnReduction {
  * different turn are ignored rather than mixed in.
  */
 export class CodexTurnReducer {
-  readonly #turnId: string;
+  #turnId: string;
   readonly #items = new Map<string, OpenItem>();
   readonly #now: () => number;
   #finished = false;
@@ -312,6 +312,11 @@ export class CodexTurnReducer {
       ],
       finished: true,
     };
+  }
+
+  /** Codex may continue a steer under a new turn id. */
+  adoptTurnId(turnId: string): void {
+    this.#turnId = turnId;
   }
 
   #error(params: ErrorNotification): CodexTurnReduction {

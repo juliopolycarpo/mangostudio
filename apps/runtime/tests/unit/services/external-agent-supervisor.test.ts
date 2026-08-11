@@ -144,7 +144,10 @@ describe('external-agent adapter registry and supervisor', () => {
     // Method presence is fixed per adapter class; capabilities are discovered
     // per machine. An adapter that can steer must still be able to report a CLI
     // build that cannot.
-    const adapter = new FakeExternalAgentAdapter({ steerable: true });
+    const adapter = new FakeExternalAgentAdapter({
+      steerable: true,
+      capabilities: { steering: true },
+    });
     const value = await fixture({ adapter });
 
     const result = await value.supervisor.discover(
@@ -376,6 +379,7 @@ describe('external-agent adapter registry and supervisor', () => {
   it('passes an adapter rejection through unchanged', async () => {
     const adapter = new FakeExternalAgentAdapter({
       steerable: true,
+      capabilities: { steering: true },
       steerResult: { accepted: false, reasonCode: 'turn-not-steerable' },
     });
     const value = await fixture({ adapter });

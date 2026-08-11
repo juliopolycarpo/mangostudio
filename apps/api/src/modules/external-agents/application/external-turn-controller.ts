@@ -284,6 +284,37 @@ class ExternalTranscriptWriter {
     return this.#pending;
   }
 
+  /**
+   * A steering attempt cannot reach the vendor unless its durable record did.
+   * Unlike ordinary checkpoints, its failure must be observable by the caller.
+   */
+  writeRequired(): Promise<void> {
+    const text = this.transcript.text;
+    const parts = JSON.stringify(this.transcript.parts);
+    const required = this.#pending
+      .then(() =>
+        this.db
+          .updateTable('messages')
+          .set({ text, parts })
+          .where('id', '=', this.messageId)
+          .where('isGenerating', '=', 1)
+          .execute()
+      )
+      .then(() => undefined);
+    // Keep subsequent best-effort checkpoints usable if this required write
+    // failed; the steering caller still receives the original rejection.
+    this.#pending = required.then(
+      () => undefined,
+      (error: unknown) => {
+        logger.warn('required_checkpoint_write_failed', {
+          messageId: this.messageId,
+          error: String(error),
+        });
+      }
+    );
+    return required;
+  }
+
   flush(): Promise<void> {
     return this.#pending;
   }
@@ -362,6 +393,10 @@ export function createExternalTurnController(
       readonly userId: string;
       /** Idempotency: a repeated `clientMessageId` returns the recorded outcome. */
       readonly steerOutcomes: Map<string, ExternalAgentSteerResult>;
+      /** Concurrent retries share this promise, so only one reaches Codex. */
+      readonly steerFlights: Map<string, Promise<ExternalAgentSteerResult>>;
+      /** Terminal delivery has begun; no new steering attempt may be recorded. */
+      terminating: boolean;
     }
   >();
 
@@ -442,14 +477,23 @@ export function createExternalTurnController(
       observer: input.observer,
       userId: input.userId,
       steerOutcomes: new Map(),
+      steerFlights: new Map(),
+      terminating: false,
     });
 
     /** The first terminal writer wins; every later one is a no-op. */
     function terminate(reason: ExternalTurnTerminalReason): void {
       if (terminalReason) return;
       terminalReason = reason;
-      transcript.finalize(reason, now());
-      settled.resolve(reason);
+      const live = liveTurns.get(input.chatId);
+      if (live?.transcript === transcript) live.terminating = true;
+      // A steer is recorded before its runtime call. Let the in-flight call
+      // resolve and durably correct that record before sealing the transcript,
+      // otherwise reload can disagree with the returned outcome.
+      void Promise.allSettled(live ? [...live.steerFlights.values()] : []).then(() => {
+        transcript.finalize(reason, now());
+        settled.resolve(reason);
+      });
     }
 
     /**
@@ -739,45 +783,46 @@ export function createExternalTurnController(
     },
     async steer(input) {
       const live = liveTurns.get(input.chatId);
-      if (!live || live.transcript.terminated || live.userId !== input.userId) {
+      if (!live || live.terminating || live.transcript.terminated || live.userId !== input.userId) {
         return { accepted: false, reasonCode: 'turn-already-completed' };
       }
 
       const cached = live.steerOutcomes.get(input.clientMessageId);
       if (cached) return cached;
+      const inFlight = live.steerFlights.get(input.clientMessageId);
+      if (inFlight) return await inFlight;
 
-      // Durable *and awaited* before any vendor call is attempted: a write
-      // still queued when the process died would be exactly the acknowledgement
-      // loss this exists to prevent. Every rejection below corrects this same
-      // record in place rather than leaving it silently absent.
-      live.transcript.recordSteerAttempt(
-        { clientMessageId: input.clientMessageId, text: input.text },
-        now()
-      );
-      await live.writer.write({ force: true });
+      const flight = (async (): Promise<ExternalAgentSteerResult> => {
+        // Durable *and awaited* before any vendor call is attempted: a write
+        // still queued when the process died would be exactly the acknowledgement
+        // loss this exists to prevent. Every rejection below corrects this same
+        // record in place rather than leaving it silently absent.
+        live.transcript.recordSteerAttempt(
+          { clientMessageId: input.clientMessageId, text: input.text },
+          now()
+        );
+        await live.writer.writeRequired();
 
-      const outcome = await resolveSteerOutcome(live, input);
-
-      // The turn may have ended while the vendor call was in flight; the
-      // terminal writer already sealed the transcript, and nothing may write
-      // to it after that.
-      if (live.transcript.terminated) {
+        const outcome = await resolveSteerOutcome(live, input);
+        if (!outcome.accepted) {
+          live.transcript.resolveSteerRejected(input.clientMessageId, outcome.reasonCode);
+          await live.writer.writeRequired();
+        }
         live.steerOutcomes.set(input.clientMessageId, outcome);
+        live.observer?.onSteer?.({
+          clientMessageId: input.clientMessageId,
+          text: input.text,
+          status: outcome.accepted ? 'accepted' : 'rejected',
+          ...(outcome.accepted ? {} : { reasonCode: outcome.reasonCode }),
+        });
         return outcome;
+      })();
+      live.steerFlights.set(input.clientMessageId, flight);
+      try {
+        return await flight;
+      } finally {
+        live.steerFlights.delete(input.clientMessageId);
       }
-
-      if (!outcome.accepted) {
-        live.transcript.resolveSteerRejected(input.clientMessageId, outcome.reasonCode);
-        await live.writer.write({ force: true });
-      }
-      live.steerOutcomes.set(input.clientMessageId, outcome);
-      live.observer?.onSteer?.({
-        clientMessageId: input.clientMessageId,
-        text: input.text,
-        status: outcome.accepted ? 'accepted' : 'rejected',
-        ...(outcome.accepted ? {} : { reasonCode: outcome.reasonCode }),
-      });
-      return outcome;
     },
   };
   return instance;

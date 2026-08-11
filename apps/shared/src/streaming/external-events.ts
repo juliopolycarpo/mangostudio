@@ -64,18 +64,31 @@ export function externalSessionStartedChunk(session: ExternalStreamSession): Str
  * user talking to the running turn, not something the vendor reported, so
  * there is no {@link ExternalAgentEvent} to project it from.
  */
-export function externalSteerChunk(input: {
-  readonly clientMessageId: string;
-  readonly text: string;
-  readonly status: 'accepted' | 'rejected';
-  readonly reasonCode?: ExternalSteerRejectionReason;
-}): StreamChunk {
+export function externalSteerChunk(
+  input:
+    | { readonly clientMessageId: string; readonly text: string; readonly status: 'accepted' }
+    | {
+        readonly clientMessageId: string;
+        readonly text: string;
+        readonly status: 'rejected';
+        readonly reasonCode: ExternalSteerRejectionReason;
+      }
+): StreamChunk {
+  if (input.status === 'rejected') {
+    return {
+      type: 'external_steer',
+      clientMessageId: input.clientMessageId,
+      text: input.text,
+      status: 'rejected',
+      reasonCode: input.reasonCode,
+      done: false,
+    };
+  }
   return {
     type: 'external_steer',
     clientMessageId: input.clientMessageId,
     text: input.text,
-    status: input.status,
-    ...(input.reasonCode !== undefined ? { reasonCode: input.reasonCode } : {}),
+    status: 'accepted',
     done: false,
   };
 }

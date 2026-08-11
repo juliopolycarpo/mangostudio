@@ -231,12 +231,22 @@ describe('external turn: live stream vs reloaded transcript', () => {
         ...prefix
           .map(externalAgentEventToStreamChunk)
           .filter((chunk): chunk is StreamChunk => chunk !== null),
-        externalSteerChunk({
-          clientMessageId: 'steer-1',
-          text: 'use the helper',
-          status: outcome,
-          ...(outcome === 'rejected' ? { reasonCode: 'turn-not-steerable' as const } : {}),
-        }),
+        ...(outcome === 'rejected'
+          ? [
+              externalSteerChunk({
+                clientMessageId: 'steer-1',
+                text: 'use the helper',
+                status: 'rejected',
+                reasonCode: 'turn-not-steerable',
+              }),
+            ]
+          : [
+              externalSteerChunk({
+                clientMessageId: 'steer-1',
+                text: 'use the helper',
+                status: 'accepted',
+              }),
+            ]),
       ];
       const state = chunks.reduce(
         (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),

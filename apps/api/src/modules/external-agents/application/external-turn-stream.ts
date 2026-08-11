@@ -295,7 +295,19 @@ function openStream(
                 if (chunk) send(chunk);
               },
               onSteer(steer) {
-                send(externalSteerChunk(steer));
+                if (steer.status === 'rejected') {
+                  if (steer.reasonCode !== undefined) {
+                    send(externalSteerChunk({ ...steer, reasonCode: steer.reasonCode }));
+                  }
+                  return;
+                }
+                send(
+                  externalSteerChunk({
+                    clientMessageId: steer.clientMessageId,
+                    text: steer.text,
+                    status: 'accepted',
+                  })
+                );
               },
             },
           },

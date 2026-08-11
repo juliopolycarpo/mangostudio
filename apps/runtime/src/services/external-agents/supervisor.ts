@@ -385,7 +385,9 @@ export class ExternalAgentSessionSupervisor {
   async steer(params: ExternalAgentSteerParams): Promise<ExternalAgentSteerResult> {
     assertExternalAgentParams('external-agent.steer', ExternalAgentSteerParamsSchema, params);
     const session = this.#requireSession(params.sessionId);
-    if (!session.adapter.steer) return { accepted: false, reasonCode: 'not-supported' };
+    if (!session.openResult.capabilities.steering || !session.adapter.steer) {
+      return { accepted: false, reasonCode: 'not-supported' };
+    }
     return await session.adapter.steer({
       ...params,
       nativeSessionId: session.openResult.nativeSessionId,

@@ -524,7 +524,10 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
       );
       // Codex may continue the turn under a new id. A later interrupt or steer
       // has to address the one it is actually running now.
-      if (session.activeTurn === active) active.turnId = response.turnId;
+      if (session.activeTurn === active) {
+        active.turnId = response.turnId;
+        active.reducer?.adoptTurnId(response.turnId);
+      }
       return { accepted: true };
     } catch (error) {
       const reason = steerRejectionReason(error, active, session);
