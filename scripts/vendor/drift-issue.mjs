@@ -93,16 +93,25 @@ export function renderIssueBody(report, runUrl) {
   return lines.join('\n');
 }
 
-/** The open issue this job owns, or `undefined` when there is none. */
+/**
+ * The open issue this job owns, or `undefined` when there is none.
+ *
+ * Paginated, and pull requests dropped, because both are ways of not finding an
+ * issue that exists — and not finding it means opening a second one every
+ * Wednesday, which is the backlog this module exists to prevent. `type:
+ * dependencies` is a label the bots wear: every open item carrying it today is
+ * a pull request, and `issues.listForRepo` returns those alongside issues, so
+ * one page of them is all it would take to push the tracking issue out of view.
+ */
 async function findOpenIssue({ github, context }) {
-  const listed = await github.rest.issues.listForRepo({
+  const listed = await github.paginate(github.rest.issues.listForRepo, {
     owner: context.repo.owner,
     repo: context.repo.repo,
     state: 'open',
     labels: DRIFT_LABELS[0],
     per_page: 100,
   });
-  return listed.data.find((issue) => (issue.body ?? '').includes(DRIFT_MARKER));
+  return listed.find((issue) => !issue.pull_request && (issue.body ?? '').includes(DRIFT_MARKER));
 }
 
 /** Opens, updates or closes the tracking issue to match this run's report. */

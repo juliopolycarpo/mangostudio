@@ -25,13 +25,44 @@ interface IssueCall {
   readonly payload: Record<string, unknown>;
 }
 
-/** Just enough Octokit to record what the module would have done. */
-function fakeGitHub(open: ReadonlyArray<{ number: number; body: string }> = []) {
+/** An item as `issues.listForRepo` returns it — pull requests included. */
+interface ListedItem {
+  readonly number: number;
+  readonly body: string;
+  /** Present on pull requests only, which is how the REST API distinguishes them. */
+  readonly pull_request?: Record<string, unknown>;
+}
+
+/**
+ * Just enough Octokit to record what the module would have done.
+ *
+ * `paginate` is the entry point under test, so it walks pages the way the real
+ * one does rather than handing back the whole list: a stub that flattened
+ * everything would agree with an unpaginated implementation and prove nothing.
+ */
+function fakeGitHub(open: readonly ListedItem[] = [], pageSize = 100) {
   const calls: IssueCall[] = [];
+  const listForRepo = (options: { page?: number; per_page?: number }) => {
+    const size = options.per_page ?? pageSize;
+    const page = options.page ?? 1;
+    return Promise.resolve({ data: open.slice((page - 1) * size, page * size) });
+  };
   const github = {
+    paginate: async (
+      route: (options: Record<string, unknown>) => Promise<{ data: readonly ListedItem[] }>,
+      options: Record<string, unknown>
+    ) => {
+      const collected: ListedItem[] = [];
+      for (let page = 1; ; page += 1) {
+        const { data } = await route({ ...options, page });
+        collected.push(...data);
+        if (data.length < ((options.per_page as number | undefined) ?? pageSize)) break;
+      }
+      return collected;
+    },
     rest: {
       issues: {
-        listForRepo: () => Promise.resolve({ data: [...open] }),
+        listForRepo,
         create: (payload: Record<string, unknown>) => {
           calls.push({ kind: 'create', payload });
           return Promise.resolve({ data: { number: 42 } });
@@ -158,6 +189,38 @@ describe('publishing', () => {
 
   it('ignores an unrelated open issue that happens to share the label', async () => {
     const { calls, ...clients } = fakeGitHub([{ number: 9, body: 'bump some dependency' }]);
+    const result = await publishDriftIssue(clients, BROKEN_REPORT, undefined);
+
+    expect(result).toMatchObject({ action: 'opened' });
+    expect(calls.map((call) => call.kind)).toEqual(['create']);
+  });
+
+  /**
+   * `type: dependencies` is a label the bots wear — every open item carrying it
+   * today is a pull request. One page of them in front of the tracking issue
+   * would make each weekly run open a fresh duplicate.
+   */
+  it('finds its issue behind a full page of dependency pull requests', async () => {
+    const bots = Array.from({ length: 100 }, (_, index) => ({
+      number: index + 100,
+      body: 'bumps something from 1.0.0 to 1.0.1',
+      pull_request: { url: 'https://example.invalid/pull' },
+    }));
+    const { calls, ...clients } = fakeGitHub([
+      ...bots,
+      { number: 7, body: `${DRIFT_MARKER}\nolder` },
+    ]);
+    const result = await publishDriftIssue(clients, BROKEN_REPORT, undefined);
+
+    expect(result).toMatchObject({ action: 'updated', number: 7 });
+    expect(calls.map((call) => call.kind)).toEqual(['update']);
+  });
+
+  /** A pull request is never this job's issue, whatever its body says. */
+  it('never adopts a pull request as its tracking issue', async () => {
+    const { calls, ...clients } = fakeGitHub([
+      { number: 11, body: `${DRIFT_MARKER}\nquoted in a PR`, pull_request: {} },
+    ]);
     const result = await publishDriftIssue(clients, BROKEN_REPORT, undefined);
 
     expect(result).toMatchObject({ action: 'opened' });
