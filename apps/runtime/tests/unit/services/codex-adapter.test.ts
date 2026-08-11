@@ -6,6 +6,7 @@ import type {
   ExternalAgentAdapterSpawnOptions,
 } from '../../../src/services/external-agents/adapter';
 import { CodexAppServerAdapter } from '../../../src/services/external-agents/codex/adapter';
+import { MINIMUM_CODEX_VERSION } from '../../../src/services/external-agents/codex/pinned';
 import type { ExternalAgentManagedProcess } from '../../../src/services/external-agents/process';
 import { TURN_ID } from '../../support/codex-fixtures';
 import {
@@ -160,7 +161,14 @@ describe('codex adapter — discovery', () => {
     const test = harness({ banner: 'codex-cli 0.140.0' });
     const descriptor = await adapter.discover(test.context);
 
-    expect(descriptor).toMatchObject({ installed: true, version: 'codex-cli 0.140.0' });
+    expect(descriptor).toMatchObject({
+      installed: true,
+      version: 'codex-cli 0.140.0',
+      // Codex is the one vendor still gated on the number, so it is also the
+      // one that has to say which number would clear it.
+      unavailableReason: 'version-unsupported',
+      requiredVersion: MINIMUM_CODEX_VERSION,
+    });
     expect(descriptor.supportedConfigurations).toHaveLength(6);
     for (const entry of descriptor.supportedConfigurations) {
       expect(entry.supported).toBe(false);
