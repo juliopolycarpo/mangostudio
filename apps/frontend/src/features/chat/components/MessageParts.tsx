@@ -10,6 +10,7 @@ import { ContinuationEventMarker } from './ContinuationEventMarker';
 import { ElicitationCard } from './ElicitationCard';
 import { ExternalActivityBlock } from './ExternalActivityBlock';
 import { ExternalApprovalCard } from './ExternalApprovalCard';
+import { ExternalSteerPartBlock } from './ExternalSteerPartBlock';
 import { findLatestFileChangeId } from './file-change-preview';
 import { GeneratedImagePart } from './GeneratedImagePart';
 import { McpMediaPartBlock } from './McpMediaPartBlock';
@@ -68,6 +69,8 @@ export function MessageParts({
                 chatId={chatId}
               />
             );
+          case 'external_steer':
+            return <ExternalSteerPartBlock key={`${part.clientMessageId}-steer`} part={part} />;
           case 'thinking': {
             const blockId = `${messageId}-thinking-${idx}`;
             const isLastThinking =

@@ -157,6 +157,8 @@ export function reduceTextGenerationStreamChunk(
       return reduceExternalApprovalStatus(nextState, chunk);
     case 'external_usage':
       return reduceExternalUsage(nextState, chunk.usage);
+    case 'external_steer':
+      return reduceExternalSteer(nextState, chunk);
     case 'external_error':
       return reduceExternalError(nextState, chunk.error);
     case 'external_turn_completed':
@@ -711,6 +713,37 @@ function reduceExternalUsage(state: TextGenerationStreamState, usage: ExternalUs
     usage: { ...part.usage, ...usage },
   }));
   return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceExternalSteer(
+  state: TextGenerationStreamState,
+  chunk: Extract<StreamChunk, { type: 'external_steer' }>
+) {
+  // One chunk per attempt, arriving resolved — see `ExternalTurnTranscript`'s
+  // steer methods, which write the same part twice server-side but never
+  // notify until the outcome is known. Appending is therefore correct on the
+  // first delivery, and idempotent against a duplicate: a `clientMessageId`
+  // this state has already rendered is a no-op rather than a second row.
+  if (
+    state.parts.some(
+      (part) => part.type === 'external_steer' && part.clientMessageId === chunk.clientMessageId
+    )
+  ) {
+    return state;
+  }
+  const parts = [
+    ...state.parts,
+    {
+      type: 'external_steer',
+      targetId: externalTargetId(state.parts),
+      clientMessageId: chunk.clientMessageId,
+      text: chunk.text,
+      status: chunk.status,
+      ...(chunk.reasonCode !== undefined ? { reasonCode: chunk.reasonCode } : {}),
+      createdAt: 0,
+    } satisfies MessagePart,
+  ];
+  return withAiMessageUpdate({ ...state, parts, activeThinkingIndex: null }, { parts });
 }
 
 function reduceExternalError(state: TextGenerationStreamState, error: ExternalAgentError) {

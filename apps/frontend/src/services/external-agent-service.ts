@@ -8,7 +8,10 @@
  */
 
 import type { Chat, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
-import type { ExternalAgentDescriptorListResponse } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentDescriptorListResponse,
+  ExternalAgentSteerResult,
+} from '@mangostudio/shared/external-agents';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
 
@@ -52,6 +55,27 @@ export async function answerExternalApproval(
     throw new ApiError(error.value);
   }
   return data as AnswerExternalApprovalResult;
+}
+
+/**
+ * Sends more input into a chat's currently running turn. Codex only.
+ *
+ * A rejection is returned rather than thrown, exactly like
+ * {@link answerExternalApproval}: "that turn already finished" is something
+ * the composer has to render, not an exception. The failure arm is for a
+ * request that never reached the server at all.
+ */
+export async function steerExternalTurn(
+  chatId: string,
+  body: { readonly clientMessageId: string; readonly text: string }
+): Promise<ExternalAgentSteerResult> {
+  const { data, error } = await client.api.chats({ id: chatId })['external-agent'].steer.post(body);
+  if (error) {
+    const value = error.value as ExternalAgentSteerResult | { error?: string } | null;
+    if (value && 'accepted' in value && value.accepted === false) return value;
+    throw new ApiError(error.value);
+  }
+  return data as ExternalAgentSteerResult;
 }
 
 /**
