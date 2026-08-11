@@ -747,6 +747,27 @@ describe('the handshake audit', () => {
     expect(auditCursorHandshake({ protocolVersion: 1 }).missing).toEqual(['agentCapabilities']);
   });
 
+  /**
+   * Present but not an object is the same "described nothing" as absent, and it
+   * must land on the same refusal. Reading it as a valid handshake would report
+   * a malformed agent as supported with every optional capability quietly
+   * false, which surfaces as features going missing rather than as a protocol
+   * problem.
+   */
+  it.each([
+    ['a boolean', true],
+    ['an array', []],
+    ['a string', 'yes'],
+  ])('refuses a capability object sent as %s', (_label, capabilities) => {
+    const audit = auditCursorHandshake({
+      protocolVersion: 1,
+      agentCapabilities: capabilities,
+    } as unknown as AcpInitializeResponse);
+
+    expect(audit.missing).toEqual(['agentCapabilities']);
+    expect(audit.unrecognized).toEqual([]);
+  });
+
   it('tolerates a capability key this runtime does not read', () => {
     // Cast rather than typed: the whole scenario is a key the vendored
     // interface has never heard of, so a literal that type-checked against
