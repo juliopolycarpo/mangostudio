@@ -140,6 +140,44 @@ describe('classifying drift', () => {
     expect(changes.every(isBreaking)).toBe(true);
   });
 
+  /**
+   * The same trap one level up, and the one that actually reaches the committed
+   * captures: `normalizeCapture` sorts object arrays too, so a Cursor release
+   * adding a permission mode whose id sorts before `agent` shifts every index
+   * after it. Compared positionally, that additive release reports as two fatal
+   * `changed` findings and fails the drift check.
+   */
+  it('compares a list of object shapes as a set', () => {
+    const modes = (ids: readonly string[]) => ({
+      availableModes: normalizeCapture(
+        ids.map((id) => ({ id, description: 'x', name: 'y' })),
+        { preserveAt: ['id'] }
+      ),
+    });
+    const committedModes = modes(['agent', 'ask', 'plan']);
+    const changes = diffCaptures(committedModes, modes(['agent', 'architect', 'ask', 'plan']));
+
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ kind: 'added' });
+    expect(changes.some(isBreaking)).toBe(false);
+  });
+
+  /**
+   * A field disappearing from inside an element is a *different shape*, so the
+   * set reports it as the old one removed and the new one added. The `removed`
+   * half is what matters: it is breaking, so the check still fails, which is
+   * the only guarantee the positional version was ever buying.
+   */
+  it('still reports an object shape the vendor stopped producing', () => {
+    const changes = diffCaptures(
+      { sessions: [{ cwd: '<string>', sessionId: '<string>' }] },
+      { sessions: [{ sessionId: '<string>' }] }
+    );
+
+    expect(changes.map((change) => change.kind).sort()).toEqual(['added', 'removed']);
+    expect(changes.some(isBreaking)).toBe(true);
+  });
+
   it('renders a change as one readable line', () => {
     expect(
       formatChange({ kind: 'changed', path: 'protocolVersion', before: '1', after: '2' })
