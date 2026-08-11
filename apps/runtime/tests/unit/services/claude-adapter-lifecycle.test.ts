@@ -29,6 +29,7 @@ import type {
 } from '../../../src/services/external-agents/adapter';
 import { ClaudeCodeAdapter } from '../../../src/services/external-agents/claude/adapter';
 import type { ExternalAgentManagedProcess } from '../../../src/services/external-agents/process';
+import { CLAUDE_HELP_LINES } from '../../support/claude-help';
 
 const RECORDED = readFileSync(
   join(import.meta.dir, '../../support/fixtures/claude-read-turn.jsonl'),
@@ -140,6 +141,8 @@ function harness(turnScripts: readonly ProcessScript[]): Harness {
     environment: {},
     spawn({ argv }) {
       if (argv.includes('--version')) return scriptedProcess({ lines: [VERSION_LINE] }).process;
+      if (argv.includes('--help'))
+        return scriptedProcess({ lines: [...CLAUDE_HELP_LINES] }).process;
       if (argv.includes('auth')) return scriptedProcess({ lines: [SUBSCRIPTION_AUTH] }).process;
       turnArgv.push(argv);
       const turn = scriptedProcess(queued.shift() ?? {});

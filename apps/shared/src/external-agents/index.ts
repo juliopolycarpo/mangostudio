@@ -1,3 +1,4 @@
+export { parseVendorCliSurface, type VendorCliSurface } from './cli-surface';
 export {
   DEFAULT_EXTERNAL_AGENT_SETTINGS,
   EXTERNAL_DISCLOSURE_FINGERPRINT_MAX_LENGTH,

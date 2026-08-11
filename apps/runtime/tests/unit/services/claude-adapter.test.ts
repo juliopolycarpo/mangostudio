@@ -15,6 +15,11 @@ import {
 } from '../../../src/services/external-agents/claude/adapter';
 import { parseClaudeAuthStatus } from '../../../src/services/external-agents/claude/auth';
 import {
+  isUsableClaudeCliSurface,
+  missingClaudeCliFlags,
+  parseClaudeCliSurface,
+} from '../../../src/services/external-agents/claude/cli-surface';
+import {
   buildSupportedConfigurations,
   CLAUDE_CANONICAL_DEFAULT_MODE,
   CLAUDE_CLI_DEFAULT_MODE,
@@ -29,6 +34,7 @@ import {
   compareClaudeVersions,
   parseClaudeVersion,
 } from '../../../src/services/external-agents/claude/version';
+import { CLAUDE_HELP_TEXT } from '../../support/claude-help';
 
 const SUBSCRIPTION = {
   accountKind: 'subscription',
@@ -380,5 +386,102 @@ describe('version gating', () => {
 
   it('returns undefined rather than guessing at an unreadable version', () => {
     expect(parseClaudeVersion('not a version')).toBeUndefined();
+  });
+});
+
+/**
+ * The probe that made the version comparison above a fallback rather than the
+ * gate. What the adapter needs to know is whether a flag exists, and `--help`
+ * answers that directly.
+ */
+describe('the CLI surface probe', () => {
+  const surface = parseClaudeCliSurface(CLAUDE_HELP_TEXT);
+
+  it('finds every flag the turn argv passes', () => {
+    expect(missingClaudeCliFlags(surface)).toEqual([]);
+    expect(isUsableClaudeCliSurface(surface)).toBe(true);
+  });
+
+  it('reads the permission modes out of a wrapped choice list', () => {
+    expect([...surface.permissionModes].sort()).toEqual([
+      'acceptEdits',
+      'auto',
+      'bypassPermissions',
+      'dontAsk',
+      'manual',
+      'plan',
+    ]);
+  });
+
+  /**
+   * `--forward-subagent-text`'s own description names `--output-format`, and an
+   * option whose flags wrap puts its description on the following line. A
+   * parser that scanned for `--token` anywhere would report both as declared
+   * options and would therefore never notice a flag going away.
+   */
+  it('does not mistake a flag named in prose for one the binary offers', () => {
+    const help = [
+      'Options:',
+      '  --keep <value>                        Mentions --removed in passing',
+      '      and wraps onto a continuation line naming --alsoNotReal',
+    ].join('\n');
+    const parsed = parseClaudeCliSurface(help);
+
+    expect(parsed.flags.has('--keep')).toBe(true);
+    expect(parsed.flags.has('--removed')).toBe(false);
+    expect(parsed.flags.has('--alsoNotReal')).toBe(false);
+  });
+
+  it('reports exactly the required flags a build dropped', () => {
+    const trimmed = parseClaudeCliSurface(
+      CLAUDE_HELP_TEXT.replace(/^ {2}--forward-subagent-text.*$/m, '  --something-else  Other')
+    );
+
+    expect(missingClaudeCliFlags(trimmed)).toEqual(['--forward-subagent-text']);
+  });
+
+  /**
+   * A spawn that produced nothing must not read as "this build has no options".
+   * Treating it that way would grey out a working install whenever a probe was
+   * flaky, so callers fall back to the pin instead.
+   */
+  it('refuses to treat unreadable output as a binary with nothing in it', () => {
+    expect(isUsableClaudeCliSurface(parseClaudeCliSurface(''))).toBe(false);
+    expect(isUsableClaudeCliSurface(parseClaudeCliSurface('command not found'))).toBe(false);
+  });
+});
+
+describe('permission modes are narrowed to what the build accepts', () => {
+  const accepted = (...modes: readonly string[]) => ({
+    ...SUBSCRIPTION,
+    acceptedModes: new Set(modes),
+  });
+
+  it('refuses a combination whose mode this build does not list', () => {
+    const configurations = buildSupportedConfigurations(accepted('plan', 'bypassPermissions'));
+    const byPair = new Map(
+      configurations.map((entry) => [`${entry.level}/${entry.routing}`, entry])
+    );
+
+    // `manual` is gone, so the pair that needs it is refused with a reason
+    // rather than passed to a CLI that would reject it at startup.
+    expect(byPair.get('default/user')).toMatchObject({
+      supported: false,
+      unsupportedReasonKey: CLAUDE_UNSUPPORTED_REASON_KEYS.modeMissing,
+    });
+    expect(byPair.get('read-only/user')?.supported).toBe(true);
+    expect(byPair.get('full-access/user')?.supported).toBe(true);
+  });
+
+  it('narrows nothing when the probe could not answer', () => {
+    const configurations = buildSupportedConfigurations(SUBSCRIPTION);
+    expect(configurations.filter((entry) => entry.supported)).not.toHaveLength(0);
+  });
+
+  it('tolerates modes this runtime never passes', () => {
+    const configurations = buildSupportedConfigurations(
+      accepted('plan', 'manual', 'bypassPermissions', 'somethingCursorAdded')
+    );
+    expect(configurations.filter((entry) => entry.supported)).toHaveLength(3);
   });
 });
