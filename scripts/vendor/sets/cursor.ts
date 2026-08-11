@@ -26,7 +26,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureCommand } from '../../lib/exec';
-import type { VendorContractSet } from '../lib/contract-set';
+import { ContractCaptureSkipped, type VendorContractSet } from '../lib/contract-set';
 import { normalizeCapture, serializeCapture } from '../lib/normalize';
 import { openStdioRpc } from '../lib/stdio-rpc';
 
@@ -64,9 +64,24 @@ export const cursorContractSet: VendorContractSet = {
   artifactsDirectory: CONTRACT_DIR,
   manifestDirectory: CONTRACT_DIR,
   perFileDigests: true,
+  // `latest` is not honoured: this set captures whatever `cursor-agent` is on
+  // PATH, so putting a current one there is the workflow's job, not this file's.
   resolveVersion: resolveCursorVersion,
 
   async capture(destination) {
+    // Checked before anything is spawned. A signed-out `cursor-agent acp`
+    // answers `initialize` and then fails `session/new`, which would surface as
+    // a crashed capture rather than as the "this machine has no credentials"
+    // it actually is — the normal state of a CI runner.
+    const status = await captureCommand(['cursor-agent', 'status'], { cwd: ROOT_DIR }).catch(
+      () => undefined
+    );
+    if (!/logged in/i.test(status?.stdout ?? '')) {
+      throw new ContractCaptureSkipped(
+        'cursor-agent is signed out, and `session/new` needs an account.'
+      );
+    }
+
     // A throwaway working directory, so `session/new` never records anything
     // about this repository and `session/list` has a cwd that is not a user's.
     const workspace = await mkdtemp(join(tmpdir(), 'cursor-contract-'));
@@ -96,6 +111,7 @@ export const cursorContractSet: VendorContractSet = {
           serializeCapture(normalizeCapture(value, { preserveAt: PRESERVE_AT }))
         );
       }
+      return {};
     } finally {
       session.close();
       await rm(workspace, { recursive: true, force: true }).catch(() => undefined);

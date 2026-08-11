@@ -18,7 +18,7 @@
 import { readFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { captureCommand } from '../../lib/exec';
-import type { VendorContractSet } from '../lib/contract-set';
+import type { CaptureOptions, VendorContractSet } from '../lib/contract-set';
 
 const ROOT_DIR = join(import.meta.dir, '..', '..', '..');
 const CODEX_DIR = join(ROOT_DIR, 'apps/runtime/src/services/external-agents/codex');
@@ -45,6 +45,19 @@ async function readPinnedSpec(): Promise<string> {
   return `${name}@${version}`;
 }
 
+/**
+ * The spec this run generates from.
+ *
+ * `latest` is the drift job's question — did OpenAI ship something — and it is
+ * deliberately not a pin. A diff against it is a signal to look, never a
+ * failure, because a vendor releasing is not a MangoStudio defect.
+ */
+async function resolveSpec(options: CaptureOptions): Promise<string> {
+  return options.latest
+    ? `${(await readPinnedSpec()).split('@').slice(0, -1).join('@')}@latest`
+    : readPinnedSpec();
+}
+
 export const codexContractSet: VendorContractSet = {
   id: 'codex-protocol',
   vendor: 'codex',
@@ -60,12 +73,12 @@ export const codexContractSet: VendorContractSet = {
    * the honest answer, since `bunx` will fetch the tarball on a machine that has
    * never seen Codex.
    */
-  resolveVersion() {
-    return readPinnedSpec();
+  resolveVersion(options) {
+    return resolveSpec(options);
   },
 
-  async capture(destination) {
-    const spec = await readPinnedSpec();
+  async capture(destination, options) {
+    const spec = await resolveSpec(options);
     const result = await captureCommand(
       ['bunx', spec, 'app-server', 'generate-ts', '--out', destination],
       { cwd: ROOT_DIR }
@@ -75,5 +88,7 @@ export const codexContractSet: VendorContractSet = {
         `bunx ${spec} app-server generate-ts failed with exit code ${result.exitCode}.\n${result.stderr.trim()}`
       );
     }
+    // Nothing here needs credentials, so nothing here is ever partial.
+    return {};
   },
 };

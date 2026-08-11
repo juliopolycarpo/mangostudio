@@ -9,6 +9,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { ContractCaptureSkipped } from '../vendor/lib/contract-set';
 import { diffCaptures, formatChange, isBreaking } from '../vendor/lib/diff';
 import { digestArtifacts } from '../vendor/lib/manifest';
 import { normalizeCapture, serializeCapture } from '../vendor/lib/normalize';
@@ -165,5 +166,41 @@ describe('artifact checksums', () => {
     const after = digestArtifacts(new Map([['b.json', '{}\n']]));
 
     expect(after.checksum).not.toBe(before.checksum);
+  });
+});
+
+/**
+ * A CI runner has no vendor credentials, which is the normal case rather than
+ * a broken one. What it must never do is record a *smaller* contract than the
+ * real one — a signed-out `claude auth status` answers with three fields
+ * instead of seven, and committing that would read as the vendor removing
+ * four.
+ */
+describe('a capture that could only see part of a contract', () => {
+  const committed = new Map([
+    ['cli-surface.json', '{"flags":["--print"]}\n'],
+    ['auth-status.json', '{"email":"<string>","loggedIn":"<boolean>"}\n'],
+  ]);
+
+  it('reports a skip distinctly from a failure', () => {
+    const skip = new ContractCaptureSkipped('cursor-agent is signed out.');
+
+    expect(skip).toBeInstanceOf(Error);
+    expect(skip.name).toBe('ContractCaptureSkipped');
+    // The distinction the caller branches on: a plain Error stops the run, a
+    // skip means this machine cannot answer and should say so.
+    expect(new Error('boom')).not.toBeInstanceOf(ContractCaptureSkipped);
+  });
+
+  it('leaves the uncapturable artifact out of the comparison entirely', () => {
+    const compared = new Map(committed);
+    compared.delete('auth-status.json');
+
+    // Diffing what was captured against the full committed set would report
+    // the credentialed artifact as removed, which is a fabricated breakage.
+    expect([...compared.keys()]).toEqual(['cli-surface.json']);
+    expect(
+      diffCaptures(JSON.parse(compared.get('cli-surface.json') ?? '{}'), { flags: ['--print'] })
+    ).toEqual([]);
   });
 });

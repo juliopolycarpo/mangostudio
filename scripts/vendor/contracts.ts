@@ -35,7 +35,12 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { parseArgs } from '../lib/args';
 import { error, info, success, warn } from '../lib/log';
-import type { VendorContractSet } from './lib/contract-set';
+import {
+  type CaptureOptions,
+  type CaptureReport,
+  ContractCaptureSkipped,
+  type VendorContractSet,
+} from './lib/contract-set';
 import { type ContractChange, diffCaptures, formatChange, isBreaking } from './lib/diff';
 import { readArtifacts, writeManifest } from './lib/manifest';
 import { claudeContractSet } from './sets/claude';
@@ -54,19 +59,48 @@ interface SetOutcome {
   readonly status: 'matched' | 'additive' | 'broken' | 'skipped';
   readonly changes: readonly ContractChange[];
   readonly observedVersion?: string;
+  /** Artifacts this machine could not capture, and why. */
+  readonly partial?: { readonly names: readonly string[]; readonly reason: string };
+}
+
+interface Capture {
+  readonly artifacts: Map<string, string>;
+  readonly report: CaptureReport;
 }
 
 /** Captures into a fresh temporary directory and hands back its artifacts. */
-async function captureInto(set: VendorContractSet): Promise<Map<string, string>> {
+async function captureInto(set: VendorContractSet, options: CaptureOptions): Promise<Capture> {
   const staging = await mkdtemp(join(tmpdir(), `${set.id}-`));
   try {
-    await set.capture(staging);
+    const report = await set.capture(staging, options);
     const artifacts = await readArtifacts(staging);
     if (artifacts.size === 0) throw new Error(`${set.id} produced no artifacts.`);
-    return artifacts;
+    return { artifacts, report };
   } finally {
     await rm(staging, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+/**
+ * The committed artifacts a partial capture is allowed to leave alone.
+ *
+ * Dropping them from the comparison is what keeps a runner with no vendor
+ * credentials useful: it verifies everything it could see, and says plainly
+ * what it could not.
+ */
+function withoutSkipped(
+  artifacts: ReadonlyMap<string, string>,
+  skipped: readonly string[]
+): Map<string, string> {
+  const kept = new Map(artifacts);
+  for (const name of skipped) kept.delete(name);
+  return kept;
+}
+
+/** A set the machine could run but could not answer for. */
+function skippedOutcome(set: VendorContractSet, reason: string): SetOutcome {
+  warn(`Skipping ${set.id}: ${reason} Nothing was verified for it.`);
+  return { id: set.id, status: 'skipped', changes: [] };
 }
 
 /**
@@ -113,19 +147,32 @@ function tryParse(content: string): unknown {
   }
 }
 
-async function checkSet(set: VendorContractSet): Promise<SetOutcome> {
-  const observedVersion = await set.resolveVersion();
+async function checkSet(set: VendorContractSet, options: CaptureOptions): Promise<SetOutcome> {
+  const observedVersion = await set.resolveVersion(options);
   if (observedVersion === undefined) {
-    warn(`Skipping ${set.id}: its tool is not on this machine, so nothing was verified.`);
-    return { id: set.id, status: 'skipped', changes: [] };
+    return skippedOutcome(set, 'its tool is not on this machine.');
   }
 
-  const captured = await captureInto(set);
-  const committed = await readArtifacts(set.artifactsDirectory);
-  const changes = diffArtifacts(committed, captured);
+  let capture: Capture;
+  try {
+    capture = await captureInto(set, options);
+  } catch (thrown) {
+    if (!(thrown instanceof ContractCaptureSkipped)) throw thrown;
+    return skippedOutcome(set, thrown.message);
+  }
+
+  const skipped = capture.report.skipped ?? [];
+  const committed = withoutSkipped(await readArtifacts(set.artifactsDirectory), skipped);
+  const changes = diffArtifacts(committed, capture.artifacts);
+  const partial =
+    skipped.length > 0
+      ? { names: skipped, reason: capture.report.reason ?? 'not capturable here' }
+      : undefined;
+  if (partial) warn(`${set.id}: ${partial.reason}; ${skipped.join(', ')} was not verified.`);
+
   if (changes.length === 0) {
     success(`${set.id} matches ${observedVersion} (${committed.size} files).`);
-    return { id: set.id, status: 'matched', changes, observedVersion };
+    return { id: set.id, status: 'matched', changes, observedVersion, ...(partial && { partial }) };
   }
 
   const breaking = changes.filter(isBreaking);
@@ -134,28 +181,55 @@ async function checkSet(set: VendorContractSet): Promise<SetOutcome> {
     warn(
       `${set.id} grew ${changes.length} field(s) on ${observedVersion}. Additive, so nothing is broken — run \`bun run vendor-contracts:regen\` to record it.`
     );
-    return { id: set.id, status: 'additive', changes, observedVersion };
+    return {
+      id: set.id,
+      status: 'additive',
+      changes,
+      observedVersion,
+      ...(partial && { partial }),
+    };
   }
   error(
     `${set.id} no longer matches ${observedVersion}: ${breaking.length} removed or changed field(s). An adapter is reading something this build does not produce.`
   );
-  return { id: set.id, status: 'broken', changes, observedVersion };
+  return { id: set.id, status: 'broken', changes, observedVersion, ...(partial && { partial }) };
 }
 
-async function regenerateSet(set: VendorContractSet, today: string): Promise<SetOutcome> {
-  const observedVersion = await set.resolveVersion();
+async function regenerateSet(
+  set: VendorContractSet,
+  today: string,
+  options: CaptureOptions
+): Promise<SetOutcome> {
+  const observedVersion = await set.resolveVersion(options);
   if (observedVersion === undefined) {
-    warn(`Skipping ${set.id}: its tool is not on this machine.`);
-    return { id: set.id, status: 'skipped', changes: [] };
+    return skippedOutcome(set, 'its tool is not on this machine.');
   }
 
-  const captured = await captureInto(set);
-  const committed = await readArtifacts(set.artifactsDirectory);
-  const changes = diffArtifacts(committed, captured);
+  let capture: Capture;
+  try {
+    capture = await captureInto(set, options);
+  } catch (thrown) {
+    if (!(thrown instanceof ContractCaptureSkipped)) throw thrown;
+    return skippedOutcome(set, thrown.message);
+  }
+
+  const skipped = capture.report.skipped ?? [];
+  const previous = await readArtifacts(set.artifactsDirectory);
+  const changes = diffArtifacts(withoutSkipped(previous, skipped), capture.artifacts);
+
+  // An artifact this machine could not capture is carried forward exactly as it
+  // was committed. Writing only what was captured would silently delete the
+  // half that needed credentials, and the deletion would look like the vendor
+  // having removed it.
+  const written = new Map(capture.artifacts);
+  for (const name of skipped) {
+    const carried = previous.get(name);
+    if (carried !== undefined) written.set(name, carried);
+  }
 
   await rm(set.artifactsDirectory, { recursive: true, force: true });
   await mkdir(set.artifactsDirectory, { recursive: true });
-  for (const [name, content] of captured) {
+  for (const [name, content] of written) {
     const destination = join(set.artifactsDirectory, name);
     await mkdir(join(destination, '..'), { recursive: true });
     await Bun.write(destination, content);
@@ -165,19 +239,27 @@ async function regenerateSet(set: VendorContractSet, today: string): Promise<Set
     set: set.id,
     command: set.command,
     capturedFrom: observedVersion,
-    artifacts: captured,
+    artifacts: written,
     today,
     perFileDigests: set.perFileDigests,
   });
 
+  if (skipped.length > 0) {
+    warn(
+      `${set.id}: ${capture.report.reason ?? 'not capturable here'}; kept the committed ${skipped.join(', ')}.`
+    );
+  }
   success(
-    `${set.id}: ${captured.size} file(s) from ${observedVersion} into ${relative(ROOT_DIR, set.artifactsDirectory)} (${manifest.checksum.slice(0, 14)}…).`
+    `${set.id}: ${written.size} file(s) from ${observedVersion} into ${relative(ROOT_DIR, set.artifactsDirectory)} (${manifest.checksum.slice(0, 14)}…).`
   );
   return {
     id: set.id,
     status: changes.length === 0 ? 'matched' : changes.some(isBreaking) ? 'broken' : 'additive',
     changes,
     observedVersion,
+    ...(skipped.length > 0
+      ? { partial: { names: skipped, reason: capture.report.reason ?? 'not capturable here' } }
+      : {}),
   };
 }
 
@@ -204,7 +286,10 @@ async function writeStepSummary(outcomes: readonly SetOutcome[]): Promise<void> 
     skipped: 'skipped — tool not installed',
   } as const;
   for (const outcome of outcomes) {
-    lines.push(`| ${outcome.id} | ${outcome.observedVersion ?? '—'} | ${label[outcome.status]} |`);
+    const note = outcome.partial ? ` (${outcome.partial.names.join(', ')} not verified)` : '';
+    lines.push(
+      `| ${outcome.id} | ${outcome.observedVersion ?? '—'} | ${label[outcome.status]}${note} |`
+    );
   }
   for (const outcome of outcomes) {
     if (outcome.changes.length === 0) continue;
@@ -215,20 +300,54 @@ async function writeStepSummary(outcomes: readonly SetOutcome[]): Promise<void> 
   await Bun.write(path, `${lines.join('\n')}\n`);
 }
 
+/**
+ * The machine-readable outcome the drift workflow turns into an issue.
+ *
+ * Written to a file rather than to stdout so the workflow reads it with
+ * `require()` instead of interpolating vendor-derived text into a shell
+ * command — the difference between data and an injection surface.
+ */
+async function writeReport(
+  path: string,
+  outcomes: readonly SetOutcome[],
+  latest: boolean
+): Promise<void> {
+  await Bun.write(
+    path,
+    `${JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        against: latest ? 'latest' : 'pinned',
+        outcomes: outcomes.map((outcome) => ({
+          id: outcome.id,
+          status: outcome.status,
+          observedVersion: outcome.observedVersion ?? null,
+          changes: outcome.changes.map(formatChange),
+          ...(outcome.partial ? { partial: outcome.partial } : {}),
+        })),
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
 function usage(): void {
   console.log(
-    'Usage: bun run vendor-contracts:regen [--only <set>] [--check] [--require-all]\n\n' +
+    'Usage: bun run vendor-contracts:regen [--only <set>] [--check] [--latest] [--require-all] [--report <path>]\n\n' +
       '  (no flags)      recapture every contract whose tool is installed\n' +
       '  --check         capture into a temporary directory and diff instead of writing\n' +
       '  --only <set>    limit to one set: codex-protocol, cursor-acp, claude-cli\n' +
-      '  --require-all   fail when a set was skipped because its tool is missing\n'
+      '  --latest        capture against the newest published tool, and never exit non-zero\n' +
+      '  --require-all   fail when a set was skipped because its tool is missing\n' +
+      '  --report <path> write the outcome as JSON, for the drift workflow\n'
   );
 }
 
 async function main(): Promise<void> {
   const { flags, values, positional } = parseArgs({
-    booleanFlags: ['--check', '--require-all'],
-    valueFlags: ['--only'],
+    booleanFlags: ['--check', '--require-all', '--latest'],
+    valueFlags: ['--only', '--report'],
   });
   if (flags['--help']) return usage();
   if (positional.length > 0) {
@@ -245,16 +364,35 @@ async function main(): Promise<void> {
     return;
   }
 
+  const options: CaptureOptions = { latest: flags['--latest'] === true };
   const today = new Date().toISOString().slice(0, 10);
   const outcomes: SetOutcome[] = [];
   for (const set of sets) {
     info(`${flags['--check'] ? 'Checking' : 'Capturing'} ${set.id}…`);
-    outcomes.push(flags['--check'] ? await checkSet(set) : await regenerateSet(set, today));
+    outcomes.push(
+      flags['--check'] ? await checkSet(set, options) : await regenerateSet(set, today, options)
+    );
   }
   await writeStepSummary(outcomes);
+  const reportPath = values['--report'];
+  if (reportPath) await writeReport(reportPath, outcomes, options.latest);
 
   const broken = outcomes.filter((outcome) => outcome.status === 'broken');
   const skipped = outcomes.filter((outcome) => outcome.status === 'skipped');
+
+  // A run against `latest` asks whether the vendor moved, and a vendor
+  // releasing is not a MangoStudio defect. It reports — into the step summary,
+  // and into the issue the workflow opens from the report — and leaves the exit
+  // code alone, because failing the branch over somebody else's release is how
+  // a drift signal becomes a thing people mute.
+  if (options.latest) {
+    if (broken.length > 0) {
+      warn(
+        `Vendors at latest no longer produce fields recorded for: ${broken.map((outcome) => outcome.id).join(', ')}. Reported, not failed.`
+      );
+    }
+    return;
+  }
   // A regeneration that found drift has *recorded* it, which is the job it was
   // asked to do. Only `--check` turns drift into an exit code; failing here
   // would mean the one command that fixes the problem also reports failure.

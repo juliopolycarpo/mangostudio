@@ -41,6 +41,9 @@ const CONTRACT_DIR = join(ROOT_DIR, 'apps/runtime/src/services/external-agents/c
 /** The option whose choice list the permission matrix maps onto. */
 const PERMISSION_MODE_FLAG = '--permission-mode';
 
+/** The one artifact that needs a signed-in account, and can be skipped without it. */
+const AUTH_ARTIFACT = 'auth-status.json';
+
 async function runClaude(args: readonly string[]): Promise<string | undefined> {
   const result = await captureCommand(['claude', ...args], { cwd: ROOT_DIR }).catch(
     () => undefined
@@ -57,6 +60,7 @@ export const claudeContractSet: VendorContractSet = {
   manifestDirectory: CONTRACT_DIR,
   perFileDigests: true,
 
+  // `latest` is not honoured here either — same reason as Cursor.
   async resolveVersion() {
     const banner = await runClaude(['--version']);
     const line = banner?.trim().split('\n')[0]?.trim();
@@ -75,20 +79,22 @@ export const claudeContractSet: VendorContractSet = {
       })
     );
 
-    // A signed-out machine answers this with a different, smaller payload, and
-    // recording that as the contract would delete fields the adapter reads. A
-    // capture that cannot see a signed-in shape is refused rather than written.
+    // A signed-out machine answers with `{loggedIn, authMethod, apiProvider}`
+    // and nothing else — no `email`, `orgId`, `orgName` or `subscriptionType`.
+    // Recording that would delete four fields from the contract, and the next
+    // diff would read the real payload as the vendor *adding* them back. The
+    // flag surface above needs no credentials, so it is kept either way.
     const status = await runClaude(['auth', 'status']);
     const parsed = status === undefined ? undefined : parseFirstJsonObject(status);
-    if (parsed === undefined) {
-      throw new Error(
-        '`claude auth status` did not return a JSON object. Sign in before capturing this contract.'
-      );
+    if (parsed?.loggedIn !== true) {
+      return {
+        skipped: [AUTH_ARTIFACT],
+        reason:
+          'claude is signed out, so `auth status` answers with fewer fields than the contract',
+      };
     }
-    await writeFile(
-      join(destination, 'auth-status.json'),
-      serializeCapture(normalizeCapture(parsed))
-    );
+    await writeFile(join(destination, AUTH_ARTIFACT), serializeCapture(normalizeCapture(parsed)));
+    return {};
   },
 };
 
