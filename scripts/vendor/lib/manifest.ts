@@ -46,17 +46,38 @@ function digest(content: string | Uint8Array): string {
   return `sha256:${createHash('sha256').update(content).digest('hex')}`;
 }
 
+function isMissing(thrown: unknown): boolean {
+  return (thrown as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
+}
+
 /**
  * Every artifact under a contract directory, manifest excluded, path-sorted.
  *
  * Recursive because Codex's generator emits a tree, and keyed on the
  * directory-relative path so two captures compare by name rather than by
  * traversal order.
+ *
+ * Filesystem errors propagate, because the alternative is worse than a crash.
+ * A committed contract that could not be read would come back as an empty map,
+ * and `checkSet` would then diff every freshly captured artifact against
+ * nothing — reporting a directory it failed to open as a vendor that added
+ * everything, which passes as `additive`. The one caller for which absence is a
+ * real answer rather than a failure is `regen` recording a set for the first
+ * time, and it says so with `allowMissing`.
  */
-export async function readArtifacts(directory: string): Promise<Map<string, string>> {
+export async function readArtifacts(
+  directory: string,
+  options: { readonly allowMissing?: boolean } = {}
+): Promise<Map<string, string>> {
   const artifacts = new Map<string, string>();
   const walk = async (current: string, prefix: string): Promise<void> => {
-    const entries = await readdir(current, { withFileTypes: true }).catch(() => []);
+    const entries = await readdir(current, { withFileTypes: true }).catch((thrown: unknown) => {
+      // Only the root may be absent, and only when the caller asked for that.
+      // A subdirectory that vanished between listing and descending is a real
+      // failure whichever caller hit it.
+      if (options.allowMissing && prefix.length === 0 && isMissing(thrown)) return [];
+      throw thrown;
+    });
     for (const entry of [...entries].sort((left, right) => left.name.localeCompare(right.name))) {
       const relative = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
       if (entry.isDirectory()) {

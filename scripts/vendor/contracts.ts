@@ -214,7 +214,10 @@ async function regenerateSet(
   }
 
   const skipped = capture.report.skipped ?? [];
-  const previous = await readArtifacts(set.artifactsDirectory);
+  // The one place an absent contract directory is an answer rather than a
+  // failure: recording a set that has never been committed. Everywhere else a
+  // directory that cannot be read must not read as "the vendor had nothing".
+  const previous = await readArtifacts(set.artifactsDirectory, { allowMissing: true });
   const changes = diffArtifacts(withoutSkipped(previous, skipped), capture.artifacts);
 
   // An artifact this machine could not capture is carried forward exactly as it

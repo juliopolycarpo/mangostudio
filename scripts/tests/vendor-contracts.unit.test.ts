@@ -9,9 +9,12 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ContractCaptureSkipped } from '../vendor/lib/contract-set';
 import { diffCaptures, formatChange, isBreaking } from '../vendor/lib/diff';
-import { digestArtifacts } from '../vendor/lib/manifest';
+import { digestArtifacts, readArtifacts } from '../vendor/lib/manifest';
 import { normalizeCapture, serializeCapture } from '../vendor/lib/normalize';
 
 describe('normalizing a capture', () => {
@@ -204,6 +207,41 @@ describe('artifact checksums', () => {
     const after = digestArtifacts(new Map([['b.json', '{}\n']]));
 
     expect(after.checksum).not.toBe(before.checksum);
+  });
+});
+
+describe('reading a committed contract directory', () => {
+  /**
+   * A directory that could not be read must not come back as an empty contract.
+   * `checkSet` would diff a real capture against nothing, report every artifact
+   * as `added`, and pass the run as additive — a failed read announcing itself
+   * as a healthy vendor.
+   */
+  it('fails rather than reporting a missing directory as an empty contract', async () => {
+    const absent = join(tmpdir(), `vendor-contract-absent-${Date.now()}`);
+
+    await expect(readArtifacts(absent)).rejects.toThrow();
+  });
+
+  /** Recording a set for the first time is the one caller absence answers. */
+  it('reads a missing directory as empty only when the caller asked for that', async () => {
+    const absent = join(tmpdir(), `vendor-contract-absent-${Date.now()}`);
+
+    expect(await readArtifacts(absent, { allowMissing: true })).toEqual(new Map());
+  });
+
+  it('reads a real tree keyed on the directory-relative path', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'vendor-contract-'));
+    await mkdir(join(directory, 'nested'), { recursive: true });
+    await writeFile(join(directory, 'a.json'), '{}\n');
+    await writeFile(join(directory, 'nested', 'b.json'), '{"b":1}\n');
+    await writeFile(join(directory, 'manifest.json'), '{"set":"x"}\n');
+
+    const artifacts = await readArtifacts(directory);
+
+    // The manifest describes the capture rather than being part of it.
+    expect([...artifacts.keys()]).toEqual(['a.json', 'nested/b.json']);
+    await rm(directory, { recursive: true, force: true });
   });
 });
 
