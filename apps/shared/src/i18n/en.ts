@@ -330,6 +330,7 @@ export const messages: Messages = {
       skills: 'Skills',
       mcp: 'MCP',
       externalApi: 'External API',
+      externalAgents: 'External agents',
       metrics: 'Metrics',
       logs: 'Logs',
     },

@@ -334,6 +334,7 @@ export const messages = {
       skills: 'Skills',
       mcp: 'MCP',
       externalApi: 'API externa',
+      externalAgents: 'Agentes externos',
       metrics: 'Métricas',
       logs: 'Logs',
     },
