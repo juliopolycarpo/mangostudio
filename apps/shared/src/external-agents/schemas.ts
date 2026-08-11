@@ -551,6 +551,23 @@ export const ExternalAgentUnavailableReasonSchema = Type.Union([
   /** The transport has not attested an isolated OS identity. */
   Type.Literal('isolation-unproven'),
   /**
+   * The installed CLI does not serve the contract this runtime was built
+   * against, and an upgrade is what fixes it.
+   *
+   * Reported by an adapter, never inferred here, and never from a version
+   * comparison alone. A number below the pin is a *warning*; what makes a
+   * target unavailable is a probe finding the surface missing — an ACP
+   * handshake that does not answer, a flag the turn's argv names that the
+   * binary does not have. The distinction matters because vendors ship
+   * constantly: gating on the number would grey out working installs every
+   * time a pin went stale, which is the failure the drift job exists to make
+   * unnecessary.
+   *
+   * `requiredVersion` on the descriptor names the build that would clear it, so
+   * the row says what to upgrade to rather than only that something is wrong.
+   */
+  Type.Literal('version-unsupported'),
+  /**
    * The user has not acknowledged this vendor's third-party disclosure.
    *
    * Advisory here, so the selector knows to prompt. The authoritative refusal
@@ -632,6 +649,17 @@ export const ExternalAgentDescriptorSchema = Type.Object(
      * bounded string that happens to carry an astral character.
      */
     version: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
+    /**
+     * The oldest build that would clear a `version-unsupported` verdict.
+     *
+     * MangoStudio's own pin rather than vendor text, so it is bounded as a
+     * plain string: it is read from the adapter's `pinned.ts`, never from
+     * anything the CLI printed. Present only alongside that reason, because a
+     * required version on a target that is already working would invite the
+     * reading that anything older is refused — which is exactly what this
+     * runtime does not do.
+     */
+    requiredVersion: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
     authState: ExternalAgentAuthStateSchema,
     /** The literal command that signs the user in, e.g. `codex login`. Shown with a copy button. */
     loginCommand: Type.Optional(VendorText('accountLabel', { minLength: 1 })),

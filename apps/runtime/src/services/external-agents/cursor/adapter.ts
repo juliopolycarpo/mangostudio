@@ -77,6 +77,7 @@ import {
   type CursorDiscoveryFacts,
   type CursorDiscoveryRecord,
 } from './discovery-cache';
+import { auditCursorHandshake } from './handshake';
 import {
   buildCursorSupportedConfigurations,
   CURSOR_UNSUPPORTED_REASON_KEYS,
@@ -248,22 +249,6 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
       };
     }
 
-    // The same gate `openSession` applies, applied where the choice is offered
-    // rather than only where it is taken: without it a too-old binary produces a
-    // selectable target whose failure surfaces after someone sends a message.
-    if (!isCursorVersionSupported(version.parsed, MINIMUM_CURSOR_VERSION_PARSED)) {
-      return {
-        targetId: this.targetId,
-        installed: true,
-        version: version.raw,
-        authState: 'unknown',
-        capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
-        supportedConfigurations: cursorUnsupportedConfigurations(
-          CURSOR_UNSUPPORTED_REASON_KEYS.versionTooOld
-        ),
-      };
-    }
-
     // Auth is read before the cache is consulted, not after: the account is part
     // of the cache key, so serving a remembered catalog for an account that has
     // since changed is the one stale answer that would be actively wrong.
@@ -279,8 +264,20 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     const cached = this.#discoveryCache.read(facts);
     if (cached) return withDiscoveryReport(cached);
 
+    // The handshake is the gate, and it runs before the version is judged.
+    // `cursor-agent acp` either answers protocol 1 with the keys this reducer
+    // reads or it does not, and that answer is worth more than a calendar
+    // comparison against a pin that goes stale every time Cursor ships. A build
+    // older than the pin whose handshake is intact keeps working; one at the pin
+    // that lost a key does not.
     const probe = await this.#probeWithRetries(context);
     if (!probe.ok) {
+      // Only here does the version get a say, and only to explain the failure.
+      // Below the pin the actionable answer is "upgrade", which is a typed
+      // reason the selector can render; at or above it, the install is broken
+      // in some way an upgrade may not fix, so the configurations carry the
+      // reason and the row is not claimed to be a version problem.
+      const belowPin = !isCursorVersionSupported(version.parsed, MINIMUM_CURSOR_VERSION_PARSED);
       return withDiscoveryReport(
         this.#discoveryCache.write(facts, {
           attempts: probe.attempts,
@@ -289,11 +286,19 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
             targetId: this.targetId,
             installed: true,
             version: version.raw,
+            ...(belowPin
+              ? {
+                  requiredVersion: MINIMUM_CURSOR_AGENT_VERSION,
+                  unavailableReason: 'version-unsupported' as const,
+                }
+              : {}),
             authState: status.authState,
             ...(status.authState === 'signed-in' ? {} : { loginCommand: CURSOR_LOGIN_COMMAND }),
             capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
             supportedConfigurations: cursorUnsupportedConfigurations(
-              CURSOR_UNSUPPORTED_REASON_KEYS.handshakeFailed
+              belowPin
+                ? CURSOR_UNSUPPORTED_REASON_KEYS.versionTooOld
+                : CURSOR_UNSUPPORTED_REASON_KEYS.handshakeFailed
             ),
             ...(status.account ? { account: status.account } : {}),
           },
@@ -322,8 +327,12 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
 
   async openSession(input: ExternalAgentOpenSessionInput): Promise<ExternalAgentOpenedSession> {
     const { params, context } = input;
-    await this.#assertSupportedVersion(context);
-
+    // No version pre-flight. `#launch` completes an `initialize` before this
+    // method can return, and that handshake refuses a protocol this reducer
+    // cannot read — which is a stronger statement than a version comparison and
+    // costs nothing extra, because the process has to start either way. A
+    // second gate here would also disagree with discovery, greying nothing and
+    // failing the send for a build the selector had already offered.
     const sessionId = params.sessionId;
     const launched = await this.#launch(context, {
       onNotification: (method, notificationParams) =>
@@ -716,17 +725,6 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
     });
   }
 
-  async #assertSupportedVersion(context: ExternalAgentAdapterContext): Promise<void> {
-    const version = await this.#readVersion(context);
-    if (isCursorVersionSupported(version?.parsed, MINIMUM_CURSOR_VERSION_PARSED)) return;
-    throw new ExternalAgentAdapterError(
-      'cursor-version-unsupported',
-      version
-        ? `cursor-agent ${version.raw} predates the ${MINIMUM_CURSOR_AGENT_VERSION} this runtime speaks. Upgrade the Cursor CLI.`
-        : 'The Cursor CLI did not report a version this runtime could read.'
-    );
-  }
-
   /**
    * `cursor-agent --version` off the executable the runtime scanner resolved.
    *
@@ -928,6 +926,7 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
           `Cursor negotiated ACP protocol ${String(initialize.protocolVersion)}; this runtime speaks ${CURSOR_ACP_PROTOCOL_VERSION}.`
         );
       }
+      assertCursorHandshakeShape(initialize);
       return { client, process: managed, initialize };
     } catch (error) {
       await client.close().catch(() => undefined);
@@ -1105,6 +1104,34 @@ function withDiscoveryReport(record: CursorDiscoveryRecord): ExternalAgentRuntim
  * come from `agentCapabilities`, and `modelCatalog` from whether a session
  * actually offered one.
  */
+/**
+ * Refuses a handshake that dropped something this client reads, and notes one
+ * that grew something it does not.
+ *
+ * Only the first is a refusal. A capability key Cursor added is reported once
+ * per handshake and then ignored — the reducer discards `session/update`
+ * variants it does not know for the same reason, and a client that failed on
+ * everything new would be broken by every vendor release rather than by the
+ * ones that actually took something away.
+ */
+const seenUnrecognizedCapabilities = new Set<string>();
+
+function assertCursorHandshakeShape(initialize: AcpInitializeResponse): void {
+  const audit = auditCursorHandshake(initialize);
+  if (audit.missing.length > 0) {
+    throw new ExternalAgentAdapterError(
+      'cursor-protocol-unsupported',
+      `Cursor's ACP handshake omitted ${audit.missing.join(', ')}, which this runtime reads.`
+    );
+  }
+  const fresh = audit.unrecognized.filter((key) => !seenUnrecognizedCapabilities.has(key));
+  if (fresh.length === 0) return;
+  for (const key of fresh) seenUnrecognizedCapabilities.add(key);
+  console.warn(
+    `[external-agents] Cursor advertised agent capabilities this runtime does not read: ${fresh.join(', ')}.`
+  );
+}
+
 function capabilitiesFrom(probe: CursorProbe): ExternalAgentCapabilities {
   const agent = probe.initialize.agentCapabilities;
   return {

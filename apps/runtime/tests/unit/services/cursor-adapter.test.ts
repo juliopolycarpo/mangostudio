@@ -6,6 +6,12 @@ import type {
   ExternalAgentAdapterSpawnOptions,
 } from '../../../src/services/external-agents/adapter';
 import { CursorAcpAdapter } from '../../../src/services/external-agents/cursor/adapter';
+import {
+  auditCursorHandshake,
+  CURSOR_KNOWN_AGENT_CAPABILITY_KEYS,
+  CURSOR_REQUIRED_HANDSHAKE_KEYS,
+} from '../../../src/services/external-agents/cursor/handshake';
+import type { AcpInitializeResponse } from '../../../src/services/external-agents/cursor/protocol';
 import type { ExternalAgentManagedProcess } from '../../../src/services/external-agents/process';
 import { CURSOR_TRANSCRIPT } from '../../support/cursor-fixtures';
 import {
@@ -210,13 +216,41 @@ describe('cursor adapter — discovery', () => {
     expect(descriptor.discovery?.failureCode).toBe('cursor-protocol-unsupported');
   });
 
-  it('refuses a build older than the pin without launching one', async () => {
+  it('keeps a build older than the pin usable when its handshake is intact', async () => {
+    // The pin is a record of what was verified, not a floor to enforce against
+    // a binary that demonstrably answers. Greying this row out would take a
+    // working install away from a user every time the pin went stale.
     const probe = harness({ banner: '2026.07.16-899851b' });
     const descriptor = await new CursorAcpAdapter().discover(probe.context);
 
-    expect(probe.launches()).toBe(0);
+    expect(probe.launches()).toBe(1);
+    expect(descriptor.unavailableReason).toBeUndefined();
+    expect(descriptor.capabilities.interactiveApprovals).toBe(true);
+    expect(descriptor.supportedConfigurations.some((entry) => entry.supported)).toBe(true);
+  });
+
+  it('names the version to upgrade to when an older build fails its handshake', async () => {
+    const descriptor = await new CursorAcpAdapter().discover(
+      harness({ banner: '2026.07.16-899851b', scenario: 'handshake-refused' }).context
+    );
+
+    expect(descriptor.unavailableReason).toBe('version-unsupported');
+    expect(descriptor.requiredVersion).toBe('2026.08.04');
     expect(descriptor.supportedConfigurations[0]?.unsupportedReasonKey).toBe(
       'externalAgents.unsupported.cursorVersionTooOld'
+    );
+  });
+
+  it('does not blame the version when a current build fails its handshake', async () => {
+    // An upgrade is not the fix here, so the row must not claim it is.
+    const descriptor = await new CursorAcpAdapter().discover(
+      harness({ scenario: 'handshake-refused' }).context
+    );
+
+    expect(descriptor.unavailableReason).toBeUndefined();
+    expect(descriptor.requiredVersion).toBeUndefined();
+    expect(descriptor.supportedConfigurations[0]?.unsupportedReasonKey).toBe(
+      'externalAgents.unsupported.cursorAcpUnavailable'
     );
   });
 
@@ -680,5 +714,59 @@ describe('cursor adapter — approvals', () => {
     const answered = [...(probe.server()?.answers.values() ?? [])];
     expect(answered[0]).toMatchObject({ code: -32601 });
     expect(JSON.stringify(answered[0])).toContain('External agents use their own tools');
+  });
+});
+
+/**
+ * The asymmetry the plan's own principle turns on: absence is a refusal,
+ * novelty is not. Reversed, this feature would break on every Cursor release.
+ */
+describe('the handshake audit', () => {
+  const live = {
+    protocolVersion: 1,
+    agentCapabilities: {
+      loadSession: true,
+      mcpCapabilities: { http: true, sse: true },
+      promptCapabilities: { audio: false, embeddedContext: false, image: true },
+      sessionCapabilities: { list: {} },
+    },
+  } as const;
+
+  it('accepts the handshake the pinned build answers with', () => {
+    expect(auditCursorHandshake(live)).toEqual({ missing: [], unrecognized: [] });
+    // The declared lists are what the audit is; asserting them against the
+    // recorded reply keeps "required" from drifting into something the vendor
+    // never sends, and "known" from logging on every startup.
+    expect(CURSOR_REQUIRED_HANDSHAKE_KEYS.every((key) => key in live)).toBe(true);
+    expect(Object.keys(live.agentCapabilities).sort()).toEqual([
+      ...CURSOR_KNOWN_AGENT_CAPABILITY_KEYS,
+    ]);
+  });
+
+  it('reports a capability object that is absent entirely', () => {
+    expect(auditCursorHandshake({ protocolVersion: 1 }).missing).toEqual(['agentCapabilities']);
+  });
+
+  it('tolerates a capability key this runtime does not read', () => {
+    // Cast rather than typed: the whole scenario is a key the vendored
+    // interface has never heard of, so a literal that type-checked against
+    // `AcpAgentCapabilities` would not be the thing under test.
+    const audit = auditCursorHandshake({
+      ...live,
+      agentCapabilities: { ...live.agentCapabilities, somethingNew: true },
+    } as unknown as AcpInitializeResponse);
+
+    expect(audit.missing).toEqual([]);
+    expect(audit.unrecognized).toEqual(['somethingNew']);
+  });
+
+  /**
+   * An optional capability reported as absent is a capability flag going false,
+   * not a target going away — `changes the descriptor when the handshake
+   * changes` above is the other half of this.
+   */
+  it('does not refuse a build that offers fewer optional capabilities', () => {
+    const audit = auditCursorHandshake({ protocolVersion: 1, agentCapabilities: {} });
+    expect(audit.missing).toEqual([]);
   });
 });

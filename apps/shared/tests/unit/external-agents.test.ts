@@ -108,8 +108,27 @@ describe('external agent descriptor', () => {
       'runtime-denied',
       'environment-unreachable',
       'isolation-unproven',
+      'version-unsupported',
       'disclosure-required',
     ]);
+  });
+
+  /**
+   * The required version is bound to the one reason whose copy interpolates it.
+   * Anywhere else it would read as a floor this runtime enforces, and it does
+   * not — a below-pin binary that still answers its probe stays selectable.
+   */
+  it('carries the version to upgrade to beside the reason that names it', () => {
+    expect(
+      Value.Check(ExternalAgentDescriptorSchema, {
+        ...DESCRIPTOR,
+        unavailableReason: 'version-unsupported',
+        requiredVersion: '2026.08.04',
+      })
+    ).toBe(true);
+    expect(Value.Check(ExternalAgentDescriptorSchema, { ...DESCRIPTOR, requiredVersion: '' })).toBe(
+      false
+    );
   });
 
   it('keeps model catalogs rich and bounded', () => {
