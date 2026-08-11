@@ -414,6 +414,31 @@ describe('the CLI surface probe', () => {
   });
 
   /**
+   * The input is a subprocess's stdout, so "the vendor would never print that"
+   * is not something this parser gets to rely on.
+   *
+   * Both shapes are here because the first fix only covered one of them. A
+   * regex ending in a required `)` reruns its inner scan from every position
+   * that starts `(choices:`, so repeating that prefix is quadratic even after
+   * the `\s*`/`[^)]` overlap is gone. Only scanning with `indexOf` removes
+   * both, and doubling the input has to stay roughly linear for that to hold.
+   */
+  it.each([
+    ['one long unterminated run', (n: number) => `(choices:${' '.repeat(n)}`],
+    ['a repeated unterminated prefix', (n: number) => '(choices:'.repeat(n)],
+  ])('stays linear on %s', (_label, build) => {
+    const line = (n: number) => `  --permission-mode <mode>   ${build(n)}`;
+    const time = (n: number) => {
+      const started = performance.now();
+      expect(parseClaudeCliSurface(line(n)).permissionModes.size).toBe(0);
+      return performance.now() - started;
+    };
+
+    time(8_000);
+    expect(time(64_000)).toBeLessThan(1_000);
+  });
+
+  /**
    * `--forward-subagent-text`'s own description names `--output-format`, and an
    * option whose flags wrap puts its description on the following line. A
    * parser that scanned for `--token` anywhere would report both as declared

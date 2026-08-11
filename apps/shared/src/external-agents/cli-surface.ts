@@ -37,8 +37,27 @@ export interface VendorCliSurface {
  */
 const OPTION_LINE = /^ {2}(-\S.*)$/;
 const LONG_FLAG = /--[a-zA-Z][\w-]*/g;
-const CHOICES = /\(choices:\s*([^)]*)\)/;
+const CHOICES_PREFIX = '(choices:';
 const QUOTED = /"([^"]+)"/g;
+
+/**
+ * The text between `(choices:` and the next `)`, scanned rather than matched.
+ *
+ * Deliberately not a regular expression. Every unanchored spelling of this —
+ * `/\(choices:\s*([^)]*)\)/`, or the same without the `\s*` — is quadratic on
+ * an input that repeats `(choices:` without ever closing it: the engine runs
+ * the inner scan to the end of the string once per prefix. Two `indexOf` calls
+ * do the same job in one pass and cannot backtrack at all.
+ *
+ * This parses a subprocess's stdout at discovery time, so "the vendor would
+ * never print that" is not a property this parser gets to rely on.
+ */
+function choiceListIn(block: string): string | undefined {
+  const start = block.indexOf(CHOICES_PREFIX);
+  if (start < 0) return undefined;
+  const end = block.indexOf(')', start + CHOICES_PREFIX.length);
+  return end < 0 ? undefined : block.slice(start + CHOICES_PREFIX.length, end);
+}
 
 /** The flag names declared on one option line, ignoring its description. */
 function flagsOnLine(line: string): string[] {
@@ -84,9 +103,9 @@ export function parseVendorCliSurface(help: string, choicesFor?: string): Vendor
     const declared = flagsOnLine(option[1] ?? '');
     for (const flag of declared) flags.add(flag);
     if (choicesFor === undefined || !declared.includes(choicesFor)) continue;
-    const matched = CHOICES.exec(optionBlock(lines, index));
-    if (!matched?.[1]) continue;
-    for (const quoted of matched[1].matchAll(QUOTED)) {
+    const list = choiceListIn(optionBlock(lines, index));
+    if (list === undefined) continue;
+    for (const quoted of list.matchAll(QUOTED)) {
       if (quoted[1]) choices.add(quoted[1]);
     }
   }
