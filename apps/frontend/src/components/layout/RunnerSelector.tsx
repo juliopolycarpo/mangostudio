@@ -285,7 +285,15 @@ function ExternalRow({
   const explanation = reason
     ? reason === 'not-installed'
       ? labels.selector.notInstalledIn.replace('{environment}', environmentName)
-      : labels.unavailable[reason]
+      : // `version-unsupported` is the one reason whose copy names a build, and
+        // the build is the adapter's pin rather than anything this bundle knows.
+        // The fallback keeps the sentence readable if a runtime ever reports the
+        // reason without the version — a greyed row with a vague reason still
+        // beats one showing a literal `{version}`.
+        labels.unavailable[reason].replace(
+          '{version}',
+          descriptor.requiredVersion ?? labels.selector.unknownVersion
+        )
     : signedOut
       ? labels.unavailable['signed-out']
       : notInstalled

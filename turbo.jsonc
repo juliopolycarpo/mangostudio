@@ -15,6 +15,9 @@
     "DRY_RUN",
     "GITHUB_OUTPUT",
     "GITHUB_SHA",
+    // The vendor-drift job renders its findings here. Additive drift does not
+    // fail the run, so the step summary is the only place a maintainer sees it.
+    "GITHUB_STEP_SUMMARY",
     "MANGO_ARCHIVE_CONCURRENCY",
     "MANGO_API_BASE",
     "MANGO_API_KEY",

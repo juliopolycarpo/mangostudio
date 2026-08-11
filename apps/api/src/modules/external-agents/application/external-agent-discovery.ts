@@ -89,6 +89,8 @@ export interface AuthoritativeAgentStatus {
   readonly models?: readonly ExternalAgentModel[];
   readonly account?: ExternalAgentAccount;
   readonly unavailableReason?: ExternalAgentUnavailableReason;
+  /** The adapter's own pin, forwarded verbatim beside `version-unsupported`. */
+  readonly requiredVersion?: string;
   /** Whether this answer was probed or remembered, when the adapter caches. */
   readonly discovery?: ExternalAgentDiscoveryReport;
 }
@@ -315,8 +317,12 @@ interface DescriptorInput {
   readonly models: readonly ExternalAgentModel[] | undefined;
   readonly account: ExternalAgentAccount | undefined;
   readonly adapterReason: ExternalAgentUnavailableReason | undefined;
+  readonly requiredVersion: string | undefined;
   readonly discovery: ExternalAgentDiscoveryReport | undefined;
 }
+
+/** Matches `ExternalAgentDescriptorSchema.requiredVersion`'s `maxLength`. */
+const MAX_REQUIRED_VERSION_LENGTH = 64;
 
 /**
  * Matches `ExternalAgentDescriptorSchema.version`'s `maxLength`. The cheap
@@ -333,12 +339,20 @@ function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
   const loginCommand = productDescriptorFor(input.targetId)?.loginCommand;
   const reason = unavailableReasonFor(input.installed, input.authState, input.adapterReason);
   const version = input.version?.slice(0, MAX_VERSION_LENGTH);
+  // Bound to the one reason whose copy interpolates it. A required version on
+  // any other row would read as a floor this runtime enforces, and it does not:
+  // an older binary that still answers its probe stays selectable.
+  const requiredVersion =
+    reason === 'version-unsupported'
+      ? input.requiredVersion?.slice(0, MAX_REQUIRED_VERSION_LENGTH)
+      : undefined;
 
   return {
     targetId: input.targetId,
     environmentId: input.environmentId,
     installed: input.installed,
     ...(version && { version }),
+    ...(requiredVersion && { requiredVersion }),
     authState: input.authState,
     // Only worth showing to someone who has the CLI but is not signed in.
     ...(input.installed && input.authState !== 'signed-in' && loginCommand && { loginCommand }),
@@ -373,6 +387,7 @@ function descriptorFrom(
     models: undefined,
     account: undefined,
     adapterReason: undefined,
+    requiredVersion: undefined,
     discovery: undefined,
   });
 }
@@ -394,6 +409,7 @@ function mergeAuthoritative(
     models: authoritative.models,
     account: authoritative.account,
     adapterReason: authoritative.unavailableReason,
+    requiredVersion: authoritative.requiredVersion,
     discovery: authoritative.discovery,
   });
 }
@@ -433,6 +449,7 @@ async function baseDescriptors(
         models: undefined,
         account: undefined,
         adapterReason: 'environment-unreachable',
+        requiredVersion: undefined,
         discovery: undefined,
       })
     );

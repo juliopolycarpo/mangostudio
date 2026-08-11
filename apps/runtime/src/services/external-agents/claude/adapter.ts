@@ -61,9 +61,17 @@ import type { ExternalAgentManagedProcess } from '../process';
 import { TurnChannel } from '../turn-channel';
 import { CLAUDE_AUTH_UNKNOWN, type ClaudeAuthentication, parseClaudeAuthStatus } from './auth';
 import {
+  type ClaudeCliSurface,
+  claudeAcceptedModes,
+  isUsableClaudeCliSurface,
+  missingClaudeCliFlags,
+  parseClaudeCliSurface,
+} from './cli-surface';
+import {
   buildSupportedConfigurations,
   CLAUDE_UNSUPPORTED_REASON_KEYS,
   type ClaudeModeAvailability,
+  claudeModeAccepted,
   claudePermissionMode,
   readAutoModeDisabled,
   unsupportedConfigurations,
@@ -178,14 +186,18 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
     }
 
     // The same gate `openSession` applies, applied where the choice is offered
-    // rather than only where it is taken. Without it a too-old binary whose
-    // `auth status` still answers produces a selectable descriptor, and the
-    // version failure surfaces only after someone picks it and sends a message.
-    if (!isClaudeVersionSupported(parseClaudeVersion(version), MINIMUM_CLAUDE_VERSION_PARSED)) {
+    // rather than only where it is taken. Without it a binary missing a flag
+    // every turn passes produces a selectable descriptor, and the failure
+    // surfaces only after someone picks it and sends a message.
+    const surface = await this.#readCliSurface(context);
+    const refusal = this.#contractRefusal(version, surface);
+    if (refusal) {
       return {
         targetId: this.targetId,
         installed: true,
         version,
+        requiredVersion: MINIMUM_CLAUDE_VERSION,
+        unavailableReason: 'version-unsupported',
         authState: 'unknown',
         capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
         supportedConfigurations: unsupportedConfigurations(
@@ -198,6 +210,9 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       this.#readAuthentication(context),
       this.#readAutoModePolicy(),
     ]);
+    // Absent rather than empty: a surface that declared no modes has not
+    // narrowed anything, and an empty set would reject every one of them.
+    const acceptedModes = claudeAcceptedModes(surface);
     const availability: ClaudeModeAvailability = {
       ...(authentication.accountKind ? { accountKind: authentication.accountKind } : {}),
       autoModeDisabledByPolicy,
@@ -206,6 +221,7 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       // `default` on `manual` until a real run says otherwise — the direction
       // that cannot silently widen what runs without asking.
       effectiveDefaultIsAuto: false,
+      ...(acceptedModes ? { acceptedModes } : {}),
     };
 
     return {
@@ -231,16 +247,22 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
    */
   async openSession(input: ExternalAgentOpenSessionInput): Promise<ExternalAgentOpenedSession> {
     const { params, context } = input;
-    await this.#assertSupportedVersion(context);
+    const surface = await this.#assertSupportedContract(context);
 
     const [authentication, autoModeDisabledByPolicy] = await Promise.all([
       this.#readAuthentication(context),
       this.#readAutoModePolicy(),
     ]);
+    // The same narrowing discovery applied, re-read rather than remembered. A
+    // session opened minutes after a selector render must not pass a mode an
+    // upgrade removed in between — and must not be refused by a probe that read
+    // no vocabulary at all, which is why this is absent rather than empty.
+    const acceptedModes = claudeAcceptedModes(surface);
     const availability: ClaudeModeAvailability = {
       ...(authentication.accountKind ? { accountKind: authentication.accountKind } : {}),
       autoModeDisabledByPolicy,
       effectiveDefaultIsAuto: false,
+      ...(acceptedModes ? { acceptedModes } : {}),
     };
     this.#assertConfigurationSupported(params.configuration, availability);
 
@@ -457,23 +479,68 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
     configuration: ExternalAgentConfiguration,
     availability: ClaudeModeAvailability
   ): void {
-    if (claudePermissionMode(configuration.level, configuration.routing, availability)) return;
+    const mode = claudePermissionMode(configuration.level, configuration.routing, availability);
+    if (mode && claudeModeAccepted(mode, availability)) return;
     throw new ExternalAgentAdapterError(
       'claude-configuration-unsupported',
       `Claude Code cannot run "${configuration.level}" with "${configuration.routing}" on this account.`
     );
   }
 
-  async #assertSupportedVersion(context: ExternalAgentAdapterContext): Promise<void> {
-    const raw = await this.#readVersion(context);
-    const observed = raw ? parseClaudeVersion(raw) : undefined;
-    if (isClaudeVersionSupported(observed, MINIMUM_CLAUDE_VERSION_PARSED)) return;
-    throw new ExternalAgentAdapterError(
-      'claude-version-unsupported',
-      raw
-        ? `Claude Code ${raw} predates the ${MINIMUM_CLAUDE_VERSION} this runtime drives. Upgrade the Claude Code CLI.`
-        : 'The Claude Code CLI did not report a version this runtime could read.'
-    );
+  /**
+   * Why this build cannot be driven, or `undefined` when it can.
+   *
+   * The flag surface decides, and the version only steps in when the surface
+   * could not be read. That ordering is the point: the pin exists because
+   * `--forward-subagent-text` landed in a particular release, so asking whether
+   * the flag is *there* answers the real question, and a below-pin build that
+   * has everything this adapter passes stays usable instead of being greyed out
+   * by arithmetic.
+   */
+  #contractRefusal(version: string, surface: ClaudeCliSurface | undefined): string | undefined {
+    if (surface) {
+      const missing = missingClaudeCliFlags(surface);
+      return missing.length > 0
+        ? `Claude Code ${version} does not offer ${missing.join(', ')}, which every turn passes. Upgrade to ${MINIMUM_CLAUDE_VERSION} or later.`
+        : undefined;
+    }
+    // No usable surface, so the pin is all that is left to go on.
+    return isClaudeVersionSupported(parseClaudeVersion(version), MINIMUM_CLAUDE_VERSION_PARSED)
+      ? undefined
+      : `Claude Code ${version} predates the ${MINIMUM_CLAUDE_VERSION} this runtime drives, and its flag surface could not be read. Upgrade the Claude Code CLI.`;
+  }
+
+  /** The `openSession` half of the same gate, throwing where discovery greys out. */
+  async #assertSupportedContract(
+    context: ExternalAgentAdapterContext
+  ): Promise<ClaudeCliSurface | undefined> {
+    const version = await this.#readVersion(context);
+    if (!version) {
+      throw new ExternalAgentAdapterError(
+        'claude-version-unsupported',
+        'The Claude Code CLI did not report a version this runtime could read.'
+      );
+    }
+    const surface = await this.#readCliSurface(context);
+    const refusal = this.#contractRefusal(version, surface);
+    if (refusal) throw new ExternalAgentAdapterError('claude-version-unsupported', refusal);
+    return surface;
+  }
+
+  /**
+   * `claude --help`, parsed into the flags and modes this adapter depends on.
+   *
+   * `undefined` when the probe produced nothing recognizable, which callers
+   * read as "not established" rather than as "the binary has no options" — a
+   * spawn that failed must not look like a vendor that removed everything.
+   */
+  async #readCliSurface(
+    context: ExternalAgentAdapterContext
+  ): Promise<ClaudeCliSurface | undefined> {
+    const help = await this.#readAllOutput(context, ['--help']);
+    if (help === undefined) return undefined;
+    const surface = parseClaudeCliSurface(help);
+    return isUsableClaudeCliSurface(surface) ? surface : undefined;
   }
 
   async #readVersion(context: ExternalAgentAdapterContext): Promise<string | undefined> {

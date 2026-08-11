@@ -1,24 +1,37 @@
 name: Vendor drift
 
-# The Codex `app-server` contract under
-# apps/runtime/src/services/external-agents/codex/protocol is emitted by the
-# vendor's own generator and committed verbatim. This job regenerates it from
-# the pinned package and fails if the result differs, so the committed tree can
-# never quietly diverge from the version the adapter claims to speak.
+# Three vendor surfaces are pinned and committed, so a version bump shows up as
+# a reviewable diff instead of a silent behaviour change: the Codex `app-server`
+# contract emitted by the vendor's own generator, the Cursor ACP handshake, and
+# the Claude Code CLI surface.
 #
-# On a version bump the resulting diff is the changelog, which is the reason
-# the output is committed rather than generated during the build.
+# Two jobs, asking two different questions:
 #
-# Path-filtered on purpose: the check downloads the pinned vendor package, and
-# every other PR has no reason to pay for that.
+#   pinned  — does the pin still reproduce? A diff here is a packaging change or
+#             a mutable release, and it fails.
+#   latest  — did the vendor move? A diff here is the interesting signal, and it
+#             opens a tracking issue rather than failing anything. A vendor
+#             releasing is not a MangoStudio defect, and a job that went red
+#             over somebody else's release would get muted rather than read.
+#
+# Neither job has vendor credentials, which is the ordinary state of a runner
+# rather than a fault. Codex needs none — its generator is a pinned npm package.
+# Claude's flag surface needs none either, so `latest` installs the CLI to check
+# it; its `auth status` shape does need a login and is reported as unverified.
+# Cursor's ACP handshake cannot open a session without an account and is skipped
+# loudly, which the step summary states rather than passing over in silence.
 
 on:
   pull_request:
     branches: [main]
     paths:
+      - "apps/runtime/src/services/external-agents/*/contract/**"
       - "apps/runtime/src/services/external-agents/codex/protocol/**"
-      - "apps/runtime/src/services/external-agents/codex/pinned.ts"
-      - "scripts/vendor/codex-protocol.ts"
+      - "apps/runtime/src/services/external-agents/*/pinned.ts"
+      - "scripts/vendor/**"
+  schedule:
+    # Weekly, on a Wednesday, away from the release-dry-run and CodeQL windows.
+    - cron: "0 8 * * 3"
   workflow_dispatch:
 
 permissions:
@@ -29,8 +42,8 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  codex-protocol:
-    name: Codex app-server contract is regenerable
+  pinned:
+    name: Committed contracts reproduce from the pin
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -42,5 +55,50 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - name: Regenerate and diff the vendored contract
-        run: bun run vendor:codex-protocol --check
+      - name: Recapture and diff the committed contracts
+        run: bun run vendor-contracts:check
+
+  latest:
+    name: Vendors at latest still produce what the adapters read
+    # Not on pull requests: it downloads whatever the vendors published today,
+    # which is neither reproducible nor any contributor's responsibility.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout only; nothing is pushed
+      issues: write # open, update or close the one drift tracking issue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Install the Claude Code CLI at latest
+        # Its flag surface and permission-mode list are readable without an
+        # account, and those are what the adapter's argv depends on.
+        run: |
+          bun add --global @anthropic-ai/claude-code@latest
+          echo "$HOME/.bun/bin" >> "$GITHUB_PATH"
+
+      - name: Recapture against the newest published vendors
+        # Never fails on drift; `--latest` reports and leaves the exit code
+        # alone. A non-zero here means the tooling itself broke.
+        run: bun run vendor-contracts:check --latest --report vendor-drift.json
+
+      - name: Open, update or close the drift issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { readFile } = await import('node:fs/promises');
+            const drift = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/vendor/drift-issue.mjs`
+            );
+            const report = JSON.parse(await readFile('vendor-drift.json', 'utf8'));
+            const runUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
+              `/actions/runs/${context.runId}`;
+            await drift.publishDriftIssue({ github, context, core }, report, runUrl);

@@ -2699,6 +2699,8 @@ export const messages: Messages = {
       signedIn: 'signed in',
       authUnknown: 'sign-in state unknown',
       notInstalledIn: 'Not installed in {environment}',
+      /** Stands in for a required version a runtime reported without naming. */
+      unknownVersion: 'a newer version',
       continueInNewChat: 'Continue in a new chat',
       copyLoginCommand: 'Copy login command',
       ownership: '{vendor} controls its own tools and permissions.',
@@ -2753,6 +2755,10 @@ export const messages: Messages = {
       'runtime-denied': "This machine's owner has not allowed external agents",
       'environment-unreachable': 'Could not reach this machine',
       'isolation-unproven': 'This machine has not proven it keeps credentials separate',
+      // The only unavailable reason that names a fix precisely, because it is
+      // the only one where the fix is a single command the user can run.
+      // `{version}` is filled from the descriptor's `requiredVersion`.
+      'version-unsupported': 'Update this agent to {version} or later on this machine',
       'disclosure-required': 'Read and accept this agent\u2019s third-party notice first',
     },
     isolation: {
@@ -2825,6 +2831,7 @@ export const messages: Messages = {
       cursorNoAutoReview: 'Cursor answers approvals itself only when its own configuration says so',
       claudeVersionTooOld:
         'The Claude Code CLI on this machine is too old — upgrade it to use it here',
+      claudeModeMissing: "This machine's Claude Code does not offer the mode this level needs",
       claudeAutoNeedsSubscription:
         'Auto-review needs a Claude subscription plan; this machine signs in another way',
       claudeAutoDisabledByPolicy: 'Your organization has turned auto mode off for Claude Code',

@@ -5,7 +5,7 @@
  * Every builder's return type is one of the generated types under
  * `src/services/external-agents/codex/protocol`, so a scenario composed from
  * these is type-checked against the vendor's own shapes. When
- * `bun run vendor:codex-protocol` pulls in a version that renames or retypes a
+ * `bun run vendor-contracts:regen` pulls in a version that renames or retypes a
  * field, the build breaks here — loudly, at the point the assumption lives —
  * instead of a stale literal continuing to satisfy a test that no longer
  * describes the protocol.

@@ -92,6 +92,16 @@ export interface ClaudeModeAvailability {
    * correct behaviour, not a regression.
    */
   readonly effectiveDefaultIsAuto: boolean;
+  /**
+   * `--permission-mode`'s own choice list, when the CLI surface could be read.
+   *
+   * Absent means the probe did not answer, and absent narrows nothing: a
+   * discovery call that could not run `--help` must not conclude that the
+   * binary offers no modes. Present means a mode outside the set is refused
+   * per combination, which is what turns "the vendor renamed a mode" into one
+   * greyed row with a reason instead of a turn that dies at startup.
+   */
+  readonly acceptedModes?: ReadonlySet<string>;
 }
 
 /** i18n keys for every way a combination can be refused. */
@@ -107,7 +117,23 @@ export const CLAUDE_UNSUPPORTED_REASON_KEYS = {
   fullAccessHasNoReviewer: 'externalAgents.unsupported.claudeFullAccessHasNoReviewer',
   /** The account could not be established, so no claim about `auto` is safe. */
   autoUnverified: 'externalAgents.unsupported.claudeAutoUnverified',
+  /** `--permission-mode` on this build does not list the mode this pair needs. */
+  modeMissing: 'externalAgents.unsupported.claudeModeMissing',
 } as const;
+
+/**
+ * Whether this build's `--permission-mode` will take a mode.
+ *
+ * Unknown accepts everything. The probe is an improvement on trusting the pin,
+ * not a precondition for running at all, so a machine where it could not run
+ * behaves exactly as it did before the probe existed.
+ */
+export function claudeModeAccepted(
+  mode: ClaudeCliPermissionMode,
+  availability: ClaudeModeAvailability
+): boolean {
+  return availability.acceptedModes?.has(mode) ?? true;
+}
 
 /**
  * Whether `auto` may be passed at all, and why not when it may not.
@@ -188,7 +214,13 @@ export function buildSupportedConfigurations(
       // The canonical spelling crosses the wire, so the persisted `default` is
       // what the fingerprint and the UI see rather than the CLI's alias.
       const vendorId = mode === CLAUDE_CLI_DEFAULT_MODE ? CLAUDE_CANONICAL_DEFAULT_MODE : mode;
-      return { supported: true, vendorId };
+      // A mode the account allows but this build does not list. Refusing the
+      // combination is the whole point: the alternative is passing a mode the
+      // CLI rejects at startup, which reaches the user as a turn that died for
+      // no stated reason rather than as a choice that was never offered.
+      return claudeModeAccepted(mode, availability)
+        ? { supported: true, vendorId }
+        : { supported: false, reasonKey: CLAUDE_UNSUPPORTED_REASON_KEYS.modeMissing, vendorId };
     }
     if (routing === 'auto-review') {
       if (level === 'read-only') {

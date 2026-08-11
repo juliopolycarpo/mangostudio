@@ -1,0 +1,12 @@
+{
+  "set": "cursor-acp",
+  "command": "cursor-agent acp — initialize, session/new, session/list",
+  "capturedFrom": "2026.08.04-aaa8809",
+  "capturedAt": "2026-08-11",
+  "checksum": "sha256:2e6d969d5a51b57923ce830e59c782d33d1bcd3e9794bd073344ad6f7a4fa0b4",
+  "files": {
+    "initialize.json": "sha256:6bc676118d72731d6a8d8bc4f49ce41be5203b0b33f18bffe3766041ac072f6e",
+    "session-list.json": "sha256:62842b9efe72fe1e1dbca069fff4a064db399b297c352114370740aa45cb50df",
+    "session-new.json": "sha256:32a2f77b64ffe7d34104a5e3192ed5a0bed81d9c9d437a74b386d3e7e7d7809e"
+  }
+}

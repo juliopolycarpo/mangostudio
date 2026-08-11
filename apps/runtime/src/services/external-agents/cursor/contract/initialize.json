@@ -1,0 +1,25 @@
+{
+  "agentCapabilities": {
+    "loadSession": "<boolean>",
+    "mcpCapabilities": {
+      "http": "<boolean>",
+      "sse": "<boolean>"
+    },
+    "promptCapabilities": {
+      "audio": "<boolean>",
+      "embeddedContext": "<boolean>",
+      "image": "<boolean>"
+    },
+    "sessionCapabilities": {
+      "list": {}
+    }
+  },
+  "authMethods": [
+    {
+      "description": "<string>",
+      "id": "cursor_login",
+      "name": "<string>"
+    }
+  ],
+  "protocolVersion": 1
+}

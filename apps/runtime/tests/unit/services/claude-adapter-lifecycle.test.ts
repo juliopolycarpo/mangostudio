@@ -29,6 +29,7 @@ import type {
 } from '../../../src/services/external-agents/adapter';
 import { ClaudeCodeAdapter } from '../../../src/services/external-agents/claude/adapter';
 import type { ExternalAgentManagedProcess } from '../../../src/services/external-agents/process';
+import { CLAUDE_HELP_LINES } from '../../support/claude-help';
 
 const RECORDED = readFileSync(
   join(import.meta.dir, '../../support/fixtures/claude-read-turn.jsonl'),
@@ -140,6 +141,8 @@ function harness(turnScripts: readonly ProcessScript[]): Harness {
     environment: {},
     spawn({ argv }) {
       if (argv.includes('--version')) return scriptedProcess({ lines: [VERSION_LINE] }).process;
+      if (argv.includes('--help'))
+        return scriptedProcess({ lines: [...CLAUDE_HELP_LINES] }).process;
       if (argv.includes('auth')) return scriptedProcess({ lines: [SUBSCRIPTION_AUTH] }).process;
       turnArgv.push(argv);
       const turn = scriptedProcess(queued.shift() ?? {});
@@ -383,5 +386,80 @@ describe('session state folded back from a run', () => {
 
     await collect(startTurn(adapter, context, { id: 'message-2' }));
     expect(argumentAfter(turnArgv[1] ?? [], '--permission-mode')).toBe('manual');
+  });
+});
+
+/**
+ * The probe's two verdicts, seen from discovery rather than from the parser.
+ *
+ * These are what a user actually meets: a greyed row that names an upgrade, or
+ * a working row on a build older than the pin. Both are decided by reading the
+ * binary, which is the whole point — the version number is the fallback.
+ */
+describe('discovery reads the binary rather than the pin', () => {
+  function discoveryHarness(options: {
+    readonly version: string;
+    readonly help: readonly string[];
+  }): ExternalAgentAdapterContext {
+    return {
+      signal: new AbortController().signal,
+      executablePath: '/usr/bin/claude',
+      environment: {},
+      spawn({ argv }) {
+        if (argv.includes('--version'))
+          return scriptedProcess({ lines: [options.version] }).process;
+        if (argv.includes('--help')) return scriptedProcess({ lines: [...options.help] }).process;
+        return scriptedProcess({ lines: [SUBSCRIPTION_AUTH] }).process;
+      },
+    };
+  }
+
+  const adapter = () => new ClaudeCodeAdapter({ readManagedSettings: () => Promise.resolve({}) });
+
+  it('keeps a build older than the pin when every flag it passes is there', async () => {
+    const descriptor = await adapter().discover(
+      discoveryHarness({ version: '2.1.150 (Claude Code)', help: CLAUDE_HELP_LINES })
+    );
+
+    expect(descriptor.unavailableReason).toBeUndefined();
+    expect(descriptor.requiredVersion).toBeUndefined();
+    expect(descriptor.supportedConfigurations.some((entry) => entry.supported)).toBe(true);
+  });
+
+  it('names the version to upgrade to when a flag every turn passes is gone', async () => {
+    const withoutForwarding = CLAUDE_HELP_LINES.filter(
+      (line) => !line.includes('--forward-subagent-text')
+    );
+    const descriptor = await adapter().discover(
+      discoveryHarness({ version: '2.1.227 (Claude Code)', help: withoutForwarding })
+    );
+
+    expect(descriptor.unavailableReason).toBe('version-unsupported');
+    expect(descriptor.requiredVersion).toBe('2.1.211');
+    expect(descriptor.supportedConfigurations.every((entry) => !entry.supported)).toBe(true);
+  });
+
+  /**
+   * A mode disappearing is narrower than a flag disappearing: it removes the
+   * combinations that need it and leaves the rest selectable, rather than
+   * taking the target away.
+   */
+  it('narrows the matrix, not the target, when a permission mode is gone', async () => {
+    const withoutManual = CLAUDE_HELP_LINES.map((line) =>
+      line.replace('"bypassPermissions", "manual",', '"bypassPermissions",')
+    );
+    const descriptor = await adapter().discover(
+      discoveryHarness({ version: '2.1.227 (Claude Code)', help: withoutManual })
+    );
+    const byPair = new Map(
+      descriptor.supportedConfigurations.map((entry) => [`${entry.level}/${entry.routing}`, entry])
+    );
+
+    expect(descriptor.unavailableReason).toBeUndefined();
+    expect(byPair.get('default/user')).toMatchObject({
+      supported: false,
+      unsupportedReasonKey: 'externalAgents.unsupported.claudeModeMissing',
+    });
+    expect(byPair.get('read-only/user')?.supported).toBe(true);
   });
 });

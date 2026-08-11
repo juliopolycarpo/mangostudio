@@ -1,0 +1,11 @@
+{
+  "set": "claude-cli",
+  "command": "claude --help; claude auth status",
+  "capturedFrom": "2.1.227 (Claude Code)",
+  "capturedAt": "2026-08-11",
+  "checksum": "sha256:f24151d7ff23126a03ed3b21c0d08924efa1969e559241afca7400ab92d4006d",
+  "files": {
+    "auth-status.json": "sha256:d021a734963ac56fbc2d02464101064037c97fe468cfd6df2a82eb49e28c3892",
+    "cli-surface.json": "sha256:a5e0b1cddcfbe4d473af82b027d1ae9ee96ecdfce678087263276dc7e818573e"
+  }
+}

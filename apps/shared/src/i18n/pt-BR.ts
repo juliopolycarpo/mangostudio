@@ -2712,6 +2712,7 @@ export const messages = {
       signedIn: 'sessão iniciada',
       authUnknown: 'estado de login desconhecido',
       notInstalledIn: 'Não instalado em {environment}',
+      unknownVersion: 'uma versão mais recente',
       continueInNewChat: 'Continuar em um novo chat',
       copyLoginCommand: 'Copiar comando de login',
       ownership: '{vendor} controla as próprias ferramentas e permissões.',
@@ -2763,6 +2764,8 @@ export const messages = {
       'runtime-denied': 'O dono desta máquina não liberou agentes externos',
       'environment-unreachable': 'Não foi possível alcançar esta máquina',
       'isolation-unproven': 'Esta máquina não provou que mantém as credenciais separadas',
+      'version-unsupported':
+        'Atualize este agente para a versão {version} ou mais recente nesta máquina',
       'disclosure-required': 'Leia e aceite o aviso de terceiros deste agente primeiro',
     },
     isolation: {
@@ -2835,6 +2838,7 @@ export const messages = {
         'O Cursor só responde às aprovações sozinho quando a configuração dele permite',
       claudeVersionTooOld:
         'O Claude Code CLI desta máquina é antigo demais — atualize para usá-lo aqui',
+      claudeModeMissing: 'O Claude Code desta máquina não oferece o modo que este nível precisa',
       claudeAutoNeedsSubscription:
         'A auto-revisão exige um plano de assinatura do Claude; esta máquina entra de outro jeito',
       claudeAutoDisabledByPolicy: 'Sua organização desativou o modo automático do Claude Code',

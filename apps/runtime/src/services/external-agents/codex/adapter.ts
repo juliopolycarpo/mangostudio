@@ -187,17 +187,27 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
       };
     }
 
-    // The same gate `openSession` applies, applied where the choice is offered
-    // rather than only where it is taken. Without it a too-old binary whose
-    // `account/read` and `model/list` still answer produces a descriptor with
-    // full capabilities and a selectable configuration, and the version failure
-    // surfaces only after someone picks it and sends a message. It also skips
-    // launching an `app-server` this adapter has already decided not to drive.
+    // Codex is the one vendor where the version number is still the gate, and
+    // that is a statement about `app-server` rather than a preference. Its
+    // `initialize` carries no protocol version, and the calls discovery makes —
+    // `account/read`, `model/list`, `permissionProfile/list` — cover none of the
+    // turn surface, so a successful probe would prove nothing about
+    // `thread/start` or `turn/start`. Cursor and Claude both have a probe that
+    // covers what they depend on and are gated on that instead; here there is
+    // nothing to ask, so the pin answers.
+    //
+    // Applying it at discovery rather than only at `openSession` is what keeps a
+    // too-old binary whose `account/read` still answers from producing a
+    // selectable configuration whose failure surfaces after someone sends a
+    // message. It also skips launching an `app-server` this adapter has already
+    // decided not to drive.
     if (!isCodexVersionSupported(parseCodexVersion(version), MINIMUM_CODEX_VERSION_PARSED)) {
       return {
         targetId: this.targetId,
         installed: true,
         version,
+        requiredVersion: MINIMUM_CODEX_VERSION,
+        unavailableReason: 'version-unsupported',
         authState: 'unknown',
         capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
         supportedConfigurations: unsupportedConfigurations(

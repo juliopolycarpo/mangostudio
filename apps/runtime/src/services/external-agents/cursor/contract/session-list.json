@@ -1,0 +1,9 @@
+{
+  "sessions": [
+    {
+      "cwd": "<string>",
+      "sessionId": "<string>",
+      "updatedAt": "<string>"
+    }
+  ]
+}

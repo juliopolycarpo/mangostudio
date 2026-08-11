@@ -426,3 +426,98 @@ Discovery reports each target on its own merits — installed, signed out, unrea
 unproven — and the blanket `not-yet-available` gate is gone. It existed while hosting a turn
 arrived in stages, because a selectable runner that could block on an approval nobody can answer is
 worse than no runner at all. Its removal was the release-unit boundary.
+
+## Vendor pinning and drift
+
+Every vendor surface an adapter depends on is **pinned, committed and diffed**, so a vendor upgrade
+breaks a CI job rather than a user's turn. Three of the load-bearing facts here live on surfaces
+that can move without notice: `codex app-server` is labelled `[experimental]` in its own help text,
+`cursor-agent acp` is officially documented but **absent from `cursor-agent --help`**, and Claude's
+permission modes changed meaning during the cycle that introduced them.
+
+### What is pinned, and where
+
+| Vendor | Committed artifacts                                                                                        | Produced by                                          |
+| ------ | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| codex  | `codex/protocol/**` — the generated TypeScript API                                                         | `bunx @openai/codex@<pinned> app-server generate-ts` |
+| cursor | `cursor/contract/` — `initialize`, `session/new`, a `session/list` page                                    | a live `cursor-agent acp` handshake                  |
+| claude | `claude/contract/` — the declared flags with `--permission-mode`'s choices, and the shape of `auth status` | `claude --help`, `claude auth status`                |
+
+All of it lives beside the adapter that reads it, because a vendor's contract is that adapter's
+business. Each set's `contract/manifest.json` records the command, the build it came off, the date
+and a checksum — without the checksum, a regeneration that produced identical output cannot be told
+apart from one that was never run. Minimum versions and the *reason* for each are in the adapter's
+own `pinned.ts`; a minimum version without a reason gets bumped casually.
+
+Cursor and Claude captures are **normalized**: object keys and leaf types survive, values do not.
+Two independent reasons, and either alone would be enough. They are not reproducible — session ids,
+timestamps and model catalogs differ between two runs of the same binary. And they are not ours to
+publish — `session/list` returns the operator's own session titles and working directories, and
+`auth status` returns an email address and an organization name. Values are kept only where the
+value *is* the contract: a negotiated `protocolVersion`, a permission mode's id.
+
+No turn is captured. A `stream-json` transcript needs a billable model call whose output differs
+every time, so it could never diff empty twice; the reducer fixtures pin that vocabulary instead.
+
+### Regenerating
+
+```bash
+bun run vendor-contracts:regen                    # recapture everything installed
+bun run vendor-contracts:regen --only cursor-acp  # one set
+bun run vendor-contracts:check                    # diff instead of writing
+```
+
+Bump a pin in the adapter's `pinned.ts`, rerun without `--check`, and commit the diff — on a version
+bump the diff *is* the changelog. A set whose tool is missing or signed out is skipped loudly and
+counted, never passed over: a green check that verified nothing is the worst outcome available here.
+
+This is deliberately **not** part of `bun run check`. It needs vendor binaries a contributor's
+machine will not have, and making the repository's main gate depend on three third-party CLIs would
+be a poor trade.
+
+### What the CI job does
+
+`.github/workflows/vendor-drift.yml` runs two jobs asking two different questions. **pinned** runs
+on PRs touching the pinned files: does the pin still reproduce? A diff there is a packaging change
+or a mutable release, and it fails. **latest** runs weekly against whatever the vendors published,
+and files a tracking issue instead of failing — a vendor releasing is not a MangoStudio defect, and
+a job that went red over somebody else's release would be muted rather than read.
+
+Both apply the same asymmetry, and it is the load-bearing decision in the whole mechanism:
+
+- A vendor **removing or changing** a recorded field **fails**. That is the case where an adapter is
+  reading something that is gone.
+- A vendor **adding** something is **reported**. The adapters ignore what they do not recognize by
+  construction, so an addition cannot break a turn.
+
+Reversed, this feature would break on every vendor release, and all three ship constantly.
+
+### What a maintainer does when the issue fires
+
+One issue exists at a time, updated in place and closed when the vendors match again, so its
+existence means there is drift *right now*. Read which set moved and in which direction. An additive
+finding needs only `vendor-contracts:regen` and a commit. A removed or changed field needs the
+adapter looked at first — something it reads no longer arrives — and only then a re-record.
+
+### The runtime half
+
+CI catches drift on a maintainer's machine; users run whatever they have. Each adapter therefore
+verifies its own assumptions at **discovery time**, and the answer is cached with the discovery
+cache rather than paid per selector render.
+
+| Vendor | Probe                                                                           | On mismatch                                                                                |
+| ------ | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| codex  | `codex --version` against the pin                                               | `version-unsupported`, with the required version                                           |
+| cursor | `cursor-agent acp` answers `protocolVersion: 1` with the keys the reducer reads | unavailable; **never a silent fall back to print mode**                                    |
+| claude | `claude --help` declares every flag the turn's argv names                       | `version-unsupported`; a missing *mode* makes only the combinations needing it unsupported |
+
+A version number alone never makes a target unavailable where a probe can answer instead. The pin
+records what was verified, and a build older than it whose surface is intact keeps working —
+enforcing the number would grey out working installs every time a pin went stale, which is the
+failure the drift job exists to make unnecessary. Codex is the exception, and for a stated reason:
+its `initialize` carries no protocol version and the calls discovery makes cover none of the turn
+surface, so there is nothing to ask that would prove more than the pin does.
+
+The same asymmetry applies here. An **unexpected but additive** handshake result — a new capability
+key, an unknown mode — is tolerated and logged. A **missing** expected capability is what makes a
+target unavailable.
