@@ -841,6 +841,55 @@ export type ExternalTurnTerminalReason = Static<typeof ExternalTurnTerminalReaso
 export const EXTERNAL_TURN_TERMINAL_REASONS: readonly ExternalTurnTerminalReason[] =
   ExternalTurnTerminalReasonSchema.anyOf.map((literal) => literal.const);
 
+/**
+ * Why a steer was refused. A closed set, like {@link ExternalTurnTerminalReasonSchema}.
+ *
+ * Steering is Codex-only and turn-state-specific rather than only adapter-
+ * specific, which is why this is not a subset of the unavailable reasons:
+ * `turn-not-steerable` exists because a review or compaction turn refuses it
+ * even when the adapter and the session both support steering in general.
+ */
+export const ExternalSteerRejectionReasonSchema = Type.Union([
+  /** The turn ended before the steer reached it — a race the user can hit legitimately. */
+  Type.Literal('turn-already-completed'),
+  /** The adapter has no `steer` member, or the session's capabilities say so. */
+  Type.Literal('not-supported'),
+  /** The runtime no longer has the session this steer was addressed to. */
+  Type.Literal('session-lost'),
+  /** The vendor refused steering for this specific turn, e.g. a review or compaction turn. */
+  Type.Literal('turn-not-steerable'),
+]);
+
+export type ExternalSteerRejectionReason = Static<typeof ExternalSteerRejectionReasonSchema>;
+
+export const EXTERNAL_STEER_REJECTION_REASONS: readonly ExternalSteerRejectionReason[] =
+  ExternalSteerRejectionReasonSchema.anyOf.map((literal) => literal.const);
+
+/**
+ * Codex only. `nativeTurnId` is the hub's own turn handle — the same value
+ * `ExternalAgentTurnResult.nativeTurnId` returned — not the vendor's internal
+ * turn id, which stays inside the adapter.
+ */
+export const ExternalAgentSteerParamsSchema = Type.Object(
+  {
+    sessionId: ExternalAgentOpaqueIdSchema,
+    nativeTurnId: ExternalAgentOpaqueIdSchema,
+    clientMessageId: ExternalAgentOpaqueIdSchema,
+    input: Type.String({ maxLength: 1024 * 1024 }),
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentSteerParams = Static<typeof ExternalAgentSteerParamsSchema>;
+
+export const ExternalAgentSteerResultSchema = Type.Union([
+  Type.Object({ accepted: Type.Literal(true) }, { additionalProperties: false }),
+  Type.Object(
+    { accepted: Type.Literal(false), reasonCode: ExternalSteerRejectionReasonSchema },
+    { additionalProperties: false }
+  ),
+]);
+export type ExternalAgentSteerResult = Static<typeof ExternalAgentSteerResultSchema>;
+
 /** Semantic event ordering is per session and starts at one, independently of transport seq. */
 export const ExternalAgentEventEnvelopeSchema = Type.Object(
   {

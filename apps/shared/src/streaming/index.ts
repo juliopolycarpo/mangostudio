@@ -31,6 +31,7 @@ export {
   type ExternalStreamSession,
   externalAgentEventToStreamChunk,
   externalSessionStartedChunk,
+  externalSteerChunk,
   externalTurnCompletedChunk,
 } from './external-events';
 export {

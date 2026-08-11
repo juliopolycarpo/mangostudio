@@ -8,6 +8,7 @@ import {
   ExternalAgentTargetIdSchema,
   ExternalApprovalDecisionSchema,
   ExternalApprovalOptionSchema,
+  ExternalSteerRejectionReasonSchema,
   ExternalTurnTerminalReasonSchema,
   ExternalUsageSchema,
 } from '../external-agents/schemas';
@@ -420,6 +421,26 @@ const SSEExternalUsageEventSchema = Type.Object({
 });
 
 /**
+ * Announces what became of a mid-turn steer, live.
+ *
+ * Hub-originated rather than projected from a vendor event — steering is the
+ * user talking to a turn that is still running, not the vendor reporting
+ * something — so it is built directly by the turn controller, the same way
+ * `external_session_started` and `external_turn_completed` are. One chunk per
+ * attempt: the durable record starts `accepted` optimistically and is
+ * corrected in place on a rejection, but the client only needs the resolved
+ * outcome, not the intermediate state nobody could have acted on anyway.
+ */
+const SSEExternalSteerEventSchema = Type.Object({
+  type: Type.Literal('external_steer'),
+  clientMessageId: Type.String(),
+  text: Type.String(),
+  status: Type.Union([Type.Literal('accepted'), Type.Literal('rejected')]),
+  reasonCode: Type.Optional(ExternalSteerRejectionReasonSchema),
+  done: Type.Literal(false),
+});
+
+/**
  * A vendor failure with its structure intact, distinct from `error`.
  *
  * `SSEErrorEvent` is terminal (`done: true`) and carries a flat message. A
@@ -493,6 +514,7 @@ export const StreamChunkSchema = Type.Union([
   SSEExternalApprovalRequestEventSchema,
   SSEExternalApprovalStatusEventSchema,
   SSEExternalUsageEventSchema,
+  SSEExternalSteerEventSchema,
   SSEExternalErrorEventSchema,
   SSEExternalTurnCompletedEventSchema,
   SSEDoneEventSchema,

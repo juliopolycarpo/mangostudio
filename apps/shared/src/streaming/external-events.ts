@@ -19,6 +19,7 @@
 import type {
   ExternalAgentEvent,
   ExternalAgentTargetId,
+  ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
 } from '../external-agents/schemas';
 import type { StreamChunk } from './events';
@@ -52,6 +53,29 @@ export function externalSessionStartedChunk(session: ExternalStreamSession): Str
     targetId: session.targetId,
     resumed: session.resumed,
     ...(session.fallbackReason !== undefined ? { fallbackReason: session.fallbackReason } : {}),
+    done: false,
+  };
+}
+
+/**
+ * Announces the resolved outcome of a mid-turn steer, live.
+ *
+ * Hub-originated, like {@link externalSessionStartedChunk}: steering is the
+ * user talking to the running turn, not something the vendor reported, so
+ * there is no {@link ExternalAgentEvent} to project it from.
+ */
+export function externalSteerChunk(input: {
+  readonly clientMessageId: string;
+  readonly text: string;
+  readonly status: 'accepted' | 'rejected';
+  readonly reasonCode?: ExternalSteerRejectionReason;
+}): StreamChunk {
+  return {
+    type: 'external_steer',
+    clientMessageId: input.clientMessageId,
+    text: input.text,
+    status: input.status,
+    ...(input.reasonCode !== undefined ? { reasonCode: input.reasonCode } : {}),
     done: false,
   };
 }
