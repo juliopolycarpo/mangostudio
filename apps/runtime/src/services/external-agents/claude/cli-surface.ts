@@ -100,3 +100,23 @@ export function missingClaudeCliFlags(surface: ClaudeCliSurface): readonly strin
 export function isUsableClaudeCliSurface(surface: ClaudeCliSurface): boolean {
   return surface.permissionModes.size > 0 || missingClaudeCliFlags(surface).length === 0;
 }
+
+/**
+ * The modes this build declared, or `undefined` when it declared none.
+ *
+ * An empty choice list is **unproven**, not "this build accepts no mode", and
+ * the two have to stay distinguishable all the way to `claudeModeAccepted` —
+ * which reads an absent set as "not established" and keeps the matrix intact,
+ * but answers `has()` with `false` for every mode of an empty one.
+ *
+ * The difference is reachable: a build that offers every required flag and
+ * whose `(choices: …)` list moved or wrapped differently parses as usable with
+ * no modes, and passing that empty set through as authoritative would grey out
+ * every configuration on a binary that can run all of them. Narrowing belongs
+ * to a probe that saw the vocabulary, never to one that failed to read it.
+ */
+export function claudeAcceptedModes(
+  surface: ClaudeCliSurface | undefined
+): ReadonlySet<string> | undefined {
+  return surface && surface.permissionModes.size > 0 ? surface.permissionModes : undefined;
+}

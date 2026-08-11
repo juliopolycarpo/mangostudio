@@ -62,6 +62,7 @@ import { TurnChannel } from '../turn-channel';
 import { CLAUDE_AUTH_UNKNOWN, type ClaudeAuthentication, parseClaudeAuthStatus } from './auth';
 import {
   type ClaudeCliSurface,
+  claudeAcceptedModes,
   isUsableClaudeCliSurface,
   missingClaudeCliFlags,
   parseClaudeCliSurface,
@@ -209,6 +210,9 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       this.#readAuthentication(context),
       this.#readAutoModePolicy(),
     ]);
+    // Absent rather than empty: a surface that declared no modes has not
+    // narrowed anything, and an empty set would reject every one of them.
+    const acceptedModes = claudeAcceptedModes(surface);
     const availability: ClaudeModeAvailability = {
       ...(authentication.accountKind ? { accountKind: authentication.accountKind } : {}),
       autoModeDisabledByPolicy,
@@ -217,7 +221,7 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       // `default` on `manual` until a real run says otherwise — the direction
       // that cannot silently widen what runs without asking.
       effectiveDefaultIsAuto: false,
-      ...(surface ? { acceptedModes: surface.permissionModes } : {}),
+      ...(acceptedModes ? { acceptedModes } : {}),
     };
 
     return {
@@ -249,14 +253,16 @@ export class ClaudeCodeAdapter implements ExternalAgentAdapter {
       this.#readAuthentication(context),
       this.#readAutoModePolicy(),
     ]);
+    // The same narrowing discovery applied, re-read rather than remembered. A
+    // session opened minutes after a selector render must not pass a mode an
+    // upgrade removed in between — and must not be refused by a probe that read
+    // no vocabulary at all, which is why this is absent rather than empty.
+    const acceptedModes = claudeAcceptedModes(surface);
     const availability: ClaudeModeAvailability = {
       ...(authentication.accountKind ? { accountKind: authentication.accountKind } : {}),
       autoModeDisabledByPolicy,
       effectiveDefaultIsAuto: false,
-      // The same narrowing discovery applied, re-read rather than remembered.
-      // A session opened minutes after a selector render must not pass a mode
-      // an upgrade removed in between.
-      ...(surface ? { acceptedModes: surface.permissionModes } : {}),
+      ...(acceptedModes ? { acceptedModes } : {}),
     };
     this.#assertConfigurationSupported(params.configuration, availability);
 

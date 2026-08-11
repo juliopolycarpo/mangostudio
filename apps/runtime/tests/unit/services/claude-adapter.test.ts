@@ -15,6 +15,7 @@ import {
 } from '../../../src/services/external-agents/claude/adapter';
 import { parseClaudeAuthStatus } from '../../../src/services/external-agents/claude/auth';
 import {
+  claudeAcceptedModes,
   isUsableClaudeCliSurface,
   missingClaudeCliFlags,
   parseClaudeCliSurface,
@@ -508,5 +509,32 @@ describe('permission modes are narrowed to what the build accepts', () => {
       accepted('plan', 'manual', 'bypassPermissions', 'somethingCursorAdded')
     );
     expect(configurations.filter((entry) => entry.supported)).toHaveLength(3);
+  });
+
+  /**
+   * The build whose flags are all there and whose choice list is not: a
+   * `(choices: …)` that moved, wrapped differently, or was dropped from the
+   * help text. That parses as a usable surface with no modes, and passing the
+   * empty set on as authoritative would reject every mode and grey out a binary
+   * that can run all of them. An unread vocabulary narrows nothing.
+   */
+  it('narrows nothing when the flags are all present but no choice list parsed', () => {
+    const help = CLAUDE_HELP_TEXT.replace(/\(choices:[^)]*\)/g, '');
+    const surface = parseClaudeCliSurface(help);
+
+    expect(missingClaudeCliFlags(surface)).toEqual([]);
+    expect(surface.permissionModes.size).toBe(0);
+    expect(claudeAcceptedModes(surface)).toBeUndefined();
+
+    const configurations = buildSupportedConfigurations({
+      ...SUBSCRIPTION,
+      ...(claudeAcceptedModes(surface) ? { acceptedModes: claudeAcceptedModes(surface) } : {}),
+    });
+    expect(configurations.filter((entry) => entry.supported)).not.toHaveLength(0);
+  });
+
+  it('still narrows on a surface that did declare its modes', () => {
+    const surface = parseClaudeCliSurface(CLAUDE_HELP_TEXT);
+    expect(claudeAcceptedModes(surface)).toEqual(surface.permissionModes);
   });
 });
