@@ -410,8 +410,8 @@ Open these first:
 - `apps/runtime/src/services/external-agents/claude/cli-surface.ts`,
   `apps/runtime/src/services/external-agents/cursor/handshake.ts` (the discovery-time probes that
   decide availability, so a version number never does it alone)
-- `apps/runtime/src/registry.ts`, `apps/runtime/src/methods.ts` (the six protocol handlers, event
-  topic, consent and close wiring)
+- `apps/runtime/src/registry.ts`, `apps/runtime/src/methods.ts` (the `external-agent.*` protocol
+  handlers, event topic, consent and close wiring)
 - `apps/api/src/services/runtime-client/runtime-client.ts` (typed method facade and session-filtered
   event subscription)
 - `apps/api/src/modules/external-agents/application/external-agent-discovery.ts` (the cheap pass,
@@ -422,6 +422,11 @@ Open these first:
   scanner can honestly say)
 - `apps/api/src/modules/external-agents/http/external-agent-routes.ts`
   (`GET /api/external-agents?environmentId=…`)
+- `apps/api/src/modules/external-agents/application/external-native-sessions.ts` and
+  `http/external-session-routes.ts` (adopting a session started in a terminal: the listing, the
+  re-read before a chat exists, and the lease that keeps two chats out of one vendor transcript)
+- `apps/api/src/modules/external-agents/infrastructure/external-session-adoption-lease-repository.ts`
+  (the lease, keyed by the session rather than by the chat)
 - `apps/shared/src/environments/detection/agent-cli-definitions.ts` (what the scanner looks for)
 - `apps/api/tests/unit/modules/external-agents/`, `apps/shared/tests/unit/external-agents.test.ts`
 
@@ -436,6 +441,11 @@ Two Codex-specific traps, both of which cost a debugging session if met unprepar
   camelCase **tagged object**. Encode through `sandbox.ts`'s two helpers, never by hand.
 - `item/tool/call` is a server→client request asking MangoStudio to run a tool, and `initialize`
   offers no capability to decline it. It is answered with a JSON-RPC error unconditionally.
+- `thread/list` returns `Thread`s whose `id` is the thread and whose `sessionId` is a *different*
+  required field naming the thread tree. Adoption maps `id`; `sessionId` is the one that looks
+  right and resumes nothing. Timestamps there are Unix **seconds** (Cursor's are ISO-8601), and
+  `sourceKinds` must be an explicit allowlist or the listing includes Codex's own subagent, review
+  and compaction threads.
 
 All three committed contracts are regenerated with `bun run vendor-contracts:regen` and drift-checked
 in CI by `.github/workflows/vendor-drift.yml`. Codex's pin is a **package invocation**, not a global

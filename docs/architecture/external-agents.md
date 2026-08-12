@@ -437,6 +437,64 @@ unanswered server→client request, so a `turn/steer` sent into that window coul
 response — the adapter reports `turn-not-steerable` instead of leaving the caller to hit the
 request's own timeout.
 
+## Adopting a session started outside MangoStudio
+
+Both Codex and Cursor keep their own conversation history, and the people who use this feature are
+by definition already terminal users. The common shape is: start something in a terminal, get deep
+into it, then want the transcript, the approval UI and the persistence MangoStudio provides.
+Adoption is what makes that possible without re-explaining everything.
+
+**Adoption is a pointer, not an import.** MangoStudio does not copy the vendor's transcript into
+its own message table. The chat opens with a marker part saying it continues a native session, and
+turns from that point stream and persist normally. Two reasons: the vendor owns that history, and
+duplicating it creates two divergent copies of one conversation; and the vendor's transcript is not
+in MangoStudio's part format, so importing means a lossy translation nobody asked for.
+
+**Codex and Cursor only.** Codex has structured, paginated `thread/list`; Cursor advertises
+`sessionCapabilities.list` and answers `session/list` with cwd filtering. Claude Code has no
+usable listing — its history is internal JSONL under an encoded `~/.claude/projects/<cwd>/` path
+that the vendor's own documentation calls internal and subject to change — so its picker entry says
+that, rather than implying something is missing. "Continue the most recent session" is not offered
+as a substitute: it is race-prone against a session the user is actively driving in another
+terminal, and it can pick up the wrong workspace or the wrong vendor account. Omitting the vendor
+beats guessing which conversation somebody meant.
+
+The two listings differ more than a neutral schema suggests, and the differences are where the bugs
+live:
+
+- Codex's `Thread.id` is the thread; `Thread.sessionId` is a *different* required field naming the
+  whole thread tree. `thread/resume` takes the first. Its `name` is nullable and `preview` — "usually
+  the first user message" — is required, so a null title falls back to the preview. Timestamps are
+  Unix **seconds**. `turns` is documented as empty at list time and there is no `messageCount`
+  field, so nothing derives a message count. Ephemeral threads and anything with a
+  `parentThreadId` are excluded, and `sourceKinds` is always an explicit allowlist — five of the
+  ten kinds are Codex's own subagent, review and compaction threads.
+- Cursor's rows are `sessionId`, `cwd` and an **ISO-8601** `updatedAt`, with no title of any kind.
+  Its rows render as workspace plus age, and nothing synthesizes a title to fill the gap.
+
+`updatedAtMs` is normalized once, at the runtime boundary, so no consumer sees a vendor's native
+time format.
+
+Three properties adoption needs beyond the listing itself:
+
+- **Re-read at adoption.** A listing proves a session existed when the page rendered. Adoption
+  re-reads the exact metadata — id, cwd, updated time — and refuses if it changed or vanished. A
+  picker row is a hint, not a handle, and a session written to since the picker loaded is one
+  somebody is using right now.
+- **Adopt strictly.** The ordinary turn path resumes with `resumeMode: 'fallback'`, which is right
+  for a send and wrong for adoption: a user who chose a specific conversation must not silently get
+  an empty one. The continuation row carries `pendingAdoption` until the vendor confirms the
+  resume, and that flag is what makes the first open strict.
+- **Take a lease.** Two MangoStudio chats must not attach to one native session concurrently. The
+  lease is keyed by `(environmentId, targetId, nativeSessionId)` with an owner and an expiry,
+  refreshed while the chat keeps opening sessions and released when its continuation is dropped. It
+  cannot see the user's own terminal — nothing on the hub can — but it makes the half MangoStudio
+  owns single-writer, and gives adoption somewhere to refuse rather than a race to lose.
+
+Listing is guarded exactly like a turn, with one addition: without an isolation attestation it is
+not offered at all. Showing another OS user's conversation titles is a worse disclosure than
+sharing a credential.
+
 ## Deliberately out of scope
 
 Present in a vendor's contract, not surfaced. Named here so a later cycle finds them without
