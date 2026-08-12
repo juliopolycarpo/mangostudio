@@ -291,6 +291,7 @@ describe('steering', () => {
       'not-supported',
       'session-lost',
       'turn-not-steerable',
+      'id-reused',
     ]);
   });
 

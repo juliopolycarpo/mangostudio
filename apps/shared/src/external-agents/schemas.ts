@@ -858,6 +858,14 @@ export const ExternalSteerRejectionReasonSchema = Type.Union([
   Type.Literal('session-lost'),
   /** The vendor refused steering for this specific turn, e.g. a review or compaction turn. */
   Type.Literal('turn-not-steerable'),
+  /**
+   * The same `clientMessageId` was already attempted with different text. A
+   * lost acknowledgement legitimately retries with the same id *and* the same
+   * text; this is what a client hits if it reuses the id after editing the
+   * composer instead — answering from the earlier attempt's cached outcome
+   * would silently drop the edit.
+   */
+  Type.Literal('id-reused'),
 ]);
 
 export type ExternalSteerRejectionReason = Static<typeof ExternalSteerRejectionReasonSchema>;

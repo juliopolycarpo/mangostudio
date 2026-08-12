@@ -412,11 +412,24 @@ before the button is shown, and `turn-not-steerable` is what a rejected attempt 
 turn's transcript — optimistically, as accepted — *before* calling the runtime, not after. A vendor
 call that succeeds but whose acknowledgement is lost must never make the user's own words
 disappear from what they see on reload; writing first and correcting the record in place on an
-actual rejection is what keeps that true. The four rejection reasons —
-`turn-already-completed | not-supported | session-lost | turn-not-steerable` — are answered from
-cheapest to most expensive: a missing live turn, a session's own capabilities, and a stale
-`nativeTurnId` are all decided by the hub without a runtime round trip; only Codex's own turn state
-needs one.
+actual rejection is what keeps that true. The five rejection reasons —
+`turn-already-completed | not-supported | session-lost | turn-not-steerable | id-reused` — are
+answered from cheapest to most expensive: a missing live turn, a session's own capabilities, a
+stale `nativeTurnId`, and a `clientMessageId` reused with different text are all decided by the hub
+without a runtime round trip; only Codex's own turn state needs one.
+
+That same durable write is charged against the turn's byte and event budget, exactly like a vendor
+event — a steer is up to 1 MiB and the caller may attempt as many as it likes, so without a charge
+it would be a second, uncapped way to grow the message `EXTERNAL_TURN_PAYLOAD_MAX_BYTES` exists to
+bound. The attempt that crosses the line is kept, matching how the same budget treats a vendor
+event, but the turn ends there: no further steer, and no further vendor event, follows it.
+
+Live delivery holds an `onEvent` notification back if it arrives while an already-durable steer's
+outcome has not been reported yet, and releases it right after that report — a live listener would
+otherwise see the vendor event before the steer that, in the durable transcript, came first. A
+steer's own runtime acknowledgement is not part of what a turn's terminal path waits on
+indefinitely, either: `terminate` gives it a few seconds to land and correct the record in place,
+but an unresponsive one no longer keeps Stop, or the vendor's own completion, waiting for it.
 
 The Codex adapter refuses locally, before any request, when an approval is currently outstanding on
 the same turn. The shared JSON-RPC client answers one message at a time and does not read past an

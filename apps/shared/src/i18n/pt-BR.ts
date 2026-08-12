@@ -2907,6 +2907,7 @@ export const messages = {
         'not-supported': 'Este agente não pode ser direcionado.',
         'session-lost': 'A máquina não tem mais a sessão deste turno.',
         'turn-not-steerable': 'Este turno não pode receber nova entrada agora.',
+        'id-reused': 'Isto já foi enviado com um texto diferente. Tente novamente.',
       },
     },
     loginHint: 'Rode isto naquela máquina para entrar:',

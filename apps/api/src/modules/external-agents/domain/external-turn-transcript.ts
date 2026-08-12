@@ -186,16 +186,23 @@ export class ExternalTurnTranscript {
    *
    * Deliberately outside {@link apply}: a steer is the user talking to the
    * turn, not the vendor reporting something, so there is no envelope
-   * sequence to advance and no event budget to charge it against — the
-   * caller has already decided this write is happening before it knows
-   * whether the vendor will honour it. `status` starts `'accepted'`
-   * optimistically; {@link resolveSteerRejected} corrects it in place if the
-   * vendor call comes back refused. The text itself never changes either way.
+   * sequence to advance — the caller has already decided this write is
+   * happening before it knows whether the vendor will honour it. `status`
+   * starts `'accepted'` optimistically; {@link resolveSteerRejected} corrects
+   * it in place if the vendor call comes back refused. The text itself never
+   * changes either way.
+   *
+   * Charged against the same byte and event budget {@link apply} enforces,
+   * because the caller accepts an unbounded number of these — without a
+   * charge, steering would be a second, uncapped way to grow the very message
+   * `EXTERNAL_TURN_PAYLOAD_MAX_BYTES` exists to bound. Applied first, then
+   * checked, exactly like `apply`: the attempt that crosses the line is kept,
+   * so the transcript's recorded byte count still matches what it holds.
    */
   recordSteerAttempt(
     input: { readonly clientMessageId: string; readonly text: string },
     at: number
-  ): void {
+  ): { readonly terminal?: ExternalTurnTerminalReason } {
     const part: ExternalSteerPart = {
       type: 'external_steer',
       targetId: this.#turnPart.targetId,
@@ -206,6 +213,15 @@ export class ExternalTurnTranscript {
     };
     this.#steerByClientMessageId.set(input.clientMessageId, part);
     this.#parts.push(part);
+    this.#turnPart.eventCount += 1;
+    this.#turnPart.persistedBytes += Buffer.byteLength(input.text);
+    this.#turnPart.updatedAt = at;
+
+    if (this.#budgetExceeded()) {
+      this.finalize('limit-exceeded', at);
+      return { terminal: 'limit-exceeded' };
+    }
+    return {};
   }
 
   /** Corrects an already-recorded steer to `'rejected'`. A no-op once corrected. */

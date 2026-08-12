@@ -2899,6 +2899,7 @@ export const messages: Messages = {
         'not-supported': 'This agent cannot be steered.',
         'session-lost': "That machine no longer has this turn's session.",
         'turn-not-steerable': 'This turn cannot take new input right now.',
+        'id-reused': 'This was already sent with different text. Try again.',
       },
     },
     loginHint: 'Run this on that machine to sign in:',
