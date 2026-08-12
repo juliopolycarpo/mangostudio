@@ -1063,3 +1063,123 @@ describe('codex adapter — native session listing', () => {
     expect(page.sessions.length).toBeGreaterThan(0);
   });
 });
+
+describe('codex adapter — native review', () => {
+  async function openSession(adapter: CodexAppServerAdapter, test: Harness) {
+    await adapter.openSession({ params: openParams(), context: test.context });
+  }
+
+  function reviewParams() {
+    return {
+      sessionId: 'session-1',
+      clientMessageId: 'message-1',
+      target: { type: 'uncommittedChanges' as const },
+    };
+  }
+
+  it('asks for the uncommitted target inline, on the session thread', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+    await openSession(adapter, test);
+
+    const stream = await adapter.startReview({
+      nativeSessionId: THREAD_ID,
+      params: reviewParams(),
+      context: test.context,
+    });
+
+    // Delivery is stated rather than defaulted: a detached review would create
+    // a second thread, and every id the hub persists names this one.
+    expect(test.server()?.calls.find((call) => call.method === 'review/start')?.params).toEqual({
+      threadId: THREAD_ID,
+      target: { type: 'uncommittedChanges' },
+      delivery: 'inline',
+    });
+    // The hub's own handle, exactly as `startTurn` reports it.
+    expect(stream.nativeTurnId).toBe('message-1');
+    expect(stream.reviewThreadId).toBe(THREAD_ID);
+  });
+
+  it('renders the bracketing review-mode items as review activity', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+    await openSession(adapter, test);
+
+    const stream = await adapter.startReview({
+      nativeSessionId: THREAD_ID,
+      params: reviewParams(),
+      context: test.context,
+    });
+    const events = await collect(stream);
+
+    const activity = events.filter((event) => event.type === 'activity_started');
+    expect(activity.map((event) => event.activity)).toMatchObject([
+      { kind: 'review', name: 'enteredReviewMode' },
+      { kind: 'review', name: 'exitedReviewMode' },
+    ]);
+    // The verdict itself is ordinary assistant text — a review needs no bespoke
+    // event vocabulary to be readable.
+    expect(
+      events.filter((event) => event.type === 'text_delta').map((event) => event.text)
+    ).toEqual(['P1: the retry loop never exits.']);
+  });
+
+  it('refuses a review Codex ran on another thread instead of streaming it', async () => {
+    // Inline delivery is documented to answer with the original thread. A build
+    // that answers with another one is running the review somewhere the hub is
+    // not subscribed, and failing loudly is the only honest outcome.
+    const adapter = new CodexAppServerAdapter();
+    const test = harness({ reviewThreadId: 'some-other-thread' });
+    await openSession(adapter, test);
+
+    await expect(
+      adapter.startReview({
+        nativeSessionId: THREAD_ID,
+        params: reviewParams(),
+        context: test.context,
+      })
+    ).rejects.toThrow('some-other-thread');
+    // The turn Codex accepted is stopped rather than left running unwatched.
+    expect(test.server()?.called('turn/interrupt')).toBe(true);
+  });
+
+  it('reports a review turn as not steerable, without a round trip', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness({ pauseBeforeCompletion: true });
+    await openSession(adapter, test);
+    const stream = await adapter.startReview({
+      nativeSessionId: THREAD_ID,
+      params: reviewParams(),
+      context: test.context,
+    });
+
+    const outcome = await adapter.steer({
+      sessionId: 'session-1',
+      nativeSessionId: THREAD_ID,
+      nativeTurnId: 'message-1',
+      clientMessageId: 'steer-1',
+      input: 'also check the tests',
+    });
+    expect(outcome).toEqual({ accepted: false, reasonCode: 'turn-not-steerable' });
+    expect(test.server()?.called('turn/steer')).toBe(false);
+
+    await adapter.cancel({
+      sessionId: 'session-1',
+      nativeSessionId: THREAD_ID,
+      nativeTurnId: 'message-1',
+      reason: 'requested',
+    });
+    // The stream ends where the cancel found it: the review had entered review
+    // mode and had not yet produced a verdict.
+    const events = await collect(stream);
+    expect(events.some((event) => event.type === 'text_delta')).toBe(false);
+    expect(test.server()?.called('turn/interrupt')).toBe(true);
+  });
+
+  it('advertises nativeReview, which is what makes startReview callable', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const descriptor = await adapter.discover(harness().context);
+    expect(descriptor.capabilities.nativeReview).toBe(true);
+    expect(typeof adapter.startReview).toBe('function');
+  });
+});

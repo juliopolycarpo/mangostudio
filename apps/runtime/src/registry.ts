@@ -129,6 +129,7 @@ export function createRuntimeMethodHandlers(
       handler('external-agent.turn', (params) => externalAgents.turn(params)),
       handler('external-agent.respond', (params) => externalAgents.respond(params)),
       handler('external-agent.steer', (params) => externalAgents.steer(params)),
+      handler('external-agent.start-review', (params) => externalAgents.startReview(params)),
       handler('external-agent.cancel', (params) => externalAgents.cancel(params)),
       handler('external-agent.close', (params) => externalAgents.closeSession(params)),
       handler('external-agent.list-sessions', (params, context) =>

@@ -16,6 +16,8 @@ import type {
   ExternalAgentRefreshAccountUsageResult,
   ExternalAgentRespondParams,
   ExternalAgentRuntimeDescriptor,
+  ExternalAgentStartReviewParams,
+  ExternalAgentStartReviewResult,
   ExternalAgentSteerParams,
   ExternalAgentSteerResult,
   ExternalAgentTargetId,
@@ -39,6 +41,8 @@ import {
   ExternalAgentRefreshAccountUsageResultSchema,
   ExternalAgentRespondParamsSchema,
   ExternalAgentRuntimeDescriptorSchema,
+  ExternalAgentStartReviewParamsSchema,
+  ExternalAgentStartReviewResultSchema,
   ExternalAgentSteerParamsSchema,
   ExternalAgentTurnParamsSchema,
 } from '@mangostudio/shared/external-agents';
@@ -53,7 +57,11 @@ import { RuntimeToolArgumentError } from '../../errors';
 import type { RuntimeEventInput } from '../../host';
 import { RUNTIME_EXTERNAL_AGENT_TOPIC } from '../../methods';
 import { probingService } from '../probing/service';
-import type { ExternalAgentAdapter, ExternalAgentAdapterContext } from './adapter';
+import type {
+  ExternalAgentAdapter,
+  ExternalAgentAdapterContext,
+  ExternalAgentTurnStream,
+} from './adapter';
 import {
   normalizeExternalAgentDescriptor,
   normalizeExternalAgentEvent,
@@ -84,10 +92,24 @@ interface LiveTurn {
   payloadBytes: number;
 }
 
-interface TurnReceipt {
-  readonly fingerprint: string;
-  readonly result: Promise<ExternalAgentTurnResult>;
-}
+/**
+ * One accepted `clientMessageId`, so a retry is answered rather than run twice.
+ *
+ * `kind` discriminates because a review and a turn share the id space and
+ * answer with different shapes. A repeat under the same id with a different
+ * kind — or different input — is a caller error, exactly as it is for two turns.
+ */
+type TurnReceipt =
+  | {
+      readonly kind: 'turn';
+      readonly fingerprint: string;
+      readonly result: Promise<ExternalAgentTurnResult>;
+    }
+  | {
+      readonly kind: 'review';
+      readonly fingerprint: string;
+      readonly result: Promise<ExternalAgentStartReviewResult>;
+    };
 
 interface LiveSession {
   readonly sessionId: string;
@@ -355,24 +377,75 @@ export class ExternalAgentSessionSupervisor {
     // Hashed rather than retained: the raw fingerprint would pin every turn's
     // attachment bytes — megabytes each — in memory for the life of the session.
     const fingerprint = turnFingerprint(params);
-    const receipt = session.turns.get(params.clientMessageId);
-    if (receipt) {
-      if (receipt.fingerprint !== fingerprint) {
-        throw new RuntimeToolArgumentError(
-          `clientMessageId "${params.clientMessageId}" was reused with different turn input.`
-        );
-      }
-      return receipt.result;
-    }
-    if (session.activeTurn) {
-      throw new RuntimeToolArgumentError(
-        `External-agent session "${params.sessionId}" already has an active turn.`
-      );
-    }
+    const replayed = this.#replayReceipt(session, 'turn', params.clientMessageId, fingerprint);
+    if (replayed?.kind === 'turn') return replayed.result;
+    this.#assertNoActiveTurn(session);
 
     const result = this.#startTurn(session, params);
-    session.turns.set(params.clientMessageId, { fingerprint, result });
+    session.turns.set(params.clientMessageId, { kind: 'turn', fingerprint, result });
     return result;
+  }
+
+  /**
+   * A vendor-native review of the working tree, on an open session.
+   *
+   * Deliberately the same session, the same active-turn rule, the same
+   * idempotency key and the same event stream as {@link turn}: a review is a
+   * turn that happens to be a review, and a second orchestration path for it
+   * would need its own ordering, dedup and cancellation rules to get wrong.
+   *
+   * `not-supported` is a thrown argument error rather than a returned refusal —
+   * unlike `steer`, which a stale capability cache can legitimately reach
+   * mid-turn — because a review is started from an explicit user action against
+   * a descriptor the hub just read.
+   */
+  startReview(params: ExternalAgentStartReviewParams): Promise<ExternalAgentStartReviewResult> {
+    assertExternalAgentParams(
+      'external-agent.start-review',
+      ExternalAgentStartReviewParamsSchema,
+      params
+    );
+    const session = this.#requireSession(params.sessionId);
+    if (!session.openResult.capabilities.nativeReview || !session.adapter.startReview) {
+      throw new RuntimeToolArgumentError(
+        `External-agent target "${session.adapter.targetId}" cannot start a native review.`
+      );
+    }
+    const fingerprint = turnFingerprint(params);
+    const replayed = this.#replayReceipt(session, 'review', params.clientMessageId, fingerprint);
+    if (replayed?.kind === 'review') return replayed.result;
+    this.#assertNoActiveTurn(session);
+
+    const result = this.#startReview(session, params);
+    session.turns.set(params.clientMessageId, { kind: 'review', fingerprint, result });
+    return result;
+  }
+
+  /**
+   * The recorded receipt for a repeated id, or nothing when this id is new.
+   * Its `kind` is what the caller narrows on to get its own result shape back.
+   */
+  #replayReceipt(
+    session: LiveSession,
+    kind: TurnReceipt['kind'],
+    clientMessageId: string,
+    fingerprint: string
+  ): TurnReceipt | undefined {
+    const receipt = session.turns.get(clientMessageId);
+    if (!receipt) return undefined;
+    if (receipt.kind !== kind || receipt.fingerprint !== fingerprint) {
+      throw new RuntimeToolArgumentError(
+        `clientMessageId "${clientMessageId}" was reused with different turn input.`
+      );
+    }
+    return receipt;
+  }
+
+  #assertNoActiveTurn(session: LiveSession): void {
+    if (!session.activeTurn) return;
+    throw new RuntimeToolArgumentError(
+      `External-agent session "${session.sessionId}" already has an active turn.`
+    );
   }
 
   async respond(params: ExternalAgentRespondParams): Promise<ExternalAgentAckResult> {
@@ -811,6 +884,65 @@ export class ExternalAgentSessionSupervisor {
         session.processes
       ),
     });
+    const nativeTurnId = this.#registerTurn(session, controller, stream);
+    return Promise.resolve({ nativeTurnId });
+  }
+
+  /**
+   * `review/start` is awaited, unlike `turn/start`, because its response is the
+   * only place the review's thread is named — and an inline review that came
+   * back on another thread must fail the call rather than stream onto one
+   * nothing is subscribed to. The adapter keeps notifications that arrive
+   * during the round trip, so awaiting costs no events.
+   */
+  async #startReview(
+    session: LiveSession,
+    params: ExternalAgentStartReviewParams
+  ): Promise<ExternalAgentStartReviewResult> {
+    const startReview = session.adapter.startReview;
+    if (!startReview) {
+      throw new RuntimeToolArgumentError(
+        `External-agent target "${session.adapter.targetId}" cannot start a native review.`
+      );
+    }
+    const controller = new AbortController();
+    const stream = await startReview.call(session.adapter, {
+      nativeSessionId: session.openResult.nativeSessionId,
+      params,
+      context: this.#context(
+        session.adapter,
+        controller.signal,
+        session.executablePath,
+        session.workspacePath,
+        session.processes
+      ),
+    });
+    const nativeTurnId = this.#registerTurn(session, controller, stream);
+    const result = { nativeTurnId, reviewThreadId: stream.reviewThreadId };
+    if (!Value.Check(ExternalAgentStartReviewResultSchema, result)) {
+      // The turn is already live, so it is cancelled rather than abandoned: a
+      // review whose result the hub cannot describe is one the hub cannot
+      // correlate events for either.
+      controller.abort(abortError('External-agent adapter returned an invalid review result.'));
+      void settleCleanup(
+        session.adapter.cancel({
+          sessionId: session.sessionId,
+          nativeSessionId: session.openResult.nativeSessionId,
+          nativeTurnId,
+          reason: 'requested',
+        })
+      ).catch(() => undefined);
+      throw new Error('External-agent adapter returned an invalid review result.');
+    }
+    return result;
+  }
+
+  /** Binds one adapter stream to the session as its active turn, and drains it. */
+  #registerTurn(
+    session: LiveSession,
+    controller: AbortController,
+    stream: ExternalAgentTurnStream
+  ): string {
     let nativeTurnId: string;
     try {
       nativeTurnId = normalizeExternalAgentTurnId(stream.nativeTurnId);
@@ -836,7 +968,7 @@ export class ExternalAgentSessionSupervisor {
     void this.#consumeTurn(session, activeTurn, stream).catch((error: unknown) => {
       this.#deferredCleanupFailure ??= error;
     });
-    return Promise.resolve({ nativeTurnId });
+    return nativeTurnId;
   }
 
   async #consumeTurn(
@@ -1345,7 +1477,7 @@ function raceTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 }
 
 /** Identifies one turn's input without holding on to its attachment bytes. */
-function turnFingerprint(params: ExternalAgentTurnParams): string {
+function turnFingerprint(params: ExternalAgentTurnParams | ExternalAgentStartReviewParams): string {
   return createHash('sha256').update(JSON.stringify(params)).digest('hex');
 }
 

@@ -43,6 +43,7 @@ import {
 } from '../../../src/services/external-agents/codex/version';
 import { assertExternalAgentAdapterConformance } from '../../../src/services/external-agents/registry';
 import { commandApprovalParams, permissionProfiles } from '../../support/codex-fixtures';
+import { FakeExternalAgentAdapter } from '../../support/fake-external-agent-adapter';
 
 describe('the two sandbox encoders are not interchangeable', () => {
   it('encodes thread/start as a kebab-case string and turn/start as a tagged object', () => {
@@ -327,13 +328,13 @@ describe('adapter conformance', () => {
         // implemented, so the flag and the member agree.
         steering: true,
         sessionListing: true,
-        nativeReview: false,
+        nativeReview: true,
         accountUsage: true,
       })
     ).not.toThrow();
   });
 
-  it('implements steer, listSessions and refreshAccountUsage; review still waits on its own plan', () => {
+  it('implements every optional member its capability set claims', () => {
     // Typed as the interface so the optional members are visible: the registry
     // derives the four opportunistic capabilities from exactly this presence
     // check.
@@ -341,13 +342,16 @@ describe('adapter conformance', () => {
     expect(adapter.steer).toBeInstanceOf(Function);
     expect(adapter.refreshAccountUsage).toBeInstanceOf(Function);
     expect(adapter.listSessions).toBeInstanceOf(Function);
-    expect(adapter.startReview).toBeUndefined();
+    expect(adapter.startReview).toBeInstanceOf(Function);
   });
 
-  it('refuses to claim native review while `startReview` is unimplemented', () => {
-    const adapter: ExternalAgentAdapter = new CodexAppServerAdapter();
+  it('refuses to claim native review on an adapter that cannot serve it', () => {
+    // The check reads the member, never the vendor: an adapter without
+    // `startReview` may not advertise the capability, whichever vendor it is.
+    const reviewless: ExternalAgentAdapter = new FakeExternalAgentAdapter();
+    expect(reviewless.startReview).toBeUndefined();
     expect(() =>
-      assertExternalAgentAdapterConformance(adapter, {
+      assertExternalAgentAdapterConformance(reviewless, {
         structuredStreaming: true,
         reasoningStream: true,
         interactiveApprovals: true,
@@ -356,8 +360,10 @@ describe('adapter conformance', () => {
         images: true,
         usageReporting: true,
         cancellation: true,
-        steering: true,
-        sessionListing: true,
+        // Every other optional flag is false, so `nativeReview` is the only
+        // claim this descriptor makes that the adapter cannot serve.
+        steering: false,
+        sessionListing: false,
         nativeReview: true,
         accountUsage: false,
       })

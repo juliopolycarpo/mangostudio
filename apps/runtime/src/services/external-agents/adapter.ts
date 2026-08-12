@@ -6,6 +6,7 @@ import type {
   ExternalAgentOpenResult,
   ExternalAgentRespondParams,
   ExternalAgentRuntimeDescriptor,
+  ExternalAgentStartReviewParams,
   ExternalAgentTargetId,
   ExternalAgentTurnParams,
   ExternalNativeSession,
@@ -127,7 +128,23 @@ export interface ExternalAgentNativeSessionPage {
 
 export interface ExternalAgentStartReviewInput {
   readonly nativeSessionId: string;
+  readonly params: ExternalAgentStartReviewParams;
   readonly context: ExternalAgentAdapterContext;
+}
+
+/**
+ * A review's stream, plus the thread the vendor decided to run it on.
+ *
+ * The extra field is the whole reason `startReview` is awaited while
+ * {@link ExternalAgentAdapter.startTurn} is not: a turn has nothing to report
+ * beyond its handle, whereas a review's response names a thread, and only
+ * inline delivery — where that thread is the session's own — is supported. An
+ * adapter returns the vendor's value rather than echoing the session's, so the
+ * supervisor can refuse a thread it is not subscribed to instead of streaming
+ * a review nobody would see.
+ */
+export interface ExternalAgentReviewStream extends ExternalAgentTurnStream {
+  readonly reviewThreadId: string;
 }
 
 export interface ExternalAgentRefreshUsageInput {
@@ -153,6 +170,6 @@ export interface ExternalAgentAdapter {
   close(input: ExternalAgentCloseInput): Promise<void>;
   steer?(input: ExternalAgentSteerInput): Promise<ExternalAgentSteerOutcome>;
   listSessions?(input: ExternalAgentListSessionsInput): Promise<ExternalAgentNativeSessionPage>;
-  startReview?(input: ExternalAgentStartReviewInput): ExternalAgentTurnStream;
+  startReview?(input: ExternalAgentStartReviewInput): Promise<ExternalAgentReviewStream>;
   refreshAccountUsage?(input: ExternalAgentRefreshUsageInput): Promise<ExternalAgentAccountUsage>;
 }

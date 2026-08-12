@@ -28,6 +28,7 @@ import type {
   ExternalAgentRuntimeDescriptor,
   ExternalAgentTargetId,
   ExternalNativeSession,
+  ExternalReviewTarget,
 } from '@mangostudio/shared/external-agents';
 import {
   EXTERNAL_NATIVE_SESSION_PAGE_LIMIT,
@@ -45,6 +46,8 @@ import type {
   ExternalAgentOpenedSession,
   ExternalAgentOpenSessionInput,
   ExternalAgentRefreshUsageInput,
+  ExternalAgentReviewStream,
+  ExternalAgentStartReviewInput,
   ExternalAgentStartTurnInput,
   ExternalAgentSteerInput,
   ExternalAgentSteerOutcome,
@@ -79,6 +82,9 @@ import type { GetAccountResponse } from './protocol/v2/GetAccountResponse';
 import type { Model } from './protocol/v2/Model';
 import type { ModelListResponse } from './protocol/v2/ModelListResponse';
 import type { PermissionProfileListResponse } from './protocol/v2/PermissionProfileListResponse';
+import type { ReviewStartParams } from './protocol/v2/ReviewStartParams';
+import type { ReviewStartResponse } from './protocol/v2/ReviewStartResponse';
+import type { ReviewTarget } from './protocol/v2/ReviewTarget';
 import type { Thread } from './protocol/v2/Thread';
 import type { ThreadListParams } from './protocol/v2/ThreadListParams';
 import type { ThreadListResponse } from './protocol/v2/ThreadListResponse';
@@ -159,6 +165,7 @@ const CODEX_CAPABILITIES: ExternalAgentCapabilities = {
   cancellation: true,
   steering: true,
   sessionListing: true,
+  nativeReview: true,
   accountUsage: true,
 };
 
@@ -180,6 +187,12 @@ interface ActiveTurn {
   /** Set once `turn/start` answers. Until then, notifications buffer. */
   reducer?: CodexTurnReducer;
   turnId?: string;
+  /**
+   * A review turn. Codex refuses `turn/steer` on one — `activeTurnNotSteerable`
+   * with `turnKind: "review"` — and steering a review has no coherent meaning
+   * anyway, so it is refused here without a round trip.
+   */
+  review?: boolean;
   /**
    * Set by `cancel` — including when it arrives before Codex has named the
    * turn, which is the case `turnId` alone cannot express.
@@ -442,6 +455,88 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
   }
 
   /**
+   * `review/start`, Codex's first-class review of the working tree.
+   *
+   * Three things make this different from {@link startTurn}, and only three:
+   *
+   * 1. **It is awaited.** `ReviewStartResponse` names the thread the review
+   *    runs on, and the caller cannot be told about a review whose thread is
+   *    not the one it subscribed to. The channel is registered on the session
+   *    before the request is sent, so notifications that arrive during the
+   *    round trip buffer exactly as they do for a turn.
+   * 2. **Inline delivery is asserted, not assumed.** For `delivery: "inline"`
+   *    Codex documents `reviewThreadId` as the original thread. A build that
+   *    returns another one is failing loudly here rather than streaming a
+   *    review onto a thread the hub is not tracking.
+   * 3. **The turn is not steerable**, which `#steerNow` reads off the flag.
+   *
+   * There is no Git precondition here on purpose. A review in a non-Git
+   * directory **completes** — Codex logs `fatal: not a git repository`
+   * internally and reviews nothing — so refusing it is the hub's job, where the
+   * workspace, the environment and the user's intent are all known.
+   */
+  async startReview(input: ExternalAgentStartReviewInput): Promise<ExternalAgentReviewStream> {
+    const session = this.#requireSession(input.params.sessionId);
+    const handle = input.params.clientMessageId;
+    const channel = new TurnChannel<ExternalAgentEvent>();
+    const active: ActiveTurn = { handle, channel, buffered: [], review: true };
+    session.activeTurn = active;
+
+    let started: ReviewStartResponse;
+    try {
+      started = await session.client.request<ReviewStartResponse>(
+        'review/start',
+        {
+          threadId: session.threadId,
+          target: encodeReviewTarget(input.params.target),
+          // Stated rather than defaulted: a detached review creates a second
+          // thread, and every id the hub persists names this one.
+          delivery: 'inline',
+        } satisfies ReviewStartParams,
+        DEFAULT_REQUEST_TIMEOUT_MS
+      );
+    } catch (error) {
+      // Nothing is consuming the channel yet — the caller is still awaiting
+      // this call — so the failure travels as a rejection rather than as an
+      // error event nobody would read.
+      channel.finish();
+      if (session.activeTurn === active) session.activeTurn = undefined;
+      throw error;
+    }
+
+    if (started.reviewThreadId !== session.threadId) {
+      channel.finish();
+      if (session.activeTurn === active) session.activeTurn = undefined;
+      await this.#interruptTurn(session, started.turn.id);
+      throw new ExternalAgentAdapterError(
+        'codex-review-detached',
+        `Codex ran an inline review on thread "${started.reviewThreadId}" instead of "${session.threadId}".`
+      );
+    }
+
+    active.turnId = started.turn.id;
+    if (active.cancelled) {
+      await this.#interruptTurn(session, started.turn.id);
+    } else {
+      active.reducer = new CodexTurnReducer(started.turn.id, this.#now);
+      if (session.accountLimits) {
+        active.channel.push({ type: 'account_limits', limits: session.accountLimits });
+      }
+      const buffered = active.buffered;
+      active.buffered = [];
+      for (const pending of buffered) {
+        this.#applyNotification(session, active, pending.method, pending.params);
+      }
+    }
+
+    return {
+      nativeTurnId: handle,
+      reviewThreadId: started.reviewThreadId,
+      [Symbol.asyncIterator]: () => channel.drain(),
+    };
+  }
+
+  /**
    * Answering is synchronous — it resolves the promise the server request is
    * parked on — but every failure still has to arrive as a **rejection**. The
    * interface promises a `Promise<void>`, and a caller that attaches `.catch`
@@ -590,6 +685,10 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     if (!active || active.cancelled || active.handle !== input.nativeTurnId || !active.turnId) {
       return { accepted: false, reasonCode: 'turn-already-completed' };
     }
+    // A review is not a conversation to redirect: Codex answers
+    // `activeTurnNotSteerable` for one, and asking is a round trip whose answer
+    // is already known here.
+    if (active.review) return { accepted: false, reasonCode: 'turn-not-steerable' };
     // The shared JSON-RPC client answers one message at a time and does not
     // read the next line until a server→client request is answered — so a
     // `turn/steer` sent while Codex is blocked on an approval could never see
@@ -1158,6 +1257,20 @@ function buildTurnStartParams(
     ...(configuration.model ? { model: configuration.model } : {}),
     ...(configuration.effort ? { effort: configuration.effort } : {}),
   };
+}
+
+/**
+ * The neutral target as Codex's own `ReviewTarget`.
+ *
+ * Exhaustive over the shipped union rather than a pass-through: the two shapes
+ * agree today, and a member added on either side has to be a deliberate mapping
+ * here instead of a MangoStudio value that happens to reach the vendor.
+ */
+function encodeReviewTarget(target: ExternalReviewTarget): ReviewTarget {
+  switch (target.type) {
+    case 'uncommittedChanges':
+      return { type: 'uncommittedChanges' };
+  }
 }
 
 /**

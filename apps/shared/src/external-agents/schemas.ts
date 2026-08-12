@@ -1203,6 +1203,66 @@ export const ExternalAgentSteerResultSchema = Type.Union([
 ]);
 export type ExternalAgentSteerResult = Static<typeof ExternalAgentSteerResultSchema>;
 
+/**
+ * What a native review is pointed at.
+ *
+ * A discriminated union with one member, deliberately. Codex's own
+ * `ReviewTarget` also carries `baseBranch`, `commit` and `custom`, and modelling
+ * this as a string enum would make adding them a breaking reshape rather than
+ * one more object in the union. Only `uncommittedChanges` ships: it is the one
+ * target the action's own name describes, and the rest are eight combinations of
+ * copy, tests and explanation before anyone has used the first one.
+ *
+ * `uncommittedChanges` is staged, unstaged **and** untracked work, as the vendor
+ * defines it — MangoStudio does not narrow it.
+ */
+export const ExternalReviewTargetSchema = Type.Union([
+  Type.Object({ type: Type.Literal('uncommittedChanges') }, { additionalProperties: false }),
+]);
+
+export type ExternalReviewTarget = Static<typeof ExternalReviewTargetSchema>;
+
+/**
+ * Start a vendor-native review on an open session.
+ *
+ * `clientMessageId` is the turn's idempotency key exactly as it is for an
+ * ordinary turn: a review is a turn that happens to be a review, and it is
+ * deduplicated, ordered, persisted and cancelled by the same machinery.
+ *
+ * Delivery is absent on purpose. Only inline ships, so there is nothing to
+ * choose — and an adapter that let a caller ask for a detached review would be
+ * promising a second thread the hub is not tracking.
+ */
+export const ExternalAgentStartReviewParamsSchema = Type.Object(
+  {
+    sessionId: ExternalAgentOpaqueIdSchema,
+    clientMessageId: ExternalAgentOpaqueIdSchema,
+    target: ExternalReviewTargetSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentStartReviewParams = Static<typeof ExternalAgentStartReviewParamsSchema>;
+
+/**
+ * The vendor's answer, both halves of it.
+ *
+ * `ReviewStartResponse` returns a turn **and** the thread the review runs on,
+ * and a detached review runs on a different thread than the one that asked for
+ * it. Carrying `reviewThreadId` back rather than dropping it is what lets the
+ * hub assert that an inline review stayed on the tracked thread instead of
+ * assuming it: if a future Codex changes that, the assertion fails loudly rather
+ * than the events arriving on a thread nobody is listening to.
+ */
+export const ExternalAgentStartReviewResultSchema = Type.Object(
+  {
+    nativeTurnId: ExternalAgentOpaqueIdSchema,
+    /** Inline delivery: the session's own thread. Asserted, never assumed. */
+    reviewThreadId: ExternalAgentOpaqueIdSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentStartReviewResult = Static<typeof ExternalAgentStartReviewResultSchema>;
+
 /** Semantic event ordering is per session and starts at one, independently of transport seq. */
 export const ExternalAgentEventEnvelopeSchema = Type.Object(
   {

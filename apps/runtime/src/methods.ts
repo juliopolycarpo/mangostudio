@@ -21,6 +21,8 @@ import type {
   ExternalAgentRefreshAccountUsageParams,
   ExternalAgentRefreshAccountUsageResult,
   ExternalAgentRespondParams,
+  ExternalAgentStartReviewParams,
+  ExternalAgentStartReviewResult,
   ExternalAgentSteerParams,
   ExternalAgentSteerResult,
   ExternalAgentTurnParams,
@@ -75,6 +77,8 @@ export type {
   ExternalAgentRefreshAccountUsageParams,
   ExternalAgentRefreshAccountUsageResult,
   ExternalAgentRespondParams,
+  ExternalAgentStartReviewParams,
+  ExternalAgentStartReviewResult,
   ExternalAgentSteerParams,
   ExternalAgentSteerResult,
   ExternalAgentTurnParams,
@@ -1077,6 +1081,14 @@ export interface RuntimeMethodMap {
   'external-agent.steer': {
     readonly params: ExternalAgentSteerParams;
     readonly result: ExternalAgentSteerResult;
+  };
+  /**
+   * A vendor-native review, started on an already-open session. It produces the
+   * same ordered event stream a turn does — there is no second event path.
+   */
+  'external-agent.start-review': {
+    readonly params: ExternalAgentStartReviewParams;
+    readonly result: ExternalAgentStartReviewResult;
   };
   'external-agent.cancel': {
     readonly params: ExternalAgentCancelParams;

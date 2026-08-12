@@ -12,6 +12,7 @@ import type {
   ExternalAgentCloseInput,
   ExternalAgentListSessionsInput,
   ExternalAgentOpenSessionInput,
+  ExternalAgentStartReviewInput,
   ExternalAgentStartTurnInput,
   ExternalAgentSteerInput,
   ExternalAgentSteerOutcome,
@@ -33,6 +34,10 @@ export interface FakeExternalAgentOptions {
   readonly steerResult?: ExternalAgentSteerOutcome;
   /** Implements the optional `listSessions` member and answers with these rows. */
   readonly listedSessions?: readonly ExternalNativeSession[];
+  /** Implements the optional `startReview` member, whatever the descriptor advertises. */
+  readonly reviewable?: boolean;
+  /** What `startReview` answers as its thread. Defaults to the session's own. */
+  readonly reviewThreadId?: string;
 }
 
 /** Scriptable protocol peer. It never knows or launches a production vendor. */
@@ -43,6 +48,7 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
   readonly responses: ExternalAgentApprovalResponseInput[] = [];
   readonly steers: ExternalAgentSteerInput[] = [];
   readonly listings: ExternalAgentListSessionsInput[] = [];
+  readonly reviews: ExternalAgentStartReviewInput[] = [];
   readonly cancellations: ExternalAgentCancelInput[] = [];
   readonly closes: ExternalAgentCloseInput[] = [];
   readonly #events: readonly ExternalAgentEvent[];
@@ -57,6 +63,7 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
   steer?: ExternalAgentAdapter['steer'];
   /** Same pattern: presence is what the registry's conformance check reads. */
   listSessions?: ExternalAgentAdapter['listSessions'];
+  startReview?: ExternalAgentAdapter['startReview'];
 
   constructor(options: FakeExternalAgentOptions = {}) {
     this.#events = options.events ?? [{ type: 'completed' }];
@@ -75,6 +82,22 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
       this.steer = (input) => {
         this.steers.push(input);
         return Promise.resolve(options.steerResult ?? { accepted: true });
+      };
+    }
+    if (options.reviewable) {
+      this.startReview = (input) => {
+        this.reviews.push(input);
+        const events = this.#events;
+        const hang = this.#hangTurn;
+        return Promise.resolve({
+          // The hub's own handle, exactly as a real adapter reports it.
+          nativeTurnId: input.params.clientMessageId,
+          reviewThreadId: options.reviewThreadId ?? input.nativeSessionId,
+          async *[Symbol.asyncIterator]() {
+            for (const event of events) yield event;
+            if (hang) await new Promise<never>(() => undefined);
+          },
+        });
       };
     }
     const listed = options.listedSessions;

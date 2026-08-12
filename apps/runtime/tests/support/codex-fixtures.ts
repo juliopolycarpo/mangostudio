@@ -28,6 +28,7 @@ import type { Model } from '../../src/services/external-agents/codex/protocol/v2
 import type { PatchChangeKind } from '../../src/services/external-agents/codex/protocol/v2/PatchChangeKind';
 import type { PermissionProfileSummary } from '../../src/services/external-agents/codex/protocol/v2/PermissionProfileSummary';
 import type { ReasoningSummaryTextDeltaNotification } from '../../src/services/external-agents/codex/protocol/v2/ReasoningSummaryTextDeltaNotification';
+import type { ReviewStartResponse } from '../../src/services/external-agents/codex/protocol/v2/ReviewStartResponse';
 import type { Thread } from '../../src/services/external-agents/codex/protocol/v2/Thread';
 import type { ThreadItem } from '../../src/services/external-agents/codex/protocol/v2/ThreadItem';
 import type { ThreadListResponse } from '../../src/services/external-agents/codex/protocol/v2/ThreadListResponse';
@@ -209,6 +210,23 @@ export function turnCompleted(
 
 export function turnStartResponse(): TurnStartResponse {
   return { turn: turnFixture('inProgress') };
+}
+
+/**
+ * `review/start`'s answer. `reviewThreadId` defaults to the thread the review
+ * was asked for, which is what inline delivery is documented to return — a test
+ * overrides it to make the adapter face a detached one.
+ */
+export function reviewStartResponse(reviewThreadId: string = THREAD_ID): ReviewStartResponse {
+  return { turn: turnFixture('inProgress'), reviewThreadId };
+}
+
+export function enteredReviewModeItem(id: string, review: string): ThreadItem {
+  return { type: 'enteredReviewMode', id, review };
+}
+
+export function exitedReviewModeItem(id: string, review: string): ThreadItem {
+  return { type: 'exitedReviewMode', id, review };
 }
 
 export function errorNotification(
