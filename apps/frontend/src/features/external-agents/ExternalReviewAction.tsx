@@ -13,13 +13,15 @@
  * disabled one for something most runners simply do not have.
  */
 
+import { ERROR_CODES } from '@mangostudio/shared/errors';
+import type { Messages } from '@mangostudio/shared/i18n';
 import { ScanSearch } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
-import { resolveApiErrorMessage } from '@/lib/utils';
+import { ApiError, resolveApiErrorMessage } from '@/lib/utils';
 import { useExternalAgents } from './useExternalAgents';
 
 interface ExternalReviewActionProps {
@@ -49,7 +51,7 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
     try {
       await app.handleReviewChanges();
     } catch (error) {
-      toast(resolveApiErrorMessage(error, labels.failed), 'error');
+      toast(reviewFailureMessage(error, labels), 'error');
     } finally {
       setPending(false);
     }
@@ -76,4 +78,25 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
       </p>
     </div>
   );
+}
+
+/**
+ * The refusal in the reader's own language, where the server has one to give.
+ *
+ * The transcript already carries the server's own sentence — this is the copy
+ * for the panel the user clicked in, and every case it names is one the server
+ * decided rather than one this component guessed. Anything else falls back to
+ * the server's message, and only then to a neutral failure.
+ */
+function reviewFailureMessage(
+  error: unknown,
+  labels: Messages['externalAgents']['review']
+): string {
+  const code = error instanceof ApiError ? error.code : undefined;
+  if (code === ERROR_CODES.EXTERNAL_REVIEW_REQUIRES_GIT) return labels.requiresGit;
+  if (code === ERROR_CODES.UNSUPPORTED) return labels.unsupported;
+  // The stream's only other validation refusal for a chat this action rendered
+  // for: it is external by construction, so what is missing is the folder.
+  if (code === ERROR_CODES.VALIDATION) return labels.requiresWorkdir;
+  return resolveApiErrorMessage(error, labels.failed);
 }

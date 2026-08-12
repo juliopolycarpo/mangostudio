@@ -427,6 +427,12 @@ Open these first:
   re-read before a chat exists, and the lease that keeps two chats out of one vendor transcript)
 - `apps/api/src/modules/external-agents/infrastructure/external-session-adoption-lease-repository.ts`
   (the lease, keyed by the session rather than by the chat)
+- `apps/api/src/modules/external-agents/application/external-turn-stream.ts` and
+  `http/external-agent-turn-routes.ts` (the send stream's preflight, and the review action that
+  reuses all of it — `POST /api/chats/:id/external-agent/review`, whose Git precondition is asked
+  through the selected runtime rather than of the hub's own filesystem)
+- `apps/frontend/src/features/external-agents/ExternalReviewAction.tsx` (the repository panel's
+  "Review my changes", kept away from the permissions dropdown's differently-scoped "Auto-review")
 - `apps/shared/src/environments/detection/agent-cli-definitions.ts` (what the scanner looks for)
 - `apps/api/tests/unit/modules/external-agents/`, `apps/shared/tests/unit/external-agents.test.ts`
 

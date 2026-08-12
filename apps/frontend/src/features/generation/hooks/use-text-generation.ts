@@ -537,7 +537,10 @@ export function useTextGeneration({
             parts: nextParts,
           });
         }
-        if (recovery) throw error;
+        // A review was started from a button in the repository panel, not from
+        // the composer — its caller is looking at that panel, and needs the
+        // refusal where it clicked as well as in the transcript.
+        if (recovery || review) throw error;
       } finally {
         activeTurnRef.current = null;
         stream.setAbortController(null);

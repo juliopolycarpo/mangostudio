@@ -8,6 +8,7 @@
  * asked for a code review when they enabled unattended approvals.
  */
 
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { en } from '@mangostudio/shared/i18n';
@@ -15,6 +16,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { ExternalReviewAction } from '../../../src/features/external-agents/ExternalReviewAction';
 import { AppContext } from '../../../src/lib/app-context';
+import { ApiError } from '../../../src/lib/utils';
 import { render, screen } from '../../support/harness/render';
 
 const descriptors: ExternalAgentDescriptor[] = [];
@@ -44,11 +46,15 @@ function renderAction(
     readonly runner?: { kind: 'external'; targetId: 'codex' } | { kind: 'mangostudio' };
     readonly hasChanges?: boolean;
     readonly isGenerating?: boolean;
+    readonly reviewFailure?: () => Error;
   } = {}
 ) {
   descriptors.length = 0;
   descriptors.push(descriptor(options.nativeReview ?? true));
-  const handleReviewChanges = vi.fn(() => Promise.resolve());
+  const handleReviewChanges = vi.fn(() => {
+    const failure = options.reviewFailure?.();
+    return failure ? Promise.reject(failure) : Promise.resolve();
+  });
   const app = {
     runner: options.runner ?? { kind: 'external', targetId: 'codex' },
     currentChatId: 'chat-1',
@@ -101,6 +107,25 @@ describe('ExternalReviewAction', () => {
     const button = screen.getByRole('button', { name: en.externalAgents.review.button });
     expect(button.hasAttribute('disabled')).toBe(true);
     expect(screen.getByText(en.externalAgents.review.noChanges)).toBeTruthy();
+  });
+
+  it('reports a refused review in the panel the user clicked in, localized', async () => {
+    // The transcript carries the server's own sentence; this is the copy for
+    // the repository panel, and the code is the server's decision rather than
+    // something the component guessed.
+    renderAction({
+      reviewFailure: () =>
+        new ApiError({
+          error: 'This folder is not a Git repository, so there are no changes to review.',
+          code: ERROR_CODES.EXTERNAL_REVIEW_REQUIRES_GIT,
+        }),
+    });
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole('button', { name: en.externalAgents.review.button }));
+
+    expect(await screen.findByText(en.externalAgents.review.requiresGit)).toBeTruthy();
   });
 
   it('cannot start a second turn while one is running', () => {
