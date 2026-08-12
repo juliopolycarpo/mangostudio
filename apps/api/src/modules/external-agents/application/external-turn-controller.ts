@@ -66,7 +66,7 @@ import {
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
 import { ExternalTurnTranscript } from '../domain/external-turn-transcript';
-import { cacheExternalAccountLimits } from './external-account-limits';
+import { cacheExternalAccountLimitsBestEffort } from './external-account-limits';
 import {
   type AnswerExternalApprovalResult,
   type ExternalApprovalRegistry,
@@ -687,14 +687,16 @@ export function createExternalTurnController(
         }
 
         if (envelope.event.type === 'account_limits') {
-          void cacheExternalAccountLimits(
+          // Discardable vendor state: a cache write must never disturb the turn.
+          cacheExternalAccountLimitsBestEffort(
             {
               userId: input.userId,
               environmentId: context.chat.environmentId,
               targetId,
               vendorAccountFingerprint: input.vendorAccountFingerprint ?? null,
             },
-            envelope.event.limits
+            envelope.event.limits,
+            { sessionId: handle.sessionId }
           );
         }
 

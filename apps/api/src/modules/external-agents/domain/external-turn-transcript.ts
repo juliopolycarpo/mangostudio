@@ -118,6 +118,13 @@ export class ExternalTurnTranscript {
     event: ExternalAgentEvent,
     context: { readonly sequence: number; readonly at: number }
   ): ExternalTranscriptApplication {
+    // Observational vendor state is streamed to the hub for display/cache only.
+    // It must not consume transcript event/byte budgets or be able to terminate
+    // the turn — the contract treats these as non-durable no-ops.
+    if (event.type === 'thread_usage' || event.type === 'account_limits') {
+      return { durable: false };
+    }
+
     this.#turnPart.lastSequence = context.sequence;
     this.#turnPart.updatedAt = context.at;
     this.#turnPart.eventCount += 1;

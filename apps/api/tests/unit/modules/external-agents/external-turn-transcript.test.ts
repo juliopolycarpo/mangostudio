@@ -164,6 +164,36 @@ describe('ExternalTurnTranscript', () => {
     expect(target.turnPart.status).toBe('terminal');
   });
 
+  it('does not charge observational account/thread usage against the event budget', () => {
+    const target = transcript({ maxEvents: 1 });
+    const limits = {
+      targetId: 'codex' as const,
+      windows: [{ usedPercent: 10 }],
+      observedAtMs: 2_000,
+    };
+    const applications = feed(target, [
+      { type: 'text_delta', text: 'ok' },
+      // Far more observational events than the budget — must not terminate.
+      ...Array.from({ length: 20 }, () => ({
+        type: 'thread_usage' as const,
+        usage: { last: { inputTokens: 1 }, total: { inputTokens: 1 } },
+      })),
+      ...Array.from({ length: 20 }, () => ({
+        type: 'account_limits' as const,
+        limits,
+      })),
+      { type: 'completed' as const },
+    ]);
+
+    expect(applications.every((application) => application.terminal !== 'limit-exceeded')).toBe(
+      true
+    );
+    expect(applications.at(-1)?.terminal).toBe('completed');
+    expect(target.turnPart.status).toBe('terminal');
+    expect(target.turnPart.eventCount).toBe(2);
+    expect(target.terminated).toBe(true);
+  });
+
   it('reports the reason it recorded when a terminal event also crosses the budget', () => {
     const target = transcript({ maxEvents: 1 });
     const applications = feed(target, [{ type: 'text_delta', text: 'a' }, { type: 'completed' }]);

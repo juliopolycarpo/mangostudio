@@ -81,4 +81,79 @@ describe('external account limits cache key', () => {
     expect(personalEnv?.windows[0]?.usedPercent).toBe(55);
     expect(personalAccount?.windows[0]?.usedPercent).toBe(90);
   });
+
+  it('isolates snapshots across users and targets', async () => {
+    const db = getDb();
+    const shared = {
+      environmentId: 'env-work',
+      vendorAccountFingerprint: 'account-work',
+      limits: {
+        windows: [{ usedPercent: 10 }],
+        observedAtMs: 1_000,
+      },
+    };
+
+    await writeExternalAccountLimitsCache(
+      {
+        userId: 'user-a',
+        environmentId: shared.environmentId,
+        targetId: 'codex',
+        vendorAccountFingerprint: shared.vendorAccountFingerprint,
+      },
+      { targetId: 'codex', ...shared.limits, windows: [{ usedPercent: 11 }] },
+      db
+    );
+    await writeExternalAccountLimitsCache(
+      {
+        userId: 'user-b',
+        environmentId: shared.environmentId,
+        targetId: 'codex',
+        vendorAccountFingerprint: shared.vendorAccountFingerprint,
+      },
+      { targetId: 'codex', ...shared.limits, windows: [{ usedPercent: 22 }] },
+      db
+    );
+    await writeExternalAccountLimitsCache(
+      {
+        userId: 'user-a',
+        environmentId: shared.environmentId,
+        targetId: 'claude',
+        vendorAccountFingerprint: shared.vendorAccountFingerprint,
+      },
+      { targetId: 'claude', ...shared.limits, windows: [{ usedPercent: 33 }] },
+      db
+    );
+
+    const userACodex = await readExternalAccountLimitsCache(
+      {
+        userId: 'user-a',
+        environmentId: shared.environmentId,
+        targetId: 'codex',
+        vendorAccountFingerprint: shared.vendorAccountFingerprint,
+      },
+      db
+    );
+    const userBCodex = await readExternalAccountLimitsCache(
+      {
+        userId: 'user-b',
+        environmentId: shared.environmentId,
+        targetId: 'codex',
+        vendorAccountFingerprint: shared.vendorAccountFingerprint,
+      },
+      db
+    );
+    const userAClaude = await readExternalAccountLimitsCache(
+      {
+        userId: 'user-a',
+        environmentId: shared.environmentId,
+        targetId: 'claude',
+        vendorAccountFingerprint: shared.vendorAccountFingerprint,
+      },
+      db
+    );
+
+    expect(userACodex?.windows[0]?.usedPercent).toBe(11);
+    expect(userBCodex?.windows[0]?.usedPercent).toBe(22);
+    expect(userAClaude?.windows[0]?.usedPercent).toBe(33);
+  });
 });

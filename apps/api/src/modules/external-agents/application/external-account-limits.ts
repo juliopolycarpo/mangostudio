@@ -51,9 +51,8 @@ export interface RefreshExternalAccountLimitsInput {
 export async function refreshExternalAccountLimits(
   input: RefreshExternalAccountLimitsInput
 ): Promise<ExternalAccountLimits | undefined> {
-  const runtime = await getRuntimeClient(input.userId, input.environmentId);
-
   try {
+    const runtime = await getRuntimeClient(input.userId, input.environmentId);
     const result = await runtime.externalAgents.refreshAccountUsage(
       {
         targetId: input.targetId,
@@ -87,4 +86,21 @@ export async function cacheExternalAccountLimits(
   limits: ExternalAccountLimits
 ): Promise<void> {
   await writeExternalAccountLimitsCache(key, limits, getDb());
+}
+
+/**
+ * Fire-and-forget cache write for a live turn. A database failure must never
+ * disturb the turn — degrade to "no cached snapshot" and log.
+ */
+export function cacheExternalAccountLimitsBestEffort(
+  key: ExternalAccountLimitsCacheKey,
+  limits: ExternalAccountLimits,
+  context: { readonly sessionId: string }
+): void {
+  void cacheExternalAccountLimits(key, limits).catch((error: unknown) => {
+    logger.warn('account_limits_cache_failed', {
+      sessionId: context.sessionId,
+      error: String(error),
+    });
+  });
 }
