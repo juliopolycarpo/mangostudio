@@ -46,15 +46,6 @@ jobs:
           restore-prefix: check-
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - name: Restore TypeScript build info
-        uses: ./.github/actions/cache-scoped
-        with:
-          family: tsbuildinfo
-          path: .mango/artifacts/tsbuildinfo/
-          validity: typescript-${{ steps.toolchain.outputs.typescript }}-${{ hashFiles('tsconfig*.json', 'apps/**/tsconfig*.json', 'packages/**/tsconfig*.json') }}-${{ hashFiles('apps/**/*.ts', 'apps/**/*.tsx', 'packages/**/*.ts', 'scripts/**/*.ts') }}
-          restore-prefix: typescript-${{ steps.toolchain.outputs.typescript }}-
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
       - name: Restore workflow lint tools
         uses: ./.github/actions/cache-scoped
         with:

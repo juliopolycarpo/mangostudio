@@ -4,8 +4,7 @@
     "lib": ["ES2022"],
     "types": ["bun"],
     "rootDir": ".",
-    "outDir": "dist",
-    "tsBuildInfoFile": "../../.mango/artifacts/tsbuildinfo/runtime.tsbuildinfo"
+    "outDir": "dist"
   },
   "include": ["src", "tests"]
 }
