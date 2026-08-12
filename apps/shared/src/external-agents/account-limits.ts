@@ -54,15 +54,13 @@ export function tightestExternalRateLimitWindow(
 }
 
 /**
- * Whether capacity remains beyond a zero primary: secondary windows, credits,
- * or reset credits. A primary at 100% with any of these still available is not
- * exhaustion.
+ * Whether capacity remains beyond an exhausted tightest window: any other
+ * reported window still under 100%, credits, or reset credits. Exhaustion is
+ * never inferred from window array position — `windows` order is not a primary
+ * ranking.
  */
 export function externalAccountHasAlternateCapacity(limits: ExternalAccountLimits): boolean {
-  if (limits.windows.length > 1) {
-    const others = limits.windows.slice(1);
-    if (others.some((window) => window.usedPercent < 100)) return true;
-  }
+  if (limits.windows.some((window) => window.usedPercent < 100)) return true;
   if (limits.credits?.unlimited === true) return true;
   if (limits.credits?.hasCredits === true) return true;
   if ((limits.resetCredits?.availableCount ?? 0) > 0) return true;
@@ -86,10 +84,10 @@ export function interpretExternalAccountLimits(
   const tightest = tightestExternalRateLimitWindow(limits);
   if (!tightest) return { kind: 'unknown' };
 
-  const primaryExhausted = tightest.usedPercent >= 100;
+  const tightestExhausted = tightest.usedPercent >= 100;
   return {
     kind: 'ok',
     tightest,
-    exhausted: primaryExhausted && !externalAccountHasAlternateCapacity(limits),
+    exhausted: tightestExhausted && !externalAccountHasAlternateCapacity(limits),
   };
 }

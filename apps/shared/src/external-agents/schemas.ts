@@ -478,7 +478,7 @@ export const ExternalCreditsSchema = Type.Object(
     hasCredits: Type.Optional(Type.Boolean()),
     unlimited: Type.Optional(Type.Boolean()),
     /** Vendor-reported balance string; not normalized to a number. */
-    balance: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    balance: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
   },
   { additionalProperties: false }
 );
@@ -489,8 +489,8 @@ export type ExternalCredits = Static<typeof ExternalCreditsSchema>;
 export const ExternalResetCreditSchema = Type.Object(
   {
     id: VendorText('vendorId', { minLength: 1 }),
-    resetType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-    status: Type.String({ minLength: 1, maxLength: 128 }),
+    resetType: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
+    status: VendorText('accountLabel', { minLength: 1 }),
     grantedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
     expiresAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
     title: Type.Optional(VendorText('title')),
@@ -518,8 +518,8 @@ export type ExternalResetCredits = Static<typeof ExternalResetCreditsSchema>;
 /** Spend-control limit. `None`/absent is unavailable, not "recovered". */
 export const ExternalSpendControlSchema = Type.Object(
   {
-    limit: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-    used: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    limit: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
+    used: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
     remainingPercent: Type.Optional(Type.Number()),
     resetsAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
     /** Backend-reported; `null`/absent means unavailable, never a sparse recovery. */
@@ -544,8 +544,8 @@ export const ExternalRateLimitBucketSchema = Type.Object(
     secondary: Type.Optional(ExternalRateLimitWindowSchema),
     credits: Type.Optional(ExternalCreditsSchema),
     spendControl: Type.Optional(ExternalSpendControlSchema),
-    planType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-    reachedType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    planType: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
+    reachedType: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
   },
   { additionalProperties: false }
 );
@@ -575,9 +575,10 @@ export const ExternalAccountLimitsSchema = Type.Object(
     windows: ReadonlyArraySchema(ExternalRateLimitWindowSchema, { maxItems: 16 }),
     byLimitId: Type.Optional(ReadonlyArraySchema(ExternalRateLimitByIdSchema, { maxItems: 32 })),
     credits: Type.Optional(ExternalCreditsSchema),
+    spendControl: Type.Optional(ExternalSpendControlSchema),
     resetCredits: Type.Optional(ExternalResetCreditsSchema),
-    planType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
-    reachedType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    planType: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
+    reachedType: Type.Optional(VendorText('accountLabel', { minLength: 1 })),
     /** When this snapshot was read or last successfully merged. Epoch ms. */
     observedAtMs: Type.Integer({ minimum: 0 }),
   },

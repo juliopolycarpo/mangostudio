@@ -9,6 +9,7 @@ import {
   EXTERNAL_STEER_REJECTION_REASONS,
   EXTERNAL_TEXT_LIMITS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
+  ExternalAccountLimitsSchema,
   ExternalAgentAckResultSchema,
   ExternalAgentCancelParamsSchema,
   ExternalAgentCloseParamsSchema,
@@ -526,6 +527,24 @@ describe('bounded vendor text', () => {
         type: 'activity_started',
         callId: 'call-1',
         activity: { name, kind: 'other', title: '' },
+      })
+    ).toBe(true);
+  });
+
+  it('accepts astral vendor text on account-limits fields via VendorText', () => {
+    const balance = boundVendorText(
+      '🙂'.repeat(EXTERNAL_TEXT_LIMITS.accountLabel),
+      'accountLabel'
+    ).text;
+    const planType = boundVendorText('プラン🙂', 'accountLabel').text;
+
+    expect(
+      Value.Check(ExternalAccountLimitsSchema, {
+        targetId: 'codex',
+        windows: [{ usedPercent: 10 }],
+        credits: { balance },
+        planType,
+        observedAtMs: 1,
       })
     ).toBe(true);
   });

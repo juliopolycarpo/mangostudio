@@ -57,6 +57,23 @@ describe('external account limits interpretation', () => {
     }
   });
 
+  it('does not treat secondary at 100% as exhaustion when primary still has capacity', () => {
+    const snapshot = limits({
+      windows: [
+        { label: 'primary', usedPercent: 40, resetsAtMs: NOW + 60_000 },
+        { label: 'secondary', usedPercent: 100, resetsAtMs: NOW + 86_400_000 },
+      ],
+      observedAtMs: NOW,
+    });
+    expect(externalAccountHasAlternateCapacity(snapshot)).toBe(true);
+    const verdict = interpretExternalAccountLimits(snapshot, NOW);
+    expect(verdict.kind).toBe('ok');
+    if (verdict.kind === 'ok') {
+      expect(verdict.exhausted).toBe(false);
+      expect(verdict.tightest.usedPercent).toBe(100);
+    }
+  });
+
   it('marks genuinely exhausted accounts and keeps the reset time', () => {
     const snapshot = limits({
       windows: [{ label: 'primary', usedPercent: 100, resetsAtMs: NOW + 3_600_000 }],
