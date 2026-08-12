@@ -348,6 +348,47 @@ describe('InputBar — mid-turn steering', () => {
     }
   });
 
+  it('disables the composer while a steer is in flight, so a later edit cannot be lost', async () => {
+    const originalFetch = globalThis.fetch;
+    const deferred = Promise.withResolvers<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => deferred.promise)
+    );
+
+    try {
+      const user = userEvent.setup();
+      renderInputBar({
+        chatId: 'chat-1',
+        runner: EXTERNAL_RUNNER,
+        externalDescriptor: steerableDescriptor(),
+        isGenerating: true,
+        disabled: true,
+      });
+
+      await user.type(screen.getByRole('textbox'), 'first correction');
+      await user.click(screen.getByRole('button', { name: 'Steer' }));
+
+      // The POST has not resolved yet: the composer must not accept an edit
+      // that was never part of what was sent, so it stays disabled rather
+      // than letting one in that the eventual clear would then discard.
+      await waitFor(() => expect(screen.getByRole('textbox')).toBeDisabled());
+      expect(screen.getByRole('textbox')).toHaveValue('first correction');
+
+      deferred.resolve(
+        new Response(JSON.stringify({ accepted: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      await waitFor(() => expect(screen.getByRole('textbox')).not.toBeDisabled());
+      expect(screen.getByRole('textbox')).toHaveValue('');
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
   it('shows the rejection reason inline when the server refuses', async () => {
     const scenario = createFetchScenario();
     scenario

@@ -445,7 +445,7 @@ export function InputBar({
               setPrompt(e.target.value);
               if (steerError) setSteerError(null);
             }}
-            disabled={(disabled && !showSteerAffordance) || externalRunnerBlocked}
+            disabled={(disabled && !showSteerAffordance) || externalRunnerBlocked || steering}
             className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none min-w-0"
             placeholder={
               showSteerAffordance ? t.externalAgents.steer.buttonHint : t.chat.input.placeholder
