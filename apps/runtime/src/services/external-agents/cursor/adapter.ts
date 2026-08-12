@@ -42,8 +42,12 @@ import type {
   ExternalAgentModel,
   ExternalAgentRuntimeDescriptor,
   ExternalAgentTargetId,
+  ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
-import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_NATIVE_SESSION_PAGE_LIMIT,
+  NO_EXTERNAL_AGENT_CAPABILITIES,
+} from '@mangostudio/shared/external-agents';
 import type {
   ExternalAgentAdapter,
   ExternalAgentAdapterContext,
@@ -147,6 +151,16 @@ const MINIMUM_CURSOR_VERSION_PARSED = requireCursorVersion(MINIMUM_CURSOR_AGENT_
 
 /** Same ceiling the neutral catalog schema enforces, applied before it is reached. */
 const MODEL_CATALOG_LIMIT = 256;
+
+/**
+ * The most rows one listing may return.
+ *
+ * ACP's `session/list` takes no page size, so the bound has to be applied to
+ * what comes back: an account with a long history would otherwise hand the hub
+ * a page the neutral contract refuses, failing the whole call instead of
+ * showing the first screenful.
+ */
+const MAX_LISTED_SESSIONS = EXTERNAL_NATIVE_SESSION_PAGE_LIMIT;
 
 /**
  * What ACP genuinely supports on the pinned build, as opposed to what the
@@ -531,50 +545,93 @@ export class CursorAcpAdapter implements ExternalAgentAdapter {
   }
 
   /**
-   * `session/list`, on a connection that is already open.
+   * `session/list`, on an open connection or on a short-lived one.
    *
    * One caveat is encoded by *not* being encoded: list membership is eventually
    * consistent. A session created earlier in the same cwd that never received a
    * prompt did not appear in a later listing, while one created in the listing
    * run did. So nothing here assumes a just-created session is listable, and
-   * plan 013 re-reads a session's metadata when it adopts one rather than
-   * trusting this page.
+   * adoption re-reads a session's metadata rather than trusting this page.
    *
-   * *Which* connection answers is the caller's to say. This adapter runs one
-   * `cursor-agent` per session, each with its own cwd and environment, so
-   * asking whichever opened first would answer a question about one workspace
-   * with another workspace's sessions. With no id given there is either a single
-   * session or an ambiguity worth failing on.
+   * *Which* connection answers matters more here than for Codex. This adapter
+   * runs one `cursor-agent` per session, each with its own cwd and environment,
+   * so asking whichever opened first would answer a question about one workspace
+   * with another workspace's sessions. A named session is used; two open ones
+   * and no name is an ambiguity worth failing on; none at all opens a probe,
+   * because the picker exists precisely before a chat does.
+   *
+   * The listing carries `sessionId`, `cwd` and an **ISO-8601** `updatedAt` —
+   * contrast Codex's Unix seconds — and no title of any kind. Nothing here
+   * invents one.
    */
   async listSessions(
     input: ExternalAgentListSessionsInput
   ): Promise<ExternalAgentNativeSessionPage> {
     const session = this.#listingSession(input.sessionId);
-    const listed = await session.client.request<AcpSessionListResponse>(
+    if (session) return await this.#listOn(session.client, input);
+
+    let launched: LaunchedAcpConnection | undefined;
+    try {
+      launched = await this.#launch(input.context, {
+        onNotification: () => undefined,
+        // A listing probe drives no turn, so there is nobody to ask: anything
+        // that would have become an approval is refused rather than left
+        // hanging.
+        onServerRequest: async () => ({ error: cursorForeignSessionRefusal() }),
+      });
+      return await this.#listOn(launched.client, input);
+    } finally {
+      await launched?.client.close().catch(() => undefined);
+      await launched?.process.terminate({ graceMs: SHUTDOWN_GRACE_MS }).catch(() => undefined);
+    }
+  }
+
+  async #listOn(
+    client: StdioJsonRpcClient,
+    input: ExternalAgentListSessionsInput
+  ): Promise<ExternalAgentNativeSessionPage> {
+    const limit = Math.min(input.limit ?? EXTERNAL_NATIVE_SESSION_PAGE_LIMIT, MAX_LISTED_SESSIONS);
+    const listed = await client.request<AcpSessionListResponse>(
       'session/list',
-      input.cursor === undefined ? {} : { cursor: input.cursor },
-      DEFAULT_REQUEST_TIMEOUT_MS
+      {
+        ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+        ...(input.workspacePath === undefined ? {} : { cwd: input.workspacePath }),
+      },
+      DEFAULT_REQUEST_TIMEOUT_MS,
+      input.context.signal
     );
-    const sessionIds = (listed.sessions ?? [])
-      .map((entry) => entry.sessionId)
-      .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+    const sessions: ExternalNativeSession[] = [];
+    for (const entry of listed.sessions ?? []) {
+      const mapped = mapListedSession(entry, this.targetId);
+      if (!mapped) continue;
+      // The `cwd` parameter is honoured by the live build, but the filter is
+      // also applied here: a page that quietly ignored it would put another
+      // repository's conversations under a picker that says it is showing this
+      // one's, which is worse than an empty list.
+      if (input.workspacePath !== undefined && mapped.workspacePath !== input.workspacePath) {
+        continue;
+      }
+      sessions.push(mapped);
+      if (sessions.length >= limit) break;
+    }
     return {
-      sessionIds,
+      sessions,
       ...(typeof listed.nextCursor === 'string' && listed.nextCursor.length > 0
         ? { nextCursor: listed.nextCursor }
         : {}),
     };
   }
 
-  #listingSession(sessionId: string | undefined): CursorSession {
+  /** The connection to list on, or nothing when a probe has to be opened. */
+  #listingSession(sessionId: string | undefined): CursorSession | undefined {
     if (sessionId !== undefined) return this.#requireSession(sessionId);
     const open = [...this.#sessions.values()];
     if (open.length === 1) return open[0] as CursorSession;
+    if (open.length === 0) return undefined;
     throw new ExternalAgentAdapterError(
       'cursor-no-connection',
-      open.length === 0
-        ? 'Listing Cursor sessions needs an open ACP connection.'
-        : 'Listing Cursor sessions needs the session to list them on; more than one is open.'
+      'Listing Cursor sessions needs the session to list them on; more than one is open.'
     );
   }
 
@@ -1169,6 +1226,34 @@ function modelCatalogFrom(models: AcpModelState | undefined): ExternalAgentModel
     });
   }
   return catalog;
+}
+
+/**
+ * One `session/list` entry as a picker row, or nothing when it is unusable.
+ *
+ * Cursor's listing is three fields and has **no title**, which is a fact about
+ * the vendor rather than a gap to paper over: a row shows the workspace and the
+ * age, and the UI renders that as a complete answer instead of an empty title
+ * slot. `updatedAt` is ISO-8601 — Codex's is Unix seconds — and the conversion
+ * to epoch milliseconds happens here, once, so nothing downstream has to know
+ * which vendor produced the row.
+ */
+function mapListedSession(
+  entry: { readonly sessionId?: string; readonly cwd?: string; readonly updatedAt?: string },
+  targetId: ExternalAgentTargetId
+): ExternalNativeSession | null {
+  const sessionId = entry.sessionId;
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return null;
+  // An unparseable timestamp drops the field rather than the row: a session the
+  // user can still adopt is worth more than the age beside it.
+  const parsed = typeof entry.updatedAt === 'string' ? Date.parse(entry.updatedAt) : Number.NaN;
+
+  return {
+    targetId,
+    nativeSessionId: sessionId,
+    ...(typeof entry.cwd === 'string' && entry.cwd.length > 0 ? { workspacePath: entry.cwd } : {}),
+    ...(Number.isFinite(parsed) && parsed >= 0 ? { updatedAtMs: parsed } : {}),
+  };
 }
 
 function buildPromptBlocks(input: ExternalAgentStartTurnInput) {

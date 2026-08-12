@@ -30,6 +30,7 @@ import type { PermissionProfileSummary } from '../../src/services/external-agent
 import type { ReasoningSummaryTextDeltaNotification } from '../../src/services/external-agents/codex/protocol/v2/ReasoningSummaryTextDeltaNotification';
 import type { Thread } from '../../src/services/external-agents/codex/protocol/v2/Thread';
 import type { ThreadItem } from '../../src/services/external-agents/codex/protocol/v2/ThreadItem';
+import type { ThreadListResponse } from '../../src/services/external-agents/codex/protocol/v2/ThreadListResponse';
 import type { ThreadStartResponse } from '../../src/services/external-agents/codex/protocol/v2/ThreadStartResponse';
 import type { ThreadTokenUsageUpdatedNotification } from '../../src/services/external-agents/codex/protocol/v2/ThreadTokenUsageUpdatedNotification';
 import type { Turn } from '../../src/services/external-agents/codex/protocol/v2/Turn';
@@ -275,6 +276,56 @@ function threadFixture(id = THREAD_ID): Thread {
     gitInfo: null,
     name: null,
     turns: [],
+  };
+}
+
+/**
+ * A `thread/list` page built from the vendored `Thread` shape.
+ *
+ * Deliberately mixed: a named user thread, an unnamed one that only has a
+ * preview, an ephemeral thread and a subagent's. A mapper that forwards all
+ * four — or that reads `sessionId` where it should read `id` — fails against
+ * this rather than against a hand-written literal that agreed with it.
+ */
+export function threadListResponse(
+  overrides: { readonly nextCursor?: string | null } = {}
+): ThreadListResponse {
+  return {
+    data: [
+      {
+        ...threadFixture('019fe6d2-aaaa-7420-b12c-000000000001'),
+        // Different from `id` on purpose: `sessionId` is the id shared by a
+        // whole thread tree, and adopting it would resume nothing.
+        sessionId: 'session-tree-0001',
+        name: 'Fix the flaky test',
+        preview: 'the retry loop keeps timing out',
+        recencyAt: 1_786_284_100,
+        updatedAt: 1_786_284_000,
+        source: 'cli',
+      },
+      {
+        ...threadFixture('019fe6d2-bbbb-7420-b12c-000000000002'),
+        sessionId: 'session-tree-0002',
+        name: null,
+        preview: 'add a migration for the lease table',
+        recencyAt: null,
+        updatedAt: 1_786_283_000,
+        source: 'cli',
+      },
+      {
+        ...threadFixture('019fe6d2-cccc-7420-b12c-000000000003'),
+        ephemeral: true,
+        preview: 'scratch',
+      },
+      {
+        ...threadFixture('019fe6d2-dddd-7420-b12c-000000000004'),
+        parentThreadId: '019fe6d2-aaaa-7420-b12c-000000000001',
+        agentRole: 'reviewer',
+        preview: 'review the diff',
+      },
+    ],
+    nextCursor: overrides.nextCursor ?? null,
+    backwardsCursor: null,
   };
 }
 

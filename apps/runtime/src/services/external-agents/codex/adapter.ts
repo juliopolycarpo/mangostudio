@@ -27,8 +27,12 @@ import type {
   ExternalAgentModel,
   ExternalAgentRuntimeDescriptor,
   ExternalAgentTargetId,
+  ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
-import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+import {
+  EXTERNAL_NATIVE_SESSION_PAGE_LIMIT,
+  NO_EXTERNAL_AGENT_CAPABILITIES,
+} from '@mangostudio/shared/external-agents';
 import type {
   ExternalAgentAccountUsage,
   ExternalAgentAdapter,
@@ -36,6 +40,8 @@ import type {
   ExternalAgentApprovalResponseInput,
   ExternalAgentCancelInput,
   ExternalAgentCloseInput,
+  ExternalAgentListSessionsInput,
+  ExternalAgentNativeSessionPage,
   ExternalAgentOpenedSession,
   ExternalAgentOpenSessionInput,
   ExternalAgentRefreshUsageInput,
@@ -73,6 +79,10 @@ import type { GetAccountResponse } from './protocol/v2/GetAccountResponse';
 import type { Model } from './protocol/v2/Model';
 import type { ModelListResponse } from './protocol/v2/ModelListResponse';
 import type { PermissionProfileListResponse } from './protocol/v2/PermissionProfileListResponse';
+import type { Thread } from './protocol/v2/Thread';
+import type { ThreadListParams } from './protocol/v2/ThreadListParams';
+import type { ThreadListResponse } from './protocol/v2/ThreadListResponse';
+import type { ThreadSourceKind } from './protocol/v2/ThreadSourceKind';
 import type { ThreadStartParams } from './protocol/v2/ThreadStartParams';
 import type { ThreadStartResponse } from './protocol/v2/ThreadStartResponse';
 import type { TurnStartParams } from './protocol/v2/TurnStartParams';
@@ -104,6 +114,25 @@ const MINIMUM_CODEX_VERSION_PARSED = requireCodexVersion(MINIMUM_CODEX_VERSION);
 const MODEL_PAGE_LIMIT = 8;
 const MODEL_CATALOG_LIMIT = 256;
 
+/** One `thread/list` page, matching the neutral contract's page ceiling. */
+const CODEX_THREAD_PAGE_LIMIT = EXTERNAL_NATIVE_SESSION_PAGE_LIMIT;
+
+/**
+ * The thread kinds a person started, as opposed to the ones Codex started for
+ * itself.
+ *
+ * `subAgent`, `subAgentReview`, `subAgentCompact`, `subAgentThreadSpawn` and
+ * `subAgentOther` are Codex's internal machinery and are never a conversation
+ * anyone chose to have. `unknown` is excluded because it is exactly the bucket
+ * a future internal kind lands in on a build older than this allowlist.
+ *
+ * `vscode` is excluded deliberately rather than forgotten. The entry point this
+ * feeds says "continue a session from your terminal", and an editor-owned thread
+ * has a live owner MangoStudio cannot see — the same reason the adoption lease
+ * exists, one step further away from anything the hub can arbitrate.
+ */
+const CODEX_USER_THREAD_SOURCE_KINDS: readonly ThreadSourceKind[] = ['cli', 'exec', 'appServer'];
+
 /**
  * Notifications tolerated between `turn/start` being sent and its result naming
  * the turn. Ordering says there should be none; the buffer exists so that if
@@ -129,6 +158,7 @@ const CODEX_CAPABILITIES: ExternalAgentCapabilities = {
   usageReporting: true,
   cancellation: true,
   steering: true,
+  sessionListing: true,
   accountUsage: true,
 };
 
@@ -733,6 +763,83 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     }
   }
 
+  /**
+   * `thread/list`, for the picker that adopts a terminal-started conversation.
+   *
+   * Prefers a live session's connection and otherwise opens a short-lived probe
+   * — the same no-live-session policy `refreshAccountUsage` uses, and for the
+   * same reason: the picker is rendered *before* any chat exists, so requiring
+   * an open session would make the feature unreachable exactly when it is
+   * wanted.
+   *
+   * Every filter below is passed explicitly rather than left to a server
+   * default. `sourceKinds` is the load-bearing one: `ThreadSourceKind` includes
+   * five subagent kinds, and an unfiltered listing mixes Codex's own review,
+   * compaction and subagent threads in with the user's conversations.
+   */
+  async listSessions(
+    input: ExternalAgentListSessionsInput
+  ): Promise<ExternalAgentNativeSessionPage> {
+    const live = input.sessionId ? this.#sessions.get(input.sessionId) : undefined;
+    if (live) return await this.#listThreads(live.client, input);
+
+    await this.#assertSupportedVersion(input.context);
+    let launched: { client: StdioJsonRpcClient; process: ExternalAgentManagedProcess } | undefined;
+    try {
+      launched = await this.#launch(input.context, {
+        onNotification: () => undefined,
+        onServerRequest: async () => ({
+          error: {
+            code: -32603,
+            message: 'Codex session listing cannot answer an approval request.',
+          },
+        }),
+      });
+      return await this.#listThreads(launched.client, input);
+    } finally {
+      await launched?.client.close().catch(() => undefined);
+      await launched?.process.terminate({ graceMs: SHUTDOWN_GRACE_MS }).catch(() => undefined);
+    }
+  }
+
+  async #listThreads(
+    client: StdioJsonRpcClient,
+    input: ExternalAgentListSessionsInput
+  ): Promise<ExternalAgentNativeSessionPage> {
+    const limit = Math.min(input.limit ?? CODEX_THREAD_PAGE_LIMIT, CODEX_THREAD_PAGE_LIMIT);
+    const params: ThreadListParams = {
+      limit,
+      // Stated, never inherited: the server documents `created_at` as its
+      // default, and a picker sorted by creation puts a thread somebody used
+      // ten minutes ago below one they abandoned last month.
+      sortKey: 'recency_at',
+      sortDirection: 'desc',
+      sourceKinds: [...CODEX_USER_THREAD_SOURCE_KINDS],
+      archived: false,
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+      ...(input.workspacePath === undefined ? {} : { cwd: input.workspacePath }),
+    };
+    const listed = await client.request<ThreadListResponse>(
+      'thread/list',
+      params,
+      DEFAULT_REQUEST_TIMEOUT_MS,
+      input.context.signal
+    );
+
+    const sessions: ExternalNativeSession[] = [];
+    for (const thread of listed.data ?? []) {
+      const mapped = mapThread(thread, this.targetId);
+      if (mapped) sessions.push(mapped);
+      if (sessions.length >= limit) break;
+    }
+    return {
+      sessions,
+      ...(typeof listed.nextCursor === 'string' && listed.nextCursor.length > 0
+        ? { nextCursor: listed.nextCursor }
+        : {}),
+    };
+  }
+
   #applyNotification(
     session: CodexSession,
     active: ActiveTurn,
@@ -1092,6 +1199,53 @@ function readEffectiveConfiguration(
     ...rest,
     model: response.model,
     ...(response.reasoningEffort ? { effort: response.reasoningEffort } : {}),
+  };
+}
+
+/**
+ * One `Thread` as a picker row, or nothing when it is not one.
+ *
+ * Four traps, all of them the kind that pass review and fail in production:
+ *
+ * 1. **`id`, not `sessionId`.** Both are required fields on `Thread`, and
+ *    `sessionId` is the id shared across a whole thread tree. `thread/resume`
+ *    takes the thread id, so mapping the wrong one adopts a conversation the
+ *    user did not pick — or none at all.
+ * 2. `name` is nullable; `preview` is required and is "usually the first user
+ *    message". A null title falls back to the preview rather than to a blank.
+ * 3. `createdAt` / `updatedAt` / `recencyAt` are Unix **seconds**. The
+ *    conversion to milliseconds happens here, once.
+ * 4. `turns` is documented as empty at list time, so nothing reads a message
+ *    count from it — and there is no `messageCount` field to invent.
+ *
+ * Ephemeral threads never reach a picker: they are not materialized on disk and
+ * there is nothing to resume. A thread with a `parentThreadId` is a subagent's,
+ * which `sourceKinds` should already have excluded — this is the second half of
+ * that filter, because a build whose source classification disagrees would
+ * otherwise surface Codex's own internal work as the user's.
+ */
+function mapThread(thread: Thread, targetId: ExternalAgentTargetId): ExternalNativeSession | null {
+  if (typeof thread.id !== 'string' || thread.id.length === 0) return null;
+  if (thread.ephemeral) return null;
+  if (thread.parentThreadId) return null;
+
+  const title = typeof thread.name === 'string' ? thread.name.trim() : '';
+  const preview = typeof thread.preview === 'string' ? thread.preview.trim() : '';
+  // Recency is what the listing is sorted by, so it is also what the row's age
+  // has to show; `updatedAt` is the fallback for the builds that leave it null.
+  const seconds = thread.recencyAt ?? thread.updatedAt;
+
+  return {
+    targetId,
+    nativeSessionId: thread.id,
+    ...(title.length > 0 ? { title } : {}),
+    ...(preview.length > 0 ? { preview } : {}),
+    ...(typeof thread.cwd === 'string' && thread.cwd.length > 0
+      ? { workspacePath: thread.cwd }
+      : {}),
+    ...(typeof seconds === 'number' && Number.isFinite(seconds) && seconds >= 0
+      ? { updatedAtMs: Math.round(seconds * 1000) }
+      : {}),
   };
 }
 

@@ -432,8 +432,49 @@ describe('cursor adapter — sessions', () => {
     const probe = harness();
     await adapter.openSession({ params: openParams(), context: probe.context });
 
-    const page = await adapter.listSessions({});
-    expect(page.sessionIds).toEqual(['7e0059d1-e5a9-46cf-aba5-1261aaeb2324']);
+    const page = await adapter.listSessions({ context: probe.context });
+    expect(page.sessions).toEqual([
+      {
+        targetId: 'cursor',
+        nativeSessionId: '7e0059d1-e5a9-46cf-aba5-1261aaeb2324',
+        workspacePath: '/workspace',
+        // ISO-8601 in, epoch milliseconds out — the conversion happens once,
+        // here, so nothing downstream has to know which vendor sent the row.
+        updatedAtMs: Date.parse('2026-08-10T07:01:24.590Z'),
+      },
+    ]);
+  });
+
+  it('gives a Cursor row no title, because the vendor has none to give', async () => {
+    const adapter = new CursorAcpAdapter();
+    const probe = harness();
+    await adapter.openSession({ params: openParams(), context: probe.context });
+
+    const [session] = (await adapter.listSessions({ context: probe.context })).sessions;
+    expect(session?.title).toBeUndefined();
+    expect(session?.preview).toBeUndefined();
+  });
+
+  it('lists without an open session by opening a short-lived connection', async () => {
+    // The picker renders before any chat exists. Requiring an open session
+    // would make the feature unreachable exactly when it is wanted.
+    const adapter = new CursorAcpAdapter();
+    const probe = harness();
+
+    const page = await adapter.listSessions({ context: probe.context });
+    expect(page.sessions).toHaveLength(1);
+    expect(probe.launches()).toBe(1);
+  });
+
+  it('drops rows outside the workspace it was asked about', async () => {
+    const adapter = new CursorAcpAdapter();
+    const probe = harness();
+
+    const page = await adapter.listSessions({
+      context: probe.context,
+      workspacePath: '/somewhere-else',
+    });
+    expect(page.sessions).toEqual([]);
   });
 
   it('will not guess which connection answers a listing', async () => {
@@ -447,9 +488,16 @@ describe('cursor adapter — sessions', () => {
       context: probe.context,
     });
 
-    await expect(adapter.listSessions({})).rejects.toThrow(/more than one is open/);
-    const page = await adapter.listSessions({ sessionId: 'session-2' });
-    expect(page.sessionIds).toEqual(['7e0059d1-e5a9-46cf-aba5-1261aaeb2324']);
+    await expect(adapter.listSessions({ context: probe.context })).rejects.toThrow(
+      /more than one is open/
+    );
+    const page = await adapter.listSessions({
+      context: probe.context,
+      sessionId: 'session-2',
+    });
+    expect(page.sessions.map((session) => session.nativeSessionId)).toEqual([
+      '7e0059d1-e5a9-46cf-aba5-1261aaeb2324',
+    ]);
   });
 });
 

@@ -970,3 +970,96 @@ describe('codex adapter — the host-tool invariant', () => {
     expect(events.at(-1)).toEqual({ type: 'completed' });
   });
 });
+
+describe('codex adapter — native session listing', () => {
+  it('adopts Thread.id and never Thread.sessionId', async () => {
+    // The single easiest mistake in this mapping: both fields are required on
+    // `Thread`, and `sessionId` is the one that *looks* right. `thread/resume`
+    // takes the thread id, so mapping the other one adopts nothing.
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+
+    const page = await adapter.listSessions({ context: test.context });
+    const ids = page.sessions.map((session) => session.nativeSessionId);
+    expect(ids).toEqual([
+      '019fe6d2-aaaa-7420-b12c-000000000001',
+      '019fe6d2-bbbb-7420-b12c-000000000002',
+    ]);
+    expect(ids.some((id) => id.startsWith('session-tree'))).toBe(false);
+  });
+
+  it('falls back to the preview when the thread has no name', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+
+    const [named, unnamed] = (await adapter.listSessions({ context: test.context })).sessions;
+    expect(named?.title).toBe('Fix the flaky test');
+    expect(unnamed?.title).toBeUndefined();
+    expect(unnamed?.preview).toBe('add a migration for the lease table');
+  });
+
+  it('converts Unix seconds to milliseconds exactly once', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+
+    const [withRecency, withoutRecency] = (await adapter.listSessions({ context: test.context }))
+      .sessions;
+    // `recencyAt` is what the listing is sorted by, so it is what the age shows.
+    expect(withRecency?.updatedAtMs).toBe(1_786_284_100_000);
+    // Null `recencyAt` falls back to `updatedAt` rather than dropping the row.
+    expect(withoutRecency?.updatedAtMs).toBe(1_786_283_000_000);
+  });
+
+  it('reports no message count, because a listed thread carries no turns', async () => {
+    // `turns` is documented as empty at list time and there is no
+    // `messageCount` field. Nothing may invent one from the empty array.
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+
+    const page = await adapter.listSessions({ context: test.context });
+    for (const session of page.sessions) {
+      expect(Object.keys(session).some((key) => key.toLowerCase().includes('count'))).toBe(false);
+    }
+  });
+
+  it('excludes ephemeral threads and subagent threads', async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+
+    const ids = (await adapter.listSessions({ context: test.context })).sessions.map(
+      (session) => session.nativeSessionId
+    );
+    expect(ids).not.toContain('019fe6d2-cccc-7420-b12c-000000000003');
+    expect(ids).not.toContain('019fe6d2-dddd-7420-b12c-000000000004');
+  });
+
+  it('asks for an explicit source allowlist, sort and bound', async () => {
+    // Every one of these is stated rather than left to a server default: an
+    // unfiltered listing mixes Codex's own subagent, review and compaction
+    // threads in with the user's, and the documented default sort is by
+    // creation rather than by recency.
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+    await adapter.listSessions({ context: test.context, workspacePath: '/workspace', limit: 10 });
+
+    const call = test.server()?.calls.find((entry) => entry.method === 'thread/list');
+    expect(call?.params).toMatchObject({
+      sortKey: 'recency_at',
+      sortDirection: 'desc',
+      sourceKinds: ['cli', 'exec', 'appServer'],
+      archived: false,
+      cwd: '/workspace',
+      limit: 10,
+    });
+  });
+
+  it('lists without an open session', async () => {
+    // The picker is rendered before any chat exists, so listing opens its own
+    // short-lived app-server exactly as discovery does.
+    const adapter = new CodexAppServerAdapter();
+    const test = harness();
+
+    const page = await adapter.listSessions({ context: test.context });
+    expect(page.sessions.length).toBeGreaterThan(0);
+  });
+});

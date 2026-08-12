@@ -29,6 +29,7 @@ import {
   reasoningSummaryDelta,
   THREAD_ID,
   TURN_ID,
+  threadListResponse,
   threadStartResponse,
   tokenUsageUpdated,
   turnCompleted,
@@ -208,6 +209,9 @@ export class FakeCodexServer {
               : permissionProfiles(),
           nextCursor: null,
         });
+        return;
+      case 'thread/list':
+        this.#respond(id, threadListResponse());
         return;
       case 'thread/resume':
         if (this.#scenario === 'resume-rejected') {

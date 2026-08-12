@@ -326,25 +326,25 @@ describe('adapter conformance', () => {
         // Codex's own capability set, `steering: true` included: `steer` is
         // implemented, so the flag and the member agree.
         steering: true,
-        sessionListing: false,
+        sessionListing: true,
         nativeReview: false,
         accountUsage: true,
       })
     ).not.toThrow();
   });
 
-  it('implements steer and refreshAccountUsage; listing and review still wait on their own plans', () => {
+  it('implements steer, listSessions and refreshAccountUsage; review still waits on its own plan', () => {
     // Typed as the interface so the optional members are visible: the registry
     // derives the four opportunistic capabilities from exactly this presence
     // check.
     const adapter: ExternalAgentAdapter = new CodexAppServerAdapter();
     expect(adapter.steer).toBeInstanceOf(Function);
     expect(adapter.refreshAccountUsage).toBeInstanceOf(Function);
-    expect(adapter.listSessions).toBeUndefined();
+    expect(adapter.listSessions).toBeInstanceOf(Function);
     expect(adapter.startReview).toBeUndefined();
   });
 
-  it('refuses to claim session listing while `listSessions` is unimplemented', () => {
+  it('refuses to claim native review while `startReview` is unimplemented', () => {
     const adapter: ExternalAgentAdapter = new CodexAppServerAdapter();
     expect(() =>
       assertExternalAgentAdapterConformance(adapter, {
@@ -358,9 +358,9 @@ describe('adapter conformance', () => {
         cancellation: true,
         steering: true,
         sessionListing: true,
-        nativeReview: false,
+        nativeReview: true,
         accountUsage: false,
       })
-    ).toThrow(/advertises sessionListing=true/);
+    ).toThrow(/advertises nativeReview=true/);
   });
 });
