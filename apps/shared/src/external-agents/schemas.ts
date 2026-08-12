@@ -1232,6 +1232,11 @@ export type ExternalReviewTarget = Static<typeof ExternalReviewTargetSchema>;
  * Delivery is absent on purpose. Only inline ships, so there is nothing to
  * choose — and an adapter that let a caller ask for a detached review would be
  * promising a second thread the hub is not tracking.
+ *
+ * Configuration is absent on purpose too. A review runs under the permissions
+ * the session already has; it does not carry a new sandbox, approval policy or
+ * model the way `turn/start` does. Reopening or reconfiguring mid-review would
+ * be a way around a choice the user already made for this thread.
  */
 export const ExternalAgentStartReviewParamsSchema = Type.Object(
   {

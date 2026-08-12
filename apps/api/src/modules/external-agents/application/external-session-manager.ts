@@ -145,6 +145,11 @@ export interface ExternalSessionHandle {
    * vendor ran the review on. Both are persisted by the caller: inline delivery
    * puts the review on this session's own thread, and a value that disagrees is
    * a turn whose events would never be correlated.
+   *
+   * The current runner configuration is not sent. A review inherits the
+   * sandbox, approval policy and model this session was opened with; a later
+   * permission change takes effect on the next ordinary turn, not by
+   * reconfiguring this one.
    */
   startReview(input: {
     readonly clientMessageId: string;
@@ -311,6 +316,9 @@ export function createExternalSessionManager(
         );
       },
       async startReview(input) {
+        // No `configuration`: Codex `review/start` has none, and a review must
+        // not reopen the session to apply a newer sandbox. The thread's
+        // existing policy is the one the user already accepted for this chat.
         return await record.client.externalAgents.startReview(
           {
             sessionId: record.sessionId,

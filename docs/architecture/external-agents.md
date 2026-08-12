@@ -525,6 +525,12 @@ things differ: the vendor call is awaited, because only its response names the t
 reports `turn-not-steerable` without a round trip, both in the adapter and in the hub, because
 steering a review has no coherent meaning.
 
+**Permissions stay with the thread.** Ordinary turns send the current sandbox, approval policy and
+model on every `turn/start`. A review does not: Codex `review/start` has no equivalent fields, and
+reopening the session to apply a newer pair would bypass the policy this conversation already
+runs under. A permission change takes effect on the next send, not on a review of the working
+tree that is already in this chat.
+
 **The Git precondition is MangoStudio's own.** Codex does not refuse a review in a non-Git
 directory — it completes, logging `fatal: not a git repository` internally, having reviewed
 nothing — so the hub enforces it, and `EXTERNAL_REVIEW_REQUIRES_GIT` is what the UI renders. It is
