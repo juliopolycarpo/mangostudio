@@ -18,6 +18,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
   externalAgentEventToStreamChunk,
   externalSessionStartedChunk,
+  externalSteerChunk,
   externalTurnCompletedChunk,
 } from '@mangostudio/shared/streaming';
 import type { MessagePart } from '@mangostudio/shared/types';
@@ -126,6 +127,10 @@ function comparable(parts: readonly MessagePart[]): unknown[] {
       const { resolvedAt, ...rest } = part;
       return rest;
     }
+    if (part.type === 'external_steer') {
+      const { createdAt, ...rest } = part;
+      return rest;
+    }
     return part;
   });
 }
@@ -192,5 +197,95 @@ describe('external turn: live stream vs reloaded transcript', () => {
     );
 
     expect(comparable(live.parts)).toEqual(comparable(stored.parts));
+  });
+
+  /**
+   * Steering is hub-originated rather than projected from a neutral event —
+   * see `ExternalTurnTranscript.recordSteerAttempt` and `externalSteerChunk`
+   * — so it needs its own parity check rather than a place in `TURN`.
+   */
+  describe('a mid-turn steer', () => {
+    function storedWithSteer(outcome: 'accepted' | 'rejected'): MessagePart[] {
+      const transcript = new ExternalTurnTranscript({
+        targetId: 'codex',
+        sessionId: 'hub-session-1',
+        startedAt: 0,
+      });
+      const prefix = TURN.slice(0, 3);
+      prefix.forEach((event, index) => {
+        transcript.apply(event, { sequence: index + 1, at: 0 });
+      });
+      transcript.recordSteerAttempt({ clientMessageId: 'steer-1', text: 'use the helper' }, 0);
+      if (outcome === 'rejected') transcript.resolveSteerRejected('steer-1', 'turn-not-steerable');
+      return transcript.parts;
+    }
+
+    function streamedWithSteer(outcome: 'accepted' | 'rejected'): MessagePart[] {
+      const prefix = TURN.slice(0, 3);
+      const chunks: StreamChunk[] = [
+        externalSessionStartedChunk({
+          sessionId: 'hub-session-1',
+          targetId: 'codex',
+          resumed: false,
+        }),
+        ...prefix
+          .map(externalAgentEventToStreamChunk)
+          .filter((chunk): chunk is StreamChunk => chunk !== null),
+        ...(outcome === 'rejected'
+          ? [
+              externalSteerChunk({
+                clientMessageId: 'steer-1',
+                text: 'use the helper',
+                status: 'rejected',
+                reasonCode: 'turn-not-steerable',
+              }),
+            ]
+          : [
+              externalSteerChunk({
+                clientMessageId: 'steer-1',
+                text: 'use the helper',
+                status: 'accepted',
+              }),
+            ]),
+      ];
+      const state = chunks.reduce(
+        (current, chunk) => reduceTextGenerationStreamChunk(current, chunk, REDUCER_OPTIONS),
+        createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+      );
+      return state.parts;
+    }
+
+    it('renders an accepted steer the same on both paths', () => {
+      expect(comparable(streamedWithSteer('accepted'))).toEqual(
+        comparable(storedWithSteer('accepted'))
+      );
+      const part = streamedWithSteer('accepted').find((entry) => entry.type === 'external_steer');
+      expect(part).toMatchObject({ text: 'use the helper', status: 'accepted' });
+    });
+
+    it('renders a rejected steer the same on both paths, reason included', () => {
+      expect(comparable(streamedWithSteer('rejected'))).toEqual(
+        comparable(storedWithSteer('rejected'))
+      );
+      const part = streamedWithSteer('rejected').find((entry) => entry.type === 'external_steer');
+      expect(part).toMatchObject({
+        text: 'use the helper',
+        status: 'rejected',
+        reasonCode: 'turn-not-steerable',
+      });
+    });
+
+    it('does not duplicate a redelivered steer chunk', () => {
+      const chunk = externalSteerChunk({
+        clientMessageId: 'steer-1',
+        text: 'use the helper',
+        status: 'accepted',
+      });
+      const state = [chunk, chunk].reduce(
+        (current, next) => reduceTextGenerationStreamChunk(current, next, REDUCER_OPTIONS),
+        createTextGenerationStreamState({ userMessageId: 'user-1', aiMessageId: 'ai-1' })
+      );
+      expect(state.parts.filter((part) => part.type === 'external_steer')).toHaveLength(1);
+    });
   });
 });

@@ -2888,6 +2888,20 @@ export const messages: Messages = {
         'session-lost': "That machine no longer has this turn's session.",
       },
     },
+    steer: {
+      button: 'Steer',
+      buttonHint: 'Send this into the running turn instead of waiting for it to finish.',
+      sentLabel: 'You, mid-turn',
+      rejectedLabel: "This wasn't delivered",
+      submitError: 'This could not be sent.',
+      reason: {
+        'turn-already-completed': 'The turn had already finished.',
+        'not-supported': 'This agent cannot be steered.',
+        'session-lost': "That machine no longer has this turn's session.",
+        'turn-not-steerable': 'This turn cannot take new input right now.',
+        'id-reused': 'This was already sent with different text. Try again.',
+      },
+    },
     loginHint: 'Run this on that machine to sign in:',
   },
 

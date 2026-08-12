@@ -60,6 +60,14 @@ export interface FakeCodexOptions {
   readonly turnStartDelayMs?: number;
   /** How many pages `model/list` serves before its cursor goes null. */
   readonly modelPages?: number;
+  /**
+   * Holds the turn open — no outstanding server request, just active — until
+   * `resumeTurn()` is called. For exercising something mid-turn that a
+   * blocking approval would race: `turn/steer` and `turn/interrupt` both
+   * need Codex to have named the turn without also holding the JSON-RPC pump
+   * hostage on an unanswered request.
+   */
+  readonly pauseBeforeCompletion?: boolean;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -70,22 +78,46 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * Everything it emits is built by the fixture factories, so it speaks the
  * pinned contract's shapes rather than shapes a test author remembered.
  */
+/** How the fixture answers the next `turn/steer` call. */
+export type CodexSteerBehavior =
+  | 'accepted'
+  | 'not-steerable'
+  | 'precondition-failed'
+  | 'unknown-error';
+
 export class FakeCodexServer {
   readonly #scenario: CodexScenario;
   readonly #send: (message: unknown) => void;
   readonly #turnStartDelayMs: number;
   readonly #modelPages: number;
+  readonly #pauseBeforeCompletion: boolean;
   /** Answers the adapter gave to server→client requests, by request id. */
   readonly answers = new Map<string, unknown>();
   /** Every method the adapter called, in order. */
   readonly calls: Array<{ method: string; params: unknown }> = [];
   #nextServerRequestId = 9000;
+  #steerBehavior: CodexSteerBehavior = 'accepted';
+  /** The `turnId` a steer answers with once accepted, e.g. after continuing under a new one. */
+  #steerTurnId = TURN_ID;
+  #resumeTurn?: () => void;
 
   constructor(send: (message: unknown) => void, options: FakeCodexOptions = {}) {
     this.#send = send;
     this.#scenario = options.scenario ?? 'text';
     this.#turnStartDelayMs = options.turnStartDelayMs ?? 0;
     this.#modelPages = options.modelPages ?? 1;
+    this.#pauseBeforeCompletion = options.pauseBeforeCompletion ?? false;
+  }
+
+  /** Lets a turn paused by `pauseBeforeCompletion` proceed to its final message and `turn/completed`. */
+  resumeTurn(): void {
+    this.#resumeTurn?.();
+  }
+
+  /** Configures how the *next* `turn/steer` call is answered. */
+  setSteerBehavior(behavior: CodexSteerBehavior, turnId?: string): void {
+    this.#steerBehavior = behavior;
+    if (turnId !== undefined) this.#steerTurnId = turnId;
   }
 
   /** Whether the adapter ever asked for a method, for interrupt assertions. */
@@ -118,8 +150,12 @@ export class FakeCodexServer {
     this.#send({ jsonrpc: '2.0', id, result });
   }
 
-  #fail(id: unknown, code: number, message: string): void {
-    this.#send({ jsonrpc: '2.0', id, error: { code, message } });
+  #fail(id: unknown, code: number, message: string, data?: unknown): void {
+    this.#send({
+      jsonrpc: '2.0',
+      id,
+      error: { code, message, ...(data !== undefined ? { data } : {}) },
+    });
   }
 
   /** Issue a server→client request and return its id, as the real server does. */
@@ -205,6 +241,28 @@ export class FakeCodexServer {
       case 'turn/interrupt':
         this.#respond(id, {});
         return;
+      case 'turn/steer':
+        switch (this.#steerBehavior) {
+          case 'not-steerable':
+            this.#fail(id, -32000, 'the active turn is not steerable', {
+              codexErrorInfo: { activeTurnNotSteerable: { turnKind: 'review' } },
+            });
+            return;
+          case 'precondition-failed':
+            // Codex's own shape for this precondition failure was never
+            // captured live — see `steerRejectionReason` in the adapter — so
+            // the fixture answers with an ordinary, unstructured error, which
+            // is the one fact the adapter can actually rely on: no
+            // `codexErrorInfo` naming the reason.
+            this.#fail(id, -32000, 'expectedTurnId does not match the active turn');
+            return;
+          case 'unknown-error':
+            this.#fail(id, -32000, 'something else went wrong');
+            return;
+          default:
+            this.#respond(id, { turnId: this.#steerTurnId });
+        }
+        return;
       default:
         this.#fail(id, -32601, `fixture does not implement ${method}`);
     }
@@ -218,6 +276,12 @@ export class FakeCodexServer {
     const echo = userMessageItem('item-user', 'hello');
     this.#notify('item/started', itemStarted(echo));
     this.#notify('item/completed', itemCompleted(echo));
+
+    if (this.#pauseBeforeCompletion) {
+      await new Promise<void>((resolve) => {
+        this.#resumeTurn = resolve;
+      });
+    }
 
     if (this.#scenario === 'command-approval' || this.#scenario === 'file-approval') {
       const requestId =

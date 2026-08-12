@@ -19,6 +19,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
   externalAgentEventToStreamChunk,
   externalSessionStartedChunk,
+  externalSteerChunk,
   externalTurnCompletedChunk,
 } from '@mangostudio/shared/streaming';
 import type { Kysely } from 'kysely';
@@ -292,6 +293,21 @@ function openStream(
               onEvent(event) {
                 const chunk = externalAgentEventToStreamChunk(event);
                 if (chunk) send(chunk);
+              },
+              onSteer(steer) {
+                if (steer.status === 'rejected') {
+                  if (steer.reasonCode !== undefined) {
+                    send(externalSteerChunk({ ...steer, reasonCode: steer.reasonCode }));
+                  }
+                  return;
+                }
+                send(
+                  externalSteerChunk({
+                    clientMessageId: steer.clientMessageId,
+                    text: steer.text,
+                    status: 'accepted',
+                  })
+                );
               },
             },
           },

@@ -37,11 +37,14 @@ import type {
   ExternalAgentOpenedSession,
   ExternalAgentOpenSessionInput,
   ExternalAgentStartTurnInput,
+  ExternalAgentSteerInput,
+  ExternalAgentSteerOutcome,
   ExternalAgentTurnStream,
 } from '../adapter';
 import { ExternalAgentAdapterError, toExternalAgentError } from '../errors';
 import { hostLocalDigestKey } from '../isolation';
 import {
+  JsonRpcCallError,
   type JsonRpcHandlers,
   type JsonRpcServerRequestOutcome,
   StdioJsonRpcClient,
@@ -69,7 +72,9 @@ import type { ThreadStartParams } from './protocol/v2/ThreadStartParams';
 import type { ThreadStartResponse } from './protocol/v2/ThreadStartResponse';
 import type { TurnStartParams } from './protocol/v2/TurnStartParams';
 import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
-import { CodexTurnReducer } from './reducer';
+import type { TurnSteerParams } from './protocol/v2/TurnSteerParams';
+import type { TurnSteerResponse } from './protocol/v2/TurnSteerResponse';
+import { CodexTurnReducer, codexErrorCode } from './reducer';
 import { encodeThreadSandboxMode, encodeTurnSandboxPolicy } from './sandbox';
 import { isCodexVersionSupported, parseCodexVersion, requireCodexVersion } from './version';
 
@@ -117,6 +122,7 @@ const CODEX_CAPABILITIES: ExternalAgentCapabilities = {
   images: true,
   usageReporting: true,
   cancellation: true,
+  steering: true,
 };
 
 interface PendingApproval {
@@ -152,6 +158,19 @@ interface CodexSession {
   /** Approvals awaiting `respond`, keyed by the vendor's own JSON-RPC request id. */
   readonly approvals: Map<string, PendingApproval>;
   activeTurn?: ActiveTurn;
+  /**
+   * Serializes `steer` calls against this session.
+   *
+   * Two distinct steers — different `clientMessageId`s, both addressed to the
+   * same running turn — would otherwise both read `activeTurn.turnId` before
+   * either request resolves. The first to land can replace that id with a
+   * continuation id, leaving the second still holding the one that request
+   * started with: sent, it names a turn Codex already moved past. Chaining
+   * every steer off the one before it is what makes each read the id the
+   * previous steer actually left behind, not the one that was live when it
+   * was called.
+   */
+  steerChain: Promise<unknown>;
 }
 
 export class CodexAppServerAdapter implements ExternalAgentAdapter {
@@ -284,6 +303,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
       process: launched.process,
       threadId: '',
       approvals: new Map(),
+      steerChain: Promise.resolve(),
     };
     // Registered before `thread/start` so a server request arriving during the
     // handshake finds a session to refuse against rather than a missing one.
@@ -471,6 +491,86 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     await session.client
       .request('turn/interrupt', { threadId: session.threadId, turnId }, SHUTDOWN_GRACE_MS)
       .catch(() => undefined);
+  }
+
+  /**
+   * `turn/steer`, Codex's own client operation for redirecting a running turn.
+   *
+   * Queued behind {@link CodexSession.steerChain} rather than run directly:
+   * two distinct steers issued close together — different `clientMessageId`s,
+   * both addressed to the turn that is live right now — would otherwise both
+   * read `activeTurn.turnId` before either request resolved, and the first to
+   * land can replace that id with a continuation id the second never saw.
+   * Chaining makes the second wait for the first's outcome and read
+   * `turnId` fresh, so it always addresses the turn Codex is actually running.
+   */
+  steer(input: ExternalAgentSteerInput): Promise<ExternalAgentSteerOutcome> {
+    const session = this.#requireSession(input.sessionId);
+    const run = session.steerChain.then(() => this.#steerNow(session, input));
+    // The chain must keep moving whether this attempt was refused, accepted or
+    // threw — otherwise one failure would wedge every steer queued behind it.
+    session.steerChain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /**
+   * `input.nativeTurnId` is the handle `startTurn` returned — the hub's own
+   * `clientMessageId` for the turn, not Codex's turn id — because that is the
+   * only turn identity the hub was ever given. Codex's own id lives in
+   * `active.turnId` and is what `expectedTurnId` has to carry; the precondition
+   * fails whenever it does not name the turn Codex is currently running, which
+   * is exactly the "steer a turn that just finished" race the caller can hit
+   * legitimately.
+   *
+   * The handle is checked locally, before any request: a turn Codex has not
+   * named yet, one that was cancelled, or one that no longer matches what the
+   * hub thinks is running are all "nothing to steer right now" and cost nothing
+   * to refuse without a round trip.
+   */
+  async #steerNow(
+    session: CodexSession,
+    input: ExternalAgentSteerInput
+  ): Promise<ExternalAgentSteerOutcome> {
+    const active = session.activeTurn;
+    if (!active || active.cancelled || active.handle !== input.nativeTurnId || !active.turnId) {
+      return { accepted: false, reasonCode: 'turn-already-completed' };
+    }
+    // The shared JSON-RPC client answers one message at a time and does not
+    // read the next line until a server→client request is answered — so a
+    // `turn/steer` sent while Codex is blocked on an approval could never see
+    // its own response until that approval resolves. Refused here, for the
+    // same reason `turn-not-steerable` exists: this turn cannot take new
+    // input right now.
+    if (session.approvals.size > 0) {
+      return { accepted: false, reasonCode: 'turn-not-steerable' };
+    }
+
+    try {
+      const response = await session.client.request<TurnSteerResponse>(
+        'turn/steer',
+        {
+          threadId: session.threadId,
+          expectedTurnId: active.turnId,
+          clientUserMessageId: input.clientMessageId,
+          input: [{ type: 'text', text: input.input, text_elements: [] }],
+        } satisfies TurnSteerParams,
+        DEFAULT_REQUEST_TIMEOUT_MS
+      );
+      // Codex may continue the turn under a new id. A later interrupt or steer
+      // has to address the one it is actually running now.
+      if (session.activeTurn === active) {
+        active.turnId = response.turnId;
+        active.reducer?.adoptTurnId(response.turnId);
+      }
+      return { accepted: true };
+    } catch (error) {
+      const reason = steerRejectionReason(error, active, session);
+      if (reason) return { accepted: false, reasonCode: reason };
+      throw error;
+    }
   }
 
   async close(input: ExternalAgentCloseInput): Promise<void> {
@@ -767,6 +867,39 @@ export function optOutNotificationMethods(
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Distinguishes Codex's two steer refusals from an ordinary failure.
+ *
+ * `activeTurnNotSteerable` is structured — the vendor names the reason — so it
+ * is read straight off the error's `data`. A precondition failure on
+ * `expectedTurnId` is not: nothing in the wire protocol says "that was the
+ * wrong turn," so it has to be read back off the adapter's own bookkeeping,
+ * which the request above kept live across the call. `undefined` means
+ * neither explains the failure, and the caller re-throws rather than guess.
+ */
+function steerRejectionReason(
+  error: unknown,
+  active: ActiveTurn,
+  session: CodexSession
+): 'turn-not-steerable' | 'turn-already-completed' | undefined {
+  if (error instanceof JsonRpcCallError) {
+    const info = codexErrorInfoFrom(error.data);
+    if (info !== undefined && codexErrorCode(info) === 'activeTurnNotSteerable') {
+      return 'turn-not-steerable';
+    }
+  }
+  if (session.activeTurn !== active || active.cancelled) return 'turn-already-completed';
+  return undefined;
+}
+
+/** `error.data` is not pinned for a failed request; either shape is read. */
+function codexErrorInfoFrom(data: unknown): unknown {
+  if (data && typeof data === 'object' && 'codexErrorInfo' in data) {
+    return (data as { codexErrorInfo?: unknown }).codexErrorInfo;
+  }
+  return data;
 }
 
 function buildThreadStartParams(

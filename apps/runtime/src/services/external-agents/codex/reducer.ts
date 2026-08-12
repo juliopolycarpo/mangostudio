@@ -88,7 +88,7 @@ function only(event: ExternalAgentEvent): CodexTurnReduction {
  * different turn are ignored rather than mixed in.
  */
 export class CodexTurnReducer {
-  readonly #turnId: string;
+  #turnId: string;
   readonly #items = new Map<string, OpenItem>();
   readonly #now: () => number;
   #finished = false;
@@ -314,6 +314,11 @@ export class CodexTurnReducer {
     };
   }
 
+  /** Codex may continue a steer under a new turn id. */
+  adoptTurnId(turnId: string): void {
+    this.#turnId = turnId;
+  }
+
   #error(params: ErrorNotification): CodexTurnReduction {
     if (!this.#belongsToTurn(params)) return NOTHING;
     // `willRetry` means Codex is handling it. Surfacing that as a turn error
@@ -352,7 +357,7 @@ function mapTokenUsage(breakdown: TokenUsageBreakdown): ExternalUsage {
 }
 
 /** `CodexErrorInfo` is a string in most members and a single-key object in the rest. */
-function codexErrorCode(info: unknown): string {
+export function codexErrorCode(info: unknown): string {
   if (typeof info === 'string') return info;
   if (info && typeof info === 'object') {
     const [key] = Object.keys(info);

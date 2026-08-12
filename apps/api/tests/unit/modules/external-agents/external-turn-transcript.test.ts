@@ -184,6 +184,31 @@ describe('ExternalTurnTranscript', () => {
     expect(applications.at(-1)?.terminal).toBe('limit-exceeded');
   });
 
+  it('charges a steer against the byte budget and terminates once it crosses', () => {
+    const target = transcript({ maxBytes: 40 });
+    target.recordSteerAttempt({ clientMessageId: 'steer-1', text: 'x'.repeat(30) }, 2_000);
+    const second = target.recordSteerAttempt(
+      { clientMessageId: 'steer-2', text: 'y'.repeat(30) },
+      2_001
+    );
+
+    expect(second.terminal).toBe('limit-exceeded');
+    expect(target.turnPart.status).toBe('terminal');
+    expect(target.turnPart.persistedBytes).toBe(60);
+    // Both attempts are already durable — kept, exactly like the vendor event
+    // that crosses the same line in `apply`.
+    expect(target.parts.filter((part) => part.type === 'external_steer')).toHaveLength(2);
+  });
+
+  it('does not charge or terminate for a steer within budget', () => {
+    const target = transcript({ maxBytes: 1_000 });
+    const result = target.recordSteerAttempt({ clientMessageId: 'steer-1', text: 'hello' }, 2_000);
+
+    expect(result.terminal).toBeUndefined();
+    expect(target.turnPart.status).toBe('active');
+    expect(target.turnPart.persistedBytes).toBe(5);
+  });
+
   it('lets the first terminal writer win', () => {
     const target = transcript();
     target.finalize('cancelled-by-user', 3_000);

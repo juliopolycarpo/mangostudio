@@ -37,8 +37,10 @@ import type {
   ExternalAgentConfiguration,
   ExternalAgentError,
   ExternalAgentEvent,
+  ExternalAgentSteerResult,
   ExternalAgentTargetId,
   ExternalApprovalRequest,
+  ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
@@ -79,6 +81,27 @@ const logger = createDiagnosticLogger('external-turn-controller');
 
 /** External turns are agent-shaped in every place that already branches on mode. */
 const EXTERNAL_INTERACTION_MODE: Exclude<InteractionMode, 'image'> = 'agent';
+
+/**
+ * How long a turn's terminal path waits on a steer's runtime acknowledgement
+ * before sealing the transcript without it.
+ *
+ * Far below the runtime's own steer timeout: that call is not aborted when the
+ * turn ends, so waiting for it in full would leave Stop, or the vendor's own
+ * completion, feeling hung for as long as that request does. Short enough that
+ * the ordinary case — the vendor answers in well under a second — is never cut
+ * short, long enough that a hung acknowledgement cannot make every send feel
+ * broken.
+ */
+const STEER_TERMINATION_GRACE_MS = 3_000;
+
+function delay(ms: number): { readonly promise: Promise<void>; readonly cancel: () => void } {
+  let timer: ReturnType<typeof setTimeout>;
+  const promise = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, ms);
+  });
+  return { promise, cancel: () => clearTimeout(timer) };
+}
 
 /** A second send arrived while this chat already had a live turn. */
 export class ExternalTurnConflictError extends Error {
@@ -130,6 +153,18 @@ interface ExternalTurnObserver {
     readonly assistantMessageId: string;
   }): void;
   onEvent?(event: ExternalAgentEvent): void;
+  /**
+   * Reported once per steer, with the resolved outcome only — never the
+   * optimistic intermediate state the durable record briefly holds while the
+   * vendor call is in flight, because nothing live could have acted on it
+   * anyway.
+   */
+  onSteer?(steer: {
+    readonly clientMessageId: string;
+    readonly text: string;
+    readonly status: 'accepted' | 'rejected';
+    readonly reasonCode?: ExternalSteerRejectionReason;
+  }): void;
   onTerminal?(reason: ExternalTurnTerminalReason, error?: ExternalAgentError): void;
 }
 
@@ -172,6 +207,8 @@ export interface ExternalTurnControllerDependencies {
   readonly approvals?: ExternalApprovalRegistry;
   readonly now?: () => number;
   readonly newId?: () => string;
+  /** Overrides {@link STEER_TERMINATION_GRACE_MS}; a test's only hook for it. */
+  readonly steerTerminationGraceMs?: number;
 }
 
 /**
@@ -270,6 +307,37 @@ class ExternalTranscriptWriter {
     return this.#pending;
   }
 
+  /**
+   * A steering attempt cannot reach the vendor unless its durable record did.
+   * Unlike ordinary checkpoints, its failure must be observable by the caller.
+   */
+  writeRequired(): Promise<void> {
+    const text = this.transcript.text;
+    const parts = JSON.stringify(this.transcript.parts);
+    const required = this.#pending
+      .then(() =>
+        this.db
+          .updateTable('messages')
+          .set({ text, parts })
+          .where('id', '=', this.messageId)
+          .where('isGenerating', '=', 1)
+          .execute()
+      )
+      .then(() => undefined);
+    // Keep subsequent best-effort checkpoints usable if this required write
+    // failed; the steering caller still receives the original rejection.
+    this.#pending = required.then(
+      () => undefined,
+      (error: unknown) => {
+        logger.warn('required_checkpoint_write_failed', {
+          messageId: this.messageId,
+          error: String(error),
+        });
+      }
+    );
+    return required;
+  }
+
   flush(): Promise<void> {
     return this.#pending;
   }
@@ -303,6 +371,94 @@ export interface ExternalTurnController {
     readonly sessionId?: string;
     readonly nativeTurnId?: string;
   }): Promise<AnswerExternalApprovalResult>;
+  /**
+   * Sends more input into the chat's currently running turn.
+   *
+   * `turn-already-completed` covers three histories the caller cannot tell
+   * apart: no turn is running, one was but it ended, and `userId` does not
+   * own the turn that is. The last one is deliberate — distinguishing it from
+   * the other two would confirm that another user's turn is live on this
+   * chat, the same reason a rejected approval answer never says "not yours."
+   * `clientMessageId` is the idempotency key: a repeat with the same `text`
+   * returns the outcome already recorded for it, without a second vendor
+   * call. A repeat with different text under the same id is `id-reused`
+   * rather than an answer to either attempt — it is a composer edit, not the
+   * retry the id exists to make safe.
+   */
+  steer(input: {
+    readonly userId: string;
+    readonly chatId: string;
+    readonly clientMessageId: string;
+    readonly text: string;
+  }): Promise<ExternalAgentSteerResult>;
+}
+
+/**
+ * The transcript of one chat's live turn, so an answered approval or a steer
+ * reaches the durable record without waiting for the vendor to echo it back.
+ */
+interface LiveExternalTurn {
+  readonly transcript: ExternalTurnTranscript;
+  readonly writer: ExternalTranscriptWriter;
+  readonly sessionId: string;
+  /** Mutable: the vendor's turn id arrives after the send is registered. */
+  readonly external: ActiveExternalTurn;
+  readonly handle: ExternalSessionHandle;
+  readonly observer: ExternalTurnObserver | undefined;
+  /** Who started this turn — `steer` refuses a caller this does not match. */
+  readonly userId: string;
+  /**
+   * Every steer this turn has attempted, keyed by `clientMessageId` and never
+   * evicted for the life of the turn.
+   *
+   * The text travels with the promise so a repeat under the same id is only
+   * ever answered from cache when it repeats the same text too — the
+   * idempotent retry a lost acknowledgement legitimately causes. A promise
+   * that rejected stays cached exactly the same way: the caller already
+   * recorded the attempt and may have already called the vendor, so a naive
+   * retry must reuse that failure rather than recording and dispatching a
+   * second one for an outcome the server never learned.
+   */
+  readonly steerAttempts: Map<
+    string,
+    { readonly text: string; readonly promise: Promise<ExternalAgentSteerResult> }
+  >;
+  /**
+   * `clientMessageId`s whose durable write has happened but whose outcome has
+   * not been reported to `observer.onSteer` yet.
+   *
+   * While this is non-empty, `onEvent` notifications for vendor events that
+   * arrive durably *after* one of these steers are held in
+   * {@link LiveExternalTurn.deferredEvents} instead of sent immediately — the
+   * durable transcript already put the steer first, and a live listener that
+   * saw the vendor event first would render an order a reload disagrees with.
+   */
+  readonly pendingSteerIds: Set<string>;
+  /** `onEvent` notifications held back by a non-empty {@link pendingSteerIds}, in arrival order. */
+  readonly deferredEvents: Array<() => void>;
+  /** Terminal delivery has begun; no new steering attempt may be recorded. */
+  terminating: boolean;
+  /**
+   * Exposed so `steer` can seal the turn itself when a steer attempt pushes
+   * the transcript past its byte or event budget — the same terminal path
+   * `onEnvelope` drives for a vendor event that does the same thing.
+   */
+  readonly terminate: (reason: ExternalTurnTerminalReason) => void;
+  readonly cancelVendorAfter: (reason: ExternalTurnTerminalReason) => void;
+}
+
+/**
+ * Delivers every `onEvent` a pending steer was holding back, in the order
+ * they arrived.
+ *
+ * Also the fallback for a steer that never got to report itself — the
+ * terminal path's grace period lapsing, most likely — so a vendor event the
+ * durable transcript already holds is never silently missing from what a
+ * live listener sees.
+ */
+function flushDeferredEvents(live: LiveExternalTurn | undefined): void {
+  if (!live || live.deferredEvents.length === 0) return;
+  for (const emit of live.deferredEvents.splice(0)) emit();
 }
 
 export function createExternalTurnController(
@@ -312,21 +468,9 @@ export function createExternalTurnController(
   const approvals = dependencies.approvals ?? externalApprovalRegistry;
   const now = dependencies.now ?? Date.now;
   const newId = dependencies.newId ?? generateId;
-  /**
-   * The transcript of each chat's live turn, so an answered approval reaches the
-   * durable record without waiting for the vendor to echo it back. One entry per
-   * chat, because a chat holds one turn at a time.
-   */
-  const liveTurns = new Map<
-    string,
-    {
-      readonly transcript: ExternalTurnTranscript;
-      readonly writer: ExternalTranscriptWriter;
-      readonly sessionId: string;
-      /** Mutable: the vendor's turn id arrives after the send is registered. */
-      readonly external: ActiveExternalTurn;
-    }
-  >();
+  const steerTerminationGraceMs =
+    dependencies.steerTerminationGraceMs ?? STEER_TERMINATION_GRACE_MS;
+  const liveTurns = new Map<string, LiveExternalTurn>();
 
   async function start(
     input: StartExternalTurnInput,
@@ -401,14 +545,42 @@ export function createExternalTurnController(
       writer,
       sessionId: handle.sessionId,
       external,
+      handle,
+      observer: input.observer,
+      userId: input.userId,
+      steerAttempts: new Map(),
+      pendingSteerIds: new Set(),
+      deferredEvents: [],
+      terminating: false,
+      terminate,
+      cancelVendorAfter,
     });
 
     /** The first terminal writer wins; every later one is a no-op. */
     function terminate(reason: ExternalTurnTerminalReason): void {
       if (terminalReason) return;
       terminalReason = reason;
-      transcript.finalize(reason, now());
-      settled.resolve(reason);
+      const live = liveTurns.get(input.chatId);
+      if (live?.transcript === transcript) live.terminating = true;
+      // A steer is recorded before its runtime call. Give the in-flight call a
+      // bounded chance to resolve and durably correct that record before
+      // sealing the transcript, otherwise reload can disagree with the
+      // returned outcome — but only a chance: that call is not aborted here,
+      // so waiting for it in full would leave Stop, or the vendor's own
+      // completion, blocked on however long a hung acknowledgement takes.
+      const attempts = live
+        ? [...live.steerAttempts.values()].map((attempt) => attempt.promise)
+        : [];
+      const grace = delay(steerTerminationGraceMs);
+      void Promise.race([Promise.allSettled(attempts), grace.promise]).then(() => {
+        grace.cancel();
+        // Whatever the race waited for, no vendor event the durable transcript
+        // already holds may stay unreported — including one a steer that
+        // never got the chance to resolve was holding back.
+        flushDeferredEvents(live);
+        transcript.finalize(reason, now());
+        settled.resolve(reason);
+      });
     }
 
     /**
@@ -498,7 +670,20 @@ export function createExternalTurnController(
         // which is server-owned for the same reason the transcript omits it: a
         // client rendering the turn must see the hub-minted id `onSession`
         // reports and nothing that could address the vendor directly.
-        if (envelope.event.type !== 'session_started') input.observer?.onEvent?.(envelope.event);
+        if (envelope.event.type !== 'session_started') {
+          const live = liveTurns.get(input.chatId);
+          const emit = () => input.observer?.onEvent?.(envelope.event);
+          // A pending steer's durable record already sits ahead of this event
+          // in `transcript.parts`. Reporting the event now, before that steer
+          // has been reported, would let a live listener see them in the
+          // opposite order — held back until `steer` (or the terminal path's
+          // grace fallback) flushes it, so live and reload always agree.
+          if (live?.transcript === transcript && live.pendingSteerIds.size > 0) {
+            live.deferredEvents.push(emit);
+          } else {
+            emit();
+          }
+        }
 
         if (application.approvalRequested) bindApproval(application.approvalRequested);
 
@@ -696,8 +881,105 @@ export function createExternalTurnController(
       void live.writer.write({ force: true });
       return result;
     },
+    async steer(input) {
+      const live = liveTurns.get(input.chatId);
+      if (!live || live.terminating || live.transcript.terminated || live.userId !== input.userId) {
+        return { accepted: false, reasonCode: 'turn-already-completed' };
+      }
+
+      const existing = live.steerAttempts.get(input.clientMessageId);
+      if (existing) {
+        // Same id, different text: not the lost-acknowledgement retry this
+        // cache exists for, but a composer edit reusing a stale id. Answering
+        // from the earlier attempt's outcome would silently discard the edit.
+        if (existing.text !== input.text) return { accepted: false, reasonCode: 'id-reused' };
+        return await existing.promise;
+      }
+
+      const attempt = (async (): Promise<ExternalAgentSteerResult> => {
+        // Marks every vendor event applied from here until this steer is
+        // reported as durably-after it, so `onEnvelope` holds them back
+        // instead of notifying a live listener out of the durable order.
+        live.pendingSteerIds.add(input.clientMessageId);
+        try {
+          // Durable *and awaited* before any vendor call is attempted: a write
+          // still queued when the process died would be exactly the acknowledgement
+          // loss this exists to prevent. Every rejection below corrects this same
+          // record in place rather than leaving it silently absent.
+          const recorded = live.transcript.recordSteerAttempt(
+            { clientMessageId: input.clientMessageId, text: input.text },
+            now()
+          );
+          await live.writer.writeRequired();
+          if (recorded.terminal) {
+            // This steer is what pushed the transcript past its byte or event
+            // budget. It is already durably kept, matching how `apply` treats
+            // the vendor event that does the same — but no vendor call follows
+            // it: the turn is over, the same as any other budget breach.
+            live.terminate(recorded.terminal);
+            live.cancelVendorAfter(recorded.terminal);
+            return { accepted: false, reasonCode: 'turn-already-completed' };
+          }
+
+          const outcome = await resolveSteerOutcome(live, input);
+          if (!outcome.accepted) {
+            live.transcript.resolveSteerRejected(input.clientMessageId, outcome.reasonCode);
+            await live.writer.writeRequired();
+          }
+          live.observer?.onSteer?.({
+            clientMessageId: input.clientMessageId,
+            text: input.text,
+            status: outcome.accepted ? 'accepted' : 'rejected',
+            ...(outcome.accepted ? {} : { reasonCode: outcome.reasonCode }),
+          });
+          return outcome;
+        } finally {
+          live.pendingSteerIds.delete(input.clientMessageId);
+          if (live.pendingSteerIds.size === 0) flushDeferredEvents(live);
+        }
+      })();
+      // Cached before it settles, and never deleted: a concurrent repeat
+      // shares this promise, and one that later throws stays cached too, so a
+      // retry reuses this same attempt instead of recording and dispatching a
+      // second one.
+      live.steerAttempts.set(input.clientMessageId, { text: input.text, promise: attempt });
+      return await attempt;
+    },
   };
   return instance;
+}
+
+/**
+ * The two reasons only the vendor call can decide, plus the two the hub
+ * already knows the answer to without making one.
+ *
+ * `not-supported` and a missing native turn id are checked first because
+ * neither needs the runtime asked: a session whose capabilities never claimed
+ * steering, or a turn the vendor has not named yet, cannot be steered no
+ * matter what the call would say.
+ */
+async function resolveSteerOutcome(
+  live: { readonly handle: ExternalSessionHandle; readonly external: ActiveExternalTurn },
+  input: { readonly clientMessageId: string; readonly text: string }
+): Promise<ExternalAgentSteerResult> {
+  if (!live.handle.capabilities.steering) return { accepted: false, reasonCode: 'not-supported' };
+  const nativeTurnId = live.external.nativeTurnId;
+  if (!nativeTurnId) return { accepted: false, reasonCode: 'turn-already-completed' };
+  try {
+    return await live.handle.steer({
+      nativeTurnId,
+      clientMessageId: input.clientMessageId,
+      text: input.text,
+    });
+  } catch (error) {
+    // Mirrors `terminalReasonForCallFailure`: an argument the runtime rejects
+    // is the session it no longer has, because the session id is the only
+    // argument the hub itself chose.
+    if (error instanceof Error && error.name === 'ToolArgumentError') {
+      return { accepted: false, reasonCode: 'session-lost' };
+    }
+    throw error;
+  }
 }
 
 /**

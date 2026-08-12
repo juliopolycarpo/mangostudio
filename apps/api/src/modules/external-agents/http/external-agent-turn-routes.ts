@@ -1,10 +1,15 @@
 /**
- * The three writes an external turn needs beyond the stream itself.
+ * The four writes an external turn needs beyond the stream itself.
  *
  * `respond` answers a mid-turn approval. It authenticates and validates a shape,
  * and then delegates the entire decision to the approval registry — the five-way
  * binding, the option check, expiry and idempotency all live there. Re-deriving
  * any of it here would give a second, weaker path to the same vendor call.
+ *
+ * `steer` sends more input into the turn that is currently running, Codex only.
+ * Like `respond`, it authenticates and validates a shape and delegates the
+ * decision — here, to the turn controller, which is the only thing that knows
+ * which turn is live for this chat and can address it.
  *
  * `fork-with-runner` is D14 made usable. A chat has one runner kind for life,
  * because a transcript that mixed owners would replay a vendor's assistant text
@@ -27,7 +32,10 @@
 
 import { ChatRunnerConfigurationSchema, ChatSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
-import { schemaMaxLengthFor } from '@mangostudio/shared/external-agents';
+import {
+  ExternalAgentSteerResultSchema,
+  schemaMaxLengthFor,
+} from '@mangostudio/shared/external-agents';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -53,6 +61,11 @@ const RespondResponseSchema = t.Object({
   /** Echoed back so a client that raced another answer can reconcile. */
   optionId: t.Optional(VendorIdSchema),
   reason: t.Optional(t.String({ maxLength: 128 })),
+});
+
+const SteerBodySchema = t.Object({
+  clientMessageId: VendorIdSchema,
+  text: t.String({ minLength: 1, maxLength: 1024 * 1024 }),
 });
 
 const ForkBodySchema = t.Object({
@@ -142,6 +155,31 @@ export function createExternalAgentTurnRoutes(
           401: ApiErrorResponseSchema,
           404: RespondResponseSchema,
           409: RespondResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/chats/:id/external-agent/steer',
+      async ({ params, body, user, set }) => {
+        const result = await controller.steer({
+          userId: user?.id ?? '',
+          chatId: params.id,
+          clientMessageId: body.clientMessageId,
+          text: body.text,
+        });
+        // Every rejection reads as a conflict: the chat and the request are
+        // both well-formed, but the turn this was addressed to is not there to
+        // steer, right now, for whichever of the reasonCode's causes applies.
+        if (!result.accepted) set.status = 409;
+        return result;
+      },
+      {
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        body: SteerBodySchema,
+        response: {
+          200: ExternalAgentSteerResultSchema,
+          401: ApiErrorResponseSchema,
+          409: ExternalAgentSteerResultSchema,
         },
       }
     )

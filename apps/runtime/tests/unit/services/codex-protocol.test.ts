@@ -323,7 +323,9 @@ describe('adapter conformance', () => {
         images: true,
         usageReporting: true,
         cancellation: true,
-        steering: false,
+        // Codex's own capability set, `steering: true` included: `steer` is
+        // implemented, so the flag and the member agree.
+        steering: true,
         sessionListing: false,
         nativeReview: false,
         accountUsage: false,
@@ -331,12 +333,19 @@ describe('adapter conformance', () => {
     ).not.toThrow();
   });
 
-  it('refuses to claim steering while `steer` is unimplemented', () => {
+  it('implements steer, unlike the three opportunistic capabilities still waiting on their own plans', () => {
     // Typed as the interface so the optional members are visible: the registry
     // derives the four opportunistic capabilities from exactly this presence
-    // check, and Codex steering arrives with its own plan.
+    // check.
     const adapter: ExternalAgentAdapter = new CodexAppServerAdapter();
-    expect(adapter.steer).toBeUndefined();
+    expect(adapter.steer).toBeInstanceOf(Function);
+    expect(adapter.listSessions).toBeUndefined();
+    expect(adapter.startReview).toBeUndefined();
+    expect(adapter.refreshAccountUsage).toBeUndefined();
+  });
+
+  it('refuses to claim session listing while `listSessions` is unimplemented', () => {
+    const adapter: ExternalAgentAdapter = new CodexAppServerAdapter();
     expect(() =>
       assertExternalAgentAdapterConformance(adapter, {
         structuredStreaming: true,
@@ -348,10 +357,10 @@ describe('adapter conformance', () => {
         usageReporting: true,
         cancellation: true,
         steering: true,
-        sessionListing: false,
+        sessionListing: true,
         nativeReview: false,
         accountUsage: false,
       })
-    ).toThrow(/advertises steering=true/);
+    ).toThrow(/advertises sessionListing=true/);
   });
 });

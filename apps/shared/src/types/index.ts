@@ -14,6 +14,7 @@ export type {
   ContinuationReasonCode,
   ExternalActivityPart,
   ExternalApprovalPart,
+  ExternalSteerPart,
   ExternalTurnPart,
   GeneratedImagePart,
   GeneratedImageStatus,

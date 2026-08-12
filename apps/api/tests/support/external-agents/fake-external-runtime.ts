@@ -15,6 +15,8 @@ import type {
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
   ExternalAgentRespondParams,
+  ExternalAgentSteerParams,
+  ExternalAgentSteerResult,
   ExternalAgentTurnParams,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
@@ -26,6 +28,7 @@ const FAKE_CAPABILITIES: ExternalAgentCapabilities = {
   interactiveApprovals: true,
   cancellation: true,
   resume: true,
+  steering: true,
 };
 
 export interface FakeExternalRuntimeOptions {
@@ -36,6 +39,16 @@ export interface FakeExternalRuntimeOptions {
   readonly onOpen?: (params: ExternalAgentOpenParams) => void;
   readonly openFailure?: () => Error;
   readonly turnFailure?: () => Error;
+  readonly capabilities?: ExternalAgentCapabilities;
+  /**
+   * Overrides the default `{ accepted: true }` outcome of every `steer` call.
+   * A promise lets a test hold the call open to inspect what the controller
+   * wrote before the vendor answered.
+   */
+  readonly steerResult?: (
+    params: ExternalAgentSteerParams
+  ) => ExternalAgentSteerResult | Promise<ExternalAgentSteerResult>;
+  readonly steerFailure?: () => Error;
 }
 
 export interface FakeExternalRuntime {
@@ -44,6 +57,7 @@ export interface FakeExternalRuntime {
     readonly open: ExternalAgentOpenParams[];
     readonly turn: ExternalAgentTurnParams[];
     readonly respond: ExternalAgentRespondParams[];
+    readonly steer: ExternalAgentSteerParams[];
     readonly cancel: { sessionId: string; nativeTurnId?: string }[];
     readonly close: { sessionId: string }[];
   };
@@ -65,6 +79,7 @@ export function createFakeExternalRuntime(
     open: [],
     turn: [],
     respond: [],
+    steer: [],
     cancel: [],
     close: [],
   };
@@ -91,7 +106,7 @@ export function createFakeExternalRuntime(
           nativeSessionId: options.nativeSessionId ?? 'native-session-1',
           resumed: params.resumeRef !== undefined && options.resumeSucceeds !== false,
           effectiveConfiguration: params.configuration,
-          capabilities: FAKE_CAPABILITIES,
+          capabilities: options.capabilities ?? FAKE_CAPABILITIES,
         });
       },
       turn(params: ExternalAgentTurnParams) {
@@ -104,6 +119,12 @@ export function createFakeExternalRuntime(
       respond(params: ExternalAgentRespondParams) {
         calls.respond.push(params);
         return Promise.resolve({ ok: true as const });
+      },
+      async steer(params: ExternalAgentSteerParams) {
+        calls.steer.push(params);
+        const failure = options.steerFailure?.();
+        if (failure) throw failure;
+        return (await options.steerResult?.(params)) ?? { accepted: true as const };
       },
       cancel(params: { sessionId: string; nativeTurnId?: string }) {
         calls.cancel.push(params);

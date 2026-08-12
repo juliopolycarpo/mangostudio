@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { Chat } from '@mangostudio/shared/chat';
+import type { ExternalAgentSteerResult } from '@mangostudio/shared/external-agents';
 import { EXTERNAL_WORKSPACE_TRUST_VERSION } from '@mangostudio/shared/external-agents';
 import { getDb } from '../../../src/db/database';
 import { getAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
@@ -32,6 +33,32 @@ function stubController(result: AnswerExternalApprovalResult): {
         throw new Error('the respond route must never start a turn');
       },
       answerApproval: (input) => {
+        calls.push(input);
+        return Promise.resolve(result);
+      },
+      steer: () => {
+        throw new Error('the respond route must never steer a turn');
+      },
+    },
+  };
+}
+
+/** Records what the steer route delegated, and answers with whatever the test needs. */
+function stubSteerController(result: ExternalAgentSteerResult): {
+  readonly controller: ExternalTurnController;
+  readonly calls: Parameters<ExternalTurnController['steer']>[0][];
+} {
+  const calls: Parameters<ExternalTurnController['steer']>[0][] = [];
+  return {
+    calls,
+    controller: {
+      start: () => {
+        throw new Error('the steer route must never start a turn');
+      },
+      answerApproval: () => {
+        throw new Error('the steer route must never answer an approval');
+      },
+      steer: (input) => {
         calls.push(input);
         return Promise.resolve(result);
       },
@@ -154,6 +181,59 @@ describe('external agent approval route', () => {
     );
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ status: 'rejected', reason: 'expired' });
+  });
+});
+
+describe('external agent steer route', () => {
+  it('delegates the whole decision to the controller, with the caller as userId', async () => {
+    const { controller, calls } = stubSteerController({ accepted: true });
+    const app = mount(controller);
+
+    const response = await app.handle(
+      post(`/chats/${chatId}/external-agent/steer`, {
+        clientMessageId: 'steer-1',
+        text: 'actually use the existing helper',
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ accepted: true });
+    expect(calls).toEqual([
+      {
+        userId: user.id,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'actually use the existing helper',
+      },
+    ]);
+  });
+
+  it('maps every rejection reason to 409', async () => {
+    for (const reasonCode of [
+      'turn-already-completed',
+      'not-supported',
+      'session-lost',
+      'turn-not-steerable',
+    ] as const) {
+      const app = mount(stubSteerController({ accepted: false, reasonCode }).controller);
+      const response = await app.handle(
+        post(`/chats/${chatId}/external-agent/steer`, {
+          clientMessageId: `steer-${reasonCode}`,
+          text: 'hello',
+        })
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toEqual({ accepted: false, reasonCode });
+      restoreAuth?.();
+    }
+  });
+
+  it('rejects an empty steer body', async () => {
+    const app = mount(stubSteerController({ accepted: true }).controller);
+    const response = await app.handle(
+      post(`/chats/${chatId}/external-agent/steer`, { clientMessageId: 'steer-1', text: '' })
+    );
+    expect(response.status).toBe(422);
   });
 });
 

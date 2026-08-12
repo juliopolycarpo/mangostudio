@@ -2896,6 +2896,20 @@ export const messages = {
         'session-lost': 'A máquina não tem mais a sessão deste turno.',
       },
     },
+    steer: {
+      button: 'Direcionar',
+      buttonHint: 'Envie isto para o turno em andamento em vez de esperar ele terminar.',
+      sentLabel: 'Você, no meio do turno',
+      rejectedLabel: 'Isto não foi entregue',
+      submitError: 'Isto não pôde ser enviado.',
+      reason: {
+        'turn-already-completed': 'O turno já havia terminado.',
+        'not-supported': 'Este agente não pode ser direcionado.',
+        'session-lost': 'A máquina não tem mais a sessão deste turno.',
+        'turn-not-steerable': 'Este turno não pode receber nova entrada agora.',
+        'id-reused': 'Isto já foi enviado com um texto diferente. Tente novamente.',
+      },
+    },
     loginHint: 'Rode isto naquela máquina para entrar:',
   },
 

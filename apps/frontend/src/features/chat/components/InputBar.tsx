@@ -11,8 +11,18 @@ import type {
   ExternalApprovalRouting,
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
-import { AlertTriangle, FileText, FolderOpen, Image, Mic, Send, Square, X } from 'lucide-react';
-import { useState } from 'react';
+import {
+  AlertTriangle,
+  CornerDownRight,
+  FileText,
+  FolderOpen,
+  Image,
+  Mic,
+  Send,
+  Square,
+  X,
+} from 'lucide-react';
+import { useRef, useState } from 'react';
 import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
@@ -20,6 +30,7 @@ import { ExternalComposerControls } from '@/features/external-agents/ExternalCom
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
+import { steerExternalTurn } from '@/services/external-agent-service';
 import { CapabilityInspector } from './CapabilityInspector';
 import { McpComposerMenu } from './McpComposerMenu';
 
@@ -121,6 +132,9 @@ export function InputBar({
   const { t } = useI18n();
   const [prompt, setPrompt] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<ChatAttachment[]>([]);
+  const [steering, setSteering] = useState(false);
+  const [steerError, setSteerError] = useState<string | null>(null);
+  const pendingSteerId = useRef<string | null>(null);
   const selectableAgents = agents.filter(
     (agent) => agent.role === 'primary' || agent.role === 'both'
   );
@@ -156,9 +170,53 @@ export function InputBar({
       externalUnavailableReason === 'disclosure-required');
   const cannotSubmit = submitDisabled || externalRunnerBlocked;
 
+  /**
+   * Whether *this* runner ever accepts a correction mid-turn, independent of
+   * whether one is running right now. `steering: true` is Codex only — see
+   * `docs/architecture/external-agents.md` — and a runner that cannot host a
+   * turn at all cannot steer one either.
+   */
+  const steerable =
+    isExternalRunner &&
+    externalDescriptor?.capabilities.steering === true &&
+    !externalRunnerBlocked;
+  const showSteerAffordance = steerable && isGenerating === true;
+
+  const handleSteer = async (text: string) => {
+    if (!chatId || steering) return;
+    setSteering(true);
+    setSteerError(null);
+    try {
+      const clientMessageId = pendingSteerId.current ?? crypto.randomUUID();
+      pendingSteerId.current = clientMessageId;
+      const result = await steerExternalTurn(chatId, {
+        clientMessageId,
+        text,
+      });
+      pendingSteerId.current = null;
+      setPrompt('');
+      // The outcome itself renders inline in the turn once the live stream
+      // reports it; this is only for a rejection nobody else will surface.
+      if (!result.accepted) setSteerError(t.externalAgents.steer.reason[result.reasonCode]);
+    } catch {
+      setSteerError(t.externalAgents.steer.submitError);
+    } finally {
+      setSteering(false);
+    }
+  };
+
   const handleSubmit = (e: { preventDefault: () => void }) => {
     e.preventDefault();
-    if (!prompt.trim() || disabled || cannotSubmit) return;
+    if (!prompt.trim()) return;
+    // `disabled` is `isGenerating` at the call site, which is exactly the
+    // state a steerable runner's affordance exists to submit through — so
+    // this branch has to run before that check, not be exempted from it.
+    if (showSteerAffordance) {
+      if (!chatId || steering) return;
+      void handleSteer(prompt);
+      return;
+    }
+    if (disabled || cannotSubmit) return;
     const attachmentIds = pendingAttachments.map((attachment) => attachment.id);
     onSubmit(prompt, attachmentIds.length > 0 ? attachmentIds : undefined);
     setPrompt('');
@@ -343,6 +401,13 @@ export function InputBar({
           </p>
         )}
 
+        {steerError && (
+          <p role="status" className="mb-2 flex items-center gap-1.5 text-[11px] text-error">
+            <AlertTriangle size={12} className="shrink-0" />
+            {steerError}
+          </p>
+        )}
+
         {pendingAttachments.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             {pendingAttachments.map((attachment) => (
@@ -376,10 +441,15 @@ export function InputBar({
           <input
             type="text"
             value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            disabled={disabled || externalRunnerBlocked}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              if (steerError) setSteerError(null);
+            }}
+            disabled={(disabled && !showSteerAffordance) || externalRunnerBlocked || steering}
             className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-body text-on-surface placeholder:text-on-surface-variant/40 py-2 outline-none min-w-0"
-            placeholder={t.chat.input.placeholder}
+            placeholder={
+              showSteerAffordance ? t.externalAgents.steer.buttonHint : t.chat.input.placeholder
+            }
           />
 
           <div className="flex items-center gap-1 pr-0.5 sm:pr-1 shrink-0">
@@ -392,17 +462,39 @@ export function InputBar({
                 <Mic size={20} className="hidden sm:block" />
               </button>
             )}
-            {isGenerating ? (
+            {isGenerating && (
               <button
                 type="button"
                 onClick={onStop}
-                className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl font-bold text-xs flex items-center gap-1.5 sm:gap-2 transition-all active:scale-95 bg-surface-container-high text-on-surface hover:bg-error/20 hover:text-error shrink-0"
+                title={t.chat.input.stop}
+                className={`flex items-center justify-center rounded-xl font-bold text-xs transition-all active:scale-95 bg-surface-container-high text-on-surface hover:bg-error/20 hover:text-error shrink-0 ${
+                  showSteerAffordance
+                    ? 'w-9 h-9 sm:w-10 sm:h-10'
+                    : 'h-9 sm:h-10 gap-1.5 px-3 sm:gap-2 sm:px-4'
+                }`}
               >
-                <span className="hidden sm:inline">{t.chat.input.stop}</span>{' '}
+                {!showSteerAffordance && (
+                  <span className="hidden sm:inline">{t.chat.input.stop}</span>
+                )}{' '}
                 <Square size={12} className="sm:hidden" />
                 <Square size={14} className="hidden sm:block" />
               </button>
-            ) : (
+            )}
+            {/* Same button, different meaning while a steerable turn runs — see
+                docs/architecture/external-agents.md's steering section. Distinct
+                styling so nobody reads it as an ordinary send. */}
+            {showSteerAffordance ? (
+              <button
+                type="submit"
+                disabled={!chatId || steering || !prompt.trim()}
+                title={t.externalAgents.steer.buttonHint}
+                className="h-9 sm:h-10 px-3 sm:px-4 rounded-xl border-2 border-primary text-primary font-bold text-xs flex items-center gap-1.5 sm:gap-2 hover:bg-primary/10 transition-all active:scale-95 disabled:opacity-50 shrink-0"
+              >
+                <span className="hidden sm:inline">{t.externalAgents.steer.button}</span>{' '}
+                <CornerDownRight size={14} className="sm:hidden" />
+                <CornerDownRight size={16} className="hidden sm:block" />
+              </button>
+            ) : !isGenerating ? (
               <button
                 type="submit"
                 disabled={disabled || cannotSubmit || !prompt.trim()}
@@ -413,7 +505,7 @@ export function InputBar({
                 <Send size={14} className="sm:hidden" />
                 <Send size={16} className="hidden sm:block" />
               </button>
-            )}
+            ) : null}
           </div>
         </form>
         <p className="text-center text-[10px] text-on-surface-variant/40 mt-2 sm:mt-3 font-label">

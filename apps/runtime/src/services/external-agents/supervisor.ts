@@ -12,6 +12,8 @@ import type {
   ExternalAgentOpenResult,
   ExternalAgentRespondParams,
   ExternalAgentRuntimeDescriptor,
+  ExternalAgentSteerParams,
+  ExternalAgentSteerResult,
   ExternalAgentTargetId,
   ExternalAgentTurnParams,
   ExternalAgentTurnResult,
@@ -29,6 +31,7 @@ import {
   ExternalAgentOpenResultSchema,
   ExternalAgentRespondParamsSchema,
   ExternalAgentRuntimeDescriptorSchema,
+  ExternalAgentSteerParamsSchema,
   ExternalAgentTurnParamsSchema,
 } from '@mangostudio/shared/external-agents';
 import type {
@@ -371,6 +374,24 @@ export class ExternalAgentSessionSupervisor {
       nativeSessionId: session.openResult.nativeSessionId,
     });
     return { ok: true };
+  }
+
+  /**
+   * `not-supported` is answered here rather than thrown, alongside the two
+   * reasons the adapter itself can produce: a hub asking a session whose
+   * adapter has no `steer` member is an expected shape a stale capability
+   * cache can reach, not a caller error the way a bad session id is.
+   */
+  async steer(params: ExternalAgentSteerParams): Promise<ExternalAgentSteerResult> {
+    assertExternalAgentParams('external-agent.steer', ExternalAgentSteerParamsSchema, params);
+    const session = this.#requireSession(params.sessionId);
+    if (!session.openResult.capabilities.steering || !session.adapter.steer) {
+      return { accepted: false, reasonCode: 'not-supported' };
+    }
+    return await session.adapter.steer({
+      ...params,
+      nativeSessionId: session.openResult.nativeSessionId,
+    });
   }
 
   async cancel(

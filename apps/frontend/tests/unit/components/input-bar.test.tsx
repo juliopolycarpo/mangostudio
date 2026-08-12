@@ -251,3 +251,171 @@ describe('InputBar — an external runner that cannot host a turn', () => {
     expect(screen.queryByRole('status')).toBeNull();
   });
 });
+
+/**
+ * Codex only. The composer's default while generating — disabled, one Stop
+ * button — must hold for every other runner; only a session whose adapter
+ * capabilities say `steering: true` gets the affordance at all.
+ */
+describe('InputBar — mid-turn steering', () => {
+  const EXTERNAL_RUNNER = { kind: 'external', targetId: 'codex' } as const;
+
+  function steerableDescriptor(): ExternalAgentDescriptor {
+    return {
+      targetId: 'codex',
+      environmentId: 'local',
+      installed: true,
+      authState: 'signed-in',
+      capabilities: { ...NO_EXTERNAL_AGENT_CAPABILITIES, steering: true },
+      supportedConfigurations: [],
+    };
+  }
+
+  it('keeps the input enabled and offers a distinct Steer button while a steerable turn runs', () => {
+    renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      externalDescriptor: steerableDescriptor(),
+      isGenerating: true,
+      disabled: true,
+    });
+
+    expect(screen.getByRole('textbox')).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Steer' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+  });
+
+  it('disables the composer as usual while generating on an adapter that cannot steer', () => {
+    renderInputBar({
+      runner: EXTERNAL_RUNNER,
+      externalDescriptor: {
+        ...steerableDescriptor(),
+        capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+      },
+      isGenerating: true,
+      disabled: true,
+    });
+
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Steer' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+  });
+
+  it('disables the composer as usual while generating on a MangoStudio runner', () => {
+    renderInputBar({
+      runner: { kind: 'mangostudio', agentId: 'default' },
+      isGenerating: true,
+      disabled: true,
+    });
+
+    expect(screen.getByRole('textbox')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Steer' })).toBeNull();
+  });
+
+  it('posts a steer and clears the composer', async () => {
+    const scenario = createFetchScenario();
+    scenario
+      .respondWithJson('POST', '/api/chats/chat-1/external-agent/steer', {
+        body: { accepted: true },
+      })
+      .install();
+
+    try {
+      const user = userEvent.setup();
+      renderInputBar({
+        chatId: 'chat-1',
+        runner: EXTERNAL_RUNNER,
+        externalDescriptor: steerableDescriptor(),
+        isGenerating: true,
+        disabled: true,
+      });
+
+      await user.type(screen.getByRole('textbox'), 'actually use the existing helper');
+      await user.click(screen.getByRole('button', { name: 'Steer' }));
+
+      // Clearing the input is downstream of the POST resolving, so it already
+      // proves the request reached this scenario's one registered route; this
+      // also pins the body it carried.
+      await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue(''));
+      expect(scenario.fetchMock).toHaveBeenCalledTimes(1);
+      const [, init] = scenario.fetchMock.mock.calls[0] as [unknown, RequestInit | undefined];
+      expect(JSON.parse(String(init?.body))).toEqual({
+        clientMessageId: expect.any(String),
+        text: 'actually use the existing helper',
+      });
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  it('disables the composer while a steer is in flight, so a later edit cannot be lost', async () => {
+    const originalFetch = globalThis.fetch;
+    const deferred = Promise.withResolvers<Response>();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => deferred.promise)
+    );
+
+    try {
+      const user = userEvent.setup();
+      renderInputBar({
+        chatId: 'chat-1',
+        runner: EXTERNAL_RUNNER,
+        externalDescriptor: steerableDescriptor(),
+        isGenerating: true,
+        disabled: true,
+      });
+
+      await user.type(screen.getByRole('textbox'), 'first correction');
+      await user.click(screen.getByRole('button', { name: 'Steer' }));
+
+      // The POST has not resolved yet: the composer must not accept an edit
+      // that was never part of what was sent, so it stays disabled rather
+      // than letting one in that the eventual clear would then discard.
+      await waitFor(() => expect(screen.getByRole('textbox')).toBeDisabled());
+      expect(screen.getByRole('textbox')).toHaveValue('first correction');
+
+      deferred.resolve(
+        new Response(JSON.stringify({ accepted: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      await waitFor(() => expect(screen.getByRole('textbox')).not.toBeDisabled());
+      expect(screen.getByRole('textbox')).toHaveValue('');
+    } finally {
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+
+  it('shows the rejection reason inline when the server refuses', async () => {
+    const scenario = createFetchScenario();
+    scenario
+      .respondWithJson('POST', '/api/chats/chat-1/external-agent/steer', {
+        status: 409,
+        body: { accepted: false, reasonCode: 'turn-not-steerable' },
+      })
+      .install();
+
+    try {
+      const user = userEvent.setup();
+      renderInputBar({
+        chatId: 'chat-1',
+        runner: EXTERNAL_RUNNER,
+        externalDescriptor: steerableDescriptor(),
+        isGenerating: true,
+        disabled: true,
+      });
+
+      await user.type(screen.getByRole('textbox'), 'switch to plan mode');
+      await user.click(screen.getByRole('button', { name: 'Steer' }));
+
+      expect(await screen.findByRole('status')).toHaveTextContent(
+        /cannot take new input right now/i
+      );
+    } finally {
+      scenario.restore();
+    }
+  });
+});

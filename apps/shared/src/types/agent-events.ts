@@ -4,6 +4,7 @@ import type {
   ExternalAgentError,
   ExternalAgentTargetId,
   ExternalApprovalOption,
+  ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
   ExternalUsage,
 } from '../external-agents/schemas';
@@ -256,6 +257,29 @@ export interface ExternalTurnPart {
   error?: ExternalAgentError;
 }
 
+/**
+ * A correction the user sent into a running Codex turn, and what became of it.
+ *
+ * Codex-only: it exists because `turn/steer` is a first-class client operation
+ * for that vendor and a queued-follow-up for the others, which is a different
+ * feature. Written durably as soon as the send is accepted for delivery — before
+ * the vendor call that might steer the turn — so a reload always shows what the
+ * user said, even when the acknowledgement that followed was lost. `status`
+ * starts `'accepted'` optimistically and is corrected to `'rejected'` in place
+ * if the vendor call comes back refused; the text itself never changes; the
+ * user really did type it either way.
+ */
+export interface ExternalSteerPart {
+  type: 'external_steer';
+  targetId: ExternalAgentTargetId;
+  clientMessageId: string;
+  text: string;
+  status: 'accepted' | 'rejected';
+  /** Present only once `status` is `'rejected'`. */
+  reasonCode?: ExternalSteerRejectionReason;
+  createdAt: number;
+}
+
 /** Discriminated union of all content block types in an assistant message. */
 export type MessagePart =
   | { type: 'text'; text: string }
@@ -282,6 +306,7 @@ export type MessagePart =
   | TurnCheckpointPart
   | ExternalActivityPart
   | ExternalApprovalPart
+  | ExternalSteerPart
   | ExternalTurnPart
   | { type: 'error'; text: string }
   | { type: 'system_event'; event: string; detail?: string }

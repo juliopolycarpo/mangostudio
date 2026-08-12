@@ -1,7 +1,12 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentConfiguration,
+  ExternalAgentSteerResult,
+} from '@mangostudio/shared/external-agents';
+import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import type {
   ExternalApprovalPart,
+  ExternalSteerPart,
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
@@ -58,8 +63,11 @@ async function insertChat(runnerKind: 'external' | 'mangostudio' = 'external'): 
   return id;
 }
 
-function harness(options: FakeExternalRuntimeOptions = {}) {
-  const runtime = createFakeExternalRuntime(options);
+function harness(
+  options: FakeExternalRuntimeOptions & { readonly steerTerminationGraceMs?: number } = {}
+) {
+  const { steerTerminationGraceMs, ...runtimeOptions } = options;
+  const runtime = createFakeExternalRuntime(runtimeOptions);
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     newSessionId: () => 'session-1',
@@ -70,6 +78,7 @@ function harness(options: FakeExternalRuntimeOptions = {}) {
     sessions,
     approvals,
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
+    ...(steerTerminationGraceMs !== undefined ? { steerTerminationGraceMs } : {}),
   });
   return { runtime, sessions, approvals, controller };
 }
@@ -124,6 +133,15 @@ async function readAssistantRow(): Promise<{
 function turnPartOf(parts: readonly MessagePart[]): ExternalTurnPart {
   const part = parts.find((entry): entry is ExternalTurnPart => entry.type === 'external_turn');
   if (!part) throw new Error('the transcript has no external_turn part');
+  return part;
+}
+
+function steerPartOf(parts: readonly MessagePart[], clientMessageId: string): ExternalSteerPart {
+  const part = parts.find(
+    (entry): entry is ExternalSteerPart =>
+      entry.type === 'external_steer' && entry.clientMessageId === clientMessageId
+  );
+  if (!part) throw new Error(`the transcript has no external_steer part for "${clientMessageId}"`);
   return part;
 }
 
@@ -494,6 +512,342 @@ describe('external turn controller', () => {
     // resumable handle, which no client may address.
     expect(sessionIds).toEqual(['session-1']);
     expect(events).toEqual(['text_delta', 'completed']);
+  });
+
+  describe('steer', () => {
+    it('persists the steered text before the vendor call resolves', async () => {
+      const held = Promise.withResolvers<ExternalAgentSteerResult>();
+      const { runtime, controller } = harness({ steerResult: () => held.promise });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const steering = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'actually use the existing helper',
+      });
+      await waitFor(() => runtime.calls.steer.length === 1, 'the steer to reach the runtime');
+
+      // The vendor call is still open, but the durable record already exists —
+      // a lost acknowledgement must not erase what the user said.
+      const midFlight = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      expect(midFlight).toMatchObject({
+        text: 'actually use the existing helper',
+        status: 'accepted',
+      });
+
+      held.resolve({ accepted: true });
+      await expect(steering).resolves.toEqual({ accepted: true });
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('holds a vendor event behind a steer that has not been reported yet', async () => {
+      const held = Promise.withResolvers<ExternalAgentSteerResult>();
+      const { runtime, controller } = harness({ steerResult: () => held.promise });
+      const log: string[] = [];
+      const running = controller.start(
+        {
+          userId,
+          chatId,
+          prompt: 'refactor the parser',
+          configuration: CONFIGURATION,
+          canonicalWorkspacePath: '/work/repo',
+          vendorAccountFingerprint: 'account-a',
+          credentialHomeFingerprint: 'sha256:home-a',
+          observer: {
+            onEvent: (event) => void log.push(event.type),
+            onSteer: (steer) => void log.push(`steer:${steer.status}`),
+          },
+        },
+        getDb()
+      );
+      await waitForTurnStart(runtime);
+
+      const steering = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'switch approach',
+      });
+      await waitFor(() => runtime.calls.steer.length === 1, 'the steer to reach the runtime');
+
+      // Durably recorded after the steer — `transcript.parts` already has the
+      // steer ahead of it — but the steer's own outcome has not been reported
+      // to the observer yet. A live listener must not see this before it.
+      runtime.emit({ type: 'text_delta', text: 'still working' });
+      expect(log).toEqual([]);
+
+      held.resolve({ accepted: true });
+      await steering;
+
+      expect(log).toEqual(['steer:accepted', 'text_delta']);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('corrects the durable record in place when Codex refuses the turn', async () => {
+      const { runtime, controller } = harness({
+        steerResult: () => ({ accepted: false, reasonCode: 'turn-not-steerable' }),
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'switch to plan mode',
+      });
+      expect(result).toEqual({ accepted: false, reasonCode: 'turn-not-steerable' });
+
+      const part = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      expect(part).toMatchObject({
+        text: 'switch to plan mode',
+        status: 'rejected',
+        reasonCode: 'turn-not-steerable',
+      });
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('shares an in-flight clientMessageId and calls the runtime once', async () => {
+      const held = Promise.withResolvers<ExternalAgentSteerResult>();
+      const { runtime, controller } = harness({ steerResult: () => held.promise });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const input = { userId, chatId, clientMessageId: 'steer-1', text: 'once' };
+      const first = controller.steer(input);
+      await waitFor(() => runtime.calls.steer.length === 1, 'the first steer to reach the runtime');
+      const second = controller.steer(input);
+      held.resolve({ accepted: true });
+
+      expect(await first).toEqual({ accepted: true });
+      expect(await second).toEqual({ accepted: true });
+      expect(runtime.calls.steer).toHaveLength(1);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('refuses a reused clientMessageId whose text no longer matches', async () => {
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const first = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'first draft',
+      });
+      expect(first).toEqual({ accepted: true });
+
+      const second = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'edited draft',
+      });
+      expect(second).toEqual({ accepted: false, reasonCode: 'id-reused' });
+
+      // The edit never reached the runtime, and the durable record still
+      // shows only the original text — the second call must not have
+      // recorded a duplicate part for it either.
+      expect(runtime.calls.steer).toHaveLength(1);
+      const part = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      expect(part).toMatchObject({ text: 'first draft', status: 'accepted' });
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('reuses a failed attempt instead of recording and dispatching a second one', async () => {
+      const { runtime, controller } = harness({
+        steerFailure: () => new Error('runtime unreachable'),
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const input = { userId, chatId, clientMessageId: 'steer-1', text: 'once' };
+      await expect(controller.steer(input)).rejects.toThrow('runtime unreachable');
+      await expect(controller.steer(input)).rejects.toThrow('runtime unreachable');
+
+      expect(runtime.calls.steer).toHaveLength(1);
+      const parts = (await readAssistantRow()).parts.filter(
+        (part) => part.type === 'external_steer' && part.clientMessageId === 'steer-1'
+      );
+      expect(parts).toHaveLength(1);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('persists a rejected steer before terminal finalization', async () => {
+      const held = Promise.withResolvers<ExternalAgentSteerResult>();
+      const { runtime, controller } = harness({ steerResult: () => held.promise });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const steering = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'switch to plan mode',
+      });
+      await waitFor(() => runtime.calls.steer.length === 1, 'the steer to reach the runtime');
+      runtime.emit({ type: 'completed' });
+      held.resolve({ accepted: false, reasonCode: 'turn-not-steerable' });
+
+      await expect(steering).resolves.toEqual({
+        accepted: false,
+        reasonCode: 'turn-not-steerable',
+      });
+      await running;
+      expect(steerPartOf((await readAssistantRow()).parts, 'steer-1')).toMatchObject({
+        status: 'rejected',
+        reasonCode: 'turn-not-steerable',
+      });
+    });
+
+    it('refuses with turn-already-completed when no turn is running', async () => {
+      const { runtime, controller } = harness();
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'hello?',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'turn-already-completed' });
+      expect(runtime.calls.steer).toHaveLength(0);
+    });
+
+    it('refuses a steer from a user who did not start the turn, indistinguishably from no turn', async () => {
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+      const other = await insertTestUser();
+
+      const result = await controller.steer({
+        userId: other.id,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'hijacked',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'turn-already-completed' });
+      expect(runtime.calls.steer).toHaveLength(0);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('refuses to write after the turn has already ended', async () => {
+      const { runtime, controller } = harness();
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+      runtime.emit({ type: 'completed' });
+      await running;
+      const finishedParts = (await readAssistantRow()).parts;
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'too late',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'turn-already-completed' });
+      expect(runtime.calls.steer).toHaveLength(0);
+      expect((await readAssistantRow()).parts).toEqual(finishedParts);
+    });
+
+    it('refuses with not-supported when the session capabilities never claimed steering', async () => {
+      const { runtime, controller } = harness({
+        capabilities: {
+          ...NO_EXTERNAL_AGENT_CAPABILITIES,
+          structuredStreaming: true,
+          interactiveApprovals: true,
+          cancellation: true,
+          resume: true,
+        },
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'hello?',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'not-supported' });
+      expect(runtime.calls.steer).toHaveLength(0);
+      const part = steerPartOf((await readAssistantRow()).parts, 'steer-1');
+      expect(part.status).toBe('rejected');
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('maps a session the runtime no longer has to session-lost', async () => {
+      const { runtime, controller } = harness({
+        steerFailure: () => Object.assign(new Error('session gone'), { name: 'ToolArgumentError' }),
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const result = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'hello?',
+      });
+
+      expect(result).toEqual({ accepted: false, reasonCode: 'session-lost' });
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('finalizes without waiting out a hung steer acknowledgement', async () => {
+      const hung = new Promise<ExternalAgentSteerResult>(() => {
+        // Never settles — a runtime acknowledgement the turn's terminal path
+        // must not block on indefinitely.
+      });
+      const { runtime, controller } = harness({
+        steerResult: () => hung,
+        steerTerminationGraceMs: 20,
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      const steering = controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'switch approach',
+      });
+      await waitFor(() => runtime.calls.steer.length === 1, 'the steer to reach the runtime');
+
+      const startedAt = Date.now();
+      runtime.emit({ type: 'completed' });
+      const result = await running;
+
+      expect(result.reason).toBe('completed');
+      // Bounded by the grace period, not by the runtime call that never
+      // answers — `steering` itself is left permanently unsettled by this test.
+      expect(Date.now() - startedAt).toBeLessThan(1_000);
+      void steering;
+    });
   });
 });
 

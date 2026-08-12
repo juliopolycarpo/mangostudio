@@ -6,6 +6,7 @@ import {
   boundVendorText,
   EXTERNAL_AGENT_TARGET_IDS,
   EXTERNAL_AGENT_UNAVAILABLE_REASONS,
+  EXTERNAL_STEER_REJECTION_REASONS,
   EXTERNAL_TEXT_LIMITS,
   EXTERNAL_TURN_PAYLOAD_MAX_BYTES,
   ExternalAgentAckResultSchema,
@@ -23,11 +24,14 @@ import {
   ExternalAgentOpenParamsSchema,
   ExternalAgentOpenResultSchema,
   ExternalAgentRespondParamsSchema,
+  ExternalAgentSteerParamsSchema,
+  ExternalAgentSteerResultSchema,
   type ExternalAgentTargetId,
   ExternalAgentTargetIdSchema,
   ExternalAgentTurnParamsSchema,
   ExternalAgentTurnResultSchema,
   ExternalIdentityIsolationSchema,
+  ExternalSteerRejectionReasonSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,
@@ -277,6 +281,53 @@ describe('runtime external-agent protocol payloads', () => {
     expect(Value.Check(ExternalIdentityIsolationSchema, { ...isolation, inferred: true })).toBe(
       false
     );
+  });
+});
+
+describe('steering', () => {
+  it('names every reason a steer can be refused', () => {
+    expect([...EXTERNAL_STEER_REJECTION_REASONS]).toEqual([
+      'turn-already-completed',
+      'not-supported',
+      'session-lost',
+      'turn-not-steerable',
+      'id-reused',
+    ]);
+  });
+
+  it('validates the steer method contract', () => {
+    expect(
+      Value.Check(ExternalAgentSteerParamsSchema, {
+        sessionId: 'session-1',
+        nativeTurnId: 'turn-1',
+        clientMessageId: 'steer-1',
+        input: 'actually use the existing helper',
+      })
+    ).toBe(true);
+    expect(Value.Check(ExternalAgentSteerResultSchema, { accepted: true })).toBe(true);
+    for (const reasonCode of EXTERNAL_STEER_REJECTION_REASONS) {
+      expect(Value.Check(ExternalAgentSteerResultSchema, { accepted: false, reasonCode })).toBe(
+        true
+      );
+    }
+  });
+
+  it('keeps the result a closed union — no reasonCode beside acceptance, no accepted flag missing', () => {
+    expect(
+      Value.Check(ExternalAgentSteerResultSchema, {
+        accepted: true,
+        reasonCode: 'turn-not-steerable',
+      })
+    ).toBe(false);
+    expect(Value.Check(ExternalAgentSteerResultSchema, { accepted: false })).toBe(false);
+    expect(
+      Value.Check(ExternalAgentSteerResultSchema, { accepted: false, reasonCode: 'made-up' })
+    ).toBe(false);
+  });
+
+  it('rejects an unrecognized reasonCode', () => {
+    expect(Value.Check(ExternalSteerRejectionReasonSchema, 'turn-already-completed')).toBe(true);
+    expect(Value.Check(ExternalSteerRejectionReasonSchema, 'made-up')).toBe(false);
   });
 });
 

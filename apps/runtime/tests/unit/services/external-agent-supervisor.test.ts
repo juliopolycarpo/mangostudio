@@ -144,7 +144,10 @@ describe('external-agent adapter registry and supervisor', () => {
     // Method presence is fixed per adapter class; capabilities are discovered
     // per machine. An adapter that can steer must still be able to report a CLI
     // build that cannot.
-    const adapter = new FakeExternalAgentAdapter({ steerable: true });
+    const adapter = new FakeExternalAgentAdapter({
+      steerable: true,
+      capabilities: { steering: false },
+    });
     const value = await fixture({ adapter });
 
     const result = await value.supervisor.discover(
@@ -345,6 +348,87 @@ describe('external-agent adapter registry and supervisor', () => {
       optionId: 'allow',
     });
     expect(adapter.responses).toHaveLength(1);
+    await value.supervisor.close();
+  });
+
+  it('forwards a steer to the adapter with the native session id attached', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      steerable: true,
+      capabilities: { steering: true },
+    });
+    const value = await fixture({ adapter });
+    await openSession(value);
+
+    const result = await value.supervisor.steer({
+      sessionId: 'session-1',
+      nativeTurnId: 'turn-1',
+      clientMessageId: 'steer-1',
+      input: 'actually use the existing helper',
+    });
+
+    expect(result).toEqual({ accepted: true });
+    expect(adapter.steers).toEqual([
+      {
+        sessionId: 'session-1',
+        nativeSessionId: 'native-session-1',
+        nativeTurnId: 'turn-1',
+        clientMessageId: 'steer-1',
+        input: 'actually use the existing helper',
+      },
+    ]);
+    await value.supervisor.close();
+  });
+
+  it('passes an adapter rejection through unchanged', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      steerable: true,
+      capabilities: { steering: true },
+      steerResult: { accepted: false, reasonCode: 'turn-not-steerable' },
+    });
+    const value = await fixture({ adapter });
+    await openSession(value);
+
+    const result = await value.supervisor.steer({
+      sessionId: 'session-1',
+      nativeTurnId: 'turn-1',
+      clientMessageId: 'steer-1',
+      input: 'switch to plan mode',
+    });
+
+    expect(result).toEqual({ accepted: false, reasonCode: 'turn-not-steerable' });
+    await value.supervisor.close();
+  });
+
+  it('answers not-supported without calling an adapter that has no steer member', async () => {
+    // The default fixture adapter never assigns `steer`, matching Cursor and
+    // Claude: the capability flag and the method's presence cannot disagree,
+    // so a session on a non-steering adapter is refused before anything is
+    // asked of it.
+    const value = await fixture();
+    await openSession(value);
+
+    const result = await value.supervisor.steer({
+      sessionId: 'session-1',
+      nativeTurnId: 'turn-1',
+      clientMessageId: 'steer-1',
+      input: 'hello?',
+    });
+
+    expect(result).toEqual({ accepted: false, reasonCode: 'not-supported' });
+    await value.supervisor.close();
+  });
+
+  it('refuses a steer against a session that is not open', async () => {
+    const value = await fixture();
+
+    await expect(
+      value.supervisor.steer({
+        sessionId: 'never-opened',
+        nativeTurnId: 'turn-1',
+        clientMessageId: 'steer-1',
+        input: 'hello?',
+      })
+    ).rejects.toThrow(/is not open/);
     await value.supervisor.close();
   });
 
