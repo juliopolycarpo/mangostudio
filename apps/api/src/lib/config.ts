@@ -116,14 +116,6 @@ export interface MangoConfig {
   corsOrigins: string[];
   /** Path to the config.toml that was loaded (for TOML-based services). */
   configFilePath: string;
-  cursor: {
-    /** Workspace directory for Cursor SDK local agents. Empty = process.cwd(). */
-    workspaceDir: string;
-    /** Override path to the Cursor SDK sidecar script. Empty = auto-detect. */
-    sidecarScriptPath: string;
-    /** Override path to the Node.js binary for the sidecar. Empty = auto-detect. */
-    nodePath: string;
-  };
   chatgpt: {
     /** ChatGPT OAuth issuer base URL. Override only for tests/debugging. */
     authBaseUrl: string;
@@ -153,7 +145,6 @@ const DEFAULT_CONFIG: Omit<MangoConfig, 'corsOrigins' | 'configFilePath'> = {
   auth: { secret: '', url: '' },
   security: { trustProxy: false },
   environments: { ltsRefresh: false, installsEnabled: false, container: false, wslExecutable: '' },
-  cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
   chatgpt: {
     authBaseUrl: 'https://auth.openai.com',
     apiBaseUrl: 'https://chatgpt.com/backend-api/codex',
@@ -229,15 +220,6 @@ const ENV_KEY_MAP: Record<string, (cfg: MangoConfig, value: string) => void> = {
   },
   MANGO_WSL_EXE: (cfg, v) => {
     cfg.environments.wslExecutable = v;
-  },
-  CURSOR_WORKSPACE_DIR: (cfg, v) => {
-    cfg.cursor.workspaceDir = v;
-  },
-  MANGO_CURSOR_SIDECAR_SCRIPT: (cfg, v) => {
-    cfg.cursor.sidecarScriptPath = v;
-  },
-  MANGO_NODE_PATH: (cfg, v) => {
-    cfg.cursor.nodePath = v;
   },
   MANGO_CHATGPT_AUTH_BASE_URL: (cfg, v) => {
     cfg.chatgpt.authBaseUrl = v;
@@ -422,7 +404,6 @@ function cloneDefaults(): MangoConfig {
     auth: { ...DEFAULT_CONFIG.auth },
     security: { ...DEFAULT_CONFIG.security },
     environments: { ...DEFAULT_CONFIG.environments },
-    cursor: { ...DEFAULT_CONFIG.cursor },
     chatgpt: { ...DEFAULT_CONFIG.chatgpt },
     secretStore: { ...DEFAULT_CONFIG.secretStore },
     corsOrigins: [],
@@ -520,17 +501,6 @@ function applyToml(cfg: MangoConfig, parsed: Record<string, unknown>): void {
     }
   }
 
-  const cursor = parsed.cursor as Record<string, unknown> | undefined;
-  if (cursor) {
-    if (typeof cursor.workspace_dir === 'string') cfg.cursor.workspaceDir = cursor.workspace_dir;
-    if (typeof cursor.sidecar_script === 'string') {
-      cfg.cursor.sidecarScriptPath = cursor.sidecar_script;
-    }
-    if (typeof cursor.node_path === 'string') {
-      cfg.cursor.nodePath = cursor.node_path;
-    }
-  }
-
   const chatgpt = parsed.chatgpt as Record<string, unknown> | undefined;
   if (chatgpt) {
     if (typeof chatgpt.auth_base_url === 'string' && chatgpt.auth_base_url) {
@@ -624,18 +594,6 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.checkpoints.dir = join(getHomeMangoDir(), 'checkpoints');
   } else {
     cfg.checkpoints.dir = resolveUserPath(cfg.checkpoints.dir);
-  }
-
-  if (cfg.cursor.workspaceDir) {
-    cfg.cursor.workspaceDir = resolveUserPath(cfg.cursor.workspaceDir);
-  }
-
-  if (cfg.cursor.sidecarScriptPath) {
-    cfg.cursor.sidecarScriptPath = resolveUserPath(cfg.cursor.sidecarScriptPath);
-  }
-
-  if (cfg.cursor.nodePath) {
-    cfg.cursor.nodePath = resolveUserPath(cfg.cursor.nodePath);
   }
 
   if (cfg.secretStore.unsafeFileFallbackDir) {
@@ -820,7 +778,6 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (partial.auth) Object.assign(cfg.auth, partial.auth);
   if (partial.security) Object.assign(cfg.security, partial.security);
   if (partial.environments) Object.assign(cfg.environments, partial.environments);
-  if (partial.cursor) Object.assign(cfg.cursor, partial.cursor);
   if (partial.chatgpt) Object.assign(cfg.chatgpt, partial.chatgpt);
   if (partial.secretStore) Object.assign(cfg.secretStore, partial.secretStore);
   if (partial.corsOrigins) cfg.corsOrigins = partial.corsOrigins;

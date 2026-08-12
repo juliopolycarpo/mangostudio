@@ -3,18 +3,13 @@ import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
 import { ConnectorStatusSchema } from '@mangostudio/shared/connectors';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Value } from '@sinclair/typebox/value';
-import { stringify as stringifyToml } from 'smol-toml';
 import { getDb } from '../../../src/db/database';
-import { getConfig } from '../../../src/lib/config';
-import { SECRET_FILE_MODE, writeFileAtomic } from '../../../src/lib/safe-file';
 import { ConnectorNotFoundError } from '../../../src/modules/connectors/application/connector-errors';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
   getProvider,
   registerProvider,
 } from '../../../src/services/providers/core/provider-registry';
-import { CursorApiError } from '../../../src/services/providers/cursor/client';
-import { CursorRuntimeUnavailableError } from '../../../src/services/providers/cursor/index';
 import { OpenAIAuthError, OpenAIConfigError } from '../../../src/services/providers/openai/index';
 import type { AIProvider } from '../../../src/services/providers/types';
 import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
@@ -46,51 +41,6 @@ const CURSOR_CONNECTOR_USER = {
 };
 
 let restoreAuth: (() => void) | null = null;
-
-function createCursorTestProvider(
-  options: {
-    rejectApiKey?: boolean;
-    rejectRuntime?: boolean;
-    syncConfigFileConnectors?: AIProvider['syncConfigFileConnectors'];
-  } = {}
-): AIProvider {
-  return {
-    providerType: 'cursor',
-    generateText: () => Promise.resolve({ text: '' }),
-    generateTextStream: async function* () {
-      await Promise.resolve();
-      yield { type: 'text', text: '', done: true };
-    },
-    listModels: () =>
-      Promise.resolve([
-        {
-          modelId: 'composer-2.5',
-          displayName: 'composer-2.5',
-          provider: 'cursor',
-          capabilities: { text: true, image: false, streaming: true, reasoning: true },
-        },
-        {
-          modelId: 'auto',
-          displayName: 'auto',
-          provider: 'cursor',
-          capabilities: { text: true, image: false, streaming: true, reasoning: true },
-        },
-      ]),
-    healthcheck: () => {
-      if (options.rejectRuntime) {
-        return Promise.reject(
-          new CursorRuntimeUnavailableError('Node.js 22.13 or newer is required.')
-        );
-      }
-      return options.rejectApiKey
-        ? Promise.reject(new CursorApiError('Cursor API key rejected'))
-        : Promise.resolve();
-    },
-    validateApiKey: () => Promise.resolve(),
-    resolveApiKey: () => Promise.resolve('cursor-test-key'),
-    syncConfigFileConnectors: options.syncConfigFileConnectors,
-  };
-}
 
 afterEach(async () => {
   restoreAuth?.();
@@ -190,9 +140,12 @@ describe('settings connectors routes', () => {
   });
 });
 
-describe('cursor connector routes', () => {
-  let originalCursorProvider: AIProvider;
-
+/**
+ * Cursor is a deprecated provider. These pin the two halves of that: new setup
+ * is refused by the endpoint rather than only hidden by the picker, and nothing
+ * a user already has is taken away.
+ */
+describe('deprecated cursor connector routes', () => {
   beforeAll(async () => {
     const db = getDb();
     const now = new Date().toISOString();
@@ -210,23 +163,12 @@ describe('cursor connector routes', () => {
       .execute();
   });
 
-  beforeEach(() => {
-    originalCursorProvider = getProvider('cursor');
-    registerProvider(
-      createCursorTestProvider({
-        syncConfigFileConnectors:
-          originalCursorProvider.syncConfigFileConnectors?.bind(originalCursorProvider),
-      })
-    );
-  });
-
   afterEach(() => {
     restoreAuth?.();
     restoreAuth = null;
-    registerProvider(originalCursorProvider);
   });
 
-  it('POST /settings/connectors with provider cursor returns 201', async () => {
+  it('refuses to create a cursor connector through the API', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
     restoreAuth = restore;
 
@@ -243,117 +185,31 @@ describe('cursor connector routes', () => {
       })
     );
 
-    expect(response.status).toBe(200);
-
-    const payload = (await response.json()) as ConnectorPayload;
-    expect(Value.Check(ConnectorResponseSchema, payload)).toBe(true);
-    expect(payload.provider).toBe('cursor');
-    expect(payload.baseUrl).toBeNull();
-    expect(payload.configured).toBe(true);
-  });
-
-  it('POST /settings/connectors with invalid cursor key returns validation error', async () => {
-    registerProvider(createCursorTestProvider({ rejectApiKey: true }));
-    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
-    restoreAuth = restore;
-
-    const response = await app.handle(
-      new Request('http://localhost/settings/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'cursor-invalid-key',
-          apiKey: 'cursor-invalid-key',
-          source: 'config-file',
-          provider: 'cursor',
-        }),
-      })
-    );
-
-    expect(response.status).toBe(422);
+    expect(response.status).toBe(410);
 
     const payload = (await response.json()) as ErrorPayload;
     expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
-    expect(payload).toEqual({
-      error: 'Cursor API key rejected',
-      code: ERROR_CODES.VALIDATION,
+    expect(payload.code).toBe(ERROR_CODES.UNSUPPORTED);
+    expect(payload.error).toContain('cursor');
+  });
+
+  it('keeps an existing cursor connector visible with its stored secret', async () => {
+    // Written straight to metadata: the endpoint that used to create these is
+    // now closed, and the connector this deprecation must not disturb is one
+    // that predates it.
+    await upsertSecretMetadata({
+      id: 'legacy-cursor-connector',
+      name: 'legacy-cursor',
+      provider: 'cursor',
+      configured: true,
+      source: 'config-file',
+      maskedSuffix: '...key',
+      updatedAt: Date.now(),
+      lastValidatedAt: Date.now(),
+      enabledModels: ['composer-2.5'],
+      userId: CURSOR_CONNECTOR_USER.id,
+      baseUrl: null,
     });
-  });
-
-  it('POST /settings/connectors returns provider error when Node runtime is unavailable', async () => {
-    registerProvider(createCursorTestProvider({ rejectRuntime: true }));
-    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
-    restoreAuth = restore;
-
-    const response = await app.handle(
-      new Request('http://localhost/settings/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'cursor-missing-node',
-          apiKey: 'cursor-live-node-key',
-          source: 'config-file',
-          provider: 'cursor',
-        }),
-      })
-    );
-
-    expect(response.status).toBe(503);
-
-    const payload = (await response.json()) as ErrorPayload;
-    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
-    expect(payload).toEqual({
-      error: 'Node.js 22.13 or newer is required.',
-      code: ERROR_CODES.PROVIDER_ERROR,
-    });
-  });
-
-  it('enables cursor models and exposes them in the model catalog', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
-    restoreAuth = restore;
-
-    const createResponse = await app.handle(
-      new Request('http://localhost/settings/connectors', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'cursor-for-models',
-          apiKey: 'cursor-live-models-key',
-          source: 'config-file',
-          provider: 'cursor',
-        }),
-      })
-    );
-    expect(createResponse.status).toBe(200);
-    const connector = (await createResponse.json()) as ConnectorPayload;
-
-    const updateResponse = await app.handle(
-      new Request(`http://localhost/settings/connectors/${connector.id}/models`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabledModels: ['composer-2.5'] }),
-      })
-    );
-    expect(updateResponse.status).toBe(200);
-
-    const catalogResponse = await app.handle(new Request('http://localhost/settings/models'));
-    expect(catalogResponse.status).toBe(200);
-    const catalog = (await catalogResponse.json()) as ModelCatalogPayload;
-    expect(catalog.textModels).toEqual(
-      expect.arrayContaining([expect.objectContaining({ modelId: 'composer-2.5' })])
-    );
-  });
-
-  it('syncs cursor config-file connectors into the connector list', async () => {
-    writeFileAtomic(
-      getConfig().configFilePath,
-      stringifyToml({
-        cursor_api_keys: {
-          'shared-cursor-config': 'cursor-live-config-key',
-        },
-      }),
-      { mode: SECRET_FILE_MODE }
-    );
 
     const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
     restoreAuth = restore;
@@ -363,11 +219,24 @@ describe('cursor connector routes', () => {
 
     const payload = (await response.json()) as ConnectorListPayload;
     expect(Value.Check(ConnectorStatusSchema, payload)).toBe(true);
-    expect(
-      payload.connectors.some(
-        (connector) => connector.provider === 'cursor' && connector.name === 'shared-cursor-config'
-      )
-    ).toBe(true);
+    const legacy = payload.connectors.find((connector) => connector.name === 'legacy-cursor');
+    expect(legacy?.provider).toBe('cursor');
+    expect(legacy?.configured).toBe(true);
+    expect(legacy?.enabledModels).toEqual(['composer-2.5']);
+  });
+
+  it('keeps that connector’s models out of the catalog', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(CURSOR_CONNECTOR_USER, settingsRoutes);
+    restoreAuth = restore;
+
+    const catalogResponse = await app.handle(new Request('http://localhost/settings/models'));
+    expect(catalogResponse.status).toBe(200);
+
+    const catalog = (await catalogResponse.json()) as ModelCatalogPayload;
+    for (const model of catalog.allModels) {
+      expect(model.provider).not.toBe('cursor');
+    }
+    expect(catalog.textModels).toEqual([]);
   });
 });
 

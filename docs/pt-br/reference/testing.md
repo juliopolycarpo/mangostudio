@@ -98,9 +98,8 @@ Cenários em `tests/browser-smoke/auth-flow.spec.ts`:
 ## Binary Smoke
 
 `scripts/test-build.ts` compila o binário standalone para uma plataforma alvo, valida o
-layout do pacote (incluindo chunks do sidecar do Cursor) e sobe o binário em runners de CI
-compatíveis para exercitar rotas HTTP centrais e a validação dos conectores Cursor e
-ChatGPT.
+layout do pacote e sobe o binário em runners de CI compatíveis para exercitar rotas HTTP
+centrais, a recusa da descontinuação do Cursor e a validação do conector ChatGPT.
 
 ```bash
 PLATFORM=linux-x64 bun run scripts/test-build.ts
@@ -110,18 +109,16 @@ Em hosts Windows, use `PLATFORM=windows-x64`. O workflow de CI `Smoke — Binary
 esse script nas seis plataformas nativas.
 
 A etapa de runtime cria um usuário descartável, envia um conector Cursor com chave fake e
-garante que o binário retorna um erro de provider controlado (422/502/503) sem falhas de
-resolução de módulo como `Cannot find module` ou `./642.js`. Ele também conclui um login
-OAuth loopback do ChatGPT contra o servidor fake de auth/backend e valida o conector e o
-catálogo de modelos. O smoke permanece hermético ao apontar `MANGO_CURSOR_SIDECAR_SCRIPT`
-para um sidecar fake temporário e `MANGO_CHATGPT_AUTH_BASE_URL` /
+garante que o binário o recusa com `410` — o Cursor é um provider descontinuado, e a recusa
+precisa valer no executável distribuído, não apenas onde um seletor escondeu a opção. A
+resposta e o stderr do servidor continuam sendo verificados contra falhas de resolução de
+módulo como `Cannot find module` ou `./642.js`. Ele também conclui um login OAuth loopback
+do ChatGPT contra o servidor fake de auth/backend e valida o conector e o catálogo de
+modelos. O smoke permanece hermético ao apontar `MANGO_CHATGPT_AUTH_BASE_URL` /
 `MANGO_CHATGPT_BASE_URL` para o servidor fake do ChatGPT. Os tokens fake do ChatGPT usam
 `MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR` dentro do home temporário do smoke, então o
 binário nunca grava esses tokens no OS secret store do usuário. Nenhuma chamada real é feita
 às APIs do Cursor ou ChatGPT.
-
-Runners do GitHub precisam de Node.js `>= 22.13` no `PATH` para a etapa do conector
-Cursor; o script falha cedo se a versão for antiga.
 
 O smoke do ChatGPT precisa da porta de callback `1455`. Quando a porta já está ocupada, o
 script imprime uma mensagem de skip para essa etapa e mantém o restante do smoke binário

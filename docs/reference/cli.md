@@ -22,26 +22,25 @@ copy-paste commands, or:
 
 ## Commands
 
-| Command                            | Description                                                                         |
-| ---------------------------------- | ----------------------------------------------------------------------------------- |
-| `mangostudio`                      | Print help and the command list.                                                    |
-| `serve [host\|port\|host:port]`    | Start the server in the foreground (default `localhost:3001`).                      |
-| `serve [host\|port\|host:port] -d` | Start the server in the background (detached) and return.                           |
-| `status`                           | Show whether a server is running and its details.                                   |
-| `stop`                             | Gracefully stop the running server (SIGTERM).                                       |
-| `killserver`                       | Force-kill the running server (SIGKILL).                                            |
-| `doctor`                           | Run environment and configuration diagnostics.                                      |
-| `doctor --all`                     | Include Cursor and ChatGPT connector checks even without a configured connector.    |
-| `doctor --cursor-probe`            | After chain checks pass, spawn the sidecar `validate_api_key` RPC with a dummy key. |
-| `doctor --chatgpt-refresh`         | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).      |
-| `doctor --probe`                   | Actively connect to each enabled MCP server (spawns children / hits URLs).          |
-| `doctor --env` / `--library`       | Limit extra sections to environments and/or library (core checks always run).       |
-| `doctor --json`                    | Emit structured JSON (checks, warning/failure counts).                              |
-| `env [runtimes\|agents] [--json]`  | Report runtimes, version managers, and agent CLIs (read-only).                      |
-| `library [locations] [--json]`     | Library coverage matrix and location health (read-only).                            |
-| `library --kind <kind>`            | Filter resources by kind (`skill`, `subagent`, etc.).                               |
-| `library --divergent`              | List only resources whose copies disagree across locations.                         |
-| `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                                             |
+| Command                            | Description                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------ |
+| `mangostudio`                      | Print help and the command list.                                               |
+| `serve [host\|port\|host:port]`    | Start the server in the foreground (default `localhost:3001`).                 |
+| `serve [host\|port\|host:port] -d` | Start the server in the background (detached) and return.                      |
+| `status`                           | Show whether a server is running and its details.                              |
+| `stop`                             | Gracefully stop the running server (SIGTERM).                                  |
+| `killserver`                       | Force-kill the running server (SIGKILL).                                       |
+| `doctor`                           | Run environment and configuration diagnostics.                                 |
+| `doctor --all`                     | Include ChatGPT connector checks even without a configured connector.          |
+| `doctor --chatgpt-refresh`         | Perform a live ChatGPT token refresh probe (rotates the stored refresh token). |
+| `doctor --probe`                   | Actively connect to each enabled MCP server (spawns children / hits URLs).     |
+| `doctor --env` / `--library`       | Limit extra sections to environments and/or library (core checks always run).  |
+| `doctor --json`                    | Emit structured JSON (checks, warning/failure counts).                         |
+| `env [runtimes\|agents] [--json]`  | Report runtimes, version managers, and agent CLIs (read-only).                 |
+| `library [locations] [--json]`     | Library coverage matrix and location health (read-only).                       |
+| `library --kind <kind>`            | Filter resources by kind (`skill`, `subagent`, etc.).                          |
+| `library --divergent`              | List only resources whose copies disagree across locations.                    |
+| `version`, `--version`, `-v`       | Print the embedded MangoStudio version.                                        |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
@@ -229,39 +228,23 @@ checkout SHA, and the frontend asset SHA from `build-info.json`. If the server
 SHA is behind the checkout or differs from the served frontend assets, restart
 or rebuild so the API and browser bundle come from the same source revision.
 
-When a Cursor connector is configured (API key in env, `~/.mango/.env`, or
-`[cursor_api_keys]` in `config.toml`), doctor also reports each link in the
-Cursor runtime chain:
+When a Cursor connector is still configured (API key in env, `~/.mango/.env`, or
+`[cursor_api_keys]` in `config.toml`), doctor reports a single `Cursor connector`
+warning. The provider is deprecated and refuses every turn; the check exists so
+an operator can see the key is still there. Use the Cursor CLI runner in the chat
+runner selector instead — see [../providers/cursor.md](../providers/cursor.md).
 
-| Check            | What it verifies                                            |
-| ---------------- | ----------------------------------------------------------- |
-| `Cursor Node`    | Host Node.js `>= 22.13` (`node` path and version)           |
-| `Cursor sidecar` | `cursor-sidecar/run-agent.mjs` beside the binary            |
-| `Cursor SDK`     | Vendored `@cursor/sdk` package with cjs/esm chunks          |
-| `Cursor native`  | Platform-native `@cursor/sdk-*` package in the sidecar tree |
-
-Pass `--all` to run the Cursor section even when no Cursor connector is
-configured. Pass `--cursor-probe` to spawn the sidecar after the chain checks
-pass; an auth rejection for the probe key means the Node → sidecar → SDK path
-is healthy.
-
-Example (Cursor configured, healthy chain):
+Example (Cursor connector still present):
 
 ```text
 MangoStudio doctor
 
 [ok]   Home directory     /home/user/.mango (writable)
 ...
-[ok]   Cursor Node        /usr/bin/node (v22.13.0, meets >= 22.13)
-[ok]   Cursor sidecar     /opt/mangostudio/cursor-sidecar/run-agent.mjs (present)
-[ok]   Cursor SDK         .../node_modules/@cursor/sdk/package.json (cjs/esm chunks complete)
-[ok]   Cursor native      @cursor/sdk-linux-x64 (present)
+[warn] Cursor connector   Deprecated provider. Use the Cursor CLI runner in the chat runner selector; this key no longer runs turns.
 
-0 warning(s), 0 failure(s).
+1 warning(s), 0 failure(s).
 ```
-
-See [`docs/providers/cursor.md`](../providers/cursor.md#troubleshooting) for
-reason-code meanings and remediation.
 
 ### ChatGPT connector checks
 

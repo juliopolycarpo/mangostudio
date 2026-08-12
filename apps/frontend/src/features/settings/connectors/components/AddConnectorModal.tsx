@@ -1,5 +1,5 @@
 import type { ProviderType } from '@mangostudio/shared';
-import { useQuery } from '@tanstack/react-query';
+import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import {
   Database,
   Eye,
@@ -13,20 +13,28 @@ import {
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { useI18n } from '@/hooks/use-i18n';
-import { providerSettingsListQueryOptions } from '../../providers/queries';
 import { useChatGptOAuth } from '../hooks/use-chatgpt-oauth';
 import type { useConnectorForm } from '../hooks/use-connector-form';
-import { formatConnectorRuntimeUnavailableHint } from '../lib/runtime-unavailable-hint';
 
-const PROVIDER_OPTIONS: { id: ProviderType }[] = [
-  { id: 'gemini' },
-  { id: 'openai' },
-  { id: 'openai-compatible' },
-  { id: 'anthropic' },
-  { id: 'deepseek' },
-  { id: 'cursor' },
-  { id: 'chatgpt' },
-];
+/**
+ * Providers a new connector can be created for.
+ *
+ * Deprecated ones are filtered out rather than rendered disabled: a dead button
+ * in a picker invites a click that has no answer, and the connectors people
+ * already have say what happened on their own card. The server refuses them
+ * too — this list is the courtesy, not the rule.
+ */
+const PROVIDER_OPTIONS: { id: ProviderType }[] = (
+  [
+    { id: 'gemini' },
+    { id: 'openai' },
+    { id: 'openai-compatible' },
+    { id: 'anthropic' },
+    { id: 'deepseek' },
+    { id: 'cursor' },
+    { id: 'chatgpt' },
+  ] satisfies { id: ProviderType }[]
+).filter(({ id }) => !isDeprecatedProvider(id));
 
 type FormHook = ReturnType<typeof useConnectorForm>;
 
@@ -55,27 +63,11 @@ export function AddConnectorModal({
 }: AddConnectorModalProps) {
   const { t } = useI18n();
   const s = t.settings.connectors;
-  const { data: providerSettings } = useQuery(providerSettingsListQueryOptions());
   const isChatGpt = form.provider === 'chatgpt';
   const chatGptOAuth = useChatGptOAuth({
     messages: s,
     onSuccess: onOAuthSuccess,
   });
-
-  const isProviderUnavailable = (provider: ProviderType): boolean => {
-    const descriptor = providerSettings?.providers.find((entry) => entry.provider === provider);
-    return descriptor?.runtimeAvailable === false;
-  };
-
-  const unavailableReason = (provider: ProviderType): string | undefined => {
-    const descriptor = providerSettings?.providers.find((entry) => entry.provider === provider);
-    if (descriptor?.runtimeAvailable !== false) return undefined;
-    return formatConnectorRuntimeUnavailableHint(
-      descriptor.runtimeUnavailableReason,
-      descriptor.runtimeUnavailableReasonParams,
-      s
-    );
-  };
 
   const sourceOptions = [
     {
@@ -98,13 +90,6 @@ export function AddConnectorModal({
     },
   ];
 
-  const unavailableProviders = PROVIDER_OPTIONS.flatMap(({ id }) => {
-    if (!isProviderUnavailable(id)) return [];
-    const hint = unavailableReason(id);
-    return hint ? [{ id, hint }] : [];
-  });
-  const cursorUnavailable = isProviderUnavailable('cursor');
-
   const handleChatGptSignIn = () => {
     const popup = window.open('about:blank', '_blank');
     void chatGptOAuth.start({ name: form.name, popup });
@@ -125,54 +110,29 @@ export function AddConnectorModal({
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium text-on-surface-variant">{s.providerLabel}</span>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {PROVIDER_OPTIONS.map(({ id }) => {
-                const unavailable = isProviderUnavailable(id);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    disabled={unavailable}
-                    onClick={() => {
-                      if (unavailable) return;
-                      setForm({
-                        ...form,
-                        provider: id,
-                        apiKey: id === 'chatgpt' ? '' : form.apiKey,
-                        source: id === 'chatgpt' ? 'bun-secrets' : form.source,
-                        baseUrl:
-                          id === 'openai-compatible' || id === 'deepseek' ? form.baseUrl : '',
-                      });
-                    }}
-                    className={`min-h-11 py-2.5 px-3 rounded-xl border text-xs sm:text-sm font-semibold text-center leading-snug transition-all ${
-                      unavailable
-                        ? 'opacity-40 cursor-not-allowed bg-surface-container-lowest border-outline-variant/10 text-on-surface-variant'
-                        : form.provider === id
-                          ? 'bg-primary/10 border-primary text-primary'
-                          : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
-                    }`}
-                  >
-                    {t.providers[id]}
-                  </button>
-                );
-              })}
+              {PROVIDER_OPTIONS.map(({ id }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => {
+                    setForm({
+                      ...form,
+                      provider: id,
+                      apiKey: id === 'chatgpt' ? '' : form.apiKey,
+                      source: id === 'chatgpt' ? 'bun-secrets' : form.source,
+                      baseUrl: id === 'openai-compatible' || id === 'deepseek' ? form.baseUrl : '',
+                    });
+                  }}
+                  className={`min-h-11 py-2.5 px-3 rounded-xl border text-xs sm:text-sm font-semibold text-center leading-snug transition-all ${
+                    form.provider === id
+                      ? 'bg-primary/10 border-primary text-primary'
+                      : 'bg-surface-container-lowest border-outline-variant/10 text-on-surface hover:border-outline-variant/30'
+                  }`}
+                >
+                  {t.providers[id]}
+                </button>
+              ))}
             </div>
-            {unavailableProviders.length > 0 ? (
-              <div className="mt-1 rounded-xl border border-outline-variant/15 bg-surface-container-lowest px-3 py-2.5 space-y-1.5">
-                {unavailableProviders.map(({ id, hint }) => (
-                  <p key={id} className="text-[11px] leading-snug text-on-surface-variant/70">
-                    <span className="font-semibold text-on-surface-variant">
-                      {t.providers[id]}:
-                    </span>{' '}
-                    {hint}
-                  </p>
-                ))}
-                {cursorUnavailable ? (
-                  <p className="text-[11px] leading-snug text-on-surface-variant/70">
-                    {s.cursorRuntimeDoctorHint}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
           </div>
 
           <Input

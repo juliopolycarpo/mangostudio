@@ -61,16 +61,19 @@ describe('filterNpmPlatforms', () => {
 });
 
 describe('buildPlatformManifest', () => {
-  test('gates the package by os + cpu and ships the binary + cursor sidecar', () => {
+  test('gates the package by os + cpu and ships the two binaries', () => {
     const manifest = buildPlatformManifest(LINUX_X64, '1.2.3');
     expect(manifest.name).toBe('@mangostudio/cli-linux-x64');
     expect(manifest.version).toBe('1.2.3');
     expect(manifest.os).toEqual(['linux']);
     expect(manifest.cpu).toEqual(['x64']);
-    expect(manifest.files).toEqual(['mangostudio', 'mangostudio-runtime', 'cursor-sidecar']);
+    expect(manifest.files).toEqual(['mangostudio', 'mangostudio-runtime']);
   });
 
-  test('omits the cursor sidecar on platforms without a native package', () => {
+  // Every platform now ships the same two files. It used to depend on whether a
+  // vendored Cursor SDK existed for the arch, which is why this is asserted for
+  // a second platform rather than folded into the case above.
+  test('ships the same file list on every platform', () => {
     const manifest = buildPlatformManifest(WIN_ARM64, '1.2.3');
     expect(manifest.files).toEqual(['mangostudio.exe', 'mangostudio-runtime.exe']);
   });

@@ -50,6 +50,7 @@ import {
   TurnRecoveryNotFoundError,
   TurnRecoveryValidationError,
 } from '../application/turn-recovery';
+import { modelUnavailableResponse } from './model-unavailable-response';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
 
@@ -389,8 +390,9 @@ export const respondStreamRoutes = (app: Elysia) =>
               return { error: 'Agent not found', code: ERROR_CODES.NOT_FOUND };
             }
             if (err instanceof NoModelAvailableError) {
-              set.status = 503;
-              return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
+              const refusal = modelUnavailableResponse(err);
+              set.status = refusal.status;
+              return refusal.body;
             }
             throw err;
           }

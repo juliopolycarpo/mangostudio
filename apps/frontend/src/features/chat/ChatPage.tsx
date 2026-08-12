@@ -2,7 +2,11 @@ import type { Message, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
-import type { ExternalThreadUsage } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentTargetId,
+  ExternalThreadUsage,
+} from '@mangostudio/shared/external-agents';
+import type { ModelUnavailableDetails } from '@mangostudio/shared/generation';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { type ComponentProps, useMemo } from 'react';
@@ -12,6 +16,7 @@ import { WorkdirPickerDialog } from '@/features/workspace/WorkdirPickerDialog';
 import { authClient } from '@/lib/auth-client';
 import { ChatPageContent } from './components/ChatPageContent';
 import { ChatContextDecisionNotice, ChatFallbackNotice } from './components/ChatPageNotices';
+import { DeprecatedModelNotice } from './components/DeprecatedModelNotice';
 import { InputBar } from './components/InputBar';
 import { InterruptedTurnNotice } from './components/InterruptedTurnNotice';
 import { PinnedTodoPanel } from './components/PinnedTodoPanel';
@@ -59,6 +64,17 @@ interface ChatPageProps {
   onRestrictToolsToWorkdirOverrideChange?: (value: boolean | null) => void | Promise<void>;
   onResumeInterruptedTurn: (messageId: string, retryCallIds: string[]) => Promise<void>;
   onDismissInterruptedTurn: (messageId: string) => Promise<void>;
+  /** The last send refused because the chat's model has a deprecated provider. */
+  modelUnavailable?: ModelUnavailableDetails | null;
+  onDismissModelUnavailable?: () => void;
+  /**
+   * Forks this chat onto the vendor's CLI. Passed in rather than resolved from
+   * app context here, because this component is rendered in tests without a
+   * provider and a hidden `useApp()` would make every one of them a context
+   * test.
+   */
+  onContinueWithExternalRunner?: (targetId: ExternalAgentTargetId) => void;
+  isForkingRunner?: boolean;
 }
 
 /**
@@ -148,6 +164,10 @@ export function ChatPage({
   onRestrictToolsToWorkdirOverrideChange,
   onResumeInterruptedTurn,
   onDismissInterruptedTurn,
+  modelUnavailable = null,
+  onDismissModelUnavailable,
+  onContinueWithExternalRunner,
+  isForkingRunner = false,
 }: ChatPageProps) {
   const { messages, status } = useChatPageMessages({ chatId, seedContextInfo });
   const interruptedTurn = useMemo(() => findLatestInterruptedTurn(messages), [messages]);
@@ -180,6 +200,14 @@ export function ChatPage({
             }
           />
           {fallbackNotice && <ChatFallbackNotice notice={fallbackNotice} />}
+          {modelUnavailable?.reason === 'provider-deprecated' ? (
+            <DeprecatedModelNotice
+              details={modelUnavailable}
+              isForking={isForkingRunner}
+              onContinueWithRunner={(targetId) => onContinueWithExternalRunner?.(targetId)}
+              onDismiss={() => onDismissModelUnavailable?.()}
+            />
+          ) : null}
           {contextControls.requiresDecision && (
             <ChatContextDecisionNotice
               warningMessage={contextControls.warningMessage}

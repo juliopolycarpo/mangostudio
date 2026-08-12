@@ -5,6 +5,7 @@
  */
 
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
+import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import type { ProviderType } from '@mangostudio/shared/types';
 import { parseStringArray } from '../../utils/json';
 import { listAllSecretMetadata } from '../secret-store/metadata';
@@ -166,7 +167,11 @@ export function createUnifiedModelCatalogService(
 
     const promise = (async () => {
       try {
-        const providerTypes = listProviders();
+        // Deprecated providers stay registered but advertise nothing: a chat
+        // still carrying one of their model ids must resolve to a named
+        // refusal, and a model selector that still offered them would keep
+        // producing chats that can only be refused.
+        const providerTypes = listProviders().filter((pt) => !isDeprecatedProvider(pt));
         const PROVIDER_TIMEOUT_MS = 5_000;
 
         const results = await Promise.allSettled(

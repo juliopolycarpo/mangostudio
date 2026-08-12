@@ -9,8 +9,6 @@ import {
   checkRuntime,
   checkRuntimeBinary,
   checkSshClient,
-  collectCursorDoctorChecks,
-  cursorRuntimeChainReady,
   type FsProbe,
 } from '../../../src/cli/doctor-checks';
 import type { MangoConfig } from '../../../src/lib/config';
@@ -56,7 +54,6 @@ function makeConfig(overrides: Partial<MangoConfig> = {}): MangoConfig {
       container: false,
       wslExecutable: '',
     },
-    cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
     chatgpt: { authBaseUrl: 'https://auth.openai.com', apiBaseUrl: 'https://api.openai.com' },
     secretStore: { unsafeFileFallbackDir: '' },
     corsOrigins: [],
@@ -269,80 +266,5 @@ describe('checkSshClient', () => {
     expect(result.status).toBe('ok');
     expect(result.detail).toContain('OpenSSH_9.6p1');
     expect(result.detail).toContain('/usr/bin/ssh');
-  });
-});
-
-describe('collectCursorDoctorChecks', () => {
-  it('maps each healthy chain link to an ok row', () => {
-    const results = collectCursorDoctorChecks([
-      { link: 'node', ok: true, detail: '/usr/bin/node (v22.13.0, meets >= 22.13)' },
-      { link: 'sidecar', ok: true, detail: '/app/cursor-sidecar/run-agent.mjs (present)' },
-      { link: 'sdk', ok: true, detail: '@cursor/sdk complete' },
-      { link: 'native', ok: true, detail: '@cursor/sdk-linux-x64 (present)' },
-    ]);
-
-    expect(results.map((row) => row.label)).toEqual([
-      'Cursor Node',
-      'Cursor sidecar',
-      'Cursor SDK',
-      'Cursor native',
-    ]);
-    expect(results.every((row) => row.status === 'ok')).toBe(true);
-  });
-
-  it('surfaces failing links with remediation detail', () => {
-    const results = collectCursorDoctorChecks([
-      {
-        link: 'node',
-        ok: false,
-        detail: 'Node.js 22.13+ is required for Cursor SDK Agents (found v20.0.0).',
-      },
-      {
-        link: 'sidecar',
-        ok: false,
-        detail: 'Cursor SDK sidecar script is missing at /tmp/cursor-sidecar/run-agent.mjs.',
-      },
-      { link: 'sdk', ok: true, detail: 'workspace sdk present' },
-      {
-        link: 'native',
-        ok: false,
-        detail: 'platform unsupported: win32-arm64 (unsupported targets: linux-x64-musl, ...)',
-      },
-    ]);
-
-    expect(results[0]?.status).toBe('fail');
-    expect(results[0]?.detail).toContain('Node.js 22.13');
-    expect(results[1]?.detail).toContain('sidecar script is missing');
-    expect(results[3]?.detail).toContain('platform unsupported');
-  });
-
-  it('appends a probe row when provided', () => {
-    const results = collectCursorDoctorChecks([{ link: 'node', ok: true, detail: 'ok' }], {
-      ok: true,
-      detail: 'validate_api_key reached SDK (auth rejected probe key)',
-    });
-
-    expect(results.at(-1)).toMatchObject({
-      label: 'Cursor probe',
-      status: 'ok',
-      detail: 'validate_api_key reached SDK (auth rejected probe key)',
-    });
-  });
-});
-
-describe('cursorRuntimeChainReady', () => {
-  it('is true only when every chain link passed', () => {
-    expect(
-      cursorRuntimeChainReady([
-        { link: 'node', ok: true, detail: '' },
-        { link: 'sidecar', ok: true, detail: '' },
-      ])
-    ).toBe(true);
-    expect(
-      cursorRuntimeChainReady([
-        { link: 'node', ok: true, detail: '' },
-        { link: 'sidecar', ok: false, detail: 'missing' },
-      ])
-    ).toBe(false);
   });
 });

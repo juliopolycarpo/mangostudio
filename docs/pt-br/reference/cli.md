@@ -25,18 +25,17 @@ pré-compilado e sidecar do frontend. Veja a
 
 ## Comandos
 
-| Comando                            | Descrição                                                                    |
-| ---------------------------------- | ---------------------------------------------------------------------------- |
-| `mangostudio`                      | Imprime ajuda e a lista de comandos.                                         |
-| `serve [host\|port\|host:port]`    | Inicia o servidor em foreground (padrão `localhost:3001`).                   |
-| `serve [host\|port\|host:port] -d` | Inicia o servidor em background (detached) e retorna.                        |
-| `status`                           | Mostra se um servidor está rodando e seus detalhes.                          |
-| `stop`                             | Encerra graciosamente o servidor em execução (SIGTERM).                      |
-| `killserver`                       | Força encerramento do servidor (SIGKILL).                                    |
-| `doctor`                           | Executa diagnósticos de ambiente e configuração.                             |
-| `doctor --all`                     | Inclui checagens do runtime Cursor mesmo sem conector.                       |
-| `doctor --cursor-probe`            | Após a cadeia passar, executa `validate_api_key` no sidecar com chave dummy. |
-| `version`, `--version`, `-v`       | Imprime a versão embutida do MangoStudio.                                    |
+| Comando                            | Descrição                                                            |
+| ---------------------------------- | -------------------------------------------------------------------- |
+| `mangostudio`                      | Imprime ajuda e a lista de comandos.                                 |
+| `serve [host\|port\|host:port]`    | Inicia o servidor em foreground (padrão `localhost:3001`).           |
+| `serve [host\|port\|host:port] -d` | Inicia o servidor em background (detached) e retorna.                |
+| `status`                           | Mostra se um servidor está rodando e seus detalhes.                  |
+| `stop`                             | Encerra graciosamente o servidor em execução (SIGTERM).              |
+| `killserver`                       | Força encerramento do servidor (SIGKILL).                            |
+| `doctor`                           | Executa diagnósticos de ambiente e configuração.                     |
+| `doctor --all`                     | Inclui checagens do conector ChatGPT mesmo sem conector configurado. |
+| `version`, `--version`, `-v`       | Imprime a versão embutida do MangoStudio.                            |
 
 ## Exemplos
 
@@ -51,6 +50,5 @@ mangostudio stop
 ```
 
 Para detalhes de modo background, instância única, arquivos de runtime, códigos
-de saída, a seção **Doctor** (diagnósticos Cursor com `--all` e `--cursor-probe`)
-e configuração, consulte a
+de saída, a seção **Doctor** e configuração, consulte a
 [versão completa em inglês](../../reference/cli.md).

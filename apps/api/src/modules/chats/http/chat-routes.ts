@@ -13,6 +13,7 @@ import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { parseQueryInt } from '../../../utils/query';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
+import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
 import { WorkdirValidationError } from '../../workspaces/application/workdir-validation';
 import { WorkspacePathError } from '../../workspaces/application/workspace-path';
 import {
@@ -78,8 +79,9 @@ export const chatRoutes = (app: Elysia) =>
               return apiError(err.message, ERROR_CODES.VALIDATION);
             }
             if (err instanceof NoModelAvailableError) {
-              set.status = 503;
-              return apiError(err.message, ERROR_CODES.PROVIDER_ERROR);
+              const refusal = modelUnavailableResponse(err);
+              set.status = refusal.status;
+              return refusal.body;
             }
             set.status = 500;
             return apiError('Chat title generation failed.', ERROR_CODES.PROVIDER_ERROR);
@@ -160,8 +162,9 @@ export const chatRoutes = (app: Elysia) =>
               return { error: err.message, code: ERROR_CODES.UNSUPPORTED };
             }
             if (err instanceof NoModelAvailableError) {
-              set.status = 503;
-              return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
+              const refusal = modelUnavailableResponse(err);
+              set.status = refusal.status;
+              return refusal.body;
             }
             throw err;
           }
@@ -194,8 +197,9 @@ export const chatRoutes = (app: Elysia) =>
               return { error: err.message, code: ERROR_CODES.UNSUPPORTED };
             }
             if (err instanceof NoModelAvailableError) {
-              set.status = 503;
-              return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
+              const refusal = modelUnavailableResponse(err);
+              set.status = refusal.status;
+              return refusal.body;
             }
             throw err;
           }

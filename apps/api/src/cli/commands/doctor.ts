@@ -40,15 +40,9 @@ import {
   type EmbeddedFrontendFiles,
   getEmbeddedFrontend,
 } from '../../server/embedded-frontend';
-import { detectNodeRuntime } from '../../services/providers/cursor/node-runtime';
-import {
-  type CursorRuntimeChainStep,
-  describeCursorRuntimeChain,
-} from '../../services/providers/cursor/runtime-availability';
 import type { DoctorArgs } from '../args';
 import { DEFAULT_DOCTOR_ARGS } from '../args';
 import { collectChatGptDoctorChecks } from '../chatgpt-doctor-checks';
-import { probeCursorDoctorRuntime } from '../cursor-doctor-probe';
 import {
   type CheckResult,
   type CheckStatus,
@@ -65,10 +59,9 @@ import {
   checkRuntimeSlot,
   checkSshClient,
   collectBuildIdentityChecks,
-  collectCursorDoctorChecks,
-  cursorRuntimeChainReady,
   type FsProbe,
   ok,
+  warn,
 } from '../doctor-checks';
 import { collectEnvironmentDoctorSection } from '../environment-doctor-checks';
 import { collectLibraryDoctorSection } from '../library-doctor-checks';
@@ -87,9 +80,7 @@ export interface DoctorDeps {
   frontendDir: () => string;
   controller: ProcessController;
   readState: typeof readState;
-  getCursorDoctorChain: () => Promise<readonly CursorRuntimeChainStep[]>;
   isCursorConfigured: (config: MangoConfig) => boolean;
-  probeCursorRuntime: typeof probeCursorDoctorRuntime;
   probeRuntimeBinary: () => Promise<RuntimeBinaryProbe>;
   probeRuntimeSlots: () => Promise<RuntimeSlotProbe[]>;
   probeSshClient: () => Promise<SshClientProbe>;
@@ -174,13 +165,17 @@ async function collectResults(
   ];
 
   if (!sectionFilter) {
-    if (d.isCursorConfigured(config) || options.all) {
-      const chain = await d.getCursorDoctorChain();
-      const probe =
-        options.cursorProbe && cursorRuntimeChainReady(chain)
-          ? await d.probeCursorRuntime()
-          : undefined;
-      results.push(...collectCursorDoctorChecks(chain, probe));
+    // Not a health check — a migration notice. The provider is deprecated and
+    // refuses every turn, so what matters is whether anyone still has a key
+    // sitting there, which is also the evidence the removal cycle needs before
+    // the connector and its secret can go.
+    if (d.isCursorConfigured(config)) {
+      results.push(
+        warn(
+          'Cursor connector',
+          'Deprecated provider. Use the Cursor CLI runner in the chat runner selector; this key no longer runs turns.'
+        )
+      );
     }
 
     const chatgptConnectors = d.listChatGptConnectors(config);
@@ -311,11 +306,7 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     frontendDir: deps.frontendDir ?? getDefaultFrontendDir,
     controller: deps.controller ?? createProcessController(),
     readState: deps.readState ?? readState,
-    getCursorDoctorChain:
-      deps.getCursorDoctorChain ??
-      (async () => describeCursorRuntimeChain(await detectNodeRuntime())),
     isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,
-    probeCursorRuntime: deps.probeCursorRuntime ?? probeCursorDoctorRuntime,
     probeRuntimeBinary: deps.probeRuntimeBinary ?? probeRuntimeBinary,
     probeRuntimeSlots: deps.probeRuntimeSlots ?? (() => probeRuntimeSlots()),
     probeSshClient: deps.probeSshClient ?? (() => probeSshClient()),

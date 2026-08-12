@@ -8,6 +8,7 @@ import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { NoModelAvailableError } from '../application/resolve-model';
 import { sendTextMessage, UnsupportedChatRunnerError } from '../application/send-text-message';
 import { EmptyTextTurnError } from '../application/text-turn-content';
+import { modelUnavailableResponse } from './model-unavailable-response';
 
 export const respondRoutes = (app: Elysia) =>
   app.group('', (app) =>
@@ -38,8 +39,9 @@ export const respondRoutes = (app: Elysia) =>
               return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
             }
             if (err instanceof NoModelAvailableError) {
-              set.status = 503;
-              return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
+              const refusal = modelUnavailableResponse(err);
+              set.status = refusal.status;
+              return refusal.body;
             }
             if (err instanceof ChatAttachmentNotFoundError || err instanceof EmptyTextTurnError) {
               set.status = 400;

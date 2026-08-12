@@ -5,6 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AddConnectorBody, Connector } from '@mangostudio/shared';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import { invalidateUnifiedCatalog } from '../../../services/providers/catalog';
 import { invalidateProviderModelCache } from '../../../services/providers/core/provider-registry';
 import { maskSecret } from '../../../utils/secrets';
@@ -32,6 +33,18 @@ export async function addConnector(userId: string, body: AddConnectorBody): Prom
   const apiKey = body.apiKey.trim();
 
   if (!apiKey) throw new ConnectorValidationError('API Key cannot be empty.');
+
+  // Enforced here rather than only in the picker, because the picker is not the
+  // only way in: the endpoint accepts a provider whether or not a form rendered
+  // it. Editing and deleting an existing connector stay allowed — this closes
+  // new setup, not the connectors people already have.
+  if (isDeprecatedProvider(provider)) {
+    throw new ConnectorValidationError(
+      `MangoStudio no longer offers ${provider} as a provider. Existing connectors keep working; new ones are not accepted.`,
+      ERROR_CODES.UNSUPPORTED,
+      410
+    );
+  }
 
   // ChatGPT refresh tokens rotate on every refresh; the user-edited config-file
   // and environment backends cannot follow that rotation, so only the OS secret

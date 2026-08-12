@@ -7,7 +7,7 @@
 [![CI](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml)
 [![Release](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml)
 
-AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, Anthropic, Cursor, DeepSeek, and ChatGPT models.
+AI-powered image generation and chat studio supporting Gemini, OpenAI-compatible, Anthropic, DeepSeek, and ChatGPT models.
 
 Extend the agent without touching the codebase:
 
@@ -29,7 +29,7 @@ against `SHA256SUMS` where applicable.
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                            |
 | Shell installer        | `curl -fsSL https://mangostudio.dev/install.sh \| bash`                                                                  |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` then `scoop install mangostudio`        |
-| Cargo                  | `cargo install mangostudio` (full app) or `cargo binstall mangostudio` (prebuilt, no Cursor SDK — see below)             |
+| Cargo                  | `cargo install mangostudio` (full app) or `cargo binstall mangostudio` (prebuilt)                                        |
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                         |
 | Manual                 | Download from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest), verify with `SHA256SUMS` |
 
@@ -72,7 +72,7 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
 
 - [Bun](https://bun.sh/) (v1.3.14+)
 - One or more API keys or sign-in capable accounts for supported providers
-  (Gemini, OpenAI-compatible, Anthropic, Cursor, DeepSeek, ChatGPT)
+  (Gemini, OpenAI-compatible, Anthropic, DeepSeek, ChatGPT)
 
 ## Develop from source
 
@@ -124,7 +124,6 @@ For each connector, you can enable or disable specific models (e.g., Gemini 2.5 
 | OpenAI-compatible | API key + base URL                          | Custom compatible endpoints                   |
 | Anthropic         | API key                                     | Claude text models                            |
 | DeepSeek          | API key                                     | First-class reasoning provider                |
-| Cursor            | API key + Node.js 22.13+ sidecar            | Local Cursor SDK agent runs                   |
 | ChatGPT           | Browser sign-in with a ChatGPT subscription | Stores rotating tokens in the OS secret store |
 
 ### Terminal Sync
@@ -139,26 +138,12 @@ work = "another-key-here"
 
 MangoStudio will sync these keys automatically the next time the Settings page is loaded or a generation is requested.
 
-### Cursor SDK Connector
+### Cursor
 
-The **Cursor** provider runs local Cursor SDK agents against your workspace. It requires:
-
-- `CURSOR_API_KEY` (or `[cursor_api_keys]` in `config.toml`)
-- **Node.js 22.13+** on the host (the agent loop runs in a Node sidecar)
-- An install that includes the bundled Cursor SDK sidecar. Every install channel
-  ships it **except `cargo binstall`**, which installs only the app binary — use
-  the shell installer or `cargo install mangostudio` if you need the Cursor provider.
-  Docker images also omit the sidecar and Node.js, so the Cursor connector is
-  unavailable in containers; see [docs/providers/cursor.md](docs/providers/cursor.md).
-
-Optional workspace override:
-
-```toml
-[cursor]
-workspace_dir = "/path/to/your/project"
-```
-
-See [docs/providers/cursor.md](docs/providers/cursor.md) for details.
+Cursor is **not** a connector. It runs as an external agent — pick it in the composer's runner
+selector and it uses your own Cursor CLI login, rules and MCP configuration. The
+MangoStudio-owned Cursor provider is deprecated; existing connectors stay editable but no longer
+run turns. See [docs/providers/cursor.md](docs/providers/cursor.md).
 
 ### ChatGPT Subscription Connector
 
@@ -283,14 +268,14 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 
 ## Architecture
 
-| Layer        | Technologies                                                                             |
-| ------------ | ---------------------------------------------------------------------------------------- |
-| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                                 |
-| **API**      | Elysia, Better Auth, native rate limiting, DDD-inspired modular architecture             |
-| **Database** | SQLite via Kysely (type-safe query builder)                                              |
-| **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, Cursor, ChatGPT, OpenAI-compatible) |
-| **Runtime**  | Bun — no Node.js dependency                                                              |
-| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`                                 |
+| Layer        | Technologies                                                                     |
+| ------------ | -------------------------------------------------------------------------------- |
+| **Frontend** | React 19, Vite 8, Tailwind CSS v4, TanStack Router/Query                         |
+| **API**      | Elysia, Better Auth, native rate limiting, DDD-inspired modular architecture     |
+| **Database** | SQLite via Kysely (type-safe query builder)                                      |
+| **AI**       | Multi-provider (Gemini, OpenAI, Anthropic, DeepSeek, ChatGPT, OpenAI-compatible) |
+| **Runtime**  | Bun — no Node.js dependency                                                      |
+| **i18n**     | Pure TypeScript dictionary in `@mangostudio/shared/i18n`                         |
 
 ## Editor Setup
 

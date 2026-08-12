@@ -120,7 +120,6 @@ describe('parseDoctorArgs', () => {
   it('defaults to no flags', () => {
     expect(parseDoctorArgs([])).toEqual({
       all: false,
-      cursorProbe: false,
       chatgptRefresh: false,
       probe: false,
       envOnly: false,
@@ -129,19 +128,9 @@ describe('parseDoctorArgs', () => {
     });
   });
 
-  it('parses --all, --cursor-probe, --chatgpt-refresh, and --probe', () => {
+  it('parses --all, --chatgpt-refresh, and --probe', () => {
     expect(parseDoctorArgs(['--all'])).toEqual({
       all: true,
-      cursorProbe: false,
-      chatgptRefresh: false,
-      probe: false,
-      envOnly: false,
-      libraryOnly: false,
-      json: false,
-    });
-    expect(parseDoctorArgs(['--cursor-probe'])).toEqual({
-      all: false,
-      cursorProbe: true,
       chatgptRefresh: false,
       probe: false,
       envOnly: false,
@@ -150,7 +139,6 @@ describe('parseDoctorArgs', () => {
     });
     expect(parseDoctorArgs(['--chatgpt-refresh'])).toEqual({
       all: false,
-      cursorProbe: false,
       chatgptRefresh: true,
       probe: false,
       envOnly: false,
@@ -159,16 +147,14 @@ describe('parseDoctorArgs', () => {
     });
     expect(parseDoctorArgs(['--probe'])).toEqual({
       all: false,
-      cursorProbe: false,
       chatgptRefresh: false,
       probe: true,
       envOnly: false,
       libraryOnly: false,
       json: false,
     });
-    expect(parseDoctorArgs(['--all', '--cursor-probe', '--chatgpt-refresh', '--probe'])).toEqual({
+    expect(parseDoctorArgs(['--all', '--chatgpt-refresh', '--probe'])).toEqual({
       all: true,
-      cursorProbe: true,
       chatgptRefresh: true,
       probe: true,
       envOnly: false,
@@ -180,7 +166,6 @@ describe('parseDoctorArgs', () => {
   it('parses --env, --library, and --json', () => {
     expect(parseDoctorArgs(['--env', '--json'])).toEqual({
       all: false,
-      cursorProbe: false,
       chatgptRefresh: false,
       probe: false,
       envOnly: true,
@@ -191,6 +176,12 @@ describe('parseDoctorArgs', () => {
 
   it('rejects unknown options', () => {
     expect(() => parseDoctorArgs(['--bogus'])).toThrow(CliError);
+  });
+
+  // Removed with the Cursor sidecar it probed. Asserted rather than assumed: a
+  // silently accepted no-op flag would read as a probe that ran and passed.
+  it('rejects the removed --cursor-probe flag', () => {
+    expect(() => parseDoctorArgs(['--cursor-probe'])).toThrow(CliError);
   });
 });
 

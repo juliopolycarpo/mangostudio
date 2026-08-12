@@ -108,6 +108,8 @@ export function useAppState() {
     seedContextInfo: textGen.seedContextInfo,
     contextCache: textGen.contextCache,
     isContextActionPending: textGen.isContextActionPending,
+    modelUnavailable: textGen.modelUnavailable,
+    dismissModelUnavailable: textGen.dismissModelUnavailable,
     lockedProvider: modelState.lockedProvider,
 
     setImageToolIntent: generationControls.setImageToolIntent,

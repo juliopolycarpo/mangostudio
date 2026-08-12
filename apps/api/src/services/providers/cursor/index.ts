@@ -1,482 +1,84 @@
-import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type { ReasoningEffort, SecretMetadataRow } from '@mangostudio/shared/types';
-import { getConfig } from '../../../lib/config';
-import { stringifyToolResult } from '../../../modules/generation/application/tool-result-utils';
-import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../tools/builtin/delegate-to-agent';
-import * as toolRegistry from '../../tools/registry';
-import type { WorkdirPolicy } from '../../tools/types';
-import { selectConnectorRowsForModel } from '../core/connector-model-rows';
-import { withModelCache } from '../core/model-cache';
-import { createProviderLifecycle } from '../core/provider-lifecycle';
-import { createProviderSecretService } from '../core/secret-service';
+/**
+ * Cursor, deprecated as a MangoStudio-owned provider.
+ *
+ * Cursor was reachable two ways with inverted ownership: as a provider where
+ * MangoStudio picked the model, declared the tools, executed them and enforced
+ * permissions; and as an external agent where Cursor does all of that itself.
+ * One vendor in one selector with opposite semantics is how a tool ends up
+ * executed by whichever side assumed the other owned it. The external path is
+ * the supported one — it uses the user's own login, inherits their rules and
+ * MCP configuration, needs no Node.js and ships none of Cursor's bytes.
+ *
+ * What is left here is a registration, not an implementation. It exists so a
+ * chat still carrying a `cursor/*` model id resolves to a provider that can be
+ * named rather than to an unknown-provider crash. Execution never reaches these
+ * methods in practice: the deprecation guard in `resolveModel` refuses the turn
+ * before provider resolution. They throw anyway, because "unreachable" is a
+ * claim about today's callers and this file outlives them.
+ *
+ * Connectors and their stored secrets are deliberately untouched.
+ */
+
 import type {
   AgentEvent,
   AgentTurnRequest,
   AIProvider,
-  GenerationConfig,
   ModelInfo,
-  ModelParameterInfo,
-  ProviderHealthcheckRequest,
   StreamingChunk,
   TextGenerationRequest,
   TextGenerationResult,
-  ToolDefinition,
 } from '../types';
-import {
-  type CursorSidecarCustomTool,
-  type CursorSidecarExecuteResult,
-  type CursorSidecarRequest,
-  streamCursorAgentSidecar,
-} from './agent-runner';
-import {
-  CURSOR_TOOL_BUDGET_EXHAUSTED_MESSAGE,
-  createBudgetedToolExecutor,
-  createCursorAgentTurnMappingState,
-  flushOutstandingToolResults,
-  mapCursorChunkToAgentEvents,
-} from './agent-turn';
-import { CursorApiError, fetchCursorModels, validateCursorApiKey } from './client';
-import { ensureCursorAgentHooks } from './hooks';
-import { buildCursorAgentPrompt } from './prompt-builder';
-import { detectCursorRuntimeAvailability } from './runtime-availability';
-import { resolveCursorRuntimeUnavailableMessage } from './runtime-reason';
 
-const secretService = createProviderSecretService({
-  provider: 'cursor',
-  tomlSection: 'cursor_api_keys',
-  envVarPrefix: 'CURSOR_API_KEY',
-  validateFn: (apiKey) => validateCursorApiKey(apiKey),
-});
+const DEPRECATION_MESSAGE =
+  'MangoStudio no longer runs Cursor models. Continue in a new chat with the Cursor CLI runner.';
 
-async function resolveClientConfig(
-  userId: string,
-  modelName?: string
-): Promise<{ apiKey: string; workspaceDir: string }> {
-  await secretService.syncConfigFileConnectors(userId);
-  const rows = await secretService.listMeta('cursor', userId);
-
-  for (const row of getCursorConnectorRowsForModel(rows, modelName)) {
-    const apiKey = await secretService.resolveSecretValue(row);
-    if (!apiKey) continue;
-    return { apiKey, workspaceDir: resolveCursorWorkspaceDir() };
-  }
-
-  throw new CursorConnectorError('No Cursor API key is configured for the requested model.');
-}
-
-export function getCursorConnectorRowsForModel(
-  rows: SecretMetadataRow[],
-  modelName?: string
-): SecretMetadataRow[] {
-  return selectConnectorRowsForModel(rows, modelName);
-}
-
-function resolveCursorWorkspaceDir(): string {
-  const configured = getConfig().cursor.workspaceDir.trim();
-  return configured || process.cwd();
-}
-
-/** Maps allowlisted MangoStudio tool definitions to Cursor SDK customTools metadata. */
-export function buildCursorCustomTools(
-  tools: ToolDefinition[] | undefined
-): CursorSidecarCustomTool[] | undefined {
-  const allowed = (tools ?? []).filter((tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME);
-  if (allowed.length === 0) return undefined;
-
-  return allowed.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
-    inputSchema: tool.parameters,
-  }));
-}
-
-function buildAllowedToolNameSet(tools: ToolDefinition[] | undefined): ReadonlySet<string> {
-  return new Set(
-    (tools ?? []).map((tool) => tool.name).filter((name) => name !== DELEGATE_TO_AGENT_TOOL_NAME)
-  );
-}
-
-/** Context needed to execute a Cursor-routed tool through the API registry. */
-interface CursorToolExecutionContext {
-  userId: string;
-  chatId: string;
-  environmentId?: string;
-  assistantMessageId?: string;
-  workdir?: string;
-  workdirPolicy?: WorkdirPolicy;
-  toolSettings?: GenerationConfig['toolSettings'];
-}
-
-function toolExecutionFromRequest(req: {
-  userId: string;
-  environmentId?: string;
-  chatId?: string;
-  assistantMessageId?: string;
-  workdir?: string;
-  workdirPolicy?: WorkdirPolicy;
-  generationConfig?: GenerationConfig;
-}): CursorToolExecutionContext {
-  return {
-    userId: req.userId,
-    chatId: req.chatId ?? '',
-    environmentId: req.environmentId,
-    assistantMessageId: req.assistantMessageId,
-    workdir: req.workdir,
-    workdirPolicy: req.workdirPolicy,
-    toolSettings: req.generationConfig?.toolSettings,
-  };
-}
-
-export async function executeCursorCustomTool(
-  ctx: CursorToolExecutionContext,
-  allowedToolNames: ReadonlySet<string>,
-  name: string,
-  args: Record<string, unknown>
-): Promise<CursorSidecarExecuteResult> {
-  if (!allowedToolNames.has(name)) {
-    return { error: `Tool "${name}" is not allowed for this agent.`, isError: true };
-  }
-
-  try {
-    const result = await toolRegistry.executeTool(
-      name,
-      args,
-      {
-        userId: ctx.userId,
-        chatId: ctx.chatId,
-        environmentId: ctx.environmentId ?? LOCAL_ENVIRONMENT_ID,
-        // Sidecar-routed mutations belong to the turn that spawned them, so the
-        // per-message checkpoint covers them like any builtin tool call.
-        assistantMessageId: ctx.assistantMessageId,
-        workdir: ctx.workdir,
-        workdirPolicy: ctx.workdirPolicy,
-        parameters: {},
-      },
-      ctx.toolSettings?.[name]
-    );
-    return { result: stringifyToolResult(result) };
-  } catch (error) {
-    return {
-      error: error instanceof Error ? error.message : 'Tool execution failed.',
-      isError: true,
-    };
+export class CursorProviderDeprecatedError extends Error {
+  constructor() {
+    super(DEPRECATION_MESSAGE);
+    this.name = 'CursorProviderDeprecatedError';
   }
 }
 
-interface PreparedCursorSidecar {
-  request: CursorSidecarRequest;
-  executeCustomTool: (
-    name: string,
-    args: Record<string, unknown>
-  ) => Promise<CursorSidecarExecuteResult>;
-}
-
-async function prepareCursorSidecar(params: {
-  apiKey: string;
-  model: string;
-  prompt: string;
-  modelParams?: Array<{ id: string; value: string }>;
-  tools: ToolDefinition[] | undefined;
-  toolExecution: CursorToolExecutionContext;
-}): Promise<PreparedCursorSidecar> {
-  const runtime = await detectCursorRuntimeAvailability();
-  if (!runtime.available || !runtime.nodePath) {
-    throw new CursorRuntimeUnavailableError(resolveCursorRuntimeUnavailableMessage(runtime));
-  }
-
-  const agentDir = await ensureCursorAgentHooks(runtime.nodePath);
-  const customTools = buildCursorCustomTools(params.tools);
-  const allowedToolNames = buildAllowedToolNameSet(params.tools);
-
-  return {
-    request: {
-      apiKey: params.apiKey,
-      model: params.model,
-      cwd: agentDir,
-      prompt: params.prompt,
-      params: params.modelParams,
-      ...(customTools ? { customTools } : {}),
-      settingSources: ['project'],
-    },
-    executeCustomTool: (name, args) =>
-      executeCursorCustomTool(params.toolExecution, allowedToolNames, name, args),
-  };
-}
-
-const listModelsWithCache = withModelCache(
-  async (userId: string): Promise<ModelInfo[]> => {
-    await secretService.syncConfigFileConnectors(userId);
-    const rows = await secretService.listMeta('cursor', userId);
-    const configuredRows = rows.filter((row) => row.configured);
-    if (configuredRows.length === 0) return [];
-
-    const models = new Map<string, ModelInfo>();
-
-    for (const row of configuredRows) {
-      const apiKey = await secretService.resolveSecretValue(row);
-      if (!apiKey) continue;
-      const connectorModels = await listConnectorModels(row, apiKey);
-      for (const model of connectorModels) models.set(model.modelId, model);
-    }
-
-    return Array.from(models.values()).sort((a, b) => a.displayName.localeCompare(b.displayName));
-  },
-  { ttl: 3_600_000, fallback: [] }
-);
-
-function listConnectorModels(_row: SecretMetadataRow, apiKey: string): Promise<ModelInfo[]> {
-  return fetchCursorModels({ apiKey });
-}
-
-interface PreparedCursorRuntime {
-  readonly apiKey: string;
-  readonly workspaceDir: string;
-}
-
-async function loadPreparedRuntime(
-  userId: string,
-  modelName?: string
-): Promise<PreparedCursorRuntime> {
-  const runtime = await detectCursorRuntimeAvailability();
-  if (!runtime.available) {
-    throw new CursorRuntimeUnavailableError(resolveCursorRuntimeUnavailableMessage(runtime));
-  }
-
-  const { apiKey, workspaceDir } = await resolveClientConfig(userId, modelName);
-  return { apiKey, workspaceDir };
-}
-
-const CURSOR_THINKING_EFFORTS = ['low', 'medium', 'high'] as const;
-type CursorThinkingEffort = (typeof CURSOR_THINKING_EFFORTS)[number];
-
-function isCursorThinkingEffort(value: ReasoningEffort): value is CursorThinkingEffort {
-  return (CURSOR_THINKING_EFFORTS as readonly ReasoningEffort[]).includes(value);
-}
-
-export function buildCursorModelParams(
-  config: TextGenerationRequest['generationConfig'],
-  modelParameters?: ModelParameterInfo[]
-): Array<{ id: string; value: string }> | undefined {
-  if (!config?.thinkingEnabled) return undefined;
-  if (!config.reasoningEffort || !isCursorThinkingEffort(config.reasoningEffort)) return undefined;
-  if (config.reasoningEffort === 'medium') return undefined;
-  if (!modelParameters) return undefined;
-
-  const thinkingParam = modelParameters.find((parameter) => parameter.id === 'thinking');
-  if (!thinkingParam?.values.includes(config.reasoningEffort)) return undefined;
-
-  return [{ id: 'thinking', value: config.reasoningEffort }];
-}
-
-async function resolveCursorModelParameters(
-  userId: string,
-  modelName: string
-): Promise<ModelParameterInfo[] | undefined> {
-  const models = await listModelsWithCache(userId);
-  return models.find((model) => model.modelId === modelName)?.parameters;
-}
-
-const lifecycle = createProviderLifecycle<PreparedCursorRuntime>({
-  provider: 'cursor',
-  loadPreparedRuntime,
-  invalidateCachedModels: listModelsWithCache.invalidate,
-  syncConfigFileConnectors: secretService.syncConfigFileConnectors,
-});
-
-async function runCursorGeneration(req: TextGenerationRequest): Promise<string> {
-  const { apiKey, workspaceDir } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-  const modelParameters = await resolveCursorModelParameters(req.userId, req.modelName);
-  const prompt = buildCursorAgentPrompt({
-    systemPrompt: req.systemPrompt,
-    history: req.history,
-    prompt: req.prompt,
-    workspaceDir,
-  });
-  const modelParams = buildCursorModelParams(req.generationConfig, modelParameters);
-  const sidecar = await prepareCursorSidecar({
-    apiKey,
-    model: req.modelName,
-    prompt,
-    modelParams,
-    tools: req.generationConfig?.tools,
-    toolExecution: toolExecutionFromRequest(req),
-  });
-
-  let text = '';
-  for await (const chunk of streamCursorAgentSidecar(sidecar.request, req.signal, {
-    executeCustomTool: sidecar.executeCustomTool,
-  })) {
-    if (chunk.type === 'error') {
-      throw new CursorConnectorError(chunk.content ?? 'Cursor agent run failed.');
-    }
-    if (chunk.type === 'text' && chunk.text) {
-      text += chunk.text;
-    }
-    if (chunk.done) break;
-  }
-
-  if (!text.trim()) {
-    throw new CursorConnectorError(`No text returned from Cursor model "${req.modelName}".`);
-  }
-
-  return text;
-}
-
-/**
- * Streams a full Cursor agent turn. The Cursor SDK owns the tool loop inside
- * the sidecar, so this adapter emits tool_result events itself and finishes
- * with turn_completed carrying no pending calls — the orchestrator completes
- * in a single iteration.
- */
-async function* runCursorAgentTurn(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
-  if (req.toolResults?.length) {
-    throw new CursorConnectorError(
-      'Cursor runs its tool loop inside the sidecar; the orchestrator must not feed back tool results.'
-    );
-  }
-
-  const { apiKey, workspaceDir } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-  const modelParameters = await resolveCursorModelParameters(req.userId, req.modelName);
-  const prompt = buildCursorAgentPrompt({
-    systemPrompt: req.systemPrompt,
-    history: req.history,
-    prompt: req.prompt ?? '',
-    workspaceDir,
-  });
-  const modelParams = buildCursorModelParams(req.generationConfig, modelParameters);
-  const sidecar = await prepareCursorSidecar({
-    apiKey,
-    model: req.modelName,
-    prompt,
-    modelParams,
-    tools: req.toolDefinitions,
-    toolExecution: toolExecutionFromRequest(req),
-  });
-
-  const abortController = new AbortController();
-  const forwardAbort = () => abortController.abort();
-  req.signal?.addEventListener('abort', forwardAbort, { once: true });
-  if (req.signal?.aborted) abortController.abort();
-
-  const budgetedExecutor = createBudgetedToolExecutor({
-    maxToolCalls: req.generationConfig?.maxToolIterations ?? MAX_TOOL_ITERATIONS_DEFAULT,
-    execute: sidecar.executeCustomTool,
-    onExhausted: () => abortController.abort(),
-  });
-
-  const mappingState = createCursorAgentTurnMappingState();
-  let sawError = false;
-
-  try {
-    for await (const chunk of streamCursorAgentSidecar(sidecar.request, abortController.signal, {
-      executeCustomTool: budgetedExecutor.execute,
-    })) {
-      if (req.signal?.aborted || budgetedExecutor.isExhausted()) break;
-
-      for (const event of mapCursorChunkToAgentEvents(chunk, mappingState)) {
-        if (event.type === 'turn_error') sawError = true;
-        yield event;
-      }
-      if (sawError) return;
-      if (chunk.done) break;
-    }
-  } finally {
-    req.signal?.removeEventListener('abort', forwardAbort);
-    abortController.abort();
-  }
-
-  if (req.signal?.aborted) return;
-  if (budgetedExecutor.isExhausted()) {
-    yield { type: 'turn_error', error: CURSOR_TOOL_BUDGET_EXHAUSTED_MESSAGE };
-    return;
-  }
-
-  yield* flushOutstandingToolResults(mappingState);
-  yield { type: 'turn_completed' };
+function refuse(): never {
+  throw new CursorProviderDeprecatedError();
 }
 
 const cursorProvider: AIProvider = {
   providerType: 'cursor',
 
-  async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
-    const text = await runCursorGeneration(req);
-    return { text };
+  generateText(_req: TextGenerationRequest): Promise<TextGenerationResult> {
+    return refuse();
   },
 
-  generateAgentTurnStream: runCursorAgentTurn,
-
-  async *generateTextStream(req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
-    const { apiKey, workspaceDir } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-    const modelParameters = await resolveCursorModelParameters(req.userId, req.modelName);
-    const prompt = buildCursorAgentPrompt({
-      systemPrompt: req.systemPrompt,
-      history: req.history,
-      prompt: req.prompt,
-      workspaceDir,
-    });
-    const modelParams = buildCursorModelParams(req.generationConfig, modelParameters);
-    const sidecar = await prepareCursorSidecar({
-      apiKey,
-      model: req.modelName,
-      prompt,
-      modelParams,
-      tools: req.generationConfig?.tools,
-      toolExecution: toolExecutionFromRequest(req),
-    });
-
-    for await (const chunk of streamCursorAgentSidecar(sidecar.request, req.signal, {
-      executeCustomTool: sidecar.executeCustomTool,
-    })) {
-      if (req.signal?.aborted) break;
-      yield chunk;
-      if (chunk.done) return;
-    }
+  generateAgentTurnStream(_req: AgentTurnRequest): AsyncIterable<AgentEvent> {
+    return refuse();
   },
 
-  listModels(userId: string): Promise<ModelInfo[]> {
-    return listModelsWithCache(userId);
+  generateTextStream(_req: TextGenerationRequest): AsyncIterable<StreamingChunk> {
+    return refuse();
   },
 
-  invalidateModelCache: lifecycle.invalidateModelCache,
-  syncConfigFileConnectors: lifecycle.syncConfigFileConnectors,
-  warmup: lifecycle.warmup,
-
-  async healthcheck(req: ProviderHealthcheckRequest): Promise<void> {
-    if (!req.apiKey?.trim()) {
-      throw new CursorApiError('Cursor API key is empty.');
-    }
-
-    const runtime = await detectCursorRuntimeAvailability();
-    if (!runtime.available) {
-      throw new CursorRuntimeUnavailableError(resolveCursorRuntimeUnavailableMessage(runtime));
-    }
-
-    await validateCursorApiKey(req.apiKey.trim());
+  /**
+   * Empty rather than absent. The unified catalog already skips deprecated
+   * providers, so this is the second answer to the same question — and the one
+   * that holds if some other caller ever lists a provider directly.
+   */
+  // biome-ignore lint/suspicious/useAwait: satisfies the AIProvider contract
+  async listModels(_userId: string): Promise<ModelInfo[]> {
+    return [];
   },
 
-  async validateApiKey(apiKey: string): Promise<void> {
-    await secretService.validateApiKey(apiKey);
+  healthcheck(): Promise<void> {
+    return refuse();
   },
 
-  async resolveApiKey(userId: string, modelName?: string): Promise<string> {
-    const { apiKey } = await resolveClientConfig(userId, modelName);
-    return apiKey;
+  validateApiKey(_apiKey: string): Promise<void> {
+    return refuse();
+  },
+
+  resolveApiKey(_userId: string, _modelName?: string): Promise<string> {
+    return refuse();
   },
 };
-
-class CursorConnectorError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'CursorConnectorError';
-  }
-}
-
-export class CursorRuntimeUnavailableError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'CursorRuntimeUnavailableError';
-  }
-}
 
 export { cursorProvider };

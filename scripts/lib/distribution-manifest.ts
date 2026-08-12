@@ -70,10 +70,7 @@ export function createDistributionManifest(
 ): DistributionManifest {
   const targets = ALL_BINARY_TARGETS.map((target) => {
     const npmPlatform = NPM_PLATFORMS.find((platform) => platform.arch === target.arch);
-    const sourceDir = join(options.rootDir, '.mango', 'out', target.arch);
-    const archiveMembers = platformArchiveLayout(target.name, {
-      includeCursorSidecar: existsSync(join(sourceDir, 'cursor-sidecar')),
-    }).extractedMembers;
+    const archiveMembers = platformArchiveLayout(target.name).extractedMembers;
 
     return {
       id: target.arch,

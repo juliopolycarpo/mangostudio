@@ -237,6 +237,13 @@ export const messages: Messages = {
         unknown: 'The turn ended before completion could be confirmed.',
       },
     },
+    deprecatedModel: {
+      title: 'MangoStudio no longer runs {provider} models',
+      body: 'This chat is set to {model}. {provider} now runs as its own CLI agent that owns its tools and approvals, so continuing there means a new chat — this one keeps its history. Pick another model below to stay in this chat.',
+      continueInNewChat: 'Continue in a new chat with {target} CLI',
+      dismiss: 'Dismiss',
+      forkFailed: 'Could not start the new chat. Try again.',
+    },
     fallback: {
       toReplay: 'Stateful continuation is no longer available. Continuing with transcript replay.',
       generic: 'Conversation mode changed from {from} to {to}.',
@@ -665,25 +672,9 @@ export const messages: Messages = {
       chatgptAlertThresholdOption: 'At {percent}%',
       chatgptAlertThresholdCrossed: '{name}: {window} is at {percent}% of its quota',
       chatgptAlertWindowReset: '{name}: {window} reset — your quota is back',
-      cursorNodeRequired: 'You need NodeJS installed to run Cursor SDK Agents.',
-      cursorNodeNotFound: '`node` binary not found',
-      cursorNodeInvalid:
-        'The configured Node.js binary at {path} is not runnable. Fix or remove MANGO_NODE_PATH / cursor.node_path.',
-      cursorNodeVersionInsufficient:
-        'Node.js {minVersion}+ is required for Cursor SDK Agents (found {version}).',
-      cursorSidecarMissing: 'Cursor SDK sidecar script is missing.',
-      cursorSidecarMissingAt: 'Cursor SDK sidecar script is missing at {path}.',
-      cursorSdkMissing: 'Cursor SDK package is missing from the sidecar. Reinstall MangoStudio.',
-      cursorSdkMissingAt:
-        'Cursor SDK package is missing from the sidecar at {path}. Reinstall MangoStudio.',
-      cursorSdkIncomplete: 'Cursor SDK package is incomplete. Reinstall MangoStudio.',
-      cursorSdkIncompleteAt: 'Cursor SDK package is incomplete at {path}. Reinstall MangoStudio.',
-      cursorNativeRuntimeMissing:
-        'This platform has no Cursor native runtime in the sidecar. Reinstall MangoStudio.',
-      cursorNativeRuntimeMissingPackage:
-        'Cursor native runtime package {packageName} is missing. Reinstall MangoStudio.',
-      cursorRuntimeDoctorHint:
-        'Run `mango doctor` for a full Cursor runtime checklist (use `--all` to check without a connector).',
+      deprecatedBadge: 'Legacy',
+      deprecatedConnectorNote:
+        'MangoStudio no longer runs this provider. Your key and its models stay here, but turns are refused — use the Cursor CLI runner in the chat runner selector instead.',
       modalsModalTitle: 'Choose Available Models',
       modelsModalTitle: 'Choose Available Models',
       modelsModalDescription: 'Models enabled for',

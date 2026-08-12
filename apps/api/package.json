@@ -27,7 +27,6 @@
     "@ai-sdk/deepseek": "^3.0.24",
     "@anthropic-ai/sdk": "^0.115.0",
     "@better-auth/api-key": "1.6.26",
-    "@cursor/sdk": "^1.0.26",
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/openapi": "^1.4.15",
     "@elysiajs/static": "^1.4.10",

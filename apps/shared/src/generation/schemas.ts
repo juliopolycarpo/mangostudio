@@ -2,9 +2,10 @@ import { type Static, Type } from '@sinclair/typebox';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-limits';
 import { AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
+import { ExternalAgentTargetIdSchema } from '../external-agents/schemas';
 import { schemaMaxLengthFor } from '../external-agents/vendor-text';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
-import { ReasoningEffortSchema } from '../provider-settings/schemas';
+import { ProviderTypeSchema, ReasoningEffortSchema } from '../provider-settings/schemas';
 import { ResumeInterruptedTurnSchema } from '../turn-recovery/schemas';
 
 export const ToolIntentSchema = Type.Optional(
@@ -100,3 +101,53 @@ export const RespondStreamBodySchema = Type.Object({
 });
 
 export type RespondStreamBody = Static<typeof RespondStreamBodySchema>;
+
+/**
+ * Why a turn could not resolve a model.
+ *
+ * A closed vocabulary rather than the server's sentence, because the two arms
+ * lead somewhere different: `not-configured` is answered in Settings, and
+ * `provider-deprecated` is answered by moving the work to the vendor's own CLI.
+ * A client that only had prose would have to pattern-match English to tell them
+ * apart.
+ */
+export const ModelUnavailableReasonSchema = Type.Union([
+  Type.Literal('not-configured'),
+  Type.Literal('provider-deprecated'),
+]);
+
+export type ModelUnavailableReason = Static<typeof ModelUnavailableReasonSchema>;
+
+/**
+ * What the client can offer to do about it.
+ *
+ * `fork-with-external-runner` is D14: a chat with MangoStudio-owned turns
+ * cannot become vendor-owned in place, so the offer is a new chat carrying
+ * environment and workdir, never an edit of this one.
+ */
+export const ModelUnavailableActionSchema = Type.Union([
+  Type.Literal('configure-connector'),
+  Type.Literal('fork-with-external-runner'),
+]);
+
+export type ModelUnavailableAction = Static<typeof ModelUnavailableActionSchema>;
+
+/**
+ * The refusal, as it travels on `ApiErrorResponse.details`.
+ *
+ * Every field is a string because `details` is a string map on the wire, and
+ * widening that for one refusal would change the shape of every error response.
+ * The reason and the action are what the client renders; `modelId` and
+ * `provider` are what let it name the thing that stopped working.
+ */
+export const ModelUnavailableDetailsSchema = Type.Object({
+  reason: ModelUnavailableReasonSchema,
+  action: ModelUnavailableActionSchema,
+  /** The stored model id the turn tried to run, when the request named one. */
+  modelId: Type.Optional(Type.String({ maxLength: GENERATION_MODEL_ID_MAX_LENGTH })),
+  provider: Type.Optional(ProviderTypeSchema),
+  /** The external agent `fork-with-external-runner` should point the fork at. */
+  targetId: Type.Optional(ExternalAgentTargetIdSchema),
+});
+
+export type ModelUnavailableDetails = Static<typeof ModelUnavailableDetailsSchema>;

@@ -15,6 +15,7 @@ import type { ExternalReviewTarget } from '@mangostudio/shared/external-agents';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import type {
   ExternalTurnRequest,
+  ModelUnavailableDetails,
   RespondStreamBody,
   ToolIntent,
 } from '@mangostudio/shared/generation';
@@ -105,6 +106,22 @@ async function answerExternalRefusal(
     return (await promptExternalDisclosure(disclosure)) ? 'disclosure' : undefined;
   }
   return undefined;
+}
+
+/**
+ * The deprecated-provider refusal, or `undefined` for any other failure.
+ *
+ * Read off the typed details rather than the server's sentence: the reason is
+ * what decides whether a fork is on offer at all, and the message is prose
+ * written for a log. `reason` is checked as well as the code so a future
+ * refusal that reuses the code cannot render Cursor's copy.
+ */
+function deprecatedProviderRefusal(error: unknown): ModelUnavailableDetails | undefined {
+  if (!(error instanceof ApiError)) return undefined;
+  if (error.code !== ERROR_CODES.MODEL_PROVIDER_DEPRECATED) return undefined;
+  const details = error.details as Partial<ModelUnavailableDetails> | undefined;
+  if (details?.reason !== 'provider-deprecated' || !details.action) return undefined;
+  return { ...details, reason: 'provider-deprecated', action: details.action };
 }
 
 /**
@@ -315,6 +332,13 @@ export function useTextGeneration({
   const [pendingContextAction, setPendingContextAction] = useState<'compact' | 'new-chat' | null>(
     null
   );
+  /**
+   * The last deprecated-provider refusal, held so the composer can offer the
+   * migration. Cleared when a turn starts rather than when one succeeds: the
+   * next send is the user acting on the notice, and leaving it up underneath a
+   * running turn would show a refusal that no longer applies.
+   */
+  const [modelUnavailable, setModelUnavailable] = useState<ModelUnavailableDetails | null>(null);
 
   const syncContextInfo = useCallback(
     (response: ContextCompactionResponse) => {
@@ -338,6 +362,7 @@ export function useTextGeneration({
   const runTurn = useCallback(
     async ({ prompt, toolIntent, attachmentIds, recovery, review }: RunTurnOptions) => {
       if (stream.abortControllerRef.current) return;
+      setModelUnavailable(null);
       stream.setIsGenerating(true);
 
       let activeChatId = chats.currentChatId;
@@ -526,6 +551,10 @@ export function useTextGeneration({
           });
         } else {
           console.error('[respond]', error);
+          // Surfaced above the composer as well as in the transcript: the
+          // transcript says what happened, the notice is where the way out is.
+          const deprecated = deprecatedProviderRefusal(error);
+          if (deprecated) setModelUnavailable(deprecated);
           const errorText = resolveApiErrorMessage(error, t.errors.textGenerationFailed);
           const alreadyHasError = streamState.parts.some((part) => part.type === 'error');
           const nextParts: MessagePart[] = alreadyHasError
@@ -698,5 +727,7 @@ export function useTextGeneration({
     seedContextInfo: stream.seedContextInfo,
     contextCache: stream.contextCache,
     isContextActionPending: pendingContextAction !== null,
+    modelUnavailable,
+    dismissModelUnavailable: useCallback(() => setModelUnavailable(null), []),
   };
 }

@@ -5,6 +5,7 @@ import {
 } from '@mangostudio/shared/external-agents';
 import { createFileRoute } from '@tanstack/react-router';
 import { ChatPage } from '@/features/chat/ChatPage';
+import { useDeprecatedModelMigration } from '@/features/chat/hooks/use-deprecated-model-migration';
 import { useExternalAgents } from '@/features/external-agents/useExternalAgents';
 import { useApp } from '@/lib/app-context';
 
@@ -19,6 +20,7 @@ function ChatRoute() {
   );
   const reasoningVisible = selectedModel?.capabilities?.reasoning === true;
   const external = useExternalAgents(app.currentEnvironmentId);
+  const deprecatedModel = useDeprecatedModelMigration(app.currentChatId);
   const descriptor =
     app.runner.kind === 'external' ? external.find(app.runner.targetId) : undefined;
 
@@ -98,6 +100,10 @@ function ChatRoute() {
       }
       onResumeInterruptedTurn={app.handleResumeInterruptedTurn}
       onDismissInterruptedTurn={app.handleDismissInterruptedTurn}
+      modelUnavailable={app.modelUnavailable}
+      onDismissModelUnavailable={app.dismissModelUnavailable}
+      onContinueWithExternalRunner={deprecatedModel.continueWithRunner}
+      isForkingRunner={deprecatedModel.isForking}
     />
   );
 }

@@ -29,10 +29,9 @@ function makeTempDir(): string {
 }
 
 function stageTarget(sourceDir: string, binary: string): void {
-  mkdirSync(join(sourceDir, 'cursor-sidecar'), { recursive: true });
+  mkdirSync(sourceDir, { recursive: true });
   writeFileSync(join(sourceDir, binary), 'binary');
   writeFileSync(join(sourceDir, 'README.md'), 'readme');
-  writeFileSync(join(sourceDir, 'cursor-sidecar', 'run-agent.mjs'), 'sidecar');
 }
 
 function fileSnapshot(rootDir: string): Record<string, string> {
@@ -73,7 +72,7 @@ describe('distribution extraction', () => {
 
   test('materializes tar.gz and zip archives into the same target layout', async () => {
     const rootDir = makeTempDir();
-    const expectedMembers = ['README.md', 'cursor-sidecar', 'mangostudio'];
+    const expectedMembers = ['README.md', 'mangostudio'];
     const sourceDir = join(rootDir, 'source');
     stageTarget(sourceDir, 'mangostudio');
 

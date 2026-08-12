@@ -77,6 +77,16 @@ export const ERROR_CODES = {
    * it is initializing a repository, or pointing the chat somewhere else.
    */
   EXTERNAL_REVIEW_REQUIRES_GIT: 'EXTERNAL_REVIEW_REQUIRES_GIT',
+  /**
+   * The turn named a model whose provider MangoStudio no longer offers.
+   *
+   * Its own code rather than a generic provider failure because nothing about
+   * the request or the connector is broken — the ownership model changed, and
+   * the way forward is a different model or the vendor's own CLI. The refusal
+   * carries `ModelUnavailableDetails` so the client can render that choice
+   * instead of an apology.
+   */
+  MODEL_PROVIDER_DEPRECATED: 'MODEL_PROVIDER_DEPRECATED',
   INTERNAL: 'INTERNAL',
 } as const;
 

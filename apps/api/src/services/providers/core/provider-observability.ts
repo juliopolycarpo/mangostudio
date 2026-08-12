@@ -1,6 +1,7 @@
 import type {
   ProviderCacheMetrics,
   ProviderCacheName,
+  ProviderDeprecationMetrics,
   ProviderObservabilityLogEntry,
   ProviderObservabilityLogsResponse,
   ProviderObservabilityMetrics,
@@ -39,6 +40,8 @@ interface MutableProviderMetrics {
   caches: Map<ProviderCacheName, MutableCacheMetrics>;
   probeTimeouts: Map<ProviderProbeOperation, number>;
   usage: MutableUsageMetrics;
+  /** Absent until the deprecation guard refuses a turn for this provider. */
+  deprecation: ProviderDeprecationMetrics | undefined;
 }
 
 interface PersistedUsageMetrics {
@@ -56,6 +59,7 @@ interface PersistedSnapshot {
     caches: Array<[ProviderCacheName, MutableCacheMetrics]>;
     probeTimeouts: Array<[ProviderProbeOperation, number]>;
     usage?: PersistedUsageMetrics;
+    deprecation?: ProviderDeprecationMetrics;
   }>;
   recentLogs: ProviderObservabilityLogEntry[];
 }
@@ -101,6 +105,7 @@ function toPersistedSnapshot(): PersistedSnapshot {
         inputTokens: metrics.usage.inputTokens,
         ...(metrics.usage.lastUsedAt !== undefined ? { lastUsedAt: metrics.usage.lastUsedAt } : {}),
       },
+      ...(metrics.deprecation ? { deprecation: metrics.deprecation } : {}),
     })),
     recentLogs: [...recentLogs],
   };
@@ -125,6 +130,7 @@ function fromPersistedSnapshot(snapshot: PersistedSnapshot): void {
             lastUsedAt: entry.usage.lastUsedAt,
           }
         : createEmptyUsageMetrics(),
+      deprecation: entry.deprecation,
     };
     providerMetrics.set(entry.provider, restored);
   }
@@ -198,6 +204,7 @@ function ensureProviderMetrics(provider: ProviderType): MutableProviderMetrics {
     caches: new Map(),
     probeTimeouts: new Map(),
     usage: createEmptyUsageMetrics(),
+    deprecation: undefined,
   };
   providerMetrics.set(provider, created);
   return created;
@@ -287,6 +294,29 @@ export function recordProviderTurn(input: {
   markDirty();
 }
 
+/**
+ * Record a turn the deprecation guard refused.
+ *
+ * This is the whole telemetry story for a deprecation: a counter that a
+ * maintainer can read before deciding the window has elapsed. It rides the
+ * observability snapshot that already exists rather than opening a reporting
+ * channel — nothing here leaves the machine.
+ *
+ * // Usage: recordDeprecatedProviderAttempt({ provider: 'cursor', modelId: 'cursor/auto' });
+ */
+export function recordDeprecatedProviderAttempt(input: {
+  provider: ProviderType;
+  modelId?: string;
+}): void {
+  const metrics = ensureProviderMetrics(input.provider);
+  metrics.deprecation = {
+    refusedTurns: (metrics.deprecation?.refusedTurns ?? 0) + 1,
+    lastAttemptedAt: Date.now(),
+    ...(input.modelId ? { lastModelId: input.modelId } : {}),
+  };
+  markDirty();
+}
+
 function toProviderCacheMetrics(
   cacheName: ProviderCacheName,
   metrics: MutableCacheMetrics
@@ -344,6 +374,7 @@ function toProviderObservabilityMetrics(
     caches,
     probeTimeouts,
     ...(usage !== undefined ? { usage } : {}),
+    ...(metrics.deprecation ? { deprecatedAttempts: metrics.deprecation } : {}),
   };
 }
 

@@ -8,7 +8,6 @@ import {
   mergeProviderRuntimeSettings,
   normalizeProviderRuntimeSettings,
 } from '../../../../src/services/providers/core/provider-settings-policy';
-import { evaluateCursorRuntimeAvailability } from '../../../../src/services/providers/cursor/runtime-availability';
 
 describe('provider settings policy', () => {
   it('maps DeepSeek compatible efforts to supported values', () => {
@@ -30,8 +29,8 @@ describe('provider settings policy', () => {
     );
   });
 
-  it('allows OpenAI xhigh without DeepSeek-specific mapping', async () => {
-    const descriptor = await buildProviderSettingsDescriptor('openai', {
+  it('allows OpenAI xhigh without DeepSeek-specific mapping', () => {
+    const descriptor = buildProviderSettingsDescriptor('openai', {
       reasoningEffort: 'xhigh',
     });
 
@@ -68,26 +67,21 @@ describe('provider settings policy', () => {
     });
   });
 
-  it('exposes cursor reasoning descriptor with tool use but no reasoning-with-tools', async () => {
-    const descriptor = await buildProviderSettingsDescriptor('cursor', { reasoningEffort: 'high' });
+  // Still described, because an existing connector's settings page still
+  // renders from this descriptor. What changed is that it now says so.
+  it('marks the deprecated Cursor descriptor while keeping its settings readable', () => {
+    const descriptor = buildProviderSettingsDescriptor('cursor', { reasoningEffort: 'high' });
 
+    expect(descriptor.deprecated).toBe(true);
     expect(descriptor.reasoning.supportedEfforts).toEqual(['low', 'medium', 'high']);
     expect(descriptor.settings.reasoningEffort).toBe('high');
     expect(descriptor.toolUseSupported).toBe(true);
     expect(descriptor.reasoning.reasoningWithToolsSupported).toBe(false);
   });
 
-  it('marks Cursor unavailable when the sidecar script is missing', () => {
-    const runtime = evaluateCursorRuntimeAvailability(
-      { available: true, nodePath: '/usr/bin/node', version: 'v22.13.0' },
-      {
-        sidecarScriptPath: '/missing/cursor-sidecar/run-agent.mjs',
-        sidecarExists: () => false,
-      }
-    );
-
-    expect(runtime.available).toBe(false);
-    expect(runtime.reasonCode).toBe('cursor.sidecar_missing');
-    expect(runtime.reasonParams?.sidecarPath).toContain('cursor-sidecar/run-agent.mjs');
+  it('leaves every supported provider undeprecated', () => {
+    for (const provider of ['gemini', 'openai', 'anthropic', 'deepseek', 'chatgpt'] as const) {
+      expect(buildProviderSettingsDescriptor(provider).deprecated).toBe(false);
+    }
   });
 });

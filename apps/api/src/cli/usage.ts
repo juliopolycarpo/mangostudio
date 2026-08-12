@@ -17,15 +17,14 @@ Commands:
   status              Show whether a server is running and its details.
   stop                Gracefully stop the running server.
   killserver          Force-kill the running server.
-  doctor [--all] [--cursor-probe] [--chatgpt-refresh] [--probe] [--env] [--library] [--json]
+  doctor [--all] [--chatgpt-refresh] [--probe] [--env] [--library] [--json]
                       Run environment and configuration diagnostics.
-                      Cursor and ChatGPT connector checks run when the
-                      connector is configured, or with --all. --cursor-probe
-                      spawns the sidecar validate_api_key RPC with a dummy
-                      key. --chatgpt-refresh performs a live token refresh
-                      (rotates the stored refresh token). --probe actively
-                      connects to each enabled MCP server. --env or
-                      --library limit extra sections; --json prints JSON.
+                      ChatGPT connector checks run when the connector is
+                      configured, or with --all. --chatgpt-refresh performs a
+                      live token refresh (rotates the stored refresh token).
+                      --probe actively connects to each enabled MCP server.
+                      --env or --library limit extra sections; --json prints
+                      JSON.
   env [runtimes|agents] [--json]
                       Report runtimes, version managers, and agent CLIs
                       (read-only; no install).

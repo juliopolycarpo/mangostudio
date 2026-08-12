@@ -5,6 +5,8 @@ export {
   ProviderCacheMetricsSchema,
   type ProviderCacheName,
   ProviderCacheNameSchema,
+  type ProviderDeprecationMetrics,
+  ProviderDeprecationMetricsSchema,
   type ProviderObservabilityLogEntry,
   ProviderObservabilityLogEntrySchema,
   type ProviderObservabilityLogsResponse,

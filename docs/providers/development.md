@@ -50,11 +50,12 @@ separate provider type lets the catalog report DeepSeek-specific reasoning,
 tool, caching, and continuation capabilities without changing generic
 OpenAI-compatible behavior.
 
-Cursor is also a first-class provider, but it is an **adapter** over the local
-`@cursor/sdk` agent runtime rather than a chat-completions wrapper. It implements
-`generateAgentTurnStream` via a Node.js sidecar (the Bun API never imports the
-SDK). See [docs/providers/cursor.md](cursor.md) for sidecar RPC, workspace
-configuration, and packaging.
+Cursor is **not** a provider to model a new one on. It is registered and
+deprecated: it advertises no models and refuses execution, and Cursor is reached
+through the external-agent adapter instead, where the vendor's own CLI owns the
+model, the tools and the approvals. See
+[docs/providers/cursor.md](cursor.md) for why the ownership inversion made one
+of the two paths untenable.
 
 ---
 

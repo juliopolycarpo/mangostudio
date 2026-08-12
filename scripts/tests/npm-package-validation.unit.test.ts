@@ -2,15 +2,12 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cursorNativePackageForArch } from '../lib/cursor-sidecar';
 import { buildMainManifest, buildPlatformManifest, type NpmPlatform } from '../lib/npm-pack';
 import {
   assertNpmDistributionAssets,
   assertPlatformBuildAssets,
   assertPlatformPackageAssets,
-  collectCursorSidecarLayoutErrors,
 } from '../lib/npm-package-validation';
-import type { ReleasePlatformId } from '../lib/release-targets';
 
 const LINUX_X64: NpmPlatform = {
   arch: 'linux-x64',
@@ -44,37 +41,7 @@ const writePlatformPackage = (packageDir: string, platform: NpmPlatform): void =
   mkdirSync(packageDir, { recursive: true });
   writeFileSync(join(packageDir, platform.binary), 'binary');
   writeFileSync(join(packageDir, platform.runtimeBinary), 'runtime binary');
-  writeCursorSidecar(packageDir, platform);
   writeJson(join(packageDir, 'package.json'), buildPlatformManifest(platform, '1.2.3'));
-};
-
-const writeCursorSidecar = (packageDir: string, platform: NpmPlatform): void => {
-  const nativePackage = cursorNativePackageForArch(platform.arch as ReleasePlatformId);
-  if (!nativePackage) return;
-
-  const sidecarDir = join(packageDir, 'cursor-sidecar');
-  mkdirSync(sidecarDir, { recursive: true });
-  writeFileSync(join(sidecarDir, 'run-agent.mjs'), '#!/usr/bin/env node');
-  writeFileSync(join(sidecarDir, 'sidecar-runtime.mjs'), 'export {};');
-  mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk'), { recursive: true });
-  writeJson(join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'), {
-    name: '@cursor/sdk',
-  });
-  mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'dist', 'cjs'), {
-    recursive: true,
-  });
-  mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'dist', 'esm'), {
-    recursive: true,
-  });
-  writeFileSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'dist', 'cjs', '642.js'), '');
-  writeFileSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'dist', 'esm', '642.js'), '');
-  mkdirSync(join(sidecarDir, 'node_modules', nativePackage), { recursive: true });
-  writeJson(join(sidecarDir, 'node_modules', nativePackage, 'package.json'), {
-    name: nativePackage,
-    bin: { rg: 'bin/rg' },
-  });
-  mkdirSync(join(sidecarDir, 'node_modules', nativePackage, 'bin'), { recursive: true });
-  writeFileSync(join(sidecarDir, 'node_modules', nativePackage, 'bin', 'rg'), 'rg');
 };
 
 const writeMainPackage = (packageDir: string): void => {
@@ -101,29 +68,12 @@ describe('assertPlatformBuildAssets', () => {
     expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).toThrow(/Missing binary/);
   });
 
-  test('rejects build output with a missing Cursor sidecar', () => {
+  test('accepts build output that is just the two binaries', () => {
     const sourceDir = makeTempDir();
     writeFileSync(join(sourceDir, LINUX_X64.binary), 'binary');
     writeFileSync(join(sourceDir, LINUX_X64.runtimeBinary), 'runtime binary');
 
-    expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).toThrow(
-      /Missing Cursor sidecar script/
-    );
-  });
-});
-
-describe('collectCursorSidecarLayoutErrors', () => {
-  test('rejects a Cursor sidecar tree that is missing numbered SDK chunks', () => {
-    const sourceDir = makeTempDir();
-    writePlatformPackage(sourceDir, LINUX_X64);
-    rmSync(join(sourceDir, 'cursor-sidecar', 'node_modules', '@cursor', 'sdk', 'dist', 'cjs'), {
-      recursive: true,
-      force: true,
-    });
-
-    const errors = collectCursorSidecarLayoutErrors(sourceDir, LINUX_X64);
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.some((error) => error.includes('cjs'))).toBe(true);
+    expect(() => assertPlatformBuildAssets(sourceDir, LINUX_X64)).not.toThrow();
   });
 });
 
@@ -135,58 +85,33 @@ describe('assertPlatformPackageAssets', () => {
     expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).not.toThrow();
   });
 
-  test('accepts a platform package without a Cursor native runtime', () => {
+  test('accepts a windows-arm64 package, which shipped no sidecar even before', () => {
     const packageDir = makeTempDir();
     writePlatformPackage(packageDir, WINDOWS_ARM64);
 
     expect(() => assertPlatformPackageAssets(packageDir, WINDOWS_ARM64)).not.toThrow();
   });
 
-  test('rejects a package manifest that omits the Cursor sidecar', () => {
+  // The vendored Cursor SDK tree is gone, so a platform package is the two
+  // binaries and a manifest. Asserted from the other side — that nothing
+  // demands `cursor-sidecar` any more — because a leftover requirement would
+  // fail every release rather than any test.
+  test('requires nothing beyond the two binaries in the manifest files list', () => {
     const packageDir = makeTempDir();
     writePlatformPackage(packageDir, LINUX_X64);
-    writeJson(join(packageDir, 'package.json'), {
-      ...buildPlatformManifest(LINUX_X64, '1.2.3'),
-      files: [LINUX_X64.binary, LINUX_X64.runtimeBinary],
-    });
+    const manifest = buildPlatformManifest(LINUX_X64, '1.2.3');
 
-    expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
-      /Manifest files must include cursor-sidecar/
-    );
+    expect(manifest.files).toEqual([LINUX_X64.binary, LINUX_X64.runtimeBinary]);
+    expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).not.toThrow();
   });
 
-  test('rejects a staged platform package with a missing Cursor sidecar', () => {
+  test('rejects a staged platform package with a missing runtime binary', () => {
     const packageDir = makeTempDir();
     writePlatformPackage(packageDir, LINUX_X64);
-    rmSync(join(packageDir, 'cursor-sidecar', 'run-agent.mjs'));
+    rmSync(join(packageDir, LINUX_X64.runtimeBinary));
 
     expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
-      /Missing Cursor sidecar script/
-    );
-  });
-
-  test('rejects a staged platform package with missing Cursor SDK chunks', () => {
-    const packageDir = makeTempDir();
-    writePlatformPackage(packageDir, LINUX_X64);
-    rmSync(
-      join(packageDir, 'cursor-sidecar', 'node_modules', '@cursor', 'sdk', 'dist', 'cjs', '642.js')
-    );
-
-    expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
-      /Missing Cursor SDK cjs numbered chunks/
-    );
-  });
-
-  test('rejects a staged platform package with a missing Cursor native binary', () => {
-    const packageDir = makeTempDir();
-    writePlatformPackage(packageDir, LINUX_X64);
-    const nativePackage = cursorNativePackageForArch(LINUX_X64.arch as ReleasePlatformId);
-    expect(nativePackage).toBeTruthy();
-    if (!nativePackage) return;
-    rmSync(join(packageDir, 'cursor-sidecar', 'node_modules', nativePackage, 'bin', 'rg'));
-
-    expect(() => assertPlatformPackageAssets(packageDir, LINUX_X64)).toThrow(
-      /Missing Cursor native package .* package entrypoint/
+      /Missing runtime binary/
     );
   });
 });

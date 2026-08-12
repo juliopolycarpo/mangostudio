@@ -40,18 +40,22 @@ describe('settings provider settings routes', () => {
     expect((payload as { providers: unknown[] }).providers.length).toBeGreaterThan(0);
   });
 
-  it('includes cursor runtime availability in provider descriptors', async () => {
+  // Still listed, because an existing connector's settings page renders from
+  // this descriptor. What the response now says is that it is deprecated —
+  // which is what closes the picker, on the server's word rather than the
+  // client's.
+  it('lists the deprecated cursor provider and marks it', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/providers'));
     const payload = (await response.json()) as {
-      providers: Array<{ provider: string; runtimeAvailable: boolean }>;
+      providers: Array<{ provider: string; deprecated: boolean }>;
     };
 
     const cursor = payload.providers.find((entry) => entry.provider === 'cursor');
-    expect(cursor).toBeTruthy();
-    expect(typeof cursor?.runtimeAvailable).toBe('boolean');
+    expect(cursor?.deprecated).toBe(true);
+    expect(payload.providers.find((entry) => entry.provider === 'openai')?.deprecated).toBe(false);
   });
 
   it('persists provider settings per user', async () => {

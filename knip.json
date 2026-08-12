@@ -20,7 +20,6 @@
     },
     "apps/api": {
       "entry": [
-        "src/services/providers/cursor/sidecar/{run-agent,sidecar-runtime}.mjs",
         "tests/**/*.{test,integration}.ts",
         "tests/support/fixtures/mcp/echo-stdio-server.ts"
       ],

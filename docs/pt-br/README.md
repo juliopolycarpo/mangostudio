@@ -7,7 +7,7 @@
 [![CI](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/ci.yml)
 [![Release](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml/badge.svg)](https://github.com/juliopolycarpo/mangostudio/actions/workflows/release.yml)
 
-Estúdio de geração de imagens e chat alimentado por IA com suporte a modelos Gemini, compatíveis com OpenAI, Anthropic, Cursor, DeepSeek e ChatGPT.
+Estúdio de geração de imagens e chat alimentado por IA com suporte a modelos Gemini, compatíveis com OpenAI, Anthropic, DeepSeek e ChatGPT.
 
 > 🇺🇸 [Read in English](../../README.md)
 
@@ -24,7 +24,7 @@ downloads contra `SHA256SUMS` quando aplicável.
 | Homebrew (macOS/Linux) | `brew install juliopolycarpo/tap/mangostudio`                                                                          |
 | Instalador shell       | `curl -fsSL https://mangostudio.dev/install.sh \| bash`                                                                |
 | Scoop (Windows)        | `scoop bucket add juliopolycarpo https://github.com/juliopolycarpo/scoop-bucket` e depois `scoop install mangostudio`  |
-| Cargo                  | `cargo install mangostudio` (app completo) ou `cargo binstall mangostudio` (pré-compilado, sem Cursor SDK)             |
+| Cargo                  | `cargo install mangostudio` (app completo) ou `cargo binstall mangostudio` (pré-compilado)                             |
 | Docker                 | `docker run -p 3001:3001 -v mango-data:/data ghcr.io/juliopolycarpo/mangostudio`                                       |
 | Manual                 | Baixe em [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest) e verifique com `SHA256SUMS` |
 
@@ -69,7 +69,7 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 
 - [Bun](https://bun.sh/) (v1.3.14+)
 - Uma ou mais chaves de API ou contas com login para provedores suportados
-  (Gemini, compatíveis com OpenAI, Anthropic, Cursor, DeepSeek, ChatGPT)
+  (Gemini, compatíveis com OpenAI, Anthropic, DeepSeek, ChatGPT)
 
 ## Desenvolver a partir do código-fonte
 
@@ -121,7 +121,6 @@ Para cada conector, é possível habilitar ou desabilitar modelos específicos (
 | Compatível OpenAI | Chave de API + base URL                     | Endpoints compatíveis customizados           |
 | Anthropic         | Chave de API                                | Modelos Claude de texto                      |
 | DeepSeek          | Chave de API                                | Provedor de reasoning de primeira classe     |
-| Cursor            | Chave de API + sidecar Node.js 22.13+       | Agente local do Cursor SDK                   |
 | ChatGPT           | Login pelo navegador com assinatura ChatGPT | Armazena tokens rotativos no OS secret store |
 
 ### Sincronização via Terminal
@@ -135,6 +134,14 @@ trabalho = "outra-chave-aqui"
 ```
 
 O MangoStudio sincroniza essas chaves automaticamente ao carregar a página de Configurações ou ao iniciar uma geração.
+
+### Cursor
+
+O Cursor **não** é um conector. Ele roda como agente externo — escolha-o no seletor de
+runner do compositor e ele usa o seu próprio login, regras e configuração MCP do Cursor
+CLI. O provider Cursor mantido pelo MangoStudio foi descontinuado: conectores existentes
+continuam editáveis, mas não executam mais turnos. Veja
+[docs/providers/cursor.md](../providers/cursor.md).
 
 ### Conector De Assinatura ChatGPT
 

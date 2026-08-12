@@ -7,6 +7,13 @@ session state. MangoStudio discovers the CLI in the user's selected environment,
 through the runtime, relays input, renders normalized events, forwards approvals, and cancels.
 Nothing more.
 
+**Cursor is external-only.** It was briefly reachable both ways — here, and as a
+MangoStudio-owned provider that picked the model, declared the tools, executed them and enforced
+permissions. Those are opposite ownership models, and one vendor answering to both in one selector
+is how a tool ends up executed by whichever side assumed the other owned it. The provider is
+deprecated and refuses every turn; [`../providers/cursor.md`](../providers/cursor.md) records why
+and what a chat still carrying a `cursor/*` model does.
+
 ## The invariant
 
 > **External agents never own MangoStudio tools. They use their own tools, and MangoStudio only

@@ -20,7 +20,6 @@ import {
   type MangoConfig,
 } from '../lib/config';
 import type { ServerState } from '../lib/server-state';
-import type { CursorRuntimeChainStep } from '../services/providers/cursor/runtime-availability';
 import type { RuntimeBinaryProbe } from './runtime-binary-probe';
 import type { RuntimeSlotProbe } from './runtime-slot-probe';
 import type { SshClientProbe } from './ssh-client-probe';
@@ -248,40 +247,6 @@ export function collectBuildIdentityChecks(input: BuildIdentityInput): CheckResu
   }
 
   return results;
-}
-
-const CURSOR_CHAIN_LABELS: Record<CursorRuntimeChainStep['link'], string> = {
-  node: 'Cursor Node',
-  sidecar: 'Cursor sidecar',
-  sdk: 'Cursor SDK',
-  native: 'Cursor native',
-};
-
-export interface CursorDoctorProbeResult {
-  ok: boolean;
-  detail: string;
-}
-
-/** Map per-link Cursor runtime chain steps into doctor checklist rows. */
-export function collectCursorDoctorChecks(
-  steps: readonly CursorRuntimeChainStep[],
-  probe?: CursorDoctorProbeResult
-): CheckResult[] {
-  const results = steps.map((step) => {
-    const label = CURSOR_CHAIN_LABELS[step.link];
-    return step.ok ? ok(label, step.detail) : fail(label, step.detail);
-  });
-
-  if (probe) {
-    results.push(probe.ok ? ok('Cursor probe', probe.detail) : fail('Cursor probe', probe.detail));
-  }
-
-  return results;
-}
-
-/** True when every prerequisite chain link passed (probe may still be pending). */
-export function cursorRuntimeChainReady(steps: readonly CursorRuntimeChainStep[]): boolean {
-  return steps.every((step) => step.ok);
 }
 
 function buildsDiffer(

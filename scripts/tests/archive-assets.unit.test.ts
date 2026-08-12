@@ -77,7 +77,6 @@ const createMuslReleasePlan = (options: {
       sourceDir,
       binaryPath: join(sourceDir, target.name),
       runtimeBinaryPath: join(sourceDir, runtimeBinaryName(target.name)),
-      cursorSidecarDir: join(sourceDir, 'cursor-sidecar'),
       readmePath: join(outDir, 'README.md'),
       assetName,
       archivePath: join(assetsDir, assetName),
@@ -122,13 +121,16 @@ const createMuslReleasePlan = (options: {
 };
 
 describe.serial('archiveReleaseAssets', () => {
-  test('rejects supported Cursor platforms when the sidecar is missing', async () => {
+  // What a platform archive needs is now just the two binaries and the README.
+  // Kept as a rejection test rather than deleted: the vendored-SDK layout check
+  // that used to live here was the only thing asserting the archive step
+  // validates its inputs at all.
+  test('rejects a platform whose runtime binary was never built', async () => {
     const rootDir = makeTempDir();
     const outDir = join(rootDir, 'out');
     const sourceDir = join(outDir, 'linux-x64');
     mkdirSync(sourceDir, { recursive: true });
     writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
-    writeFileSync(join(sourceDir, 'mangostudio-runtime'), 'runtime binary');
     writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
 
     const plan = createReleaseAssetPlan({
@@ -139,43 +141,7 @@ describe.serial('archiveReleaseAssets', () => {
       onlyPlatform: 'linux-x64',
     });
 
-    await expect(archiveReleaseAssets(plan)).rejects.toThrow(
-      /Invalid linux-x64 Cursor sidecar layout/
-    );
-  });
-
-  test('rejects supported Cursor platforms when SDK chunks are missing', async () => {
-    const rootDir = makeTempDir();
-    const outDir = join(rootDir, 'out');
-    const sourceDir = join(outDir, 'linux-x64');
-    const sidecarDir = join(sourceDir, 'cursor-sidecar');
-    mkdirSync(sourceDir, { recursive: true });
-    writeFileSync(join(sourceDir, 'mangostudio'), 'binary');
-    writeFileSync(join(sourceDir, 'mangostudio-runtime'), 'runtime binary');
-    writeFileSync(join(outDir, 'README.md'), '# Standalone build\n');
-    mkdirSync(sidecarDir, { recursive: true });
-    writeFileSync(join(sidecarDir, 'run-agent.mjs'), '#!/usr/bin/env node');
-    writeFileSync(join(sidecarDir, 'sidecar-runtime.mjs'), 'export {};');
-    mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk'), { recursive: true });
-    writeFileSync(
-      join(sidecarDir, 'node_modules', '@cursor', 'sdk', 'package.json'),
-      JSON.stringify({ name: '@cursor/sdk' })
-    );
-    mkdirSync(join(sidecarDir, 'node_modules', '@cursor', 'sdk-linux-x64'), { recursive: true });
-    writeFileSync(
-      join(sidecarDir, 'node_modules', '@cursor', 'sdk-linux-x64', 'package.json'),
-      JSON.stringify({ name: '@cursor/sdk-linux-x64', bin: { rg: 'bin/rg' } })
-    );
-
-    const plan = createReleaseAssetPlan({
-      version: '1.2.3',
-      rootDir,
-      outDir,
-      assetsDir: join(rootDir, 'release-assets'),
-      onlyPlatform: 'linux-x64',
-    });
-
-    await expect(archiveReleaseAssets(plan)).rejects.toThrow(/numbered chunks|chunk directory/);
+    await expect(archiveReleaseAssets(plan)).rejects.toThrow(/runtime binary/);
   });
 
   test('writes every archive and checksum manifest with bounded parallelism', async () => {
