@@ -323,6 +323,14 @@ export class ExternalTurnTranscript {
         this.#turnPart.usage = { ...this.#turnPart.usage, ...event.usage };
         return { durable: false };
 
+      case 'thread_usage':
+        // Cumulative scope is chat-level display state, not a durable turn part.
+        return { durable: false };
+
+      case 'account_limits':
+        // Account quota is cached vendor state, not transcript.
+        return { durable: false };
+
       case 'completed':
         this.finalize('completed', at);
         return { durable: true, terminal: 'completed' };

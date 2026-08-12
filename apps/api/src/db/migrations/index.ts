@@ -46,6 +46,7 @@ import { externalSessionContinuations } from './045_external_session_continuatio
 import { chatRunnerPermissions } from './046_chat_runner_permissions';
 import { externalSessionIsolation } from './047_external_session_isolation';
 import { externalAgentDisclosures } from './048_external_agent_disclosures';
+import { externalAccountLimitsCache } from './049_external_account_limits_cache';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -96,4 +97,5 @@ export const allMigrations = {
   '046_chat_runner_permissions': chatRunnerPermissions,
   '047_external_session_isolation': externalSessionIsolation,
   '048_external_agent_disclosures': externalAgentDisclosures,
+  '049_external_account_limits_cache': externalAccountLimitsCache,
 };

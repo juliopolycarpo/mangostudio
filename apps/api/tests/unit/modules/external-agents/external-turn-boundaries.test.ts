@@ -180,6 +180,7 @@ describe('external turn boundaries', () => {
     // Every member is observational. Adding one that is not has to be a
     // deliberate edit to this list, in the same commit.
     expect([...types].sort()).toEqual([
+      'account_limits',
       'activity_completed',
       'activity_started',
       'activity_updated',
@@ -190,6 +191,7 @@ describe('external turn boundaries', () => {
       'reasoning_delta',
       'session_started',
       'text_delta',
+      'thread_usage',
       'usage',
     ]);
   });

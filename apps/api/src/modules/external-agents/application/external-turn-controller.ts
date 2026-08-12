@@ -66,6 +66,7 @@ import {
   updateChatAfterTurn,
 } from '../../generation/infrastructure/conversation-persistence';
 import { ExternalTurnTranscript } from '../domain/external-turn-transcript';
+import { cacheExternalAccountLimits } from './external-account-limits';
 import {
   type AnswerExternalApprovalResult,
   type ExternalApprovalRegistry,
@@ -683,6 +684,18 @@ export function createExternalTurnController(
           } else {
             emit();
           }
+        }
+
+        if (envelope.event.type === 'account_limits') {
+          void cacheExternalAccountLimits(
+            {
+              userId: input.userId,
+              environmentId: context.chat.environmentId,
+              targetId,
+              vendorAccountFingerprint: input.vendorAccountFingerprint ?? null,
+            },
+            envelope.event.limits
+          );
         }
 
         if (application.approvalRequested) bindApproval(application.approvalRequested);

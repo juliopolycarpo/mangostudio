@@ -7,6 +7,8 @@ import {
   type ExternalAgentEventEnvelope,
   type ExternalAgentOpenParams,
   type ExternalAgentOpenResult,
+  type ExternalAgentRefreshAccountUsageParams,
+  type ExternalAgentRefreshAccountUsageResult,
   type ExternalAgentRespondParams,
   type ExternalAgentSteerParams,
   type ExternalAgentSteerResult,
@@ -281,6 +283,10 @@ interface RuntimeExternalAgentsClient {
     params: ExternalAgentCloseParams,
     options?: RuntimeRequestOptions
   ): Promise<ExternalAgentAckResult>;
+  refreshAccountUsage(
+    params: ExternalAgentRefreshAccountUsageParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentRefreshAccountUsageResult>;
   /** Subscribes only to validated semantic events for one hub-owned session. */
   onEvent(sessionId: string, listener: (event: ExternalAgentEventEnvelope) => void): () => void;
 }
@@ -437,6 +443,8 @@ export class RuntimeClient {
       steer: (params, options) => this.request('external-agent.steer', params, options),
       cancel: (params, options) => this.request('external-agent.cancel', params, options),
       close: (params, options) => this.request('external-agent.close', params, options),
+      refreshAccountUsage: (params, options) =>
+        this.request('external-agent.refresh-account-usage', params, options),
       onEvent: (sessionId, listener) =>
         this.protocol.onEvent((frame) => {
           if (frame.topic !== RUNTIME_EXTERNAL_AGENT_TOPIC) return;
