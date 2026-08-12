@@ -5,6 +5,8 @@ import {
   type ExternalAgentDiscoverParams,
   type ExternalAgentDiscoverResult,
   type ExternalAgentEventEnvelope,
+  type ExternalAgentListSessionsParams,
+  type ExternalAgentListSessionsResult,
   type ExternalAgentOpenParams,
   type ExternalAgentOpenResult,
   type ExternalAgentRefreshAccountUsageParams,
@@ -287,6 +289,11 @@ interface RuntimeExternalAgentsClient {
     params: ExternalAgentRefreshAccountUsageParams,
     options?: RuntimeRequestOptions
   ): Promise<ExternalAgentRefreshAccountUsageResult>;
+  /** The vendor's own conversation history on that machine, one page at a time. */
+  listSessions(
+    params: ExternalAgentListSessionsParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentListSessionsResult>;
   /** Subscribes only to validated semantic events for one hub-owned session. */
   onEvent(sessionId: string, listener: (event: ExternalAgentEventEnvelope) => void): () => void;
 }
@@ -445,6 +452,8 @@ export class RuntimeClient {
       close: (params, options) => this.request('external-agent.close', params, options),
       refreshAccountUsage: (params, options) =>
         this.request('external-agent.refresh-account-usage', params, options),
+      listSessions: (params, options) =>
+        this.request('external-agent.list-sessions', params, options),
       onEvent: (sessionId, listener) =>
         this.protocol.onEvent((frame) => {
           if (frame.topic !== RUNTIME_EXTERNAL_AGENT_TOPIC) return;

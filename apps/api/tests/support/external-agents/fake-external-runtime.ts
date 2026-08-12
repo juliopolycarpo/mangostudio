@@ -12,6 +12,8 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentEvent,
   ExternalAgentEventEnvelope,
+  ExternalAgentListSessionsParams,
+  ExternalAgentListSessionsResult,
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
   ExternalAgentRespondParams,
@@ -49,6 +51,10 @@ export interface FakeExternalRuntimeOptions {
     params: ExternalAgentSteerParams
   ) => ExternalAgentSteerResult | Promise<ExternalAgentSteerResult>;
   readonly steerFailure?: () => Error;
+  /** Answers `external-agent.list-sessions`; absent means the vendor has nothing to list. */
+  readonly listSessions?: (
+    params: ExternalAgentListSessionsParams
+  ) => ExternalAgentListSessionsResult;
 }
 
 export interface FakeExternalRuntime {
@@ -58,6 +64,7 @@ export interface FakeExternalRuntime {
     readonly turn: ExternalAgentTurnParams[];
     readonly respond: ExternalAgentRespondParams[];
     readonly steer: ExternalAgentSteerParams[];
+    readonly listSessions: ExternalAgentListSessionsParams[];
     readonly cancel: { sessionId: string; nativeTurnId?: string }[];
     readonly close: { sessionId: string }[];
   };
@@ -80,6 +87,7 @@ export function createFakeExternalRuntime(
     turn: [],
     respond: [],
     steer: [],
+    listSessions: [],
     cancel: [],
     close: [],
   };
@@ -125,6 +133,10 @@ export function createFakeExternalRuntime(
         const failure = options.steerFailure?.();
         if (failure) throw failure;
         return (await options.steerResult?.(params)) ?? { accepted: true as const };
+      },
+      listSessions(params: ExternalAgentListSessionsParams) {
+        calls.listSessions.push(params);
+        return Promise.resolve(options.listSessions?.(params) ?? { sessions: [] });
       },
       cancel(params: { sessionId: string; nativeTurnId?: string }) {
         calls.cancel.push(params);

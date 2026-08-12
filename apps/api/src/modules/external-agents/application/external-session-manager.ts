@@ -42,6 +42,11 @@ import {
   ExternalEventSequencer,
 } from '../domain/external-event-sequencer';
 import {
+  EXTERNAL_ADOPTION_LEASE_TTL_MS,
+  refreshAdoptionLease,
+  releaseAdoptionLease,
+} from '../infrastructure/external-session-adoption-lease-repository';
+import {
   continuationMatches,
   deleteContinuation,
   readContinuation,
@@ -337,7 +342,13 @@ export function createExternalSessionManager(
   ): Promise<void> {
     reapGenerations.set(chatId, (reapGenerations.get(chatId) ?? 0) + 1);
     const record = teardown(chatId, reason);
-    if (!keepContinuation) await deleteContinuation(chatId, resolveDb());
+    if (!keepContinuation) {
+      // The lease goes with the pointer it protects. Keeping it would leave the
+      // vendor session unadoptable by anyone until it expired, on behalf of a
+      // chat that is no longer attached to it.
+      await deleteContinuation(chatId, resolveDb());
+      await releaseAdoptionLease(chatId, resolveDb());
+    }
     if (record) await closeRemote(record);
   }
 
@@ -359,7 +370,10 @@ export function createExternalSessionManager(
     // another environment's session id would hand one binding's conversation to
     // a different one.
     const resumable = stored && continuationMatches(stored, binding) ? stored : undefined;
-    if (stored && !resumable) await deleteContinuation(input.chatId, db);
+    if (stored && !resumable) {
+      await deleteContinuation(input.chatId, db);
+      await releaseAdoptionLease(input.chatId, db);
+    }
 
     const client = await resolveRuntimeClient(input.userId, input.environmentId);
     const sessionId = newSessionId();
@@ -371,8 +385,11 @@ export function createExternalSessionManager(
         configuration: input.configuration,
         ...(resumable ? { resumeRef: resumable.nativeSessionId } : {}),
         // The ordinary turn path wants a conversation, not a failure, when the
-        // vendor has forgotten the session. Strict resume belongs to adoption.
-        resumeMode: 'fallback',
+        // vendor has forgotten the session — but an adopted one is the opposite
+        // case. The user picked *that* conversation by name, so its first open
+        // fails rather than silently handing back an empty one; every open
+        // after the vendor confirms the resume is an ordinary turn again.
+        resumeMode: resumable?.pendingAdoption ? 'strict' : 'fallback',
         timeoutMs: openTimeoutMs,
       },
       { timeoutMs: openTimeoutMs }
@@ -420,9 +437,20 @@ export function createExternalSessionManager(
         nativeSessionId: opened.nativeSessionId,
         effectiveConfiguration: opened.effectiveConfiguration,
         updatedAt: now(),
+        // Cleared by the vendor's own confirmation, not by having tried: a
+        // strict open that did not resume never reaches here, and one that did
+        // has nothing left to be strict about.
+        pendingAdoption: resumable?.pendingAdoption === true && !opened.resumed,
       },
       db
     );
+    // A chat that is still opening sessions is still using the conversation it
+    // adopted, so the claim is renewed by use rather than by a timer. Scoped to
+    // this chat, so a lease that expired and was taken over cannot be reclaimed
+    // by continuing to send.
+    if (resumable) {
+      await refreshAdoptionLease(input.chatId, now() + EXTERNAL_ADOPTION_LEASE_TTL_MS, db);
+    }
 
     // Checked after the last await and registered on the same tick, so a reap
     // that landed while the vendor was starting cannot be followed by the row it

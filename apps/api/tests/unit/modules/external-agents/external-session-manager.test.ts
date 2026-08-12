@@ -7,7 +7,14 @@ import {
   type ExternalSessionConsumer,
   ExternalSessionReapedError,
 } from '../../../../src/modules/external-agents/application/external-session-manager';
-import { readContinuation } from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
+import {
+  acquireAdoptionLease,
+  readAdoptionLease,
+} from '../../../../src/modules/external-agents/infrastructure/external-session-adoption-lease-repository';
+import {
+  readContinuation,
+  writeContinuation,
+} from '../../../../src/modules/external-agents/infrastructure/external-session-continuation-repository';
 import {
   createFakeExternalRuntime,
   type FakeExternalRuntime,
@@ -122,6 +129,83 @@ describe('external session manager', () => {
 
     expect(second.calls.open[0]?.resumeRef).toBe('native-session-1');
     expect(handle.resumed).toBe(true);
+  });
+
+  it('resumes an adopted session strictly, and stops once the vendor confirms it', async () => {
+    // The ordinary send wants a conversation rather than a failure when the
+    // vendor forgot the session. Adoption is the opposite: the user named
+    // *that* conversation, and a fallback would hand them an empty one.
+    await writeContinuation(
+      {
+        chatId,
+        userId,
+        environmentId: 'local',
+        targetId: 'codex',
+        canonicalWorkspacePath: '/work/repo',
+        vendorAccountFingerprint: 'account-a',
+        credentialHomeFingerprint: 'sha256:home-a',
+        runtimeSessionId: '',
+        nativeSessionId: 'adopted-thread',
+        effectiveConfiguration: null,
+        updatedAt: 1,
+        pendingAdoption: true,
+      },
+      getDb()
+    );
+
+    const runtime = createFakeExternalRuntime({ nativeSessionId: 'adopted-thread' });
+    await managerFor(runtime).ensureSession(baseInput());
+
+    expect(runtime.calls.open[0]).toMatchObject({
+      resumeRef: 'adopted-thread',
+      resumeMode: 'strict',
+    });
+    await expect(readContinuation(chatId, getDb())).resolves.toMatchObject({
+      pendingAdoption: false,
+    });
+
+    // The next send is an ordinary turn again.
+    const later = createFakeExternalRuntime({ nativeSessionId: 'adopted-thread' });
+    await managerFor(later).ensureSession(baseInput());
+    expect(later.calls.open[0]?.resumeMode).toBe('fallback');
+  });
+
+  it('releases the adoption lease when the continuation is dropped', async () => {
+    await writeContinuation(
+      {
+        chatId,
+        userId,
+        environmentId: 'local',
+        targetId: 'codex',
+        canonicalWorkspacePath: '/work/repo',
+        vendorAccountFingerprint: 'account-a',
+        credentialHomeFingerprint: 'sha256:home-a',
+        runtimeSessionId: '',
+        nativeSessionId: 'adopted-thread',
+        effectiveConfiguration: null,
+        updatedAt: 1,
+        pendingAdoption: true,
+      },
+      getDb()
+    );
+    const key = {
+      environmentId: 'local',
+      targetId: 'codex',
+      nativeSessionId: 'adopted-thread',
+    } as const;
+    await acquireAdoptionLease(
+      { ...key, userId, chatId, acquiredAt: 1, expiresAt: 10_000_000 },
+      getDb()
+    );
+
+    const runtime = createFakeExternalRuntime({ nativeSessionId: 'adopted-thread' });
+    const manager = managerFor(runtime);
+    await manager.ensureSession(baseInput());
+    await manager.reapChat(chatId, 'session-lost');
+
+    // The lease protects a pointer. Keeping it once the pointer is gone would
+    // make the vendor session unadoptable for nobody's benefit.
+    await expect(readAdoptionLease(key, getDb())).resolves.toBeUndefined();
   });
 
   it('reports resumed: false when the vendor could not resume', async () => {
