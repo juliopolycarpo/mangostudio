@@ -35,6 +35,7 @@ function ChatRoute() {
       onReasoningEffortChange={app.settings.setReasoningEffort}
       reasoningVisible={reasoningVisible}
       contextInfo={app.contextInfo}
+      threadUsage={app.threadUsage}
       fallbackNotice={app.fallbackNotice}
       seedContextInfo={app.seedContextInfo}
       contextSettings={app.settings.contextSettings}

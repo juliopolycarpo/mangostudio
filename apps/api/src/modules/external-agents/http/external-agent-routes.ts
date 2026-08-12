@@ -22,6 +22,8 @@
 import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
+  type ExternalAccountLimits,
+  ExternalAccountLimitsSchema,
   type ExternalAgentDescriptor,
   ExternalAgentDescriptorListResponseSchema,
   isExternalAgentTargetId,
@@ -29,6 +31,10 @@ import {
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import {
+  readCachedExternalAccountLimits,
+  refreshExternalAccountLimits,
+} from '../application/external-account-limits';
 import {
   type ExternalAgentDiscoveryService,
   externalAgentDiscoveryService,
@@ -65,6 +71,17 @@ const DisclosureListResponseSchema = t.Object({
 
 const AcknowledgeResponseSchema = t.Object({ acknowledged: t.Literal(true) });
 const RevokeResponseSchema = t.Object({ revoked: t.Literal(true) });
+
+const AccountLimitsQuerySchema = t.Object({
+  environmentId: t.Optional(EnvironmentIdSchema),
+  /** Opaque vendor-account digest; omit when the descriptor has none. */
+  vendorAccountFingerprint: t.Optional(t.String({ maxLength: 128 })),
+});
+
+const AccountLimitsResponseSchema = t.Object({
+  /** Absent means unknown — never fabricate a zero snapshot. */
+  limits: t.Optional(ExternalAccountLimitsSchema),
+});
 
 export interface ExternalAgentRouteDependencies {
   readonly discovery?: ExternalAgentDiscoveryService;
@@ -216,6 +233,69 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
         params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
         response: {
           200: RevokeResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .get(
+      '/external-agents/:targetId/account-limits',
+      async ({ params, query, user, set }) => {
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          set.status = 401;
+          return UNAUTHENTICATED;
+        }
+        if (!isExternalAgentTargetId(params.targetId)) {
+          set.status = 404;
+          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+        }
+        const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
+        const limits = await readCachedExternalAccountLimits({
+          userId,
+          environmentId,
+          targetId: params.targetId,
+          vendorAccountFingerprint: query.vendorAccountFingerprint ?? null,
+        });
+        return limits ? { limits } : {};
+      },
+      {
+        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
+        query: AccountLimitsQuerySchema,
+        response: {
+          200: AccountLimitsResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+        },
+      }
+    )
+    .post(
+      '/external-agents/:targetId/account-limits/refresh',
+      async ({ params, query, user, set }) => {
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          set.status = 401;
+          return UNAUTHENTICATED;
+        }
+        if (!isExternalAgentTargetId(params.targetId)) {
+          set.status = 404;
+          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+        }
+        const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
+        // Short-lived probe when no live session is named — see application layer.
+        const limits: ExternalAccountLimits | undefined = await refreshExternalAccountLimits({
+          userId,
+          environmentId,
+          targetId: params.targetId,
+          vendorAccountFingerprint: query.vendorAccountFingerprint ?? null,
+        });
+        return limits ? { limits } : {};
+      },
+      {
+        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
+        query: AccountLimitsQuerySchema,
+        response: {
+          200: AccountLimitsResponseSchema,
           401: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
         },

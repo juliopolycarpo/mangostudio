@@ -156,3 +156,37 @@ export async function revokeExternalDisclosure(targetId: string): Promise<void> 
   const { error } = await client.api['external-agents']({ targetId }).disclosure.delete();
   if (error) throw new ApiError(error.value);
 }
+
+export async function getExternalAccountLimits(
+  targetId: string,
+  query: { environmentId: string; vendorAccountFingerprint?: string }
+): Promise<{ limits?: import('@mangostudio/shared/external-agents').ExternalAccountLimits }> {
+  const { data, error } = await client.api['external-agents']({ targetId })['account-limits'].get({
+    query: {
+      environmentId: query.environmentId,
+      ...(query.vendorAccountFingerprint
+        ? { vendorAccountFingerprint: query.vendorAccountFingerprint }
+        : {}),
+    },
+  });
+  if (error) throw new ApiError(error.value);
+  return data as { limits?: import('@mangostudio/shared/external-agents').ExternalAccountLimits };
+}
+
+export async function refreshExternalAccountLimits(
+  targetId: string,
+  query: { environmentId: string; vendorAccountFingerprint?: string }
+): Promise<{ limits?: import('@mangostudio/shared/external-agents').ExternalAccountLimits }> {
+  const { data, error } = await client.api['external-agents']({ targetId })[
+    'account-limits'
+  ].refresh.post(undefined, {
+    query: {
+      environmentId: query.environmentId,
+      ...(query.vendorAccountFingerprint
+        ? { vendorAccountFingerprint: query.vendorAccountFingerprint }
+        : {}),
+    },
+  });
+  if (error) throw new ApiError(error.value);
+  return data as { limits?: import('@mangostudio/shared/external-agents').ExternalAccountLimits };
+}

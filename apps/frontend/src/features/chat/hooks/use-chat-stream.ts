@@ -1,3 +1,4 @@
+import type { ExternalThreadUsage } from '@mangostudio/shared/external-agents';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContextInfo, FallbackNotice } from '@/features/generation/types';
 
@@ -9,11 +10,14 @@ interface UseChatStreamOptions {
 export function useChatStream({ currentChatId }: UseChatStreamOptions) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [contextInfo, setContextInfo] = useState<ContextInfo | null>(null);
+  const [threadUsage, setThreadUsage] = useState<ExternalThreadUsage | null>(null);
   const [fallbackNotice, setFallbackNotice] = useState<FallbackNotice | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   // Per-chat context info cache — survives chat switches
   const contextCacheRef = useRef<Map<string, ContextInfo>>(new Map());
+  // Per-chat vendor thread usage — cumulative totals survive chat switches
+  const threadUsageCacheRef = useRef<Map<string, ExternalThreadUsage>>(new Map());
   // Version counter makes contextCache reactive
   const [_cacheVersion, setCacheVersion] = useState(0);
   void _cacheVersion;
@@ -29,9 +33,13 @@ export function useChatStream({ currentChatId }: UseChatStreamOptions) {
       const cached = contextCacheRef.current.get(currentChatId);
       // eslint-disable-next-line @eslint-react/set-state-in-effect
       setContextInfo(cached ?? null);
+      // eslint-disable-next-line @eslint-react/set-state-in-effect
+      setThreadUsage(threadUsageCacheRef.current.get(currentChatId) ?? null);
     } else {
       // eslint-disable-next-line @eslint-react/set-state-in-effect
       setContextInfo(null);
+      // eslint-disable-next-line @eslint-react/set-state-in-effect
+      setThreadUsage(null);
     }
     // eslint-disable-next-line @eslint-react/set-state-in-effect
     setFallbackNotice(null);
@@ -59,10 +67,18 @@ export function useChatStream({ currentChatId }: UseChatStreamOptions) {
     }
   }, []);
 
+  const updateThreadUsage = useCallback((chatId: string, usage: ExternalThreadUsage) => {
+    threadUsageCacheRef.current.set(chatId, usage);
+    if (chatId === currentChatIdRef.current) {
+      setThreadUsage(usage);
+    }
+  }, []);
+
   return {
     isGenerating,
     setIsGenerating,
     contextInfo,
+    threadUsage,
     fallbackNotice,
     setFallbackNotice,
     handleStop,
@@ -70,6 +86,7 @@ export function useChatStream({ currentChatId }: UseChatStreamOptions) {
     setAbortController,
     updateContextInfo,
     seedContextInfo,
+    updateThreadUsage,
     contextCache: contextCacheRef.current,
   };
 }

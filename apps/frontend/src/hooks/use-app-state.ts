@@ -103,6 +103,7 @@ export function useAppState() {
     activeModel: modelState.activeModel,
     isModelSelectorDisabled: modelState.isModelSelectorDisabled,
     contextInfo: textGen.contextInfo,
+    threadUsage: textGen.threadUsage,
     fallbackNotice: textGen.fallbackNotice,
     seedContextInfo: textGen.seedContextInfo,
     contextCache: textGen.contextCache,

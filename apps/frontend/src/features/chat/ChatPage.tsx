@@ -2,6 +2,7 @@ import type { Message, ReasoningEffort } from '@mangostudio/shared';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { ContextSettings } from '@mangostudio/shared/chat';
+import type { ExternalThreadUsage } from '@mangostudio/shared/external-agents';
 import { isTurnCheckpointPart, type TurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { WorkspaceSettings } from '@mangostudio/shared/workspaces';
 import { type ComponentProps, useMemo } from 'react';
@@ -28,6 +29,8 @@ interface ChatPageProps {
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   reasoningVisible: boolean;
   contextInfo?: ContextInfo | null;
+  /** Vendor-reported thread usage for the active chat; absent until a turn reports it. */
+  threadUsage?: ExternalThreadUsage | null;
   fallbackNotice?: FallbackNotice | null;
   seedContextInfo?: (chatId: string, info: ContextInfo) => void;
   contextSettings: ContextSettings;
@@ -117,6 +120,7 @@ export function ChatPage({
   onReasoningEffortChange,
   reasoningVisible,
   contextInfo,
+  threadUsage = null,
   fallbackNotice,
   seedContextInfo,
   contextSettings,
@@ -214,6 +218,7 @@ export function ChatPage({
             onReasoningEffortChange={onReasoningEffortChange}
             reasoningVisible={reasoningVisible}
             contextInfo={contextInfo}
+            threadUsage={threadUsage}
             imageToolIntent={imageToolIntent}
             onImageToolIntentChange={onImageToolIntentChange}
             activeModel={activeModel}

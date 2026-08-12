@@ -106,6 +106,8 @@ export function normalizeExternalAgentEvent(event: ExternalAgentEvent): External
     case 'error':
       return { ...event, error: normalizeError(event.error) };
     case 'usage':
+    case 'thread_usage':
+    case 'account_limits':
     case 'completed':
       return event;
   }

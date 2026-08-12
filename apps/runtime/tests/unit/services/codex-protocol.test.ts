@@ -328,20 +328,20 @@ describe('adapter conformance', () => {
         steering: true,
         sessionListing: false,
         nativeReview: false,
-        accountUsage: false,
+        accountUsage: true,
       })
     ).not.toThrow();
   });
 
-  it('implements steer, unlike the three opportunistic capabilities still waiting on their own plans', () => {
+  it('implements steer and refreshAccountUsage; listing and review still wait on their own plans', () => {
     // Typed as the interface so the optional members are visible: the registry
     // derives the four opportunistic capabilities from exactly this presence
     // check.
     const adapter: ExternalAgentAdapter = new CodexAppServerAdapter();
     expect(adapter.steer).toBeInstanceOf(Function);
+    expect(adapter.refreshAccountUsage).toBeInstanceOf(Function);
     expect(adapter.listSessions).toBeUndefined();
     expect(adapter.startReview).toBeUndefined();
-    expect(adapter.refreshAccountUsage).toBeUndefined();
   });
 
   it('refuses to claim session listing while `listSessions` is unimplemented', () => {

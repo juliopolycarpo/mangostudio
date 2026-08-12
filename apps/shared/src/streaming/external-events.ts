@@ -174,6 +174,12 @@ export function externalAgentEventToStreamChunk(event: ExternalAgentEvent): Stre
     case 'usage':
       return { type: 'external_usage', usage: event.usage, done: false };
 
+    case 'thread_usage':
+      return { type: 'external_thread_usage', usage: event.usage, done: false };
+
+    case 'account_limits':
+      return { type: 'external_account_limits', limits: event.limits, done: false };
+
     case 'error':
       return { type: 'external_error', error: event.error, done: false };
   }

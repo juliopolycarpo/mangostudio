@@ -118,6 +118,13 @@ export class ExternalTurnTranscript {
     event: ExternalAgentEvent,
     context: { readonly sequence: number; readonly at: number }
   ): ExternalTranscriptApplication {
+    // Observational vendor state is streamed to the hub for display/cache only.
+    // It must not consume transcript event/byte budgets or be able to terminate
+    // the turn — the contract treats these as non-durable no-ops.
+    if (event.type === 'thread_usage' || event.type === 'account_limits') {
+      return { durable: false };
+    }
+
     this.#turnPart.lastSequence = context.sequence;
     this.#turnPart.updatedAt = context.at;
     this.#turnPart.eventCount += 1;
@@ -321,6 +328,14 @@ export class ExternalTurnTranscript {
         // Sparse by design: adapters report only what their vendor reports, and
         // a later event that omits a field must not erase an earlier value.
         this.#turnPart.usage = { ...this.#turnPart.usage, ...event.usage };
+        return { durable: false };
+
+      case 'thread_usage':
+        // Cumulative scope is chat-level display state, not a durable turn part.
+        return { durable: false };
+
+      case 'account_limits':
+        // Account quota is cached vendor state, not transcript.
         return { durable: false };
 
       case 'completed':

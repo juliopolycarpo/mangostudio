@@ -10,6 +10,7 @@ import type {
   ExternalAgentDescriptor,
   ExternalApprovalRouting,
   ExternalPermissionLevel,
+  ExternalThreadUsage,
 } from '@mangostudio/shared/external-agents';
 import {
   AlertTriangle,
@@ -27,6 +28,7 @@ import { ModelSelector } from '@/components/layout/ModelSelector';
 import { ThinkingToggle } from '@/components/layout/ThinkingToggle';
 import { EnvironmentSelector } from '@/features/environments/components/EnvironmentSelector';
 import { ExternalComposerControls } from '@/features/external-agents/ExternalComposerControls';
+import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
@@ -53,6 +55,8 @@ interface Props {
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   reasoningVisible?: boolean;
   contextInfo?: ContextInfo | null;
+  /** Vendor thread usage for this chat; nothing renders until a turn reports it. */
+  threadUsage?: ExternalThreadUsage | null;
   imageToolIntent?: boolean;
   onImageToolIntentChange?: (active: boolean) => void;
   activeModel?: string | null;
@@ -103,6 +107,7 @@ export function InputBar({
   onReasoningEffortChange,
   reasoningVisible = false,
   contextInfo,
+  threadUsage = null,
   imageToolIntent = false,
   onImageToolIntentChange,
   activeModel = null,
@@ -385,6 +390,8 @@ export function InputBar({
                 </span>
               </span>
             )}
+
+            <ExternalUsageDisplay turn={threadUsage?.last} thread={threadUsage} />
           </div>
         </div>
 

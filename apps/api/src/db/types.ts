@@ -433,6 +433,22 @@ interface ExternalAgentDisclosuresTable {
   acknowledgedAt: number;
 }
 
+/**
+ * Discardable vendor account-quota cache. Keyed so two environments or two
+ * vendor accounts never share a snapshot.
+ */
+interface ExternalAccountLimitsCacheTable {
+  userId: string;
+  environmentId: string;
+  targetId: string;
+  /** Empty string when the adapter reported no account fingerprint. */
+  vendorAccountFingerprint: string;
+  /** JSON: ExternalAccountLimits. */
+  limitsJson: string;
+  observedAtMs: number;
+  updatedAt: number;
+}
+
 /** Root Kysely Database interface. */
 export interface Database {
   chats: ChatsTable;
@@ -463,6 +479,7 @@ export interface Database {
   connector_usage_samples: ConnectorUsageSamplesTable;
   external_session_continuations: ExternalSessionContinuationsTable;
   external_agent_disclosures: ExternalAgentDisclosuresTable;
+  external_account_limits_cache: ExternalAccountLimitsCacheTable;
 }
 
 export type GeneratedImageSelect = Selectable<GeneratedImagesTable>;
