@@ -38,6 +38,9 @@ export interface FakeExternalAgentOptions {
   readonly reviewable?: boolean;
   /** What `startReview` answers as its thread. Defaults to the session's own. */
   readonly reviewThreadId?: string;
+  /** Holds `startReview` open, for inspecting what the supervisor did meanwhile. */
+  readonly reviewGate?: Promise<void>;
+  readonly reviewFailure?: () => Error;
 }
 
 /** Scriptable protocol peer. It never knows or launches a production vendor. */
@@ -85,11 +88,14 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
       };
     }
     if (options.reviewable) {
-      this.startReview = (input) => {
+      this.startReview = async (input) => {
         this.reviews.push(input);
         const events = this.#events;
         const hang = this.#hangTurn;
-        return Promise.resolve({
+        await options.reviewGate;
+        const failure = options.reviewFailure?.();
+        if (failure) throw failure;
+        return {
           // The hub's own handle, exactly as a real adapter reports it.
           nativeTurnId: input.params.clientMessageId,
           reviewThreadId: options.reviewThreadId ?? input.nativeSessionId,
@@ -97,7 +103,7 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
             for (const event of events) yield event;
             if (hang) await new Promise<never>(() => undefined);
           },
-        });
+        };
       };
     }
     const listed = options.listedSessions;

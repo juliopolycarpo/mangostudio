@@ -60,6 +60,7 @@ import { probingService } from '../probing/service';
 import type {
   ExternalAgentAdapter,
   ExternalAgentAdapterContext,
+  ExternalAgentReviewStream,
   ExternalAgentTurnStream,
 } from './adapter';
 import {
@@ -906,17 +907,44 @@ export class ExternalAgentSessionSupervisor {
       );
     }
     const controller = new AbortController();
-    const stream = await startReview.call(session.adapter, {
-      nativeSessionId: session.openResult.nativeSessionId,
-      params,
-      context: this.#context(
-        session.adapter,
-        controller.signal,
-        session.executablePath,
-        session.workspacePath,
-        session.processes
-      ),
-    });
+    // The slot is taken *before* the await, not after it. `turn()` refuses a
+    // second turn by reading `activeTurn` synchronously, and this call is the
+    // only one that suspends between passing that check and filling it — a send
+    // landing in that window would otherwise start a turn beside the review and
+    // have its own registration overwritten. The id is the hub's own handle,
+    // which is what an adapter reports back anyway.
+    const reservation: LiveTurn = {
+      nativeTurnId: params.clientMessageId,
+      controller,
+      payloadBytes: 0,
+    };
+    session.activeTurn = reservation;
+    session.state = 'running';
+
+    let stream: ExternalAgentReviewStream;
+    try {
+      stream = await startReview.call(session.adapter, {
+        nativeSessionId: session.openResult.nativeSessionId,
+        params,
+        context: this.#context(
+          session.adapter,
+          controller.signal,
+          session.executablePath,
+          session.workspacePath,
+          session.processes
+        ),
+      });
+    } catch (error) {
+      // A review that never started holds nothing: release the slot so the next
+      // send is not refused by a turn that does not exist.
+      if (session.activeTurn === reservation) {
+        session.activeTurn = undefined;
+        // Only when this reservation is still what `running` refers to: a close
+        // that landed during the call owns the state now.
+        if (session.state === 'running') session.state = 'idle';
+      }
+      throw error;
+    }
     const nativeTurnId = this.#registerTurn(session, controller, stream);
     const result = { nativeTurnId, reviewThreadId: stream.reviewThreadId };
     if (!Value.Check(ExternalAgentStartReviewResultSchema, result)) {

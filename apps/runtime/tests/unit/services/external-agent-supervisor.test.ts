@@ -1221,6 +1221,54 @@ describe('external-agent native review', () => {
     expect(adapter.reviews).toHaveLength(1);
   });
 
+  it("holds the session's turn slot across the review call, so a send cannot slip in", async () => {
+    // `review/start` is awaited — it is the only start call that suspends
+    // between checking for an active turn and registering one — so the slot is
+    // taken before the await rather than after it.
+    const openReview = Promise.withResolvers<void>();
+    const adapter = new FakeExternalAgentAdapter({
+      reviewable: true,
+      capabilities: { nativeReview: true },
+      reviewGate: openReview.promise,
+    });
+    const value = await fixture({ adapter });
+    await openSession(value);
+
+    const review = value.supervisor.startReview(REVIEW);
+    expect(() =>
+      value.supervisor.turn({
+        sessionId: 'session-1',
+        clientMessageId: 'message-2',
+        input: 'hello',
+        configuration: CONFIGURATION,
+      })
+    ).toThrow(/already has an active turn/);
+
+    openReview.resolve();
+    await review;
+  });
+
+  it('releases the slot when the review call itself fails', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      reviewable: true,
+      capabilities: { nativeReview: true },
+      reviewFailure: () => new Error('review/start refused'),
+    });
+    const value = await fixture({ adapter });
+    await openSession(value);
+
+    await expect(value.supervisor.startReview(REVIEW)).rejects.toThrow('review/start refused');
+    // A review that never started holds nothing.
+    await expect(
+      value.supervisor.turn({
+        sessionId: 'session-1',
+        clientMessageId: 'message-2',
+        input: 'hello',
+        configuration: CONFIGURATION,
+      })
+    ).resolves.toMatchObject({ nativeTurnId: 'turn-1' });
+  });
+
   it('refuses a review while a turn is already running on the session', async () => {
     const adapter = new FakeExternalAgentAdapter({
       reviewable: true,
