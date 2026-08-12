@@ -471,6 +471,10 @@ export function useTextGeneration({
                 });
               }
 
+              if (streamState.threadUsage) {
+                stream.updateThreadUsage(activeChatId, streamState.threadUsage);
+              }
+
               if (chunk.type === 'fallback_notice') {
                 stream.setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
               }
@@ -626,6 +630,7 @@ export function useTextGeneration({
     handleResumeInterruptedTurn,
     handleDismissInterruptedTurn,
     contextInfo: stream.contextInfo,
+    threadUsage: stream.threadUsage,
     fallbackNotice: stream.fallbackNotice,
     seedContextInfo: stream.seedContextInfo,
     contextCache: stream.contextCache,

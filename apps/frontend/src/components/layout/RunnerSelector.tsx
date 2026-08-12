@@ -23,9 +23,14 @@ import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agent
 import type { Messages } from '@mangostudio/shared/i18n';
 import { Bot, Check, ChevronDown, Copy, CornerUpRight, Cpu } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
+import {
+  getExternalAccountLimits,
+  refreshExternalAccountLimits,
+} from '@/services/external-agent-service';
 
 export interface RunnerSelectorProps {
   runner: ChatRunnerConfiguration;
@@ -317,6 +322,9 @@ function ExternalRow({
             {descriptor.account?.label ?? labels.selector.signedIn}
           </span>
         ) : null}
+        {descriptor.capabilities.accountUsage && selectable ? (
+          <ExternalAccountLimitsChipFor descriptor={descriptor} />
+        ) : null}
         {selectable && descriptor.authState === 'unknown' ? (
           <span className="shrink-0 text-[10px] text-on-surface-variant/70">
             {labels.selector.authUnknown}
@@ -373,5 +381,55 @@ function ExternalRow({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Loads cached quota and offers a manual refresh — never polls. */
+function ExternalAccountLimitsChipFor({ descriptor }: { descriptor: ExternalAgentDescriptor }) {
+  const { t } = useI18n();
+  const [limits, setLimits] = useState<
+    import('@mangostudio/shared/external-agents').ExternalAccountLimits | null | undefined
+  >(undefined);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getExternalAccountLimits(descriptor.targetId, {
+      environmentId: descriptor.environmentId,
+      ...(descriptor.account?.fingerprint
+        ? { vendorAccountFingerprint: descriptor.account.fingerprint }
+        : {}),
+    })
+      .then((response) => {
+        if (!cancelled) setLimits(response.limits ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLimits(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [descriptor.targetId, descriptor.environmentId, descriptor.account?.fingerprint]);
+
+  return (
+    <ExternalAccountLimitsChip
+      limits={limits}
+      refreshing={refreshing}
+      onRefresh={() => {
+        setRefreshing(true);
+        void refreshExternalAccountLimits(descriptor.targetId, {
+          environmentId: descriptor.environmentId,
+          ...(descriptor.account?.fingerprint
+            ? { vendorAccountFingerprint: descriptor.account.fingerprint }
+            : {}),
+        })
+          .then((response) => setLimits(response.limits ?? null))
+          .catch(() => {
+            // Keep the previous chip; toast would need the container.
+            void t.externalAgents.limits.refreshFailed;
+          })
+          .finally(() => setRefreshing(false));
+      }}
+    />
   );
 }

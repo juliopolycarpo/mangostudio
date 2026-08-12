@@ -419,3 +419,24 @@ describe('InputBar — mid-turn steering', () => {
     }
   });
 });
+
+describe('InputBar — external thread usage', () => {
+  it('renders cumulative usage from threadUsage next to the composer chrome', () => {
+    renderInputBar({
+      threadUsage: {
+        last: { inputTokens: 1200, outputTokens: 80 },
+        total: { totalTokens: 50_000 },
+      },
+    });
+
+    expect(screen.getByTestId('external-usage')).toBeTruthy();
+    expect(screen.getByTestId('external-usage-turn').textContent).toContain('1.2k');
+    expect(screen.getByTestId('external-usage-thread').textContent).toContain('50k');
+  });
+
+  it('renders nothing when no vendor usage has been reported', () => {
+    renderInputBar({});
+
+    expect(screen.queryByTestId('external-usage')).toBeNull();
+  });
+});

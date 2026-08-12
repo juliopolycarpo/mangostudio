@@ -1,7 +1,9 @@
 import type { GeneratedImagePart, Message, MessagePart } from '@mangostudio/shared';
 import type {
+  ExternalAccountLimits,
   ExternalAgentError,
   ExternalAgentTargetId,
+  ExternalThreadUsage,
   ExternalTurnTerminalReason,
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
@@ -38,6 +40,10 @@ export interface TextGenerationStreamState {
   readonly activeThinkingIndex: number | null;
   readonly userMessageUpdate: TextGenerationStreamMessageUpdate | null;
   readonly aiMessageUpdate: TextGenerationStreamMessageUpdate | null;
+  /** Cumulative thread usage from the vendor — separate from per-turn `usage` on the turn part. */
+  readonly threadUsage: ExternalThreadUsage | null;
+  /** Latest account-quota snapshot observed on this stream. */
+  readonly accountLimits: ExternalAccountLimits | null;
 }
 
 interface ParsedSubagentEvent {
@@ -75,6 +81,8 @@ export function createTextGenerationStreamState({
     activeThinkingIndex: null,
     userMessageUpdate: null,
     aiMessageUpdate: null,
+    threadUsage: null,
+    accountLimits: null,
   };
 }
 
@@ -157,6 +165,10 @@ export function reduceTextGenerationStreamChunk(
       return reduceExternalApprovalStatus(nextState, chunk);
     case 'external_usage':
       return reduceExternalUsage(nextState, chunk.usage);
+    case 'external_thread_usage':
+      return reduceExternalThreadUsage(nextState, chunk.usage);
+    case 'external_account_limits':
+      return { ...nextState, accountLimits: chunk.limits };
     case 'external_steer':
       return reduceExternalSteer(nextState, chunk);
     case 'external_error':
@@ -713,6 +725,23 @@ function reduceExternalUsage(state: TextGenerationStreamState, usage: ExternalUs
     usage: { ...part.usage, ...usage },
   }));
   return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
+function reduceExternalThreadUsage(state: TextGenerationStreamState, usage: ExternalThreadUsage) {
+  // Scopes stay separate: never fold thread totals into the per-turn part.
+  return {
+    ...state,
+    threadUsage: {
+      last:
+        usage.last !== undefined
+          ? { ...state.threadUsage?.last, ...usage.last }
+          : state.threadUsage?.last,
+      total:
+        usage.total !== undefined
+          ? { ...state.threadUsage?.total, ...usage.total }
+          : state.threadUsage?.total,
+    },
+  };
 }
 
 function reduceExternalSteer(
