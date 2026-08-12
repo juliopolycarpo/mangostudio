@@ -197,15 +197,6 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
         },
       };
     }
-    if (resolution.ok && input.review && !resolution.descriptor.capabilities.nativeReview) {
-      return {
-        ok: false,
-        failure: {
-          kind: 'unsupported',
-          message: 'This agent does not offer a review of your working tree.',
-        },
-      };
-    }
     if (!resolution.ok) {
       // Two different refusals with two different remedies. "Change a setting"
       // is on the user; "this machine cannot keep vendor logins separate" is on
@@ -216,6 +207,19 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
         failure: {
           kind: resolution.isolationUnproven ? 'isolation-unproven' : 'unsupported',
           message: resolution.message,
+        },
+      };
+    }
+
+    // The descriptor this machine actually answered with, before anything is
+    // spent on the review: the session's own capabilities are checked again at
+    // start, which is what catches a descriptor that has gone stale.
+    if (input.review && !resolution.descriptor.capabilities.nativeReview) {
+      return {
+        ok: false,
+        failure: {
+          kind: 'unsupported',
+          message: 'This agent does not offer a review of your working tree.',
         },
       };
     }
