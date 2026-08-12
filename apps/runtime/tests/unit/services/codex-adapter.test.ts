@@ -567,6 +567,56 @@ describe('codex adapter — steering', () => {
     expect(interrupt?.params).toMatchObject({ turnId: 'continued-turn-id' });
   });
 
+  it("serializes concurrent steers so the second addresses the first's continuation id", async () => {
+    const adapter = new CodexAppServerAdapter();
+    const test = harness({ pauseBeforeCompletion: true });
+    const stream = await openPausedTurn(adapter, test);
+
+    test.server()?.setSteerBehavior('accepted', 'continuation-1');
+    // Neither is awaited before the other starts: both read `activeTurn` while
+    // the first is still in flight, which is exactly the race that let the
+    // second address a turn id Codex had already moved past.
+    const first = adapter.steer({
+      sessionId: 'session-1',
+      nativeSessionId: 'thread',
+      nativeTurnId: 'message-1',
+      clientMessageId: 'steer-1',
+      input: 'first correction',
+    });
+    const second = adapter.steer({
+      sessionId: 'session-1',
+      nativeSessionId: 'thread',
+      nativeTurnId: 'message-1',
+      clientMessageId: 'steer-2',
+      input: 'second correction',
+    });
+
+    expect(await first).toEqual({ accepted: true });
+    expect(await second).toEqual({ accepted: true });
+
+    const steers = test.server()?.calls.filter((call) => call.method === 'turn/steer') ?? [];
+    expect(steers).toHaveLength(2);
+    expect(steers[0]?.params).toMatchObject({
+      expectedTurnId: TURN_ID,
+      clientUserMessageId: 'steer-1',
+    });
+    // Serialized: the second is not sent until the first resolved and updated
+    // the turn id Codex is actually running, so it addresses that id — not
+    // the stale one that was live when both calls were made.
+    expect(steers[1]?.params).toMatchObject({
+      expectedTurnId: 'continuation-1',
+      clientUserMessageId: 'steer-2',
+    });
+
+    await adapter.cancel({
+      sessionId: 'session-1',
+      nativeSessionId: 'thread',
+      nativeTurnId: 'message-1',
+      reason: 'requested',
+    });
+    expect(await collect(stream)).toEqual([]);
+  });
+
   it('maps a structured activeTurnNotSteerable refusal to turn-not-steerable', async () => {
     const adapter = new CodexAppServerAdapter();
     const test = harness({ pauseBeforeCompletion: true });

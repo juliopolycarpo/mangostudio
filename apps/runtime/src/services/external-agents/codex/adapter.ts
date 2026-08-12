@@ -158,6 +158,19 @@ interface CodexSession {
   /** Approvals awaiting `respond`, keyed by the vendor's own JSON-RPC request id. */
   readonly approvals: Map<string, PendingApproval>;
   activeTurn?: ActiveTurn;
+  /**
+   * Serializes `steer` calls against this session.
+   *
+   * Two distinct steers — different `clientMessageId`s, both addressed to the
+   * same running turn — would otherwise both read `activeTurn.turnId` before
+   * either request resolves. The first to land can replace that id with a
+   * continuation id, leaving the second still holding the one that request
+   * started with: sent, it names a turn Codex already moved past. Chaining
+   * every steer off the one before it is what makes each read the id the
+   * previous steer actually left behind, not the one that was live when it
+   * was called.
+   */
+  steerChain: Promise<unknown>;
 }
 
 export class CodexAppServerAdapter implements ExternalAgentAdapter {
@@ -290,6 +303,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
       process: launched.process,
       threadId: '',
       approvals: new Map(),
+      steerChain: Promise.resolve(),
     };
     // Registered before `thread/start` so a server request arriving during the
     // handshake finds a session to refuse against rather than a missing one.
@@ -482,6 +496,27 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
   /**
    * `turn/steer`, Codex's own client operation for redirecting a running turn.
    *
+   * Queued behind {@link CodexSession.steerChain} rather than run directly:
+   * two distinct steers issued close together — different `clientMessageId`s,
+   * both addressed to the turn that is live right now — would otherwise both
+   * read `activeTurn.turnId` before either request resolved, and the first to
+   * land can replace that id with a continuation id the second never saw.
+   * Chaining makes the second wait for the first's outcome and read
+   * `turnId` fresh, so it always addresses the turn Codex is actually running.
+   */
+  steer(input: ExternalAgentSteerInput): Promise<ExternalAgentSteerOutcome> {
+    const session = this.#requireSession(input.sessionId);
+    const run = session.steerChain.then(() => this.#steerNow(session, input));
+    // The chain must keep moving whether this attempt was refused, accepted or
+    // threw — otherwise one failure would wedge every steer queued behind it.
+    session.steerChain = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /**
    * `input.nativeTurnId` is the handle `startTurn` returned — the hub's own
    * `clientMessageId` for the turn, not Codex's turn id — because that is the
    * only turn identity the hub was ever given. Codex's own id lives in
@@ -495,8 +530,10 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
    * hub thinks is running are all "nothing to steer right now" and cost nothing
    * to refuse without a round trip.
    */
-  async steer(input: ExternalAgentSteerInput): Promise<ExternalAgentSteerOutcome> {
-    const session = this.#requireSession(input.sessionId);
+  async #steerNow(
+    session: CodexSession,
+    input: ExternalAgentSteerInput
+  ): Promise<ExternalAgentSteerOutcome> {
     const active = session.activeTurn;
     if (!active || active.cancelled || active.handle !== input.nativeTurnId || !active.turnId) {
       return { accepted: false, reasonCode: 'turn-already-completed' };
