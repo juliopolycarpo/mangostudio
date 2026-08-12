@@ -40,6 +40,7 @@ import type {
   ExternalAgentSteerResult,
   ExternalAgentTargetId,
   ExternalApprovalRequest,
+  ExternalReviewTarget,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
   ExternalUsage,
@@ -120,6 +121,14 @@ export class ExternalTurnRunnerMismatchError extends Error {
   }
 }
 
+/** The session's adapter does not offer a vendor-native review of the working tree. */
+export class ExternalTurnReviewUnsupportedError extends Error {
+  constructor(chatId: string) {
+    super(`The agent running chat "${chatId}" cannot review the working tree.`);
+    this.name = 'ExternalTurnReviewUnsupportedError';
+  }
+}
+
 /** An external turn needs a workspace; there is nothing for the vendor to run against without one. */
 export class ExternalTurnWorkspaceMissingError extends Error {
   constructor(chatId: string) {
@@ -190,6 +199,16 @@ interface StartExternalTurnInput {
    * a future call site omit it and silently opt out of the check.
    */
   readonly credentialHomeFingerprint: string;
+  /**
+   * Runs this turn as a vendor-native review instead of relaying `prompt`.
+   *
+   * The prompt is still persisted — it is what the transcript shows the user
+   * asked for — but nothing composes it into vendor input: `review/start` takes
+   * a target, not a message. Everything else about the turn is unchanged, which
+   * is the point: ordering, persistence, approvals, cancellation and recovery
+   * are the same code as for any other turn.
+   */
+  readonly review?: { readonly target: ExternalReviewTarget };
   readonly observer?: ExternalTurnObserver;
 }
 
@@ -409,6 +428,12 @@ interface LiveExternalTurn {
   /** Who started this turn — `steer` refuses a caller this does not match. */
   readonly userId: string;
   /**
+   * A vendor-native review. Refuses steering: a review has no conversation to
+   * redirect, and the vendor refuses it too — this answers without the round
+   * trip and without depending on the vendor to keep doing so.
+   */
+  readonly review: boolean;
+  /**
    * Every steer this turn has attempted, keyed by `clientMessageId` and never
    * evicted for the life of the turn.
    *
@@ -501,6 +526,12 @@ export function createExternalTurnController(
       credentialHomeFingerprint: input.credentialHomeFingerprint,
       configuration: input.configuration,
     });
+    // After the session is open, because only the adapter that answered `open`
+    // can say what this machine's build supports — the descriptor the caller
+    // preflighted against is cached, and this is not.
+    if (input.review && !handle.capabilities.nativeReview) {
+      throw new ExternalTurnReviewUnsupportedError(input.chatId);
+    }
     input.observer?.onSession?.({
       sessionId: handle.sessionId,
       targetId,
@@ -549,6 +580,7 @@ export function createExternalTurnController(
       handle,
       observer: input.observer,
       userId: input.userId,
+      review: input.review !== undefined,
       steerAttempts: new Map(),
       pendingSteerIds: new Set(),
       deferredEvents: [],
@@ -754,17 +786,25 @@ export function createExternalTurnController(
       input.observer?.onTurnPrepared?.({ userMessageId, assistantMessageId });
 
       try {
-        const nativeTurnId = await handle.startTurn({
-          clientMessageId: userMessageId,
-          input: input.prompt,
-          configuration: input.configuration,
-        });
+        const nativeTurnId = input.review
+          ? await startReviewTurn({
+              handle,
+              clientMessageId: userMessageId,
+              target: input.review.target,
+            })
+          : await handle.startTurn({
+              clientMessageId: userMessageId,
+              input: input.prompt,
+              configuration: input.configuration,
+            });
         external.nativeTurnId = nativeTurnId;
         transcript.bindNativeTurn(nativeTurnId);
         handle.beginTurn(nativeTurnId);
         for (const request of deferredApprovals.splice(0)) bindApproval(request);
       } catch (error) {
-        transcript.recordError(vendorErrorFrom(error, 'turn-start'));
+        transcript.recordError(
+          vendorErrorFrom(error, input.review ? 'review-start' : 'turn-start')
+        );
         const reason = terminalReasonForCallFailure(error);
         terminate(reason);
         // The runtime no longer has this session, but the manager still caches
@@ -901,6 +941,9 @@ export function createExternalTurnController(
       if (!live || live.terminating || live.transcript.terminated || live.userId !== input.userId) {
         return { accepted: false, reasonCode: 'turn-already-completed' };
       }
+      // Before any durable record: a steer that cannot be delivered must not
+      // leave "you, mid-turn" in a transcript nobody steered.
+      if (live.review) return { accepted: false, reasonCode: 'turn-not-steerable' };
 
       const existing = live.steerAttempts.get(input.clientMessageId);
       if (existing) {
@@ -962,6 +1005,38 @@ export function createExternalTurnController(
     },
   };
   return instance;
+}
+
+/**
+ * Starts the review and checks that it landed where the hub is listening.
+ *
+ * Only inline delivery is requested, and inline means the review runs on this
+ * session's own thread — so a `reviewThreadId` naming another one is a vendor
+ * that changed its behaviour, not a case to accommodate. Refusing here rather
+ * than proceeding is what keeps "the review ran" from meaning "its events went
+ * somewhere nobody is reading": the failure surfaces on the turn, where the user
+ * can see it.
+ */
+async function startReviewTurn(context: {
+  readonly handle: ExternalSessionHandle;
+  readonly clientMessageId: string;
+  readonly target: ExternalReviewTarget;
+}): Promise<string> {
+  const started = await context.handle.startReview({
+    clientMessageId: context.clientMessageId,
+    target: context.target,
+  });
+  if (started.reviewThreadId !== context.handle.nativeSessionId) {
+    // The turn is refused but it is already accepted over there. Nothing else
+    // will stop it: the hub never learns its id — `finish` cancels only a turn
+    // it recorded — so a vendor that ran it detached would keep the session
+    // busy and the next send would be refused for a turn nobody can see.
+    await context.handle.cancel(started.nativeTurnId).catch(() => undefined);
+    throw new Error(
+      `The review was started on session "${started.reviewThreadId}" instead of this chat's own.`
+    );
+  }
+  return started.nativeTurnId;
 }
 
 /**

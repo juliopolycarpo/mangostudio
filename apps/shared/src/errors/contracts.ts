@@ -67,6 +67,16 @@ export const ERROR_CODES = {
    * already has it — or to let that chat's lease expire.
    */
   EXTERNAL_SESSION_HELD: 'EXTERNAL_SESSION_HELD',
+  /**
+   * A native review was asked for on a workspace that is not a Git repository.
+   *
+   * MangoStudio's own precondition, not the vendor's: Codex runs the review
+   * anyway and logs `fatal: not a git repository` internally, so a review of
+   * uncommitted changes outside a repository would complete having reviewed
+   * nothing. Its own code because the remedy is neither a retry nor a setting —
+   * it is initializing a repository, or pointing the chat somewhere else.
+   */
+  EXTERNAL_REVIEW_REQUIRES_GIT: 'EXTERNAL_REVIEW_REQUIRES_GIT',
   INTERNAL: 'INTERNAL',
 } as const;
 

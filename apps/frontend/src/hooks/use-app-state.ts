@@ -128,6 +128,7 @@ export function useAppState() {
     handleNavigate: chatActions.handleNavigate,
     handleSubmit: generationControls.handleSubmit,
     handleStop: generationControls.handleStop,
+    handleReviewChanges: textGen.handleReviewChanges,
     handleCompactCurrentChat: textGen.handleCompactCurrentChat,
     handleStartSummarizedChat: textGen.handleStartSummarizedChat,
     handleResumeInterruptedTurn: textGen.handleResumeInterruptedTurn,

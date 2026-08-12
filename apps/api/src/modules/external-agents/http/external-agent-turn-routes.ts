@@ -1,5 +1,5 @@
 /**
- * The four writes an external turn needs beyond the stream itself.
+ * The five writes an external turn needs beyond the send stream itself.
  *
  * `respond` answers a mid-turn approval. It authenticates and validates a shape,
  * and then delegates the entire decision to the approval registry — the five-way
@@ -25,6 +25,13 @@
  * the request is refused when the two no longer agree. Consent names a
  * workspace, and the workspace can change while the dialog is open.
  *
+ * `review` starts a vendor-native review of the chat's working tree. It is the
+ * one endpoint here that answers with a stream, and it is deliberately the same
+ * stream a send produces: the review runs through the same controller, the same
+ * session, the same ordering, persistence and cancellation. What it does *not*
+ * share is the composer — there is no prompt to write, which is the whole point
+ * of the action.
+ *
  * Cancellation is deliberately absent: the existing stop endpoint reaches an
  * external turn through the active-turn registry, and a second one would be a
  * second way to end a turn with its own bugs.
@@ -34,6 +41,7 @@ import { ChatRunnerConfigurationSchema, ChatSchema } from '@mangostudio/shared/c
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   ExternalAgentSteerResultSchema,
+  ExternalReviewTargetSchema,
   schemaMaxLengthFor,
 } from '@mangostudio/shared/external-agents';
 import { Elysia, t } from 'elysia';
@@ -46,7 +54,13 @@ import {
   type ExternalTurnController,
   externalTurnController,
 } from '../application/external-turn-controller';
+import { streamExternalTurn } from '../application/external-turn-stream';
 import { grantWorkspaceTrust } from '../application/external-workspace-trust';
+import {
+  EXTERNAL_PREFLIGHT_CODE,
+  EXTERNAL_PREFLIGHT_STATUS,
+  externalPreflightDetails,
+} from './external-preflight';
 
 /** Vendor ids, bounded exactly as they are everywhere else they cross the wire. */
 const VendorIdSchema = t.String({ minLength: 1, maxLength: schemaMaxLengthFor('vendorId') });
@@ -97,6 +111,23 @@ const TrustWorkspaceResponseSchema = t.Object({
 });
 
 /**
+ * What to review, and what the transcript should say the user asked for.
+ *
+ * `displayPrompt` is the localized label the action was rendered with. It is
+ * persisted as the turn's user message and never reaches the vendor —
+ * `review/start` takes a target, not a message — so it is a caption, not input.
+ * Optional because the endpoint is reachable outside the browser, where there is
+ * no chosen language to honour and the fallback below is the honest answer.
+ */
+const ReviewBodySchema = t.Object({
+  target: ExternalReviewTargetSchema,
+  displayPrompt: t.Optional(t.String({ minLength: 1, maxLength: 200 })),
+});
+
+/** What a review's user message says when the caller supplied no wording of its own. */
+const DEFAULT_REVIEW_PROMPT = 'Review my uncommitted changes.';
+
+/**
  * A rejected answer is the request's fault or the turn's, never the server's.
  *
  * `not-found` covers both an approval that never existed and one this user may
@@ -122,6 +153,8 @@ export interface ExternalAgentTurnRouteDependencies {
    * step that makes a trust grant match the check that reads it.
    */
   readonly resolveRuntimeClient?: typeof getRuntimeClient;
+  /** The turn stream a review runs on. Injectable for the same reason. */
+  readonly streamExternalTurn?: typeof streamExternalTurn;
 }
 
 export function createExternalAgentTurnRoutes(
@@ -129,6 +162,7 @@ export function createExternalAgentTurnRoutes(
   dependencies: ExternalAgentTurnRouteDependencies = {}
 ) {
   const resolveRuntimeClient = dependencies.resolveRuntimeClient ?? getRuntimeClient;
+  const runExternalTurnStream = dependencies.streamExternalTurn ?? streamExternalTurn;
   return new Elysia()
     .use(requireAuth)
     .post(
@@ -181,6 +215,50 @@ export function createExternalAgentTurnRoutes(
           401: ApiErrorResponseSchema,
           409: ExternalAgentSteerResultSchema,
         },
+      }
+    )
+    .post(
+      '/chats/:id/external-agent/review',
+      async ({ params, body, user, set }) => {
+        const userId = user?.id ?? '';
+        const db = getDb();
+        const chat = await getOwnedChat(params.id, userId, db);
+        if (!chat) {
+          set.status = 404;
+          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+        }
+
+        // Everything else — runner kind, workdir, conflict, disclosure, trust,
+        // isolation and the Git precondition — is the send path's preflight,
+        // unchanged. A review that checked any of it here would be a second
+        // opinion on questions that already have one.
+        const result = await runExternalTurnStream(
+          {
+            userId,
+            chat,
+            chatId: params.id,
+            prompt: body.displayPrompt ?? DEFAULT_REVIEW_PROMPT,
+            attachmentIds: [],
+            externalTurn: undefined,
+            review: { target: body.target },
+          },
+          db
+        );
+        if (result.ok) return result.response;
+        set.status = EXTERNAL_PREFLIGHT_STATUS[result.failure.kind];
+        return {
+          error: result.failure.message,
+          code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
+          ...externalPreflightDetails(result.failure),
+        };
+      },
+      {
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        body: ReviewBodySchema,
+        // No `response` map, exactly as the send stream has none: the success
+        // case is an SSE `Response` this route hands back untouched, and
+        // declaring a schema around it would put validation between the vendor's
+        // events and the socket.
       }
     )
     .post(

@@ -1,5 +1,6 @@
 /* global console */
 import type { GenerateImageResponse } from '@mangostudio/shared';
+import type { ExternalReviewTarget } from '@mangostudio/shared/external-agents';
 import type { GenerateImageBody, RespondStreamBody } from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { getApiBaseUrl } from '../lib/api-base-url';
@@ -72,7 +73,51 @@ export async function respondTextStream(
   onChunk: (chunk: StreamChunk) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  const response = await fetch(`${getApiBaseUrl()}/api/respond/stream`, {
+  await postStream('/api/respond/stream', request, onChunk, signal);
+}
+
+/**
+ * Calls the chat's review endpoint and delivers the same chunks a send does.
+ *
+ * A review is a turn, so it is read exactly like one: same framing, same
+ * reducer, same refusals. The only difference is that there is no prompt to
+ * write — `displayPrompt` is the localized caption the transcript keeps for the
+ * action the user took, and it never reaches the vendor.
+ */
+export async function startExternalReviewStream(
+  chatId: string,
+  request: { readonly target: ExternalReviewTarget; readonly displayPrompt?: string },
+  onChunk: (chunk: StreamChunk) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  let terminalError: { readonly error: string; readonly code?: string } | undefined;
+  await postStream(
+    `/api/chats/${encodeURIComponent(chatId)}/external-agent/review`,
+    request,
+    (chunk) => {
+      if (chunk.type === 'error' && chunk.done) {
+        terminalError = {
+          error: chunk.error,
+          ...(chunk.code ? { code: chunk.code } : {}),
+        };
+      }
+      onChunk(chunk);
+    },
+    signal
+  );
+  // Setup refusals after HTTP 200 — a session that cannot review, for example —
+  // arrive as a terminal error chunk. Resolving here would tell the repository
+  // panel the click succeeded.
+  if (terminalError) throw new ApiError(terminalError);
+}
+
+async function postStream(
+  path: string,
+  request: unknown,
+  onChunk: (chunk: StreamChunk) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),

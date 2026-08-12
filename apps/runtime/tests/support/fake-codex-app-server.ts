@@ -19,7 +19,9 @@ import {
   agentMessageItem,
   commandApprovalParams,
   commandExecutionItem,
+  enteredReviewModeItem,
   errorNotification,
+  exitedReviewModeItem,
   fileChangeApprovalParams,
   itemCompleted,
   itemStarted,
@@ -27,6 +29,7 @@ import {
   permissionProfiles,
   reasoningItem,
   reasoningSummaryDelta,
+  reviewStartResponse,
   THREAD_ID,
   TURN_ID,
   threadListResponse,
@@ -69,6 +72,12 @@ export interface FakeCodexOptions {
    * hostage on an unanswered request.
    */
   readonly pauseBeforeCompletion?: boolean;
+  /**
+   * What `review/start` answers with as `reviewThreadId`. Defaults to the
+   * thread that asked, which is what inline delivery returns; a different value
+   * is the detached answer the adapter must refuse.
+   */
+  readonly reviewThreadId?: string;
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -92,6 +101,7 @@ export class FakeCodexServer {
   readonly #turnStartDelayMs: number;
   readonly #modelPages: number;
   readonly #pauseBeforeCompletion: boolean;
+  readonly #reviewThreadId: string;
   /** Answers the adapter gave to server→client requests, by request id. */
   readonly answers = new Map<string, unknown>();
   /** Every method the adapter called, in order. */
@@ -108,6 +118,7 @@ export class FakeCodexServer {
     this.#turnStartDelayMs = options.turnStartDelayMs ?? 0;
     this.#modelPages = options.modelPages ?? 1;
     this.#pauseBeforeCompletion = options.pauseBeforeCompletion ?? false;
+    this.#reviewThreadId = options.reviewThreadId ?? THREAD_ID;
   }
 
   /** Lets a turn paused by `pauseBeforeCompletion` proceed to its final message and `turn/completed`. */
@@ -242,6 +253,13 @@ export class FakeCodexServer {
         this.#respond(id, turnStartResponse());
         void this.#runTurn();
         return;
+      case 'review/start':
+        // Inline delivery answers with the thread the review was asked for.
+        // `reviewThreadId` overrides that, which is the detached case the
+        // adapter has to refuse rather than stream onto.
+        this.#respond(id, reviewStartResponse(this.#reviewThreadId));
+        void this.#runReview();
+        return;
       case 'turn/interrupt':
         this.#respond(id, {});
         return;
@@ -270,6 +288,31 @@ export class FakeCodexServer {
       default:
         this.#fail(id, -32601, `fixture does not implement ${method}`);
     }
+  }
+
+  /**
+   * A review turn as Codex runs it: the bracketing review-mode items around the
+   * verdict, then the same completion any other turn ends with.
+   */
+  async #runReview(): Promise<void> {
+    this.#notify('turn/started', { threadId: THREAD_ID, turn: turnStartResponse().turn });
+    const entered = enteredReviewModeItem('item-review-in', 'uncommitted changes');
+    this.#notify('item/started', itemStarted(entered));
+    this.#notify('item/completed', itemCompleted(entered));
+
+    if (this.#pauseBeforeCompletion) {
+      await new Promise<void>((resolve) => {
+        this.#resumeTurn = resolve;
+      });
+    }
+
+    const verdict = agentMessageItem('item-review-msg', 'P1: the retry loop never exits.');
+    this.#notify('item/started', itemStarted(verdict));
+    this.#notify('item/completed', itemCompleted(verdict));
+    const exited = exitedReviewModeItem('item-review-out', 'uncommitted changes');
+    this.#notify('item/started', itemStarted(exited));
+    this.#notify('item/completed', itemCompleted(exited));
+    this.#notify('turn/completed', turnCompleted());
   }
 
   async #runTurn(): Promise<void> {

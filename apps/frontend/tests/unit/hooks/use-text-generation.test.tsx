@@ -14,6 +14,7 @@ import { act, renderHook, waitFor } from '../../support/harness/render';
 
 vi.mock('../../../src/services/generation-service', () => ({
   respondTextStream: vi.fn(),
+  startExternalReviewStream: vi.fn(),
   cancelInterruptedTurn: vi.fn(),
   dismissInterruptedTurn: vi.fn(),
 }));

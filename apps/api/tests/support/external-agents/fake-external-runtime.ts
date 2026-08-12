@@ -17,6 +17,7 @@ import type {
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
   ExternalAgentRespondParams,
+  ExternalAgentStartReviewParams,
   ExternalAgentSteerParams,
   ExternalAgentSteerResult,
   ExternalAgentTurnParams,
@@ -55,6 +56,13 @@ export interface FakeExternalRuntimeOptions {
   readonly listSessions?: (
     params: ExternalAgentListSessionsParams
   ) => ExternalAgentListSessionsResult;
+  /**
+   * What `external-agent.start-review` answers as its thread. Defaults to the
+   * session's own, which is what inline delivery returns; anything else is the
+   * detached answer the hub must refuse to correlate events against.
+   */
+  readonly reviewThreadId?: string;
+  readonly reviewFailure?: () => Error;
 }
 
 export interface FakeExternalRuntime {
@@ -64,6 +72,7 @@ export interface FakeExternalRuntime {
     readonly turn: ExternalAgentTurnParams[];
     readonly respond: ExternalAgentRespondParams[];
     readonly steer: ExternalAgentSteerParams[];
+    readonly startReview: ExternalAgentStartReviewParams[];
     readonly listSessions: ExternalAgentListSessionsParams[];
     readonly cancel: { sessionId: string; nativeTurnId?: string }[];
     readonly close: { sessionId: string }[];
@@ -87,6 +96,7 @@ export function createFakeExternalRuntime(
     turn: [],
     respond: [],
     steer: [],
+    startReview: [],
     listSessions: [],
     cancel: [],
     close: [],
@@ -133,6 +143,16 @@ export function createFakeExternalRuntime(
         const failure = options.steerFailure?.();
         if (failure) throw failure;
         return (await options.steerResult?.(params)) ?? { accepted: true as const };
+      },
+      startReview(params: ExternalAgentStartReviewParams) {
+        calls.startReview.push(params);
+        const failure = options.reviewFailure?.();
+        if (failure) return Promise.reject(failure);
+        started = true;
+        return Promise.resolve({
+          nativeTurnId,
+          reviewThreadId: options.reviewThreadId ?? options.nativeSessionId ?? 'native-session-1',
+        });
       },
       listSessions(params: ExternalAgentListSessionsParams) {
         calls.listSessions.push(params);

@@ -25,6 +25,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { useToast } from '@/components/ui/Toast';
+import { ExternalReviewAction } from '@/features/external-agents/ExternalReviewAction';
 import { useI18n } from '@/hooks/use-i18n';
 import { resolveApiErrorMessage } from '@/lib/utils';
 import { BranchControl } from './BranchControl';
@@ -411,6 +412,12 @@ function RepositoryStatus({
         // CommitForm stays mounted while a diff is open: it holds the in-progress
         // commit message in local state, and unmounting it would discard the draft.
         <>
+          {/*
+            Above the commit form, because reviewing comes before committing —
+            and nowhere near the composer's permissions dropdown, whose
+            "Auto-review" option means something else entirely.
+          */}
+          <ExternalReviewAction chatId={chatId} hasChanges={!status.clean} />
           <CommitForm
             chatId={chatId}
             branch={status.branch}

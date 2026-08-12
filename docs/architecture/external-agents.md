@@ -404,9 +404,12 @@ capability flag comes from whether the adapter implements the optional `steer` m
 composer reads it from there rather than assuming.
 
 The composer gates the affordance on the adapter's static capability alone. Codex's own protocol
-gives no advance signal that a specific in-flight turn — a review, a compaction — will refuse a
-steer; `Turn` carries no such field. So a refusal is discovered by attempting it, not predicted
-before the button is shown, and `turn-not-steerable` is what a rejected attempt reports back.
+gives no advance signal that a specific in-flight turn will refuse a steer; `Turn` carries no such
+field. So a refusal is discovered by attempting it, not predicted before the button is shown, and
+`turn-not-steerable` is what a rejected attempt reports back. The one exception is a turn
+MangoStudio itself started as a review: nobody has to ask Codex about a turn the hub knows the kind
+of, so both the hub and the adapter answer `turn-not-steerable` locally, before the durable record
+a steer would otherwise leave behind.
 
 **Persistence order is the whole feature.** The hub writes the steered text into the running
 turn's transcript — optimistically, as accepted — *before* calling the runtime, not after. A vendor
@@ -494,6 +497,46 @@ Three properties adoption needs beyond the listing itself:
 Listing is guarded exactly like a turn, with one addition: without an isolation attestation it is
 not offered at all. Showing another OS user's conversation titles is a worse disclosure than
 sharing a credential.
+
+## Reviewing the working tree
+
+Codex only. `review/start` is a first-class non-interactive review in Codex's own protocol, with
+`enteredReviewMode` / `exitedReviewMode` items bracketing it — a product feature, not a prompt
+template, and the `nativeReview` capability comes from whether the adapter implements the optional
+`startReview` member.
+
+**It is not auto-review.** The permissions dropdown's `auto-review` routing decides whether a
+subagent answers the *agent's own tool calls*; this reviews the *user's code*. Same word, opposite
+subjects, so each surface's copy states its subject explicitly and the two never appear adjacent:
+the action lives in the repository panel, next to the changes it reviews.
+
+One target ships, `{ type: 'uncommittedChanges' }`, modelled as a discriminated union with a single
+member so Codex's `baseBranch`, `commit` and `custom` are additive later rather than a breaking
+reshape of a string enum. Delivery is always `inline`, and `ReviewStartResponse.reviewThreadId` is
+**asserted** to be the session's own thread rather than assumed: detached delivery runs the review
+on a thread nothing is subscribed to, so a build that returns another id fails the call instead of
+streaming into the void.
+
+A review is a turn that happens to be a review. It uses the same session, the same active-turn
+rule, the same `clientMessageId` idempotency, the same event topic and sequence, the same
+persistence and the same cancellation — the bracketing items render as ordinary `kind: 'review'`
+activity and the verdict as ordinary assistant text, so no second event vocabulary exists. Two
+things differ: the vendor call is awaited, because only its response names the thread; and the turn
+reports `turn-not-steerable` without a round trip, both in the adapter and in the hub, because
+steering a review has no coherent meaning.
+
+**Permissions stay with the thread.** Ordinary turns send the current sandbox, approval policy and
+model on every `turn/start`. A review does not: Codex `review/start` has no equivalent fields, and
+reopening the session to apply a newer pair would bypass the policy this conversation already
+runs under. A permission change takes effect on the next send, not on a review of the working
+tree that is already in this chat.
+
+**The Git precondition is MangoStudio's own.** Codex does not refuse a review in a non-Git
+directory — it completes, logging `fatal: not a git repository` internally, having reviewed
+nothing — so the hub enforces it, and `EXTERNAL_REVIEW_REQUIRES_GIT` is what the UI renders. It is
+checked **through the selected runtime**, never against the hub's filesystem: the workspace may be
+on an SSH host, in a container, in WSL or on a paired machine, and a hub-side `fs` check would be
+answering a question about the wrong disk.
 
 ## Deliberately out of scope
 

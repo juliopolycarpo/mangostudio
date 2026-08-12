@@ -29,6 +29,7 @@ import type {
   ExternalAgentEventEnvelope,
   ExternalAgentSteerResult,
   ExternalAgentTargetId,
+  ExternalReviewTarget,
   ExternalTurnTerminalReason,
 } from '@mangostudio/shared/external-agents';
 import type { Kysely } from 'kysely';
@@ -137,6 +138,23 @@ export interface ExternalSessionHandle {
     readonly clientMessageId: string;
     readonly text: string;
   }): Promise<ExternalAgentSteerResult>;
+  /**
+   * Starts a vendor-native review as this session's turn.
+   *
+   * Returns the same `nativeTurnId` an ordinary turn does, plus the thread the
+   * vendor ran the review on. Both are persisted by the caller: inline delivery
+   * puts the review on this session's own thread, and a value that disagrees is
+   * a turn whose events would never be correlated.
+   *
+   * The current runner configuration is not sent. A review inherits the
+   * sandbox, approval policy and model this session was opened with; a later
+   * permission change takes effect on the next ordinary turn, not by
+   * reconfiguring this one.
+   */
+  startReview(input: {
+    readonly clientMessageId: string;
+    readonly target: ExternalReviewTarget;
+  }): Promise<{ readonly nativeTurnId: string; readonly reviewThreadId: string }>;
   cancel(nativeTurnId?: string): Promise<void>;
 }
 
@@ -293,6 +311,19 @@ export function createExternalSessionManager(
             nativeTurnId: input.nativeTurnId,
             clientMessageId: input.clientMessageId,
             input: input.text,
+          },
+          { timeoutMs: callTimeoutMs }
+        );
+      },
+      async startReview(input) {
+        // No `configuration`: Codex `review/start` has none, and a review must
+        // not reopen the session to apply a newer sandbox. The thread's
+        // existing policy is the one the user already accepted for this chat.
+        return await record.client.externalAgents.startReview(
+          {
+            sessionId: record.sessionId,
+            clientMessageId: input.clientMessageId,
+            target: input.target,
           },
           { timeoutMs: callTimeoutMs }
         );

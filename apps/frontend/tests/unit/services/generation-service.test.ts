@@ -56,6 +56,7 @@ import {
   type GenerateImageRequest,
   generateImage,
   respondTextStream,
+  startExternalReviewStream,
   uploadReferenceImage,
 } from '../../../src/services/generation-service';
 
@@ -231,6 +232,39 @@ describe('respondTextStream', () => {
     const { onChunk } = collectChunks();
 
     await expect(respondTextStream(makeRequest(), onChunk)).rejects.toThrow(en.errors.unknown);
+  });
+});
+
+describe('startExternalReviewStream', () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects after a terminal setup-error chunk so the review action can toast', async () => {
+    fetchMock.mockResolvedValue(
+      streamingResponse([
+        'data: {"type":"error","error":"This agent does not offer a review of your working tree.","done":true}\n',
+      ])
+    );
+    const { chunks, onChunk } = collectChunks();
+
+    await expect(
+      startExternalReviewStream('chat-1', { target: { type: 'uncommittedChanges' } }, onChunk)
+    ).rejects.toThrow('This agent does not offer a review of your working tree.');
+    expect(chunks).toEqual([
+      {
+        type: 'error',
+        error: 'This agent does not offer a review of your working tree.',
+        done: true,
+      },
+    ]);
   });
 });
 

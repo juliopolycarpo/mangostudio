@@ -12,6 +12,8 @@ import {
   type ExternalAgentRefreshAccountUsageParams,
   type ExternalAgentRefreshAccountUsageResult,
   type ExternalAgentRespondParams,
+  type ExternalAgentStartReviewParams,
+  type ExternalAgentStartReviewResult,
   type ExternalAgentSteerParams,
   type ExternalAgentSteerResult,
   type ExternalAgentTurnParams,
@@ -277,6 +279,11 @@ interface RuntimeExternalAgentsClient {
     params: ExternalAgentSteerParams,
     options?: RuntimeRequestOptions
   ): Promise<ExternalAgentSteerResult>;
+  /** A vendor-native review, delivered on the session's own event stream. */
+  startReview(
+    params: ExternalAgentStartReviewParams,
+    options?: RuntimeRequestOptions
+  ): Promise<ExternalAgentStartReviewResult>;
   cancel(
     params: ExternalAgentCancelParams,
     options?: RuntimeRequestOptions
@@ -448,6 +455,8 @@ export class RuntimeClient {
       turn: (params, options) => this.request('external-agent.turn', params, options),
       respond: (params, options) => this.request('external-agent.respond', params, options),
       steer: (params, options) => this.request('external-agent.steer', params, options),
+      startReview: (params, options) =>
+        this.request('external-agent.start-review', params, options),
       cancel: (params, options) => this.request('external-agent.cancel', params, options),
       close: (params, options) => this.request('external-agent.close', params, options),
       refreshAccountUsage: (params, options) =>
