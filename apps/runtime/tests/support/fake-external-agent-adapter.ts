@@ -2,6 +2,7 @@ import type {
   ExternalAgentCapabilities,
   ExternalAgentEvent,
   ExternalAgentRuntimeDescriptor,
+  ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import type {
@@ -9,6 +10,7 @@ import type {
   ExternalAgentApprovalResponseInput,
   ExternalAgentCancelInput,
   ExternalAgentCloseInput,
+  ExternalAgentListSessionsInput,
   ExternalAgentOpenSessionInput,
   ExternalAgentStartTurnInput,
   ExternalAgentSteerInput,
@@ -29,6 +31,8 @@ export interface FakeExternalAgentOptions {
   readonly steerable?: boolean;
   /** What `steer` resolves with once `steerable` is set. Defaults to accepted. */
   readonly steerResult?: ExternalAgentSteerOutcome;
+  /** Implements the optional `listSessions` member and answers with these rows. */
+  readonly listedSessions?: readonly ExternalNativeSession[];
 }
 
 /** Scriptable protocol peer. It never knows or launches a production vendor. */
@@ -38,6 +42,7 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
   readonly turns: ExternalAgentStartTurnInput[] = [];
   readonly responses: ExternalAgentApprovalResponseInput[] = [];
   readonly steers: ExternalAgentSteerInput[] = [];
+  readonly listings: ExternalAgentListSessionsInput[] = [];
   readonly cancellations: ExternalAgentCancelInput[] = [];
   readonly closes: ExternalAgentCloseInput[] = [];
   readonly #events: readonly ExternalAgentEvent[];
@@ -50,6 +55,8 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
   readonly #turnError?: Error;
   /** Assigned in the constructor, so `typeof adapter.steer` follows the option. */
   steer?: ExternalAgentAdapter['steer'];
+  /** Same pattern: presence is what the registry's conformance check reads. */
+  listSessions?: ExternalAgentAdapter['listSessions'];
 
   constructor(options: FakeExternalAgentOptions = {}) {
     this.#events = options.events ?? [{ type: 'completed' }];
@@ -68,6 +75,13 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
       this.steer = (input) => {
         this.steers.push(input);
         return Promise.resolve(options.steerResult ?? { accepted: true });
+      };
+    }
+    const listed = options.listedSessions;
+    if (listed) {
+      this.listSessions = (input) => {
+        this.listings.push(input);
+        return Promise.resolve({ sessions: listed });
       };
     }
   }

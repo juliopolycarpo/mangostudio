@@ -11,6 +11,7 @@ import type {
   ExternalAgentRuntimeDescriptor,
   ExternalApprovalOption,
   ExternalApprovalRequest,
+  ExternalNativeSession,
   ExternalSupportedConfiguration,
   ExternalTextLimit,
 } from '@mangostudio/shared/external-agents';
@@ -66,6 +67,54 @@ export function normalizeExternalAgentOpenResult(
 export function normalizeExternalAgentTurnId(raw: string): string {
   return safeVendorId(raw, 'native turn id');
 }
+
+/**
+ * Bounds a listing before it becomes a picker.
+ *
+ * Titles and previews are third-party text rendered in MangoStudio's UI, so
+ * they go through the same cut every other vendor label does. A row whose id
+ * could not survive `vendorId` bounding is **dropped** rather than repaired:
+ * a truncated session id is a pointer to a different conversation, and adopting
+ * one would be worse than not offering it.
+ *
+ * The workspace path is sanitized but not cut to a label's length — it is a
+ * path the vendor will be asked about again, and a shortened one names nothing.
+ * An unbounded one is dropped for the same reason a bad id is.
+ */
+export function normalizeExternalNativeSessions(
+  sessions: readonly ExternalNativeSession[]
+): ExternalNativeSession[] {
+  const normalized: ExternalNativeSession[] = [];
+  for (const session of sessions) {
+    const id = boundVendorText(session.nativeSessionId, 'vendorId');
+    if (id.truncated || id.text.length === 0) continue;
+
+    const title =
+      session.title === undefined ? undefined : displayText(session.title, 'sessionTitle');
+    const preview =
+      session.preview === undefined ? undefined : displayText(session.preview, 'sessionTitle');
+    const workspacePath =
+      session.workspacePath === undefined ? undefined : sanitizeVendorText(session.workspacePath);
+    if (workspacePath && (workspacePath.truncated || workspacePath.text.length > MAX_PATH_LENGTH)) {
+      continue;
+    }
+
+    normalized.push({
+      targetId: session.targetId,
+      nativeSessionId: id.text,
+      ...(title && title.text.length > 0 ? { title: title.text } : {}),
+      ...(preview && preview.text.length > 0 ? { preview: preview.text } : {}),
+      ...(workspacePath && workspacePath.text.length > 0
+        ? { workspacePath: workspacePath.text }
+        : {}),
+      ...(session.updatedAtMs === undefined ? {} : { updatedAtMs: session.updatedAtMs }),
+    });
+  }
+  return normalized;
+}
+
+/** Matches `ExternalNativeSessionSchema.workspacePath`'s bound. */
+const MAX_PATH_LENGTH = 4_096;
 
 export function normalizeExternalAgentEvent(event: ExternalAgentEvent): ExternalAgentEvent {
   switch (event.type) {

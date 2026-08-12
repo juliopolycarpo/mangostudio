@@ -8,6 +8,8 @@ import type {
   ExternalAgentDiscoverParams,
   ExternalAgentDiscoverResult,
   ExternalAgentEvent,
+  ExternalAgentListSessionsParams,
+  ExternalAgentListSessionsResult,
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
   ExternalAgentRefreshAccountUsageParams,
@@ -29,6 +31,8 @@ import {
   ExternalAgentDiscoverResultSchema,
   ExternalAgentEventEnvelopeSchema,
   ExternalAgentEventSchema,
+  ExternalAgentListSessionsParamsSchema,
+  ExternalAgentListSessionsResultSchema,
   ExternalAgentOpenParamsSchema,
   ExternalAgentOpenResultSchema,
   ExternalAgentRefreshAccountUsageParamsSchema,
@@ -55,6 +59,7 @@ import {
   normalizeExternalAgentEvent,
   normalizeExternalAgentOpenResult,
   normalizeExternalAgentTurnId,
+  normalizeExternalNativeSessions,
 } from './normalization';
 import {
   buildExternalAgentEnvironment,
@@ -509,6 +514,101 @@ export class ExternalAgentSessionSupervisor {
         throw new AggregateError(
           [error, cleanupError],
           `External-agent account-usage refresh for "${params.targetId}" failed during cleanup.`
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * The vendor's own conversation history for one target, in this environment.
+   *
+   * Sessions belong to the machine that ran them, which is why this is a
+   * runtime operation and not a hub one: there is nothing on the hub to read.
+   *
+   * `workspacePath` is canonicalized and put through the owner's workspace
+   * policy before anything is asked, exactly as `open` does. A listing is a read
+   * of another person's conversation titles — it is not a lesser operation than
+   * starting a session, and a directory the owner never authorized is not one
+   * this runtime enumerates history for.
+   */
+  async listSessions(
+    params: ExternalAgentListSessionsParams,
+    requestSignal: AbortSignal
+  ): Promise<ExternalAgentListSessionsResult> {
+    assertExternalAgentParams(
+      'external-agent.list-sessions',
+      ExternalAgentListSessionsParamsSchema,
+      params
+    );
+    const adapter = this.#registry.require(params.targetId);
+    if (typeof adapter.listSessions !== 'function') {
+      throw new RuntimeToolArgumentError(
+        `External-agent target "${params.targetId}" cannot list sessions.`
+      );
+    }
+
+    const live = params.sessionId ? this.#sessions.get(params.sessionId) : undefined;
+    if (live && live.adapter.targetId !== params.targetId) {
+      throw new RuntimeToolArgumentError(
+        `Session "${params.sessionId}" belongs to "${live.adapter.targetId}", not "${params.targetId}".`
+      );
+    }
+
+    const processes = new Set<ExternalAgentManagedProcess>();
+    const controller = linkedDeadline(
+      [requestSignal, this.#shutdownController.signal],
+      params.timeoutMs
+    );
+    try {
+      const workspacePath =
+        params.workspacePath === undefined
+          ? undefined
+          : await this.#canonicalAuthorizedWorkspace(params.workspacePath, controller.signal);
+      const executable = live
+        ? { path: live.executablePath }
+        : await raceAbort(
+            this.#resolveExecutable(params.targetId, controller.signal),
+            controller.signal,
+            `Resolving external-agent target "${params.targetId}" timed out.`
+          );
+      throwIfAborted(controller.signal);
+      const page = await raceAbort(
+        adapter.listSessions({
+          context: this.#context(
+            adapter,
+            controller.signal,
+            executable.path,
+            workspacePath ?? live?.workspacePath,
+            processes
+          ),
+          ...(params.cursor === undefined ? {} : { cursor: params.cursor }),
+          ...(params.limit === undefined ? {} : { limit: params.limit }),
+          ...(workspacePath === undefined ? {} : { workspacePath }),
+          ...(live ? { sessionId: live.sessionId } : {}),
+        }),
+        controller.signal,
+        `Listing external-agent sessions for "${params.targetId}" timed out.`
+      );
+
+      const result = {
+        sessions: normalizeExternalNativeSessions(page.sessions),
+        ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+      };
+      if (!Value.Check(ExternalAgentListSessionsResultSchema, result)) {
+        throw new Error('External-agent session listing produced an invalid or unbounded result.');
+      }
+      controller.dispose();
+      await this.#terminateProcesses(processes);
+      return result;
+    } catch (error) {
+      controller.dispose();
+      try {
+        await this.#terminateProcesses(processes);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `External-agent session listing for "${params.targetId}" failed during cleanup.`
         );
       }
       throw error;

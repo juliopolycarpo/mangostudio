@@ -42,6 +42,15 @@ export interface ExternalSessionContinuation extends ExternalContinuationBinding
   readonly nativeSessionId: string;
   readonly effectiveConfiguration: ExternalAgentConfiguration | null;
   readonly updatedAt: number;
+  /**
+   * True while the vendor still has to confirm it resumed the adopted session.
+   *
+   * Only adoption sets it. It is what makes the first open strict — the user
+   * named a conversation, and a fallback to a fresh one would answer with the
+   * wrong conversation rather than with a failure — and it is cleared as soon
+   * as a resume succeeds, after which ordinary turn semantics apply.
+   */
+  readonly pendingAdoption: boolean;
 }
 
 export async function readContinuation(
@@ -67,6 +76,7 @@ export async function readContinuation(
     nativeSessionId: row.nativeSessionId,
     effectiveConfiguration: parseEffectiveConfiguration(row.effectiveConfiguration),
     updatedAt: row.updatedAt,
+    pendingAdoption: row.pendingAdoption === 1,
   };
 }
 
@@ -76,6 +86,7 @@ export interface WriteContinuationInput extends ExternalContinuationBinding {
   readonly nativeSessionId: string;
   readonly effectiveConfiguration: ExternalAgentConfiguration | null;
   readonly updatedAt: number;
+  readonly pendingAdoption?: boolean;
 }
 
 /**
@@ -102,6 +113,7 @@ export async function writeContinuation(
       ? JSON.stringify(input.effectiveConfiguration)
       : null,
     updatedAt: input.updatedAt,
+    pendingAdoption: input.pendingAdoption === true ? 1 : 0,
   };
 
   await db

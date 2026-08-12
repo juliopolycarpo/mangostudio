@@ -21,7 +21,7 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import type { Messages } from '@mangostudio/shared/i18n';
-import { Bot, Check, ChevronDown, Copy, CornerUpRight, Cpu } from 'lucide-react';
+import { Bot, Check, ChevronDown, Copy, CornerUpRight, Cpu, History } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { externalAgentSelectable } from '@/features/external-agents/useExternalAgents';
@@ -56,6 +56,14 @@ export interface RunnerSelectorProps {
   onSelectExternal: (descriptor: ExternalAgentDescriptor) => void;
   /** Offered instead of a switch when the chat already has turns. */
   onForkWithRunner: (runner: ChatRunnerConfiguration) => void;
+  /**
+   * Opens the native-session picker.
+   *
+   * Always a new chat, so it is offered whether or not this one has turns:
+   * adopting is not a runner switch, it is a different conversation whose
+   * history belongs to the vendor.
+   */
+  onBrowseSessions: () => void;
 }
 
 export function RunnerSelector({
@@ -70,6 +78,7 @@ export function RunnerSelector({
   onSelectAgent,
   onSelectExternal,
   onForkWithRunner,
+  onBrowseSessions,
 }: RunnerSelectorProps) {
   const { t } = useI18n();
   const labels = t.externalAgents.selector;
@@ -180,6 +189,23 @@ export function RunnerSelector({
               }}
             />
           ))}
+
+          {/* Offered only where something can actually answer. A vendor with no
+              listing gets its explanation inside the picker; an environment
+              where *nothing* can list has no picker worth opening. */}
+          {externalAgents.some((descriptor) => descriptor.capabilities.sessionListing) ? (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onBrowseSessions();
+              }}
+              className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm text-on-surface-variant transition-colors hover:bg-surface-container-high"
+            >
+              <History size={13} className="shrink-0 text-primary/80" />
+              <span className="min-w-0 flex-1 truncate">{t.externalAgents.sessions.entry}</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

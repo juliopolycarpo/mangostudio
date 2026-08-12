@@ -293,6 +293,9 @@ export const messages: Messages = {
       chatCompacted: 'Context compacted into a summary',
       summaryHandoff: 'This chat started from a summarized handoff',
       cursorInternalToolCall: 'Cursor used {tool}',
+      // The marker an adopted chat opens with. It names the vendor because the
+      // history above this line is theirs and is not shown here.
+      externalSessionAdopted: 'Continuing a {vendor} session started outside MangoStudio',
     },
   },
 
@@ -2706,6 +2709,46 @@ export const messages: Messages = {
       ownership: '{vendor} controls its own tools and permissions.',
       unavailableHere: 'This agent cannot run here right now — pick another.',
       forkFailed: 'The new chat could not be created.',
+    },
+    sessions: {
+      /** The selector entry that opens the picker. */
+      entry: 'Continue a session from your terminal',
+      title: 'Continue a session from your terminal',
+      subtitle:
+        'Pick a conversation you started with a CLI on {environment}. MangoStudio continues it — it does not copy its history.',
+      loading: 'Looking for sessions…',
+      empty: 'No sessions found on this machine.',
+      emptyInWorkspace: 'No sessions for this folder. Turn off the filter to see the rest.',
+      thisWorkspaceOnly: 'Only this folder',
+      loadMore: 'Show more',
+      noTitle: 'Untitled session',
+      adopt: 'Continue',
+      adopting: 'Opening…',
+      // Ages are relative and deliberately coarse: the exact second a vendor
+      // last touched a thread is noise next to "this morning" or "last week".
+      ageJustNow: 'just now',
+      ageMinutes: '{count}m ago',
+      ageHours: '{count}h ago',
+      ageDays: '{count}d ago',
+      loadFailed: 'Could not load sessions from this machine.',
+      /** Every adoption refusal the server can answer with. */
+      adoptFailed: 'That session could not be continued.',
+      staleSession:
+        'That session changed since the list loaded. It has been refreshed — pick again.',
+      heldSession: 'That session is already open in another MangoStudio chat.',
+      noWorkspace: 'That session does not record a folder, so it cannot be continued here.',
+      unreachable: 'Could not reach the machine those sessions live on.',
+      isolationUnproven:
+        'This machine has not proved it keeps vendor logins separate, so its sessions are not listed.',
+      /**
+       * Claude's row. It says why rather than implying something is broken:
+       * the CLI keeps its history in an internal JSONL format the vendor
+       * documents as internal and subject to change, so there is no listing to
+       * read that would still be right next month.
+       */
+      unsupported: 'This agent does not publish a list of its own sessions.',
+      unsupportedClaude:
+        'Claude Code keeps its history in an internal format its own documentation says may change, so MangoStudio does not read it. Start a Claude chat here instead.',
     },
     usage: {
       turnLabel: 'This turn',

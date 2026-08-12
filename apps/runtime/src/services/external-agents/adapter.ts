@@ -8,6 +8,7 @@ import type {
   ExternalAgentRuntimeDescriptor,
   ExternalAgentTargetId,
   ExternalAgentTurnParams,
+  ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalAgentManagedProcess, SpawnExternalAgentProcessOptions } from './process';
 
@@ -95,20 +96,32 @@ export type ExternalAgentSteerOutcome =
     };
 
 export interface ExternalAgentListSessionsInput {
+  /**
+   * Everything a probe needs when no session is open.
+   *
+   * A listing is asked for *before* a chat exists — that is the whole point of
+   * the picker — so an adapter that has no live connection opens a short-lived
+   * one, exactly as discovery and the account-usage refresh already do.
+   */
+  readonly context: ExternalAgentAdapterContext;
   readonly cursor?: string;
+  readonly limit?: number;
+  /** Exact-match workspace filter, canonical as the target machine spells it. */
+  readonly workspacePath?: string;
   /**
    * Which open session's connection answers the listing.
    *
    * An adapter that keeps one vendor process per session — Cursor does, because
    * each session carries its own cwd and environment — has no single connection
    * to ask. Optional because an adapter with one shared process has nothing to
-   * choose between.
+   * choose between, and because a picker rendered before any chat exists has no
+   * session to name.
    */
   readonly sessionId?: string;
 }
 
 export interface ExternalAgentNativeSessionPage {
-  readonly sessionIds: readonly string[];
+  readonly sessions: readonly ExternalNativeSession[];
   readonly nextCursor?: string;
 }
 

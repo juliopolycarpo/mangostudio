@@ -416,6 +416,34 @@ interface ExternalSessionContinuationsTable {
   /** JSON, vendor-reported, display only. */
   effectiveConfiguration: string | null;
   updatedAt: number;
+  /**
+   * 1 while this chat's first open still has to resume strictly.
+   *
+   * Written only by adoption, which points a chat at a conversation the user
+   * picked by name. Until the vendor confirms it resumed that conversation, a
+   * fallback to a fresh session would silently hand over a different — empty —
+   * one, so the flag survives a failed attempt and is cleared by a successful
+   * resume, after which ordinary turn semantics apply.
+   */
+  pendingAdoption: Generated<number>;
+}
+
+/**
+ * Who currently holds a native vendor session.
+ *
+ * Keyed by the session rather than the chat: what must not happen twice is two
+ * MangoStudio chats writing into one vendor transcript, whichever chats those
+ * are. `expiresAt` keeps a hub that died holding a lease from making the
+ * session permanently unadoptable.
+ */
+interface ExternalSessionAdoptionLeasesTable {
+  environmentId: string;
+  targetId: string;
+  nativeSessionId: string;
+  userId: string;
+  chatId: string;
+  acquiredAt: number;
+  expiresAt: number;
 }
 
 /**
@@ -478,6 +506,7 @@ export interface Database {
   observability_snapshot: ObservabilitySnapshotTable;
   connector_usage_samples: ConnectorUsageSamplesTable;
   external_session_continuations: ExternalSessionContinuationsTable;
+  external_session_adoption_leases: ExternalSessionAdoptionLeasesTable;
   external_agent_disclosures: ExternalAgentDisclosuresTable;
   external_account_limits_cache: ExternalAccountLimitsCacheTable;
 }

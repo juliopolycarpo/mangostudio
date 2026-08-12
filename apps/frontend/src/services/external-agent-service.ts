@@ -11,6 +11,8 @@ import type { Chat, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type {
   ExternalAgentDescriptorListResponse,
   ExternalAgentSteerResult,
+  ExternalNativeSession,
+  ExternalNativeSessionListResponse,
 } from '@mangostudio/shared/external-agents';
 import { client } from '@/lib/api-client';
 import { ApiError } from '@/lib/utils';
@@ -118,6 +120,51 @@ export async function trustExternalWorkspace(
     ['external-agent']['trust-workspace'].post(scope);
   if (error) throw new ApiError(error.value);
   return (data as { workspacePath: string }).workspacePath;
+}
+
+/**
+ * The vendor's own sessions on one machine.
+ *
+ * Rows are pointers, not transcripts: nothing here carries conversation
+ * content, and adopting one records which vendor conversation a new chat
+ * continues rather than copying it into MangoStudio.
+ */
+export async function listExternalNativeSessions(query: {
+  readonly environmentId: string;
+  readonly targetId: string;
+  readonly workspacePath?: string;
+  readonly cursor?: string;
+}): Promise<ExternalNativeSessionListResponse> {
+  const { data, error } = await client.api['external-agents'].sessions.get({
+    query: {
+      environmentId: query.environmentId,
+      targetId: query.targetId,
+      ...(query.workspacePath ? { workspacePath: query.workspacePath } : {}),
+      ...(query.cursor ? { cursor: query.cursor } : {}),
+    },
+  });
+  if (error) throw new ApiError(error.value);
+  return data as ExternalNativeSessionListResponse;
+}
+
+/**
+ * Continues a native session in a new chat.
+ *
+ * The row is sent back exactly as it was rendered. The server re-reads the
+ * session before it creates anything and refuses when the answer differs, so a
+ * session deleted or written to since the picker loaded produces an error and
+ * no chat — never a silently empty conversation.
+ */
+export async function adoptExternalSession(input: {
+  readonly environmentId: string;
+  readonly session: ExternalNativeSession;
+}): Promise<Chat> {
+  const { data, error } = await client.api.chats['adopt-external-session'].post({
+    environmentId: input.environmentId,
+    session: input.session,
+  });
+  if (error) throw new ApiError(error.value);
+  return (data as { chat: Chat }).chat;
 }
 
 /** One vendor the user has been shown the third-party notice for. */

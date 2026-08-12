@@ -1078,3 +1078,77 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await Bun.sleep(5);
   }
 }
+
+describe('external-agent session listing', () => {
+  const SESSION = {
+    targetId: 'codex' as const,
+    nativeSessionId: 'thread-1',
+    title: 'Fix the flaky test',
+    workspacePath: '/workspace',
+    updatedAtMs: 1_786_284_100_000,
+  };
+
+  it('refuses a listing for a workspace the owner never authorized', async () => {
+    // A listing reads the first lines of somebody's conversations. It is not a
+    // lesser operation than opening a session, and it answers to the same
+    // workspace policy.
+    const value = await fixture({
+      adapter: new FakeExternalAgentAdapter({ listedSessions: [SESSION] }),
+      authorizeWorkspace: () => false,
+    });
+
+    await expect(
+      value.supervisor.listSessions(
+        { targetId: 'codex', workspacePath: value.workspacePath, timeoutMs: 1_000 },
+        new AbortController().signal
+      )
+    ).rejects.toThrow(/not authorized/);
+    expect((value.adapter as FakeExternalAgentAdapter).listings).toHaveLength(0);
+  });
+
+  it('passes the canonical workspace through to the adapter', async () => {
+    const adapter = new FakeExternalAgentAdapter({ listedSessions: [SESSION] });
+    const value = await fixture({ adapter });
+
+    const page = await value.supervisor.listSessions(
+      { targetId: 'codex', workspacePath: value.workspacePath, limit: 5, timeoutMs: 1_000 },
+      new AbortController().signal
+    );
+
+    expect(page.sessions).toHaveLength(1);
+    expect(adapter.listings[0]).toMatchObject({
+      workspacePath: value.workspacePath,
+      limit: 5,
+    });
+  });
+
+  it('refuses a target whose adapter has no listing', async () => {
+    const value = await fixture();
+    await expect(
+      value.supervisor.listSessions(
+        { targetId: 'codex', timeoutMs: 1_000 },
+        new AbortController().signal
+      )
+    ).rejects.toThrow(/cannot list sessions/);
+  });
+
+  it('bounds vendor text and drops a row whose id could not survive it', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      listedSessions: [
+        { ...SESSION, title: 'x'.repeat(EXTERNAL_TEXT_LIMITS.sessionTitle + 40) },
+        // An id past the vendor-id bound is a pointer to nothing: truncating it
+        // would adopt a different conversation, so the row goes instead.
+        { ...SESSION, nativeSessionId: 'y'.repeat(EXTERNAL_TEXT_LIMITS.vendorId + 1) },
+      ],
+    });
+    const value = await fixture({ adapter });
+
+    const page = await value.supervisor.listSessions(
+      { targetId: 'codex', timeoutMs: 1_000 },
+      new AbortController().signal
+    );
+
+    expect(page.sessions).toHaveLength(1);
+    expect([...(page.sessions[0]?.title ?? '')]).toHaveLength(EXTERNAL_TEXT_LIMITS.sessionTitle);
+  });
+});
