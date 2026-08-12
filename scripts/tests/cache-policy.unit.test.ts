@@ -10,14 +10,7 @@ import {
 const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
-const EXPECTED_FAMILIES = [
-  'bun',
-  'turbo',
-  'vite',
-  'tsbuildinfo',
-  'lint-tools',
-  'playwright',
-] as const;
+const EXPECTED_FAMILIES = ['bun', 'turbo', 'vite', 'lint-tools', 'playwright'] as const;
 
 describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {
@@ -116,10 +109,16 @@ describe('CI cache policy', () => {
       }
     }
 
-    const tsbuildinfo = byFamily('tsbuildinfo');
-    expect(tsbuildinfo).toHaveLength(1);
-    expect(tsbuildinfo[0].inputs.validity).toContain("hashFiles('tsconfig*.json'");
-    expect(tsbuildinfo[0].inputs.validity).toContain("hashFiles('apps/**/*.ts', 'apps/**/*.tsx'");
+    // No `tsbuildinfo` family, deliberately. TypeScript 7.0.2 reports
+    // `TS2589: Type instantiation is excessively deep` when a project is
+    // checked against a build info file produced from different sources, while
+    // a cold check of the very same tree passes. Restoring one across commits
+    // therefore made the typecheck disagree with itself: green locally, red on
+    // CI, with no file or line to chase. `incremental` is off for the same
+    // reason, so there is no build info to cache in the first place — and turbo
+    // already skips unchanged workspaces on a content hash, which is the
+    // trustworthy half of what this cache was doing.
+    expect(byFamily('tsbuildinfo')).toHaveLength(0);
     expect(readText('.github/workflows/lint.yml')).toContain('tsc --version');
 
     const lintTools = byFamily('lint-tools');

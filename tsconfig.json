@@ -7,8 +7,6 @@
     "moduleDetection": "force",
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true,
-    "incremental": true,
-    "tsBuildInfoFile": ".mango/artifacts/tsbuildinfo/root.tsbuildinfo"
+    "noEmit": true
   }
 }
