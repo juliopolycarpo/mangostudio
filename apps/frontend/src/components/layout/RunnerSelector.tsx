@@ -307,37 +307,41 @@ function ExternalRow({
 
   return (
     <div className="rounded-xl px-1">
-      <button
-        type="button"
-        role="option"
-        aria-selected={active}
-        disabled={!selectable}
-        onClick={() => onSelect(forks)}
-        className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors enabled:hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <span className="min-w-0 flex-1 truncate">{labels.target[descriptor.targetId]}</span>
-        {descriptor.authState === 'signed-in' ? (
-          <span className="flex shrink-0 items-center gap-1 text-[10px] text-success">
-            <Check size={11} />
-            {descriptor.account?.label ?? labels.selector.signedIn}
-          </span>
-        ) : null}
+      <div className="flex w-full items-center gap-1">
+        <button
+          type="button"
+          role="option"
+          aria-selected={active}
+          disabled={!selectable}
+          onClick={() => onSelect(forks)}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-on-surface transition-colors enabled:hover:bg-surface-container-high disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span className="min-w-0 flex-1 truncate">{labels.target[descriptor.targetId]}</span>
+          {descriptor.authState === 'signed-in' ? (
+            <span className="flex shrink-0 items-center gap-1 text-[10px] text-success">
+              <Check size={11} />
+              {descriptor.account?.label ?? labels.selector.signedIn}
+            </span>
+          ) : null}
+          {selectable && descriptor.authState === 'unknown' ? (
+            <span className="shrink-0 text-[10px] text-on-surface-variant/70">
+              {labels.selector.authUnknown}
+            </span>
+          ) : null}
+          {selectable && forks ? (
+            <span className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
+              <CornerUpRight size={11} />
+              {labels.selector.continueInNewChat}
+            </span>
+          ) : null}
+          {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
+        </button>
         {descriptor.capabilities.accountUsage && selectable ? (
-          <ExternalAccountLimitsChipFor descriptor={descriptor} />
+          <div className="shrink-0 pr-2">
+            <ExternalAccountLimitsChipFor descriptor={descriptor} />
+          </div>
         ) : null}
-        {selectable && descriptor.authState === 'unknown' ? (
-          <span className="shrink-0 text-[10px] text-on-surface-variant/70">
-            {labels.selector.authUnknown}
-          </span>
-        ) : null}
-        {selectable && forks ? (
-          <span className="flex shrink-0 items-center gap-1 text-[10px] text-on-surface-variant/70">
-            <CornerUpRight size={11} />
-            {labels.selector.continueInNewChat}
-          </span>
-        ) : null}
-        {active ? <Check size={14} className="shrink-0 text-primary" /> : null}
-      </button>
+      </div>
 
       {explanation ? (
         <p className="px-2 pb-2 text-[10px] leading-relaxed text-on-surface-variant/70">
@@ -391,9 +395,15 @@ function ExternalAccountLimitsChipFor({ descriptor }: { descriptor: ExternalAgen
     import('@mangostudio/shared/external-agents').ExternalAccountLimits | null | undefined
   >(undefined);
   const [refreshing, setRefreshing] = useState(false);
+  const identityKey = `${descriptor.targetId}:${descriptor.environmentId}:${descriptor.account?.fingerprint ?? ''}`;
+  const identityRef = useRef(identityKey);
+  identityRef.current = identityKey;
 
   useEffect(() => {
     let cancelled = false;
+    // Drop the previous account's snapshot immediately so a late response cannot
+    // paint one identity's quota onto another.
+    setLimits(undefined);
     void getExternalAccountLimits(descriptor.targetId, {
       environmentId: descriptor.environmentId,
       ...(descriptor.account?.fingerprint
@@ -401,21 +411,24 @@ function ExternalAccountLimitsChipFor({ descriptor }: { descriptor: ExternalAgen
         : {}),
     })
       .then((response) => {
-        if (!cancelled) setLimits(response.limits ?? null);
+        if (!cancelled && identityRef.current === identityKey) {
+          setLimits(response.limits ?? null);
+        }
       })
       .catch(() => {
-        if (!cancelled) setLimits(null);
+        if (!cancelled && identityRef.current === identityKey) setLimits(null);
       });
     return () => {
       cancelled = true;
     };
-  }, [descriptor.targetId, descriptor.environmentId, descriptor.account?.fingerprint]);
+  }, [descriptor.targetId, descriptor.environmentId, descriptor.account?.fingerprint, identityKey]);
 
   return (
     <ExternalAccountLimitsChip
       limits={limits}
       refreshing={refreshing}
       onRefresh={() => {
+        const requestIdentity = identityRef.current;
         setRefreshing(true);
         void refreshExternalAccountLimits(descriptor.targetId, {
           environmentId: descriptor.environmentId,
@@ -423,12 +436,18 @@ function ExternalAccountLimitsChipFor({ descriptor }: { descriptor: ExternalAgen
             ? { vendorAccountFingerprint: descriptor.account.fingerprint }
             : {}),
         })
-          .then((response) => setLimits(response.limits ?? null))
+          .then((response) => {
+            if (identityRef.current === requestIdentity) {
+              setLimits(response.limits ?? null);
+            }
+          })
           .catch(() => {
             // Keep the previous chip; toast would need the container.
             void t.externalAgents.limits.refreshFailed;
           })
-          .finally(() => setRefreshing(false));
+          .finally(() => {
+            if (identityRef.current === requestIdentity) setRefreshing(false);
+          });
       }}
     />
   );

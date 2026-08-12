@@ -68,8 +68,10 @@ export function useChatStream({ currentChatId }: UseChatStreamOptions) {
   }, []);
 
   const updateThreadUsage = useCallback((chatId: string, usage: ExternalThreadUsage) => {
-    setThreadUsage(usage);
     threadUsageCacheRef.current.set(chatId, usage);
+    if (chatId === currentChatIdRef.current) {
+      setThreadUsage(usage);
+    }
   }, []);
 
   return {
