@@ -44,7 +44,7 @@ import { EXTERNAL_NATIVE_SESSION_PAGE_LIMIT } from '@mangostudio/shared/external
 import type { Kysely } from 'kysely';
 import { getDb } from '../../../db/database';
 import type { Database } from '../../../db/types';
-import { getRuntimeClient } from '../../../services/runtime-client';
+import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
 import { generateId } from '../../../utils/id';
 import { toPublicChat } from '../../chats/application/public-chat';
 import { createChat, getOwnedChat, updateChat } from '../../chats/infrastructure/chat-repository';
@@ -173,13 +173,13 @@ export function createExternalNativeSessionService(
   ): Promise<
     | {
         readonly ok: true;
-        readonly client: Awaited<ReturnType<typeof getRuntimeClient>>;
+        readonly client: RuntimeClient;
         readonly vendorAccountFingerprint: string | null;
         readonly credentialHomeFingerprint: string;
       }
     | Refusal
   > {
-    let client: Awaited<ReturnType<typeof getRuntimeClient>>;
+    let client: RuntimeClient;
     try {
       client = await resolveRuntimeClient(userId, environmentId);
     } catch {
