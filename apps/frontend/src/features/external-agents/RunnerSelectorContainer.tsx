@@ -7,8 +7,13 @@
  */
 
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
-import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
+import type {
+  ExternalAgentDescriptor,
+  ExternalNativeSession,
+} from '@mangostudio/shared/external-agents';
 import { normalizePermissionLevel } from '@mangostudio/shared/external-agents';
+import type { Messages } from '@mangostudio/shared/i18n';
 import { useState } from 'react';
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
 import { useToast } from '@/components/ui/Toast';
@@ -17,7 +22,9 @@ import { useMessagesQuery } from '@/features/chat/queries';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
-import { forkChatWithRunner } from '@/services/external-agent-service';
+import { ApiError } from '@/lib/utils';
+import { adoptExternalSession, forkChatWithRunner } from '@/services/external-agent-service';
+import { ExternalSessionPicker } from './ExternalSessionPicker';
 import { useExternalAgents } from './useExternalAgents';
 import { useExternalDisclosures } from './useExternalDisclosures';
 
@@ -31,6 +38,10 @@ export function RunnerSelectorContainer() {
   const messages = useMessagesQuery(app.currentChatId);
   const [pendingDisclosure, setPendingDisclosure] = useState<ExternalAgentDescriptor | null>(null);
   const [isAccepting, setAccepting] = useState(false);
+  const [isPickingSession, setPickingSession] = useState(false);
+  const [adoptingId, setAdoptingId] = useState<string | undefined>(undefined);
+  /** Bumped to make the picker re-list after an adoption the server refused as stale. */
+  const [sessionReloadToken, setSessionReloadToken] = useState(0);
 
   const environment = environments.data?.find(
     (candidate) => candidate.id === app.currentEnvironmentId
@@ -61,6 +72,31 @@ export function RunnerSelectorContainer() {
       .catch(() => toast(t.externalAgents.selector.forkFailed, 'error'));
   };
 
+  /**
+   * Adoption always lands in a new chat, so the only success path is navigating
+   * to it. Every refusal keeps the picker open: the user is choosing between
+   * rows, and closing the dialog under them would lose the choice they were
+   * halfway through making.
+   */
+  const adopt = (session: ExternalNativeSession) => {
+    const environmentId = app.currentEnvironmentId;
+    if (!environmentId) return;
+    setAdoptingId(session.nativeSessionId);
+    void adoptExternalSession({ environmentId, session })
+      .then((chat) => {
+        setPickingSession(false);
+        app.handleSelectChat(chat.id);
+      })
+      .catch((error: unknown) => {
+        const code = error instanceof ApiError ? error.code : undefined;
+        toast(adoptionMessage(code, t), 'error');
+        // A stale row is the one failure the list itself can fix, so it
+        // refreshes rather than leaving the same dead row to be clicked again.
+        if (code === ERROR_CODES.CONFLICT) setSessionReloadToken((token) => token + 1);
+      })
+      .finally(() => setAdoptingId(undefined));
+  };
+
   return (
     <>
       <RunnerSelector
@@ -89,7 +125,21 @@ export function RunnerSelectorContainer() {
           activate(descriptor);
         }}
         onForkWithRunner={fork}
+        onBrowseSessions={() => setPickingSession(true)}
       />
+
+      {isPickingSession && app.currentEnvironmentId ? (
+        <ExternalSessionPicker
+          environmentId={app.currentEnvironmentId}
+          environmentName={environmentName}
+          {...(app.currentWorkdir ? { workspacePath: app.currentWorkdir } : {})}
+          agents={external.agents}
+          {...(adoptingId ? { adoptingId } : {})}
+          reloadToken={sessionReloadToken}
+          onAdopt={adopt}
+          onClose={() => setPickingSession(false)}
+        />
+      ) : null}
 
       {pendingDisclosure ? (
         <ExternalDisclosureDialog
@@ -121,4 +171,29 @@ export function RunnerSelectorContainer() {
       ) : null}
     </>
   );
+}
+
+/**
+ * Which refusal the user is looking at.
+ *
+ * Each arm names a different next step — refresh the list, use the other chat,
+ * pick a session that has a folder — so they are not collapsed into one
+ * apology. Anything unrecognized falls back to the generic message rather than
+ * to the server's own sentence: that text is written for an operator reading a
+ * log, not for someone mid-click.
+ */
+function adoptionMessage(code: string | null | undefined, t: Messages): string {
+  const labels = t.externalAgents.sessions;
+  switch (code) {
+    case ERROR_CODES.CONFLICT:
+      return labels.staleSession;
+    case ERROR_CODES.EXTERNAL_SESSION_HELD:
+      return labels.heldSession;
+    case ERROR_CODES.PERMISSION_DENIED:
+      return labels.isolationUnproven;
+    case ERROR_CODES.PROVIDER_ERROR:
+      return labels.unreachable;
+    default:
+      return labels.adoptFailed;
+  }
 }

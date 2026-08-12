@@ -53,6 +53,7 @@ function renderSelector(overrides: Partial<React.ComponentProps<typeof RunnerSel
     onSelectAgent: vi.fn(),
     onSelectExternal: vi.fn(),
     onForkWithRunner: vi.fn(),
+    onBrowseSessions: vi.fn(),
     ...overrides,
   };
   const result = render(<RunnerSelector {...props} />);
