@@ -19,6 +19,7 @@
 
 import { createHmac } from 'node:crypto';
 import type {
+  ExternalAccountLimits,
   ExternalAgentAttachment,
   ExternalAgentCapabilities,
   ExternalAgentConfiguration,
@@ -29,6 +30,7 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import type {
+  ExternalAgentAccountUsage,
   ExternalAgentAdapter,
   ExternalAgentAdapterContext,
   ExternalAgentApprovalResponseInput,
@@ -36,6 +38,7 @@ import type {
   ExternalAgentCloseInput,
   ExternalAgentOpenedSession,
   ExternalAgentOpenSessionInput,
+  ExternalAgentRefreshUsageInput,
   ExternalAgentStartTurnInput,
   ExternalAgentSteerInput,
   ExternalAgentSteerOutcome,
@@ -64,6 +67,8 @@ import {
   CODEX_OPT_OUT_NOTIFICATION_PREFIXES,
   MINIMUM_CODEX_VERSION,
 } from './pinned';
+import type { AccountRateLimitsUpdatedNotification } from './protocol/v2/AccountRateLimitsUpdatedNotification';
+import type { GetAccountRateLimitsResponse } from './protocol/v2/GetAccountRateLimitsResponse';
 import type { GetAccountResponse } from './protocol/v2/GetAccountResponse';
 import type { Model } from './protocol/v2/Model';
 import type { ModelListResponse } from './protocol/v2/ModelListResponse';
@@ -74,6 +79,7 @@ import type { TurnStartParams } from './protocol/v2/TurnStartParams';
 import type { TurnStartResponse } from './protocol/v2/TurnStartResponse';
 import type { TurnSteerParams } from './protocol/v2/TurnSteerParams';
 import type { TurnSteerResponse } from './protocol/v2/TurnSteerResponse';
+import { mapAccountRateLimitsResponse, mergeAccountRateLimitsUpdate } from './rate-limits';
 import { CodexTurnReducer, codexErrorCode } from './reducer';
 import { encodeThreadSandboxMode, encodeTurnSandboxPolicy } from './sandbox';
 import { isCodexVersionSupported, parseCodexVersion, requireCodexVersion } from './version';
@@ -123,6 +129,7 @@ const CODEX_CAPABILITIES: ExternalAgentCapabilities = {
   usageReporting: true,
   cancellation: true,
   steering: true,
+  accountUsage: true,
 };
 
 interface PendingApproval {
@@ -158,6 +165,12 @@ interface CodexSession {
   /** Approvals awaiting `respond`, keyed by the vendor's own JSON-RPC request id. */
   readonly approvals: Map<string, PendingApproval>;
   activeTurn?: ActiveTurn;
+  /**
+   * Full baseline from `account/rateLimits/read`, merged with sparse updates.
+   * Absent until the baseline read succeeds — a sparse update alone must not
+   * produce a displayed snapshot.
+   */
+  accountLimits?: ExternalAccountLimits;
   /**
    * Serializes `steer` calls against this session.
    *
@@ -312,6 +325,9 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     try {
       const started = await this.#startOrResumeThread(launched.client, params, context);
       session.threadId = started.thread.thread.id;
+      // Full baseline is required before any sparse update can be displayed.
+      const accountLimits = await this.#readAccountLimits(session.client, context.signal);
+      if (accountLimits) session.accountLimits = accountLimits;
       return {
         nativeSessionId: started.thread.thread.id,
         resumed: started.resumed,
@@ -321,6 +337,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
         // for rather than what is in force is showing a guess.
         effectiveConfiguration: readEffectiveConfiguration(started.thread, params.configuration),
         capabilities: CODEX_CAPABILITIES,
+        ...(accountLimits ? { accountLimits } : {}),
       };
     } catch (error) {
       this.#sessions.delete(sessionId);
@@ -369,6 +386,11 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
           return;
         }
         active.reducer = new CodexTurnReducer(started.turn.id, this.#now);
+        // Re-announce the latest merged quota so a turn that starts after a
+        // between-turn sparse update still surfaces it on the stream.
+        if (session.accountLimits) {
+          active.channel.push({ type: 'account_limits', limits: session.accountLimits });
+        }
         const buffered = active.buffered;
         active.buffered = [];
         for (const pending of buffered) {
@@ -605,8 +627,17 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
 
   #onNotification(sessionId: string, method: string, params: unknown): void {
     const session = this.#sessions.get(sessionId);
-    const active = session?.activeTurn;
-    if (!session || !active) return;
+    if (!session) return;
+
+    // Account quota updates are session-scoped: they arrive whether or not a
+    // turn is running. Merge into the baseline (or ignore when there is none).
+    if (method === 'account/rateLimits/updated') {
+      this.#mergeAccountLimitsUpdate(session, params);
+      return;
+    }
+
+    const active = session.activeTurn;
+    if (!active) return;
     if (!active.reducer) {
       // Ordering says this cannot happen: `turn/start`'s result precedes every
       // notification for that turn. The bound buffer is here so that if the
@@ -617,6 +648,88 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
       return;
     }
     this.#applyNotification(session, active, method, params);
+  }
+
+  #mergeAccountLimitsUpdate(session: CodexSession, params: unknown): void {
+    const merged = mergeAccountRateLimitsUpdate(
+      session.accountLimits,
+      params as AccountRateLimitsUpdatedNotification,
+      this.#now()
+    );
+    if (!merged) return;
+    session.accountLimits = merged;
+    const active = session.activeTurn;
+    if (active?.reducer) {
+      active.channel.push({ type: 'account_limits', limits: merged });
+    }
+  }
+
+  async #readAccountLimits(
+    client: StdioJsonRpcClient,
+    signal: AbortSignal
+  ): Promise<ExternalAccountLimits | undefined> {
+    const response = await this.#tryRequest<GetAccountRateLimitsResponse>(
+      client,
+      'account/rateLimits/read',
+      {},
+      signal
+    );
+    if (!response) return undefined;
+    return mapAccountRateLimitsResponse(response, this.targetId, this.#now());
+  }
+
+  /**
+   * Re-read the full baseline. Prefer a live session; otherwise open a
+   * short-lived app-server connection solely for the read.
+   *
+   * No-live-session policy: open a short-lived probe (same pattern as
+   * discovery). Reporting "unknown" would make the selector refresh button
+   * useless before any turn has started — the moment the user most needs to
+   * see quota.
+   */
+  async refreshAccountUsage(
+    input: ExternalAgentRefreshUsageInput
+  ): Promise<ExternalAgentAccountUsage> {
+    if (input.sessionId) {
+      const session = this.#sessions.get(input.sessionId);
+      if (session) {
+        const limits = await this.#readAccountLimits(session.client, input.context.signal);
+        if (limits) {
+          session.accountLimits = limits;
+          return { limits };
+        }
+        if (session.accountLimits) return { limits: session.accountLimits };
+        throw new ExternalAgentAdapterError(
+          'codex-account-limits-unavailable',
+          'Codex did not return account rate limits for this session.'
+        );
+      }
+    }
+
+    await this.#assertSupportedVersion(input.context);
+    let launched: { client: StdioJsonRpcClient; process: ExternalAgentManagedProcess } | undefined;
+    try {
+      launched = await this.#launch(input.context, {
+        onNotification: () => undefined,
+        onServerRequest: async () => ({
+          error: {
+            code: -32603,
+            message: 'Codex account-usage probe cannot answer an approval request.',
+          },
+        }),
+      });
+      const limits = await this.#readAccountLimits(launched.client, input.context.signal);
+      if (!limits) {
+        throw new ExternalAgentAdapterError(
+          'codex-account-limits-unavailable',
+          'Codex did not return account rate limits.'
+        );
+      }
+      return { limits };
+    } finally {
+      await launched?.client.close().catch(() => undefined);
+      await launched?.process.terminate({ graceMs: SHUTDOWN_GRACE_MS }).catch(() => undefined);
+    }
   }
 
   #applyNotification(

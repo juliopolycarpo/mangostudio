@@ -81,6 +81,7 @@ export const RUNTIME_METHOD_CAPABILITIES: Readonly<
   'external-agent.steer': ['externalAgents'],
   'external-agent.cancel': ['externalAgents'],
   'external-agent.close': ['externalAgents'],
+  'external-agent.refresh-account-usage': ['externalAgents'],
   'probing.runtimes': ['probing'],
   'probing.version-managers': ['probing'],
   'probing.agent-clis': ['probing'],

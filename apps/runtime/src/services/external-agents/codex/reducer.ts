@@ -272,7 +272,15 @@ export class CodexTurnReducer {
 
   #usage(params: ThreadTokenUsageUpdatedNotification): CodexTurnReduction {
     if (!this.#belongsToTurn(params)) return NOTHING;
-    return only({ type: 'usage', usage: mapTokenUsage(params.tokenUsage.last) });
+    const last = mapTokenUsage(params.tokenUsage.last);
+    const total = mapTokenUsage(params.tokenUsage.total);
+    return {
+      events: [
+        { type: 'usage', usage: last },
+        { type: 'thread_usage', usage: { last, total } },
+      ],
+      finished: false,
+    };
   }
 
   /**

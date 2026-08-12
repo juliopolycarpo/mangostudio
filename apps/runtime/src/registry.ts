@@ -131,6 +131,9 @@ export function createRuntimeMethodHandlers(
       handler('external-agent.steer', (params) => externalAgents.steer(params)),
       handler('external-agent.cancel', (params) => externalAgents.cancel(params)),
       handler('external-agent.close', (params) => externalAgents.closeSession(params)),
+      handler('external-agent.refresh-account-usage', (params, context) =>
+        externalAgents.refreshAccountUsage(params, context.signal)
+      ),
       handler('probing.runtimes', (params) => probingService.probeRuntimes(params)),
       handler('probing.version-managers', (params) => probingService.probeVersionManagers(params)),
       handler('probing.agent-clis', (params) => probingService.probeAgentClis(params)),

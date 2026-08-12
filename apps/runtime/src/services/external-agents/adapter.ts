@@ -1,4 +1,5 @@
 import type {
+  ExternalAccountLimits,
   ExternalAgentCancelParams,
   ExternalAgentEvent,
   ExternalAgentOpenParams,
@@ -118,11 +119,14 @@ export interface ExternalAgentStartReviewInput {
 
 export interface ExternalAgentRefreshUsageInput {
   readonly context: ExternalAgentAdapterContext;
+  /** When set, refresh against this live session rather than opening a probe. */
+  readonly sessionId?: string;
 }
 
-export interface ExternalAgentAccountUsage {
-  readonly summary: string;
-}
+/** Account-level plan quota from a vendor that supports `accountUsage`. */
+export type ExternalAgentAccountUsage = {
+  readonly limits: ExternalAccountLimits;
+};
 
 /** Vendor-neutral lifecycle. Protocol codecs and process policy remain inside adapters. */
 export interface ExternalAgentAdapter {

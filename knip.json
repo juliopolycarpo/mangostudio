@@ -36,7 +36,12 @@
       "project": ["src/**/*.ts", "tests/**/*.ts"]
     },
     "apps/runtime": {
-      "entry": ["src/cli.ts", "tests/**/*.test.ts", "tests/support/external-agent-fixture.ts"],
+      "entry": [
+        "src/cli.ts",
+        "tests/**/*.test.ts",
+        "tests/support/external-agent-fixture.ts",
+        "tests/support/codex-rate-limit-fixtures.ts"
+      ],
       "project": ["src/**/*.ts", "tests/**/*.ts"],
       "ignore": ["src/services/external-agents/codex/protocol/**"]
     },

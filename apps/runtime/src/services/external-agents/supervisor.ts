@@ -10,6 +10,8 @@ import type {
   ExternalAgentEvent,
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
+  ExternalAgentRefreshAccountUsageParams,
+  ExternalAgentRefreshAccountUsageResult,
   ExternalAgentRespondParams,
   ExternalAgentRuntimeDescriptor,
   ExternalAgentSteerParams,
@@ -29,6 +31,8 @@ import {
   ExternalAgentEventSchema,
   ExternalAgentOpenParamsSchema,
   ExternalAgentOpenResultSchema,
+  ExternalAgentRefreshAccountUsageParamsSchema,
+  ExternalAgentRefreshAccountUsageResultSchema,
   ExternalAgentRespondParamsSchema,
   ExternalAgentRuntimeDescriptorSchema,
   ExternalAgentSteerParamsSchema,
@@ -431,6 +435,84 @@ export class ExternalAgentSessionSupervisor {
     session.state = 'closing';
     session.closePromise = this.#closeSession(session, reason);
     return session.closePromise;
+  }
+
+  /**
+   * Manual account-quota refresh. Prefer a live session when `sessionId` is
+   * set and known; otherwise open a short-lived probe (no-live-session policy).
+   */
+  async refreshAccountUsage(
+    params: ExternalAgentRefreshAccountUsageParams,
+    requestSignal: AbortSignal
+  ): Promise<ExternalAgentRefreshAccountUsageResult> {
+    assertExternalAgentParams(
+      'external-agent.refresh-account-usage',
+      ExternalAgentRefreshAccountUsageParamsSchema,
+      params
+    );
+    const adapter = this.#registry.require(params.targetId);
+    if (typeof adapter.refreshAccountUsage !== 'function') {
+      return {};
+    }
+
+    const live = params.sessionId ? this.#sessions.get(params.sessionId) : undefined;
+    if (live && live.adapter.targetId !== params.targetId) {
+      throw new RuntimeToolArgumentError(
+        `Session "${params.sessionId}" belongs to "${live.adapter.targetId}", not "${params.targetId}".`
+      );
+    }
+
+    const processes = new Set<ExternalAgentManagedProcess>();
+    const controller = linkedDeadline(
+      [requestSignal, this.#shutdownController.signal],
+      params.timeoutMs
+    );
+    try {
+      const executable = live
+        ? { path: live.executablePath }
+        : await raceAbort(
+            this.#resolveExecutable(params.targetId, controller.signal),
+            controller.signal,
+            `Resolving external-agent target "${params.targetId}" timed out.`
+          );
+      throwIfAborted(controller.signal);
+      const usage = await raceAbort(
+        adapter.refreshAccountUsage({
+          context: this.#context(
+            adapter,
+            controller.signal,
+            executable.path,
+            live?.workspacePath,
+            processes
+          ),
+          ...(live
+            ? { sessionId: live.sessionId }
+            : params.sessionId
+              ? { sessionId: params.sessionId }
+              : {}),
+        }),
+        controller.signal,
+        `External-agent account-usage refresh for "${params.targetId}" timed out.`
+      );
+      const result = { limits: usage.limits };
+      if (!Value.Check(ExternalAgentRefreshAccountUsageResultSchema, result)) {
+        throw new Error('External-agent account-usage refresh produced an invalid result.');
+      }
+      controller.dispose();
+      await this.#terminateProcesses(processes);
+      return result;
+    } catch (error) {
+      controller.dispose();
+      try {
+        await this.#terminateProcesses(processes);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          `External-agent account-usage refresh for "${params.targetId}" failed during cleanup.`
+        );
+      }
+      throw error;
+    }
   }
 
   close(): Promise<void> {

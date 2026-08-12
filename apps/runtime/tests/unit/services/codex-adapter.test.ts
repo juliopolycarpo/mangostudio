@@ -310,6 +310,27 @@ describe('codex adapter — turns', () => {
           totalTokens: 120,
         },
       },
+      {
+        type: 'thread_usage',
+        usage: {
+          last: {
+            inputTokens: 100,
+            outputTokens: 20,
+            cacheReadTokens: 10,
+            cacheWriteTokens: 5,
+            reasoningTokens: 3,
+            totalTokens: 120,
+          },
+          total: {
+            inputTokens: 21_424,
+            outputTokens: 7,
+            cacheReadTokens: 6_912,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+            totalTokens: 21_431,
+          },
+        },
+      },
       { type: 'completed' },
     ]);
   });

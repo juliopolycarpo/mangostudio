@@ -16,6 +16,8 @@ import type {
   ExternalAgentEventEnvelope,
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
+  ExternalAgentRefreshAccountUsageParams,
+  ExternalAgentRefreshAccountUsageResult,
   ExternalAgentRespondParams,
   ExternalAgentSteerParams,
   ExternalAgentSteerResult,
@@ -66,6 +68,8 @@ export type {
   ExternalAgentEventEnvelope,
   ExternalAgentOpenParams,
   ExternalAgentOpenResult,
+  ExternalAgentRefreshAccountUsageParams,
+  ExternalAgentRefreshAccountUsageResult,
   ExternalAgentRespondParams,
   ExternalAgentSteerParams,
   ExternalAgentSteerResult,
@@ -1077,6 +1081,10 @@ export interface RuntimeMethodMap {
   'external-agent.close': {
     readonly params: ExternalAgentCloseParams;
     readonly result: ExternalAgentAckResult;
+  };
+  'external-agent.refresh-account-usage': {
+    readonly params: ExternalAgentRefreshAccountUsageParams;
+    readonly result: ExternalAgentRefreshAccountUsageResult;
   };
   'probing.runtimes': {
     readonly params: RuntimeProbeRuntimesParams;

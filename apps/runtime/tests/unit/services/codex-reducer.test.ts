@@ -83,18 +83,51 @@ describe('codex reducer — the captured real turn', () => {
           totalTokens: 21_431,
         },
       },
+      {
+        type: 'thread_usage',
+        usage: {
+          last: {
+            inputTokens: 21_424,
+            outputTokens: 7,
+            cacheReadTokens: 6_912,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+            totalTokens: 21_431,
+          },
+          total: {
+            inputTokens: 21_424,
+            outputTokens: 7,
+            cacheReadTokens: 6_912,
+            cacheWriteTokens: 0,
+            reasoningTokens: 0,
+            totalTokens: 21_431,
+          },
+        },
+      },
       { type: 'completed' },
     ]);
     expect(reducer.finished).toBe(true);
   });
 
-  it('captures usage before the turn ends, not after it', () => {
+  it('captures usage before the turn ends, and keeps it through completion', () => {
     const usageIndex = transcript.findIndex(
       (frame) => frame.method === 'thread/tokenUsage/updated'
     );
     const completedIndex = transcript.findIndex((frame) => frame.method === 'turn/completed');
     expect(usageIndex).toBeGreaterThanOrEqual(0);
     expect(usageIndex).toBeLessThan(completedIndex);
+
+    const realTurnId = '019fe6d2-e0fc-73f2-a1ee-3a190d09293b';
+    const reducer = new CodexTurnReducer(realTurnId);
+    const events = transcript.flatMap((frame) => [
+      ...reducer.reduce(frame.method, frame.params).events,
+    ]);
+    const usageEvent = events.find((event) => event.type === 'usage');
+    const completedEvent = events.find((event) => event.type === 'completed');
+    expect(usageEvent).toBeDefined();
+    expect(completedEvent).toBeDefined();
+    if (!usageEvent || !completedEvent) return;
+    expect(events.indexOf(usageEvent)).toBeLessThan(events.indexOf(completedEvent));
   });
 });
 
