@@ -1027,6 +1027,11 @@ async function startReviewTurn(context: {
     target: context.target,
   });
   if (started.reviewThreadId !== context.handle.nativeSessionId) {
+    // The turn is refused but it is already accepted over there. Nothing else
+    // will stop it: the hub never learns its id — `finish` cancels only a turn
+    // it recorded — so a vendor that ran it detached would keep the session
+    // busy and the next send would be refused for a turn nobody can see.
+    await context.handle.cancel(started.nativeTurnId).catch(() => undefined);
     throw new Error(
       `The review was started on session "${started.reviewThreadId}" instead of this chat's own.`
     );

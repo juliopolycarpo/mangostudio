@@ -617,6 +617,13 @@ describe('external turn controller', () => {
       expect(result.error?.code).toBe('review-start');
       expect(result.error?.message).toContain('some-other-thread');
       expect(runtime.calls.startReview).toHaveLength(1);
+      // The turn is refused here but already accepted over there, and the hub
+      // never records its id — so nothing else would ever stop it, and the
+      // session would stay busy for a turn nobody can see.
+      expect(runtime.calls.cancel).toContainEqual({
+        sessionId: 'session-1',
+        nativeTurnId: 'native-turn-1',
+      });
     });
 
     it('refuses a review on a session whose adapter reported no nativeReview', async () => {

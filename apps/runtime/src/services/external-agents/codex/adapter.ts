@@ -507,7 +507,10 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     if (started.reviewThreadId !== session.threadId) {
       channel.finish();
       if (session.activeTurn === active) session.activeTurn = undefined;
-      await this.#interruptTurn(session, started.turn.id);
+      // Interrupted on the thread it actually runs on. `turn/interrupt` names a
+      // thread as well as a turn, so sending this session's would be a no-op
+      // and would leave the detached review running with nothing watching it.
+      await this.#interruptTurn(session, started.turn.id, started.reviewThreadId);
       throw new ExternalAgentAdapterError(
         'codex-review-detached',
         `Codex ran an inline review on thread "${started.reviewThreadId}" instead of "${session.threadId}".`
@@ -632,11 +635,22 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
     }
   }
 
-  /** `turn/interrupt`, best effort: a failure here must not fail a cancel. */
-  async #interruptTurn(session: CodexSession, turnId: string): Promise<void> {
-    if (!session.threadId) return;
+  /**
+   * `turn/interrupt`, best effort: a failure here must not fail a cancel.
+   *
+   * `threadId` defaults to the session's own, which is where every turn this
+   * adapter starts runs. It is overridable for the one case where that is not
+   * true: a review Codex ran detached, which has to be stopped on the thread it
+   * reported rather than on the one that asked for it.
+   */
+  async #interruptTurn(
+    session: CodexSession,
+    turnId: string,
+    threadId = session.threadId
+  ): Promise<void> {
+    if (!threadId) return;
     await session.client
-      .request('turn/interrupt', { threadId: session.threadId, turnId }, SHUTDOWN_GRACE_MS)
+      .request('turn/interrupt', { threadId, turnId }, SHUTDOWN_GRACE_MS)
       .catch(() => undefined);
   }
 

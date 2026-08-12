@@ -1139,8 +1139,11 @@ describe('codex adapter — native review', () => {
         context: test.context,
       })
     ).rejects.toThrow('some-other-thread');
-    // The turn Codex accepted is stopped rather than left running unwatched.
-    expect(test.server()?.called('turn/interrupt')).toBe(true);
+    // The turn Codex accepted is stopped rather than left running unwatched —
+    // and stopped on the thread it actually runs on. `turn/interrupt` names a
+    // thread as well as a turn, so this session's id would be a no-op.
+    const interrupt = test.server()?.calls.find((call) => call.method === 'turn/interrupt');
+    expect(interrupt?.params).toMatchObject({ threadId: 'some-other-thread', turnId: TURN_ID });
   });
 
   it('reports a review turn as not steerable, without a round trip', async () => {
