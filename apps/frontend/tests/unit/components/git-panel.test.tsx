@@ -11,6 +11,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitPanel } from '../../../src/features/workspace/GitPanel';
+import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
 import { render } from '../../support/harness/render';
 
@@ -180,6 +181,26 @@ beforeEach(() => {
   localStorage.clear();
 });
 
+/**
+ * The panel reads the app's runner to decide whether to offer the agent's own
+ * review of the working tree. Only the fields that decision needs are supplied,
+ * and the runner is MangoStudio's own — the review action has its own suite.
+ */
+function Panel({ chatId = 'chat-1' }: { readonly chatId?: string }) {
+  const app = {
+    runner: { kind: 'mangostudio' },
+    currentChatId: chatId,
+    currentEnvironmentId: null,
+    isGenerating: false,
+    handleReviewChanges: () => Promise.resolve(),
+  };
+  return (
+    <AppContext value={app as never}>
+      <GitPanel chatId={chatId} />
+    </AppContext>
+  );
+}
+
 describe('GitPanel', () => {
   it('shows branch divergence and merges unstaged work into one changes group', () => {
     hooks.data = repoState({
@@ -194,7 +215,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     expect(screen.getByText('mangostudio')).toBeInTheDocument();
     expect(screen.getByText('feat/git-panel')).toBeInTheDocument();
@@ -243,7 +264,7 @@ describe('GitPanel', () => {
       )
       .mockResolvedValueOnce(undefined);
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByLabelText('Change branch'));
     await user.click(screen.getByRole('button', { name: 'Switch to feat/history' }));
@@ -267,7 +288,7 @@ describe('GitPanel', () => {
       remotes: [],
     };
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByLabelText('Change branch'));
     await user.type(screen.getByPlaceholderText('feat/branch-name'), 'feat/navigation');
@@ -287,7 +308,7 @@ describe('GitPanel', () => {
       remotes: [],
     };
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByLabelText('Change branch'));
     await user.click(screen.getByRole('button', { name: 'More actions for feat/history' }));
@@ -319,7 +340,7 @@ describe('GitPanel', () => {
       .mockRejectedValueOnce(new ApiError({ error: 'not fully merged', code: 'BRANCH_NOT_MERGED' }))
       .mockResolvedValueOnce({ branches: [], remotes: [] });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByLabelText('Change branch'));
     await user.click(screen.getByRole('button', { name: 'More actions for feat/history' }));
@@ -348,7 +369,7 @@ describe('GitPanel', () => {
       remotes: [],
     };
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByLabelText('Change branch'));
     await user.click(screen.getByRole('button', { name: 'More actions for main' }));
@@ -386,7 +407,7 @@ describe('GitPanel', () => {
       },
     };
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     // The card is collapsed by default so it cannot push the commit box down.
     await user.click(screen.getByText('GitHub'));
 
@@ -407,16 +428,16 @@ describe('GitPanel', () => {
     hooks.data = repoState();
     hooks.githubData = { state: 'gh-not-installed' };
 
-    const { rerender } = render(<GitPanel chatId="chat-1" />);
+    const { rerender } = render(<Panel />);
     await user.click(screen.getByText('GitHub'));
     expect(screen.getByText(/Install GitHub CLI/)).toBeVisible();
 
     hooks.githubData = { state: 'not-authenticated' };
-    rerender(<GitPanel chatId="chat-1" />);
+    rerender(<Panel />);
     expect(screen.getByText(/gh auth login/)).toBeVisible();
 
     hooks.githubData = { state: 'not-a-github-remote' };
-    rerender(<GitPanel chatId="chat-1" />);
+    rerender(<Panel />);
     expect(screen.queryByText('GitHub')).not.toBeInTheDocument();
   });
 
@@ -424,7 +445,7 @@ describe('GitPanel', () => {
     const user = userEvent.setup();
     hooks.data = { state: 'not-a-repo', workdir: '/srv/projects/new-project' };
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'Initialize repository' }));
 
     expect(hooks.mutate).toHaveBeenCalledOnce();
@@ -434,7 +455,7 @@ describe('GitPanel', () => {
     const user = userEvent.setup();
     hooks.error = new Error('failed');
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'Retry' }));
 
     expect(hooks.refetch).toHaveBeenCalledOnce();
@@ -453,7 +474,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'Stage src/panel.tsx' }));
     expect(hooks.stage).toHaveBeenCalledWith({ paths: ['src/panel.tsx'] });
@@ -475,7 +496,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'Stage all Changes' }));
 
     expect(hooks.stage).toHaveBeenCalledWith({ paths: ['src/panel.tsx', 'notes.txt'] });
@@ -495,7 +516,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'Discard everything in Changes' }));
 
     const dialog = screen.getByRole('dialog', { name: 'Discard changes and delete files?' });
@@ -526,7 +547,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'Delete untracked file notes.txt' }));
     expect(screen.getByRole('dialog', { name: 'Delete untracked files?' })).toBeVisible();
@@ -556,7 +577,7 @@ describe('GitPanel', () => {
       diff: '@@ -4,2 +4,2 @@\n-old title\n+new title\n',
     };
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
 
     const diff = screen.getByRole('region', { name: 'View diff for src/panel.tsx' });
@@ -591,7 +612,7 @@ describe('GitPanel', () => {
       diff: '@@ -1 +1 @@\n-old\n+new\n',
     };
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     await user.click(screen.getByRole('tab', { name: 'History' }));
     await user.click(screen.getByRole('button', { name: /Ship repository navigation/ }));
 
@@ -615,7 +636,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship Git writes');
     await user.type(screen.getByRole('textbox', { name: 'Commit body' }), 'Includes UI actions.');
@@ -644,7 +665,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     const titleInput = screen.getByRole('textbox', { name: 'Commit title' });
     await user.type(titleInput, 'Ship Git writes');
@@ -672,7 +693,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Stage all and commit' }));
@@ -696,7 +717,7 @@ describe('GitPanel', () => {
       },
     });
 
-    const { rerender } = render(<GitPanel chatId="chat-1" />);
+    const { rerender } = render(<Panel />);
     await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Ship');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Commit and push' }));
@@ -706,7 +727,7 @@ describe('GitPanel', () => {
 
     hooks.commit.mockRejectedValue(new Error('hook rejected the commit'));
     hooks.gitPush.mockClear();
-    rerender(<GitPanel chatId="chat-1" />);
+    rerender(<Panel />);
     await user.type(screen.getByRole('textbox', { name: 'Commit title' }), 'Second');
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Commit and push' }));
@@ -734,7 +755,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     await user.click(screen.getByRole('button', { name: 'Generate message' }));
 
     expect(hooks.generate).toHaveBeenCalledOnce();
@@ -767,7 +788,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     const titleInput = screen.getByRole('textbox', { name: 'Commit title' });
     await user.type(titleInput, 'manual title');
     await user.click(screen.getByRole('button', { name: 'Generate message' }));
@@ -789,7 +810,7 @@ describe('GitPanel', () => {
     };
     hooks.data = repoState();
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit' }));
@@ -823,7 +844,7 @@ describe('GitPanel', () => {
     });
     hooks.data = repoState();
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await openCommitMenu(user);
     await user.click(screen.getByRole('menuitem', { name: 'Amend latest commit' }));
@@ -848,7 +869,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
     await user.click(screen.getByRole('menuitem', { name: 'Stashes...' }));
@@ -878,7 +899,7 @@ describe('GitPanel', () => {
     hooks.stashes = [{ index: 0, message: 'Agent draft', branch: 'main' }];
     hooks.data = repoState();
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
     await user.click(screen.getByRole('menuitem', { name: 'Stashes...' }));
@@ -896,7 +917,7 @@ describe('GitPanel', () => {
     hooks.gitFetch.mockResolvedValue(undefined);
     hooks.data = repoState();
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByRole('button', { name: 'More repository actions' }));
     const prune = screen.getByRole('menuitemcheckbox', { name: 'Prune stale branches' });
@@ -928,7 +949,7 @@ describe('GitPanel', () => {
       },
     });
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
     expect(
       screen.queryByRole('button', { name: 'Force push (with lease)' })
     ).not.toBeInTheDocument();
@@ -951,7 +972,7 @@ describe('GitPanel', () => {
       remotes: [{ name: 'feat/remote', remote: 'origin', ref: 'origin/feat/remote' }],
     };
 
-    render(<GitPanel chatId="chat-1" />);
+    render(<Panel />);
 
     await user.click(screen.getByLabelText('Change branch'));
     await user.click(screen.getByRole('button', { name: 'Check out origin/feat/remote' }));

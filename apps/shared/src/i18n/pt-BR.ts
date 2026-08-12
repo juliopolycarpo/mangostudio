@@ -2959,6 +2959,27 @@ export const messages = {
         'id-reused': 'Isto já foi enviado com um texto diferente. Tente novamente.',
       },
     },
+    /**
+     * A revisão que o próprio agente faz do diretório de trabalho.
+     *
+     * Cada texto aqui diz explicitamente o que é revisado, porque o seletor de
+     * permissões tem a opção "Revisão automática" e as duas coisas são
+     * opostas: esta revisa o *seu* código, aquela responde aos pedidos *do
+     * agente* no seu lugar. Quem achasse ter ligado revisão de código e na
+     * verdade tivesse ligado aprovação automática estaria sendo mal informado.
+     */
+    review: {
+      button: 'Revisar minhas mudanças',
+      hint: 'O {vendor} revisa o código no seu diretório de trabalho — no índice, fora dele e não rastreado.',
+      /** O que a transcrição registra como pedido do usuário. */
+      userMessage: 'Revise minhas mudanças não commitadas.',
+      running: 'Revisando…',
+      noChanges: 'Nada a revisar — esta pasta não tem mudanças pendentes.',
+      requiresGit: 'Esta pasta não é um repositório Git, então não há mudanças para revisar.',
+      requiresWorkdir: 'Escolha uma pasta para este chat antes de pedir uma revisão.',
+      unsupported: 'Este agente não revisa o seu diretório de trabalho.',
+      failed: 'Não foi possível iniciar a revisão.',
+    },
     loginHint: 'Rode isto naquela máquina para entrar:',
   },
 

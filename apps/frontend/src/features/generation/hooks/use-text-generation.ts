@@ -11,6 +11,7 @@ import {
   isTimestampChatTitle,
 } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import type { ExternalReviewTarget } from '@mangostudio/shared/external-agents';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import type {
   ExternalTurnRequest,
@@ -18,6 +19,7 @@ import type {
   ToolIntent,
 } from '@mangostudio/shared/generation';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
+import type { StreamChunk } from '@mangostudio/shared/streaming';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import { invalidateChatFileCheckpoints } from '@/features/chat/hooks/use-chat-file-checkpoints';
@@ -45,6 +47,7 @@ import {
   cancelInterruptedTurn,
   dismissInterruptedTurn,
   respondTextStream,
+  startExternalReviewStream,
 } from '@/services/generation-service';
 
 /**
@@ -192,6 +195,23 @@ interface UseTextGenerationOptions {
 
 type RecoveryRequest = NonNullable<RespondStreamBody['recovery']>;
 
+/**
+ * One turn, however it was started.
+ *
+ * `review` is what makes this an options object rather than four positional
+ * arguments: a review carries no prompt the user wrote, no attachments and no
+ * MangoStudio model, but everything after the request — optimistic messages,
+ * the reducer, cancellation, error handling, invalidation — is identical, and
+ * a second copy of that is a second place for it to drift.
+ */
+interface RunTurnOptions {
+  readonly prompt: string;
+  readonly toolIntent?: ToolIntent;
+  readonly attachmentIds?: string[];
+  readonly recovery?: RecoveryRequest;
+  readonly review?: ExternalReviewTarget;
+}
+
 function resolveSummaryModelId(settings: ContextSettings, currentModel: string): string {
   return settings.preferredSummaryModel === 'current_model'
     ? currentModel
@@ -315,13 +335,8 @@ export function useTextGeneration({
     [chats, queryClient]
   );
 
-  const handleRespond = useCallback(
-    async (
-      prompt: string,
-      toolIntent?: ToolIntent,
-      attachmentIds?: string[],
-      recovery?: RecoveryRequest
-    ) => {
+  const runTurn = useCallback(
+    async ({ prompt, toolIntent, attachmentIds, recovery, review }: RunTurnOptions) => {
       if (stream.abortControllerRef.current) return;
       stream.setIsGenerating(true);
 
@@ -361,8 +376,12 @@ export function useTextGeneration({
         : model;
       const agentSelection = boundAgentSelection ?? getAgentSelection();
 
+      // A review's prompt is the button's own label, the same words every time.
+      // Renaming a chat to it would replace a timestamp with something even
+      // less descriptive.
       if (
         !recovery &&
+        !review &&
         shouldRenameChatFromPrompt(chatTitleSettings, activeChatTitle, createdChatDuringRequest)
       ) {
         startChatAutoRename({
@@ -418,74 +437,87 @@ export function useTextGeneration({
         // lands because the controller is already registered.
         await whenRunnerPersisted?.();
 
-        await sendWithExternalConsent(activeChatId, () =>
-          respondTextStream(
-            {
-              chatId: activeChatId,
-              prompt,
-              attachmentIds,
-              model,
-              systemPrompt: systemPrompt || undefined,
-              promptSettings,
-              thinkingEnabled,
-              reasoningEffort,
-              maxToolIterations,
-              contextSettings,
-              toolIntent,
-              // Vendor ids, not MangoStudio's: a Codex model and one of that
-              // model's own efforts. Absent on an internal turn, where the closed
-              // `model`/`reasoningEffort` pair is the right vocabulary.
-              externalTurn: externalTurnRequest,
-              agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
-              recovery,
-            },
-            (chunk) => {
-              streamState = reduceTextGenerationStreamChunk(streamState, chunk, {
-                pendingSubagentName,
+        await sendWithExternalConsent(activeChatId, () => {
+          const onChunk = (chunk: StreamChunk) => {
+            streamState = reduceTextGenerationStreamChunk(streamState, chunk, {
+              pendingSubagentName,
+            });
+            applyStreamMessageUpdate(
+              activeChatId,
+              streamState.userMessageUpdate,
+              updateOptimisticMessage
+            );
+            applyStreamMessageUpdate(
+              activeChatId,
+              streamState.aiMessageUpdate,
+              updateOptimisticMessage
+            );
+
+            if (chunk.type === 'assistant_message_id') {
+              activeTurnRef.current = { chatId: activeChatId, messageId: chunk.messageId };
+              if (recovery) {
+                void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
+              }
+            }
+
+            if (chunk.type === 'context_info') {
+              stream.updateContextInfo(activeChatId, {
+                estimatedInputTokens: chunk.estimatedInputTokens,
+                contextLimit: chunk.contextLimit,
+                estimatedUsageRatio: chunk.estimatedUsageRatio,
+                mode: chunk.mode,
+                severity: chunk.severity,
               });
-              applyStreamMessageUpdate(
+            }
+
+            if (streamState.threadUsage) {
+              stream.updateThreadUsage(activeChatId, streamState.threadUsage);
+            }
+
+            if (chunk.type === 'fallback_notice') {
+              stream.setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
+            }
+
+            if (chunk.type === 'todo_update') {
+              setChatTodos(queryClient, activeChatId, chunk.todos);
+            }
+          };
+
+          // One transport per kind of turn, one reducer for both. A review has
+          // no prompt, no attachments and no MangoStudio model to name; what it
+          // has is the same chunk vocabulary, which is why everything above this
+          // line is shared.
+          return review
+            ? startExternalReviewStream(
                 activeChatId,
-                streamState.userMessageUpdate,
-                updateOptimisticMessage
+                { target: review, displayPrompt: prompt },
+                onChunk,
+                controller.signal
+              )
+            : respondTextStream(
+                {
+                  chatId: activeChatId,
+                  prompt,
+                  attachmentIds,
+                  model,
+                  systemPrompt: systemPrompt || undefined,
+                  promptSettings,
+                  thinkingEnabled,
+                  reasoningEffort,
+                  maxToolIterations,
+                  contextSettings,
+                  toolIntent,
+                  // Vendor ids, not MangoStudio's: a Codex model and one of that
+                  // model's own efforts. Absent on an internal turn, where the
+                  // closed `model`/`reasoningEffort` pair is the right vocabulary.
+                  externalTurn: externalTurnRequest,
+                  agentId: isAgentId(agentSelection.agentId) ? agentSelection.agentId : undefined,
+                  recovery,
+                },
+                onChunk,
+                controller.signal
               );
-              applyStreamMessageUpdate(
-                activeChatId,
-                streamState.aiMessageUpdate,
-                updateOptimisticMessage
-              );
-
-              if (chunk.type === 'assistant_message_id') {
-                activeTurnRef.current = { chatId: activeChatId, messageId: chunk.messageId };
-                if (recovery) {
-                  void queryClient.invalidateQueries({ queryKey: messageKeys.list(activeChatId) });
-                }
-              }
-
-              if (chunk.type === 'context_info') {
-                stream.updateContextInfo(activeChatId, {
-                  estimatedInputTokens: chunk.estimatedInputTokens,
-                  contextLimit: chunk.contextLimit,
-                  estimatedUsageRatio: chunk.estimatedUsageRatio,
-                  mode: chunk.mode,
-                  severity: chunk.severity,
-                });
-              }
-
-              if (streamState.threadUsage) {
-                stream.updateThreadUsage(activeChatId, streamState.threadUsage);
-              }
-
-              if (chunk.type === 'fallback_notice') {
-                stream.setFallbackNotice({ from: chunk.from, to: chunk.to, reason: chunk.reason });
-              }
-
-              if (chunk.type === 'todo_update') {
-                setChatTodos(queryClient, activeChatId, chunk.todos);
-              }
-            },
-            controller.signal
-          )
-        );
+        });
       } catch (error: unknown) {
         const isAbort = error instanceof Error && error.name === 'AbortError';
         if (isAbort) {
@@ -549,6 +581,33 @@ export function useTextGeneration({
       pendingSubagentName,
     ]
   );
+
+  const handleRespond = useCallback(
+    async (
+      prompt: string,
+      toolIntent?: ToolIntent,
+      attachmentIds?: string[],
+      recovery?: RecoveryRequest
+    ) => {
+      await runTurn({ prompt, toolIntent, attachmentIds, recovery });
+    },
+    [runTurn]
+  );
+
+  /**
+   * The vendor's own review of the working tree, as an ordinary turn.
+   *
+   * Refused without a chat: a review needs a workspace, and a workspace lives on
+   * a chat. Nothing is created here — an action that silently made a new chat to
+   * review a folder it does not have yet would be a surprise, not a shortcut.
+   */
+  const handleReviewChanges = useCallback(async () => {
+    if (!chats.currentChatId) return;
+    await runTurn({
+      prompt: t.externalAgents.review.userMessage,
+      review: { type: 'uncommittedChanges' },
+    });
+  }, [chats.currentChatId, runTurn, t.externalAgents.review.userMessage]);
 
   const handleStop = useCallback(() => {
     const activeTurn = activeTurnRef.current;
@@ -624,6 +683,7 @@ export function useTextGeneration({
   return {
     isGenerating: stream.isGenerating,
     handleRespond,
+    handleReviewChanges,
     handleCompactCurrentChat,
     handleStartSummarizedChat,
     handleStop,

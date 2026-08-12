@@ -2963,6 +2963,28 @@ export const messages: Messages = {
         'id-reused': 'This was already sent with different text. Try again.',
       },
     },
+    /**
+     * The agent's own review of the working tree.
+     *
+     * Every string here names its subject explicitly, because the permissions
+     * dropdown has an "Auto-review" option and the two words mean opposite
+     * things: this reviews *your* code, that one answers *the agent's* requests
+     * for you. Someone who thought they had turned on code review and had
+     * actually turned on unattended approvals would have been badly misled, so
+     * the copy says which one it is rather than relying on placement.
+     */
+    review: {
+      button: 'Review my changes',
+      hint: '{vendor} reviews the code in your working tree — staged, unstaged and untracked.',
+      /** What the transcript records the user as having asked for. */
+      userMessage: 'Review my uncommitted changes.',
+      running: 'Reviewing…',
+      noChanges: 'Nothing to review — this folder has no uncommitted changes.',
+      requiresGit: 'This folder is not a Git repository, so there are no changes to review.',
+      requiresWorkdir: 'Choose a folder for this chat before asking for a review.',
+      unsupported: 'This agent does not review your working tree.',
+      failed: 'The review could not be started.',
+    },
     loginHint: 'Run this on that machine to sign in:',
   },
 
