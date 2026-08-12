@@ -58,6 +58,15 @@ export const ERROR_CODES = {
    * because the request is well-formed and the fix is one explicit choice.
    */
   EXTERNAL_DISCLOSURE_REQUIRED: 'EXTERNAL_DISCLOSURE_REQUIRED',
+  /**
+   * Another MangoStudio chat already holds the native vendor session this
+   * request tried to adopt.
+   *
+   * Its own code because the remedy is neither a retry nor a refresh: one
+   * vendor session has one transcript, and the way out is to use the chat that
+   * already has it — or to let that chat's lease expire.
+   */
+  EXTERNAL_SESSION_HELD: 'EXTERNAL_SESSION_HELD',
   INTERNAL: 'INTERNAL',
 } as const;
 

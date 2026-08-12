@@ -1003,6 +1003,116 @@ export const ExternalAgentAckResultSchema = Type.Object(
 export type ExternalAgentAckResult = Static<typeof ExternalAgentAckResultSchema>;
 
 /**
+ * One conversation a vendor already owns, as a picker row.
+ *
+ * This is a *pointer*, not an import. Nothing here carries transcript content:
+ * adopting a session records which vendor conversation a chat continues, and
+ * the vendor keeps the history it wrote.
+ *
+ * `updatedAtMs` is milliseconds since epoch, normalized exactly once at the
+ * runtime boundary — Codex reports Unix **seconds**, Cursor an **ISO-8601**
+ * string, and no consumer past the adapter sees either. The `AtMs` suffix is
+ * the contract that the conversion already happened.
+ *
+ * Both text fields are vendor-supplied and therefore bounded and inert:
+ * `title` is Codex's nullable thread name, `preview` its "usually the first
+ * user message". Cursor has **neither** — its listing is `sessionId`, `cwd` and
+ * `updatedAt` and nothing else — so a row with no title is a complete answer
+ * rather than a missing one, and nothing synthesizes text to fill the gap.
+ */
+export const ExternalNativeSessionSchema = Type.Object(
+  {
+    targetId: ExternalAgentTargetIdSchema,
+    /** Codex: `Thread.id`, never `Thread.sessionId`. Cursor: `sessionId`. */
+    nativeSessionId: ExternalAgentOpaqueIdSchema,
+    title: Type.Optional(VendorText('sessionTitle', { minLength: 1 })),
+    preview: Type.Optional(VendorText('sessionTitle', { minLength: 1 })),
+    /** The vendor's own working directory for the session, when it reports one. */
+    workspacePath: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+    updatedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { additionalProperties: false }
+);
+export type ExternalNativeSession = Static<typeof ExternalNativeSessionSchema>;
+
+/**
+ * How many sessions one page may carry.
+ *
+ * A ceiling rather than a preference: vendor histories are unbounded, and the
+ * picker pages through them. Stated here so the runtime, the hub and the schema
+ * cannot disagree about what "a page" is.
+ */
+export const EXTERNAL_NATIVE_SESSION_PAGE_LIMIT = 50;
+
+export const ExternalAgentListSessionsParamsSchema = Type.Object(
+  {
+    targetId: ExternalAgentTargetIdSchema,
+    /**
+     * Filter to one workspace, exactly as the vendor spells it.
+     *
+     * Also the directory the listing connection is authorized against, which is
+     * why it is a canonical path and not a pattern: a listing is a read of
+     * another machine's conversation history, and it happens inside the
+     * runtime-owner's workspace policy like everything else.
+     */
+    workspacePath: Type.Optional(Type.String({ minLength: 1, maxLength: 4_096 })),
+    cursor: Type.Optional(ExternalAgentOpaqueIdSchema),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: EXTERNAL_NATIVE_SESSION_PAGE_LIMIT })),
+    /** When set, answer from this live session's connection instead of a probe. */
+    sessionId: Type.Optional(ExternalAgentOpaqueIdSchema),
+    timeoutMs: ExternalAgentTimeoutSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentListSessionsParams = Static<typeof ExternalAgentListSessionsParamsSchema>;
+
+export const ExternalAgentListSessionsResultSchema = Type.Object(
+  {
+    sessions: ReadonlyArraySchema(ExternalNativeSessionSchema, {
+      maxItems: EXTERNAL_NATIVE_SESSION_PAGE_LIMIT,
+    }),
+    /** Absent when the vendor has no further pages. */
+    nextCursor: Type.Optional(ExternalAgentOpaqueIdSchema),
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentListSessionsResult = Static<typeof ExternalAgentListSessionsResultSchema>;
+
+/** The hub's own answer: the runtime's page, plus which machine it describes. */
+export const ExternalNativeSessionListResponseSchema = Type.Object(
+  {
+    environmentId: Type.String({ minLength: 1 }),
+    sessions: ReadonlyArraySchema(ExternalNativeSessionSchema, {
+      maxItems: EXTERNAL_NATIVE_SESSION_PAGE_LIMIT,
+    }),
+    nextCursor: Type.Optional(ExternalAgentOpaqueIdSchema),
+  },
+  { additionalProperties: false }
+);
+export type ExternalNativeSessionListResponse = Static<
+  typeof ExternalNativeSessionListResponseSchema
+>;
+
+/**
+ * What adoption is asked for: a machine, and the row the picker rendered.
+ *
+ * The row is an *expectation*, not an input. The server re-reads the session
+ * from the vendor before it creates anything and refuses when the answer
+ * differs, so nothing it stores comes from here — the workspace a chat ends up
+ * with is the one the vendor confirmed. What echoing the row buys is the
+ * refusal: without it, adoption would attach to whatever that id points at now,
+ * which may be a conversation the user never saw.
+ */
+export const ExternalSessionAdoptionRequestSchema = Type.Object(
+  {
+    environmentId: Type.String({ minLength: 1, maxLength: 256 }),
+    session: ExternalNativeSessionSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalSessionAdoptionRequest = Static<typeof ExternalSessionAdoptionRequestSchema>;
+
+/**
  * How an external turn ended. A closed set, deliberately.
  *
  * Every member is a state the hub can actually reach, and a turn that ends for

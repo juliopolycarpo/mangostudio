@@ -296,6 +296,7 @@ export const messages = {
       chatCompacted: 'Contexto compactado em um resumo',
       summaryHandoff: 'Este chat começou a partir de um resumo anterior',
       cursorInternalToolCall: 'Cursor usou {tool}',
+      externalSessionAdopted: 'Continuando uma sessão do {vendor} iniciada fora do MangoStudio',
     },
   },
 
@@ -2718,6 +2719,36 @@ export const messages = {
       ownership: '{vendor} controla as próprias ferramentas e permissões.',
       unavailableHere: 'Este agente não pode rodar aqui agora — escolha outro.',
       forkFailed: 'Não foi possível criar o novo chat.',
+    },
+    sessions: {
+      entry: 'Continuar uma sessão do seu terminal',
+      title: 'Continuar uma sessão do seu terminal',
+      subtitle:
+        'Escolha uma conversa que você começou por CLI em {environment}. O MangoStudio continua a conversa — ele não copia o histórico.',
+      loading: 'Procurando sessões…',
+      empty: 'Nenhuma sessão encontrada nesta máquina.',
+      emptyInWorkspace: 'Nenhuma sessão para esta pasta. Desligue o filtro para ver as demais.',
+      thisWorkspaceOnly: 'Somente esta pasta',
+      loadMore: 'Mostrar mais',
+      noTitle: 'Sessão sem título',
+      adopt: 'Continuar',
+      adopting: 'Abrindo…',
+      ageJustNow: 'agora mesmo',
+      ageMinutes: 'há {count}min',
+      ageHours: 'há {count}h',
+      ageDays: 'há {count}d',
+      loadFailed: 'Não foi possível carregar as sessões desta máquina.',
+      adoptFailed: 'Não foi possível continuar essa sessão.',
+      staleSession:
+        'Essa sessão mudou depois que a lista foi carregada. A lista foi atualizada — escolha de novo.',
+      heldSession: 'Essa sessão já está aberta em outro chat do MangoStudio.',
+      noWorkspace: 'Essa sessão não registra uma pasta, então não dá para continuá-la aqui.',
+      unreachable: 'Não foi possível alcançar a máquina onde essas sessões estão.',
+      isolationUnproven:
+        'Esta máquina não comprovou que mantém os logins de fornecedor separados, então as sessões dela não são listadas.',
+      unsupported: 'Este agente não publica uma lista das próprias sessões.',
+      unsupportedClaude:
+        'O Claude Code guarda o histórico em um formato interno que a própria documentação diz que pode mudar, então o MangoStudio não lê esse formato. Comece um chat do Claude aqui.',
     },
     usage: {
       turnLabel: 'Este turno',
