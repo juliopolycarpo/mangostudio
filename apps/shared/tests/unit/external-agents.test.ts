@@ -359,6 +359,21 @@ describe('the neutral event contract', () => {
       decision: { optionId: 'approve', source: 'user' },
     },
     { type: 'usage', usage: { inputTokens: 10, outputTokens: 3 } },
+    {
+      type: 'thread_usage',
+      usage: {
+        last: { inputTokens: 10, outputTokens: 3 },
+        total: { inputTokens: 100, outputTokens: 30 },
+      },
+    },
+    {
+      type: 'account_limits',
+      limits: {
+        targetId: 'codex',
+        windows: [{ usedPercent: 40, resetsAtMs: 1_700_000_000_000 }],
+        observedAtMs: 1_700_000_000_000,
+      },
+    },
     { type: 'completed' },
     { type: 'error', error: { code: 'stream_closed', message: 'The process exited.' } },
   ];

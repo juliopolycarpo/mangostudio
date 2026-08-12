@@ -1,6 +1,7 @@
 import { type Static, Type } from '@sinclair/typebox';
 import { SSEErrorEventSchema } from '../errors';
 import {
+  ExternalAccountLimitsSchema,
   ExternalActivityKindSchema,
   ExternalActivityStatusSchema,
   ExternalActivityUpdateSchema,
@@ -9,6 +10,7 @@ import {
   ExternalApprovalDecisionSchema,
   ExternalApprovalOptionSchema,
   ExternalSteerRejectionReasonSchema,
+  ExternalThreadUsageSchema,
   ExternalTurnTerminalReasonSchema,
   ExternalUsageSchema,
 } from '../external-agents/schemas';
@@ -420,6 +422,18 @@ const SSEExternalUsageEventSchema = Type.Object({
   done: Type.Literal(false),
 });
 
+const SSEExternalThreadUsageEventSchema = Type.Object({
+  type: Type.Literal('external_thread_usage'),
+  usage: ExternalThreadUsageSchema,
+  done: Type.Literal(false),
+});
+
+const SSEExternalAccountLimitsEventSchema = Type.Object({
+  type: Type.Literal('external_account_limits'),
+  limits: ExternalAccountLimitsSchema,
+  done: Type.Literal(false),
+});
+
 /**
  * Announces what became of a mid-turn steer, live.
  *
@@ -529,6 +543,8 @@ export const StreamChunkSchema = Type.Union([
   SSEExternalApprovalRequestEventSchema,
   SSEExternalApprovalStatusEventSchema,
   SSEExternalUsageEventSchema,
+  SSEExternalThreadUsageEventSchema,
+  SSEExternalAccountLimitsEventSchema,
   SSEExternalSteerEventSchema,
   SSEExternalErrorEventSchema,
   SSEExternalTurnCompletedEventSchema,

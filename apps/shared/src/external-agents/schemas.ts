@@ -437,6 +437,159 @@ export const ExternalUsageSchema = Type.Object(
 export type ExternalUsage = Static<typeof ExternalUsageSchema>;
 
 /**
+ * Cumulative thread usage as Codex reports it: separate `last` (this turn) and
+ * `total` (the whole thread). The two must never be collapsed — a per-turn
+ * display that read `total` would grow monotonically and mislead.
+ */
+export const ExternalThreadUsageSchema = Type.Object(
+  {
+    last: Type.Optional(ExternalUsageSchema),
+    total: Type.Optional(ExternalUsageSchema),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalThreadUsage = Static<typeof ExternalThreadUsageSchema>;
+
+/**
+ * One metered window, as the vendor models it.
+ *
+ * `resetsAtMs` is milliseconds since epoch. Vendor reset times arrive as Unix
+ * **seconds** and are converted exactly once at the shared/runtime boundary;
+ * a field name ending in `AtMs` is the contract that conversion has already
+ * happened.
+ */
+export const ExternalRateLimitWindowSchema = Type.Object(
+  {
+    /** Vendor label when one exists (e.g. primary/secondary limit name). Pass through, never translate. */
+    label: Type.Optional(VendorText('title', { minLength: 1 })),
+    usedPercent: Type.Number({ minimum: 0 }),
+    windowDurationMins: Type.Optional(Type.Integer({ minimum: 0 })),
+    resetsAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalRateLimitWindow = Static<typeof ExternalRateLimitWindowSchema>;
+
+/** Pay-as-you-go credits snapshot. Absence means unknown, never zero. */
+export const ExternalCreditsSchema = Type.Object(
+  {
+    hasCredits: Type.Optional(Type.Boolean()),
+    unlimited: Type.Optional(Type.Boolean()),
+    /** Vendor-reported balance string; not normalized to a number. */
+    balance: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalCredits = Static<typeof ExternalCreditsSchema>;
+
+/** One redeemable rate-limit reset credit. Timestamps are epoch milliseconds. */
+export const ExternalResetCreditSchema = Type.Object(
+  {
+    id: VendorText('vendorId', { minLength: 1 }),
+    resetType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    status: Type.String({ minLength: 1, maxLength: 128 }),
+    grantedAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    expiresAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    title: Type.Optional(VendorText('title')),
+    description: Type.Optional(VendorText('detail')),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalResetCredit = Static<typeof ExternalResetCreditSchema>;
+
+export const ExternalResetCreditsSchema = Type.Object(
+  {
+    availableCount: Type.Integer({ minimum: 0 }),
+    /**
+     * Detail rows when the vendor provided them. Omitted when only the count is
+     * known; an empty array means details were fetched and none were available.
+     */
+    credits: Type.Optional(ReadonlyArraySchema(ExternalResetCreditSchema, { maxItems: 64 })),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalResetCredits = Static<typeof ExternalResetCreditsSchema>;
+
+/** Spend-control limit. `None`/absent is unavailable, not "recovered". */
+export const ExternalSpendControlSchema = Type.Object(
+  {
+    limit: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    used: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    remainingPercent: Type.Optional(Type.Number()),
+    resetsAtMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    /** Backend-reported; `null`/absent means unavailable, never a sparse recovery. */
+    reached: Type.Optional(Type.Boolean()),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalSpendControl = Static<typeof ExternalSpendControlSchema>;
+
+/**
+ * One metered limit bucket (primary + secondary windows, credits, plan).
+ *
+ * Derived field-by-field from Codex's `RateLimitSnapshot`. Labels and
+ * `reachedType` pass through as the vendor sent them.
+ */
+export const ExternalRateLimitBucketSchema = Type.Object(
+  {
+    limitId: Type.Optional(VendorText('vendorId', { minLength: 1 })),
+    limitName: Type.Optional(VendorText('title', { minLength: 1 })),
+    primary: Type.Optional(ExternalRateLimitWindowSchema),
+    secondary: Type.Optional(ExternalRateLimitWindowSchema),
+    credits: Type.Optional(ExternalCreditsSchema),
+    spendControl: Type.Optional(ExternalSpendControlSchema),
+    planType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    reachedType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalRateLimitBucket = Static<typeof ExternalRateLimitBucketSchema>;
+
+export const ExternalRateLimitByIdSchema = Type.Object(
+  {
+    limitId: VendorText('vendorId', { minLength: 1 }),
+    snapshot: ExternalRateLimitBucketSchema,
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalRateLimitById = Static<typeof ExternalRateLimitByIdSchema>;
+
+/**
+ * Account-level plan quota, derived from Codex's `GetAccountRateLimitsResponse`.
+ *
+ * `windows` flattens the backward-compatible single-bucket view into an ordered
+ * list the UI can render without inventing totals. `observedAtMs` drives
+ * staleness: a stale snapshot renders as unknown, never as zero.
+ */
+export const ExternalAccountLimitsSchema = Type.Object(
+  {
+    targetId: ExternalAgentTargetIdSchema,
+    windows: ReadonlyArraySchema(ExternalRateLimitWindowSchema, { maxItems: 16 }),
+    byLimitId: Type.Optional(ReadonlyArraySchema(ExternalRateLimitByIdSchema, { maxItems: 32 })),
+    credits: Type.Optional(ExternalCreditsSchema),
+    resetCredits: Type.Optional(ExternalResetCreditsSchema),
+    planType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    reachedType: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    /** When this snapshot was read or last successfully merged. Epoch ms. */
+    observedAtMs: Type.Integer({ minimum: 0 }),
+  },
+  { additionalProperties: false }
+);
+
+export type ExternalAccountLimits = Static<typeof ExternalAccountLimitsSchema>;
+
+/** How long a cached account-limits snapshot stays "fresh" before rendering as stale. */
+export const EXTERNAL_ACCOUNT_LIMITS_STALE_MS = 15 * 60_000;
+
+/**
  * A failure, with the vendor's own structure preserved.
  *
  * Flattening this to a string is what makes "it failed" the only thing anyone
@@ -519,6 +672,14 @@ export const ExternalAgentEventSchema = Type.Union([
   ),
   Type.Object(
     { type: Type.Literal('usage'), usage: ExternalUsageSchema },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    { type: Type.Literal('thread_usage'), usage: ExternalThreadUsageSchema },
+    { additionalProperties: false }
+  ),
+  Type.Object(
+    { type: Type.Literal('account_limits'), limits: ExternalAccountLimitsSchema },
     { additionalProperties: false }
   ),
   Type.Object({ type: Type.Literal('completed') }, { additionalProperties: false }),
@@ -750,6 +911,8 @@ export const ExternalAgentOpenResultSchema = Type.Object(
     fallbackReason: Type.Optional(VendorText('errorMessage')),
     effectiveConfiguration: ExternalAgentConfigurationSchema,
     capabilities: ExternalAgentCapabilitiesSchema,
+    /** Baseline account quota when the adapter read one on open. */
+    accountLimits: Type.Optional(ExternalAccountLimitsSchema),
   },
   { additionalProperties: false }
 );
@@ -800,6 +963,37 @@ export const ExternalAgentCloseParamsSchema = Type.Object(
   { additionalProperties: false }
 );
 export type ExternalAgentCloseParams = Static<typeof ExternalAgentCloseParamsSchema>;
+
+/**
+ * Manual account-limits refresh. Prefer a live session when one exists; otherwise
+ * the runtime opens a short-lived connection for `account/rateLimits/read`.
+ */
+export const ExternalAgentRefreshAccountUsageParamsSchema = Type.Object(
+  {
+    targetId: ExternalAgentTargetIdSchema,
+    /** When set, refresh against this live session rather than opening a probe. */
+    sessionId: Type.Optional(ExternalAgentOpaqueIdSchema),
+    timeoutMs: ExternalAgentTimeoutSchema,
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentRefreshAccountUsageParams = Static<
+  typeof ExternalAgentRefreshAccountUsageParamsSchema
+>;
+
+export const ExternalAgentRefreshAccountUsageResultSchema = Type.Object(
+  {
+    /**
+     * Absent when the adapter has no account-usage surface, or when a baseline
+     * could not be read (signed out, timed out). Absence is unknown, never zero.
+     */
+    limits: Type.Optional(ExternalAccountLimitsSchema),
+  },
+  { additionalProperties: false }
+);
+export type ExternalAgentRefreshAccountUsageResult = Static<
+  typeof ExternalAgentRefreshAccountUsageResultSchema
+>;
 
 export const ExternalAgentAckResultSchema = Type.Object(
   { ok: Type.Literal(true) },
