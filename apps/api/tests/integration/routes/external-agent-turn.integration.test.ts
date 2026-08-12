@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { Chat } from '@mangostudio/shared/chat';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ExternalAgentSteerResult } from '@mangostudio/shared/external-agents';
 import { EXTERNAL_WORKSPACE_TRUST_VERSION } from '@mangostudio/shared/external-agents';
 import { getDb } from '../../../src/db/database';
 import { getAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import type { AnswerExternalApprovalResult } from '../../../src/modules/external-agents/application/external-approval-registry';
 import type { ExternalTurnController } from '../../../src/modules/external-agents/application/external-turn-controller';
+import type {
+  ExternalTurnStreamResult,
+  StreamExternalTurnInput,
+} from '../../../src/modules/external-agents/application/external-turn-stream';
 import { requiresWorkspaceTrust } from '../../../src/modules/external-agents/application/external-workspace-trust';
 import { createExternalAgentTurnRoutes } from '../../../src/modules/external-agents/http/external-agent-turn-routes';
 import { insertTestUser } from '../../support/factories';
@@ -105,6 +110,36 @@ function stubRuntimeClient() {
     ReturnType<typeof import('../../../src/services/runtime-client').getRuntimeClient>
   >);
 }
+
+/** A stub for the turn stream, recording what the review route handed it. */
+function stubReviewStream(result: ExternalTurnStreamResult): {
+  readonly streamExternalTurn: NonNullable<
+    Parameters<typeof createExternalAgentTurnRoutes>[1]
+  >['streamExternalTurn'];
+  readonly calls: StreamExternalTurnInput[];
+} {
+  const calls: StreamExternalTurnInput[] = [];
+  return {
+    calls,
+    streamExternalTurn: (input) => {
+      calls.push(input);
+      return Promise.resolve(result);
+    },
+  };
+}
+
+/** A controller no review route may reach: the stream owns that decision. */
+const REVIEW_CONTROLLER: ExternalTurnController = {
+  start: () => {
+    throw new Error('the review route must never start a turn directly');
+  },
+  answerApproval: () => {
+    throw new Error('the review route must never answer an approval');
+  },
+  steer: () => {
+    throw new Error('the review route must never steer a turn');
+  },
+};
 
 function mount(
   controller: ExternalTurnController,
@@ -511,5 +546,111 @@ describe('trusting a workspace for an external agent', () => {
     expect(response.status).toBe(503);
     const settings = await getAppSettings(getDb(), user.id);
     expect(settings.externalAgentSettings.workspaceTrust).toEqual([]);
+  });
+});
+
+describe('external agent review route', () => {
+  const REVIEW_BODY = { target: { type: 'uncommittedChanges' as const } };
+
+  function sseResponse(): Response {
+    return new Response('data: {"type":"done","done":true}\n\n', {
+      headers: { 'Content-Type': 'text/event-stream' },
+    });
+  }
+
+  it("runs the review through the send path, with no prompt of the caller's", async () => {
+    const stream = stubReviewStream({ ok: true, response: sseResponse() });
+    const app = mount(REVIEW_CONTROLLER, {
+      resolveRuntimeClient: stubRuntimeClient,
+      streamExternalTurn: stream.streamExternalTurn,
+    });
+
+    const response = await app.handle(
+      post(`/chats/${chatId}/external-agent/review`, {
+        ...REVIEW_BODY,
+        displayPrompt: 'Review my changes',
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type') ?? '').toContain('text/event-stream');
+    expect(stream.calls[0]).toMatchObject({
+      userId: user.id,
+      chatId,
+      // The caption the action was rendered with, persisted as the user
+      // message; it is not input, and the vendor never sees it.
+      prompt: 'Review my changes',
+      attachmentIds: [],
+      review: REVIEW_BODY,
+    });
+  });
+
+  it('captions the turn itself when the caller supplied no wording', async () => {
+    // Reachable outside the browser, where there is no chosen language to
+    // honour: a review still has to say what it was.
+    const stream = stubReviewStream({ ok: true, response: sseResponse() });
+    const app = mount(REVIEW_CONTROLLER, {
+      resolveRuntimeClient: stubRuntimeClient,
+      streamExternalTurn: stream.streamExternalTurn,
+    });
+
+    await app.handle(post(`/chats/${chatId}/external-agent/review`, REVIEW_BODY));
+
+    expect(stream.calls[0]?.prompt).toBe('Review my uncommitted changes.');
+  });
+
+  it('answers a workspace with no repository with its own typed code', async () => {
+    const stream = stubReviewStream({
+      ok: false,
+      failure: {
+        kind: 'review-requires-git',
+        message: 'This folder is not a Git repository, so there are no changes to review.',
+      },
+    });
+    const app = mount(REVIEW_CONTROLLER, {
+      resolveRuntimeClient: stubRuntimeClient,
+      streamExternalTurn: stream.streamExternalTurn,
+    });
+
+    const response = await app.handle(post(`/chats/${chatId}/external-agent/review`, REVIEW_BODY));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: ERROR_CODES.EXTERNAL_REVIEW_REQUIRES_GIT,
+    });
+  });
+
+  it('refuses a target the contract does not define', async () => {
+    // A discriminated union with one member: a client asking for a branch or a
+    // commit review is refused by the schema rather than reaching a vendor.
+    const stream = stubReviewStream({ ok: true, response: sseResponse() });
+    const app = mount(REVIEW_CONTROLLER, {
+      resolveRuntimeClient: stubRuntimeClient,
+      streamExternalTurn: stream.streamExternalTurn,
+    });
+
+    const response = await app.handle(
+      post(`/chats/${chatId}/external-agent/review`, {
+        target: { type: 'baseBranch', branch: 'main' },
+      })
+    );
+
+    expect(response.status).toBe(422);
+    expect(stream.calls).toHaveLength(0);
+  });
+
+  it('answers 404 for a chat this user does not own', async () => {
+    const stream = stubReviewStream({ ok: true, response: sseResponse() });
+    const app = mount(REVIEW_CONTROLLER, {
+      resolveRuntimeClient: stubRuntimeClient,
+      streamExternalTurn: stream.streamExternalTurn,
+    });
+
+    const response = await app.handle(
+      post('/chats/chat-that-is-not-theirs/external-agent/review', REVIEW_BODY)
+    );
+
+    expect(response.status).toBe(404);
+    expect(stream.calls).toHaveLength(0);
   });
 });

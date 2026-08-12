@@ -21,10 +21,12 @@ import {
   ChatAttachmentNotFoundError,
 } from '../../attachments/infrastructure/attachment-repository';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
+import { streamExternalTurn } from '../../external-agents/application/external-turn-stream';
 import {
-  type ExternalTurnPreflightFailure,
-  streamExternalTurn,
-} from '../../external-agents/application/external-turn-stream';
+  EXTERNAL_PREFLIGHT_CODE,
+  EXTERNAL_PREFLIGHT_STATUS,
+  externalPreflightDetails,
+} from '../../external-agents/http/external-preflight';
 import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
 import {
   NoModelAvailableError,
@@ -50,40 +52,6 @@ import {
 } from '../application/turn-recovery';
 
 const KEEPALIVE_INTERVAL_MS = 15_000;
-
-/**
- * How a refused external send reads over HTTP.
- *
- * Every one of these is decided before the response becomes a stream, so they
- * are status codes rather than error frames — a refusal after the 200 is
- * committed reads to a user as a turn that failed, not as one that never began.
- */
-const EXTERNAL_PREFLIGHT_STATUS = {
-  conflict: 409,
-  unsupported: 409,
-  unavailable: 503,
-  validation: 400,
-  // Not 409: nothing about the request is wrong, and nothing about it will
-  // change. What is missing is a decision only the user can make, which the
-  // client turns into one dialog and one retry.
-  'workspace-trust': 403,
-  // Also 403, and also not 409: the request is fine and retrying changes
-  // nothing. What is missing is an operator's change to the machine.
-  'isolation-unproven': 403,
-  // 403 for the same reason `workspace-trust` is: the request is well-formed,
-  // and what is missing is one explicit choice the client turns into a dialog.
-  'disclosure-required': 403,
-} as const satisfies Record<ExternalTurnPreflightFailure['kind'], number>;
-
-const EXTERNAL_PREFLIGHT_CODE = {
-  conflict: ERROR_CODES.CONFLICT,
-  unsupported: ERROR_CODES.UNSUPPORTED,
-  unavailable: ERROR_CODES.PROVIDER_ERROR,
-  validation: ERROR_CODES.VALIDATION,
-  'workspace-trust': ERROR_CODES.EXTERNAL_WORKSPACE_UNTRUSTED,
-  'isolation-unproven': ERROR_CODES.EXTERNAL_ISOLATION_UNPROVEN,
-  'disclosure-required': ERROR_CODES.EXTERNAL_DISCLOSURE_REQUIRED,
-} as const satisfies Record<ExternalTurnPreflightFailure['kind'], string>;
 
 function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -366,28 +334,11 @@ export const respondStreamRoutes = (app: Elysia) =>
               // machine that runs the vendor can spell the directory it will
               // read. The client renders this; it never composes one. The
               // vendor and machine travel with it so the grant that follows can
-              // be checked against the scope this refusal disclosed.
-              ...(result.failure.kind === 'workspace-trust'
-                ? {
-                    details: {
-                      workspacePath: result.failure.workspacePath,
-                      targetId: result.failure.targetId,
-                      environmentId: result.failure.environmentId,
-                    },
-                  }
-                : {}),
-              // Same reasoning, one level up: the acknowledgement is recorded
-              // against a specific machine's descriptor, so a client that only
-              // learned "a disclosure is required" could not record one. The
-              // vendor and machine travel with the refusal that disclosed them.
-              ...(result.failure.kind === 'disclosure-required'
-                ? {
-                    details: {
-                      targetId: result.failure.targetId,
-                      environmentId: result.failure.environmentId,
-                    },
-                  }
-                : {}),
+              // be checked against the scope this refusal disclosed — and the
+              // acknowledgement is recorded against a specific machine's
+              // descriptor, so a client that only learned "a disclosure is
+              // required" could not record one.
+              ...externalPreflightDetails(result.failure),
             };
           }
 

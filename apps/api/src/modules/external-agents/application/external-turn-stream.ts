@@ -13,7 +13,10 @@
  * controller. This module knows how to put bytes on a socket.
  */
 
-import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentTargetId,
+  ExternalReviewTarget,
+} from '@mangostudio/shared/external-agents';
 import type { ExternalTurnRequest } from '@mangostudio/shared/generation';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import {
@@ -27,6 +30,7 @@ import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
+import { getRepoRoot } from '../../git/application/git-status-service';
 import { requiresExternalDisclosure } from './external-disclosure-gate';
 import {
   type ExternalTurnConfigurationResolution,
@@ -58,11 +62,22 @@ export interface StreamExternalTurnInput {
   readonly attachmentIds: readonly string[];
   /** The vendor model and effort the composer chose, if any. */
   readonly externalTurn: ExternalTurnRequest | undefined;
+  /** Runs a vendor-native review of the working tree instead of relaying the prompt. */
+  readonly review?: { readonly target: ExternalReviewTarget };
 }
 
 export interface ExternalTurnStreamDependencies {
   readonly controller?: ExternalTurnController;
   readonly resolveConfiguration?: typeof resolveExternalTurnConfiguration;
+  /**
+   * Reads the workspace's Git root **through the machine that owns it**.
+   *
+   * Injectable for the same reason the runtime client is elsewhere: this is the
+   * one preflight step that reaches another filesystem, and a test that could
+   * not replace it would either need a live runtime or would skip the check
+   * that makes a review of "uncommitted changes" mean anything.
+   */
+  readonly resolveRepoRoot?: typeof getRepoRoot;
 }
 
 /**
@@ -96,6 +111,15 @@ export type ExternalTurnPreflightFailure =
   | { readonly kind: 'unavailable'; readonly message: string }
   | { readonly kind: 'validation'; readonly message: string }
   /**
+   * A review was asked for on a workspace that is not a Git repository.
+   *
+   * MangoStudio's own precondition. Codex completes such a review instead of
+   * refusing it — it logs `fatal: not a git repository` internally and reviews
+   * nothing — so an action called "review my changes" would silently review
+   * none of them without this.
+   */
+  | { readonly kind: 'review-requires-git'; readonly message: string }
+  /**
    * The vendor would load this workspace's own configuration and the user has
    * not agreed to that yet. Carries the whole scope the grant would cover, not
    * just the path the dialog prints: the client echoes it back when recording
@@ -117,6 +141,7 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
   const controller = dependencies.controller ?? externalTurnController;
   const resolveConfiguration =
     dependencies.resolveConfiguration ?? resolveExternalTurnConfiguration;
+  const resolveRepoRoot = dependencies.resolveRepoRoot ?? getRepoRoot;
 
   return async function streamExternalTurn(
     input: StreamExternalTurnInput,
@@ -169,6 +194,15 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
         failure: {
           kind: 'unavailable',
           message: 'Could not reach the machine this chat runs on.',
+        },
+      };
+    }
+    if (resolution.ok && input.review && !resolution.descriptor.capabilities.nativeReview) {
+      return {
+        ok: false,
+        failure: {
+          kind: 'unsupported',
+          message: 'This agent does not offer a review of your working tree.',
         },
       };
     }
@@ -240,6 +274,43 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       };
     }
 
+    // Last of the preflight, because it is the only step that spends a round
+    // trip on another machine, and because it needs the canonical workspace
+    // that machine spelled. Asked *through the runtime* rather than of the
+    // hub's own filesystem: the workspace may be on an SSH host, in a
+    // container, in WSL or on a paired machine, and a hub-side check would be
+    // answering a question about the wrong disk.
+    if (input.review) {
+      let repoRoot: string | null;
+      try {
+        repoRoot = await resolveRepoRoot(resolution.canonicalWorkspacePath, undefined, {
+          userId: input.userId,
+          environmentId: input.chat.environmentId,
+        });
+      } catch (error) {
+        logger.warn('review_repo_check_failed', {
+          chatId: input.chatId,
+          error: error instanceof Error ? error.message : 'unknown error',
+        });
+        return {
+          ok: false,
+          failure: {
+            kind: 'unavailable',
+            message: 'Could not reach the machine this chat runs on.',
+          },
+        };
+      }
+      if (!repoRoot) {
+        return {
+          ok: false,
+          failure: {
+            kind: 'review-requires-git',
+            message: 'This folder is not a Git repository, so there are no changes to review.',
+          },
+        };
+      }
+    }
+
     return { ok: true, response: openStream(input, resolution, db, controller) };
   };
 }
@@ -275,6 +346,7 @@ function openStream(
             prompt: input.prompt,
             ...(input.attachmentIds.length > 0 ? { attachmentIds: [...input.attachmentIds] } : {}),
             configuration: resolution.configuration,
+            ...(input.review ? { review: input.review } : {}),
             canonicalWorkspacePath: resolution.canonicalWorkspacePath,
             vendorAccountFingerprint: resolution.vendorAccountFingerprint,
             credentialHomeFingerprint: resolution.credentialHomeFingerprint,

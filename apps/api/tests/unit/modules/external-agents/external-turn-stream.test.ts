@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import type {
+  ExternalAgentCapabilities,
   ExternalAgentDescriptor,
   ExternalSupportedConfiguration,
 } from '@mangostudio/shared/external-agents';
@@ -88,8 +89,19 @@ function chatRecord(overrides: Partial<OwnedChatRecord> = {}): OwnedChatRecord {
   };
 }
 
-function harness(options: { readonly agents?: readonly ExternalAgentDescriptor[] } = {}) {
-  const runtime = createFakeExternalRuntime();
+function harness(
+  options: {
+    readonly agents?: readonly ExternalAgentDescriptor[];
+    /** Stands in for the runtime's `git rev-parse`; null is "not a repository". */
+    readonly repoRoot?: (workdir: string) => string | null;
+    readonly repoRootFailure?: () => Error;
+    /** What the opened session reports it can do, as opposed to the descriptor. */
+    readonly sessionCapabilities?: ExternalAgentCapabilities;
+  } = {}
+) {
+  const runtime = createFakeExternalRuntime(
+    options.sessionCapabilities ? { capabilities: options.sessionCapabilities } : {}
+  );
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     newSessionId: () => `session-${crypto.randomUUID()}`,
@@ -103,8 +115,18 @@ function harness(options: { readonly agents?: readonly ExternalAgentDescriptor[]
       resetCache: () => undefined,
     },
   });
-  const stream = createExternalTurnStream({ controller, resolveConfiguration });
-  return { runtime, controller, approvals, resolveConfiguration, stream };
+  const repoRootCalls: Array<{ workdir: string; selection: unknown }> = [];
+  const stream = createExternalTurnStream({
+    controller,
+    resolveConfiguration,
+    resolveRepoRoot: (workdir, _signal, selection) => {
+      repoRootCalls.push({ workdir, selection });
+      const failure = options.repoRootFailure?.();
+      if (failure) return Promise.reject(failure);
+      return Promise.resolve(options.repoRoot ? options.repoRoot(workdir) : workdir);
+    },
+  });
+  return { runtime, controller, approvals, resolveConfiguration, stream, repoRootCalls };
 }
 
 /** Reads SSE frames off the response until the stream closes. */
@@ -697,5 +719,138 @@ describe('workspace trust', () => {
     );
 
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('the native review action', () => {
+  const REVIEW = { target: { type: 'uncommittedChanges' as const } };
+  const REVIEWING_CAPABILITIES: ExternalAgentCapabilities = {
+    ...NO_EXTERNAL_AGENT_CAPABILITIES,
+    structuredStreaming: true,
+    nativeReview: true,
+  };
+  const REVIEWING_AGENT = descriptor({ capabilities: REVIEWING_CAPABILITIES });
+
+  /** Both halves agree: the cached descriptor *and* the session that opened. */
+  function reviewHarness(overrides: Parameters<typeof harness>[0] = {}) {
+    return harness({
+      agents: [REVIEWING_AGENT],
+      sessionCapabilities: REVIEWING_CAPABILITIES,
+      ...overrides,
+    });
+  }
+
+  beforeEach(async () => {
+    // The acknowledgement is fingerprinted over the capability set the user was
+    // shown, and this suite's agent advertises one more capability than the
+    // default descriptor does — so it needs its own, or every case here would
+    // assert the disclosure refusal instead.
+    await acknowledgeExternalDisclosure(
+      { userId, targetId: 'codex' },
+      {
+        capabilities: REVIEWING_AGENT.capabilities,
+        supportedConfigurations: REVIEWING_AGENT.supportedConfigurations,
+      },
+      getDb()
+    );
+  });
+
+  function reviewInput() {
+    return {
+      userId,
+      chat: chatRecord(),
+      chatId,
+      prompt: 'Review my uncommitted changes.',
+      attachmentIds: [] as readonly string[],
+      externalTurn: undefined,
+      review: REVIEW,
+    };
+  }
+
+  it('starts a review turn and streams it like any other turn', async () => {
+    const { stream, runtime } = reviewHarness();
+    const result = await stream(reviewInput(), getDb());
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    await waitFor(() => runtime.calls.startReview.length === 1, 'the review to reach the runtime');
+    runtime.emit({ type: 'text_delta', text: 'P1: the retry loop never exits.' });
+    runtime.emit({ type: 'completed' });
+
+    const chunks = await readChunks(result.response);
+    expect(chunks.map((chunk) => chunk.type)).toContain('external_text');
+    expect(chunks.at(-1)).toMatchObject({ type: 'done' });
+    // The composer's path was not used: no `external-agent.turn` was sent.
+    expect(runtime.calls.turn).toHaveLength(0);
+  });
+
+  it('refuses a workspace that is not a Git repository', async () => {
+    // MangoStudio's own precondition. Codex would complete the review instead
+    // of failing — it logs `fatal: not a git repository` internally and reviews
+    // nothing — so this test is what keeps the check from being deleted as
+    // redundant.
+    const { stream, runtime } = reviewHarness({ repoRoot: () => null });
+
+    const result = await stream(reviewInput(), getDb());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('review-requires-git');
+    expect(runtime.calls.startReview).toHaveLength(0);
+  });
+
+  it('asks the machine that owns the workspace, using the canonical path', async () => {
+    // Not the hub's filesystem: the workspace may be on an SSH host, in a
+    // container, in WSL or on a paired machine, and a hub-side check would be
+    // answering about the wrong disk.
+    const { stream, repoRootCalls } = reviewHarness();
+
+    const result = await stream(reviewInput(), getDb());
+    expect(result.ok).toBe(true);
+    expect(repoRootCalls).toEqual([
+      { workdir: '/work/repo', selection: { userId, environmentId: 'local' } },
+    ]);
+  });
+
+  it('reports an unreachable machine as unavailable rather than as no repository', async () => {
+    const { stream } = reviewHarness({ repoRootFailure: () => new Error('runtime is gone') });
+
+    const result = await stream(reviewInput(), getDb());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('unavailable');
+  });
+
+  it('refuses a runner whose descriptor reports no nativeReview', async () => {
+    const { stream, repoRootCalls } = harness();
+
+    const result = await stream(reviewInput(), getDb());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('unsupported');
+    // Refused before the round trip: an agent that cannot review has no reason
+    // to make the hub ask another machine about Git.
+    expect(repoRootCalls).toHaveLength(0);
+  });
+
+  it('never checks Git for an ordinary send, even by an agent that could review', async () => {
+    const { stream, repoRootCalls, runtime } = reviewHarness();
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'hello',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    await waitForTurnStart(runtime);
+    runtime.emit({ type: 'completed' });
+    await readChunks(result.response);
+
+    expect(repoRootCalls).toHaveLength(0);
   });
 });

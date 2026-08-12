@@ -514,6 +514,121 @@ describe('external turn controller', () => {
     expect(events).toEqual(['text_delta', 'completed']);
   });
 
+  describe('native review', () => {
+    const REVIEW_CAPABILITIES = {
+      ...NO_EXTERNAL_AGENT_CAPABILITIES,
+      structuredStreaming: true,
+      cancellation: true,
+      steering: true,
+      nativeReview: true,
+    };
+
+    function startReview(
+      controller: ReturnType<typeof harness>['controller']
+    ): Promise<ExternalTurnResult> {
+      return controller.start(
+        {
+          userId,
+          chatId,
+          prompt: 'Review my uncommitted changes.',
+          configuration: CONFIGURATION,
+          canonicalWorkspacePath: '/work/repo',
+          vendorAccountFingerprint: 'account-a',
+          credentialHomeFingerprint: 'sha256:home-a',
+          review: { target: { type: 'uncommittedChanges' } },
+        },
+        getDb()
+      );
+    }
+
+    it('runs the review as an ordinary turn, on the same session and transcript', async () => {
+      const { runtime, controller } = harness({ capabilities: REVIEW_CAPABILITIES });
+      const running = startReview(controller);
+      await waitFor(
+        () => runtime.calls.startReview.length === 1,
+        'the review to reach the runtime'
+      );
+
+      // The review replaces the vendor call, not the orchestration: no
+      // `external-agent.turn` is sent, and the prompt is a caption rather than
+      // input the vendor was handed.
+      expect(runtime.calls.turn).toHaveLength(0);
+      expect(runtime.calls.startReview[0]).toMatchObject({
+        sessionId: 'session-1',
+        clientMessageId: userMessageId,
+        target: { type: 'uncommittedChanges' },
+      });
+
+      runtime.emit({
+        type: 'activity_started',
+        callId: 'item-review-in',
+        activity: { name: 'enteredReviewMode', kind: 'review', title: 'uncommitted changes' },
+      });
+      runtime.emit({ type: 'text_delta', text: 'P1: the retry loop never exits.' });
+      runtime.emit({ type: 'completed' });
+
+      const result = await running;
+      expect(result.reason).toBe('completed');
+      const stored = await readAssistantRow();
+      expect(stored.text).toContain('P1: the retry loop never exits.');
+      expect(turnPartOf(stored.parts)).toMatchObject({
+        status: 'terminal',
+        nativeTurnId: 'native-turn-1',
+      });
+    });
+
+    it('refuses to steer a review, before anything durable is written', async () => {
+      const { runtime, controller } = harness({ capabilities: REVIEW_CAPABILITIES });
+      const running = startReview(controller);
+      await waitFor(
+        () => runtime.calls.startReview.length === 1,
+        'the review to reach the runtime'
+      );
+
+      const outcome = await controller.steer({
+        userId,
+        chatId,
+        clientMessageId: 'steer-1',
+        text: 'also check the tests',
+      });
+
+      // The session supports steering in general; this turn does not, which is
+      // exactly what `turn-not-steerable` is for.
+      expect(outcome).toEqual({ accepted: false, reasonCode: 'turn-not-steerable' });
+      expect(runtime.calls.steer).toHaveLength(0);
+      const parts = (await readAssistantRow()).parts;
+      expect(parts.some((part) => part.type === 'external_steer')).toBe(false);
+
+      runtime.emit({ type: 'completed' });
+      await running;
+    });
+
+    it('fails the turn when the vendor ran the review on another thread', async () => {
+      // Inline delivery is documented to answer with the session's own thread.
+      // A different one means the events are arriving somewhere the hub is not
+      // listening, so the turn ends rather than appearing to run forever.
+      const { runtime, controller } = harness({
+        capabilities: REVIEW_CAPABILITIES,
+        reviewThreadId: 'some-other-thread',
+      });
+
+      const result = await startReview(controller);
+      expect(result.reason).toBe('vendor-error');
+      expect(result.error?.code).toBe('review-start');
+      expect(result.error?.message).toContain('some-other-thread');
+      expect(runtime.calls.startReview).toHaveLength(1);
+    });
+
+    it('refuses a review on a session whose adapter reported no nativeReview', async () => {
+      // The session's own answer, not the cached descriptor the caller
+      // preflighted against: an old runtime paired with a new hub says here
+      // what it can actually do.
+      const { controller } = harness();
+
+      await expect(startReview(controller)).rejects.toThrow(/cannot review the working tree/);
+    });
+  });
+
   describe('steer', () => {
     it('persists the steered text before the vendor call resolves', async () => {
       const held = Promise.withResolvers<ExternalAgentSteerResult>();
