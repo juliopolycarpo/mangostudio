@@ -116,6 +116,13 @@ describe('mergeAccountRateLimitsUpdate', () => {
       'codex',
       1_000
     );
+    expect(withSpend.spendControl).toEqual({
+      limit: '100',
+      used: '80',
+      remainingPercent: 20,
+      resetsAtMs: FIXTURE_RESETS_AT_MS,
+      reached: true,
+    });
     const merged = mergeAccountRateLimitsUpdate(
       withSpend,
       accountRateLimitsUpdated({
@@ -125,10 +132,21 @@ describe('mergeAccountRateLimitsUpdate', () => {
       5_000
     );
     // Null means unavailable — retain previous spend-control state.
-    expect(merged?.windows[0]).toBeDefined();
-    // The merge keeps the primary bucket's prior spendControl via the baseline
-    // windows path; assert plan/windows still present and not zeroed.
+    expect(merged?.spendControl).toEqual({
+      limit: '100',
+      used: '80',
+      remainingPercent: 20,
+      resetsAtMs: FIXTURE_RESETS_AT_MS,
+      reached: true,
+    });
     expect(merged?.planType).toBe('plus');
     expect(merged?.windows[0]?.usedPercent).toBe(42);
+  });
+
+  it('ignores a malformed rateLimits notification instead of throwing', () => {
+    expect(
+      mergeAccountRateLimitsUpdate(baseline, { rateLimits: null } as never, 6_000)
+    ).toBeUndefined();
+    expect(mergeAccountRateLimitsUpdate(baseline, {} as never, 6_000)).toBeUndefined();
   });
 });

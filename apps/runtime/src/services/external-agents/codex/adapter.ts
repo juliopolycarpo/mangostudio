@@ -651,6 +651,7 @@ export class CodexAppServerAdapter implements ExternalAgentAdapter {
   }
 
   #mergeAccountLimitsUpdate(session: CodexSession, params: unknown): void {
+    // Guard at the merge boundary: a quota notification must never kill the session.
     const merged = mergeAccountRateLimitsUpdate(
       session.accountLimits,
       params as AccountRateLimitsUpdatedNotification,

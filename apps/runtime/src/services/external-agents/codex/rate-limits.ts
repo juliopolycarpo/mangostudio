@@ -159,6 +159,7 @@ export function mapAccountRateLimitsResponse(
     windows: windowsFromBucket(primary),
     ...(byLimitId.length > 0 ? { byLimitId } : {}),
     ...(primary.credits ? { credits: primary.credits } : {}),
+    ...(primary.spendControl ? { spendControl: primary.spendControl } : {}),
     ...(mapResetCredits(response.rateLimitResetCredits)
       ? { resetCredits: mapResetCredits(response.rateLimitResetCredits) }
       : {}),
@@ -276,12 +277,18 @@ export function mergeAccountRateLimitsUpdate(
   observedAtMs: number
 ): ExternalAccountLimits | undefined {
   if (!baseline) return undefined;
+  // A malformed/partial notification must not throw into the session loop.
+  if (notification == null || typeof notification !== 'object') return undefined;
+  if (notification.rateLimits == null || typeof notification.rateLimits !== 'object') {
+    return undefined;
+  }
 
   const mergedPrimary = mergeBucket(
     {
       primary: baseline.windows[0],
       secondary: baseline.windows[1],
       credits: baseline.credits,
+      spendControl: baseline.spendControl,
       planType: baseline.planType,
       reachedType: baseline.reachedType,
     },
@@ -292,6 +299,7 @@ export function mergeAccountRateLimitsUpdate(
     ...baseline,
     windows: windowsFromBucket(mergedPrimary),
     ...(mergedPrimary.credits ? { credits: mergedPrimary.credits } : {}),
+    ...(mergedPrimary.spendControl ? { spendControl: mergedPrimary.spendControl } : {}),
     ...(mergedPrimary.planType ? { planType: mergedPrimary.planType } : {}),
     ...(mergedPrimary.reachedType ? { reachedType: mergedPrimary.reachedType } : {}),
     observedAtMs,
