@@ -93,7 +93,7 @@ function harness(
   options: {
     readonly agents?: readonly ExternalAgentDescriptor[];
     /** Stands in for the runtime's `git rev-parse`; null is "not a repository". */
-    readonly repoRoot?: (workdir: string) => string | null;
+    readonly repoRoot?: (workdir: string) => string | null | Promise<string | null>;
     readonly repoRootFailure?: () => Error;
     /** What the opened session reports it can do, as opposed to the descriptor. */
     readonly sessionCapabilities?: ExternalAgentCapabilities;
@@ -852,5 +852,24 @@ describe('the native review action', () => {
     await readChunks(result.response);
 
     expect(repoRootCalls).toHaveLength(0);
+  });
+
+  it('refuses a review whose chat moved while preflight was awaiting', async () => {
+    const { stream, runtime } = reviewHarness({
+      repoRoot: async () => {
+        await getDb()
+          .updateTable('chats')
+          .set({ workdir: '/work/other' })
+          .where('id', '=', chatId)
+          .execute();
+        return '/work/repo';
+      },
+    });
+
+    const result = await stream(reviewInput(), getDb());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.kind).toBe('conflict');
+    expect(runtime.calls.startReview).toHaveLength(0);
   });
 });

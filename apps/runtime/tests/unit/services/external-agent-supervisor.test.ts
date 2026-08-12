@@ -1286,4 +1286,52 @@ describe('external-agent native review', () => {
     });
     expect(() => value.supervisor.startReview(REVIEW)).toThrow(/already has an active turn/);
   });
+
+  it('cancels a pending review when the protocol request is aborted', async () => {
+    const openReview = Promise.withResolvers<void>();
+    const adapter = new FakeExternalAgentAdapter({
+      reviewable: true,
+      capabilities: { nativeReview: true },
+      reviewGate: openReview.promise,
+    });
+    const value = await fixture({ adapter });
+    await openSession(value);
+
+    const request = new AbortController();
+    const review = value.supervisor.startReview(REVIEW, request.signal);
+    request.abort(new Error('hub timed out'));
+    await expect(review).rejects.toThrow('hub timed out');
+    expect(adapter.cancellations).toHaveLength(1);
+    expect(adapter.reviews[0]?.context.signal.aborted).toBe(true);
+
+    openReview.resolve();
+    await expect(
+      value.supervisor.turn({
+        sessionId: 'session-1',
+        clientMessageId: 'message-2',
+        input: 'hello',
+        configuration: CONFIGURATION,
+      })
+    ).resolves.toMatchObject({ nativeTurnId: 'turn-1' });
+  });
+
+  it('releases the reservation when review turn registration fails', async () => {
+    const adapter = new FakeExternalAgentAdapter({
+      reviewable: true,
+      capabilities: { nativeReview: true },
+      reviewNativeTurnId: 'x'.repeat(EXTERNAL_TEXT_LIMITS.vendorId + 1),
+    });
+    const value = await fixture({ adapter });
+    await openSession(value);
+
+    await expect(value.supervisor.startReview(REVIEW)).rejects.toThrow(/invalid native turn id/);
+    await expect(
+      value.supervisor.turn({
+        sessionId: 'session-1',
+        clientMessageId: 'message-2',
+        input: 'hello',
+        configuration: CONFIGURATION,
+      })
+    ).resolves.toMatchObject({ nativeTurnId: 'turn-1' });
+  });
 });

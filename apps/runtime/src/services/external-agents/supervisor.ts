@@ -400,7 +400,10 @@ export class ExternalAgentSessionSupervisor {
    * mid-turn — because a review is started from an explicit user action against
    * a descriptor the hub just read.
    */
-  startReview(params: ExternalAgentStartReviewParams): Promise<ExternalAgentStartReviewResult> {
+  startReview(
+    params: ExternalAgentStartReviewParams,
+    requestSignal: AbortSignal = new AbortController().signal
+  ): Promise<ExternalAgentStartReviewResult> {
     assertExternalAgentParams(
       'external-agent.start-review',
       ExternalAgentStartReviewParamsSchema,
@@ -417,7 +420,7 @@ export class ExternalAgentSessionSupervisor {
     if (replayed?.kind === 'review') return replayed.result;
     this.#assertNoActiveTurn(session);
 
-    const result = this.#startReview(session, params);
+    const result = this.#startReview(session, params, requestSignal);
     session.turns.set(params.clientMessageId, { kind: 'review', fingerprint, result });
     return result;
   }
@@ -898,7 +901,8 @@ export class ExternalAgentSessionSupervisor {
    */
   async #startReview(
     session: LiveSession,
-    params: ExternalAgentStartReviewParams
+    params: ExternalAgentStartReviewParams,
+    requestSignal: AbortSignal
   ): Promise<ExternalAgentStartReviewResult> {
     const startReview = session.adapter.startReview;
     if (!startReview) {
@@ -921,31 +925,51 @@ export class ExternalAgentSessionSupervisor {
     session.activeTurn = reservation;
     session.state = 'running';
 
+    const pending = startReview.call(session.adapter, {
+      nativeSessionId: session.openResult.nativeSessionId,
+      params,
+      context: this.#context(
+        session.adapter,
+        controller.signal,
+        session.executablePath,
+        session.workspacePath,
+        session.processes
+      ),
+    });
     let stream: ExternalAgentReviewStream;
     try {
-      stream = await startReview.call(session.adapter, {
-        nativeSessionId: session.openResult.nativeSessionId,
-        params,
-        context: this.#context(
-          session.adapter,
-          controller.signal,
-          session.executablePath,
-          session.workspacePath,
-          session.processes
-        ),
-      });
+      stream = await raceAbort(pending, requestSignal, 'External-agent review was cancelled.');
     } catch (error) {
-      // A review that never started holds nothing: release the slot so the next
-      // send is not refused by a turn that does not exist.
-      if (session.activeTurn === reservation) {
-        session.activeTurn = undefined;
-        // Only when this reservation is still what `running` refers to: a close
-        // that landed during the call owns the state now.
-        if (session.state === 'running') session.state = 'idle';
+      if (requestSignal.aborted) {
+        // The hub gave up (its 30s request deadline, a disconnect, a cancel
+        // frame). The adapter call may still be in flight — Codex can answer
+        // after we have already recorded a failure — so the reservation is
+        // cancelled rather than only dropped, or the review would keep the
+        // session busy with nobody watching it.
+        this.#cancelReservation(session, reservation);
+      } else {
+        // A review that never started holds nothing: release the slot so the
+        // next send is not refused by a turn that does not exist.
+        this.#releaseReservation(session, reservation);
       }
+      void pending.catch(() => undefined);
       throw error;
     }
-    const nativeTurnId = this.#registerTurn(session, controller, stream);
+    if (requestSignal.aborted) {
+      this.#cancelReservation(session, reservation);
+      throw requestSignal.reason instanceof Error
+        ? requestSignal.reason
+        : abortError('External-agent review was cancelled.');
+    }
+    let nativeTurnId: string;
+    try {
+      nativeTurnId = this.#registerTurn(session, controller, stream);
+    } catch (error) {
+      // `#registerTurn` aborts and asks the adapter to cancel, but the slot is
+      // still this reservation: registration throws before replacing it.
+      this.#releaseReservation(session, reservation);
+      throw error;
+    }
     const result = { nativeTurnId, reviewThreadId: stream.reviewThreadId };
     if (!Value.Check(ExternalAgentStartReviewResultSchema, result)) {
       // The turn is already live, so it is cancelled rather than abandoned: a
@@ -997,6 +1021,28 @@ export class ExternalAgentSessionSupervisor {
       this.#deferredCleanupFailure ??= error;
     });
     return nativeTurnId;
+  }
+
+  /** Drops a review reservation that never became a registered turn. */
+  #releaseReservation(session: LiveSession, reservation: LiveTurn): void {
+    if (session.activeTurn !== reservation) return;
+    session.activeTurn = undefined;
+    // Only when this reservation is still what `running` refers to: a close
+    // that landed during the call owns the state now.
+    if (session.state === 'running') session.state = 'idle';
+  }
+
+  #cancelReservation(session: LiveSession, reservation: LiveTurn): void {
+    reservation.controller.abort(abortError('External-agent review was cancelled.'));
+    void settleCleanup(
+      session.adapter.cancel({
+        sessionId: session.sessionId,
+        nativeSessionId: session.openResult.nativeSessionId,
+        nativeTurnId: reservation.nativeTurnId,
+        reason: 'requested',
+      })
+    ).catch(() => undefined);
+    this.#releaseReservation(session, reservation);
   }
 
   async #consumeTurn(

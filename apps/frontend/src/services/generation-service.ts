@@ -90,12 +90,25 @@ export async function startExternalReviewStream(
   onChunk: (chunk: StreamChunk) => void,
   signal?: AbortSignal
 ): Promise<void> {
+  let terminalError: { readonly error: string; readonly code?: string } | undefined;
   await postStream(
     `/api/chats/${encodeURIComponent(chatId)}/external-agent/review`,
     request,
-    onChunk,
+    (chunk) => {
+      if (chunk.type === 'error' && chunk.done) {
+        terminalError = {
+          error: chunk.error,
+          ...(chunk.code ? { code: chunk.code } : {}),
+        };
+      }
+      onChunk(chunk);
+    },
     signal
   );
+  // Setup refusals after HTTP 200 — a session that cannot review, for example —
+  // arrive as a terminal error chunk. Resolving here would tell the repository
+  // panel the click succeeded.
+  if (terminalError) throw new ApiError(terminalError);
 }
 
 async function postStream(

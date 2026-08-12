@@ -41,6 +41,8 @@ export interface FakeExternalAgentOptions {
   /** Holds `startReview` open, for inspecting what the supervisor did meanwhile. */
   readonly reviewGate?: Promise<void>;
   readonly reviewFailure?: () => Error;
+  /** What `startReview` reports as `nativeTurnId`. Defaults to the client message id. */
+  readonly reviewNativeTurnId?: string;
 }
 
 /** Scriptable protocol peer. It never knows or launches a production vendor. */
@@ -97,7 +99,7 @@ export class FakeExternalAgentAdapter implements ExternalAgentAdapter {
         if (failure) throw failure;
         return {
           // The hub's own handle, exactly as a real adapter reports it.
-          nativeTurnId: input.params.clientMessageId,
+          nativeTurnId: options.reviewNativeTurnId ?? input.params.clientMessageId,
           reviewThreadId: options.reviewThreadId ?? input.nativeSessionId,
           async *[Symbol.asyncIterator]() {
             for (const event of events) yield event;

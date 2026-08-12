@@ -28,7 +28,7 @@ import {
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
-import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
+import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
 import { getRepoRoot } from '../../git/application/git-status-service';
 import { requiresExternalDisclosure } from './external-disclosure-gate';
@@ -78,6 +78,7 @@ export interface ExternalTurnStreamDependencies {
    * that makes a review of "uncommitted changes" mean anything.
    */
   readonly resolveRepoRoot?: typeof getRepoRoot;
+  readonly loadChat?: typeof getOwnedChat;
 }
 
 /**
@@ -142,6 +143,7 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
   const resolveConfiguration =
     dependencies.resolveConfiguration ?? resolveExternalTurnConfiguration;
   const resolveRepoRoot = dependencies.resolveRepoRoot ?? getRepoRoot;
+  const loadChat = dependencies.loadChat ?? getOwnedChat;
 
   return async function streamExternalTurn(
     input: StreamExternalTurnInput,
@@ -315,8 +317,35 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
       }
     }
 
+    const current = await loadChat(input.chatId, input.userId, db);
+    if (!current || chatBindingChanged(input.chat, current)) {
+      // Configuration and the Git preflight both await. Another tab can move
+      // this chat's workdir or environment in that window; the controller would
+      // then open a session with the new environment id and the old canonical
+      // path. Refusing here keeps those two from being combined.
+      return {
+        ok: false,
+        failure: {
+          kind: 'conflict',
+          message: 'This chat moved to a different folder or machine before the turn started.',
+        },
+      };
+    }
+
     return { ok: true, response: openStream(input, resolution, db, controller) };
   };
+}
+
+function chatBindingChanged(left: OwnedChatRecord, right: OwnedChatRecord): boolean {
+  if (left.environmentId !== right.environmentId || left.workdir !== right.workdir) return true;
+  if (left.runner.kind !== right.runner.kind) return true;
+  if (left.runner.kind === 'external' && right.runner.kind === 'external') {
+    return left.runner.targetId !== right.runner.targetId;
+  }
+  if (left.runner.kind === 'mangostudio' && right.runner.kind === 'mangostudio') {
+    return left.runner.agentId !== right.runner.agentId;
+  }
+  return false;
 }
 
 function openStream(
