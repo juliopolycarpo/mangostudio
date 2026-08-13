@@ -12,8 +12,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { type Static, Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import Type, { type Static } from 'typebox';
+import Value from 'typebox/value';
 
 import { API_KEY_SCOPES, ApiKeyScopeSchema } from '../../src/api-keys';
 import { EnvironmentIdSchema, NodeVersionSpecSchema } from '../../src/environments';

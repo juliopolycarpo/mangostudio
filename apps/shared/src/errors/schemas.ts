@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 
 /** Generic API error response returned by all HTTP error paths. */
 export const ApiErrorResponseSchema = Type.Object({

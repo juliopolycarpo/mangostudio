@@ -3,7 +3,7 @@ import {
   ProviderSettingsDescriptorSchema,
   ProviderSettingsListResponseSchema,
 } from '@mangostudio/shared/provider-settings';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';

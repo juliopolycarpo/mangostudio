@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { LibraryResource } from '@mangostudio/shared/library';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { parseLibraryArgs } from '../../../src/cli/args';
 import {
   CliLibraryLocationsSchema,

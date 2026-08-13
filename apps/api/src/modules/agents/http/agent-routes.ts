@@ -46,71 +46,71 @@ export const agentRoutes = new Elysia()
 
   .get(
     '/agents/:agentId',
+    {
+      params: t.Object({ agentId: t.String() }),
+    },
     async ({ params, set, user }): Promise<AgentProfile | ApiErrorResponse> => {
       try {
         return await getAgentProfile(getDb(), user?.id ?? '', params.agentId);
       } catch (error) {
         return handleAgentSettingsError(error, set);
       }
-    },
-    {
-      params: t.Object({ agentId: t.String() }),
     }
   )
 
   .put(
     '/agents/:agentId',
+    {
+      params: t.Object({ agentId: t.String() }),
+      body: AgentProfileUpsertBodySchema,
+    },
     async ({ body, params, set, user }): Promise<AgentProfile | ApiErrorResponse> => {
       try {
         return await updateAgentProfile(getDb(), user?.id ?? '', params.agentId, body);
       } catch (error) {
         return handleAgentSettingsError(error, set);
       }
-    },
-    {
-      params: t.Object({ agentId: t.String() }),
-      body: AgentProfileUpsertBodySchema,
     }
   )
 
   .post(
     '/agents',
+    {
+      body: CreateAgentProfileBodySchema,
+    },
     ({ body, set }): AgentProfile | ApiErrorResponse => {
       try {
         return createAgentProfile(body);
       } catch (error) {
         return handleAgentSettingsError(error, set);
       }
-    },
-    {
-      body: CreateAgentProfileBodySchema,
     }
   )
 
   .delete(
     '/agents/:agentId',
+    {
+      params: t.Object({ agentId: t.String() }),
+    },
     ({ params, set }): DeleteAgentProfileResponse | ApiErrorResponse => {
       try {
         return deleteAgentProfile(params.agentId);
       } catch (error) {
         return handleAgentSettingsError(error, set);
       }
-    },
-    {
-      params: t.Object({ agentId: t.String() }),
     }
   )
 
   .post(
     '/agents/preview',
+    {
+      body: AgentMarkdownPreviewBodySchema,
+    },
     ({ body, set }): AgentMarkdownPreviewResponse | ApiErrorResponse => {
       try {
         return previewAgentProfileMarkdown(body.markdown, body.id);
       } catch (error) {
         return handleAgentSettingsError(error, set);
       }
-    },
-    {
-      body: AgentMarkdownPreviewBodySchema,
     }
   );

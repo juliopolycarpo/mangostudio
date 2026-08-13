@@ -20,7 +20,7 @@ import {
   ExternalAgentTurnParamsSchema,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalActivityPart, MessagePart } from '@mangostudio/shared/types';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../../src/db/database';
 import {
   compactChatUseCase,

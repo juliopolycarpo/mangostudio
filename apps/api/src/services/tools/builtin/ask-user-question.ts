@@ -6,6 +6,7 @@
  * arrives as the next user message through the normal respond/stream path.
  */
 
+import { describeSchemaError } from '@mangostudio/shared/errors';
 import {
   ASK_USER_QUESTION_MAX_QUESTIONS,
   ASK_USER_QUESTION_TOOL_NAME,
@@ -14,7 +15,7 @@ import {
   QUESTION_MAX_OPTIONS,
   QUESTION_MIN_OPTIONS,
 } from '@mangostudio/shared/questions';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { registerTool } from '../registry';
 
 export { ASK_USER_QUESTION_TOOL_NAME };
@@ -109,10 +110,10 @@ async function execute(args: Record<string, unknown>): Promise<AskUserQuestionRe
  */
 export function parseAskUserQuestionArgs(args: Record<string, unknown>): AskUserQuestionArgs {
   if (!Value.Check(AskUserQuestionArgsSchema, args)) {
-    const firstError = Value.Errors(AskUserQuestionArgsSchema, args).First();
-    const detail = firstError
-      ? `${firstError.path || '/'}: ${firstError.message}`
-      : 'invalid payload';
+    const detail = describeSchemaError(
+      Value.Errors(AskUserQuestionArgsSchema, args),
+      'invalid payload'
+    );
     throw new Error(
       `Invalid ask_user_question arguments (${detail}). Provide 1-${ASK_USER_QUESTION_MAX_QUESTIONS} questions, ` +
         `each with ${QUESTION_MIN_OPTIONS}-${QUESTION_MAX_OPTIONS} labeled options.`

@@ -280,270 +280,266 @@ export const respondStreamRoutes = (app: Elysia) =>
        * Pre-flight checks return HTTP errors before SSE headers are committed.
        * Afterwards, wraps streamTextTurn generator as SSE frames.
        */
-      .post(
-        '/respond/stream',
-        async ({ body, set, user }) => {
-          const userId = user?.id ?? '';
-          const db = getDb();
+      .post('/respond/stream', { body: RespondStreamBodySchema }, async ({ body, set, user }) => {
+        const userId = user?.id ?? '';
+        const db = getDb();
 
-          // Ownership check must be pre-flight to return HTTP 404 before SSE
-          // headers flush. The same read supplies the persisted runner, which
-          // names the agent when the request does not.
-          const ownedChat = await getOwnedChat(body.chatId, userId, db);
-          if (!ownedChat) {
-            set.status = 404;
-            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+        // Ownership check must be pre-flight to return HTTP 404 before SSE
+        // headers flush. The same read supplies the persisted runner, which
+        // names the agent when the request does not.
+        const ownedChat = await getOwnedChat(body.chatId, userId, db);
+        if (!ownedChat) {
+          set.status = 404;
+          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+        }
+
+        const attachmentIds = normalizeTextTurnAttachmentIds(body.attachmentIds);
+        try {
+          assertTextTurnHasContent(body.prompt, attachmentIds);
+          await assertChatAttachmentIdsAvailable(
+            { attachmentIds, userId, chatId: body.chatId },
+            db
+          );
+        } catch (err) {
+          if (err instanceof ChatAttachmentNotFoundError || err instanceof EmptyTextTurnError) {
+            set.status = 400;
+            return { error: err.message, code: ERROR_CODES.VALIDATION };
           }
+          throw err;
+        }
 
-          const attachmentIds = normalizeTextTurnAttachmentIds(body.attachmentIds);
+        // Before the model, agent and provider preflight below, not after. An
+        // external turn resolves no MangoStudio model, so running that first
+        // answers a chat that needs no model with `NoModelAvailableError` —
+        // a 503 about a provider the user never chose.
+        if (ownedChat.runner.kind === 'external') {
+          const result = await streamExternalTurn(
+            {
+              userId,
+              chat: ownedChat,
+              chatId: body.chatId,
+              prompt: body.prompt,
+              attachmentIds,
+              externalTurn: body.externalTurn,
+            },
+            db
+          );
+          if (result.ok) return result.response;
+          set.status = EXTERNAL_PREFLIGHT_STATUS[result.failure.kind];
+          return {
+            error: result.failure.message,
+            code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
+            // The disclosure has to name what gets loaded, and only the
+            // machine that runs the vendor can spell the directory it will
+            // read. The client renders this; it never composes one. The
+            // vendor and machine travel with it so the grant that follows can
+            // be checked against the scope this refusal disclosed — and the
+            // acknowledgement is recorded against a specific machine's
+            // descriptor, so a client that only learned "a disclosure is
+            // required" could not record one.
+            ...externalPreflightDetails(result.failure),
+          };
+        }
+
+        let inspectedRecovery: Awaited<ReturnType<typeof inspectInterruptedTurnResume>> | null =
+          null;
+        if (body.recovery) {
           try {
-            assertTextTurnHasContent(body.prompt, attachmentIds);
-            await assertChatAttachmentIdsAvailable(
-              { attachmentIds, userId, chatId: body.chatId },
+            inspectedRecovery = await inspectInterruptedTurnResume(
+              { chatId: body.chatId, userId, recovery: body.recovery },
               db
             );
           } catch (err) {
-            if (err instanceof ChatAttachmentNotFoundError || err instanceof EmptyTextTurnError) {
+            if (err instanceof TurnRecoveryNotFoundError) {
+              set.status = 404;
+              return { error: err.message, code: ERROR_CODES.NOT_FOUND };
+            }
+            if (err instanceof TurnRecoveryConflictError) {
+              set.status = 409;
+              return { error: err.message, code: ERROR_CODES.CONFLICT };
+            }
+            if (err instanceof TurnRecoveryValidationError) {
               set.status = 400;
               return { error: err.message, code: ERROR_CODES.VALIDATION };
             }
             throw err;
           }
+        }
 
-          // Before the model, agent and provider preflight below, not after. An
-          // external turn resolves no MangoStudio model, so running that first
-          // answers a chat that needs no model with `NoModelAvailableError` —
-          // a 503 about a provider the user never chose.
-          if (ownedChat.runner.kind === 'external') {
-            const result = await streamExternalTurn(
+        // Model resolution must be pre-flight to return HTTP 503 before SSE headers flush.
+        let resolvedModel: ResolvedModel;
+        let resolvedAgent: ResolvedRunnerAgent;
+        try {
+          resolvedAgent = await resolveRunnerAgentProfile({
+            db,
+            userId,
+            runner: ownedChat.runner,
+            agentId: inspectedRecovery?.agentId ?? body.agentId,
+          });
+          resolvedModel = await resolveModel({
+            requestedModel:
+              inspectedRecovery?.modelName ?? body.model ?? resolvedAgent.profile.model,
+            userId,
+            type: 'text',
+          });
+        } catch (err) {
+          if (err instanceof AgentSettingsError && err.status === 404) {
+            set.status = 404;
+            return { error: 'Agent not found', code: ERROR_CODES.NOT_FOUND };
+          }
+          if (err instanceof NoModelAvailableError) {
+            const refusal = modelUnavailableResponse(err);
+            set.status = refusal.status;
+            return refusal.body;
+          }
+          throw err;
+        }
+
+        // Provider lookup must be pre-flight to return HTTP 400 before SSE headers flush.
+        try {
+          if (resolvedModel.providerType) {
+            getProvider(resolvedModel.providerType);
+          } else {
+            await getProviderForModel(resolvedModel.modelId, userId);
+          }
+        } catch {
+          set.status = 400;
+          return {
+            error: 'No provider available for the requested model.',
+            code: ERROR_CODES.PROVIDER_ERROR,
+          };
+        }
+
+        const abortController = new AbortController();
+        let activeAssistantMessageId: string | null = null;
+        const registerTurn = (messageId: string) => {
+          activeAssistantMessageId = messageId;
+          registerActiveTurn(messageId, {
+            userId,
+            chatId: body.chatId,
+            abort: (reasonCode) => abortController.abort(reasonCode),
+          });
+        };
+        const unregisterTurn = () => {
+          if (!activeAssistantMessageId) return;
+          unregisterActiveTurn(activeAssistantMessageId);
+          activeAssistantMessageId = null;
+        };
+
+        let reservedRecovery: Awaited<ReturnType<typeof reserveInterruptedTurnResume>> | null =
+          null;
+        if (body.recovery && inspectedRecovery) {
+          try {
+            reservedRecovery = await reserveInterruptedTurnResume(
               {
-                userId,
-                chat: ownedChat,
                 chatId: body.chatId,
-                prompt: body.prompt,
+                userId,
+                displayPrompt: body.prompt,
                 attachmentIds,
-                externalTurn: body.externalTurn,
+                recovery: body.recovery,
+                inspected: inspectedRecovery,
+                resolvedModel,
+                agentId: resolvedAgent.agentId,
+                agentName: resolvedAgent.profile.name,
+                onTurnReserved: registerTurn,
               },
               db
             );
-            if (result.ok) return result.response;
-            set.status = EXTERNAL_PREFLIGHT_STATUS[result.failure.kind];
-            return {
-              error: result.failure.message,
-              code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
-              // The disclosure has to name what gets loaded, and only the
-              // machine that runs the vendor can spell the directory it will
-              // read. The client renders this; it never composes one. The
-              // vendor and machine travel with it so the grant that follows can
-              // be checked against the scope this refusal disclosed — and the
-              // acknowledgement is recorded against a specific machine's
-              // descriptor, so a client that only learned "a disclosure is
-              // required" could not record one.
-              ...externalPreflightDetails(result.failure),
-            };
-          }
-
-          let inspectedRecovery: Awaited<ReturnType<typeof inspectInterruptedTurnResume>> | null =
-            null;
-          if (body.recovery) {
-            try {
-              inspectedRecovery = await inspectInterruptedTurnResume(
-                { chatId: body.chatId, userId, recovery: body.recovery },
-                db
-              );
-            } catch (err) {
-              if (err instanceof TurnRecoveryNotFoundError) {
-                set.status = 404;
-                return { error: err.message, code: ERROR_CODES.NOT_FOUND };
-              }
-              if (err instanceof TurnRecoveryConflictError) {
-                set.status = 409;
-                return { error: err.message, code: ERROR_CODES.CONFLICT };
-              }
-              if (err instanceof TurnRecoveryValidationError) {
-                set.status = 400;
-                return { error: err.message, code: ERROR_CODES.VALIDATION };
-              }
-              throw err;
-            }
-          }
-
-          // Model resolution must be pre-flight to return HTTP 503 before SSE headers flush.
-          let resolvedModel: ResolvedModel;
-          let resolvedAgent: ResolvedRunnerAgent;
-          try {
-            resolvedAgent = await resolveRunnerAgentProfile({
-              db,
-              userId,
-              runner: ownedChat.runner,
-              agentId: inspectedRecovery?.agentId ?? body.agentId,
-            });
-            resolvedModel = await resolveModel({
-              requestedModel:
-                inspectedRecovery?.modelName ?? body.model ?? resolvedAgent.profile.model,
-              userId,
-              type: 'text',
-            });
           } catch (err) {
-            if (err instanceof AgentSettingsError && err.status === 404) {
+            unregisterTurn();
+            if (err instanceof TurnRecoveryNotFoundError) {
               set.status = 404;
-              return { error: 'Agent not found', code: ERROR_CODES.NOT_FOUND };
+              return { error: err.message, code: ERROR_CODES.NOT_FOUND };
             }
-            if (err instanceof NoModelAvailableError) {
-              const refusal = modelUnavailableResponse(err);
-              set.status = refusal.status;
-              return refusal.body;
+            if (err instanceof TurnRecoveryConflictError) {
+              set.status = 409;
+              return { error: err.message, code: ERROR_CODES.CONFLICT };
+            }
+            if (err instanceof TurnRecoveryValidationError) {
+              set.status = 400;
+              return { error: err.message, code: ERROR_CODES.VALIDATION };
             }
             throw err;
           }
+        }
 
-          // Provider lookup must be pre-flight to return HTTP 400 before SSE headers flush.
-          try {
-            if (resolvedModel.providerType) {
-              getProvider(resolvedModel.providerType);
-            } else {
-              await getProviderForModel(resolvedModel.modelId, userId);
-            }
-          } catch {
-            set.status = 400;
-            return {
-              error: 'No provider available for the requested model.',
-              code: ERROR_CODES.PROVIDER_ERROR,
-            };
-          }
+        const stream = new ReadableStream({
+          async start(controller) {
+            const heartbeat = setInterval(() => {
+              try {
+                controller.enqueue(KEEPALIVE_BYTES);
+              } catch {
+                // Controller may already be closed
+              }
+            }, KEEPALIVE_INTERVAL_MS);
 
-          const abortController = new AbortController();
-          let activeAssistantMessageId: string | null = null;
-          const registerTurn = (messageId: string) => {
-            activeAssistantMessageId = messageId;
-            registerActiveTurn(messageId, {
-              userId,
-              chatId: body.chatId,
-              abort: (reasonCode) => abortController.abort(reasonCode),
-            });
-          };
-          const unregisterTurn = () => {
-            if (!activeAssistantMessageId) return;
-            unregisterActiveTurn(activeAssistantMessageId);
-            activeAssistantMessageId = null;
-          };
-
-          let reservedRecovery: Awaited<ReturnType<typeof reserveInterruptedTurnResume>> | null =
-            null;
-          if (body.recovery && inspectedRecovery) {
             try {
-              reservedRecovery = await reserveInterruptedTurnResume(
+              for await (const event of streamTextTurn(
                 {
                   chatId: body.chatId,
                   userId,
-                  displayPrompt: body.prompt,
+                  prompt: reservedRecovery?.effectivePrompt ?? body.prompt,
                   attachmentIds,
-                  recovery: body.recovery,
-                  inspected: inspectedRecovery,
-                  resolvedModel,
+                  model: resolvedModel.modelId,
+                  systemPrompt: body.systemPrompt,
+                  promptSettings: body.promptSettings,
+                  thinkingEnabled: body.thinkingEnabled ?? body.thinkingVisibility !== 'off',
+                  reasoningEffort: body.reasoningEffort,
+                  maxToolIterations: body.maxToolIterations,
+                  contextSettings: body.contextSettings,
+                  toolIntent: body.toolIntent,
                   agentId: resolvedAgent.agentId,
-                  agentName: resolvedAgent.profile.name,
-                  onTurnReserved: registerTurn,
+                  resolvedAgentProfile: resolvedAgent.profile,
+                  signal: abortController.signal,
+                  resolvedModel,
+                  preparedTurn: reservedRecovery
+                    ? {
+                        userMessageId: reservedRecovery.userMessageId,
+                        assistantMessageId: reservedRecovery.assistantMessageId,
+                        checkpoint: reservedRecovery.checkpoint,
+                      }
+                    : undefined,
+                  onTurnPrepared: registerTurn,
                 },
                 db
-              );
-            } catch (err) {
-              unregisterTurn();
-              if (err instanceof TurnRecoveryNotFoundError) {
-                set.status = 404;
-                return { error: err.message, code: ERROR_CODES.NOT_FOUND };
-              }
-              if (err instanceof TurnRecoveryConflictError) {
-                set.status = 409;
-                return { error: err.message, code: ERROR_CODES.CONFLICT };
-              }
-              if (err instanceof TurnRecoveryValidationError) {
-                set.status = 400;
-                return { error: err.message, code: ERROR_CODES.VALIDATION };
-              }
-              throw err;
-            }
-          }
-
-          const stream = new ReadableStream({
-            async start(controller) {
-              const heartbeat = setInterval(() => {
-                try {
-                  controller.enqueue(KEEPALIVE_BYTES);
-                } catch {
-                  // Controller may already be closed
-                }
-              }, KEEPALIVE_INTERVAL_MS);
-
-              try {
-                for await (const event of streamTextTurn(
-                  {
-                    chatId: body.chatId,
-                    userId,
-                    prompt: reservedRecovery?.effectivePrompt ?? body.prompt,
-                    attachmentIds,
-                    model: resolvedModel.modelId,
-                    systemPrompt: body.systemPrompt,
-                    promptSettings: body.promptSettings,
-                    thinkingEnabled: body.thinkingEnabled ?? body.thinkingVisibility !== 'off',
-                    reasoningEffort: body.reasoningEffort,
-                    maxToolIterations: body.maxToolIterations,
-                    contextSettings: body.contextSettings,
-                    toolIntent: body.toolIntent,
-                    agentId: resolvedAgent.agentId,
-                    resolvedAgentProfile: resolvedAgent.profile,
-                    signal: abortController.signal,
-                    resolvedModel,
-                    preparedTurn: reservedRecovery
-                      ? {
-                          userMessageId: reservedRecovery.userMessageId,
-                          assistantMessageId: reservedRecovery.assistantMessageId,
-                          checkpoint: reservedRecovery.checkpoint,
-                        }
-                      : undefined,
-                    onTurnPrepared: registerTurn,
-                  },
-                  db
-                )) {
-                  if (!abortController.signal.aborted) {
-                    controller.enqueue(sseEvent(toSsePayload(event)));
-                  }
-                }
-              } catch (err) {
+              )) {
                 if (!abortController.signal.aborted) {
-                  const message = err instanceof Error ? err.message : 'Stream generation failed';
-                  const code = getErrorCode(err);
-                  const errorEvent: SSEErrorEvent = {
-                    type: 'error',
-                    error: message,
-                    ...(code ? { code } : {}),
-                    done: true,
-                  };
-                  controller.enqueue(sseEvent(errorEvent));
-                }
-              } finally {
-                clearInterval(heartbeat);
-                unregisterTurn();
-                try {
-                  controller.close();
-                } catch {
-                  // The browser may already have cancelled the stream.
+                  controller.enqueue(sseEvent(toSsePayload(event)));
                 }
               }
-            },
-            cancel() {
-              abortController.abort('client_disconnect');
-            },
-          });
+            } catch (err) {
+              if (!abortController.signal.aborted) {
+                const message = err instanceof Error ? err.message : 'Stream generation failed';
+                const code = getErrorCode(err);
+                const errorEvent: SSEErrorEvent = {
+                  type: 'error',
+                  error: message,
+                  ...(code ? { code } : {}),
+                  done: true,
+                };
+                controller.enqueue(sseEvent(errorEvent));
+              }
+            } finally {
+              clearInterval(heartbeat);
+              unregisterTurn();
+              try {
+                controller.close();
+              } catch {
+                // The browser may already have cancelled the stream.
+              }
+            }
+          },
+          cancel() {
+            abortController.abort('client_disconnect');
+          },
+        });
 
-          return new Response(stream, {
-            headers: {
-              'Content-Type': 'text/event-stream',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-            },
-          });
-        },
-        { body: RespondStreamBodySchema }
-      )
+        return new Response(stream, {
+          headers: {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            Connection: 'keep-alive',
+          },
+        });
+      })
   );

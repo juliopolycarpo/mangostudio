@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import Type from 'typebox';
+import Value from 'typebox/value';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { clearGeminiModelCatalog } from '../../../src/services/gemini';
 import { isProviderModelsUrl } from '../../support/connectors';

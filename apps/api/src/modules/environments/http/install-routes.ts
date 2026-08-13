@@ -110,6 +110,10 @@ export function createInstallRoutes(service: InstallService = installService) {
     })
     .get(
       '/environments/install/recipes',
+      {
+        query: t.Object({ environmentId: t.Optional(EnvironmentIdSchema) }),
+        response: { 200: t.Array(InstallRecipePreviewSchema) },
+      },
       ({ user, installPeerIp, request, query }) =>
         service.listRecipes({
           ...requestContext({
@@ -118,14 +122,21 @@ export function createInstallRoutes(service: InstallService = installService) {
             request,
           }),
           ...(query.environmentId ? { environmentId: query.environmentId } : {}),
-        }),
-      {
-        query: t.Object({ environmentId: t.Optional(EnvironmentIdSchema) }),
-        response: { 200: t.Array(InstallRecipePreviewSchema) },
-      }
+        })
     )
     .post(
       '/environments/install/prepare',
+      {
+        body: InstallPrepareBodySchema,
+        response: {
+          200: InstallPreparationSchema,
+          400: ApiErrorResponseSchema,
+          403: InstallBlockedResponseSchema,
+          409: t.Union([InstallBlockedResponseSchema, ApiErrorResponseSchema]),
+          422: ApiErrorResponseSchema,
+          502: ApiErrorResponseSchema,
+        },
+      },
       async ({ body, user, installPeerIp, request, set }) => {
         try {
           return await service.prepare(
@@ -140,21 +151,20 @@ export function createInstallRoutes(service: InstallService = installService) {
         } catch (error) {
           return mapInstallError(error, set);
         }
-      },
-      {
-        body: InstallPrepareBodySchema,
-        response: {
-          200: InstallPreparationSchema,
-          400: ApiErrorResponseSchema,
-          403: InstallBlockedResponseSchema,
-          409: t.Union([InstallBlockedResponseSchema, ApiErrorResponseSchema]),
-          422: ApiErrorResponseSchema,
-          502: ApiErrorResponseSchema,
-        },
       }
     )
     .post(
       '/environments/install',
+      {
+        body: InstallStartBodySchema,
+        response: {
+          200: InstallStartResponseSchema,
+          400: ApiErrorResponseSchema,
+          403: InstallBlockedResponseSchema,
+          409: t.Union([InstallBlockedResponseSchema, ApiErrorResponseSchema]),
+          422: ApiErrorResponseSchema,
+        },
+      },
       async ({ body, user, installPeerIp, request, set }) => {
         try {
           return await service.start(
@@ -169,39 +179,39 @@ export function createInstallRoutes(service: InstallService = installService) {
         } catch (error) {
           return mapInstallError(error, set);
         }
-      },
-      {
-        body: InstallStartBodySchema,
-        response: {
-          200: InstallStartResponseSchema,
-          400: ApiErrorResponseSchema,
-          403: InstallBlockedResponseSchema,
-          409: t.Union([InstallBlockedResponseSchema, ApiErrorResponseSchema]),
-          422: ApiErrorResponseSchema,
-        },
       }
     )
-    .get('/environments/install/runs', ({ user }) => service.listRuns(user?.id ?? ''), {
-      response: { 200: InstallRunListSchema },
-    })
+    .get(
+      '/environments/install/runs',
+      {
+        response: { 200: InstallRunListSchema },
+      },
+      ({ user }) => service.listRuns(user?.id ?? '')
+    )
     .post(
       '/environments/install/:runId/cancel',
-      async ({ params, user, set }) => {
-        const result = await service.cancel(params.runId, user?.id ?? '');
-        if (result) return result;
-        set.status = 404;
-        return { error: 'Install run not found.', code: ERROR_CODES.NOT_FOUND };
-      },
       {
         params: runIdParams,
         response: {
           200: InstallCancelResponseSchema,
           404: ApiErrorResponseSchema,
         },
+      },
+      async ({ params, user, set }) => {
+        const result = await service.cancel(params.runId, user?.id ?? '');
+        if (result) return result;
+        set.status = 404;
+        return { error: 'Install run not found.', code: ERROR_CODES.NOT_FOUND };
       }
     )
     .get(
       '/environments/install/:runId/log',
+      {
+        params: runIdParams,
+        response: {
+          404: ApiErrorResponseSchema,
+        },
+      },
       async ({ params, user, set }) => {
         const source = await service.getRunStream(params.runId, user?.id ?? '');
         if (!source) {
@@ -258,12 +268,6 @@ export function createInstallRoutes(service: InstallService = installService) {
             Connection: 'keep-alive',
           },
         });
-      },
-      {
-        params: runIdParams,
-        response: {
-          404: ApiErrorResponseSchema,
-        },
       }
     );
 }

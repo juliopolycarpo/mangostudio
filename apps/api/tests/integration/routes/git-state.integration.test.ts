@@ -8,7 +8,7 @@ import {
   InitRepoResponseSchema,
 } from '@mangostudio/shared/git';
 import { GIT_SCOPES, gitTopic, type RealtimeInvalidateEvent } from '@mangostudio/shared/realtime';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';
 import {

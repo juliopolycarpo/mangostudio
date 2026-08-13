@@ -18,7 +18,7 @@ import {
   MCP_SERVER_SLUG_MAX_LENGTH,
   McpPortableDocumentSchema,
 } from '@mangostudio/shared/mcp';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { isHttpUrl, isValidMcpServerSlug, McpServerError } from '../domain/mcp-server';
 import { analyzeMcpHttpUrl, looksCredentialShaped } from './mcp-credential-policy';
 

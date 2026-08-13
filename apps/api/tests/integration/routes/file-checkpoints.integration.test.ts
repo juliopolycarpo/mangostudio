@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { faker } from '@faker-js/faker';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { fileCheckpointRoutes } from '../../../src/modules/file-checkpoints/http/file-checkpoint-routes';
 import { executeCreateFile } from '../../../src/services/tools/builtin/create-file';

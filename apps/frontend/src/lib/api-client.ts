@@ -1,4 +1,4 @@
-import { treaty } from '@elysiajs/eden';
+import { treaty } from '@elysia/eden';
 import type { App } from '@mangostudio/api';
 import { getApiBaseUrl } from './api-base-url';
 import { scheduleLoginRedirect } from './auth-navigate';

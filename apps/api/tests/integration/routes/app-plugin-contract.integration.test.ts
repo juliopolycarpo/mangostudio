@@ -60,7 +60,7 @@ async function openApiDocument(): Promise<OpenApiDocument> {
  * answers is only "is every route still published under the same path and
  * method".
  *
- * `/uploads` is excluded because `@elysiajs/static` derives its routes from
+ * `/uploads` is excluded because `@elysia/static` derives its routes from
  * whatever is on disk when the plugin is registered — it publishes a `/uploads/*`
  * wildcard when the directory is absent and nothing when it is populated. That
  * makes its footprint a property of the machine rather than of the API, so

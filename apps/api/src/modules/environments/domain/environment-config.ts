@@ -11,7 +11,7 @@ import {
   WebSocketEnvironmentConfigSchema,
   WslEnvironmentConfigSchema,
 } from '@mangostudio/shared/environments';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 
 const CONFIG_SCHEMAS = {
   'in-process': InProcessEnvironmentConfigSchema,

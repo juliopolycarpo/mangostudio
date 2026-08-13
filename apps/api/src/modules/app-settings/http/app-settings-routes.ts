@@ -18,11 +18,11 @@ export const appSettingsRoutes = new Elysia()
 
   .put(
     '/app',
+    {
+      body: AppSettingsPutBodySchema,
+    },
     // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
     async ({ body, user }): Promise<AppSettings> => {
       return updateAppSettings(getDb(), user?.id ?? '', normalizeAppSettings(body));
-    },
-    {
-      body: AppSettingsPutBodySchema,
     }
   );

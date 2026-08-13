@@ -13,8 +13,8 @@ import {
   ApiErrorResponseSchema,
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
-import { Value } from '@sinclair/typebox/value';
 import type { Elysia } from 'elysia';
+import Value from 'typebox/value';
 import { getApiKeyApi } from '../../../src/auth';
 import { getDb } from '../../../src/db/database';
 import { apiKeyRoutes } from '../../../src/modules/api-keys/http/api-key-routes';

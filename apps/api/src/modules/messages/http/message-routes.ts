@@ -20,6 +20,12 @@ export const messageRoutes = (app: Elysia) =>
        */
       .get(
         '/images',
+        {
+          query: t.Object({
+            limit: t.Optional(t.String()),
+            cursor: t.Optional(t.String()),
+          }),
+        },
         // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
         async ({ query, user }) => {
           return listGalleryUseCase(
@@ -30,53 +36,47 @@ export const messageRoutes = (app: Elysia) =>
             },
             getDb()
           );
-        },
-        {
-          query: t.Object({
-            limit: t.Optional(t.String()),
-            cursor: t.Optional(t.String()),
-          }),
         }
       )
 
       /** Create a new message for a chat owned by the user. */
-      .post(
-        '/',
-        async ({ body, user, set }) => {
-          try {
-            await createMessageUseCase(
-              {
-                id: body.id,
-                chatId: body.chatId,
-                userId: user?.id ?? '',
-                role: body.role,
-                text: body.text,
-                imageUrl: body.imageUrl,
-                referenceImage: body.referenceImage,
-                timestamp: body.timestamp,
-                isGenerating: body.isGenerating ?? false,
-                generationTime: body.generationTime,
-                modelName: body.modelName,
-                styleParams: body.styleParams,
-                interactionMode: body.interactionMode ?? 'image',
-              },
-              getDb()
-            );
-            return { success: true };
-          } catch (err) {
-            if (err instanceof ChatNotFoundError) {
-              set.status = 404;
-              return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
-            }
-            throw err;
+      .post('/', { body: CreateMessageBodySchema }, async ({ body, user, set }) => {
+        try {
+          await createMessageUseCase(
+            {
+              id: body.id,
+              chatId: body.chatId,
+              userId: user?.id ?? '',
+              role: body.role,
+              text: body.text,
+              imageUrl: body.imageUrl,
+              referenceImage: body.referenceImage,
+              timestamp: body.timestamp,
+              isGenerating: body.isGenerating ?? false,
+              generationTime: body.generationTime,
+              modelName: body.modelName,
+              styleParams: body.styleParams,
+              interactionMode: body.interactionMode ?? 'image',
+            },
+            getDb()
+          );
+          return { success: true };
+        } catch (err) {
+          if (err instanceof ChatNotFoundError) {
+            set.status = 404;
+            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
           }
-        },
-        { body: CreateMessageBodySchema }
-      )
+          throw err;
+        }
+      })
 
       /** Update a message in a chat owned by the user. */
       .put(
         '/:id',
+        {
+          params: t.Object({ id: t.String() }),
+          body: UpdateMessageBodySchema,
+        },
         async ({ params, body, user, set }) => {
           try {
             await updateMessageUseCase(
@@ -102,10 +102,6 @@ export const messageRoutes = (app: Elysia) =>
             }
             throw err;
           }
-        },
-        {
-          params: t.Object({ id: t.String() }),
-          body: UpdateMessageBodySchema,
         }
       )
   );

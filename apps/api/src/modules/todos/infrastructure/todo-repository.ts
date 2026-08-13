@@ -10,8 +10,8 @@ import {
   type TodoList,
   TodoListSchema,
 } from '@mangostudio/shared/todos';
-import { Value } from '@sinclair/typebox/value';
 import type { Kysely } from 'kysely';
+import Value from 'typebox/value';
 import type { ChatTodoInsert, ChatTodoSelect, Database } from '../../../db/types';
 
 /**

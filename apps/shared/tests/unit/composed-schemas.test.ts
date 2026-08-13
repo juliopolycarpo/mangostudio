@@ -16,8 +16,8 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import type { Static, TSchema } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import type { Static, TSchema } from 'typebox';
+import Value from 'typebox/value';
 
 import type {
   AgentCliStatus,

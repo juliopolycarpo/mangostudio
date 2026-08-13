@@ -18,7 +18,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import { RuntimeLifecycleViewSchema } from '@mangostudio/shared/environments';
 import type { RuntimeHealthReport, RuntimePlatformId } from '@mangostudio/shared/runtime-home';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { getVersion } from '../../../src/lib/config';
 import {

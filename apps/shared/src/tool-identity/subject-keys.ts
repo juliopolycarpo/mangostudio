@@ -6,8 +6,8 @@
  * a second list that could drift away from them.
  */
 
-import type { TSchema } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import type { TSchema } from 'typebox';
+import Value from 'typebox/value';
 import { RuntimeIdSchema, VersionManagerIdSchema } from '../environments';
 import { LibraryTargetIdSchema } from '../library';
 import { SubjectKeySchema, type ToolIdentityKind } from './schemas';

@@ -18,6 +18,10 @@ export const capabilityRoutes = new Elysia()
 
   .get(
     '/chats/:id/capabilities',
+    {
+      params: t.Object({ id: t.String() }),
+      query: ChatCapabilitiesQuerySchema,
+    },
     async ({ params, query, user, set }) => {
       try {
         return await inspectChatCapabilities({
@@ -39,9 +43,5 @@ export const capabilityRoutes = new Elysia()
         }
         throw err;
       }
-    },
-    {
-      params: t.Object({ id: t.String() }),
-      query: ChatCapabilitiesQuerySchema,
     }
   );

@@ -125,7 +125,7 @@ import {
 } from '@mangostudio/runtime';
 import { ExternalAgentEventEnvelopeSchema } from '@mangostudio/shared/external-agents';
 import type { RuntimeEventFrame } from '@mangostudio/shared/runtime-protocol';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';

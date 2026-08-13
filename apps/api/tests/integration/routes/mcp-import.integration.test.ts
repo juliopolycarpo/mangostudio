@@ -9,7 +9,7 @@ import {
   McpImportPreviewResponseSchema,
   type McpServerListResponse,
 } from '@mangostudio/shared/mcp';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { loadConfigForTest } from '../../../src/lib/config';
 import { mcpServerRoutes } from '../../../src/modules/mcp-servers/http/mcp-server-routes';
 import { closeAllMcpClients } from '../../../src/services/mcp/connection-manager';

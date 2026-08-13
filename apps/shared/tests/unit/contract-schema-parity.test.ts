@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { Static } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import type { Static } from 'typebox';
+import Value from 'typebox/value';
 
 import type { AgentId, AgentProfile } from '../../src/agents';
 import { AgentProfileSchema } from '../../src/agents';

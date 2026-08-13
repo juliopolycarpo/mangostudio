@@ -19,7 +19,7 @@ import {
 import type { ExternalIdentityIsolation } from '@mangostudio/shared/external-agents';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import type { RuntimeErrorCode } from '@mangostudio/shared/runtime-protocol';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { probeRuntimeSlots } from '../../cli/runtime-slot-probe';
 import { getDb } from '../../db/database';
 import { getVersion } from '../../lib/config';

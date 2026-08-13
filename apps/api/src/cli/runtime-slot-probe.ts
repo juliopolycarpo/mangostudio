@@ -27,7 +27,7 @@ import {
   runtimeSlotConfigPath,
   runtimeSlotDir,
 } from '@mangostudio/shared/runtime-home';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getRuntimeHomeMangoDir } from '../lib/config';
 
 export interface RuntimeSlotProbe {

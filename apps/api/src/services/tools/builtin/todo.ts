@@ -7,6 +7,7 @@
  * process, the SSE stream, and context compaction.
  */
 
+import { describeSchemaError } from '@mangostudio/shared/errors';
 import {
   getActiveTodo,
   summarizeTodos,
@@ -19,7 +20,7 @@ import {
   type TodoWriteArgs,
   TodoWriteArgsSchema,
 } from '@mangostudio/shared/todos';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../db/database';
 import {
   getChatTodos,
@@ -115,10 +116,7 @@ async function executeRead(
  */
 function parseTodoWriteArgs(args: Record<string, unknown>): TodoWriteArgs {
   if (!Value.Check(TodoWriteArgsSchema, args)) {
-    const firstError = Value.Errors(TodoWriteArgsSchema, args).First();
-    const detail = firstError
-      ? `${firstError.path || '/'}: ${firstError.message}`
-      : 'invalid payload';
+    const detail = describeSchemaError(Value.Errors(TodoWriteArgsSchema, args), 'invalid payload');
     throw new Error(
       `Invalid todo_write arguments (${detail}). Provide the full list as ` +
         `{ todos: [{ content, status }] } with at most ${TODO_MAX_ITEMS} items, each content ` +

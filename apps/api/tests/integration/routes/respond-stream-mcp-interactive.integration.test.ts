@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { StreamChunkSchema } from '@mangostudio/shared/streaming';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';

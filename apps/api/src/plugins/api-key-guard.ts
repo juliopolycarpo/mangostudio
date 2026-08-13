@@ -81,7 +81,7 @@ interface ApiKeyGuardContext {
 }
 
 export function apiKeyGuard(app: Elysia) {
-  return app.onBeforeHandle(async (context) => {
+  return app.beforeHandle(async (context) => {
     const ctx = context as ApiKeyGuardContext;
     const key = ctx.request.headers.get(API_KEY_HEADER);
     if (!key) return;

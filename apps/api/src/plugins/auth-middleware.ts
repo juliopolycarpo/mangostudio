@@ -25,7 +25,7 @@ function isExpectedApiKeySessionFailure(error: unknown): boolean {
  * and re-run once per module instead of once per request.
  */
 const authMiddleware = new Elysia({ name: 'auth-middleware' }).derive(
-  { as: 'scoped' },
+  'plugin',
   async ({ request }) => {
     // With the api-key plugin's enableSessionForAPIKeys on, getSession throws
     // a Better Auth APIError for an invalid/expired x-api-key header instead
@@ -57,13 +57,13 @@ const authMiddleware = new Elysia({ name: 'auth-middleware' }).derive(
  */
 export const requireAuth = new Elysia({ name: 'require-auth' })
   .use(authMiddleware)
-  .onBeforeHandle({ as: 'scoped' }, ({ user, set }) => {
+  .beforeHandle('plugin', ({ user, set }) => {
     if (!user) {
       set.status = 401;
       return { error: 'Unauthorized', code: ERROR_CODES.UNAUTHORIZED } satisfies ApiErrorResponse;
     }
   })
-  .as('scoped');
+  .as('plugin');
 
 /**
  * Stronger authenticated-route guard for credential-management surfaces.
@@ -72,7 +72,7 @@ export const requireAuth = new Elysia({ name: 'require-auth' })
  */
 export const requireCookieAuth = new Elysia({ name: 'require-cookie-auth' })
   .use(requireAuth)
-  .onBeforeHandle({ as: 'scoped' }, ({ authenticationMethod, set }) => {
+  .beforeHandle('plugin', ({ authenticationMethod, set }) => {
     if (authenticationMethod === 'api-key') {
       set.status = 403;
       return {
@@ -81,4 +81,4 @@ export const requireCookieAuth = new Elysia({ name: 'require-cookie-auth' })
       } satisfies ApiErrorResponse;
     }
   })
-  .as('scoped');
+  .as('plugin');

@@ -43,6 +43,12 @@ export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys
   app
     .get(
       '/',
+      {
+        response: {
+          200: ListApiKeysResponseSchema,
+          ...errorResponses,
+        },
+      },
       async ({ request, set, user }): Promise<ListApiKeysResponse | ApiErrorResponse> => {
         try {
           return await listApiKeys({
@@ -52,16 +58,17 @@ export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys
         } catch (error) {
           return handleApiKeyError(error, set);
         }
-      },
-      {
-        response: {
-          200: ListApiKeysResponseSchema,
-          ...errorResponses,
-        },
       }
     )
     .post(
       '/',
+      {
+        body: CreateApiKeyBodySchema,
+        response: {
+          201: CreateApiKeyResponseSchema,
+          ...errorResponses,
+        },
+      },
       async ({ body, request, set, user }): Promise<CreateApiKeyResponse | ApiErrorResponse> => {
         try {
           const response = await createApiKey(
@@ -73,17 +80,17 @@ export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys
         } catch (error) {
           return handleApiKeyError(error, set);
         }
-      },
-      {
-        body: CreateApiKeyBodySchema,
-        response: {
-          201: CreateApiKeyResponseSchema,
-          ...errorResponses,
-        },
       }
     )
     .delete(
       '/:id',
+      {
+        params: t.Object({ id: t.String({ minLength: 1 }) }),
+        response: {
+          204: t.Void(),
+          ...errorResponses,
+        },
+      },
       async ({ params, request, set, user }): Promise<undefined | ApiErrorResponse> => {
         try {
           await revokeApiKey({ userId: user?.id ?? '', headers: request.headers }, params.id);
@@ -92,13 +99,6 @@ export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys
         } catch (error) {
           return handleApiKeyError(error, set);
         }
-      },
-      {
-        params: t.Object({ id: t.String({ minLength: 1 }) }),
-        response: {
-          204: t.Void(),
-          ...errorResponses,
-        },
       }
     )
 );

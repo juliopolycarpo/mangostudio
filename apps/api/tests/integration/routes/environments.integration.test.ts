@@ -10,7 +10,7 @@ import {
   VersionManagerStatusListSchema,
   VersionManagerStatusSchema,
 } from '@mangostudio/shared/environments';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import type {
   EnvironmentProbingService,
   ProbeScope,

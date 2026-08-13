@@ -5,7 +5,7 @@ import {
   type TurnCheckpointPart,
   TurnCheckpointPartSchema,
 } from '@mangostudio/shared/turn-recovery';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../../src/db/database';
 import {
   CHECKPOINT_MAX_INTERVAL_MS,

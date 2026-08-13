@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 
 export const FixedRuleFileKindSchema = Type.Union([Type.Literal('agents'), Type.Literal('claude')]);
 
@@ -40,13 +40,10 @@ export const RuleFilePreviewBodySchema = Type.Object({
   path: Type.String({ minLength: 1 }),
 });
 
-export const RuleFilePreviewResponseSchema = Type.Composite([
-  RuleFileDescriptorSchema,
-  Type.Object({
-    content: Type.Optional(Type.String()),
-    truncated: Type.Boolean(),
-  }),
-]);
+export const RuleFilePreviewResponseSchema = Type.Interface([RuleFileDescriptorSchema], {
+  content: Type.Optional(Type.String()),
+  truncated: Type.Boolean(),
+});
 
 export const DefaultRuleFilesResponseSchema = Type.Object({
   files: Type.Array(RuleFileDescriptorSchema),

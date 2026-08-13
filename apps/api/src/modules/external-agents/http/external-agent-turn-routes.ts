@@ -167,6 +167,17 @@ export function createExternalAgentTurnRoutes(
     .use(requireAuth)
     .post(
       '/chats/:id/external-agent/respond',
+      {
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        body: RespondBodySchema,
+        response: {
+          200: RespondResponseSchema,
+          400: RespondResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: RespondResponseSchema,
+          409: RespondResponseSchema,
+        },
+      },
       async ({ params, body, user, set }) => {
         const result = await controller.answerApproval({
           userId: user?.id ?? '',
@@ -179,21 +190,19 @@ export function createExternalAgentTurnRoutes(
           return { status: 'rejected' as const, reason: result.reason };
         }
         return { status: 'accepted' as const, optionId: result.optionId };
-      },
-      {
-        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
-        body: RespondBodySchema,
-        response: {
-          200: RespondResponseSchema,
-          400: RespondResponseSchema,
-          401: ApiErrorResponseSchema,
-          404: RespondResponseSchema,
-          409: RespondResponseSchema,
-        },
       }
     )
     .post(
       '/chats/:id/external-agent/steer',
+      {
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        body: SteerBodySchema,
+        response: {
+          200: ExternalAgentSteerResultSchema,
+          401: ApiErrorResponseSchema,
+          409: ExternalAgentSteerResultSchema,
+        },
+      },
       async ({ params, body, user, set }) => {
         const result = await controller.steer({
           userId: user?.id ?? '',
@@ -206,19 +215,18 @@ export function createExternalAgentTurnRoutes(
         // steer, right now, for whichever of the reasonCode's causes applies.
         if (!result.accepted) set.status = 409;
         return result;
-      },
-      {
-        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
-        body: SteerBodySchema,
-        response: {
-          200: ExternalAgentSteerResultSchema,
-          401: ApiErrorResponseSchema,
-          409: ExternalAgentSteerResultSchema,
-        },
       }
     )
     .post(
       '/chats/:id/external-agent/review',
+      {
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        body: ReviewBodySchema,
+        // No `response` map, exactly as the send stream has none: the success
+        // case is an SSE `Response` this route hands back untouched, and
+        // declaring a schema around it would put validation between the vendor's
+        // events and the socket.
+      },
       async ({ params, body, user, set }) => {
         const userId = user?.id ?? '';
         const db = getDb();
@@ -251,18 +259,19 @@ export function createExternalAgentTurnRoutes(
           code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
           ...externalPreflightDetails(result.failure),
         };
-      },
-      {
-        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
-        body: ReviewBodySchema,
-        // No `response` map, exactly as the send stream has none: the success
-        // case is an SSE `Response` this route hands back untouched, and
-        // declaring a schema around it would put validation between the vendor's
-        // events and the socket.
       }
     )
     .post(
       '/chats/:id/fork-with-runner',
+      {
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        body: ForkBodySchema,
+        response: {
+          201: ForkResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+        },
+      },
       async ({ params, body, user, set }) => {
         const userId = user?.id ?? '';
         const db = getDb();
@@ -311,19 +320,22 @@ export function createExternalAgentTurnRoutes(
             workdir: source.workdir,
           }),
         };
-      },
-      {
-        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
-        body: ForkBodySchema,
-        response: {
-          201: ForkResponseSchema,
-          401: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-        },
       }
     )
     .post(
       '/chats/:id/external-agent/trust-workspace',
+      {
+        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
+        body: TrustWorkspaceBodySchema,
+        response: {
+          200: TrustWorkspaceResponseSchema,
+          400: ApiErrorResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
+        },
+      },
       async ({ params, body, user, set }) => {
         const userId = user?.id ?? '';
         const db = getDb();
@@ -390,18 +402,6 @@ export function createExternalAgentTurnRoutes(
           db
         );
         return { workspacePath };
-      },
-      {
-        params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
-        body: TrustWorkspaceBodySchema,
-        response: {
-          200: TrustWorkspaceResponseSchema,
-          400: ApiErrorResponseSchema,
-          401: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
-          503: ApiErrorResponseSchema,
-        },
       }
     );
 }

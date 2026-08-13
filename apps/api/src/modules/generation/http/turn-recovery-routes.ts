@@ -31,6 +31,7 @@ export const turnRecoveryRoutes = (app: Elysia) =>
       .use(requireAuth)
       .post(
         '/dismiss',
+        { params: t.Object({ id: t.String(), messageId: t.String() }) },
         async ({ params, user, set }) => {
           try {
             await dismissInterruptedTurn(
@@ -48,11 +49,11 @@ export const turnRecoveryRoutes = (app: Elysia) =>
           } catch (error) {
             return handleRecoveryError(error, set);
           }
-        },
-        { params: t.Object({ id: t.String(), messageId: t.String() }) }
+        }
       )
       .post(
         '/cancel',
+        { params: t.Object({ id: t.String(), messageId: t.String() }) },
         async ({ params, user, set }) => {
           const userId = user?.id ?? '';
           try {
@@ -89,7 +90,6 @@ export const turnRecoveryRoutes = (app: Elysia) =>
           } catch (error) {
             return handleRecoveryError(error, set);
           }
-        },
-        { params: t.Object({ id: t.String(), messageId: t.String() }) }
+        }
       )
   );

@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 
 /**
  * Reserved: profiles are not implemented. Every persisted row and request uses

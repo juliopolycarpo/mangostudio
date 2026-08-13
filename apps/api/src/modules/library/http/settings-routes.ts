@@ -54,13 +54,6 @@ export function createSettingsRoutes(service: SettingsRouteService = defaultSett
     .use(requireAuth)
     .get(
       '/library/settings',
-      async ({ query, set, user }): Promise<SettingsSnapshot[] | ApiErrorResponse> => {
-        try {
-          return await service.list(scopeFor(user?.id ?? '', query.environmentId));
-        } catch (error) {
-          return handleLibraryError(error, set, '[library-settings]');
-        }
-      },
       {
         query: environmentQuery,
         response: {
@@ -69,17 +62,17 @@ export function createSettingsRoutes(service: SettingsRouteService = defaultSett
           500: ApiErrorResponseSchema,
           503: ApiErrorResponseSchema,
         },
+      },
+      async ({ query, set, user }): Promise<SettingsSnapshot[] | ApiErrorResponse> => {
+        try {
+          return await service.list(scopeFor(user?.id ?? '', query.environmentId));
+        } catch (error) {
+          return handleLibraryError(error, set, '[library-settings]');
+        }
       }
     )
     .get(
       '/library/settings/compare',
-      async ({ query, set, user }): Promise<ConceptComparison[] | ApiErrorResponse> => {
-        try {
-          return await service.compare(scopeFor(user?.id ?? '', query.environmentId));
-        } catch (error) {
-          return handleLibraryError(error, set, '[library-settings]');
-        }
-      },
       {
         query: environmentQuery,
         response: {
@@ -88,17 +81,17 @@ export function createSettingsRoutes(service: SettingsRouteService = defaultSett
           500: ApiErrorResponseSchema,
           503: ApiErrorResponseSchema,
         },
+      },
+      async ({ query, set, user }): Promise<ConceptComparison[] | ApiErrorResponse> => {
+        try {
+          return await service.compare(scopeFor(user?.id ?? '', query.environmentId));
+        } catch (error) {
+          return handleLibraryError(error, set, '[library-settings]');
+        }
       }
     )
     .get(
       '/library/settings/:targetId',
-      async ({ params, query, set, user }): Promise<SettingsSnapshot | ApiErrorResponse> => {
-        try {
-          return await service.get(scopeFor(user?.id ?? '', query.environmentId), params.targetId);
-        } catch (error) {
-          return handleLibraryError(error, set, '[library-settings]');
-        }
-      },
       {
         params: t.Object({ targetId: LibraryTargetIdSchema }),
         query: environmentQuery,
@@ -108,6 +101,13 @@ export function createSettingsRoutes(service: SettingsRouteService = defaultSett
           500: ApiErrorResponseSchema,
           503: ApiErrorResponseSchema,
         },
+      },
+      async ({ params, query, set, user }): Promise<SettingsSnapshot | ApiErrorResponse> => {
+        try {
+          return await service.get(scopeFor(user?.id ?? '', query.environmentId), params.targetId);
+        } catch (error) {
+          return handleLibraryError(error, set, '[library-settings]');
+        }
       }
     );
 }

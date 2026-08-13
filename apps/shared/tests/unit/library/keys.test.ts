@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import {
   isValidResourceSlug,
   LIBRARY_RESOURCE_SLUG_MAX_LENGTH,

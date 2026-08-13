@@ -17,7 +17,7 @@ import {
 } from '@mangostudio/shared/library/host';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../../src/db/database';
 import { discoverLibraryResources } from '../../../../src/modules/library/application/library-discovery';
 import { LibraryCache } from '../../../../src/modules/library/infrastructure/library-cache';

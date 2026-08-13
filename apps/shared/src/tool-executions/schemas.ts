@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 
 export const TOOL_EXECUTION_STATUSES = [
   'queued',
@@ -10,17 +10,32 @@ export const TOOL_EXECUTION_STATUSES = [
   'timed_out',
 ] as const;
 
-export const ToolExecutionStatusSchema = Type.Union(
-  TOOL_EXECUTION_STATUSES.map((status) => Type.Literal(status))
-);
+// Written as a literal tuple rather than mapped from the array above:
+// TypeBox infers a union by walking a tuple, and a mapped array widens to
+// `TSchema[]`, which infers as `never` and silently erases the type.
+export const ToolExecutionStatusSchema = Type.Union([
+  Type.Literal('queued'),
+  Type.Literal('running'),
+  Type.Literal('awaiting_user'),
+  Type.Literal('succeeded'),
+  Type.Literal('failed'),
+  Type.Literal('cancelled'),
+  Type.Literal('timed_out'),
+]);
 
 export type ToolExecutionStatus = Static<typeof ToolExecutionStatusSchema>;
 
 export const TOOL_EXECUTION_SOURCES = ['builtin', 'skill', 'mcp', 'subagent'] as const;
 
-export const ToolExecutionSourceSchema = Type.Union(
-  TOOL_EXECUTION_SOURCES.map((source) => Type.Literal(source))
-);
+// Written as a literal tuple rather than mapped from the array above:
+// TypeBox infers a union by walking a tuple, and a mapped array widens to
+// `TSchema[]`, which infers as `never` and silently erases the type.
+export const ToolExecutionSourceSchema = Type.Union([
+  Type.Literal('builtin'),
+  Type.Literal('skill'),
+  Type.Literal('mcp'),
+  Type.Literal('subagent'),
+]);
 
 export type ToolExecutionSource = Static<typeof ToolExecutionSourceSchema>;
 
@@ -42,9 +57,21 @@ export const TOOL_EXECUTION_REASON_CODES = [
   'outcome_unknown',
 ] as const;
 
-export const ToolExecutionReasonCodeSchema = Type.Union(
-  TOOL_EXECUTION_REASON_CODES.map((code) => Type.Literal(code))
-);
+// Written as a literal tuple rather than mapped from the array above:
+// TypeBox infers a union by walking a tuple, and a mapped array widens to
+// `TSchema[]`, which infers as `never` and silently erases the type.
+export const ToolExecutionReasonCodeSchema = Type.Union([
+  Type.Literal('timeout'),
+  Type.Literal('user_cancelled'),
+  Type.Literal('turn_aborted'),
+  Type.Literal('not_allowed'),
+  Type.Literal('tool_disabled'),
+  Type.Literal('unknown_tool'),
+  Type.Literal('validation_failed'),
+  Type.Literal('server_closed'),
+  Type.Literal('execution_error'),
+  Type.Literal('outcome_unknown'),
+]);
 
 export type ToolExecutionReasonCode = Static<typeof ToolExecutionReasonCodeSchema>;
 

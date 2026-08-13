@@ -1,7 +1,7 @@
 import type { GithubContext, GithubPr, GithubRepo } from '@mangostudio/shared/github';
 import { GithubPrSchema } from '@mangostudio/shared/github';
-import { type Static, type TSchema, Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import Type, { type Static, type TSchema } from 'typebox';
+import Value from 'typebox/value';
 import { GhCliError, type GithubCli, ghCli } from '../infrastructure/gh-cli';
 
 const GhRepoOutputSchema = Type.Object({

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { RuntimeServiceStatusSchema } from '@mangostudio/shared/runtime-home';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import {
   readRuntimeSlotState,
   writePairingToken,

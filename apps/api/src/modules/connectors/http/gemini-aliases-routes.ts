@@ -43,6 +43,7 @@ export const geminiAliasRoutes = new Elysia()
 
   .post(
     '/connectors/gemini',
+    { body: AddConnectorBodySchema },
     async ({ body, set, user }): Promise<Connector | ApiErrorResponse> => {
       try {
         const connector = await addGeminiConnector(user?.id ?? '', body);
@@ -53,12 +54,12 @@ export const geminiAliasRoutes = new Elysia()
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    { body: AddConnectorBodySchema }
+    }
   )
 
   .delete(
     '/connectors/gemini/:id',
+    { params: t.Object({ id: t.String() }) },
     async ({ params, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
       try {
         await deleteGeminiConnector(user?.id ?? '', params.id);
@@ -70,12 +71,15 @@ export const geminiAliasRoutes = new Elysia()
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    { params: t.Object({ id: t.String() }) }
+    }
   )
 
   .put(
     '/connectors/gemini/:id/models',
+    {
+      params: t.Object({ id: t.String() }),
+      body: UpdateConnectorModelsBodySchema,
+    },
     async ({ params, body, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
       try {
         await updateConnectorModels(user?.id ?? '', params.id, body.enabledModels);
@@ -85,9 +89,5 @@ export const geminiAliasRoutes = new Elysia()
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    {
-      params: t.Object({ id: t.String() }),
-      body: UpdateConnectorModelsBodySchema,
     }
   );

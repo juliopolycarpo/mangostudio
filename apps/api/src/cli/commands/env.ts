@@ -17,8 +17,8 @@ import {
   RuntimeStatusListSchema,
   VersionManagerStatusListSchema,
 } from '@mangostudio/shared/environments';
-import { Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import Type from 'typebox';
+import Value from 'typebox/value';
 import {
   environmentProbingService,
   LOCAL_PROBE_SCOPE,

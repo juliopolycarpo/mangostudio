@@ -10,7 +10,7 @@
 
 import { mock } from 'bun:test';
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
-import { Type } from '@sinclair/typebox';
+import Type from 'typebox';
 import {
   UnsafeBaseUrlError,
   validateBaseUrl,

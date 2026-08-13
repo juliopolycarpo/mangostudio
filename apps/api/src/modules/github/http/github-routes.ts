@@ -29,6 +29,16 @@ export function createGithubRoutes(resolveContext: GetGithubContext = getGithubC
   return new Elysia().use(requireAuth).group('/github', (app) =>
     app.get(
       '/context',
+      {
+        query: GithubContextQuerySchema,
+        response: {
+          200: GithubContextSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      },
       async ({ query, request, set, user }): Promise<RouteResult> => {
         const resolution = await resolveChatWorkdir(query.chatId, user?.id ?? '', getDb());
         if (resolution.state === 'no-workdir') {
@@ -59,16 +69,6 @@ export function createGithubRoutes(resolveContext: GetGithubContext = getGithubC
             code: error instanceof GithubContextError ? error.code : ERROR_CODES.INTERNAL,
           };
         }
-      },
-      {
-        query: GithubContextQuerySchema,
-        response: {
-          200: GithubContextSchema,
-          403: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
-          500: ApiErrorResponseSchema,
-        },
       }
     )
   );

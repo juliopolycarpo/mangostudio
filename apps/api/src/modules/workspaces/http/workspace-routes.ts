@@ -52,6 +52,9 @@ export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/f
   app
     .get(
       '/',
+      {
+        query: ListDirectoryQuerySchema,
+      },
       async ({ query, set, user }): Promise<ListDirectoryResponse | ApiErrorResponse> => {
         try {
           const selection = await resolveRuntimeSelection(user?.id ?? '', query.chatId);
@@ -63,13 +66,11 @@ export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/f
         } catch (error) {
           return handleDirectoryBrowserError(error, set);
         }
-      },
-      {
-        query: ListDirectoryQuerySchema,
       }
     )
     .post(
       '/validate',
+      { body: ValidatePathBodySchema },
       async ({ body, set, user }): Promise<ValidatePathResponse | ApiErrorResponse> => {
         try {
           const selection = await resolveRuntimeSelection(user?.id ?? '', body.chatId);
@@ -85,7 +86,6 @@ export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/f
           }
           throw error;
         }
-      },
-      { body: ValidatePathBodySchema }
+      }
     )
 );

@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import { ProfileIdSchema } from '../profiles';
 import type { SkillSource } from '../skills';
 
@@ -680,10 +680,9 @@ export const LibraryUndoResultSchema = Type.Object({
  * client rendering a result against "the row with this backupId" would report an
  * undo on the wrong machine's row without this.
  */
-export const PropagationUndoSchema = Type.Composite([
-  LibraryUndoResultSchema,
-  Type.Object({ environmentId: LibraryEnvironmentIdSchema }),
-]);
+export const PropagationUndoSchema = Type.Interface([LibraryUndoResultSchema], {
+  environmentId: LibraryEnvironmentIdSchema,
+});
 
 /**
  * Which flow wrote a backup set, and therefore what undoing it does.
@@ -773,13 +772,10 @@ export const BackupAvailabilitySchema = Type.Union([
  * what makes the row survive the machine being away; `availability` is what
  * keeps the row honest about what can be done with it.
  */
-export const PropagationBackupSetSchema = Type.Composite([
-  LibraryBackupSetSchema,
-  Type.Object({
-    environmentId: LibraryEnvironmentIdSchema,
-    availability: BackupAvailabilitySchema,
-  }),
-]);
+export const PropagationBackupSetSchema = Type.Interface([LibraryBackupSetSchema], {
+  environmentId: LibraryEnvironmentIdSchema,
+  availability: BackupAvailabilitySchema,
+});
 
 /**
  * What retained backups currently cost. Surfaced so a directory holding copies
@@ -939,10 +935,9 @@ export const LibraryStagedRemovalSchema = Type.Object({
 });
 
 /** The hub's view, which names the machine the stale directory is sitting on. */
-export const StagedRemovalLeftoverSchema = Type.Composite([
-  LibraryStagedRemovalSchema,
-  Type.Object({ environmentId: LibraryEnvironmentIdSchema }),
-]);
+export const StagedRemovalLeftoverSchema = Type.Interface([LibraryStagedRemovalSchema], {
+  environmentId: LibraryEnvironmentIdSchema,
+});
 
 export const RemovalPreviewRequestSchema = Type.Object({
   resourceKeys: Type.Array(Type.String({ minLength: 1 }), {

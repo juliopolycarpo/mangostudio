@@ -16,17 +16,21 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { inspect } from 'node:util';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
-import { Value } from '@sinclair/typebox/value';
 import { Elysia, t } from 'elysia';
+import Value from 'typebox/value';
 import { errorHandler } from '../../../src/plugins/error-handler';
 
 const SECRET = 'sk-live-do-not-log-me';
 const INTERNAL_DETAIL = '/var/secrets/private-key.pem could not be opened';
 
 function uploadApp() {
-  return new Elysia().use(errorHandler).post('/avatar', () => ({ ok: true }), {
-    body: t.Object({ image: t.File({ type: 'image/*' }) }),
-  });
+  return new Elysia().use(errorHandler).post(
+    '/avatar',
+    {
+      body: t.Object({ image: t.File({ type: 'image/*' }) }),
+    },
+    () => ({ ok: true })
+  );
 }
 
 function uploadRequest(bytes: Uint8Array): Request {
@@ -106,7 +110,7 @@ describe('errorHandler status and body mapping', () => {
   it('answers a rejected request body with 422', async () => {
     const app = new Elysia()
       .use(errorHandler)
-      .post('/rename', () => ({ ok: true }), { body: t.Object({ name: t.String() }) });
+      .post('/rename', { body: t.Object({ name: t.String() }) }, () => ({ ok: true }));
 
     const response = await app.handle(
       new Request('http://localhost/rename', {
@@ -124,9 +128,13 @@ describe('errorHandler status and body mapping', () => {
   });
 
   it('answers a response that fails our own schema with 500', async () => {
-    const app = new Elysia().use(errorHandler).get('/count', () => ({ count: 'many' }) as never, {
-      response: t.Object({ count: t.Number() }),
-    });
+    const app = new Elysia().use(errorHandler).get(
+      '/count',
+      {
+        response: t.Object({ count: t.Number() }),
+      },
+      () => ({ count: 'many' }) as never
+    );
 
     // The caller's request was fine; the bug is ours, and saying 422 would send
     // them off to fix a request that was never at fault.
@@ -195,9 +203,13 @@ describe('errorHandler status and body mapping', () => {
 describe('errorHandler leaks nothing to the client', () => {
   it('keeps a rejected credential out of both the response and the logs', async () => {
     capture = captureConsole();
-    const app = new Elysia().use(errorHandler).post('/connectors', () => ({ ok: true }), {
-      body: t.Object({ apiKey: t.String(), enabled: t.Boolean() }),
-    });
+    const app = new Elysia().use(errorHandler).post(
+      '/connectors',
+      {
+        body: t.Object({ apiKey: t.String(), enabled: t.Boolean() }),
+      },
+      () => ({ ok: true })
+    );
 
     const response = await app.handle(
       new Request('http://localhost/connectors', {
@@ -238,9 +250,13 @@ describe('errorHandler leaks nothing to the client', () => {
 
   it('keeps a rejected response value out of the 500 it produces', async () => {
     capture = captureConsole();
-    const app = new Elysia().use(errorHandler).get('/profile', () => ({ token: SECRET }) as never, {
-      response: t.Object({ name: t.String() }),
-    });
+    const app = new Elysia().use(errorHandler).get(
+      '/profile',
+      {
+        response: t.Object({ name: t.String() }),
+      },
+      () => ({ token: SECRET }) as never
+    );
 
     const raw = await (await app.handle(new Request('http://localhost/profile'))).text();
 

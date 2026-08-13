@@ -11,6 +11,7 @@ import { type Elysia, t } from 'elysia';
 import { fileTypeFromBuffer } from 'file-type';
 import { getDb } from '../db/database';
 import { getConfig } from '../lib/config';
+import { registerFileTypeDetector } from '../lib/file-type-detector';
 import { createDiagnosticLogger } from '../lib/logger';
 import {
   buildAttachmentStoragePath,
@@ -26,6 +27,10 @@ import { getById } from '../modules/chats/infrastructure/chat-repository';
 import { requireAuth } from '../plugins/auth-middleware';
 import { generateId } from '../utils/id';
 
+// `t.File({ type })` below cannot verify bytes until Elysia has a detector,
+// and rejects every typed upload with 422 while it does not have one.
+registerFileTypeDetector();
+
 const UPLOADS_DIR = getConfig().uploads.dir;
 const uploadLogger = createDiagnosticLogger('upload');
 
@@ -39,6 +44,11 @@ export const uploadRoutes = (app: Elysia) =>
       /** Upload a single image file. */
       .post(
         '/',
+        {
+          body: t.Object({
+            image: t.File({ type: 'image/*', maxSize: '20m' }),
+          }),
+        },
         async ({ body, set }) => {
           const file = body.image;
           const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
@@ -100,17 +110,23 @@ export const uploadRoutes = (app: Elysia) =>
 
           const imageUrl = `/uploads/${filename}`;
           return { imageUrl };
-        },
-        {
-          body: t.Object({
-            image: t.File({ type: 'image/*', maxSize: '20m' }),
-          }),
         }
       )
 
       /** Upload a chat-scoped attachment file. */
       .post(
         '/chat',
+        {
+          body: t.Object({
+            chatId: t.String(),
+            file: t.File({ maxSize: CHAT_ATTACHMENT_MAX_SIZE }),
+          }),
+          response: {
+            200: UploadChatAttachmentResponseSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+          },
+        },
         async ({ body, set, user }) => {
           const db = getDb();
           const chat = await getById(body.chatId, db);
@@ -161,17 +177,6 @@ export const uploadRoutes = (app: Elysia) =>
             }
             throw err;
           }
-        },
-        {
-          body: t.Object({
-            chatId: t.String(),
-            file: t.File({ maxSize: CHAT_ATTACHMENT_MAX_SIZE }),
-          }),
-          response: {
-            200: UploadChatAttachmentResponseSchema,
-            400: ApiErrorResponseSchema,
-            404: ApiErrorResponseSchema,
-          },
         }
       )
   );

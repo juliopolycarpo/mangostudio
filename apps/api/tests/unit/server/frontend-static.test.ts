@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { staticPlugin } from '@elysiajs/static';
+import { staticPlugin } from '@elysia/static';
 import { Elysia } from 'elysia';
 import type { App } from '../../../src/app';
 import {
@@ -125,7 +125,7 @@ describe('registerFrontend from the filesystem', () => {
   /**
    * The source/`npm install` path, where assets come off disk instead of the
    * embedded manifest. It is the branch carrying the documented
-   * `@elysiajs/static` `ignorePatterns` workaround, so its precedence is pinned
+   * `@elysia/static` `ignorePatterns` workaround, so its precedence is pinned
    * separately from the embedded one: a plugin swap that fixes the underlying
    * inverted-comparison bug must keep every outcome below identical before the
    * workaround can be removed.
@@ -203,24 +203,22 @@ describe('registerFrontend from the filesystem', () => {
     }
   });
 
-  test('serves SPA deep links under a 404 status, unlike the embedded branch', async () => {
+  test('serves SPA deep links with 200, matching the embedded branch', async () => {
     const get = await buildFilesystemApp();
 
-    // Characterized, not endorsed — and only observable once `app.modules` has
-    // settled. Before the async static plugin finishes registering, these same
-    // requests answer 200; afterwards the NOT_FOUND status survives the
-    // `Response` the `onError` fallback returns, and the shell ships with a
-    // 404. The embedded branch, which registers no static plugin, answers 200
-    // for both (see the suite above).
+    // This used to answer 404-with-the-shell here and 200 in the embedded
+    // branch: the framework's NOT_FOUND status leaked onto the `Response` the
+    // fallback returned, so every SPA deep link on a source or `npm install`
+    // deployment reported 404 to uptime checks and crawlers while rendering
+    // fine in a browser. A returned `Response` now carries its own status, so
+    // both deployment shapes answer 200 and the divergence is gone.
     //
-    // Browsers render the app either way, which is why it went unnoticed, but
-    // every SPA deep link on a source or `npm install` deployment reports 404
-    // to uptime checks and crawlers. Pinned so the divergence is visible and
-    // cannot widen; fixing it changes public behavior and belongs in its own
-    // PR, not in a characterization suite.
+    // Kept as an explicit assertion rather than deleted: the two branches
+    // agreeing is the property worth holding, and it was reached by a framework
+    // behavior change rather than by a decision recorded here.
     for (const path of ['/settings', '/index.html']) {
       const response = await get(path);
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(200);
       expect(await response.text()).toBe(INDEX_HTML);
     }
   });

@@ -20,7 +20,7 @@
  * here renders an empty page while `check`, `test` and `build` stay green.
  */
 
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import { ReadonlyArraySchema } from '../schema-helpers';
 import {
   EXTERNAL_APPROVAL_MAX_OPTIONS,

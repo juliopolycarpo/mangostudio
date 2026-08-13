@@ -21,7 +21,8 @@
   "dependencies": {
     "@mangostudio/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "smol-toml": "^1.7.0"
+    "smol-toml": "^1.7.0",
+    "typebox": "1.3.13"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

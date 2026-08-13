@@ -10,7 +10,7 @@ import {
   AgentProfileSchema,
 } from '@mangostudio/shared/agents';
 import { DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import { settingsRoutes } from '../../../src/routes/settings';

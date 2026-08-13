@@ -4,7 +4,7 @@ import type {
   RuntimeStatus,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { parseEnvArgs } from '../../../src/cli/args';
 import { CliEnvironmentSnapshotSchema, runEnv } from '../../../src/cli/commands/env';
 import { CliError } from '../../../src/cli/errors';

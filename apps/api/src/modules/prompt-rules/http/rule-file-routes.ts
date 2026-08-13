@@ -27,15 +27,15 @@ export const ruleFileRoutes = new Elysia().use(requireAuth).group('/rule-files',
 
     .post(
       '/preview',
+      {
+        body: RuleFilePreviewBodySchema,
+      },
       ({ body, set }) => {
         try {
           return previewRuleFile(body.path);
         } catch (error) {
           return handleRuleFileError(error, set);
         }
-      },
-      {
-        body: RuleFilePreviewBodySchema,
       }
     )
 );

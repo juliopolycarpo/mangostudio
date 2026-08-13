@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 
 export const ASK_USER_QUESTION_TOOL_NAME = 'ask_user_question';
 

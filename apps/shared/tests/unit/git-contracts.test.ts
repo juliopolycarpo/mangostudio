@@ -18,7 +18,7 @@ import {
   SwitchBranchBodySchema,
   UnstagePathsBodySchema,
 } from '@mangostudio/shared/git';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 
 describe('Git write contracts', () => {
   it('accepts either explicit paths or the all-files selector', () => {

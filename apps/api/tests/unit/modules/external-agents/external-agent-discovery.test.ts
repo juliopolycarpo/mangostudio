@@ -10,7 +10,7 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 
 import type {
   EnvironmentProbingService,

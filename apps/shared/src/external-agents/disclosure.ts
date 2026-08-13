@@ -19,7 +19,7 @@
  * Browser-safe: no Node builtins.
  */
 
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import { ReadonlyArraySchema } from '../schema-helpers';
 import type { ExternalAgentCapabilities, ExternalAgentTargetId } from './schemas';
 import { ExternalAgentTargetIdSchema } from './schemas';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import {
   CONTAINER_MAX_MOUNTS,
   CONTAINER_RUNTIME_MOUNT_PATH,

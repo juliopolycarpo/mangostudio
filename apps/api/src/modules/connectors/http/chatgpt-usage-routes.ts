@@ -24,6 +24,10 @@ export const chatGptUsageRoutes = new Elysia()
 
   .post(
     '/connectors/:id/usage/reset',
+    {
+      params: t.Object({ id: t.String() }),
+      body: RedeemChatGptResetCreditBodySchema,
+    },
     async ({
       params,
       body,
@@ -35,27 +39,30 @@ export const chatGptUsageRoutes = new Elysia()
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    {
-      params: t.Object({ id: t.String() }),
-      body: RedeemChatGptResetCreditBodySchema,
     }
   )
 
   .get(
     '/connectors/:id/usage/stats',
+    { params: t.Object({ id: t.String() }) },
     async ({ params, set, user }): Promise<ChatGptUsageStatsResponse | ApiErrorResponse> => {
       try {
         return { stats: await getChatGptUsageStats(user?.id ?? '', params.id) };
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    { params: t.Object({ id: t.String() }) }
+    }
   )
 
   .get(
     '/connectors/:id/usage/history',
+    {
+      params: t.Object({ id: t.String() }),
+      query: t.Object({
+        window: t.Optional(t.Union([t.Literal('primary'), t.Literal('secondary')])),
+        days: t.Optional(t.Numeric({ minimum: 1, maximum: 90 })),
+      }),
+    },
     async ({
       params,
       query,
@@ -72,12 +79,5 @@ export const chatGptUsageRoutes = new Elysia()
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    {
-      params: t.Object({ id: t.String() }),
-      query: t.Object({
-        window: t.Optional(t.Union([t.Literal('primary'), t.Literal('secondary')])),
-        days: t.Optional(t.Numeric({ minimum: 1, maximum: 90 })),
-      }),
     }
   );

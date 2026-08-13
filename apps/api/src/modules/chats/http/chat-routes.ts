@@ -43,29 +43,26 @@ export const chatRoutes = (app: Elysia) =>
     app
       .use(requireAuth)
       /** List all chats for the authenticated user ordered by most recently updated. */
-      .get(
-        '/',
-        ({ user }) => {
-          return listChatsUseCase(user?.id ?? '', getDb());
-        },
-        { response: { 200: ChatListSchema } }
-      )
+      .get('/', { response: { 200: ChatListSchema } }, ({ user }) => {
+        return listChatsUseCase(user?.id ?? '', getDb());
+      })
 
       /** Create a new chat for the authenticated user. */
       .post(
         '/',
+        { body: CreateChatBodySchema, response: { 200: ChatSchema } },
         // biome-ignore lint/suspicious/useAwait: Migrated from ESLint
         async ({ body, user }) => {
           return createChatUseCase(
             { title: body.title, model: body.model, userId: user?.id ?? '' },
             getDb()
           );
-        },
-        { body: CreateChatBodySchema, response: { 200: ChatSchema } }
+        }
       )
 
       .post(
         '/title-suggestion',
+        { body: GenerateChatTitleBodySchema },
         async ({ body, user, set }) => {
           try {
             return await generateChatTitleUseCase({
@@ -86,13 +83,16 @@ export const chatRoutes = (app: Elysia) =>
             set.status = 500;
             return apiError('Chat title generation failed.', ERROR_CODES.PROVIDER_ERROR);
           }
-        },
-        { body: GenerateChatTitleBodySchema }
+        }
       )
 
       /** Update a chat owned by the authenticated user. */
       .put(
         '/:id',
+        {
+          params: t.Object({ id: t.String() }),
+          body: UpdateChatBodySchema,
+        },
         async ({ params, body, user, set }) => {
           try {
             await updateChatUseCase(
@@ -133,15 +133,15 @@ export const chatRoutes = (app: Elysia) =>
             }
             throw error;
           }
-        },
-        {
-          params: t.Object({ id: t.String() }),
-          body: UpdateChatBodySchema,
         }
       )
 
       .post(
         '/:id/compact',
+        {
+          params: t.Object({ id: t.String() }),
+          body: CompactChatBodySchema,
+        },
         async ({ params, body, user, set }) => {
           try {
             return await compactChatUseCase(
@@ -168,15 +168,15 @@ export const chatRoutes = (app: Elysia) =>
             }
             throw err;
           }
-        },
-        {
-          params: t.Object({ id: t.String() }),
-          body: CompactChatBodySchema,
         }
       )
 
       .post(
         '/:id/summarize-to-new-chat',
+        {
+          params: t.Object({ id: t.String() }),
+          body: SummarizeToNewChatBodySchema,
+        },
         async ({ params, body, user, set }) => {
           try {
             return await summarizeToNewChatUseCase(
@@ -203,26 +203,25 @@ export const chatRoutes = (app: Elysia) =>
             }
             throw err;
           }
-        },
-        {
-          params: t.Object({ id: t.String() }),
-          body: SummarizeToNewChatBodySchema,
         }
       )
 
       /** Delete a chat and its messages (cascades) if owned by the user. */
-      .delete(
-        '/:id',
-        async ({ params, user }) => {
-          await deleteChatUseCase({ chatId: params.id, userId: user?.id ?? '' }, getDb());
-          return { success: true };
-        },
-        { params: t.Object({ id: t.String() }) }
-      )
+      .delete('/:id', { params: t.Object({ id: t.String() }) }, async ({ params, user }) => {
+        await deleteChatUseCase({ chatId: params.id, userId: user?.id ?? '' }, getDb());
+        return { success: true };
+      })
 
       /** Get messages for a specific chat with ownership verification and cursor pagination. */
       .get(
         '/:id/messages',
+        {
+          params: t.Object({ id: t.String() }),
+          query: t.Object({
+            limit: t.Optional(t.String()),
+            cursor: t.Optional(t.String()),
+          }),
+        },
         async ({ params, query, user, set }) => {
           try {
             return await getChatMessagesUseCase(
@@ -241,13 +240,6 @@ export const chatRoutes = (app: Elysia) =>
             }
             throw err;
           }
-        },
-        {
-          params: t.Object({ id: t.String() }),
-          query: t.Object({
-            limit: t.Optional(t.String()),
-            cursor: t.Optional(t.String()),
-          }),
         }
       )
   );

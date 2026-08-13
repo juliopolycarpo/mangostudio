@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
-import { Value } from '@sinclair/typebox/value';
 import { Elysia } from 'elysia';
+import Value from 'typebox/value';
 import { requireAuth } from '../../../src/plugins/auth-middleware';
 import { authRoutes } from '../../../src/routes/auth';
 import { createApiTestApp } from '../../support/harness/create-api-test-app';

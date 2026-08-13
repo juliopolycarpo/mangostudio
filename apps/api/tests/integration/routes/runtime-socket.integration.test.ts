@@ -14,6 +14,7 @@ import {
   type RuntimeProtocolVersion,
 } from '@mangostudio/shared/runtime-protocol';
 import { Elysia } from 'elysia';
+import { websocket } from 'elysia/websocket';
 import { getDb } from '../../../src/db/database';
 import { createRuntimePairingService } from '../../../src/modules/environments/application/runtime-pairing-service';
 import { createRuntimeSocketRoutes } from '../../../src/modules/environments/http/runtime-socket-routes';
@@ -127,7 +128,7 @@ async function startHub(options: StartHubOptions = {}) {
     };
   }
 
-  const app = new Elysia({ websocket: REALTIME_WEBSOCKET_OPTIONS }).group('/api', (group) =>
+  const app = new Elysia().use(websocket(REALTIME_WEBSOCKET_OPTIONS)).group('/api', (group) =>
     group.use(
       createRuntimeSocketRoutes({
         pairing: options.failMarkSeen

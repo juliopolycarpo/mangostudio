@@ -7,7 +7,7 @@ import {
   ExternalAgentDescriptorListResponseSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import type { ProbeScope } from '../../../src/modules/environments/application/probing-service';
 import type { ExternalAgentDiscoveryService } from '../../../src/modules/external-agents/application/external-agent-discovery';
 import { createExternalAgentRoutes } from '../../../src/modules/external-agents/http/external-agent-routes';

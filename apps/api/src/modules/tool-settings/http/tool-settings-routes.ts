@@ -37,15 +37,15 @@ export const toolSettingsRoutes = new Elysia()
 
   .put(
     '/tools/:toolName',
+    {
+      params: t.Object({ toolName: t.String() }),
+      body: UpdateToolSettingsBodySchema,
+    },
     async ({ body, params, set, user }): Promise<ToolSettingsDescriptor | ApiErrorResponse> => {
       try {
         return await updateToolSettingsDescriptor(getDb(), user?.id ?? '', params.toolName, body);
       } catch (error) {
         return handleToolSettingsError(error, set);
       }
-    },
-    {
-      params: t.Object({ toolName: t.String() }),
-      body: UpdateToolSettingsBodySchema,
     }
   );

@@ -7,7 +7,7 @@ import {
   ListDirectoryResponseSchema,
   ValidatePathResponseSchema,
 } from '@mangostudio/shared/workspaces';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { workspaceRoutes } from '../../../src/modules/workspaces/http/workspace-routes';
 import {
   createApiTestApp,

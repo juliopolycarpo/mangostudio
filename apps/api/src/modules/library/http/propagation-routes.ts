@@ -97,13 +97,6 @@ export function createPropagationRoutes(
     .use(requireAuth)
     .post(
       '/library/propagate/preview',
-      async ({ body, set, user }): Promise<PropagationPreview | ApiErrorResponse> => {
-        try {
-          return await service.preview(user?.id ?? '', body);
-        } catch (error) {
-          return mapPropagationError(error, set);
-        }
-      },
       {
         body: PropagationPreviewRequestSchema,
         response: {
@@ -113,17 +106,17 @@ export function createPropagationRoutes(
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
         },
+      },
+      async ({ body, set, user }): Promise<PropagationPreview | ApiErrorResponse> => {
+        try {
+          return await service.preview(user?.id ?? '', body);
+        } catch (error) {
+          return mapPropagationError(error, set);
+        }
       }
     )
     .post(
       '/library/propagate/apply',
-      async ({ body, set, user }): Promise<PropagationApply | ApiErrorResponse> => {
-        try {
-          return await service.apply(user?.id ?? '', body);
-        } catch (error) {
-          return mapPropagationError(error, set);
-        }
-      },
       {
         body: PropagationApplyRequestSchema,
         response: {
@@ -139,21 +132,17 @@ export function createPropagationRoutes(
           // the same 503 the discovery and settings routes already return.
           503: ApiErrorResponseSchema,
         },
+      },
+      async ({ body, set, user }): Promise<PropagationApply | ApiErrorResponse> => {
+        try {
+          return await service.apply(user?.id ?? '', body);
+        } catch (error) {
+          return mapPropagationError(error, set);
+        }
       }
     )
     .post(
       '/library/propagate/undo',
-      async ({ body, set, user }): Promise<PropagationUndo | ApiErrorResponse> => {
-        try {
-          return await service.undo(
-            user?.id ?? '',
-            body.backupId,
-            body.environmentId ?? LOCAL_ENVIRONMENT_ID
-          );
-        } catch (error) {
-          return mapPropagationError(error, set);
-        }
-      },
       {
         body: PropagationUndoRequestSchema,
         response: {
@@ -165,26 +154,47 @@ export function createPropagationRoutes(
           // runtime is a 503 rather than an internal error.
           503: ApiErrorResponseSchema,
         },
+      },
+      async ({ body, set, user }): Promise<PropagationUndo | ApiErrorResponse> => {
+        try {
+          return await service.undo(
+            user?.id ?? '',
+            body.backupId,
+            body.environmentId ?? LOCAL_ENVIRONMENT_ID
+          );
+        } catch (error) {
+          return mapPropagationError(error, set);
+        }
       }
     )
     .get(
       '/library/propagate/backups',
+      {
+        response: {
+          200: PropagationBackupUsageSchema,
+          500: ApiErrorResponseSchema,
+        },
+      },
       async ({ set, user }): Promise<PropagationBackupUsage | ApiErrorResponse> => {
         try {
           return await service.backupUsage(user?.id ?? '');
         } catch (error) {
           return mapPropagationError(error, set);
         }
-      },
-      {
-        response: {
-          200: PropagationBackupUsageSchema,
-          500: ApiErrorResponseSchema,
-        },
       }
     )
     .delete(
       '/library/propagate/backups/:backupId',
+      {
+        params: PropagationBackupPurgeRequestSchema,
+        query: PropagationBackupPurgeQuerySchema,
+        response: {
+          204: t.Void(),
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
+        },
+      },
       async ({ params, query, set, user }): Promise<undefined | ApiErrorResponse> => {
         // Pinning keeps a set holding someone's only copy of a resource out of
         // every automatic eviction path, which only works if there is an
@@ -209,43 +219,26 @@ export function createPropagationRoutes(
         } catch (error) {
           return mapPropagationError(error, set);
         }
-      },
-      {
-        params: PropagationBackupPurgeRequestSchema,
-        query: PropagationBackupPurgeQuerySchema,
-        response: {
-          204: t.Void(),
-          422: ApiErrorResponseSchema,
-          500: ApiErrorResponseSchema,
-          503: ApiErrorResponseSchema,
-        },
       }
     )
     .get(
       '/library/divergence/acks',
+      {
+        response: {
+          200: LibraryDivergenceAckListSchema,
+          500: ApiErrorResponseSchema,
+        },
+      },
       async ({ set, user }): Promise<LibraryDivergenceAck[] | ApiErrorResponse> => {
         try {
           return await service.listAcks(user?.id ?? '');
         } catch (error) {
           return mapPropagationError(error, set);
         }
-      },
-      {
-        response: {
-          200: LibraryDivergenceAckListSchema,
-          500: ApiErrorResponseSchema,
-        },
       }
     )
     .post(
       '/library/divergence/acks',
-      async ({ body, set, user }): Promise<LibraryDivergenceAck | ApiErrorResponse> => {
-        try {
-          return await service.acknowledge(user?.id ?? '', body);
-        } catch (error) {
-          return mapPropagationError(error, set);
-        }
-      },
       {
         body: LibraryDivergenceAckRequestSchema,
         response: {
@@ -258,10 +251,25 @@ export function createPropagationRoutes(
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
         },
+      },
+      async ({ body, set, user }): Promise<LibraryDivergenceAck | ApiErrorResponse> => {
+        try {
+          return await service.acknowledge(user?.id ?? '', body);
+        } catch (error) {
+          return mapPropagationError(error, set);
+        }
       }
     )
     .delete(
       '/library/divergence/acks/:key',
+      {
+        params: t.Object({ key: t.String() }),
+        response: {
+          204: t.Void(),
+          422: ApiErrorResponseSchema,
+          500: ApiErrorResponseSchema,
+        },
+      },
       async ({ params, set, user }): Promise<undefined | ApiErrorResponse> => {
         if (!parseResourceKey(params.key)) return invalidResourceKey(set);
         try {
@@ -273,14 +281,6 @@ export function createPropagationRoutes(
         } catch (error) {
           return mapPropagationError(error, set);
         }
-      },
-      {
-        params: t.Object({ key: t.String() }),
-        response: {
-          204: t.Void(),
-          422: ApiErrorResponseSchema,
-          500: ApiErrorResponseSchema,
-        },
       }
     );
 }
