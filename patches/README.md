@@ -34,8 +34,18 @@ imports `./gen` eagerly, so this throws on `import { openapi } from
 entrypoint. The patch rewrites both specifiers to the public `typebox/type`
 subpath, in the ESM and CJS builds.
 
+That alone is not enough for a bundled build. `@elysia/openapi` declares
+`typebox` as a *devDependency*, so under Bun's isolated linker its own
+directory has no `typebox` to resolve against; only the symlinked path a
+dev server walks happens to find one. So the patch also drops the barrel's
+eager `./gen` import and its `fromTypes` re-export, in all three barrels
+(`.mjs`, `.js`, `.d.ts`). Nothing here uses `fromTypes`, it is reachable
+through the `@elysia/openapi/gen` subpath either way, and it is what drags
+the TypeScript compiler API into the bundle.
+
 **Drop when:** the package ships with `typebox` imported by its public
-specifier. Verify with `bun -e "import('@elysia/openapi')"`.
+specifier *and* declared as a real dependency. Verify with
+`bun -e "import('@elysia/openapi')"` and a binary build that starts.
 
 ### 2. File schemas are published as internal markers (`dist/openapi.*`)
 
