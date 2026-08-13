@@ -19,6 +19,7 @@ scripts/
 ├── verify.ts         check → test → build gate (bun run verify)
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
+├── bench/            Hermetic performance measurement (startup.ts)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
 ├── install/          Archive-install smoke fixture for the release dry-run (install.sh, not shipped; canonical installers live at mangostudio.dev)
@@ -140,6 +141,26 @@ Runnable Bun scripts for manual verification (no extra dependencies):
 ```bash
 MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://localhost:3001
 ```
+
+## bench/ — hermetic performance measurement
+
+| Script       | Purpose                                                            |
+| ------------ | ------------------------------------------------------------------ |
+| `startup.ts` | Median process-start → first healthy `GET /api/health` of a binary |
+
+```bash
+bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --runs 10
+bun run scripts/bench/startup.ts .mango/out/linux-x64/mangostudio --warm
+```
+
+Every run gets a temp `HOME`, database, uploads, and images directory, so the
+developer's real `~/.mango` is never read or written. Cold (default) measures a
+first run with every migration applying; `--warm` migrates once, discards that
+run, and measures the restart cost — the only mode where framework and
+module-load time are visible rather than buried under migration work.
+
+Compare two binaries by building both and running the same command against
+each; a startup claim is only worth as much as its median and spread.
 
 ## vendor/ — committed vendor contracts
 
