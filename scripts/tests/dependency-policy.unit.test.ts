@@ -32,6 +32,14 @@ describe('dependency policy', () => {
   test('the real manifests carry no retired specifier and one cohort version', async () => {
     const entries = await readAllManifests();
 
+    expect(entries.map((entry) => entry.workspacePath)).toEqual([
+      '',
+      'apps/api',
+      'apps/frontend',
+      'apps/runtime',
+      'apps/shared',
+      'packages/cli',
+    ]);
     expect(findRetiredDependencies(entries)).toEqual([]);
     expect(findCohortVersionConflicts(entries)).toEqual([]);
     await expect(assertDependencyCohort()).resolves.toBeUndefined();

@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { ALL_WORKSPACE_NAMES, ROOT_DIR } from './config';
+import { ROOT_DIR } from './config';
 
 const MANIFEST_SECTIONS = [
   'dependencies',
@@ -222,12 +222,35 @@ export const assertNoDisallowedWorkspaceDependencies = async (): Promise<void> =
   throw new Error(`Disallowed workspace dependencies found:\n${details}`);
 };
 
+interface RootPackageJson {
+  readonly workspaces?: readonly string[];
+}
+
+const workspacePackageJsonPattern = (workspaceGlob: string): string => {
+  const trimmed = workspaceGlob.endsWith('/') ? workspaceGlob.slice(0, -1) : workspaceGlob;
+  return `${trimmed}/package.json`;
+};
+
+const listWorkspaceManifestPaths = async (): Promise<string[]> => {
+  const root = JSON.parse(await Bun.file(join(ROOT_DIR, 'package.json')).text()) as RootPackageJson;
+  const workspacePaths = new Set<string>(['']);
+
+  for (const workspaceGlob of root.workspaces ?? []) {
+    const glob = new Bun.Glob(workspacePackageJsonPattern(workspaceGlob));
+    for await (const match of glob.scan({ cwd: ROOT_DIR, onlyFiles: true })) {
+      workspacePaths.add(match.replace(/\\/g, '/').replace(/\/package\.json$/, ''));
+    }
+  }
+
+  return [...workspacePaths].sort((left, right) => left.localeCompare(right));
+};
+
 /**
  * Read the root manifest plus every workspace manifest.
  * Usage: await readAllManifests()
  */
-export const readAllManifests = (): Promise<ManifestEntry[]> => {
-  const workspacePaths = ['', ...ALL_WORKSPACE_NAMES.map((name) => `apps/${name}`)];
+export const readAllManifests = async (): Promise<ManifestEntry[]> => {
+  const workspacePaths = await listWorkspaceManifestPaths();
 
   return Promise.all(
     workspacePaths.map(async (workspacePath) => ({
