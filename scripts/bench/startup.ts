@@ -27,7 +27,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
 import { header, info, log } from '../lib/log';
@@ -190,11 +190,12 @@ const { flags, values, positional } = parseArgs({
 
 if (flags['--help']) printHelp();
 
-const binary = positional.shift();
+const suppliedBinary = positional.shift();
 assertNoUnexpectedArguments(positional);
 
-if (!binary) fatal('Pass the path to a compiled MangoStudio executable.');
-if (!(await Bun.file(binary).exists())) fatal(`No such binary: ${binary}`);
+if (!suppliedBinary) fatal('Pass the path to a compiled MangoStudio executable.');
+const binary = resolve(suppliedBinary);
+if (!(await Bun.file(binary).exists())) fatal(`No such binary: ${suppliedBinary}`);
 
 const runs = Number(values['--runs'] ?? 10);
 if (!Number.isInteger(runs) || runs < 1) fatal('`--runs` must be a positive integer.');
