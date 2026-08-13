@@ -1,4 +1,5 @@
 import type { Connector } from '@mangostudio/shared';
+import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import { Link } from '@tanstack/react-router';
 import {
   BarChart3,
@@ -43,6 +44,10 @@ export function ConnectorCard({
   const s = t.settings.connectors;
   const isReadOnlyShared = isReadOnlySharedConnector(c);
   const isChatGpt = c.provider === 'chatgpt';
+  // Legacy, not broken. The card stays fully operable — models, delete, the
+  // stored key — because the deprecation closes new setup and execution, not
+  // the connector someone already owns.
+  const isDeprecated = isDeprecatedProvider(c.provider);
   const chatGptOAuth = useChatGptOAuth({
     messages: s,
     onSuccess: async () => {
@@ -91,6 +96,11 @@ export function ConnectorCard({
                 {s.sharedConnector}
               </span>
             )}
+            {isDeprecated && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-200 border border-amber-500/20">
+                {s.deprecatedBadge}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 text-xs">
             <span className="flex items-center gap-1 text-on-surface-variant/60">
@@ -130,6 +140,11 @@ export function ConnectorCard({
           {chatGptOAuth.error ? (
             <p className="text-[11px] leading-relaxed text-error">{chatGptOAuth.error}</p>
           ) : null}
+          {isDeprecated && (
+            <p className="text-[11px] leading-relaxed text-amber-200/80">
+              {s.deprecatedConnectorNote}
+            </p>
+          )}
           {isReadOnlyShared && (
             <p className="text-[10px] text-on-surface-variant/50">{s.managedExternally}</p>
           )}

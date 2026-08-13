@@ -99,4 +99,30 @@ describe('ConnectorModelsModal', () => {
 
     expect(onSearchChange).toHaveBeenCalledWith('pro');
   });
+
+  it('shows stored enabled models when the catalog discovered none', () => {
+    render(
+      <ConnectorModelsModal
+        connector={{
+          ...CONNECTOR,
+          provider: 'cursor',
+          name: 'legacy-cursor',
+          enabledModels: ['composer-2.5'],
+        }}
+        modelCatalog={{
+          ...MODEL_CATALOG,
+          discoveredTextModels: [],
+          discoveredImageModels: [],
+        }}
+        modelSearchQuery=""
+        onSearchChange={vi.fn()}
+        onToggleModel={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getAllByText('composer-2.5').length).toBeGreaterThan(0);
+    expect(screen.getByRole('checkbox', { name: /composer-2\.5/i })).toBeChecked();
+    expect(screen.queryByText(/no models have been discovered/i)).not.toBeInTheDocument();
+  });
 });

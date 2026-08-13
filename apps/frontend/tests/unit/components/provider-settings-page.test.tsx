@@ -12,6 +12,8 @@ import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 // Mock TanStack Router — provide useParams
+const routeParams = { provider: 'deepseek' };
+
 vi.mock('@tanstack/react-router', async (importOriginal) => {
   const actual = await importOriginal<typeof TanstackRouter>();
   return {
@@ -29,7 +31,7 @@ vi.mock('@tanstack/react-router', async (importOriginal) => {
         {children}
       </a>
     ),
-    useParams: () => ({ provider: 'deepseek' }),
+    useParams: () => routeParams,
   };
 });
 
@@ -53,7 +55,7 @@ const DEEPSEEK_DESCRIPTOR = {
     reasoningEffort: 'high',
     maxToolIterations: 15,
   },
-  runtimeAvailable: true,
+  deprecated: false,
 };
 
 /**
@@ -71,6 +73,7 @@ describe('ProviderSettingsPage', () => {
   const fetchScenario = createFetchScenario();
 
   beforeEach(() => {
+    routeParams.provider = 'deepseek';
     fetchScenario.install();
   });
 
@@ -239,5 +242,24 @@ describe('ProviderSettingsPage', () => {
       // the user's hand.
       expect(screen.getByLabelText(/enable thinking/i)).not.toBeChecked();
     });
+  });
+
+  it('shows the deprecation notice instead of runtime controls', async () => {
+    routeParams.provider = 'cursor';
+    fetchScenario.respondWithJson('GET', '/api/settings/providers/cursor', {
+      body: {
+        ...DEEPSEEK_DESCRIPTOR,
+        provider: 'cursor',
+        displayName: 'Cursor',
+        deprecated: true,
+      },
+    });
+
+    render(<ProviderSettingsPage />);
+
+    await screen.findByText('Cursor');
+    expect(screen.getByText('Legacy')).toBeInTheDocument();
+    expect(screen.getByText(/no longer runs this provider/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/enable thinking/i)).not.toBeInTheDocument();
   });
 });

@@ -27,6 +27,7 @@ interface ProviderRegistry {
   listRegisteredProviderTypes(): ProviderType[];
   invalidateProviderModelCache(type: ProviderType, userId?: string): void;
   clearRegistry(): void;
+  resolveProviderTypeForModel(modelName: string, userId: string): Promise<ProviderType | undefined>;
   getProviderForModel(modelName: string, userId: string): Promise<AIProvider>;
 }
 
@@ -126,11 +127,14 @@ function createProviderRegistry(dbAccessor: typeof getDb = getDb): ProviderRegis
       providerRouteCache.clear();
     },
 
-    async getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
+    async resolveProviderTypeForModel(
+      modelName: string,
+      userId: string
+    ): Promise<ProviderType | undefined> {
       const cachedProviderType = getCachedProviderRoute(providerRouteCache, userId, modelName);
       if (cachedProviderType) {
         recordProviderCacheHit(cachedProviderType, 'provider-route');
-        return this.getProvider(cachedProviderType);
+        return cachedProviderType;
       }
 
       const db = getProviderRegistryDb();
@@ -147,16 +151,24 @@ function createProviderRegistry(dbAccessor: typeof getDb = getDb): ProviderRegis
             const providerType = row.provider as ProviderType;
             recordProviderCacheMiss(providerType, 'provider-route');
             setCachedProviderRoute(providerRouteCache, userId, modelName, providerType);
-            return this.getProvider(providerType);
+            return providerType;
           }
         } catch {
           registryLogger.warn('malformed_enabled_models', { provider: row.provider });
         }
       }
 
-      throw new Error(
-        `[registry] No connector found for model "${modelName}". Configure a connector that includes this model.`
-      );
+      return undefined;
+    },
+
+    async getProviderForModel(modelName: string, userId: string): Promise<AIProvider> {
+      const providerType = await this.resolveProviderTypeForModel(modelName, userId);
+      if (!providerType) {
+        throw new Error(
+          `[registry] No connector found for model "${modelName}". Configure a connector that includes this model.`
+        );
+      }
+      return this.getProvider(providerType);
     },
   };
 }
@@ -206,6 +218,22 @@ export function invalidateProviderModelCache(type: ProviderType, userId?: string
  */
 export function clearRegistry(): void {
   providerRegistry.clearRegistry();
+}
+
+/**
+ * Names the provider a model belongs to, without requiring it to be runnable.
+ *
+ * Separate from {@link getProviderForModel} because the deprecation guard needs
+ * the name of a provider it is about to refuse, and resolving the provider
+ * object would either succeed pointlessly or throw for the wrong reason.
+ * // Usage: const provider = await resolveProviderTypeForModel('cursor/auto', userId)
+ */
+// biome-ignore lint/suspicious/useAwait: matches the registry's async surface
+export async function resolveProviderTypeForModel(
+  modelName: string,
+  userId: string
+): Promise<ProviderType | undefined> {
+  return providerRegistry.resolveProviderTypeForModel(modelName, userId);
 }
 
 /**

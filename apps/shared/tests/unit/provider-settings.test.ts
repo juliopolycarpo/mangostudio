@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
+  DEPRECATED_PROVIDERS,
+  isDeprecatedModelId,
+  isDeprecatedProvider,
   ProviderSettingsDescriptorSchema,
   ReasoningEffortSchema,
   UpdateProviderRuntimeSettingsBodySchema,
@@ -56,55 +59,17 @@ describe('provider settings contracts', () => {
         reasoningEffort: 'xhigh',
         maxToolIterations: 10,
       },
-      runtimeAvailable: true,
+      deprecated: false,
     };
 
     expect(Value.Check(ProviderSettingsDescriptorSchema, descriptor)).toBe(true);
   });
 
-  it('accepts cursor runtime unavailability reason codes', () => {
-    for (const reason of [
-      'cursor.node_not_found',
-      'cursor.version_insufficient',
-      'cursor.sidecar_missing',
-      'cursor.sdk_missing',
-      'cursor.sdk_incomplete',
-      'cursor.native_runtime_missing',
-    ]) {
-      expect(
-        Value.Check(ProviderSettingsDescriptorSchema, {
-          provider: 'cursor',
-          displayName: 'Cursor',
-          scope: 'provider',
-          reasoning: {
-            supportedEfforts: ['low', 'medium', 'high'],
-            defaultEffort: 'medium',
-            thinkingToggleSupported: true,
-            reasoningWithToolsSupported: false,
-          },
-          promptCachingSupported: false,
-          toolUseSupported: false,
-          structuredOutputSupported: false,
-          maxOutputTokensLimit: 128000,
-          settings: {
-            provider: 'cursor',
-            thinkingEnabled: true,
-            reasoningEffort: 'medium',
-            maxToolIterations: 10,
-          },
-          runtimeAvailable: false,
-          runtimeUnavailableReason: reason,
-          runtimeUnavailableReasonParams: {
-            foundVersion: 'v20.0.0',
-            packageName: '@cursor/sdk-linux-x64',
-            sidecarPath: '/tmp/cursor-sidecar/run-agent.mjs',
-          },
-        })
-      ).toBe(true);
-    }
-  });
-
-  it('rejects unknown cursor runtime unavailability reason codes', () => {
+  // The Cursor descriptor is still described — an existing connector's settings
+  // page renders from it — and now says the provider is deprecated. `deprecated`
+  // is required rather than optional so a server that forgot to set it fails
+  // validation instead of quietly reading as "supported".
+  it('describes the deprecated Cursor provider', () => {
     expect(
       Value.Check(ProviderSettingsDescriptorSchema, {
         provider: 'cursor',
@@ -117,7 +82,7 @@ describe('provider settings contracts', () => {
           reasoningWithToolsSupported: false,
         },
         promptCachingSupported: false,
-        toolUseSupported: false,
+        toolUseSupported: true,
         structuredOutputSupported: false,
         maxOutputTokensLimit: 128000,
         settings: {
@@ -126,9 +91,47 @@ describe('provider settings contracts', () => {
           reasoningEffort: 'medium',
           maxToolIterations: 10,
         },
-        runtimeAvailable: false,
-        runtimeUnavailableReason: 'cursor.unknown',
+        deprecated: true,
+      })
+    ).toBe(true);
+  });
+
+  it('rejects a descriptor that omits the deprecation flag', () => {
+    expect(
+      Value.Check(ProviderSettingsDescriptorSchema, {
+        provider: 'cursor',
+        displayName: 'Cursor',
+        scope: 'provider',
+        reasoning: {
+          supportedEfforts: ['low', 'medium', 'high'],
+          defaultEffort: 'medium',
+          thinkingToggleSupported: true,
+          reasoningWithToolsSupported: false,
+        },
+        promptCachingSupported: false,
+        toolUseSupported: true,
+        structuredOutputSupported: false,
+        maxOutputTokensLimit: 128000,
+        settings: {
+          provider: 'cursor',
+          thinkingEnabled: true,
+          reasoningEffort: 'medium',
+          maxToolIterations: 10,
+        },
       })
     ).toBe(false);
+  });
+
+  it('names Cursor, and only Cursor, as deprecated', () => {
+    expect([...DEPRECATED_PROVIDERS]).toEqual(['cursor']);
+    expect(isDeprecatedProvider('cursor')).toBe(true);
+    expect(isDeprecatedProvider('openai')).toBe(false);
+  });
+
+  it('recognizes stored Cursor model ids even without a catalog entry', () => {
+    expect(isDeprecatedModelId('cursor/composer-2.5')).toBe(true);
+    expect(isDeprecatedModelId('cursor/auto')).toBe(true);
+    expect(isDeprecatedModelId('gpt-4o')).toBe(false);
+    expect(isDeprecatedModelId('cursor')).toBe(false);
   });
 });

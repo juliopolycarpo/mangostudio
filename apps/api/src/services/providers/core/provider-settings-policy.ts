@@ -5,13 +5,11 @@ import {
 } from '@mangostudio/shared/app-settings';
 import type {
   ProviderRuntimeSettings,
-  ProviderRuntimeUnavailableReason,
-  ProviderRuntimeUnavailableReasonParams,
   ProviderSettingsDescriptor,
   ReasoningPolicy,
 } from '@mangostudio/shared/provider-settings';
+import { isDeprecatedProvider } from '@mangostudio/shared/provider-settings';
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
-import { detectCursorRuntimeAvailability } from '../cursor/runtime-availability';
 
 const PROVIDER_TYPES: ReadonlyArray<ProviderType> = [
   'gemini',
@@ -30,14 +28,7 @@ interface ProviderSettingsPolicy {
   toolUseSupported: boolean;
   structuredOutputSupported: boolean;
   maxOutputTokensLimit: number;
-  detectRuntimeAvailability?: () => Promise<ProviderRuntimeStatus>;
   defaults: Omit<ProviderRuntimeSettings, 'provider'>;
-}
-
-interface ProviderRuntimeStatus {
-  available: boolean;
-  reasonCode?: ProviderRuntimeUnavailableReason;
-  reasonParams?: ProviderRuntimeUnavailableReasonParams;
 }
 
 const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
@@ -107,15 +98,14 @@ const PROVIDER_POLICIES: Record<ProviderType, ProviderSettingsPolicy> = {
     },
   },
   cursor: {
+    // Deprecated, and kept only so an existing connector and the settings it
+    // already carries stay readable. Nothing here is offered for new setup.
     displayName: 'Cursor',
-    // reasoningWithToolsSupported stays false until the Cursor SDK confirms
-    // the thinking param can be combined with customTools.
     reasoning: buildReasoningPolicy(['low', 'medium', 'high'], true, false),
     promptCachingSupported: false,
     toolUseSupported: true,
     structuredOutputSupported: false,
     maxOutputTokensLimit: 128_000,
-    detectRuntimeAvailability: detectCursorRuntimeAvailability,
     defaults: {
       thinkingEnabled: true,
       reasoningEffort: 'medium',
@@ -162,34 +152,11 @@ function getProviderSettingsPolicy(provider: ProviderType): ProviderSettingsPoli
   return PROVIDER_POLICIES[provider];
 }
 
-export async function getProviderRuntimeAvailability(provider: ProviderType): Promise<{
-  runtimeAvailable: boolean;
-  runtimeUnavailableReason?: ProviderRuntimeUnavailableReason;
-  runtimeUnavailableReasonParams?: ProviderRuntimeUnavailableReasonParams;
-}> {
-  const detectRuntimeAvailability = PROVIDER_POLICIES[provider].detectRuntimeAvailability;
-  if (!detectRuntimeAvailability) {
-    return { runtimeAvailable: true };
-  }
-
-  const runtime = await detectRuntimeAvailability();
-  if (runtime.available) {
-    return { runtimeAvailable: true };
-  }
-
-  return {
-    runtimeAvailable: false,
-    runtimeUnavailableReason: runtime.reasonCode ?? 'cursor.node_not_found',
-    ...(runtime.reasonParams ? { runtimeUnavailableReasonParams: runtime.reasonParams } : {}),
-  };
-}
-
-export async function buildProviderSettingsDescriptor(
+export function buildProviderSettingsDescriptor(
   provider: ProviderType,
   savedSettings?: Partial<ProviderRuntimeSettings>
-): Promise<ProviderSettingsDescriptor> {
+): ProviderSettingsDescriptor {
   const policy = getProviderSettingsPolicy(provider);
-  const runtime = await getProviderRuntimeAvailability(provider);
   return {
     provider,
     displayName: policy.displayName,
@@ -200,13 +167,7 @@ export async function buildProviderSettingsDescriptor(
     structuredOutputSupported: policy.structuredOutputSupported,
     maxOutputTokensLimit: policy.maxOutputTokensLimit,
     settings: normalizeProviderRuntimeSettings(provider, savedSettings),
-    runtimeAvailable: runtime.runtimeAvailable,
-    ...(runtime.runtimeUnavailableReason
-      ? { runtimeUnavailableReason: runtime.runtimeUnavailableReason }
-      : {}),
-    ...(runtime.runtimeUnavailableReasonParams
-      ? { runtimeUnavailableReasonParams: runtime.runtimeUnavailableReasonParams }
-      : {}),
+    deprecated: isDeprecatedProvider(provider),
   };
 }
 

@@ -179,12 +179,16 @@ bounded downloads and output, user-scoped audit records, and raw SSE logs. See
 
 ## Provider Architecture
 
-Providers implement the `AIProvider` interface. The provider registry maps provider types to implementations. Key abstraction layers:
+Providers implement the `AIProvider` interface. The provider registry maps provider types to implementations. The bundled providers are **Gemini, OpenAI, OpenAI-compatible, Anthropic, DeepSeek and ChatGPT**.
+
+**Cursor is registered but deprecated.** It advertises no models and refuses execution; the supported path is the external-agent adapter, where Cursor's own CLI owns the model, the tools and the approvals. `resolve-model.ts` is where that refusal is raised, before provider resolution, so every path to a provider passes through it. See [`../providers/cursor.md`](../providers/cursor.md).
+
+Key abstraction layers:
 
 ```
 stream-text-turn.ts (orchestrator)
   │
-  ├─ resolve-model.ts → selects provider + model
+  ├─ resolve-model.ts → selects provider + model, refuses deprecated ones
   ├─ continuation-runtime.ts → decides strategy
   │
   ▼

@@ -23,15 +23,12 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
-import { createCursorSmokeSidecarFixture } from './lib/cursor-smoke-sidecar-fixture';
 import {
   DISTRIBUTION_MANIFEST_FILE,
   readDistributionManifest,
   validateDistributionManifest,
 } from './lib/distribution-manifest';
 import { captureCommand } from './lib/exec';
-import { NPM_PLATFORMS, platformShipsCursorSidecar } from './lib/npm-pack';
-import { collectCursorSidecarLayoutErrors } from './lib/npm-package-validation';
 import {
   type BinaryTarget,
   filterBinaryTargets,
@@ -56,7 +53,6 @@ const PORT = parseInt(process.env.API_PORT ?? '13001', 10);
 const RELEASE_ASSETS_DIR = join(ROOT_DIR, 'release-assets');
 const DISTRIBUTION_MANIFEST_PATH =
   process.env.DISTRIBUTION_MANIFEST_PATH?.trim() || join(ROOT_DIR, DISTRIBUTION_MANIFEST_FILE);
-const NPM_PLATFORM = NPM_PLATFORMS.find((platform) => platform.arch === REQUESTED_PLATFORM);
 const CHATGPT_CALLBACK_PORT = 1455;
 const RUNTIME_HANDSHAKE_TIMEOUT_MS = 10_000;
 // Resolve via the canonical helper so the archive name we expect matches the one
@@ -175,14 +171,6 @@ function validateLayout(): void {
   // release that ships one without the other cannot start stdio environments.
   if (!existsSync(RUNTIME_BINARY_PATH)) fail(`Missing runtime binary: ${RUNTIME_BINARY_PATH}`);
   pass(`Runtime binary exists: ${RUNTIME_BINARY_NAME}`);
-
-  if (NPM_PLATFORM && platformShipsCursorSidecar(NPM_PLATFORM)) {
-    const layoutErrors = collectCursorSidecarLayoutErrors(PLATFORM_DIR, NPM_PLATFORM);
-    if (layoutErrors.length > 0) {
-      fail(`Cursor sidecar layout invalid:\n- ${layoutErrors.join('\n- ')}`);
-    }
-    pass('cursor-sidecar layout includes SDK chunks and native runtime package');
-  }
 }
 
 function validatePrebuiltDistribution(): void {
@@ -406,38 +394,12 @@ const MODULE_RESOLUTION_FAILURE_PATTERNS = [
   './642.js',
 ] as const;
 
-const GRACEFUL_CURSOR_CONNECTOR_STATUSES = new Set([422, 502, 503]);
-
 function assertNoModuleResolutionFailures(text: string, label: string): void {
   for (const pattern of MODULE_RESOLUTION_FAILURE_PATTERNS) {
     if (text.includes(pattern)) {
       fail(`${label} contains forbidden module-resolution pattern: ${pattern}`);
     }
   }
-}
-
-function parseNodeVersion(raw: string): { major: number; minor: number } | null {
-  const match = raw.trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return null;
-  return { major: Number(match[1]), minor: Number(match[2]) };
-}
-
-function nodeMeetsCursorMinimum(version: { major: number; minor: number }): boolean {
-  if (version.major > 22) return true;
-  if (version.major < 22) return false;
-  return version.minor >= 13;
-}
-
-async function assertNodeRuntimeForCursor(): Promise<void> {
-  const { stdout, exitCode } = await captureCommand(['node', '--version']);
-  if (exitCode !== 0)
-    fail('Node.js is required for Cursor connector smoke but `node --version` failed');
-
-  const version = parseNodeVersion(stdout);
-  if (!version || !nodeMeetsCursorMinimum(version)) {
-    fail(`Node.js 22.13 or newer is required for Cursor connector smoke (got ${stdout.trim()})`);
-  }
-  pass(`Node.js ${stdout.trim()} satisfies Cursor sidecar minimum`);
 }
 
 function buildSessionCookieHeader(response: Response): string {
@@ -453,7 +415,17 @@ function buildSessionCookieHeader(response: Response): string {
   return setCookies.map((cookie) => cookie.split(';')[0]).join('; ');
 }
 
-async function smokeCursorConnector(
+/**
+ * The deprecation, as the shipped binary enforces it.
+ *
+ * This replaces a smoke that existed to prove a vendored Node SDK tree resolved
+ * from inside the compiled executable. That tree is gone, and what is worth
+ * asserting now is the rule that replaced it: the endpoint refuses a new Cursor
+ * connector regardless of what any picker rendered. Server stderr is still
+ * checked for module-resolution failures, because a compiled binary is exactly
+ * where those surface.
+ */
+async function smokeDeprecatedCursorConnector(
   port: number,
   sessionCookie: string,
   serverStderr: string
@@ -476,27 +448,23 @@ async function smokeCursorConnector(
   assertNoModuleResolutionFailures(body, 'Cursor connector response body');
   assertNoModuleResolutionFailures(serverStderr, 'Server stderr');
 
-  if (!GRACEFUL_CURSOR_CONNECTOR_STATUSES.has(response.status)) {
+  if (response.status !== 410) {
     fail(
-      `POST /api/settings/connectors (cursor) returned ${response.status}; expected a graceful provider outcome (422/502/503). Body: ${body}`
+      `POST /api/settings/connectors (cursor) returned ${response.status}; expected 410 for a deprecated provider. Body: ${body}`
     );
   }
 
-  if (response.status === 422) {
-    let payload: { error?: string };
-    try {
-      payload = JSON.parse(body) as { error?: string };
-    } catch {
-      fail(`Cursor connector validation response is not JSON: ${body}`);
-    }
-    if (!payload.error?.trim()) {
-      fail('Cursor connector validation response is missing a user-facing error message');
-    }
+  let payload: { error?: string };
+  try {
+    payload = JSON.parse(body) as { error?: string };
+  } catch {
+    fail(`Cursor connector refusal is not JSON: ${body}`);
+  }
+  if (!payload.error?.trim()) {
+    fail('Cursor connector refusal is missing a user-facing error message');
   }
 
-  pass(
-    `POST /api/settings/connectors (cursor) → ${response.status} without module-resolution failures`
-  );
+  pass('POST /api/settings/connectors (cursor) → 410 (deprecated provider)');
 }
 
 async function smokeChatGptConnector(port: number, sessionCookie: string): Promise<void> {
@@ -603,10 +571,6 @@ async function smokeTest(): Promise<void> {
   const authBaseUrl = `http://127.0.0.1:${PORT}`;
   const chatGptSmokeEnabled = canBindChatGptCallbackPort();
   const fakeChatGpt = chatGptSmokeEnabled ? startFakeChatGptServer() : null;
-  const cursorFixture =
-    NPM_PLATFORM && platformShipsCursorSidecar(NPM_PLATFORM)
-      ? createCursorSmokeSidecarFixture(PLATFORM.arch)
-      : null;
   let serverStderr = '';
 
   // The binary is a CLI; bare invocation prints help, so start the server
@@ -622,7 +586,6 @@ async function smokeTest(): Promise<void> {
       API_HOST: '127.0.0.1',
       API_PORT: String(PORT),
       BETTER_AUTH_URL: authBaseUrl,
-      ...(cursorFixture ? { MANGO_CURSOR_SIDECAR_SCRIPT: cursorFixture.sidecarScriptPath } : {}),
       ...(fakeChatGpt
         ? {
             MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
@@ -707,7 +670,9 @@ async function smokeTest(): Promise<void> {
       pass('/api/auth/get-session → handled by Better Auth (not intercepted by SPA fallback)');
     }
 
-    if (cursorFixture || fakeChatGpt) {
+    // The connector smokes both need an account. The Cursor one always runs —
+    // it asserts a refusal, which needs nothing running behind it.
+    {
       const signupEmail = `smoke-${Date.now()}@test.local`;
       const signupResponse = await fetch(`${authBaseUrl}/api/auth/sign-up/email`, {
         method: 'POST',
@@ -726,15 +691,8 @@ async function smokeTest(): Promise<void> {
 
       const sessionCookie = buildSessionCookieHeader(signupResponse);
 
-      if (cursorFixture) {
-        console.log('\n🔌 Running Cursor connector smoke...');
-        await assertNodeRuntimeForCursor();
-        await smokeCursorConnector(PORT, sessionCookie, serverStderr);
-      } else {
-        console.log(
-          `\n⏭️  Cursor connector smoke skipped — ${PLATFORM.arch} ships no Cursor sidecar.`
-        );
-      }
+      console.log('\n🔌 Running deprecated Cursor connector smoke...');
+      await smokeDeprecatedCursorConnector(PORT, sessionCookie, serverStderr);
 
       if (fakeChatGpt) {
         console.log('\n🔌 Running ChatGPT connector smoke...');
@@ -744,19 +702,11 @@ async function smokeTest(): Promise<void> {
           `\n⏭️  ChatGPT connector smoke skipped — port ${CHATGPT_CALLBACK_PORT} is already bound.`
         );
       }
-    } else {
-      console.log(
-        `\n⏭️  Cursor connector smoke skipped — ${PLATFORM.arch} ships no Cursor sidecar.`
-      );
-      console.log(
-        `\n⏭️  ChatGPT connector smoke skipped — port ${CHATGPT_CALLBACK_PORT} is already bound.`
-      );
     }
   } finally {
     proc.kill();
     await proc.exited.catch(() => undefined as undefined);
     await stderrPump.catch(() => undefined as undefined);
-    cursorFixture?.cleanup();
     fakeChatGpt?.stop();
     removeTempDir(tmpHome);
   }

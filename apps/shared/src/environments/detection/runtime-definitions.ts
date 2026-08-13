@@ -49,6 +49,17 @@ function wellKnownBunDirectories(env: PathEnv): string[] {
   return [pathApi.join(configuredRoot || pathApi.join(env.homeDir, '.bun'), 'bin')];
 }
 
+/**
+ * The oldest Node a MangoStudio environment reports as usable.
+ *
+ * Owned by runtime detection rather than by any one feature. It arrived as the
+ * floor a since-removed vendor sidecar needed, and leaving it named after that
+ * vendor would have implied the floor disappears with it: Node and NVM are
+ * first-class environment targets on their own, installable and probed for
+ * reasons that have nothing to do with any provider.
+ */
+export const NODE_MINIMUM_SUPPORTED_VERSION = '22.13';
+
 export const NODE_RUNTIME_DEFINITION: RuntimeDefinition = {
   id: 'node',
   binaryNames: ['node'],

@@ -50,12 +50,33 @@ export const ProviderUsageMetricsSchema = Type.Object({
 
 export type ProviderUsageMetrics = Static<typeof ProviderUsageMetricsSchema>;
 
+export const ProviderDeprecationMetricsSchema = Type.Object({
+  /** Turns refused by the deprecation guard since the counter was last reset. */
+  refusedTurns: Type.Number(),
+  /** Unix epoch ms of the most recent refusal. */
+  lastAttemptedAt: Type.Number(),
+  /** The stored model id of that refusal — what a chat is still pointing at. */
+  lastModelId: Type.Optional(Type.String()),
+});
+
+export type ProviderDeprecationMetrics = Static<typeof ProviderDeprecationMetricsSchema>;
+
 export const ProviderObservabilityMetricsSchema = Type.Object({
   provider: ProviderTypeSchema,
   totalProbeTimeouts: Type.Number(),
   caches: ReadonlyArraySchema(ProviderCacheMetricsSchema),
   probeTimeouts: ReadonlyArraySchema(ProviderProbeMetricsSchema),
   usage: Type.Optional(ProviderUsageMetricsSchema),
+  /**
+   * Turns refused because this provider is deprecated.
+   *
+   * The only evidence that says whether a deprecation window has actually
+   * elapsed for anyone: a counter that stays at zero across a release is what
+   * makes "nobody is still using it" checkable rather than asserted. Absent
+   * until the first refusal, so a provider that was never deprecated reads as
+   * silent rather than as zero.
+   */
+  deprecatedAttempts: Type.Optional(ProviderDeprecationMetricsSchema),
 });
 
 export type ProviderObservabilityMetrics = Static<typeof ProviderObservabilityMetricsSchema>;

@@ -29,6 +29,7 @@ import {
   directoryExists,
   type ExternalAgentCliDefinition,
   type MinimumRuntimeVersion,
+  NODE_MINIMUM_SUPPORTED_VERSION,
   NODE_RELEASE_SCHEDULE,
   NODE_RUNTIME_DEFINITION,
   type NvmDetectionDeps,
@@ -39,7 +40,6 @@ import {
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { describeTargetLocations, getLibraryTarget } from '@mangostudio/shared/library/host';
-import { CURSOR_MIN_NODE_VERSION } from '@mangostudio/shared/provider-settings';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { RuntimeToolArgumentError } from '../../errors';
 import type {
@@ -113,7 +113,7 @@ function parseMinimumVersion(value: string): MinimumRuntimeVersion {
 }
 
 const DEFAULT_MINIMUM_VERSIONS: Partial<Record<RuntimeId, MinimumRuntimeVersion>> = {
-  node: parseMinimumVersion(CURSOR_MIN_NODE_VERSION),
+  node: parseMinimumVersion(NODE_MINIMUM_SUPPORTED_VERSION),
 };
 
 function pathApi(platform: string): typeof posix | typeof win32 {

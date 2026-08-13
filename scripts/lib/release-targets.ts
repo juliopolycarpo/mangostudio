@@ -83,17 +83,13 @@ export function runtimeBinaryName(binaryName: ReleaseBinaryName): ReleaseRuntime
  * outside that dir, so only `extractedMembers` — what the distribution manifest
  * promises and `extract-target.ts` asserts exactly — carries it. Both lists come
  * from here so a new archive member cannot reach one of them without the other.
- * // Usage: platformArchiveLayout('mangostudio', { includeCursorSidecar: true })
+ * // Usage: platformArchiveLayout('mangostudio')
  */
-export function platformArchiveLayout(
-  binaryName: ReleaseBinaryName,
-  options: { readonly includeCursorSidecar: boolean }
-): { readonly sourceDirMembers: string[]; readonly extractedMembers: string[] } {
-  const sourceDirMembers = [
-    binaryName,
-    runtimeBinaryName(binaryName),
-    ...(options.includeCursorSidecar ? ['cursor-sidecar'] : []),
-  ];
+export function platformArchiveLayout(binaryName: ReleaseBinaryName): {
+  readonly sourceDirMembers: string[];
+  readonly extractedMembers: string[];
+} {
+  const sourceDirMembers = [binaryName, runtimeBinaryName(binaryName)];
   return { sourceDirMembers, extractedMembers: [...sourceDirMembers, 'README.md'] };
 }
 

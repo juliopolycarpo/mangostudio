@@ -1,4 +1,5 @@
 import type { ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
+import { isDeprecatedModelId } from '@mangostudio/shared/provider-settings';
 
 export const EMPTY_MODEL_CATALOG: ModelCatalogResponse = {
   configured: false,
@@ -30,7 +31,10 @@ export function resolveActiveModeModel(
   globalModel: string | undefined,
   options: ModelOption[]
 ): string {
-  if (chatModel && hasModelOption(chatModel, options)) {
+  // Deprecated ids are hidden from the catalog on purpose. Keep the stored
+  // value anyway: replacing it with the first live model would send a
+  // different provider and skip the server's named refusal.
+  if (chatModel && (hasModelOption(chatModel, options) || isDeprecatedModelId(chatModel))) {
     return chatModel;
   }
 

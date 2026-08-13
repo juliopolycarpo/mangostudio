@@ -24,7 +24,7 @@ afterEach(() => {
   tempDirs = [];
 });
 
-function fixture(options: { readonly cursorSidecarTargets?: readonly ReleasePlatformId[] } = {}): {
+function fixture(): {
   rootDir: string;
   manifest: ReturnType<typeof createDistributionManifest>;
 } {
@@ -42,10 +42,6 @@ function fixture(options: { readonly cursorSidecarTargets?: readonly ReleasePlat
     const targetDir = join(rootDir, '.mango', 'out', target.arch);
     mkdirSync(targetDir, { recursive: true });
     writeFileSync(join(targetDir, target.name), target.arch);
-    if (options.cursorSidecarTargets?.includes(target.arch)) {
-      mkdirSync(join(targetDir, 'cursor-sidecar'), { recursive: true });
-      writeFileSync(join(targetDir, 'cursor-sidecar', 'index.js'), 'sidecar');
-    }
     writeFileSync(
       join(rootDir, 'release-assets', releaseArchiveFileName('1.2.3', target)),
       `archive-${target.arch}`
@@ -114,20 +110,19 @@ describe('distribution manifest', () => {
     ]);
   });
 
-  test('records the Cursor sidecar only for targets that built one', () => {
-    const { manifest } = fixture({ cursorSidecarTargets: ['linux-x64'] });
+  // Every target now promises the same three members. This used to vary with
+  // whether the build produced a vendored Cursor SDK tree for the arch, so it
+  // is asserted across two targets rather than one.
+  test('promises the same archive members on every target', () => {
+    const { manifest } = fixture();
 
-    expect(manifest.targets.find((target) => target.id === 'linux-x64')?.archiveMembers).toEqual([
-      'mangostudio',
-      'mangostudio-runtime',
-      'cursor-sidecar',
-      'README.md',
-    ]);
-    expect(manifest.targets.find((target) => target.id === 'linux-arm64')?.archiveMembers).toEqual([
-      'mangostudio',
-      'mangostudio-runtime',
-      'README.md',
-    ]);
+    for (const id of ['linux-x64', 'linux-arm64']) {
+      expect(manifest.targets.find((target) => target.id === id)?.archiveMembers).toEqual([
+        'mangostudio',
+        'mangostudio-runtime',
+        'README.md',
+      ]);
+    }
   });
 
   test('rejects duplicate target and file identities', () => {

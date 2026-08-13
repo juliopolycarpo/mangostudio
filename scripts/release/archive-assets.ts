@@ -7,11 +7,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { cursorNativePackageFor } from '../lib/cursor-sidecar';
 import { archiveConcurrency, captureCommand, mapWithConcurrency } from '../lib/exec';
 import { assertDirectory, assertFile, assertSafeToDelete } from '../lib/fs-assert';
-import { NPM_PLATFORMS } from '../lib/npm-pack';
-import { collectCursorSidecarLayoutErrors } from '../lib/npm-package-validation';
 import {
   createReleaseAssetPlan,
   type FrontendArchivePlan,
@@ -79,8 +76,7 @@ async function archivePlatform(plan: PlatformArchivePlan, assetsDir: string): Pr
     return;
   }
 
-  const includeCursorSidecar = platformRequiresCursorSidecar(plan);
-  const members = platformArchiveMembers(plan, { includeCursorSidecar });
+  const members = platformArchiveMembers(plan);
 
   await runCommand([
     'tar',
@@ -104,12 +100,7 @@ async function archivePlatformZip(plan: PlatformArchivePlan, assetsDir: string):
   cpSync(plan.runtimeBinaryPath, join(stagingDir, runtimeBinaryName(plan.platform.name)));
   cpSync(plan.readmePath, join(stagingDir, 'README.md'));
 
-  const includeCursorSidecar = platformRequiresCursorSidecar(plan);
-  if (includeCursorSidecar) {
-    cpSync(plan.cursorSidecarDir, join(stagingDir, 'cursor-sidecar'), { recursive: true });
-  }
-
-  const members = platformArchiveMembers(plan, { includeCursorSidecar });
+  const members = platformArchiveMembers(plan);
 
   await runCommand(['zip', '-qr', plan.archivePath, ...members, 'README.md'], stagingDir);
   rmSync(stagingDir, { force: true, recursive: true });
@@ -124,20 +115,7 @@ async function archiveFrontend(plan: FrontendArchivePlan): Promise<void> {
 function assertPlatformInputs(plan: PlatformArchivePlan): void {
   assertFile(plan.binaryPath, `${plan.platform.arch} binary`);
   assertFile(plan.runtimeBinaryPath, `${plan.platform.arch} runtime binary`);
-  const npmPlatform = NPM_PLATFORMS.find((platform) => platform.arch === plan.platform.arch);
-  if (npmPlatform && cursorNativePackageFor(plan.platform)) {
-    const layoutErrors = collectCursorSidecarLayoutErrors(plan.sourceDir, npmPlatform);
-    if (layoutErrors.length > 0) {
-      throw new Error(
-        `Invalid ${plan.platform.arch} Cursor sidecar layout:\n- ${layoutErrors.join('\n- ')}`
-      );
-    }
-  }
   assertFile(plan.readmePath, 'standalone README.md');
-}
-
-function platformRequiresCursorSidecar(plan: PlatformArchivePlan): boolean {
-  return cursorNativePackageFor(plan.platform) !== null;
 }
 
 function writeChecksumManifest(plan: ReleaseAssetPlan): void {

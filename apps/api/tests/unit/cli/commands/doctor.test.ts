@@ -18,32 +18,6 @@ const BUILD_INFO: BuildInfo = {
   buildType: 'production',
 };
 
-const FAILING_NODE_CHAIN = [
-  {
-    link: 'node' as const,
-    ok: false,
-    detail: 'Node.js 22.13+ is required for Cursor SDK Agents (found v20.0.0).',
-  },
-  {
-    link: 'sidecar' as const,
-    ok: false,
-    detail: 'Cursor SDK sidecar script is missing at /tmp/cursor-sidecar/run-agent.mjs.',
-  },
-  { link: 'sdk' as const, ok: true, detail: '@cursor/sdk complete' },
-  {
-    link: 'native' as const,
-    ok: true,
-    detail: '@cursor/sdk-linux-x64 (present)',
-  },
-];
-
-const HEALTHY_CHAIN = [
-  { link: 'node' as const, ok: true, detail: '/usr/bin/node (v22.13.0, meets >= 22.13)' },
-  { link: 'sidecar' as const, ok: true, detail: '/app/cursor-sidecar/run-agent.mjs (present)' },
-  { link: 'sdk' as const, ok: true, detail: '@cursor/sdk complete' },
-  { link: 'native' as const, ok: true, detail: '@cursor/sdk-linux-x64 (present)' },
-];
-
 function makeConfig(): MangoConfig {
   return {
     server: { host: 'localhost', port: 3001, publicUrl: '' },
@@ -68,7 +42,6 @@ function makeConfig(): MangoConfig {
       container: false,
       wslExecutable: '',
     },
-    cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
     chatgpt: { authBaseUrl: 'https://auth.openai.com', apiBaseUrl: 'https://api.openai.com' },
     secretStore: { unsafeFileFallbackDir: '' },
     corsOrigins: [],
@@ -83,13 +56,7 @@ function makeDoctorDeps(overrides: Record<string, unknown> = {}) {
     frontendDir: () => '/app',
     controller: new FakeProcessController(),
     readState: () => Promise.resolve(null),
-    getCursorDoctorChain: () => Promise.resolve(HEALTHY_CHAIN),
     isCursorConfigured: () => false,
-    probeCursorRuntime: () =>
-      Promise.resolve({
-        ok: true,
-        detail: 'validate_api_key reached SDK (auth rejected probe key)',
-      }),
     probeRuntimeBinary: () =>
       Promise.resolve({ path: null, present: false, version: null, error: null }),
     listChatGptConnectors: () => [],
@@ -132,7 +99,7 @@ describe('runDoctor', () => {
     const text = lines.join('\n');
     expect(text).toContain('MangoStudio doctor');
     expect(text).toContain('0 failure(s)');
-    expect(text).not.toContain('Cursor Node');
+    expect(text).not.toContain('Cursor');
     expect(exited).toBe(-1);
   });
 
@@ -175,50 +142,6 @@ describe('runDoctor', () => {
     );
 
     expect(exited).toBe(1);
-  });
-
-  it('includes per-link Cursor checks when a connector is configured', async () => {
-    const lines: string[] = [];
-    let exited = -1;
-
-    await runDoctor(
-      { ...DEFAULT_DOCTOR_ARGS },
-      {
-        ...makeDoctorDeps({
-          isCursorConfigured: () => true,
-          getCursorDoctorChain: () => Promise.resolve(FAILING_NODE_CHAIN),
-        }),
-        log: (msg) => lines.push(msg),
-        exit: (code) => {
-          exited = code;
-        },
-      }
-    );
-
-    const text = lines.join('\n');
-    expect(text).toContain('Cursor Node');
-    expect(text).toContain('Cursor sidecar');
-    expect(text).toContain('Cursor SDK');
-    expect(text).toContain('Cursor native');
-    expect(text).toContain('sidecar script is missing');
-    expect(text).toContain('2 failure(s)');
-    expect(exited).toBe(1);
-  });
-
-  it('runs Cursor checks with --all even without a configured connector', async () => {
-    const lines: string[] = [];
-
-    await runDoctor(
-      { ...DEFAULT_DOCTOR_ARGS, all: true },
-      {
-        ...makeDoctorDeps(),
-        log: (msg) => lines.push(msg),
-      }
-    );
-
-    const text = lines.join('\n');
-    expect(text).toContain('Cursor Node');
-    expect(text).toContain('Cursor sidecar');
   });
 
   it('skips ChatGPT checks when no connector exists and --all is absent', async () => {
@@ -277,20 +200,55 @@ describe('runDoctor', () => {
     expect(lines.join('\n')).toContain('ChatGPT secrets');
   });
 
-  it('appends a probe row when --cursor-probe and the chain is ready', async () => {
+  // The deprecation's second telemetry question — is a Cursor key still around
+  // — answered where an operator will look. A warning, not a failure: nothing
+  // is broken, there is just something left to migrate.
+  it('warns when a deprecated Cursor connector is still configured', async () => {
     const lines: string[] = [];
 
     await runDoctor(
-      { ...DEFAULT_DOCTOR_ARGS, all: true, cursorProbe: true },
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({ isCursorConfigured: () => true }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    const text = lines.join('\n');
+    expect(text).toContain('Cursor connector');
+    expect(text).toContain('Deprecated provider');
+  });
+
+  it('warns when a Cursor connector exists in secret_metadata', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          listCursorConnectors: () => [{ id: 'legacy-cursor', provider: 'cursor' }],
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    const text = lines.join('\n');
+    expect(text).toContain('Cursor connector');
+    expect(text).toContain('Deprecated provider');
+  });
+
+  it('says nothing about Cursor when no connector is configured', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS, all: true },
       {
         ...makeDoctorDeps(),
         log: (msg) => lines.push(msg),
       }
     );
 
-    const text = lines.join('\n');
-    expect(text).toContain('Cursor probe');
-    expect(text).toContain('auth rejected probe key');
+    expect(lines.join('\n')).not.toContain('Cursor');
   });
 
   it('warns when checkout and frontend build stamps differ from the server', async () => {

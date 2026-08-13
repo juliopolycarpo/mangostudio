@@ -1,4 +1,16 @@
+/**
+ * The streaming turn against a MangoStudio-owned provider, in both shapes it
+ * supports: a plain text stream, and a provider that runs its own tool loop and
+ * emits `AgentEvent`s.
+ *
+ * These were written against Cursor, which is now deprecated and refuses every
+ * turn. The pipeline they cover was never Cursor-specific, so they run against a
+ * live provider id instead of being deleted — and the deprecation itself is
+ * asserted at the end, on the route where it matters most.
+ */
+
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import * as realCatalogNs from '../../../src/services/providers/catalog';
 import type {
@@ -29,7 +41,7 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-async function mockCursorLegacyProvider(
+async function mockLegacyStreamProvider(
   streamFactory: () => AsyncIterable<StreamingChunk>,
   insertedMessages: Array<Record<string, unknown>>
 ): Promise<void> {
@@ -52,17 +64,17 @@ async function mockCursorLegacyProvider(
   await mock.module('../../../src/services/providers/core/provider-registry', () => ({
     getProviderForModel: () =>
       Promise.resolve({
-        providerType: 'cursor',
+        providerType: 'openai',
         generateText: () => Promise.resolve({ text: '' }),
         generateTextStream: streamFactory,
         listModels: () => Promise.resolve([]),
         validateApiKey: () => Promise.resolve(),
-        resolveApiKey: () => Promise.resolve('cursor-test-key'),
+        resolveApiKey: () => Promise.resolve('provider-test-key'),
       }),
   }));
 }
 
-function mockCursorStreamDb(insertedMessages: Array<Record<string, unknown>>) {
+function mockStreamDb(insertedMessages: Array<Record<string, unknown>>) {
   const dbMock = createTestStreamDb({
     userId: TEST_USER.id,
     insertedMessages,
@@ -72,7 +84,7 @@ function mockCursorStreamDb(insertedMessages: Array<Record<string, unknown>>) {
   return () => ({ getDb: () => dbMock });
 }
 
-async function mockCursorAgentProvider(
+async function mockAgentTurnProvider(
   streamFactory: (req: AgentTurnRequest) => AsyncIterable<AgentEvent>,
   insertedMessages: Array<Record<string, unknown>>
 ): Promise<void> {
@@ -95,7 +107,7 @@ async function mockCursorAgentProvider(
   await mock.module('../../../src/services/providers/catalog', () => ({
     ...realCatalog,
     getCachedModelMetadata: () => ({
-      providerType: 'cursor' as const,
+      providerType: 'openai' as const,
       capabilities: {
         text: true,
         image: false,
@@ -109,12 +121,12 @@ async function mockCursorAgentProvider(
   }));
 
   const provider = {
-    providerType: 'cursor',
+    providerType: 'openai',
     generateText: () => Promise.resolve({ text: '' }),
     generateAgentTurnStream: streamFactory,
     listModels: () => Promise.resolve([]),
     validateApiKey: () => Promise.resolve(),
-    resolveApiKey: () => Promise.resolve('cursor-test-key'),
+    resolveApiKey: () => Promise.resolve('provider-test-key'),
   };
   await mock.module('../../../src/services/providers/core/provider-registry', () => ({
     getProvider: () => provider,
@@ -129,25 +141,25 @@ afterEach(async () => {
   await restoreAllMocks();
 });
 
-describe('POST /respond/stream — cursor legacy provider', () => {
-  it('streams cursor text chunks and completes the turn', async () => {
+describe('POST /respond/stream — legacy text-stream provider', () => {
+  it('streams provider text chunks and completes the turn', async () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
 
-    await mockCursorLegacyProvider(async function* () {
+    await mockLegacyStreamProvider(async function* () {
       await Promise.resolve();
-      yield { type: 'text', text: 'Hi from Cursor', done: false };
+      yield { type: 'text', text: 'Hi from the provider', done: false };
       yield { type: 'text', text: '', done: true };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockCursorStreamDb(insertedMessages));
+    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
       buildRespondStreamRequest({
-        chatId: 'cursor-chat',
+        chatId: 'stream-chat',
         prompt: 'Hello',
-        model: 'composer-2.5',
+        model: 'gpt-5.2',
       })
     );
 
@@ -156,15 +168,15 @@ describe('POST /respond/stream — cursor legacy provider', () => {
 
     expect(sseEvents.find((event) => event.type === 'text')).toMatchObject({
       type: 'text',
-      text: 'Hi from Cursor',
+      text: 'Hi from the provider',
     });
     expect(sseEvents.find((event) => event.type === 'done')).toBeDefined();
   });
 
-  it('surfaces cursor internal tool calls and provider error chunks', async () => {
+  it('surfaces provider internal tool calls and error chunks', async () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
 
-    await mockCursorLegacyProvider(async function* () {
+    await mockLegacyStreamProvider(async function* () {
       await Promise.resolve();
       yield {
         type: 'tool_call',
@@ -172,18 +184,18 @@ describe('POST /respond/stream — cursor legacy provider', () => {
         name: 'read_file',
         done: false,
       };
-      yield { type: 'error', content: 'Cursor agent run failed.', done: true };
+      yield { type: 'error', content: 'The provider run failed.', done: true };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockCursorStreamDb(insertedMessages));
+    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
       buildRespondStreamRequest({
-        chatId: 'cursor-chat-error',
+        chatId: 'stream-chat-error',
         prompt: 'Inspect the repo',
-        model: 'composer-2.5',
+        model: 'gpt-5.2',
       })
     );
 
@@ -192,12 +204,12 @@ describe('POST /respond/stream — cursor legacy provider', () => {
 
     expect(sseEvents.find((event) => event.type === 'system_event')).toMatchObject({
       type: 'system_event',
-      event: 'cursor_internal_tool_call',
+      event: 'openai_internal_tool_call',
       detail: 'read_file',
     });
     expect(sseEvents.find((event) => event.type === 'error')).toMatchObject({
       type: 'error',
-      error: 'Cursor agent run failed.',
+      error: 'The provider run failed.',
     });
     expect(sseEvents.find((event) => event.type === 'done')).toBeUndefined();
 
@@ -206,7 +218,7 @@ describe('POST /respond/stream — cursor legacy provider', () => {
       const parts = parsePersistedParts(aiMessage.parts);
       expect(parts).toContainEqual({
         type: 'system_event',
-        event: 'cursor_internal_tool_call',
+        event: 'openai_internal_tool_call',
         detail: 'read_file',
       });
       expect(parts.some((part) => part.type === 'error')).toBe(true);
@@ -214,12 +226,12 @@ describe('POST /respond/stream — cursor legacy provider', () => {
   });
 });
 
-describe('POST /respond/stream — cursor agent turn provider', () => {
+describe('POST /respond/stream — agent-turn provider', () => {
   it('streams a full turn with real tool_call/tool_result parts and no internal-tool system event', async () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
     const receivedRequests: AgentTurnRequest[] = [];
 
-    await mockCursorAgentProvider(async function* stream(req) {
+    await mockAgentTurnProvider(async function* stream(req) {
       receivedRequests.push(req);
       await Promise.resolve();
       yield { type: 'reasoning_delta', text: 'Inspecting…' };
@@ -240,16 +252,16 @@ describe('POST /respond/stream — cursor agent turn provider', () => {
       yield { type: 'assistant_text_delta', text: 'The README describes MangoStudio.' };
       yield { type: 'turn_completed' };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockCursorStreamDb(insertedMessages));
+    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
       buildRespondStreamRequest({
-        chatId: 'cursor-agent-chat',
+        chatId: 'stream-agent-chat',
         prompt: 'What does the README say?',
-        model: 'composer-2.5',
+        model: 'gpt-5.2',
       })
     );
 
@@ -279,7 +291,7 @@ describe('POST /respond/stream — cursor agent turn provider', () => {
     // Provider ran its internal loop: exactly one iteration, no fed-back results.
     expect(receivedRequests).toHaveLength(1);
     expect(receivedRequests[0]?.toolResults).toBeUndefined();
-    expect(receivedRequests[0]?.chatId).toBe('cursor-agent-chat');
+    expect(receivedRequests[0]?.chatId).toBe('stream-agent-chat');
 
     const aiMessage = insertedMessages.find((message) => message.role === 'ai');
     expect(aiMessage).toBeDefined();
@@ -302,7 +314,7 @@ describe('POST /respond/stream — cursor agent turn provider', () => {
   it('surfaces provider turn_error as a persisted error response', async () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
 
-    await mockCursorAgentProvider(async function* stream() {
+    await mockAgentTurnProvider(async function* stream() {
       await Promise.resolve();
       yield { type: 'assistant_text_delta', text: 'Working…' };
       yield {
@@ -310,16 +322,16 @@ describe('POST /respond/stream — cursor agent turn provider', () => {
         error: 'The model exceeded the maximum number of tool interactions.',
       };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockCursorStreamDb(insertedMessages));
+    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
 
     const response = await app.handle(
       buildRespondStreamRequest({
-        chatId: 'cursor-agent-chat-error',
+        chatId: 'stream-agent-chat-error',
         prompt: 'Do work',
-        model: 'composer-2.5',
+        model: 'gpt-5.2',
       })
     );
 
@@ -343,5 +355,50 @@ describe('POST /respond/stream — cursor agent turn provider', () => {
         lastAssistantText: 'Working…',
       })
     );
+  });
+});
+
+/**
+ * The refusal on the route it matters most on.
+ *
+ * Pre-flight, before SSE headers flush, so the client gets a status and a body
+ * it can branch on rather than an `error` frame inside a stream it then has to
+ * unwind. The details are the point: an error message alone would leave the
+ * composer with nothing to offer.
+ */
+describe('POST /respond/stream — deprecated provider', () => {
+  it('refuses a stored cursor model with the typed reason and its action', async () => {
+    await mockVerifiedChatOwnership();
+    await mockNoopTools();
+    await mock.module('../../../src/services/providers/catalog', () => ({
+      ...realCatalog,
+      getCachedModelMetadata: () => ({ providerType: 'cursor' as const, capabilities: undefined }),
+    }));
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      buildRespondStreamRequest({
+        chatId: 'deprecated-provider-chat',
+        prompt: 'Keep going',
+        model: 'cursor/composer-2.5',
+      })
+    );
+
+    expect(response.status).toBe(503);
+
+    const payload = (await response.json()) as {
+      code?: string;
+      details?: Record<string, string>;
+    };
+    expect(payload.code).toBe(ERROR_CODES.MODEL_PROVIDER_DEPRECATED);
+    expect(payload.details).toEqual({
+      reason: 'provider-deprecated',
+      action: 'fork-with-external-runner',
+      modelId: 'cursor/composer-2.5',
+      provider: 'cursor',
+      targetId: 'cursor',
+    });
   });
 });

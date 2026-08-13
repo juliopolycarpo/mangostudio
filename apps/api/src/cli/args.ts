@@ -14,7 +14,6 @@ export interface ServeArgs {
 
 export interface DoctorArgs {
   all: boolean;
-  cursorProbe: boolean;
   chatgptRefresh: boolean;
   /** Actively connect to each enabled MCP server (spawns children / hits URLs). */
   probe: boolean;
@@ -34,7 +33,6 @@ export interface EnvArgs {
 /** Default doctor flags for tests and internal callers. */
 export const DEFAULT_DOCTOR_ARGS: DoctorArgs = {
   all: false,
-  cursorProbe: false,
   chatgptRefresh: false,
   probe: false,
   envOnly: false,
@@ -85,10 +83,9 @@ export function parseServeArgs(rest: string[]): ServeArgs {
   return { host, port, detached };
 }
 
-/** Parse `doctor` args: optional --all, --cursor-probe, --chatgpt-refresh, and --probe flags. */
+/** Parse `doctor` args: optional --all, --chatgpt-refresh, and --probe flags. */
 export function parseDoctorArgs(rest: string[]): DoctorArgs {
   let all = false;
-  let cursorProbe = false;
   let chatgptRefresh = false;
   let probe = false;
   let envOnly = false;
@@ -98,10 +95,6 @@ export function parseDoctorArgs(rest: string[]): DoctorArgs {
   for (const arg of rest) {
     if (arg === '--all') {
       all = true;
-      continue;
-    }
-    if (arg === '--cursor-probe') {
-      cursorProbe = true;
       continue;
     }
     if (arg === '--chatgpt-refresh') {
@@ -127,7 +120,7 @@ export function parseDoctorArgs(rest: string[]): DoctorArgs {
     throw new CliError(`Unknown option for doctor: ${arg}`);
   }
 
-  return { all, cursorProbe, chatgptRefresh, probe, envOnly, libraryOnly, json };
+  return { all, chatgptRefresh, probe, envOnly, libraryOnly, json };
 }
 
 /** Parse `env` args: optional subcommand and --json. */

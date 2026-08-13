@@ -28,8 +28,6 @@ export interface PlatformArchivePlan {
   readonly binaryPath: string;
   /** Execution host spawned for stdio environments; ships beside the hub binary. */
   readonly runtimeBinaryPath: string;
-  /** Vendored Cursor SDK sidecar dir; only present for platforms with a native package. */
-  readonly cursorSidecarDir: string;
   readonly readmePath: string;
   readonly assetName: string;
   readonly archivePath: string;
@@ -116,7 +114,6 @@ function createPlatformArchivePlan(
     sourceDir,
     binaryPath: join(sourceDir, target.name),
     runtimeBinaryPath: join(sourceDir, runtimeBinaryName(target.name)),
-    cursorSidecarDir: join(sourceDir, 'cursor-sidecar'),
     readmePath: join(outDir, 'README.md'),
     assetName,
     archivePath: join(assetsDir, assetName),
@@ -219,16 +216,11 @@ export function selectCanaryAssets(
 }
 
 /**
- * Archive members relative to a platform's build output dir. The release
- * archive script validates required Cursor sidecar assets before including
- * them for platforms with a native Cursor SDK package.
- * // Usage: platformArchiveMembers(plan, { includeCursorSidecar: true })
+ * Archive members relative to a platform's build output dir.
+ * // Usage: platformArchiveMembers(plan)
  */
-export function platformArchiveMembers(
-  plan: PlatformArchivePlan,
-  options: { readonly includeCursorSidecar: boolean }
-): string[] {
-  return platformArchiveLayout(plan.platform.name, options).sourceDirMembers;
+export function platformArchiveMembers(plan: PlatformArchivePlan): string[] {
+  return platformArchiveLayout(plan.platform.name).sourceDirMembers;
 }
 
 function createFrontendArchivePlan(

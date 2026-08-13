@@ -1,11 +1,17 @@
 import type { ModelOption } from '@mangostudio/shared';
 import {
+  type ExternalAgentTargetId,
   normalizeApprovalRouting,
   normalizePermissionLevel,
 } from '@mangostudio/shared/external-agents';
 import { createFileRoute } from '@tanstack/react-router';
+import { useCallback } from 'react';
 import { ChatPage } from '@/features/chat/ChatPage';
-import { useExternalAgents } from '@/features/external-agents/useExternalAgents';
+import { useDeprecatedModelMigration } from '@/features/chat/hooks/use-deprecated-model-migration';
+import {
+  externalAgentSelectable,
+  useExternalAgents,
+} from '@/features/external-agents/useExternalAgents';
 import { useApp } from '@/lib/app-context';
 
 export const Route = createFileRoute('/_authenticated/')({
@@ -19,6 +25,14 @@ function ChatRoute() {
   );
   const reasoningVisible = selectedModel?.capabilities?.reasoning === true;
   const external = useExternalAgents(app.currentEnvironmentId);
+  const canForkTarget = useCallback(
+    (targetId: ExternalAgentTargetId) => {
+      const agent = external.find(targetId);
+      return agent !== undefined && externalAgentSelectable(agent);
+    },
+    [external]
+  );
+  const deprecatedModel = useDeprecatedModelMigration(app.currentChatId, canForkTarget);
   const descriptor =
     app.runner.kind === 'external' ? external.find(app.runner.targetId) : undefined;
 
@@ -98,6 +112,13 @@ function ChatRoute() {
       }
       onResumeInterruptedTurn={app.handleResumeInterruptedTurn}
       onDismissInterruptedTurn={app.handleDismissInterruptedTurn}
+      modelUnavailable={app.modelUnavailable}
+      onDismissModelUnavailable={app.dismissModelUnavailable}
+      onContinueWithExternalRunner={deprecatedModel.continueWithRunner}
+      isForkingRunner={deprecatedModel.isForking}
+      migrationRunnerAvailable={
+        app.modelUnavailable?.targetId !== undefined && canForkTarget(app.modelUnavailable.targetId)
+      }
     />
   );
 }

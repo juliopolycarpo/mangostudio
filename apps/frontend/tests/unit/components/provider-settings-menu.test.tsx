@@ -59,7 +59,7 @@ const MOCK_DESCRIPTORS = {
         thinkingEnabled: true,
         reasoningEffort: 'high',
       },
-      runtimeAvailable: true,
+      deprecated: false,
     },
     {
       provider: 'anthropic',
@@ -78,7 +78,26 @@ const MOCK_DESCRIPTORS = {
       settings: {
         provider: 'anthropic',
       },
-      runtimeAvailable: true,
+      deprecated: false,
+    },
+    {
+      provider: 'cursor',
+      displayName: 'Cursor',
+      scope: 'provider',
+      reasoning: {
+        supportedEfforts: ['low', 'medium', 'high'],
+        defaultEffort: 'medium',
+        thinkingToggleSupported: true,
+        reasoningWithToolsSupported: true,
+      },
+      promptCachingSupported: false,
+      toolUseSupported: true,
+      structuredOutputSupported: false,
+      maxOutputTokensLimit: 128000,
+      settings: {
+        provider: 'cursor',
+      },
+      deprecated: true,
     },
   ],
 };
@@ -148,5 +167,17 @@ describe('ProviderSettingsMenu', () => {
 
     // Anthropic has Caching badge
     expect(screen.getByText('Caching')).toBeInTheDocument();
+  });
+
+  it('marks a deprecated provider without advertising live capabilities', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/providers', {
+      body: MOCK_DESCRIPTORS,
+    });
+
+    render(<ProviderSettingsMenu />);
+
+    await screen.findByText('Cursor');
+    expect(screen.getByText('Legacy')).toBeInTheDocument();
+    expect(screen.getByText(/no longer runs this provider/i)).toBeInTheDocument();
   });
 });

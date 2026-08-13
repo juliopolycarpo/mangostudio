@@ -12,6 +12,40 @@ export const ProviderTypeSchema = Type.Union([
   Type.Literal('chatgpt'),
 ]);
 
+/**
+ * Providers MangoStudio no longer owns, kept registered rather than deleted.
+ *
+ * A deprecated provider advertises no models, refuses execution and accepts no
+ * new connector, but stays a recognizable provider type: a chat still carrying
+ * one of its model ids has to resolve to a named refusal, not to an
+ * unknown-provider crash. Existing connectors and their stored secrets survive.
+ *
+ * Cursor is here because it is reachable twice with inverted ownership — as a
+ * MangoStudio-owned provider, and as an external agent that owns its own tools
+ * and approvals. The external path is the supported one.
+ */
+export const DEPRECATED_PROVIDERS: ReadonlyArray<Static<typeof ProviderTypeSchema>> = ['cursor'];
+
+/** True when this provider is deprecated. // Usage: isDeprecatedProvider('cursor') */
+export function isDeprecatedProvider(
+  provider: string
+): provider is (typeof DEPRECATED_PROVIDERS)[number] {
+  return (DEPRECATED_PROVIDERS as readonly string[]).includes(provider);
+}
+
+/**
+ * True when a stored model id belongs to a deprecated provider.
+ *
+ * Cursor ids are `cursor/…`. Hiding those providers from the catalog must not
+ * rewrite a chat that still carries one — the next turn has to send the stored
+ * id so the server can refuse it by name.
+ */
+export function isDeprecatedModelId(modelId: string): boolean {
+  const slash = modelId.indexOf('/');
+  if (slash <= 0) return false;
+  return isDeprecatedProvider(modelId.slice(0, slash));
+}
+
 export const ProviderSettingScopeSchema = Type.Literal('provider');
 
 export const ReasoningEffortSchema = Type.Union([
@@ -49,25 +83,6 @@ export const ProviderRuntimeSettingsSchema = Type.Object({
   parallelToolCallsEnabled: Type.Optional(Type.Boolean()),
 });
 
-export const CURSOR_MIN_NODE_VERSION = '22.13';
-
-export const ProviderRuntimeUnavailableReasonSchema = Type.Union([
-  Type.Literal('cursor.node_not_found'),
-  Type.Literal('cursor.node_invalid'),
-  Type.Literal('cursor.version_insufficient'),
-  Type.Literal('cursor.sidecar_missing'),
-  Type.Literal('cursor.sdk_missing'),
-  Type.Literal('cursor.sdk_incomplete'),
-  Type.Literal('cursor.native_runtime_missing'),
-]);
-
-export const ProviderRuntimeUnavailableReasonParamsSchema = Type.Object({
-  foundVersion: Type.Optional(Type.String()),
-  packageName: Type.Optional(Type.String()),
-  sidecarPath: Type.Optional(Type.String()),
-  nodePath: Type.Optional(Type.String()),
-});
-
 export const UpdateProviderRuntimeSettingsBodySchema = Type.Object({
   thinkingEnabled: Type.Optional(Type.Boolean()),
   reasoningEffort: Type.Optional(ReasoningEffortSchema),
@@ -90,9 +105,13 @@ export const ProviderSettingsDescriptorSchema = Type.Object({
   structuredOutputSupported: Type.Boolean(),
   maxOutputTokensLimit: Type.Integer({ minimum: 1 }),
   settings: ProviderRuntimeSettingsSchema,
-  runtimeAvailable: Type.Boolean(),
-  runtimeUnavailableReason: Type.Optional(ProviderRuntimeUnavailableReasonSchema),
-  runtimeUnavailableReasonParams: Type.Optional(ProviderRuntimeUnavailableReasonParamsSchema),
+  /**
+   * MangoStudio no longer offers this provider. Not a capability flag: existing
+   * connectors and their secrets stay, but execution is refused and new setup
+   * is closed. The server is the authority — a client that hid a provider on
+   * its own would still be able to POST a connector for it.
+   */
+  deprecated: Type.Boolean(),
 });
 
 export const ProviderSettingsListResponseSchema = Type.Object({
@@ -105,12 +124,6 @@ export type ReasoningPolicy = Static<typeof ReasoningPolicySchema>;
 export type ProviderRuntimeSettings = Static<typeof ProviderRuntimeSettingsSchema>;
 export type UpdateProviderRuntimeSettingsBody = Static<
   typeof UpdateProviderRuntimeSettingsBodySchema
->;
-export type ProviderRuntimeUnavailableReason = Static<
-  typeof ProviderRuntimeUnavailableReasonSchema
->;
-export type ProviderRuntimeUnavailableReasonParams = Static<
-  typeof ProviderRuntimeUnavailableReasonParamsSchema
 >;
 export type ProviderSettingsDescriptor = Static<typeof ProviderSettingsDescriptorSchema>;
 export type ProviderSettingsListResponse = Static<typeof ProviderSettingsListResponseSchema>;

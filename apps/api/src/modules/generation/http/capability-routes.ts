@@ -6,6 +6,7 @@ import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { inspectChatCapabilities } from '../application/inspect-chat-capabilities';
 import { NoModelAvailableError } from '../application/resolve-model';
+import { modelUnavailableResponse } from './model-unavailable-response';
 
 /**
  * Read-only inspector for the effective capability set of a chat. Accepts the
@@ -32,8 +33,9 @@ export const capabilityRoutes = new Elysia()
           return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
         }
         if (err instanceof NoModelAvailableError) {
-          set.status = 503;
-          return { error: err.message, code: ERROR_CODES.PROVIDER_ERROR };
+          const refusal = modelUnavailableResponse(err);
+          set.status = refusal.status;
+          return refusal.body;
         }
         throw err;
       }

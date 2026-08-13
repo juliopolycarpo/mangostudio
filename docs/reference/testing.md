@@ -140,8 +140,8 @@ Test scenarios (`tests/browser-smoke/auth-flow.spec.ts`):
 ## Binary Smoke
 
 `scripts/test-build.ts` builds the standalone binary for a target platform, validates
-packaging layout (including Cursor sidecar SDK chunks), and boots the binary on matching
-CI runners to exercise core HTTP routes plus Cursor and ChatGPT connector validation.
+packaging layout, and boots the binary on matching CI runners to exercise core HTTP routes
+plus the Cursor deprecation refusal and ChatGPT connector validation.
 
 ```bash
 PLATFORM=linux-x64 bun run scripts/test-build.ts
@@ -150,19 +150,17 @@ PLATFORM=linux-x64 bun run scripts/test-build.ts
 On Windows hosts, use `PLATFORM=windows-x64`. The CI `Smoke — Binary` workflow runs this
 script across all six native platform runners.
 
-The runtime leg signs up a throwaway user, posts a Cursor connector with a fake API key,
-and asserts the binary returns a graceful provider error (422/502/503) without
-module-resolution failures such as `Cannot find module` or `./642.js`. It also completes a
-ChatGPT OAuth loopback sign-in against the fake ChatGPT auth/backend server, then verifies
-the connector and model catalog. The smoke stays hermetic by pointing
-`MANGO_CURSOR_SIDECAR_SCRIPT` at a temp fake sidecar and
+The runtime leg signs up a throwaway user, posts a Cursor connector with a fake API key, and
+asserts the binary refuses it with `410` — Cursor is a deprecated provider, and the refusal
+must hold in the shipped executable, not only where a picker hid the option. The response and
+the server's stderr are still scanned for module-resolution failures such as
+`Cannot find module` or `./642.js`, which is where a broken compiled binary shows itself. It
+also completes a ChatGPT OAuth loopback sign-in against the fake ChatGPT auth/backend server,
+then verifies the connector and model catalog. The smoke stays hermetic by pointing
 `MANGO_CHATGPT_AUTH_BASE_URL` / `MANGO_CHATGPT_BASE_URL` at the fake ChatGPT server. ChatGPT
 smoke tokens use `MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR` under the temporary smoke home
 so the binary never writes fake tokens to the user's OS secret store. No real Cursor or
 ChatGPT API calls are made.
-
-GitHub-hosted runners must provide Node.js `>= 22.13` on `PATH` for the Cursor connector
-leg; the script fails fast when the version is too old.
 
 The ChatGPT smoke needs callback port `1455`. When that port is already bound, the script
 prints a skip message for the ChatGPT connector leg while keeping the rest of the binary

@@ -34,9 +34,6 @@ const WATCHED_ENV_KEYS = [
   'UPLOADS_DIR',
   'IMAGES_DIR',
   'TRUST_PROXY',
-  'CURSOR_WORKSPACE_DIR',
-  'MANGO_CURSOR_SIDECAR_SCRIPT',
-  'MANGO_NODE_PATH',
   'MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR',
   'MANGO_LIBRARY_BACKUP_DIR',
   'MANGO_LIBRARY_BACKUP_RETENTION_COUNT',
@@ -273,44 +270,19 @@ describe('config precedence', () => {
     expect(loadConfig(TMP_TOML).environments.container).toBe(true);
   });
 
-  test('loads cursor sidecar script override from config.toml', () => {
-    writeFileSync(TMP_TOML, '[cursor]\nsidecar_script = "/tmp/custom-run-agent.mjs"\n');
+  // The `[cursor]` section went with the Node sidecar. A TOML key nothing reads
+  // must not look like it still works, and an unknown section is ignored rather
+  // than rejected — so this asserts the ignoring, not an error.
+  test('ignores a leftover [cursor] section without failing to load', () => {
+    writeFileSync(
+      TMP_TOML,
+      '[cursor]\nsidecar_script = "/tmp/custom-run-agent.mjs"\nnode_path = "/opt/node22/bin/node"\n'
+    );
 
     const cfg = loadConfig(TMP_TOML);
 
-    expect(cfg.cursor.sidecarScriptPath).toBe('/tmp/custom-run-agent.mjs');
-  });
-
-  test('MANGO_CURSOR_SIDECAR_SCRIPT env var overrides config.toml sidecar_script', () => {
-    writeFileSync(TMP_TOML, '[cursor]\nsidecar_script = "/tmp/from-toml.mjs"\n');
-    process.env.MANGO_CURSOR_SIDECAR_SCRIPT = '/tmp/from-env.mjs';
-
-    const cfg = loadConfig(TMP_TOML);
-
-    expect(cfg.cursor.sidecarScriptPath).toBe('/tmp/from-env.mjs');
-  });
-
-  test('loads cursor node path override from config.toml', () => {
-    writeFileSync(TMP_TOML, '[cursor]\nnode_path = "/opt/node22/bin/node"\n');
-
-    const cfg = loadConfig(TMP_TOML);
-
-    expect(cfg.cursor.nodePath).toBe('/opt/node22/bin/node');
-  });
-
-  test('MANGO_NODE_PATH env var overrides config.toml node_path', () => {
-    writeFileSync(TMP_TOML, '[cursor]\nnode_path = "/tmp/from-toml-node"\n');
-    process.env.MANGO_NODE_PATH = '/tmp/from-env-node';
-
-    const cfg = loadConfig(TMP_TOML);
-
-    expect(cfg.cursor.nodePath).toBe('/tmp/from-env-node');
-  });
-
-  test('cursor node path defaults to empty (auto-detect)', () => {
-    const cfg = loadConfig(join(TMP_DIR, 'nonexistent.toml'));
-
-    expect(cfg.cursor.nodePath).toBe('');
+    expect(cfg).not.toHaveProperty('cursor');
+    expect(cfg.configFilePath).toBe(TMP_TOML);
   });
 
   test('loads unsafe secret-store fallback directory from config.toml', () => {

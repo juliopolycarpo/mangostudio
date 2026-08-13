@@ -43,10 +43,8 @@ export async function listProviderSettingsDescriptors(
 ): Promise<ProviderSettingsListResponse> {
   const savedSettings = await listProviderSettings(db, userId);
   return {
-    providers: await Promise.all(
-      listRegisteredProviderTypes().map((provider) =>
-        buildProviderSettingsDescriptor(provider, savedSettings.get(provider))
-      )
+    providers: listRegisteredProviderTypes().map((provider) =>
+      buildProviderSettingsDescriptor(provider, savedSettings.get(provider))
     ),
   };
 }

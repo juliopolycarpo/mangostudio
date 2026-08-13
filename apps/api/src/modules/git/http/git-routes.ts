@@ -52,6 +52,7 @@ import {
 } from '../../chats/application/chat-workdir';
 import type { ChatRecord } from '../../chats/infrastructure/chat-repository';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
+import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
 import {
   EmptyGeneratedCommitMessageError,
   generateCommitMessageUseCase,
@@ -332,8 +333,9 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
             return { error: error.message, code: ERROR_CODES.GENERATION_EMPTY };
           }
           if (error instanceof NoModelAvailableError) {
-            set.status = 503;
-            return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
+            const refusal = modelUnavailableResponse(error);
+            set.status = refusal.status;
+            return refusal.body;
           }
           // A cancelled request is the client hanging up, not a server fault worth logging.
           if (!request.signal.aborted) {

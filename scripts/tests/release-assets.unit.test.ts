@@ -121,9 +121,6 @@ describe('createReleaseAssetPlan', () => {
     expect(plan.platformArchives).toHaveLength(1);
     expect(archive.sourceDir).toBe(join('/repo', '.mango', 'out', 'linux-x64'));
     expect(archive.binaryPath).toBe(join('/repo', '.mango', 'out', 'linux-x64', 'mangostudio'));
-    expect(archive.cursorSidecarDir).toBe(
-      join('/repo', '.mango', 'out', 'linux-x64', 'cursor-sidecar')
-    );
     expect(archive.readmePath).toBe(join('/repo', '.mango', 'out', 'README.md'));
     expect(plan.rawBinaries).toEqual([
       {
@@ -215,21 +212,13 @@ describe('selectCanaryAssets', () => {
 });
 
 describe('platformArchiveMembers', () => {
-  test('lists the Cursor sidecar only when requested', () => {
+  test('lists exactly the two binaries', () => {
     const [linux] = createReleaseAssetPlan({
       version: '1.2.3',
       rootDir: '/repo',
       onlyPlatform: 'linux-x64',
     }).platformArchives;
 
-    expect(platformArchiveMembers(linux, { includeCursorSidecar: false })).toEqual([
-      'mangostudio',
-      'mangostudio-runtime',
-    ]);
-    expect(platformArchiveMembers(linux, { includeCursorSidecar: true })).toEqual([
-      'mangostudio',
-      'mangostudio-runtime',
-      'cursor-sidecar',
-    ]);
+    expect(platformArchiveMembers(linux)).toEqual(['mangostudio', 'mangostudio-runtime']);
   });
 });

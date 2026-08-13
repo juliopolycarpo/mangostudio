@@ -5,12 +5,6 @@ import { basename, join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
-import {
-  assembleCursorSidecar,
-  type CursorSidecarStaging,
-  cursorNativePackageFor,
-  prepareCursorSidecarStaging,
-} from './lib/cursor-sidecar';
 import { writeEmbedModules } from './lib/embed-frontend';
 import {
   ALL_BINARY_TARGETS,
@@ -148,7 +142,6 @@ async function buildStandaloneTarget(
     buildTime: string;
     buildInfo: BuildStamp;
     outDir: string;
-    cursorSidecar: CursorSidecarStaging | null;
   }
 ): Promise<boolean> {
   const platformOutDir = join(context.outDir, target.arch);
@@ -164,11 +157,6 @@ async function buildStandaloneTarget(
     console.log(`   (dry run) Would compile for ${target.target}`);
     console.log(`✅ Successfully built ${target.name} for ${target.arch} (dry run)`);
     console.log(`✅ Successfully built ${runtimeName} for ${target.arch} (dry run)`);
-    if (cursorNativePackageFor(target)) {
-      console.log(`📁 Would vendor Cursor sidecar to ${join(platformOutDir, 'cursor-sidecar')}`);
-    } else {
-      console.log(`⏭️  Cursor sidecar unsupported for ${target.arch}; would skip`);
-    }
     return true;
   }
 
@@ -179,16 +167,6 @@ async function buildStandaloneTarget(
     ]);
     if (compiled.some((succeeded) => !succeeded)) {
       return false;
-    }
-
-    if (context.cursorSidecar) {
-      const cursorSidecarDestination = join(platformOutDir, 'cursor-sidecar');
-      const staged = assembleCursorSidecar(cursorSidecarDestination, target, context.cursorSidecar);
-      if (staged) {
-        console.log(`📁 Vendored Cursor sidecar to ${cursorSidecarDestination}`);
-      } else {
-        console.log(`⏭️  Cursor sidecar unsupported for ${target.arch}; skipped`);
-      }
     }
 
     return true;
@@ -481,26 +459,18 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
     console.log(`📦 Embedding frontend into binary (${embed.fileCount} asset file(s))`);
   }
 
-  const cursorSidecar = options.dryRun ? null : await prepareCursorSidecarStaging(targets);
-
   console.log(`🎯 Building executables for ${targets.length} platform(s)`);
 
-  let results: boolean[];
-  try {
-    results = await Promise.all(
-      targets.map((target) =>
-        buildStandaloneTarget(target, options, {
-          apiSource,
-          buildTime,
-          buildInfo,
-          outDir,
-          cursorSidecar,
-        })
-      )
-    );
-  } finally {
-    cursorSidecar?.cleanup();
-  }
+  const results = await Promise.all(
+    targets.map((target) =>
+      buildStandaloneTarget(target, options, {
+        apiSource,
+        buildTime,
+        buildInfo,
+        outDir,
+      })
+    )
+  );
 
   const successCount = results.filter(Boolean).length;
   const failedCount = results.length - successCount;

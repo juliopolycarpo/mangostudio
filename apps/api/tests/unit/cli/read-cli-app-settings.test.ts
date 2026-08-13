@@ -35,7 +35,6 @@ function makeConfig(dbPath: string): MangoConfig {
       container: false,
       wslExecutable: '',
     },
-    cursor: { workspaceDir: '', sidecarScriptPath: '', nodePath: '' },
     chatgpt: { authBaseUrl: 'https://auth.openai.com', apiBaseUrl: 'https://api.openai.com' },
     secretStore: { unsafeFileFallbackDir: '' },
     corsOrigins: [],

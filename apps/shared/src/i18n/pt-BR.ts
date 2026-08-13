@@ -235,6 +235,15 @@ export const messages = {
         unknown: 'O turno terminou antes que a conclusão pudesse ser confirmada.',
       },
     },
+    deprecatedModel: {
+      title: 'O MangoStudio não executa mais modelos {provider}',
+      body: 'Este chat está configurado com {model}. O {provider} agora roda como um agente de CLI próprio, dono das próprias ferramentas e aprovações, então continuar lá significa um novo chat — este mantém o histórico. Escolha outro modelo abaixo para continuar neste chat.',
+      continueInNewChat: 'Continuar em um novo chat com o CLI {target}',
+      runnerUnavailable:
+        'O CLI {target} não está disponível neste ambiente. Instale e entre, ou escolha outro modelo abaixo.',
+      dismiss: 'Dispensar',
+      forkFailed: 'Não foi possível iniciar o novo chat. Tente novamente.',
+    },
     fallback: {
       toReplay:
         'Continuação stateful não está mais disponível. Continuando com replay do transcript.',
@@ -670,26 +679,9 @@ export const messages = {
       chatgptAlertThresholdOption: 'Em {percent}%',
       chatgptAlertThresholdCrossed: '{name}: {window} está em {percent}% da cota',
       chatgptAlertWindowReset: '{name}: {window} reiniciou — sua cota voltou',
-      cursorNodeRequired: 'Você precisa do Node.js instalado para executar agentes Cursor SDK.',
-      cursorNodeNotFound: 'Binário `node` não encontrado.',
-      cursorNodeInvalid:
-        'O binário Node.js configurado em {path} não pode ser executado. Corrija ou remova MANGO_NODE_PATH / cursor.node_path.',
-      cursorNodeVersionInsufficient:
-        'Node.js {minVersion}+ é necessário para agentes Cursor SDK (encontrado {version}).',
-      cursorSidecarMissing: 'O script sidecar do Cursor SDK está ausente.',
-      cursorSidecarMissingAt: 'O script sidecar do Cursor SDK está ausente em {path}.',
-      cursorSdkMissing: 'O pacote Cursor SDK está ausente do sidecar. Reinstale o MangoStudio.',
-      cursorSdkMissingAt:
-        'O pacote Cursor SDK está ausente do sidecar em {path}. Reinstale o MangoStudio.',
-      cursorSdkIncomplete: 'O pacote Cursor SDK está incompleto. Reinstale o MangoStudio.',
-      cursorSdkIncompleteAt:
-        'O pacote Cursor SDK está incompleto em {path}. Reinstale o MangoStudio.',
-      cursorNativeRuntimeMissing:
-        'Esta plataforma não tem runtime nativo do Cursor no sidecar. Reinstale o MangoStudio.',
-      cursorNativeRuntimeMissingPackage:
-        'O pacote de runtime nativo do Cursor {packageName} está ausente. Reinstale o MangoStudio.',
-      cursorRuntimeDoctorHint:
-        'Execute `mango doctor` para uma checklist completa do runtime Cursor (use `--all` para verificar sem um conector).',
+      deprecatedBadge: 'Legado',
+      deprecatedConnectorNote:
+        'O MangoStudio não executa mais este provedor. Sua chave e seus modelos continuam aqui, mas os turnos são recusados — use o runner Cursor CLI no seletor de runner do chat.',
       modalsModalTitle: 'Escolher Modelos Disponíveis',
       modelsModalTitle: 'Escolher Modelos Disponíveis',
       modelsModalDescription: 'Os modelos habilitados para',
@@ -749,6 +741,9 @@ export const messages = {
       capabilityCompaction: 'Compactação',
       reservedForFuture: 'Reservado para configurações futuras',
       maxOutputTokensPlaceholder: '1 – {limit}',
+      deprecatedBadge: 'Legado',
+      deprecatedNote:
+        'O MangoStudio não executa mais este provedor. As configurações aqui não afetam turnos — use o runner CLI do Cursor no seletor de runner do chat.',
     },
     tools: {
       title: 'Ferramentas',

@@ -4,7 +4,6 @@
 
 import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { getConfig } from './config';
 
 function isBunBinary(execPath: string): boolean {
   const executableName = basename(execPath).toLowerCase();
@@ -94,19 +93,4 @@ export function resolveRuntimeLaunchCommand(binaryPath?: string): RuntimeLaunchC
     command: process.execPath,
     args: [join(import.meta.dir, '../../../runtime/src/cli.ts')],
   };
-}
-
-/** Returns the Cursor SDK sidecar script path for the current runtime mode. */
-export function getCursorSidecarScriptPath(): string {
-  const override = getConfig().cursor.sidecarScriptPath.trim();
-  if (override) {
-    return override;
-  }
-
-  const devSidecar = join(import.meta.dir, '../services/providers/cursor/sidecar/run-agent.mjs');
-  if (existsSync(devSidecar)) {
-    return devSidecar;
-  }
-
-  return join(getRuntimeBaseDir(), 'cursor-sidecar', 'run-agent.mjs');
 }
