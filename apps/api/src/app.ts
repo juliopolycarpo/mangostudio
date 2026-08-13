@@ -4,6 +4,7 @@
  * for proper Eden type inference in the frontend.
  */
 
+import { mkdirSync } from 'node:fs';
 import { cors } from '@elysia/cors';
 import { openapi } from '@elysia/openapi';
 import { staticPlugin } from '@elysia/static';
@@ -56,6 +57,12 @@ registerApplicationServices();
 const UPLOADS_DIR = getConfig().uploads.dir;
 const IMAGES_DIR = getConfig().images.dir;
 const requestLogger = createDiagnosticLogger('request');
+
+// `staticPlugin` enumerates its assets directory when the server starts, and a
+// missing one fails the listen rather than serving nothing. The uploads route
+// module creates this directory as an import side effect, which happens to run
+// first today — this does not rely on that ordering holding.
+mkdirSync(UPLOADS_DIR, { recursive: true });
 
 /**
  * Base API instance with /api prefix.
