@@ -62,7 +62,15 @@ function toInstallRun(row: EnvironmentInstallRunSelect): InstallRun {
   };
 }
 
-export function createInstallRunRepository(db: Kysely<Database> = getDb()): InstallRunRepository {
+/**
+ * `injected` is resolved per call rather than defaulted at construction, for the
+ * same reason as {@link createEnvironmentRepository}: `createInstallService()`
+ * runs at module scope and builds this, so an eager `= getDb()` default opened
+ * SQLite as a side effect of importing the app.
+ */
+export function createInstallRunRepository(injected?: Kysely<Database>): InstallRunRepository {
+  const db = (): Kysely<Database> => injected ?? getDb();
+
   return {
     async create(input) {
       const row: EnvironmentInstallRunInsert = {
@@ -77,7 +85,7 @@ export function createInstallRunRepository(db: Kysely<Database> = getDb()): Inst
         status: 'running',
         truncated: 0,
       };
-      await db.insertInto('environment_install_runs').values(row).execute();
+      await db().insertInto('environment_install_runs').values(row).execute();
       return {
         id: input.id,
         recipeId: input.recipeId,
@@ -91,7 +99,7 @@ export function createInstallRunRepository(db: Kysely<Database> = getDb()): Inst
     },
 
     async complete(id, userId, profileId, result) {
-      await db
+      await db()
         .updateTable('environment_install_runs')
         .set({
           finishedAt: result.finishedAt,
@@ -106,7 +114,7 @@ export function createInstallRunRepository(db: Kysely<Database> = getDb()): Inst
     },
 
     async find(id, userId, profileId) {
-      const row = await db
+      const row = await db()
         .selectFrom('environment_install_runs')
         .selectAll()
         .where('id', '=', id)
@@ -118,7 +126,7 @@ export function createInstallRunRepository(db: Kysely<Database> = getDb()): Inst
 
     async list(userId, profileId, limit = DEFAULT_RUN_LIMIT) {
       const safeLimit = Math.max(1, Math.min(DEFAULT_RUN_LIMIT, Math.trunc(limit)));
-      const rows = await db
+      const rows = await db()
         .selectFrom('environment_install_runs')
         .selectAll()
         .where('userId', '=', userId)
