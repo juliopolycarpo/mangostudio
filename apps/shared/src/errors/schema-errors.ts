@@ -14,6 +14,10 @@
 
 import type { TLocalizedValidationError } from 'typebox/error';
 
+/** RFC 6901: `~` then `/`, so a slash does not produce a nested pointer. */
+const escapePointerToken = (token: string): string =>
+  token.replaceAll('~', '~0').replaceAll('/', '~1');
+
 /** The single key a container-level violation is actually about, if there is one. */
 const offendingProperty = (error: TLocalizedValidationError): string | undefined => {
   if (error.keyword === 'required') return error.params.requiredProperties[0];
@@ -27,7 +31,9 @@ const offendingProperty = (error: TLocalizedValidationError): string | undefined
  */
 export const schemaErrorPointer = (error: TLocalizedValidationError): string => {
   const property = offendingProperty(error);
-  const pointer = property ? `${error.instancePath}/${property}` : error.instancePath;
+  const pointer = property
+    ? `${error.instancePath}/${escapePointerToken(property)}`
+    : error.instancePath;
   return pointer || '/';
 };
 

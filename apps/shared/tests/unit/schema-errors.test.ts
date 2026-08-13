@@ -55,6 +55,11 @@ describe('schemaErrorPointer', () => {
   it('renders a violation of the whole document as the root pointer', () => {
     expect(schemaErrorPointer(firstError(Outer, []))).toBe('/');
   });
+
+  it('escapes slash and tilde in an unexpected property name', () => {
+    expect(schemaErrorPointer(firstError(Outer, { jobs: [], 'a/b': 1 }))).toBe('/a~1b');
+    expect(schemaErrorPointer(firstError(Outer, { jobs: [], 'a~b': 1 }))).toBe('/a~0b');
+  });
 });
 
 describe('describeSchemaError', () => {
