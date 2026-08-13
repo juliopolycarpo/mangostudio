@@ -67,7 +67,7 @@ describe('smoke matrix runtime dependencies', () => {
 
   test('runtime import walker detects external packages on a known consumer', () => {
     const { externalSpecifiers } = walkRuntimeImports('scripts/qa-gate/metrics-envelope.ts');
-    expect(externalSpecifiers.has('@sinclair/typebox')).toBe(true);
+    expect(externalSpecifiers.has('typebox')).toBe(true);
   });
 
   test('smoke jobs install dependencies only when rebuild is enabled', () => {

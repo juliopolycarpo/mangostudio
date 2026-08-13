@@ -8,7 +8,10 @@ import {
   WORKSPACE_DPRINT_PATHS,
   type WorkspaceName,
 } from './lib/config';
-import { assertNoDisallowedWorkspaceDependencies } from './lib/dependency-policy';
+import {
+  assertDependencyCohort,
+  assertNoDisallowedWorkspaceDependencies,
+} from './lib/dependency-policy';
 import { assertVersionsInLockstep } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -84,6 +87,7 @@ function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
         assertVersionsInLockstep();
       }),
     () => runTask('root:dependency-policy', () => assertNoDisallowedWorkspaceDependencies()),
+    () => runTask('root:dependency-cohort', () => assertDependencyCohort()),
   ];
 
   if (!skipFormat) {
