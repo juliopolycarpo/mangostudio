@@ -1,5 +1,7 @@
 import { Elysia } from 'elysia';
+import { websocket } from 'elysia/websocket';
 import { getAuth } from '../../../src/auth';
+import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { assertTestEnvironmentReady } from '../setup/test-environment';
 
 type ApiTestPlugin = Parameters<Elysia['use']>[0];
@@ -13,7 +15,11 @@ type ApiTestPlugin = Parameters<Elysia['use']>[0];
 export function createApiTestApp(...plugins: ApiTestPlugin[]) {
   assertTestEnvironmentReady('createApiTestApp');
 
-  const app = new Elysia();
+  // WebSocket support is a plugin in Elysia 2, and both socket protocols are
+  // built as independent route plugins. Registering it here keeps one builder
+  // for every route test instead of a second, divergent socket-only one; it is
+  // inert for the suites that never open a socket.
+  const app = new Elysia().use(websocket(REALTIME_WEBSOCKET_OPTIONS));
 
   for (const plugin of plugins) {
     app.use(plugin);

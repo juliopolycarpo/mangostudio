@@ -22,7 +22,7 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
-    "@elysiajs/eden": "^1.4.8",
+    "@elysia/eden": "2.0.0-beta.2",
     "@mangostudio/shared": "workspace:*",
     "@shikijs/core": "4.4.2",
     "@shikijs/engine-javascript": "4.4.2",

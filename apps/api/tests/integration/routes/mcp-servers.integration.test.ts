@@ -9,7 +9,7 @@ import {
   type TestMcpServerResponse,
   TestMcpServerResponseSchema,
 } from '@mangostudio/shared/mcp';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
 import { mcpServerRoutes } from '../../../src/modules/mcp-servers/http/mcp-server-routes';

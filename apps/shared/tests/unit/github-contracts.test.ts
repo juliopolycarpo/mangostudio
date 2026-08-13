@@ -5,7 +5,7 @@ import {
   GithubPrSchema,
   GithubRepoSchema,
 } from '@mangostudio/shared/github';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 
 const repo = {
   nameWithOwner: 'mango/mangostudio',

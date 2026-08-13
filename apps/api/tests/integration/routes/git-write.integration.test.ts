@@ -17,7 +17,7 @@ import {
   gitTopic,
   type RealtimeInvalidateEvent,
 } from '@mangostudio/shared/realtime';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import {

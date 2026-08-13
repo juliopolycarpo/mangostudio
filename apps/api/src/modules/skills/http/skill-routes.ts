@@ -34,15 +34,15 @@ export const skillRoutes = new Elysia()
 
   .put(
     '/skills/:skillKey',
+    {
+      params: t.Object({ skillKey: t.String() }),
+      body: UpdateSkillSettingsBodySchema,
+    },
     async ({ body, params, set, user }): Promise<SkillDescriptor | ApiErrorResponse> => {
       try {
         return await updateSkillSetting(getDb(), user?.id ?? '', params.skillKey, body);
       } catch (error) {
         return handleSkillSettingsError(error, set);
       }
-    },
-    {
-      params: t.Object({ skillKey: t.String() }),
-      body: UpdateSkillSettingsBodySchema,
     }
   );

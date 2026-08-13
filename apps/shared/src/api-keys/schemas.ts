@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 
 /** Header external callers present a key on. */
 export const API_KEY_HEADER = 'x-api-key';

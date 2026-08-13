@@ -1,5 +1,5 @@
-import { type Static, Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import Type, { type Static } from 'typebox';
+import Value from 'typebox/value';
 import { AgentIdSchema } from '../agents/schemas';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 import { TODO_MAX_ITEMS, TodoItemSchema } from '../todos/schemas';
@@ -19,9 +19,16 @@ export const TURN_CHECKPOINT_STATUSES = [
   'resumed',
 ] as const;
 
-export const TurnCheckpointStatusSchema = Type.Union(
-  TURN_CHECKPOINT_STATUSES.map((status) => Type.Literal(status))
-);
+// Written as a literal tuple rather than mapped from the array above:
+// TypeBox infers a union by walking a tuple, and a mapped array widens to
+// `TSchema[]`, which infers as `never` and silently erases the type.
+export const TurnCheckpointStatusSchema = Type.Union([
+  Type.Literal('active'),
+  Type.Literal('completed'),
+  Type.Literal('interrupted'),
+  Type.Literal('dismissed'),
+  Type.Literal('resumed'),
+]);
 export type TurnCheckpointStatus = Static<typeof TurnCheckpointStatusSchema>;
 
 export const TURN_INTERRUPTION_REASON_CODES = [
@@ -33,16 +40,29 @@ export const TURN_INTERRUPTION_REASON_CODES = [
   'unknown',
 ] as const;
 
-export const TurnInterruptionReasonCodeSchema = Type.Union(
-  TURN_INTERRUPTION_REASON_CODES.map((reason) => Type.Literal(reason))
-);
+// Written as a literal tuple rather than mapped from the array above:
+// TypeBox infers a union by walking a tuple, and a mapped array widens to
+// `TSchema[]`, which infers as `never` and silently erases the type.
+export const TurnInterruptionReasonCodeSchema = Type.Union([
+  Type.Literal('client_disconnect'),
+  Type.Literal('server_restart'),
+  Type.Literal('provider_error'),
+  Type.Literal('user_cancelled'),
+  Type.Literal('tool_loop_exhausted'),
+  Type.Literal('unknown'),
+]);
 export type TurnInterruptionReasonCode = Static<typeof TurnInterruptionReasonCodeSchema>;
 
 export const TOOL_RETRY_SAFETY_VALUES = ['safe_read', 'confirmation_required', 'unknown'] as const;
 
-export const ToolRetrySafetySchema = Type.Union(
-  TOOL_RETRY_SAFETY_VALUES.map((safety) => Type.Literal(safety))
-);
+// Written as a literal tuple rather than mapped from the array above:
+// TypeBox infers a union by walking a tuple, and a mapped array widens to
+// `TSchema[]`, which infers as `never` and silently erases the type.
+export const ToolRetrySafetySchema = Type.Union([
+  Type.Literal('safe_read'),
+  Type.Literal('confirmation_required'),
+  Type.Literal('unknown'),
+]);
 export type ToolRetrySafety = Static<typeof ToolRetrySafetySchema>;
 
 export const IncompleteToolCallOutcomeSchema = Type.Union([

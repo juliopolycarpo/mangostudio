@@ -16,7 +16,14 @@ export const authRoutes = (app: Elysia) =>
   app.group('/auth', (app) =>
     app
       .get('/ok', () => ({ ok: true }))
-      .all('/*', (context) => {
+      // `parse: 'none'` keeps Elysia from reading the body, because Better Auth
+      // is handed the untouched `Request` and reads it itself. Registering any
+      // globally scoped error handler makes the framework materialise the body
+      // before the handler runs, which consumes the stream and leaves every
+      // sign-up and sign-in failing with `Invalid JSON in request body`. Handing
+      // over a re-created `Request` instead would be lossy, so the parse is
+      // skipped rather than replayed.
+      .all('/*', { parse: 'none' }, (context) => {
         authLogger.info('request', { method: context.request.method, path: context.path });
 
         if (BETTER_AUTH_ACCEPT_METHODS.includes(context.request.method)) {

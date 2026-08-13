@@ -9,7 +9,7 @@ describe('api-client 401 handling', () => {
     scheduleLoginRedirectMock = vi.fn();
     vi.resetModules();
 
-    vi.doMock('@elysiajs/eden', () => ({
+    vi.doMock('@elysia/eden', () => ({
       treaty: vi.fn((_baseUrl: string, options: { fetcher?: typeof fetch }) => {
         capturedFetcher = options.fetcher ?? null;
         return {};

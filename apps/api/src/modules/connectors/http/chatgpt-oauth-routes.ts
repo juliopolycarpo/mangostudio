@@ -20,30 +20,31 @@ export const chatGptOAuthRoutes = new Elysia()
 
   .post(
     '/connectors/chatgpt/oauth/start',
+    { body: StartChatGptOAuthBodySchema },
     async ({ body, set, user }): Promise<StartChatGptOAuthResponse | ApiErrorResponse> => {
       try {
         return await startChatGptOAuth(user?.id ?? '', body);
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    { body: StartChatGptOAuthBodySchema }
+    }
   )
 
   .get(
     '/connectors/chatgpt/oauth/:sessionId/status',
+    { params: t.Object({ sessionId: t.String() }) },
     ({ params, set, user }): ChatGptOAuthStatus | ApiErrorResponse => {
       try {
         return getChatGptOAuthStatus(user?.id ?? '', params.sessionId);
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    { params: t.Object({ sessionId: t.String() }) }
+    }
   )
 
   .post(
     '/connectors/chatgpt/oauth/:sessionId/cancel',
+    { params: t.Object({ sessionId: t.String() }) },
     ({ params, set, user }): { success: true } | ApiErrorResponse => {
       try {
         cancelChatGptOAuth(user?.id ?? '', params.sessionId);
@@ -51,6 +52,5 @@ export const chatGptOAuthRoutes = new Elysia()
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    { params: t.Object({ sessionId: t.String() }) }
+    }
   );

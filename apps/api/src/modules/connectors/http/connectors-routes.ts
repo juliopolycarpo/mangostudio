@@ -113,18 +113,19 @@ export const connectorRoutes = new Elysia()
 
   .post(
     '/connectors',
+    { body: AddConnectorBodySchema },
     async ({ body, set, user }): Promise<Connector | ApiErrorResponse> => {
       try {
         return await addConnector(user?.id ?? '', body);
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    { body: AddConnectorBodySchema }
+    }
   )
 
   .delete(
     '/connectors/:id',
+    { params: t.Object({ id: t.String() }) },
     async ({ params, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
       try {
         await removeConnector(user?.id ?? '', params.id);
@@ -132,12 +133,15 @@ export const connectorRoutes = new Elysia()
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    { params: t.Object({ id: t.String() }) }
+    }
   )
 
   .put(
     '/connectors/:id/models',
+    {
+      params: t.Object({ id: t.String() }),
+      body: UpdateConnectorModelsBodySchema,
+    },
     async ({ params, body, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
       try {
         await updateConnectorModels(user?.id ?? '', params.id, body.enabledModels);
@@ -145,9 +149,5 @@ export const connectorRoutes = new Elysia()
       } catch (error) {
         return handleConnectorError(error, set);
       }
-    },
-    {
-      params: t.Object({ id: t.String() }),
-      body: UpdateConnectorModelsBodySchema,
     }
   );

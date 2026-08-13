@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { AddConnectorBodySchema } from '@mangostudio/shared/connectors';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import {
   decideTurnPersistence,
   getContinuationStrategy,

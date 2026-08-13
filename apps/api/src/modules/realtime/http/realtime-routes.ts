@@ -13,8 +13,8 @@ import {
   RealtimeServerMessageSchema,
   SETTINGS_TOPIC,
 } from '@mangostudio/shared/realtime';
-import { Value } from '@sinclair/typebox/value';
 import { Elysia } from 'elysia';
+import Value from 'typebox/value';
 import { getAuth } from '../../../auth';
 import { getDb } from '../../../db/database';
 import { getConfig } from '../../../lib/config';
@@ -88,9 +88,11 @@ interface RealtimeSocket {
   ): unknown;
   close(code?: number, reason?: string): unknown;
   cork(callback: () => void): unknown;
-  data: {
-    realtimeSocket: RealtimeSocketState;
-  };
+  /**
+   * Elysia flattens derived values onto the socket context rather than
+   * nesting them under `data`, which now carries the route's own wiring.
+   */
+  realtimeSocket: RealtimeSocketState;
 }
 
 const logger = createDiagnosticLogger('realtime-ws');
@@ -159,7 +161,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
   }
 
   function failSocket(ws: RealtimeSocket, error: unknown): void {
-    const state = ws.data.realtimeSocket;
+    const state = ws.realtimeSocket;
     logger.error('handler_failed', {
       userId: state.userId,
       error: error instanceof Error ? error.message : String(error),
@@ -181,7 +183,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
     }
     if (connections.size >= MAX_CONNECTIONS_PER_USER) return false;
     connections.add(ws.id);
-    ws.data.realtimeSocket.connectionRegistered = true;
+    ws.realtimeSocket.connectionRegistered = true;
     return true;
   }
 
@@ -197,7 +199,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
 
   async function subscribe(ws: RealtimeSocket, message: RealtimeClientMessage): Promise<void> {
     if (message.type !== 'subscribe') return;
-    const state = ws.data.realtimeSocket;
+    const state = ws.realtimeSocket;
     if (!state.userId) return;
     const accepted = new Set<string>();
 
@@ -277,7 +279,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
       response: RealtimeServerMessageSchema,
       open(ws) {
         const socket = ws as unknown as RealtimeSocket;
-        const state = socket.data.realtimeSocket;
+        const state = socket.realtimeSocket;
 
         if (state.rejection === 'forbidden') {
           sendAndClose(
@@ -327,7 +329,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
       },
       async message(ws, incomingMessage) {
         const socket = ws as unknown as RealtimeSocket;
-        const state = socket.data.realtimeSocket;
+        const state = socket.realtimeSocket;
         if (state.cleanedUp || state.rejection || !state.userId) return;
 
         // Admit before enqueue so slow subscribe ownership work cannot reset the
@@ -411,7 +413,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
       },
       close(ws) {
         const socket = ws as unknown as RealtimeSocket;
-        cleanupConnection(socket.data.realtimeSocket, socket.id);
+        cleanupConnection(socket.realtimeSocket, socket.id);
       },
     });
 }

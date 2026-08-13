@@ -16,8 +16,10 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { app } from '../../../src/app';
+import { getConfig } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 
 const ROUTE_INVENTORY_FIXTURE = join(
@@ -60,7 +62,7 @@ async function openApiDocument(): Promise<OpenApiDocument> {
  * answers is only "is every route still published under the same path and
  * method".
  *
- * `/uploads` is excluded because `@elysiajs/static` derives its routes from
+ * `/uploads` is excluded because `@elysia/static` derives its routes from
  * whatever is on disk when the plugin is registered — it publishes a `/uploads/*`
  * wildcard when the directory is absent and nothing when it is populated. That
  * makes its footprint a property of the machine rather than of the API, so
@@ -171,7 +173,7 @@ describe('OpenAPI document', () => {
     );
   });
 
-  it('describes a multipart file body with its declared limits', async () => {
+  it('describes a multipart file body as a binary string', async () => {
     const document = await openApiDocument();
     const body = document.paths['/api/upload/chat']?.post?.requestBody;
     const multipart = body?.content['multipart/form-data']?.schema as
@@ -180,7 +182,30 @@ describe('OpenAPI document', () => {
 
     expect(body?.required).toBe(true);
     expect(multipart?.required).toEqual(['chatId', 'file']);
-    expect(multipart?.properties?.file).toMatchObject({ format: 'binary', maxSize: '20m' });
+    // `format: 'binary'` is what makes generated clients send bytes and what
+    // renders the upload control in Scalar, so it is pinned here.
+    //
+    // The declared `maxSize` is deliberately *not* asserted. A file schema
+    // serializes to an opaque marker whose size and MIME constraints live in
+    // non-enumerable closures on a frozen object, so no consumer of the schema
+    // can read them back — the limit is still enforced at request time, it is
+    // simply no longer publishable. It was never a standard OpenAPI keyword.
+    expect(multipart?.properties?.file).toMatchObject({ type: 'string', format: 'binary' });
+  });
+
+  it('publishes no framework-internal schema markers', async () => {
+    const document = await openApiDocument();
+
+    // Internal marker keys (`~kind`, `~elyTyp`) are how the framework tags
+    // schema nodes it handles natively; they are meaningless to an OpenAPI
+    // consumer and make a document fail strict validation. A file schema is the
+    // node that carries them, and converting it back to a documentable shape is
+    // patched into the plugin — so this asserts across the whole document
+    // rather than one route: it is the check that fails loudly if that patch
+    // ever stops being applied, which is otherwise silent.
+    const markers = JSON.stringify(document).match(/"~[A-Za-z]+"/g);
+
+    expect([...new Set(markers ?? [])]).toEqual([]);
   });
 
   it('describes a JSON response body with its required fields', async () => {
@@ -300,6 +325,14 @@ describe('root WebSocket transport', () => {
     // route plugin. `app.handle` cannot see them, so the assertion has to
     // listen on the composed app rather than rebuild a root that happens to
     // pass the same object.
+    // The static plugin enumerates its assets directory when the server starts,
+    // not when it is registered. The shared `afterEach` deletes the whole test
+    // sandbox — uploads directory included — so by the time this runs, the
+    // directory `app.ts` was configured to serve is gone and the listen fails
+    // asynchronously: a port is still assigned, and the failure only shows up
+    // as the connection below being reset.
+    mkdirSync(getConfig().uploads.dir, { recursive: true });
+
     app.listen(0);
     const port = (app.server as { port?: number } | null)?.port;
     expect(port).toBeNumber();

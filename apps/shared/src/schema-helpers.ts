@@ -1,4 +1,4 @@
-import { type Static, type TSchema, Type } from '@sinclair/typebox';
+import Type, { type Static, type TSchema } from 'typebox';
 
 /**
  * Array schema whose inferred type is `ReadonlyArray<T>` while validating like a

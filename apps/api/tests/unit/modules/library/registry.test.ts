@@ -17,7 +17,7 @@ import {
   listLibraryTargetLocationIds,
 } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import {
   describeLocation,
   describeTargetLocations,

@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import {
   ExternalAgentTargetIdSchema,
   ExternalIdentityIsolationSchema,

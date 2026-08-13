@@ -11,11 +11,7 @@ import {
   parseDistributionManifest,
   validateDistributionManifest,
 } from '../lib/distribution-manifest';
-import {
-  ALL_BINARY_TARGETS,
-  type ReleasePlatformId,
-  releaseArchiveFileName,
-} from '../lib/release-targets';
+import { ALL_BINARY_TARGETS, releaseArchiveFileName } from '../lib/release-targets';
 
 let tempDirs: string[] = [];
 

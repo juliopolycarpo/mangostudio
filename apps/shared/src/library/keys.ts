@@ -1,4 +1,4 @@
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import {
   LIBRARY_RESOURCE_SLUG_MAX_LENGTH,
   LIBRARY_RESOURCE_SLUG_PATTERN,

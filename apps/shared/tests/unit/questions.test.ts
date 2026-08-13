@@ -4,7 +4,7 @@ import {
   AskUserQuestionArgsSchema,
   formatQuestionAnswers,
 } from '@mangostudio/shared/questions';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 
 const INTRO = 'My answers to your questions:';
 

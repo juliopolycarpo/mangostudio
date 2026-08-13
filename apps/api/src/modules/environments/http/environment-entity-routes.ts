@@ -89,19 +89,15 @@ export function createEnvironmentEntityRoutes(
   return (
     new Elysia()
       .use(requireAuth)
-      .get('/environments', ({ user }) => service.list(user?.id ?? ''), {
-        response: { 200: EnvironmentListSchema },
-      })
+      .get(
+        '/environments',
+        {
+          response: { 200: EnvironmentListSchema },
+        },
+        ({ user }) => service.list(user?.id ?? '')
+      )
       .post(
         '/environments',
-        async ({ body, user, set }) => {
-          try {
-            set.status = 201;
-            return await service.create(user?.id ?? '', body);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           body: CreateEnvironmentBodySchema,
           response: {
@@ -110,10 +106,25 @@ export function createEnvironmentEntityRoutes(
             409: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
+        },
+        async ({ body, user, set }) => {
+          try {
+            set.status = 201;
+            return await service.create(user?.id ?? '', body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .get(
         '/environments/:id',
+        {
+          params: environmentParams,
+          response: {
+            200: EnvironmentSchema,
+            404: ApiErrorResponseSchema,
+          },
+        },
         async ({ params, user, set }) => {
           const environment = await service.find(user?.id ?? '', params.id);
           if (environment) return environment;
@@ -122,24 +133,10 @@ export function createEnvironmentEntityRoutes(
             error: `Environment "${params.id}" was not found.`,
             code: ERROR_CODES.NOT_FOUND,
           };
-        },
-        {
-          params: environmentParams,
-          response: {
-            200: EnvironmentSchema,
-            404: ApiErrorResponseSchema,
-          },
         }
       )
       .put(
         '/environments/:id',
-        async ({ params, body, user, set }) => {
-          try {
-            return await service.update(user?.id ?? '', params.id, body);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           body: UpdateEnvironmentBodySchema,
@@ -150,20 +147,17 @@ export function createEnvironmentEntityRoutes(
             409: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, body, user, set }) => {
+          try {
+            return await service.update(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .delete(
         '/environments/:id',
-        async ({ params, query, user, set }) => {
-          try {
-            await service.remove(user?.id ?? '', params.id, {
-              removeRuntime: query.removeRuntime === true || query.removeRuntime === 'true',
-            });
-            return { success: true as const };
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           query: t.Object({
@@ -177,17 +171,20 @@ export function createEnvironmentEntityRoutes(
             409: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, query, user, set }) => {
+          try {
+            await service.remove(user?.id ?? '', params.id, {
+              removeRuntime: query.removeRuntime === true || query.removeRuntime === 'true',
+            });
+            return { success: true as const };
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .post(
         '/environments/:id/connect',
-        async ({ params, user, set }) => {
-          try {
-            return await service.connect(user?.id ?? '', params.id);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           response: {
@@ -195,34 +192,34 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, user, set }) => {
+          try {
+            return await service.connect(user?.id ?? '', params.id);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .post(
         '/environments/:id/disconnect',
-        async ({ params, user, set }) => {
-          try {
-            return await service.disconnect(user?.id ?? '', params.id);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           response: {
             200: EnvironmentSchema,
             404: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, user, set }) => {
+          try {
+            return await service.disconnect(user?.id ?? '', params.id);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .get(
         '/environments/:id/pairing',
-        async ({ params, user, set }) => {
-          try {
-            return await pairing.status(user?.id ?? '', params.id);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           response: {
@@ -230,20 +227,19 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, user, set }) => {
+          try {
+            return await pairing.status(user?.id ?? '', params.id);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       // POST rather than PUT: each call mints a new secret and retires the
       // previous one, so replaying it is not the same as sending it once.
       .post(
         '/environments/:id/pairing',
-        async ({ params, user, set }) => {
-          try {
-            set.status = 201;
-            return await pairing.issue(user?.id ?? '', params.id);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           response: {
@@ -251,18 +247,18 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, user, set }) => {
+          try {
+            set.status = 201;
+            return await pairing.issue(user?.id ?? '', params.id);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .delete(
         '/environments/:id/pairing',
-        async ({ params, user, set }) => {
-          try {
-            await pairing.revoke(user?.id ?? '', params.id);
-            return { success: true as const };
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           response: {
@@ -270,19 +266,18 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, user, set }) => {
+          try {
+            await pairing.revoke(user?.id ?? '', params.id);
+            return { success: true as const };
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .get(
         '/environments/:id/runtime',
-        async ({ params, query, user, set }) => {
-          try {
-            return await lifecycle.getView(user?.id ?? '', params.id, {
-              includeSlotBytes: query.slotBytes === true || query.slotBytes === 'true',
-            });
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           query: t.Object({
@@ -292,17 +287,19 @@ export function createEnvironmentEntityRoutes(
             200: RuntimeLifecycleViewSchema,
             404: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, query, user, set }) => {
+          try {
+            return await lifecycle.getView(user?.id ?? '', params.id, {
+              includeSlotBytes: query.slotBytes === true || query.slotBytes === 'true',
+            });
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .post(
         '/environments/:id/runtime/install',
-        async ({ params, body, user, set }) => {
-          try {
-            return await lifecycle.startInstall(user?.id ?? '', params.id, body);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           body: RuntimeLifecycleInstallBodySchema,
@@ -312,10 +309,24 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, body, user, set }) => {
+          try {
+            return await lifecycle.startInstall(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .post(
         '/environments/:id/runtime/runs/:runId/cancel',
+        {
+          params: runIdParams,
+          response: {
+            200: RuntimeLifecycleCancelResponseSchema,
+            404: ApiErrorResponseSchema,
+          },
+        },
         async ({ params, user, set }) => {
           const cancelled = await lifecycle.cancel(params.runId, user?.id ?? '');
           if (!cancelled) {
@@ -323,24 +334,10 @@ export function createEnvironmentEntityRoutes(
             return { error: 'Runtime install run not found.', code: ERROR_CODES.NOT_FOUND };
           }
           return { runId: params.runId, cancellationRequested: true };
-        },
-        {
-          params: runIdParams,
-          response: {
-            200: RuntimeLifecycleCancelResponseSchema,
-            404: ApiErrorResponseSchema,
-          },
         }
       )
       .post(
         '/environments/:id/runtime/setup',
-        async ({ params, body, user, set }) => {
-          try {
-            return await lifecycle.startSetup(user?.id ?? '', params.id, body);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           body: RuntimeSetupBodySchema,
@@ -350,6 +347,13 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, body, user, set }) => {
+          try {
+            return await lifecycle.startSetup(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       // The ssh credentials in this body are used for the duration of the run
@@ -358,13 +362,6 @@ export function createEnvironmentEntityRoutes(
       // straight into the ssh channel's stdin rather than into this response.
       .post(
         '/environments/:id/runtime/bootstrap',
-        async ({ params, body, user, set }) => {
-          try {
-            return await lifecycle.startPairedBootstrap(user?.id ?? '', params.id, body);
-          } catch (error) {
-            return environmentError(error, set);
-          }
-        },
         {
           params: environmentParams,
           body: RuntimePairedBootstrapBodySchema,
@@ -374,10 +371,23 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
           },
+        },
+        async ({ params, body, user, set }) => {
+          try {
+            return await lifecycle.startPairedBootstrap(user?.id ?? '', params.id, body);
+          } catch (error) {
+            return environmentError(error, set);
+          }
         }
       )
       .get(
         '/environments/:id/runtime/runs/:runId/log',
+        {
+          params: runIdParams,
+          response: {
+            404: ApiErrorResponseSchema,
+          },
+        },
         async ({ params, user, set }) => {
           const source = await lifecycle.getRunStream(params.runId, user?.id ?? '');
           if (!source) {
@@ -435,12 +445,6 @@ export function createEnvironmentEntityRoutes(
               Connection: 'keep-alive',
             },
           });
-        },
-        {
-          params: runIdParams,
-          response: {
-            404: ApiErrorResponseSchema,
-          },
         }
       )
   );

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { TurnCheckpointPartSchema } from '@mangostudio/shared/turn-recovery';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { createTurnCheckpointPart } from '../../../src/modules/generation/application/turn-checkpoint';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';

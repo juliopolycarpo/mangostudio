@@ -11,8 +11,8 @@ import type {
   ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
 import { ExternalAccountLimitsSchema } from '@mangostudio/shared/external-agents';
-import { Value } from '@sinclair/typebox/value';
 import type { Kysely } from 'kysely';
+import Value from 'typebox/value';
 import type { Database } from '../../../db/types';
 
 export interface ExternalAccountLimitsCacheKey {

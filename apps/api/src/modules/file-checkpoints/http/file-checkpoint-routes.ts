@@ -26,6 +26,13 @@ export const fileCheckpointRoutes = (app: Elysia) =>
       .use(requireAuth)
       .get(
         '/:id/checkpoints',
+        {
+          params: t.Object({ id: t.String() }),
+          response: {
+            200: ChatFileCheckpointsResponseSchema,
+            404: ApiErrorResponseSchema,
+          },
+        },
         async ({ params, user, set }): Promise<ApiErrorResponse | ChatFileCheckpointsResponse> => {
           const userId = user?.id ?? '';
           try {
@@ -39,17 +46,19 @@ export const fileCheckpointRoutes = (app: Elysia) =>
           }
           const checkpoints = await listChatFileCheckpointSummaries(getDb(), params.id);
           return { checkpoints };
-        },
-        {
-          params: t.Object({ id: t.String() }),
-          response: {
-            200: ChatFileCheckpointsResponseSchema,
-            404: ApiErrorResponseSchema,
-          },
         }
       )
       .post(
         '/:id/checkpoints/:messageId/revert',
+        {
+          params: t.Object({ id: t.String(), messageId: t.String() }),
+          response: {
+            200: RevertChatFileCheckpointsResponseSchema,
+            403: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+          },
+        },
         async ({
           params,
           user,
@@ -78,15 +87,6 @@ export const fileCheckpointRoutes = (app: Elysia) =>
             }
             throw error;
           }
-        },
-        {
-          params: t.Object({ id: t.String(), messageId: t.String() }),
-          response: {
-            200: RevertChatFileCheckpointsResponseSchema,
-            403: ApiErrorResponseSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-          },
         }
       )
   );

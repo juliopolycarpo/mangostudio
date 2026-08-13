@@ -5,10 +5,12 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { staticPlugin } from '@elysiajs/static';
+import { staticPlugin } from '@elysia/static';
+import { NotFound } from 'elysia';
 import type { App } from '../app';
 import { isSpaRoute } from '../lib/spa-guard';
 import { type EmbeddedFrontendFiles, getEmbeddedFrontend } from './embedded-frontend';
+import { frontendNotFound, setFrontendFallback } from './frontend-fallback';
 
 /** True when a built frontend (index.html) exists in the directory. // Usage: hasFrontend(dir) */
 function hasFrontend(frontendDir: string): boolean {
@@ -85,14 +87,12 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
     app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
   }
 
-  app.onError(({ code, request }) => {
-    if (code === 'NOT_FOUND' && request.method === 'GET') {
-      const { pathname } = new URL(request.url);
-      if (isSpaRoute(pathname)) {
-        return serveEmbeddedIndex();
-      }
-    }
+  setFrontendFallback((request) => {
+    if (request.method !== 'GET') return undefined;
+    const { pathname } = new URL(request.url);
+    return isSpaRoute(pathname) ? serveEmbeddedIndex() : undefined;
   });
+  app.error(NotFound, ({ request }) => frontendNotFound(request));
 }
 
 function registerSpa(app: App, frontendDir: string): void {
@@ -108,27 +108,32 @@ function registerSpa(app: App, frontendDir: string): void {
       staticPlugin({
         assets: frontendDir,
         prefix: '/',
-        // ignorePatterns in @elysiajs/static has an inverted comparison so string
-        // patterns never match — only regex patterns work. Exclude index.html so the
-        // plugin does not register a GET /index.html handler that fails in compiled
-        // binaries; GET /index.html is handled by the onError NOT_FOUND handler below.
+        // ignorePatterns in @elysia/static still has an inverted comparison, so
+        // string patterns never match and only regex patterns work — verified
+        // against 2.0.0-beta.2, so the regex form below is still load-bearing.
+        // Exclude index.html so the plugin does not register a GET /index.html
+        // handler that fails in compiled binaries; GET /index.html is handled by
+        // the NotFound fallback below.
         ignorePatterns: [/index\.html$/, '/api/*', '/uploads/*', '/images/*', '/scalar'],
       })
     )
-    .onError(({ code, request }) => {
-      if (code === 'NOT_FOUND' && request.method === 'GET') {
-        const { pathname } = new URL(request.url);
-        if (isSpaRoute(pathname)) {
-          return serveIndexFile(indexPath);
-        }
-      }
-    });
+    .error(NotFound, ({ request }) => frontendNotFound(request));
+
+  setFrontendFallback((request) => {
+    if (request.method !== 'GET') return undefined;
+    const { pathname } = new URL(request.url);
+    return isSpaRoute(pathname) ? serveIndexFile(indexPath) : undefined;
+  });
 }
 
 function registerApiOnly(app: App): void {
-  app.onError(({ code }) => {
-    if (code === 'NOT_FOUND') {
-      return new Response('Frontend not found. API is running.', { status: 404 });
-    }
+  setFrontendFallback((request) => {
+    const { pathname } = new URL(request.url);
+    // The outer `NotFound` handler in `app.ts` runs first and stops when this
+    // returns a body. Claiming `/api/*` here would turn unknown endpoints into
+    // plaintext instead of `ApiErrorResponse`.
+    if (pathname === '/api' || pathname.startsWith('/api/')) return undefined;
+    return new Response('Frontend not found. API is running.', { status: 404 });
   });
+  app.error(NotFound, ({ request }) => frontendNotFound(request));
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { type Static, Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import Type, { type Static } from 'typebox';
+import Value from 'typebox/value';
 import { ReadonlyArraySchema } from '../../src/schema-helpers';
 import { assertType, type Equals } from '../../src/test-utils/type-assert';
 

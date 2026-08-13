@@ -1,0 +1,137 @@
+diff --git a/dist/gen/index.js b/dist/gen/index.js
+index 500863734b896bafa4522c9d5f4500b7d9a3d883..67aa0fa2752cff2ab72175f7d5e145eccc3c5d0d 100644
+--- a/dist/gen/index.js
++++ b/dist/gen/index.js
+@@ -1,6 +1,6 @@
+ Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+-const require_script = require('../node_modules/typebox/build/type/script/script.js');
+-require('../node_modules/typebox/build/type/index.js');
++const require_script = require('typebox/type');
++require('typebox/type');
+ 
+ //#region src/gen/index.ts
+ const matchRoute = /: Elysia<(.*)>/gs;
+diff --git a/dist/gen/index.mjs b/dist/gen/index.mjs
+index 27baa3f4900963856809d0b13dc49e91f454a1d3..936ed97fd99a5e3dec3a1fdd6512a0ade6e56071 100644
+--- a/dist/gen/index.mjs
++++ b/dist/gen/index.mjs
+@@ -1,5 +1,5 @@
+-import { Script } from "../node_modules/typebox/build/type/script/script.mjs";
+-import "../node_modules/typebox/build/type/index.mjs";
++import { Script } from "typebox/type";
++import "typebox/type";
+ 
+ //#region src/gen/index.ts
+ const matchRoute = /: Elysia<(.*)>/gs;
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 1662e930f5691329deae33004ad5ab408317d7b2..ae80be78e6cb17d6b69945f804779dabb6fedaa2 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -1,5 +1,4 @@
+ import { ElysiaOpenAPIConfig } from "./types.js";
+-import { fromTypes } from "./gen/index.js";
+ import { toOpenAPISchema, withHeaders } from "./openapi.js";
+ import { Elysia } from "elysia";
+ import { AnyElysia } from "elysia/base";
+@@ -29,4 +28,4 @@ declare const openapi: <const Enabled extends boolean = true, const Path extends
+   error: any[];
+ }>);
+ //#endregion
+-export { type ElysiaOpenAPIConfig, openapi as default, openapi, fromTypes, toOpenAPISchema, withHeaders };
+\ No newline at end of file
++export { type ElysiaOpenAPIConfig, openapi as default, openapi, toOpenAPISchema, withHeaders };
+\ No newline at end of file
+diff --git a/dist/index.js b/dist/index.js
+index 07fce4ec7bac2209ecaeb5b0630978b8184885a0..e1b2142838f914ce0d1680c88fa3150dba9b779d 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -2,7 +2,6 @@ Object.defineProperties(exports, { __esModule: { value: true }, [Symbol.toString
+ const require_openapi = require('./openapi.js');
+ const require_swagger_index = require('./swagger/index.js');
+ const require_scalar_index = require('./scalar/index.js');
+-const require_gen_index = require('./gen/index.js');
+ let elysia = require("elysia");
+ 
+ //#region src/index.ts
+@@ -92,6 +91,5 @@ const openapi = ({ enabled = true, path = "/openapi", provider = "scalar", specP
+ //#endregion
+ exports.default = openapi;
+ exports.openapi = openapi;
+-exports.fromTypes = require_gen_index.fromTypes;
+ exports.toOpenAPISchema = require_openapi.toOpenAPISchema;
+ exports.withHeaders = require_openapi.withHeaders;
+\ No newline at end of file
+diff --git a/dist/index.mjs b/dist/index.mjs
+index f5913c72eea31133f2688221b133c5b3cb6cb86d..d6f28ae3531e30ee64562fd16c7b6bd4aeabd7c4 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1,7 +1,6 @@
+ import { toOpenAPISchema, withHeaders } from "./openapi.mjs";
+ import { SwaggerUIRender } from "./swagger/index.mjs";
+ import { ScalarRender } from "./scalar/index.mjs";
+-import { fromTypes } from "./gen/index.mjs";
+ import { Elysia } from "elysia";
+ 
+ //#region src/index.ts
+@@ -89,4 +88,4 @@ const openapi = ({ enabled = true, path = "/openapi", provider = "scalar", specP
+ };
+ 
+ //#endregion
+-export { openapi as default, openapi, fromTypes, toOpenAPISchema, withHeaders };
+\ No newline at end of file
++export { openapi as default, openapi, toOpenAPISchema, withHeaders };
+\ No newline at end of file
+diff --git a/dist/openapi.js b/dist/openapi.js
+index e415bd17b5912594f8adc9cad63a8390f85afce6..fb423730a99a207b28d3812bfd80b0f0d8e99012 100644
+--- a/dist/openapi.js
++++ b/dist/openapi.js
+@@ -282,6 +282,10 @@ const unwrapSchema = (schema, mapJsonSchema, io = "input") => {
+ */
+ const enumToOpenApi = (_schema) => {
+ 	if (!_schema || typeof _schema !== "object") return _schema;
++	if (_schema["~kind"] === "File") return {
++		type: "string",
++		format: "binary"
++	};
+ 	{
+ 		const schema = _schema;
+ 		if (schema.anyOf && Array.isArray(schema.anyOf) && schema.anyOf.length > 0 && schema.anyOf.every((item) => item && typeof item === "object" && item.const !== void 0)) return {
+@@ -289,6 +293,11 @@ const enumToOpenApi = (_schema) => {
+ 			enum: schema.anyOf.map((item) => item.const)
+ 		};
+ 	}
++	if (Array.isArray(_schema.anyOf) || Array.isArray(_schema.oneOf) || Array.isArray(_schema.allOf)) {
++		const { "~elyTyp": _elyTyp, ...rest } = _schema;
++		for (const key of ["anyOf", "oneOf", "allOf"]) if (Array.isArray(rest[key])) rest[key] = rest[key].map(enumToOpenApi);
++		return rest;
++	}
+ 	const schema = _schema;
+ 	if (schema.type === "object" && schema.properties) {
+ 		const properties = {};
+diff --git a/dist/openapi.mjs b/dist/openapi.mjs
+index 43720be7f9e73f2d1bf599f1152cdf9eaa9bc0b6..1c3e92739928f83cda918f3c3c50ebed79f6f56d 100644
+--- a/dist/openapi.mjs
++++ b/dist/openapi.mjs
+@@ -281,6 +281,10 @@ const unwrapSchema = (schema, mapJsonSchema, io = "input") => {
+ */
+ const enumToOpenApi = (_schema) => {
+ 	if (!_schema || typeof _schema !== "object") return _schema;
++	if (_schema["~kind"] === "File") return {
++		type: "string",
++		format: "binary"
++	};
+ 	{
+ 		const schema = _schema;
+ 		if (schema.anyOf && Array.isArray(schema.anyOf) && schema.anyOf.length > 0 && schema.anyOf.every((item) => item && typeof item === "object" && item.const !== void 0)) return {
+@@ -288,6 +292,11 @@ const enumToOpenApi = (_schema) => {
+ 			enum: schema.anyOf.map((item) => item.const)
+ 		};
+ 	}
++	if (Array.isArray(_schema.anyOf) || Array.isArray(_schema.oneOf) || Array.isArray(_schema.allOf)) {
++		const { "~elyTyp": _elyTyp, ...rest } = _schema;
++		for (const key of ["anyOf", "oneOf", "allOf"]) if (Array.isArray(rest[key])) rest[key] = rest[key].map(enumToOpenApi);
++		return rest;
++	}
+ 	const schema = _schema;
+ 	if (schema.type === "object" && schema.properties) {
+ 		const properties = {};

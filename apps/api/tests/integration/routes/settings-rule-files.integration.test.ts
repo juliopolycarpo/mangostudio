@@ -6,7 +6,7 @@ import {
   DefaultRuleFilesResponseSchema,
   RuleFilePreviewResponseSchema,
 } from '@mangostudio/shared/prompt-rules';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
   createApiTestApp,

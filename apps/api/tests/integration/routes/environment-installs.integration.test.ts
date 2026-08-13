@@ -9,7 +9,7 @@ import {
   InstallStartResponseSchema,
   type InstallStreamEvent,
 } from '@mangostudio/shared/environments';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { assertRequestedProfileId } from '../../../src/lib/profile-context';
 import {
   InstallBlockedError,

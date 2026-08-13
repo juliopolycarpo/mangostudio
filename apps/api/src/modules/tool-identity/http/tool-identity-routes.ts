@@ -74,23 +74,31 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
   app
     .get(
       '/',
+      {
+        response: {
+          200: ToolIdentityListResponseSchema,
+          ...errorResponses,
+        },
+      },
       async ({ set, user }): Promise<ToolIdentityListResponse | ApiErrorResponse> => {
         try {
           return await listToolIdentities(getDb(), user?.id ?? '');
         } catch (error) {
           return handleToolIdentityError(error, set);
         }
-      },
-      {
-        response: {
-          200: ToolIdentityListResponseSchema,
-          ...errorResponses,
-        },
       }
     )
 
     .put(
       '/:subjectKey',
+      {
+        params: subjectKeyParams,
+        body: ToolIdentityUpdateSchema,
+        response: {
+          200: ToolIdentityUpdateResponseSchema,
+          ...errorResponses,
+        },
+      },
       async ({
         body,
         params,
@@ -108,14 +116,6 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
         } catch (error) {
           return handleToolIdentityError(error, set);
         }
-      },
-      {
-        params: subjectKeyParams,
-        body: ToolIdentityUpdateSchema,
-        response: {
-          200: ToolIdentityUpdateResponseSchema,
-          ...errorResponses,
-        },
       }
     )
 
@@ -129,6 +129,22 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
      */
     .post(
       '/:subjectKey/image',
+      {
+        params: subjectKeyParams,
+        body: t.Object({
+          // No `type` here on purpose. Elysia would reject the bytes with a
+          // generic schema error, and the type is exactly the thing worth
+          // explaining: an SVG has to come back with the reason it cannot be
+          // accepted, not a shrug. `uploadToolIdentityImage` decides, and it
+          // does so from the bytes. The size bound stays, since that one is
+          // worth enforcing before the body is buffered.
+          image: t.File({ maxSize: TOOL_IMAGE_MAX_BYTES }),
+        }),
+        response: {
+          200: ToolIdentityUpdateResponseSchema,
+          ...errorResponses,
+        },
+      },
       async ({
         body,
         params,
@@ -146,22 +162,6 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
         } catch (error) {
           return handleToolIdentityError(error, set);
         }
-      },
-      {
-        params: subjectKeyParams,
-        body: t.Object({
-          // No `type` here on purpose. Elysia would reject the bytes with a
-          // generic schema error, and the type is exactly the thing worth
-          // explaining: an SVG has to come back with the reason it cannot be
-          // accepted, not a shrug. `uploadToolIdentityImage` decides, and it
-          // does so from the bytes. The size bound stays, since that one is
-          // worth enforcing before the body is buffered.
-          image: t.File({ maxSize: TOOL_IMAGE_MAX_BYTES }),
-        }),
-        response: {
-          200: ToolIdentityUpdateResponseSchema,
-          ...errorResponses,
-        },
       }
     )
 
@@ -174,6 +174,7 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
      */
     .get(
       '/:subjectKey/image',
+      { params: subjectKeyParams },
       async ({ params, request, set, user }) => {
         try {
           const image = await readToolIdentityImage(getDb(), user?.id ?? '', params.subjectKey);
@@ -200,12 +201,18 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
         } catch (error) {
           return handleToolIdentityError(error, set);
         }
-      },
-      { params: subjectKeyParams }
+      }
     )
 
     .delete(
       '/:subjectKey',
+      {
+        params: subjectKeyParams,
+        response: {
+          204: t.Void(),
+          ...errorResponses,
+        },
+      },
       async ({ params, set, user }): Promise<undefined | ApiErrorResponse> => {
         try {
           await resetToolIdentity(getDb(), user?.id ?? '', params.subjectKey);
@@ -214,13 +221,6 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
         } catch (error) {
           return handleToolIdentityError(error, set);
         }
-      },
-      {
-        params: subjectKeyParams,
-        response: {
-          204: t.Void(),
-          ...errorResponses,
-        },
       }
     )
 );

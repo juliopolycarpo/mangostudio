@@ -7,7 +7,7 @@ import {
   type GenerateCommitMessageResponse,
   GenerateCommitMessageResponseSchema,
 } from '@mangostudio/shared/git';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import { gitRoutes } from '../../../src/modules/git/http/git-routes';

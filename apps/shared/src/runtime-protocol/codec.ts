@@ -1,4 +1,4 @@
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { type RuntimeFrame, RuntimeFrameSchema } from './schemas';
 
 /** Upper bound for one NDJSON frame, measured as UTF-8 bytes without the newline. */

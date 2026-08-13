@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { schemaErrorPointer } from '@mangostudio/shared/errors';
 import type {
   ExternalAgentAckResult,
   ExternalAgentCancelParams,
@@ -51,7 +52,8 @@ import type {
   RuntimeExternalAgentHealth,
 } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_HEALTH_LIVE_SESSION_LIMIT } from '@mangostudio/shared/runtime-home';
-import { Value } from '@sinclair/typebox/value';
+import type { TSchema } from 'typebox';
+import Value from 'typebox/value';
 import type { RuntimeConsentSource } from '../../consent-source';
 import { RuntimeToolArgumentError } from '../../errors';
 import type { RuntimeEventInput } from '../../host';
@@ -1579,14 +1581,10 @@ async function settleCleanup(promise: Promise<unknown>): Promise<void> {
   );
 }
 
-function assertExternalAgentParams(
-  method: string,
-  schema: Parameters<typeof Value.Check>[0],
-  params: unknown
-): void {
+function assertExternalAgentParams(method: string, schema: TSchema, params: unknown): void {
   if (Value.Check(schema, params)) return;
-  const issue = Value.Errors(schema, params).First();
+  const issue = Value.Errors(schema, params).at(0);
   throw new RuntimeToolArgumentError(
-    `Runtime method "${method}" received an invalid external-agent payload${issue ? ` at "${issue.path || '/'}"` : ''}.`
+    `Runtime method "${method}" received an invalid external-agent payload${issue ? ` at "${schemaErrorPointer(issue)}"` : ''}.`
   );
 }

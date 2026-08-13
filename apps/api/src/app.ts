@@ -4,10 +4,12 @@
  * for proper Eden type inference in the frontend.
  */
 
-import { cors } from '@elysiajs/cors';
-import { openapi } from '@elysiajs/openapi';
-import { staticPlugin } from '@elysiajs/static';
-import { Elysia } from 'elysia';
+import { mkdirSync } from 'node:fs';
+import { cors } from '@elysia/cors';
+import { openapi } from '@elysia/openapi';
+import { staticPlugin } from '@elysia/static';
+import { Elysia, NotFound } from 'elysia';
+import { websocket } from 'elysia/websocket';
 import { getConfig } from './lib/config';
 import { createDiagnosticLogger } from './lib/logger';
 import { apiKeyRoutes } from './modules/api-keys/http/api-key-routes';
@@ -47,6 +49,7 @@ import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
 import { settingsRoutes } from './routes/settings';
 import { uploadRoutes } from './routes/upload';
+import { frontendNotFound } from './server/frontend-fallback';
 import { registerApplicationServices } from './services/register-application-services';
 
 registerApplicationServices();
@@ -54,6 +57,12 @@ registerApplicationServices();
 const UPLOADS_DIR = getConfig().uploads.dir;
 const IMAGES_DIR = getConfig().images.dir;
 const requestLogger = createDiagnosticLogger('request');
+
+// `staticPlugin` enumerates its assets directory when the server starts, and a
+// missing one fails the listen rather than serving nothing. The uploads route
+// module creates this directory as an import side effect, which happens to run
+// first today — this does not rely on that ordering holding.
+mkdirSync(UPLOADS_DIR, { recursive: true });
 
 /**
  * Base API instance with /api prefix.
@@ -112,8 +121,19 @@ const api = new Elysia({ prefix: '/api' })
 /**
  * Main application instance.
  */
-export const app = new Elysia({ websocket: REALTIME_WEBSOCKET_OPTIONS })
-  .onRequest(({ request }) => {
+export const app = new Elysia()
+  // WebSocket support is a plugin in Elysia 2 rather than constructor options.
+  // Registered on the outer app, before the route plugins that open sockets, so
+  // both the realtime and runtime-pairing protocols inherit one option set.
+  .use(websocket(REALTIME_WEBSOCKET_OPTIONS))
+  // Seated ahead of the API error plugin on purpose. Elysia walks `NotFound`
+  // handlers in registration order and stops at the first that returns
+  // something; the frontend is only wired up at server start, long after this
+  // module is evaluated, so its own handler would never be reached. This one
+  // defers (returns nothing) for anything the frontend does not claim, leaving
+  // API 404s to answer with `ApiErrorResponse` as before.
+  .error(NotFound, ({ request }) => frontendNotFound(request))
+  .request(({ request }) => {
     // Only log API and auth requests to avoid spamming frontend assets logs
     const url = new URL(request.url);
     if (url.pathname.startsWith('/api')) {

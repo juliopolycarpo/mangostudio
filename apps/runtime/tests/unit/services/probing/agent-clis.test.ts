@@ -15,7 +15,7 @@ import {
   parseCursorAgentVersion,
 } from '@mangostudio/shared/environments/detection';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import type { RuntimeProbeAgentClisParams } from '../../../../src/methods';
 import {
   createProbingService,

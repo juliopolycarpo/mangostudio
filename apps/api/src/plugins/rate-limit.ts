@@ -200,7 +200,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         );
         return { clientIp };
       })
-      .onBeforeHandle((context) => {
+      .beforeHandle((context) => {
         const ctx = context as RateLimitContext;
         const { clientIp } = ctx;
 

@@ -7,7 +7,7 @@ import {
   type SkillListResponse,
   SkillListResponseSchema,
 } from '@mangostudio/shared/skills';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { loadConfigForTest } from '../../../src/lib/config';
 import {
   resetSkillsCache,

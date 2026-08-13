@@ -134,13 +134,11 @@ export function createEnvironmentRoutes(
     .use(requireAuth)
     .get(
       '/environments/runtimes',
-      ({ user, query }) => probingService.listRuntimeStatuses(scopeFor(user, query)),
-      { query: environmentQuery, response: { 200: RuntimeStatusListSchema } }
+      { query: environmentQuery, response: { 200: RuntimeStatusListSchema } },
+      ({ user, query }) => probingService.listRuntimeStatuses(scopeFor(user, query))
     )
     .get(
       '/environments/runtimes/:id',
-      ({ params, query, set, user }) =>
-        getRuntimeOrNotFound(probingService, scopeFor(user, query), params.id, false, set),
       {
         params: runtimeIdParams,
         query: environmentQuery,
@@ -148,12 +146,12 @@ export function createEnvironmentRoutes(
           200: RuntimeStatusSchema,
           404: ApiErrorResponseSchema,
         },
-      }
+      },
+      ({ params, query, set, user }) =>
+        getRuntimeOrNotFound(probingService, scopeFor(user, query), params.id, false, set)
     )
     .post(
       '/environments/runtimes/:id/probe',
-      ({ params, query, set, user }) =>
-        getRuntimeOrNotFound(probingService, scopeFor(user, query), params.id, true, set),
       {
         params: runtimeIdParams,
         query: environmentQuery,
@@ -161,17 +159,17 @@ export function createEnvironmentRoutes(
           200: RuntimeStatusSchema,
           404: ApiErrorResponseSchema,
         },
-      }
+      },
+      ({ params, query, set, user }) =>
+        getRuntimeOrNotFound(probingService, scopeFor(user, query), params.id, true, set)
     )
     .get(
       '/environments/version-managers',
-      ({ user, query }) => probingService.listVersionManagerStatuses(scopeFor(user, query)),
-      { query: environmentQuery, response: { 200: VersionManagerStatusListSchema } }
+      { query: environmentQuery, response: { 200: VersionManagerStatusListSchema } },
+      ({ user, query }) => probingService.listVersionManagerStatuses(scopeFor(user, query))
     )
     .get(
       '/environments/version-managers/:id',
-      ({ params, query, set, user }) =>
-        getVersionManagerOrNotFound(probingService, scopeFor(user, query), params.id, false, set),
       {
         params: versionManagerIdParams,
         query: environmentQuery,
@@ -179,12 +177,12 @@ export function createEnvironmentRoutes(
           200: VersionManagerStatusSchema,
           404: ApiErrorResponseSchema,
         },
-      }
+      },
+      ({ params, query, set, user }) =>
+        getVersionManagerOrNotFound(probingService, scopeFor(user, query), params.id, false, set)
     )
     .post(
       '/environments/version-managers/:id/probe',
-      ({ params, query, set, user }) =>
-        getVersionManagerOrNotFound(probingService, scopeFor(user, query), params.id, true, set),
       {
         params: versionManagerIdParams,
         query: environmentQuery,
@@ -192,17 +190,17 @@ export function createEnvironmentRoutes(
           200: VersionManagerStatusSchema,
           404: ApiErrorResponseSchema,
         },
-      }
+      },
+      ({ params, query, set, user }) =>
+        getVersionManagerOrNotFound(probingService, scopeFor(user, query), params.id, true, set)
     )
     .get(
       '/environments/agents',
-      ({ user, query }) => probingService.listAgentCliStatuses(scopeFor(user, query)),
-      { query: environmentQuery, response: { 200: AgentCliStatusListSchema } }
+      { query: environmentQuery, response: { 200: AgentCliStatusListSchema } },
+      ({ user, query }) => probingService.listAgentCliStatuses(scopeFor(user, query))
     )
     .get(
       '/environments/agents/:targetId',
-      ({ params, query, set, user }) =>
-        getAgentCliOrNotFound(probingService, scopeFor(user, query), params.targetId, false, set),
       {
         params: agentTargetParams,
         query: environmentQuery,
@@ -210,12 +208,12 @@ export function createEnvironmentRoutes(
           200: AgentCliStatusSchema,
           404: ApiErrorResponseSchema,
         },
-      }
+      },
+      ({ params, query, set, user }) =>
+        getAgentCliOrNotFound(probingService, scopeFor(user, query), params.targetId, false, set)
     )
     .post(
       '/environments/agents/:targetId/probe',
-      ({ params, query, set, user }) =>
-        getAgentCliOrNotFound(probingService, scopeFor(user, query), params.targetId, true, set),
       {
         params: agentTargetParams,
         query: environmentQuery,
@@ -223,26 +221,28 @@ export function createEnvironmentRoutes(
           200: AgentCliStatusSchema,
           404: ApiErrorResponseSchema,
         },
-      }
-    )
-    .get(
-      '/environments/wsl',
-      async ({ user }) => {
-        const detection = await wslService.detect();
-        if (detection.distributions.length === 0) return detection;
-        return {
-          ...detection,
-          distributions: markConfiguredDistributions(
-            detection.distributions,
-            await configuredWslDistros(entityService, user?.id ?? '')
-          ),
-        };
       },
-      { response: { 200: WslDetectionSchema } }
+      ({ params, query, set, user }) =>
+        getAgentCliOrNotFound(probingService, scopeFor(user, query), params.targetId, true, set)
     )
-    .get('/environments/containers', () => containerService.detect(), {
-      response: { 200: ContainerDetectionSchema },
+    .get('/environments/wsl', { response: { 200: WslDetectionSchema } }, async ({ user }) => {
+      const detection = await wslService.detect();
+      if (detection.distributions.length === 0) return detection;
+      return {
+        ...detection,
+        distributions: markConfiguredDistributions(
+          detection.distributions,
+          await configuredWslDistros(entityService, user?.id ?? '')
+        ),
+      };
     })
+    .get(
+      '/environments/containers',
+      {
+        response: { 200: ContainerDetectionSchema },
+      },
+      () => containerService.detect()
+    )
     .use(createInstallRoutes(environmentInstallService))
     .use(createEnvironmentEntityRoutes(entityService));
 }

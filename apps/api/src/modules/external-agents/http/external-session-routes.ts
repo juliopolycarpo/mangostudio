@@ -97,6 +97,18 @@ export function createExternalSessionRoutes(
     .use(requireAuth)
     .get(
       '/external-agents/sessions',
+      {
+        query: SessionQuerySchema,
+        response: {
+          200: ExternalNativeSessionListResponseSchema,
+          400: ApiErrorResponseSchema,
+          401: ApiErrorResponseSchema,
+          403: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
+        },
+      },
       async ({ query, user, set }) => {
         const userId = user?.id;
         if (!userId) {
@@ -125,22 +137,21 @@ export function createExternalSessionRoutes(
           sessions: [...listing.sessions],
           ...(listing.nextCursor ? { nextCursor: listing.nextCursor } : {}),
         };
-      },
-      {
-        query: SessionQuerySchema,
-        response: {
-          200: ExternalNativeSessionListResponseSchema,
-          400: ApiErrorResponseSchema,
-          401: ApiErrorResponseSchema,
-          403: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
-          503: ApiErrorResponseSchema,
-        },
       }
     )
     .post(
       '/chats/adopt-external-session',
+      {
+        body: ExternalSessionAdoptionRequestSchema,
+        response: {
+          201: AdoptResponseSchema,
+          400: ApiErrorResponseSchema,
+          401: ApiErrorResponseSchema,
+          403: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
+        },
+      },
       async ({ body, user, set }) => {
         const userId = user?.id;
         if (!userId) {
@@ -158,17 +169,6 @@ export function createExternalSessionRoutes(
         }
         set.status = 201;
         return { chat: adopted.chat };
-      },
-      {
-        body: ExternalSessionAdoptionRequestSchema,
-        response: {
-          201: AdoptResponseSchema,
-          400: ApiErrorResponseSchema,
-          401: ApiErrorResponseSchema,
-          403: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
-          503: ApiErrorResponseSchema,
-        },
       }
     );
 }

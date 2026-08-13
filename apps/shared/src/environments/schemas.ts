@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
 import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
 import { ProfileIdSchema } from '../profiles';
@@ -491,16 +491,13 @@ export const RuntimePairingTokenSchema = Type.Object(
   { additionalProperties: false }
 );
 
-export const RuntimePairingIssueSchema = Type.Composite([
-  RuntimePairingTokenSchema,
-  Type.Object(
-    {
-      /** Readable exactly once. Regenerating is the only way to see one again. */
-      token: Type.String({ minLength: 1 }),
-    },
-    { additionalProperties: false }
-  ),
-]);
+// Heritage folding drops a member's own `additionalProperties`, so this schema
+// accepts unknown keys — the behavior `Type.Composite` already had here. Fixing
+// it would change a public contract, so it stays a recorded finding.
+export const RuntimePairingIssueSchema = Type.Interface([RuntimePairingTokenSchema], {
+  /** Readable exactly once. Regenerating is the only way to see one again. */
+  token: Type.String({ minLength: 1 }),
+});
 
 export const RuntimePairingStatusSchema = Type.Object(
   {
@@ -638,17 +635,14 @@ export const RuntimeStatusSchema = Type.Object({
 
 export const RuntimeStatusListSchema = Type.Array(RuntimeStatusSchema);
 
-export const AgentCliStatusSchema = Type.Composite([
-  RuntimeStatusSchema,
-  Type.Object({
-    targetId: LibraryTargetIdSchema,
-    configHome: Type.String({ minLength: 1 }),
-    configHomeExists: Type.Boolean(),
-    authenticated: Type.Boolean(),
-    authSignal: AgentAuthSignalSchema,
-    locations: Type.Array(LibraryLocationStatusSchema),
-  }),
-]);
+export const AgentCliStatusSchema = Type.Interface([RuntimeStatusSchema], {
+  targetId: LibraryTargetIdSchema,
+  configHome: Type.String({ minLength: 1 }),
+  configHomeExists: Type.Boolean(),
+  authenticated: Type.Boolean(),
+  authSignal: AgentAuthSignalSchema,
+  locations: Type.Array(LibraryLocationStatusSchema),
+});
 
 export const AgentCliStatusListSchema = Type.Array(AgentCliStatusSchema);
 
@@ -813,12 +807,9 @@ export const InstallCancelResponseSchema = Type.Object({
   cancellationRequested: Type.Boolean(),
 });
 
-export const InstallBlockedResponseSchema = Type.Composite([
-  ApiErrorResponseSchema,
-  Type.Object({
-    recipe: InstallRecipePreviewSchema,
-  }),
-]);
+export const InstallBlockedResponseSchema = Type.Interface([ApiErrorResponseSchema], {
+  recipe: InstallRecipePreviewSchema,
+});
 
 export const InstallRunStatusSchema = Type.Union([
   Type.Literal('running'),

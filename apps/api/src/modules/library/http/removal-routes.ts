@@ -67,13 +67,6 @@ export function createRemovalRoutes(service: RemovalRouteService = defaultRemova
     .use(requireAuth)
     .post(
       '/library/removal/preview',
-      async ({ body, set, user }): Promise<RemovalPreview | ApiErrorResponse> => {
-        try {
-          return await service.preview(user?.id ?? '', body);
-        } catch (error) {
-          return mapRemovalError(error, set);
-        }
-      },
       {
         body: RemovalPreviewRequestSchema,
         response: {
@@ -83,17 +76,17 @@ export function createRemovalRoutes(service: RemovalRouteService = defaultRemova
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
         },
+      },
+      async ({ body, set, user }): Promise<RemovalPreview | ApiErrorResponse> => {
+        try {
+          return await service.preview(user?.id ?? '', body);
+        } catch (error) {
+          return mapRemovalError(error, set);
+        }
       }
     )
     .post(
       '/library/removal/apply',
-      async ({ body, set, user }): Promise<RemovalApply | ApiErrorResponse> => {
-        try {
-          return await service.apply(user?.id ?? '', body);
-        } catch (error) {
-          return mapRemovalError(error, set);
-        }
-      },
       {
         body: RemovalApplyRequestSchema,
         response: {
@@ -111,6 +104,13 @@ export function createRemovalRoutes(service: RemovalRouteService = defaultRemova
           // the same 503 the discovery and settings routes already return.
           503: ApiErrorResponseSchema,
         },
+      },
+      async ({ body, set, user }): Promise<RemovalApply | ApiErrorResponse> => {
+        try {
+          return await service.apply(user?.id ?? '', body);
+        } catch (error) {
+          return mapRemovalError(error, set);
+        }
       }
     );
 }

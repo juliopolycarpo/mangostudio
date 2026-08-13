@@ -635,14 +635,30 @@ describe('external-agent adapter registry and supervisor', () => {
     const adapter = new FakeExternalAgentAdapter({ openGate: openGate.promise });
     const value = await fixture({ adapter });
 
-    await expect(openSession(value, 'late-session', 5)).rejects.toThrow(/Deadline exceeded/);
+    // `waitFor` pumps a ref'd timer. The open deadline itself is unref'd, and
+    // under coverage Bun's 5s test timeout used to win before that 5ms
+    // timer fired while this await sat on a hanging adapter promise.
+    const opening = openSession(value, 'late-session', 5);
+    let finished = false;
+    const openingOutcome = opening
+      .finally(() => {
+        finished = true;
+      })
+      .then(
+        () => new Error('Expected the open deadline to reject the session.'),
+        (error: unknown) => error
+      );
+    await waitFor(() => finished);
+    const openingError = await openingOutcome;
+    expect(openingError).toBeInstanceOf(Error);
+    expect((openingError as Error).message).toContain('Deadline exceeded');
     expect(value.supervisor.health.liveSessionCount).toBe(0);
 
     openGate.resolve();
     await waitFor(() => adapter.closes.length === 1);
     expect(adapter.closes[0]).toMatchObject({ sessionId: 'late-session', reason: 'requested' });
     await value.supervisor.close();
-  });
+  }, 15_000);
 
   it('keeps watching consent for a pending reaper after open cancellation', async () => {
     let allow = RUNTIME_CONSENT_PRESETS.full;

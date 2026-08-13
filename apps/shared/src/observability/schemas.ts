@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
 

@@ -9,6 +9,7 @@ export const todoRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
     app.use(requireAuth).get(
       '/:id/todos',
+      { params: t.Object({ id: t.String() }) },
       /** Current todo state for a chat owned by the authenticated user. */
       async ({ params, user, set }) => {
         const userId = user?.id ?? '';
@@ -22,7 +23,6 @@ export const todoRoutes = (app: Elysia) =>
           throw err;
         }
         return getChatTodosState(getDb(), userId, params.id);
-      },
-      { params: t.Object({ id: t.String() }) }
+      }
     )
   );

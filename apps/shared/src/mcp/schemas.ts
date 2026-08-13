@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import { ChatAttachmentSchema } from '../chat/schemas';
 
 /** Per-user unique server identifier; becomes the tool namespace prefix. */

@@ -5,7 +5,7 @@ import {
   ToolIdentityListResponseSchema,
   type ToolIdentityUpdateResponse,
 } from '@mangostudio/shared/tool-identity';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getDb } from '../../../src/db/database';
 import { toolIdentityRoutes } from '../../../src/modules/tool-identity/http/tool-identity-routes';
 import { errorHandler } from '../../../src/plugins/error-handler';

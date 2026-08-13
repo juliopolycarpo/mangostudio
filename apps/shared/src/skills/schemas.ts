@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 
 /** Directory-name shape a skill slug must satisfy. */
 export const SKILL_SLUG_PATTERN = '^[a-z0-9]+(?:-[a-z0-9]+)*$';

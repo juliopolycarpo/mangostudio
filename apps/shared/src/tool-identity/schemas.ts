@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 
 /** Kinds a subject key can name; each mirrors an existing schema family. */
 const ToolIdentityKindSchema = Type.Union([

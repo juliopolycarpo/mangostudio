@@ -9,13 +9,17 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { staticPlugin } from '@elysiajs/static';
-import { Elysia } from 'elysia';
+import { staticPlugin } from '@elysia/static';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { Elysia, NotFound } from 'elysia';
+import Value from 'typebox/value';
 import type { App } from '../../../src/app';
+import { errorHandler } from '../../../src/plugins/error-handler';
 import {
   registerEmbeddedFrontend,
   resetEmbeddedFrontend,
 } from '../../../src/server/embedded-frontend';
+import { clearFrontendFallback, frontendNotFound } from '../../../src/server/frontend-fallback';
 import { registerFrontend } from '../../../src/server/frontend-static';
 
 const INDEX_HTML = '<html><body>embedded index</body></html>';
@@ -27,9 +31,19 @@ let assetDir: string;
 const temporaryDirs: string[] = [];
 
 function buildApp(frontendDir = '/nonexistent-frontend-dir'): (path: string) => Promise<Response> {
-  const app = new Elysia();
+  const app = new Elysia()
+    .error(NotFound, ({ request }) => frontendNotFound(request))
+    .use(new Elysia({ prefix: '/api' }).use(errorHandler));
   registerFrontend(app as unknown as App, frontendDir);
   return (path: string) => app.handle(new Request(`http://localhost${path}`));
+}
+
+async function expectJsonNotFound(response: Response): Promise<void> {
+  expect(response.status).toBe(404);
+  expect(response.headers.get('content-type')).toContain('application/json');
+  const payload: unknown = await response.json();
+  expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+  expect(payload).toEqual({ error: 'Not found', code: ERROR_CODES.NOT_FOUND });
 }
 
 beforeEach(() => {
@@ -40,6 +54,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetEmbeddedFrontend();
+  clearFrontendFallback();
   rmSync(assetDir, { recursive: true, force: true });
   while (temporaryDirs.length > 0) {
     rmSync(temporaryDirs.pop() as string, { recursive: true, force: true });
@@ -81,10 +96,11 @@ describe('registerFrontend with embedded assets', () => {
     expect(await response.text()).toBe(INDEX_HTML);
   });
 
-  test('does not swallow unknown /api/* or missing asset paths', async () => {
+  test('does not swallow /api, unknown /api/*, or missing asset paths', async () => {
     const get = registerEmbedded();
 
-    expect((await get('/api/nope')).status).toBe(404);
+    await expectJsonNotFound(await get('/api'));
+    await expectJsonNotFound(await get('/api/nope'));
     expect((await get('/assets/missing.js')).status).toBe(404);
   });
 
@@ -125,7 +141,7 @@ describe('registerFrontend from the filesystem', () => {
   /**
    * The source/`npm install` path, where assets come off disk instead of the
    * embedded manifest. It is the branch carrying the documented
-   * `@elysiajs/static` `ignorePatterns` workaround, so its precedence is pinned
+   * `@elysia/static` `ignorePatterns` workaround, so its precedence is pinned
    * separately from the embedded one: a plugin swap that fixes the underlying
    * inverted-comparison bug must keep every outcome below identical before the
    * workaround can be removed.
@@ -140,8 +156,9 @@ describe('registerFrontend from the filesystem', () => {
     writeFileSync(join(uploadsDir, 'photo.png'), UPLOAD_BYTES);
 
     const app = new Elysia()
+      .error(NotFound, ({ request }) => frontendNotFound(request))
       .use(staticPlugin({ assets: uploadsDir, prefix: '/uploads' }))
-      .group('/api', (api) => api.get('/health', () => ({ ok: true })));
+      .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, frontendDir);
 
     // `staticPlugin` enumerates its directory asynchronously, so both its
@@ -196,31 +213,32 @@ describe('registerFrontend from the filesystem', () => {
     const get = await buildFilesystemApp();
 
     expect((await get('/api/health')).status).toBe(200);
-    for (const path of ['/api/nope', '/assets/missing.js', '/scalar']) {
+    for (const path of ['/api', '/api/nope']) {
+      await expectJsonNotFound(await get(path));
+    }
+    for (const path of ['/assets/missing.js', '/scalar']) {
       const response = await get(path);
       expect(response.status).toBe(404);
       expect(await response.text()).not.toBe(INDEX_HTML);
     }
   });
 
-  test('serves SPA deep links under a 404 status, unlike the embedded branch', async () => {
+  test('serves SPA deep links with 200, matching the embedded branch', async () => {
     const get = await buildFilesystemApp();
 
-    // Characterized, not endorsed — and only observable once `app.modules` has
-    // settled. Before the async static plugin finishes registering, these same
-    // requests answer 200; afterwards the NOT_FOUND status survives the
-    // `Response` the `onError` fallback returns, and the shell ships with a
-    // 404. The embedded branch, which registers no static plugin, answers 200
-    // for both (see the suite above).
+    // This used to answer 404-with-the-shell here and 200 in the embedded
+    // branch: the framework's NOT_FOUND status leaked onto the `Response` the
+    // fallback returned, so every SPA deep link on a source or `npm install`
+    // deployment reported 404 to uptime checks and crawlers while rendering
+    // fine in a browser. A returned `Response` now carries its own status, so
+    // both deployment shapes answer 200 and the divergence is gone.
     //
-    // Browsers render the app either way, which is why it went unnoticed, but
-    // every SPA deep link on a source or `npm install` deployment reports 404
-    // to uptime checks and crawlers. Pinned so the divergence is visible and
-    // cannot widen; fixing it changes public behavior and belongs in its own
-    // PR, not in a characterization suite.
+    // Kept as an explicit assertion rather than deleted: the two branches
+    // agreeing is the property worth holding, and it was reached by a framework
+    // behavior change rather than by a decision recorded here.
     for (const path of ['/settings', '/index.html']) {
       const response = await get(path);
-      expect(response.status).toBe(404);
+      expect(response.status).toBe(200);
       expect(await response.text()).toBe(INDEX_HTML);
     }
   });
@@ -242,6 +260,26 @@ describe('registerFrontend without embedded assets', () => {
     const healthy = await app.handle(new Request('http://localhost/api/health'));
     expect(healthy.status).toBe(200);
     expect(await healthy.json()).toEqual({ ok: true });
+
+    const root = await app.handle(new Request('http://localhost/'));
+    expect(root.status).toBe(404);
+    expect(await root.text()).toBe('Frontend not found. API is running.');
+  });
+
+  test('leaves unknown API paths to the JSON error handler in API-only mode', async () => {
+    // Same seating as `app.ts`: the SPA/API-only fallback is registered on the
+    // outer instance, ahead of the API plugin's `errorHandler`. If the fallback
+    // claims `/api/*`, that outer handler answers first and the JSON 404 never
+    // runs.
+    const app = new Elysia()
+      .error(NotFound, ({ request }) => frontendNotFound(request))
+      .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
+    registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
+
+    for (const path of ['/api', '/api/nope']) {
+      const missing = await app.handle(new Request(`http://localhost${path}`));
+      await expectJsonNotFound(missing);
+    }
 
     const root = await app.handle(new Request('http://localhost/'));
     expect(root.status).toBe(404);

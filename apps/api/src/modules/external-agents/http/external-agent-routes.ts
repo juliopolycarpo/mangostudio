@@ -119,6 +119,13 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
     .use(requireAuth)
     .get(
       '/external-agents',
+      {
+        query: environmentQuery,
+        response: {
+          200: ExternalAgentDescriptorListResponseSchema,
+          401: ApiErrorResponseSchema,
+        },
+      },
       async ({ query, user, set }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
@@ -130,17 +137,16 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
         // throwing, so there is no failure arm here to write.
         const agents = await discovery.listExternalAgents({ userId, environmentId });
         return { environmentId, agents: await withDisclosureReasons(userId, agents) };
-      },
-      {
-        query: environmentQuery,
-        response: {
-          200: ExternalAgentDescriptorListResponseSchema,
-          401: ApiErrorResponseSchema,
-        },
       }
     )
     .get(
       '/external-agents/disclosures',
+      {
+        response: {
+          200: DisclosureListResponseSchema,
+          401: ApiErrorResponseSchema,
+        },
+      },
       async ({ user, set }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
@@ -148,16 +154,19 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           return UNAUTHENTICATED;
         }
         return { disclosures: [...(await listExternalDisclosures(userId, getDb()))] };
-      },
-      {
-        response: {
-          200: DisclosureListResponseSchema,
-          401: ApiErrorResponseSchema,
-        },
       }
     )
     .post(
       '/external-agents/:targetId/disclosure',
+      {
+        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
+        query: environmentQuery,
+        response: {
+          200: AcknowledgeResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+        },
+      },
       async ({ params, query, user, set }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
@@ -191,19 +200,18 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           getDb()
         );
         return { acknowledged: true as const };
-      },
-      {
-        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
-        query: environmentQuery,
-        response: {
-          200: AcknowledgeResponseSchema,
-          401: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-        },
       }
     )
     .delete(
       '/external-agents/:targetId/disclosure',
+      {
+        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
+        response: {
+          200: RevokeResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+        },
+      },
       async ({ params, user, set }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
@@ -228,18 +236,19 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           keepContinuation: true,
         });
         return { revoked: true as const };
-      },
-      {
-        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
-        response: {
-          200: RevokeResponseSchema,
-          401: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-        },
       }
     )
     .get(
       '/external-agents/:targetId/account-limits',
+      {
+        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
+        query: AccountLimitsQuerySchema,
+        response: {
+          200: AccountLimitsResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+        },
+      },
       async ({ params, query, user, set }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
@@ -258,7 +267,10 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           vendorAccountFingerprint: query.vendorAccountFingerprint ?? null,
         });
         return limits ? { limits } : {};
-      },
+      }
+    )
+    .post(
+      '/external-agents/:targetId/account-limits/refresh',
       {
         params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
         query: AccountLimitsQuerySchema,
@@ -267,10 +279,7 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           401: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
         },
-      }
-    )
-    .post(
-      '/external-agents/:targetId/account-limits/refresh',
+      },
       async ({ params, query, user, set }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
@@ -290,15 +299,6 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           vendorAccountFingerprint: query.vendorAccountFingerprint ?? null,
         });
         return limits ? { limits } : {};
-      },
-      {
-        params: t.Object({ targetId: t.String({ minLength: 1, maxLength: 64 }) }),
-        query: AccountLimitsQuerySchema,
-        response: {
-          200: AccountLimitsResponseSchema,
-          401: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-        },
       }
     );
 }

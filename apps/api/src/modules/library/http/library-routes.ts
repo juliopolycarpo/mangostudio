@@ -207,6 +207,15 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
       .use(requireAuth)
       .get(
         '/library/resources',
+        {
+          query: resourceQuery,
+          response: {
+            200: LibraryResourceListSchema,
+            422: ApiErrorResponseSchema,
+            500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
+          },
+        },
         async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
@@ -221,19 +230,26 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           } catch (error) {
             return handleLibraryError(error, set);
           }
-        },
-        {
-          query: resourceQuery,
-          response: {
-            200: LibraryResourceListSchema,
-            422: ApiErrorResponseSchema,
-            500: ApiErrorResponseSchema,
-            503: ApiErrorResponseSchema,
-          },
         }
       )
       .get(
         '/library/resources/:key/content',
+        {
+          params: resourceParams,
+          query: t.Object({
+            location: LibraryLocationIdSchema,
+            workspaceRoot: WorkspaceRootSchema,
+            environmentId: EnvironmentIdQuerySchema,
+          }),
+          response: {
+            200: LibraryResourceContentSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            422: ApiErrorResponseSchema,
+            500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
+          },
+        },
         async ({
           params,
           query,
@@ -264,26 +280,25 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           } catch (error) {
             return handleLibraryError(error, set);
           }
-        },
+        }
+      )
+      .get(
+        '/library/resources/:key',
         {
           params: resourceParams,
           query: t.Object({
-            location: LibraryLocationIdSchema,
             workspaceRoot: WorkspaceRootSchema,
             environmentId: EnvironmentIdQuerySchema,
           }),
           response: {
-            200: LibraryResourceContentSchema,
+            200: LibraryResourceSchema,
             400: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
-        }
-      )
-      .get(
-        '/library/resources/:key',
+        },
         async ({ params, query, set, user }): Promise<LibraryResource | ApiErrorResponse> => {
           if (!parseResourceKey(params.key)) return invalidResourceKey(set);
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
@@ -301,34 +316,10 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           } catch (error) {
             return handleLibraryError(error, set);
           }
-        },
-        {
-          params: resourceParams,
-          query: t.Object({
-            workspaceRoot: WorkspaceRootSchema,
-            environmentId: EnvironmentIdQuerySchema,
-          }),
-          response: {
-            200: LibraryResourceSchema,
-            400: ApiErrorResponseSchema,
-            404: ApiErrorResponseSchema,
-            422: ApiErrorResponseSchema,
-            500: ApiErrorResponseSchema,
-            503: ApiErrorResponseSchema,
-          },
         }
       )
       .get(
         '/library/locations',
-        async ({ query, set, user }): Promise<LibraryLocationStatus[] | ApiErrorResponse> => {
-          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
-          if (!workspace.ok) return workspace.body;
-          try {
-            return await service.listLocations(user?.id ?? '', workspace.root, query.environmentId);
-          } catch (error) {
-            return handleLibraryError(error, set);
-          }
-        },
         {
           query: t.Object({
             workspaceRoot: WorkspaceRootSchema,
@@ -340,15 +331,41 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             500: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
+        },
+        async ({ query, set, user }): Promise<LibraryLocationStatus[] | ApiErrorResponse> => {
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
+          if (!workspace.ok) return workspace.body;
+          try {
+            return await service.listLocations(user?.id ?? '', workspace.root, query.environmentId);
+          } catch (error) {
+            return handleLibraryError(error, set);
+          }
         }
       )
       // The coverage matrix has one column per target, and that column set has to
       // be stable even when a filter leaves no rows to infer it from.
-      .get('/library/targets', () => service.listTargets(), {
-        response: { 200: LibraryTargetDescriptorListSchema },
-      })
+      .get(
+        '/library/targets',
+        {
+          response: { 200: LibraryTargetDescriptorListSchema },
+        },
+        () => service.listTargets()
+      )
       .post(
         '/library/rescan',
+        {
+          query: t.Object({
+            force: t.Optional(t.Union([t.Literal('true'), t.Literal('false')])),
+            workspaceRoot: WorkspaceRootSchema,
+            environmentId: EnvironmentIdQuerySchema,
+          }),
+          response: {
+            200: LibraryResourceListSchema,
+            422: ApiErrorResponseSchema,
+            500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
+          },
+        },
         async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
@@ -362,19 +379,6 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           } catch (error) {
             return handleLibraryError(error, set);
           }
-        },
-        {
-          query: t.Object({
-            force: t.Optional(t.Union([t.Literal('true'), t.Literal('false')])),
-            workspaceRoot: WorkspaceRootSchema,
-            environmentId: EnvironmentIdQuerySchema,
-          }),
-          response: {
-            200: LibraryResourceListSchema,
-            422: ApiErrorResponseSchema,
-            500: ApiErrorResponseSchema,
-            503: ApiErrorResponseSchema,
-          },
         }
       )
   );

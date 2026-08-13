@@ -6,7 +6,7 @@ import {
   ApiErrorResponseSchema,
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { getApiKeyApi } from '../../../src/auth';
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';

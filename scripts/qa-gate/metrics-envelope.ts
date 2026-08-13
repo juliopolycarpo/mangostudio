@@ -3,8 +3,9 @@
 // the trusted publisher validates untrusted artifact JSON against this schema
 // (owned by the default branch) before rendering anything from it.
 
-import { type Static, type TSchema, Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import { describeSchemaError } from '@mangostudio/shared/errors';
+import Type, { type Static, type TSchema } from 'typebox';
+import Value from 'typebox/value';
 
 import type { Metrics } from './collect/types';
 
@@ -192,8 +193,10 @@ export interface EnvelopeParseOptions {
 }
 
 const firstSchemaError = (value: unknown): string => {
-  const first = Value.Errors(QaMetricsEnvelopeSchema, value).First();
-  return first ? `${first.path || '/'}: ${first.message}` : 'unknown schema violation';
+  return describeSchemaError(
+    Value.Errors(QaMetricsEnvelopeSchema, value),
+    'unknown schema violation'
+  );
 };
 
 /**

@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import { ApiErrorResponseSchema } from '../errors/schemas';
 
 /**
@@ -190,13 +190,14 @@ export type RealtimeInvalidateMessage = Static<typeof RealtimeInvalidateMessageS
 /** Payload published on the in-process bus (invalidation signals only). */
 export type RealtimeInvalidateEvent = RealtimeInvalidateMessage;
 
-export const RealtimeErrorMessageSchema = Type.Composite(
+export const RealtimeErrorMessageSchema = Type.Interface(
   [
     Type.Object({
       type: Type.Literal('error'),
     }),
     ApiErrorResponseSchema,
   ],
+  {},
   { additionalProperties: false }
 );
 export type RealtimeErrorMessage = Static<typeof RealtimeErrorMessageSchema>;

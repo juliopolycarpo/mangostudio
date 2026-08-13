@@ -91,8 +91,15 @@ interface RuntimeUpgradeServer {
 /** Minimal shape of the socket, mirroring how realtime-routes narrows its own. */
 interface RuntimeSocket {
   close(code?: number, reason?: string): unknown;
-  raw: { send(message: Uint8Array, compress?: boolean): number };
-  data: { runtimeSocket: RuntimeSocketState };
+  raw: {
+    send(message: Uint8Array, compress?: boolean): number;
+    close(code?: number, reason?: string): void;
+  };
+  /**
+   * Elysia flattens derived values onto the socket context rather than
+   * nesting them under `data`, which now carries the route's own wiring.
+   */
+  runtimeSocket: RuntimeSocketState;
 }
 
 function bearerToken(header: string | null): string | null {
@@ -193,7 +200,7 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
     .ws(RUNTIME_SOCKET_PATH, {
       open(rawSocket) {
         const socket = rawSocket as unknown as RuntimeSocket;
-        const state = socket.data.runtimeSocket;
+        const state = socket.runtimeSocket;
 
         if (state.rejection === 'internal') {
           socket.close(RUNTIME_CLOSE_CODES.INTERNAL, 'Internal error');
@@ -228,15 +235,15 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       },
       message(rawSocket, message) {
         const socket = rawSocket as unknown as RuntimeSocket;
-        socket.data.runtimeSocket.port?.receive(message as ArrayBufferView | string);
+        socket.runtimeSocket.port?.receive(message as ArrayBufferView | string);
       },
       drain(rawSocket) {
         const socket = rawSocket as unknown as RuntimeSocket;
-        socket.data.runtimeSocket.port?.handleDrain();
+        socket.runtimeSocket.port?.handleDrain();
       },
       close(rawSocket) {
         const socket = rawSocket as unknown as RuntimeSocket;
-        const state = socket.data.runtimeSocket;
+        const state = socket.runtimeSocket;
         state.socketClosed = true;
         teardown(state);
         state.port?.handleSocketClosed();
@@ -315,7 +322,11 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       // manager's own release closes with `RELEASED`, which reads as "the hub
       // let you go, come back". A retired credential must say `UNAUTHORIZED`
       // or the runtime redials forever against a token that no longer exists.
-      socket.close(RUNTIME_CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
+      // Through `raw` rather than the handler context: this runs after `open`
+      // returned, and the context's own `close` does not land before the
+      // manager's `disconnect` below closes with `RELEASED` — which is exactly
+      // the "come back" signal this branch exists to avoid sending.
+      socket.raw.close(RUNTIME_CLOSE_CODES.UNAUTHORIZED, 'Unauthorized');
       resolveManager().disconnect(peer.userId, peer.environmentId);
     }
   }

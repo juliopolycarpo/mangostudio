@@ -29,7 +29,7 @@ import {
   runtimeSlotForPath,
   runtimeSlotDir as sharedRuntimeSlotDir,
 } from '@mangostudio/shared/runtime-home';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import { loadRuntimeConfig } from './config';
 
 export type { RuntimeSlot } from '@mangostudio/shared/runtime-home';

@@ -28,7 +28,7 @@ import {
   runtimeSlotCurrentBinaryPath,
   runtimeSlotVersionBinaryPath,
 } from '@mangostudio/shared/runtime-home';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 import type { RuntimeLaunchCommand } from '../../../lib/runtime-paths';
 import {
   runtimePushArchiveScript,

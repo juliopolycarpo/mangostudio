@@ -1,4 +1,4 @@
-import { type Static, Type } from '@sinclair/typebox';
+import Type, { type Static } from 'typebox';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 
 /** Runtime state of the cached model catalog. */

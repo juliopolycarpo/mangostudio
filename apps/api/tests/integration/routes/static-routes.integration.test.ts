@@ -22,7 +22,8 @@ describe('SPA onError NOT_FOUND guard', () => {
     expect(isSpaRoute('/assets/main-XyZ789.css')).toBe(false);
   });
 
-  test('/api/* paths are NOT served as SPA', () => {
+  test('/api and /api/* paths are NOT served as SPA', () => {
+    expect(isSpaRoute('/api')).toBe(false);
     expect(isSpaRoute('/api/health')).toBe(false);
     expect(isSpaRoute('/api/chats')).toBe(false);
   });
@@ -32,18 +33,33 @@ describe('SPA onError NOT_FOUND guard', () => {
     expect(isSpaRoute('/api/auth/sign-in/email')).toBe(false);
   });
 
-  test('/uploads/* paths are NOT served as SPA', () => {
+  test('/uploads and /uploads/* paths are NOT served as SPA', () => {
+    expect(isSpaRoute('/uploads')).toBe(false);
     expect(isSpaRoute('/uploads/image.png')).toBe(false);
     expect(isSpaRoute('/uploads/Chat_chat-id/1710000000000/file.png')).toBe(false);
   });
 
-  test('/images/* paths are NOT served as SPA', () => {
+  test('/images and /images/* paths are NOT served as SPA', () => {
+    expect(isSpaRoute('/images')).toBe(false);
     expect(isSpaRoute('/images/generated.png')).toBe(false);
   });
 
-  test('/scalar is NOT served as SPA', () => {
+  test('/scalar and /scalar/* paths are NOT served as SPA', () => {
     expect(isSpaRoute('/scalar')).toBe(false);
     expect(isSpaRoute('/scalar/something')).toBe(false);
+  });
+
+  test('/assets and /assets/* paths are NOT served as SPA', () => {
+    expect(isSpaRoute('/assets')).toBe(false);
+    expect(isSpaRoute('/assets/app.js')).toBe(false);
+  });
+
+  test('lookalike path segments ARE served as SPA', () => {
+    expect(isSpaRoute('/apiary')).toBe(true);
+    expect(isSpaRoute('/uploads-old')).toBe(true);
+    expect(isSpaRoute('/images-archive')).toBe(true);
+    expect(isSpaRoute('/assets-page')).toBe(true);
+    expect(isSpaRoute('/scalarity')).toBe(true);
   });
 
   test('generic SPA routes ARE served as SPA', () => {

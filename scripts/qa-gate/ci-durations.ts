@@ -2,8 +2,9 @@
 // workflow_run publisher. This is deliberately separate from the unprivileged
 // qa-metrics envelope because reading Actions jobs requires `actions: read`.
 
-import { type Static, Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import { describeSchemaError } from '@mangostudio/shared/errors';
+import Type, { type Static } from 'typebox';
+import Value from 'typebox/value';
 
 /** Hard cap for the trusted-side JSON handoff into the report renderer. */
 const CI_DURATIONS_MAX_BYTES = 1024 * 1024;
@@ -47,8 +48,10 @@ export type CiRunDurations = Static<typeof CiRunDurationsSchema>;
 export type CiDurationComparison = Static<typeof CiDurationComparisonSchema>;
 
 const firstSchemaError = (value: unknown): string => {
-  const first = Value.Errors(CiDurationComparisonSchema, value).First();
-  return first ? `${first.path || '/'}: ${first.message}` : 'unknown schema violation';
+  return describeSchemaError(
+    Value.Errors(CiDurationComparisonSchema, value),
+    'unknown schema violation'
+  );
 };
 
 /** Parse the Actions API timing handoff before it reaches Markdown rendering. */

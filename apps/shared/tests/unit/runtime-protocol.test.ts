@@ -12,7 +12,7 @@ import {
   RuntimeProtocolError,
   type RuntimeRequestFrame,
 } from '@mangostudio/shared/runtime-protocol';
-import { Value } from '@sinclair/typebox/value';
+import Value from 'typebox/value';
 
 const request: RuntimeRequestFrame = {
   type: 'req',

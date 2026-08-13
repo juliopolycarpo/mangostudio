@@ -39,6 +39,7 @@ export const providerSettingsRoutes = new Elysia()
 
   .get(
     '/providers/:provider',
+    { params: t.Object({ provider: t.String() }) },
     async ({ params, set, user }): Promise<ProviderSettingsDescriptor | ApiErrorResponse> => {
       try {
         return await getProviderSettingsDescriptor(
@@ -49,12 +50,15 @@ export const providerSettingsRoutes = new Elysia()
       } catch (error) {
         return handleProviderSettingsError(error, set);
       }
-    },
-    { params: t.Object({ provider: t.String() }) }
+    }
   )
 
   .put(
     '/providers/:provider',
+    {
+      params: t.Object({ provider: t.String() }),
+      body: UpdateProviderRuntimeSettingsBodySchema,
+    },
     async ({ body, params, set, user }): Promise<ProviderSettingsDescriptor | ApiErrorResponse> => {
       try {
         return await updateProviderSettingsDescriptor(
@@ -66,9 +70,5 @@ export const providerSettingsRoutes = new Elysia()
       } catch (error) {
         return handleProviderSettingsError(error, set);
       }
-    },
-    {
-      params: t.Object({ provider: t.String() }),
-      body: UpdateProviderRuntimeSettingsBodySchema,
     }
   );
