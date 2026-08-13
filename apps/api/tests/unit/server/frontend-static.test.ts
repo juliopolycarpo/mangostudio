@@ -31,9 +31,19 @@ let assetDir: string;
 const temporaryDirs: string[] = [];
 
 function buildApp(frontendDir = '/nonexistent-frontend-dir'): (path: string) => Promise<Response> {
-  const app = new Elysia();
+  const app = new Elysia()
+    .error(NotFound, ({ request }) => frontendNotFound(request))
+    .use(new Elysia({ prefix: '/api' }).use(errorHandler));
   registerFrontend(app as unknown as App, frontendDir);
   return (path: string) => app.handle(new Request(`http://localhost${path}`));
+}
+
+async function expectJsonNotFound(response: Response): Promise<void> {
+  expect(response.status).toBe(404);
+  expect(response.headers.get('content-type')).toContain('application/json');
+  const payload: unknown = await response.json();
+  expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+  expect(payload).toEqual({ error: 'Not found', code: ERROR_CODES.NOT_FOUND });
 }
 
 beforeEach(() => {
@@ -86,10 +96,11 @@ describe('registerFrontend with embedded assets', () => {
     expect(await response.text()).toBe(INDEX_HTML);
   });
 
-  test('does not swallow unknown /api/* or missing asset paths', async () => {
+  test('does not swallow /api, unknown /api/*, or missing asset paths', async () => {
     const get = registerEmbedded();
 
-    expect((await get('/api/nope')).status).toBe(404);
+    await expectJsonNotFound(await get('/api'));
+    await expectJsonNotFound(await get('/api/nope'));
     expect((await get('/assets/missing.js')).status).toBe(404);
   });
 
@@ -145,8 +156,9 @@ describe('registerFrontend from the filesystem', () => {
     writeFileSync(join(uploadsDir, 'photo.png'), UPLOAD_BYTES);
 
     const app = new Elysia()
+      .error(NotFound, ({ request }) => frontendNotFound(request))
       .use(staticPlugin({ assets: uploadsDir, prefix: '/uploads' }))
-      .group('/api', (api) => api.get('/health', () => ({ ok: true })));
+      .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, frontendDir);
 
     // `staticPlugin` enumerates its directory asynchronously, so both its
@@ -201,7 +213,10 @@ describe('registerFrontend from the filesystem', () => {
     const get = await buildFilesystemApp();
 
     expect((await get('/api/health')).status).toBe(200);
-    for (const path of ['/api/nope', '/assets/missing.js', '/scalar']) {
+    for (const path of ['/api', '/api/nope']) {
+      await expectJsonNotFound(await get(path));
+    }
+    for (const path of ['/assets/missing.js', '/scalar']) {
       const response = await get(path);
       expect(response.status).toBe(404);
       expect(await response.text()).not.toBe(INDEX_HTML);
@@ -261,12 +276,10 @@ describe('registerFrontend without embedded assets', () => {
       .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
     registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
 
-    const missing = await app.handle(new Request('http://localhost/api/nope'));
-    expect(missing.status).toBe(404);
-    expect(missing.headers.get('content-type')).toContain('application/json');
-    const payload: unknown = await missing.json();
-    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
-    expect(payload).toEqual({ error: 'Not found', code: ERROR_CODES.NOT_FOUND });
+    for (const path of ['/api', '/api/nope']) {
+      const missing = await app.handle(new Request(`http://localhost${path}`));
+      await expectJsonNotFound(missing);
+    }
 
     const root = await app.handle(new Request('http://localhost/'));
     expect(root.status).toBe(404);
