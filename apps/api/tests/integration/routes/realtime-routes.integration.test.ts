@@ -9,7 +9,7 @@ import {
   type RealtimeServerMessage,
   SETTINGS_TOPIC,
 } from '@mangostudio/shared/realtime';
-import type { Elysia } from 'elysia';
+import { Elysia } from 'elysia';
 import { getApiKeyApi } from '../../../src/auth';
 import { getDb } from '../../../src/db/database';
 import { createChat } from '../../../src/modules/chats/infrastructure/chat-repository';
@@ -37,7 +37,7 @@ let stopServer: (() => void) | undefined;
 
 function startServer(
   dependencies: Parameters<typeof createRealtimeRoutes>[0] = {},
-  options: { withApiKeyGuard?: boolean } = {}
+  options: { withApiKeyGuard?: boolean; withRootWebSocketOptions?: boolean } = {}
 ) {
   const bus = dependencies.bus ?? createRealtimeBus();
   const routes = createRealtimeRoutes({ ...dependencies, bus });
@@ -55,7 +55,12 @@ function startServer(
         .use(routes)
         .get('/realtime-scope-probe', () => ({ ok: true }));
     });
-  const app = createApiTestApp(apiRoutes);
+  // The transport caps live on the root instance in `app.ts`, not on the route,
+  // so a server that omits them exercises the protocol without the limits. Most
+  // cases here want that; the ones asserting a cap ask for the real root.
+  const app = options.withRootWebSocketOptions
+    ? new Elysia({ websocket: REALTIME_WEBSOCKET_OPTIONS }).use(apiRoutes)
+    : createApiTestApp(apiRoutes);
   app.listen(0);
   const port = (app.server as { port?: number } | null)?.port;
 
@@ -269,6 +274,46 @@ describe('realtime WebSocket origins and liveness', () => {
       backpressureLimit: 64 * 1024,
       closeOnBackpressureLimit: true,
     });
+  });
+
+  it('applies the root payload cap to the realtime socket', async () => {
+    // `REALTIME_WEBSOCKET_OPTIONS` is declared beside the realtime route but
+    // applied once, on the root instance, so both socket families inherit one
+    // transport policy. The case above pins the values; this one proves they
+    // are in force — a root that stops carrying them leaves the constant
+    // correct and the cap gone.
+    const { httpUrl, wsUrl } = startServer({}, { withRootWebSocketOptions: true });
+    const user = await signUp(httpUrl);
+    const client = connect(wsUrl, { Cookie: user.cookie });
+
+    await client.opened;
+    expect(await client.nextMessage()).toEqual({ type: 'ready' });
+
+    // Sent raw: every well-formed frame this protocol defines is far below the
+    // cap, so the only way to reach it is a payload the protocol would reject
+    // anyway. The transport has to refuse it first.
+    send(client.socket, 'x'.repeat(REALTIME_WEBSOCKET_OPTIONS.maxPayloadLength + 1));
+
+    // Bun refuses the oversized frame at the transport, below the protocol, so
+    // the socket goes away without an application-level error frame.
+    const closed = await client.closed;
+    expect(closed.code).not.toBe(1000);
+    expect(client.messages.some((message) => message.type === 'invalidate')).toBe(false);
+  });
+
+  it('handshakes regardless of query parameters on the socket URL', async () => {
+    // The browser client connects to a bare `/api/ws` with no query string, so
+    // nothing in the handshake may depend on one. Duplicated and unknown keys
+    // are the shapes a proxy or a future client would introduce, and a query
+    // parser that starts rejecting or reshaping them must not reach this route.
+    const { httpUrl, wsUrl } = startServer();
+    const user = await signUp(httpUrl);
+
+    for (const suffix of ['', '?topic=a&topic=b', '?unexpected=1&unexpected=2&other=']) {
+      const client = connect(`${wsUrl}${suffix}`, { Cookie: user.cookie });
+      await client.opened;
+      expect(await client.nextMessage()).toEqual({ type: 'ready' });
+    }
   });
 
   it('accepts configured, public-auth, and absent origins but rejects other browser origins', async () => {
