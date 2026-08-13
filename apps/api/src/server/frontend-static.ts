@@ -127,6 +127,13 @@ function registerSpa(app: App, frontendDir: string): void {
 }
 
 function registerApiOnly(app: App): void {
-  setFrontendFallback(() => new Response('Frontend not found. API is running.', { status: 404 }));
+  setFrontendFallback((request) => {
+    const { pathname } = new URL(request.url);
+    // The outer `NotFound` handler in `app.ts` runs first and stops when this
+    // returns a body. Claiming `/api/*` here would turn unknown endpoints into
+    // plaintext instead of `ApiErrorResponse`.
+    if (pathname === '/api' || pathname.startsWith('/api/')) return undefined;
+    return new Response('Frontend not found. API is running.', { status: 404 });
+  });
   app.error(NotFound, ({ request }) => frontendNotFound(request));
 }

@@ -10,12 +10,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { staticPlugin } from '@elysia/static';
-import { Elysia } from 'elysia';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { Elysia, NotFound } from 'elysia';
+import Value from 'typebox/value';
 import type { App } from '../../../src/app';
+import { errorHandler } from '../../../src/plugins/error-handler';
 import {
   registerEmbeddedFrontend,
   resetEmbeddedFrontend,
 } from '../../../src/server/embedded-frontend';
+import { clearFrontendFallback, frontendNotFound } from '../../../src/server/frontend-fallback';
 import { registerFrontend } from '../../../src/server/frontend-static';
 
 const INDEX_HTML = '<html><body>embedded index</body></html>';
@@ -40,6 +44,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resetEmbeddedFrontend();
+  clearFrontendFallback();
   rmSync(assetDir, { recursive: true, force: true });
   while (temporaryDirs.length > 0) {
     rmSync(temporaryDirs.pop() as string, { recursive: true, force: true });
@@ -240,6 +245,28 @@ describe('registerFrontend without embedded assets', () => {
     const healthy = await app.handle(new Request('http://localhost/api/health'));
     expect(healthy.status).toBe(200);
     expect(await healthy.json()).toEqual({ ok: true });
+
+    const root = await app.handle(new Request('http://localhost/'));
+    expect(root.status).toBe(404);
+    expect(await root.text()).toBe('Frontend not found. API is running.');
+  });
+
+  test('leaves unknown API paths to the JSON error handler in API-only mode', async () => {
+    // Same seating as `app.ts`: the SPA/API-only fallback is registered on the
+    // outer instance, ahead of the API plugin's `errorHandler`. If the fallback
+    // claims `/api/*`, that outer handler answers first and the JSON 404 never
+    // runs.
+    const app = new Elysia()
+      .error(NotFound, ({ request }) => frontendNotFound(request))
+      .use(new Elysia({ prefix: '/api' }).use(errorHandler).get('/health', () => ({ ok: true })));
+    registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
+
+    const missing = await app.handle(new Request('http://localhost/api/nope'));
+    expect(missing.status).toBe(404);
+    expect(missing.headers.get('content-type')).toContain('application/json');
+    const payload: unknown = await missing.json();
+    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+    expect(payload).toEqual({ error: 'Not found', code: ERROR_CODES.NOT_FOUND });
 
     const root = await app.handle(new Request('http://localhost/'));
     expect(root.status).toBe(404);
