@@ -25,16 +25,16 @@
  */
 
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
 import { header, info, log } from '../lib/log';
 
-/** Ports are per-run so a lingering process from a previous run cannot answer. */
-const BASE_PORT = 41_000;
 const READY_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 5;
+const SHUTDOWN_TIMEOUT_MS = 5_000;
 /** Long enough to be a real secret, fixed so runs are comparable. */
 const BENCH_AUTH_SECRET = 'startup-bench-secret-at-least-32-chars';
 
@@ -86,7 +86,48 @@ async function readPeakRssKb(pid: number): Promise<number> {
   }
 }
 
-/** Spawn the binary, wait for a healthy answer, then stop it. */
+/** Bind an OS-selected loopback port, then release it for the child to claim. */
+async function reserveEphemeralPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+  if (!address || typeof address === 'string') {
+    throw new Error('Failed to allocate an ephemeral benchmark port.');
+  }
+  return address.port;
+}
+
+async function waitForExit(child: Bun.Subprocess, timeoutMs: number): Promise<void> {
+  const timedOut = Symbol('timed-out');
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      child.exited,
+      new Promise<typeof timedOut>((resolve) => {
+        timer = setTimeout(() => resolve(timedOut), timeoutMs);
+      }),
+    ]);
+    if (result === timedOut) {
+      child.kill('SIGKILL');
+      await child.exited;
+    }
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function stopChild(child: Bun.Subprocess): Promise<void> {
+  if (child.exitCode === null) child.kill('SIGTERM');
+  await waitForExit(child, SHUTDOWN_TIMEOUT_MS);
+}
+
+/** Spawn the binary, wait for a healthy answer from *this* child, then stop it. */
 async function measureOnce(binary: string, home: string, port: number): Promise<RunSample> {
   const startedAt = Bun.nanoseconds();
   const child = Bun.spawn([binary, 'serve', String(port)], {
@@ -97,31 +138,39 @@ async function measureOnce(binary: string, home: string, port: number): Promise<
 
   let toHealthMs = Number.NaN;
   const deadline = Date.now() + READY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
-        signal: AbortSignal.timeout(1000),
-      });
-      await response.text();
-      if (response.ok) {
-        toHealthMs = (Bun.nanoseconds() - startedAt) / 1e6;
-        break;
+  const poll = (async () => {
+    while (Date.now() < deadline && child.exitCode === null) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+          signal: AbortSignal.timeout(1000),
+        });
+        await response.text();
+        // Require 200 from a still-live child so a leftover listener on this
+        // port cannot count as this process becoming ready.
+        if (response.status === 200 && child.exitCode === null) {
+          toHealthMs = (Bun.nanoseconds() - startedAt) / 1e6;
+          return;
+        }
+      } catch {
+        // Not listening yet.
       }
-    } catch {
-      // Not listening yet.
+      await Bun.sleep(POLL_INTERVAL_MS);
     }
-    await Bun.sleep(POLL_INTERVAL_MS);
-  }
+  })();
 
-  const peakRssKb = await readPeakRssKb(child.pid);
-  child.kill('SIGTERM');
-  await child.exited;
+  await Promise.race([poll, child.exited]);
+  const readyExitCode = child.exitCode;
+
+  const peakRssKb = Number.isNaN(toHealthMs) ? 0 : await readPeakRssKb(child.pid);
+  await stopChild(child);
 
   if (Number.isNaN(toHealthMs)) {
     const stderr = await new Response(child.stderr).text();
-    fatal(
-      `Binary never answered /api/health within ${READY_TIMEOUT_MS} ms.\n${stderr.slice(-2000)}`
-    );
+    const reason =
+      readyExitCode === null
+        ? `Binary never answered /api/health within ${READY_TIMEOUT_MS} ms.`
+        : `Binary exited before answering /api/health (code ${readyExitCode}).`;
+    throw new Error(`${reason}\n${stderr.slice(-2000)}`);
   }
 
   return { toHealthMs, peakRssKb };
@@ -162,16 +211,18 @@ const samples: RunSample[] = [];
 // Warm mode reuses one home across runs so the migrated database survives;
 // cold mode needs a fresh one each time, or run 2 would already be warm.
 let sharedHome: string | undefined;
-if (warm) {
-  sharedHome = await mkdtemp(join(tmpdir(), 'mango-bench-'));
-  await measureOnce(binary, sharedHome, BASE_PORT);
-}
+let failure: string | undefined;
 
 try {
+  if (warm) {
+    sharedHome = await mkdtemp(join(tmpdir(), 'mango-bench-'));
+    await measureOnce(binary, sharedHome, await reserveEphemeralPort());
+  }
+
   for (let run = 0; run < runs; run += 1) {
     const home = sharedHome ?? (await mkdtemp(join(tmpdir(), 'mango-bench-')));
     try {
-      const sample = await measureOnce(binary, home, BASE_PORT + 1 + run);
+      const sample = await measureOnce(binary, home, await reserveEphemeralPort());
       samples.push(sample);
       if (!quiet) {
         info(`  run ${run + 1}/${runs}: ${sample.toHealthMs.toFixed(1)} ms`);
@@ -180,9 +231,13 @@ try {
       if (!sharedHome) await rm(home, { recursive: true, force: true });
     }
   }
+} catch (error) {
+  failure = error instanceof Error ? error.message : String(error);
 } finally {
   if (sharedHome) await rm(sharedHome, { recursive: true, force: true });
 }
+
+if (failure) fatal(failure);
 
 const healthTimings = samples.map((sample) => sample.toHealthMs);
 console.log(
