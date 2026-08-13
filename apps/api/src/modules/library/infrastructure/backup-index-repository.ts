@@ -65,10 +65,19 @@ function toRow(row: LibraryBackupSelect): LibraryBackupIndexRow {
   };
 }
 
-export function createLibraryBackupIndex(db: Kysely<Database> = getDb()): LibraryBackupIndex {
+/**
+ * `injected` is resolved per call rather than defaulted at construction. Callers
+ * already build this inside a function for exactly this reason — see
+ * `conflict-resolution.ts` — but an eager `= getDb()` default leaves that as a
+ * rule every future caller has to know: construct me at module scope and I open
+ * SQLite. Resolving here makes the safe thing the default.
+ */
+export function createLibraryBackupIndex(injected?: Kysely<Database>): LibraryBackupIndex {
+  const db = (): Kysely<Database> => injected ?? getDb();
+
   return {
     async list(userId) {
-      const rows = await db
+      const rows = await db()
         .selectFrom('library_backups')
         .selectAll()
         .where('userId', '=', userId)
@@ -90,7 +99,7 @@ export function createLibraryBackupIndex(db: Kysely<Database> = getDb()): Librar
         pinned: row.pinned ? 1 : 0,
         operation: row.operation,
       }));
-      await db
+      await db()
         .insertInto('library_backups')
         .values(values)
         // Re-recording is how a listing reconciles: the machine has just been
@@ -109,7 +118,7 @@ export function createLibraryBackupIndex(db: Kysely<Database> = getDb()): Librar
 
     async forget(userId, environmentId, backupIds) {
       if (backupIds.length === 0) return;
-      await db
+      await db()
         .deleteFrom('library_backups')
         .where('userId', '=', userId)
         .where('environmentId', '=', environmentId)

@@ -49,12 +49,20 @@ function toRecord(row: RuntimePairingTokenSelect): RuntimePairingTokenRecord {
   };
 }
 
+/**
+ * `injected` is resolved per call rather than defaulted at construction, for the
+ * same reason as {@link createEnvironmentRepository}: the module-scope singleton
+ * below is built at import time, so an eager `= getDb()` default opened SQLite
+ * as a side effect of importing the app.
+ */
 export function createRuntimePairingRepository(
-  db: Kysely<Database> = getDb()
+  injected?: Kysely<Database>
 ): RuntimePairingRepository {
+  const db = (): Kysely<Database> => injected ?? getDb();
+
   return {
     async findActiveForEnvironment(userId, environmentId) {
-      const row = await db
+      const row = await db()
         .selectFrom('runtime_pairing_tokens')
         .selectAll()
         .where('userId', '=', userId)
@@ -65,7 +73,7 @@ export function createRuntimePairingRepository(
     },
 
     async findById(id) {
-      const row = await db
+      const row = await db()
         .selectFrom('runtime_pairing_tokens')
         .selectAll()
         .where('id', '=', id)
@@ -87,14 +95,16 @@ export function createRuntimePairingRepository(
       // Rotation is one transaction on purpose: a crash between the delete and
       // the insert would otherwise leave an environment that shows no token
       // while the operator is holding the string the UI just printed.
-      await db.transaction().execute(async (transaction) => {
-        await transaction
-          .deleteFrom('runtime_pairing_tokens')
-          .where('userId', '=', input.userId)
-          .where('environmentId', '=', input.environmentId)
-          .execute();
-        await transaction.insertInto('runtime_pairing_tokens').values(row).execute();
-      });
+      await db()
+        .transaction()
+        .execute(async (transaction) => {
+          await transaction
+            .deleteFrom('runtime_pairing_tokens')
+            .where('userId', '=', input.userId)
+            .where('environmentId', '=', input.environmentId)
+            .execute();
+          await transaction.insertInto('runtime_pairing_tokens').values(row).execute();
+        });
       return {
         id: input.id,
         userId: input.userId,
@@ -108,7 +118,7 @@ export function createRuntimePairingRepository(
 
     async revokeForEnvironment(userId, environmentId) {
       const update: RuntimePairingTokenUpdate = { revokedAt: Date.now() };
-      const result = await db
+      const result = await db()
         .updateTable('runtime_pairing_tokens')
         .set(update)
         .where('userId', '=', userId)
@@ -120,7 +130,7 @@ export function createRuntimePairingRepository(
 
     async touch(id, seenAt) {
       const update: RuntimePairingTokenUpdate = { lastSeenAt: seenAt };
-      await db
+      await db()
         .updateTable('runtime_pairing_tokens')
         .set(update)
         .where('id', '=', id)

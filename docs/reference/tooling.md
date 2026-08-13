@@ -107,3 +107,63 @@ optimizer state, not task outputs.
 - Remote Cache for CI.
 - `--affected` filtering in CI pipelines.
 - Package-specific Turbo configuration once the base graph is stable.
+
+## Elysia build-time AOT — evaluated, not adopted
+
+Elysia 2 ships a Bun build plugin (`elysia/plugin/aot/bun`) that moves handler
+and validator compilation from process start to build time. It was measured
+against MangoStudio on 2026-08-13 and **not adopted**: it is correct here, but
+it buys nothing this repository can spend.
+
+### What was measured
+
+Elysia `2.0.0-beta.4`, Bun `1.3.14`, linux-x64, ten runs per figure, each under
+a throwaway `HOME` and database. Both binaries were produced by the same
+programmatic `Bun.build({ compile })` call from the same source, so the only
+variable is the plugin.
+
+| Measure                       |      JIT |      AOT | Delta | Gate        | Result |
+| ----------------------------- | -------: | -------: | ----: | ----------- | ------ |
+| Cold start → `/api/health`    |   980 ms |  1001 ms | +2.1% | ≥10% gain   | fail   |
+| Warm start → `/api/health`    |   898 ms |   907 ms | +1.0% | ≥10% gain   | fail   |
+| First schema-backed request   |   196 ms |   193 ms | −2.0% | not slower  | noise  |
+| Compile duration (per target) |  1094 ms |  4049 ms | +270% | ≤20% growth | fail   |
+| Binary size                   | 111.2 MB | 113.2 MB | +1.8% | ≤5% growth  | pass   |
+| Peak RSS during startup       |   152 MB |   157 MB | +2.7% | —           | —      |
+
+Reproduce the startup halves with `scripts/bench/startup.ts` against two
+binaries; see `scripts/README.md`.
+
+### Why there is nothing to win
+
+Startup is not spent in Elysia. It goes to migrations, opening SQLite, Better
+Auth initialization, and evaluating a ~111 MB bundle. Route compilation is a
+small enough slice that removing it entirely stays inside run-to-run noise —
+which is also why the AOT binary measured marginally *slower*: it carries a
+larger manifest to load.
+
+### What the evaluation did establish
+
+The plugin is not broken here. Both binaries served a byte-identical OpenAPI
+document with the same 188 operations, so route and contract parity is not the
+objection. Three findings are worth keeping:
+
+- The capture step **imports the app inside the build process**. Anything the
+  app does at import time therefore happens during a build — which is how the
+  eager `getDb()` defaults in the repository factories were found, and why
+  `apps/api/tests/integration/server/app-import-side-effects.integration.test.ts`
+  now pins that importing the app opens no database.
+- Sealed validators carrying a coercion or codec schema report their 422 field
+  detail coarsely. That is 15 routes — across api-keys, environments,
+  external-agents, git, library, respond, settings, and tool-identities —
+  trading error-message precision for the compile-time win. The plugin only
+  says so under `verbose: true`, so adopting it without that flag would ship
+  the coarser errors silently.
+- `scripts/build.ts` shells out to the `bun build` CLI, which has no plugin
+  flag. Adopting AOT means moving binary compilation to programmatic
+  `Bun.build({ compile })` for every target — a build-pipeline rewrite that the
+  measurements above do not pay for.
+
+Revisit if Elysia's own startup share grows, if migrations and bundle
+evaluation stop dominating, or if a target appears (workerd) where runtime JIT
+is unavailable rather than merely slower.

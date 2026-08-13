@@ -80,10 +80,20 @@ function parseConfigJson(value: string): unknown {
   }
 }
 
-export function createEnvironmentRepository(db: Kysely<Database> = getDb()): EnvironmentRepository {
+/**
+ * `injected` is resolved per call rather than defaulted at construction: the
+ * module-scope singleton below is built while this module is imported, and an
+ * eager `= getDb()` default opened SQLite right there — creating
+ * `~/.mango/database.sqlite` for anything that merely imported the app, and
+ * connecting before `runMigrations()` had run. Callers still inject a database
+ * for tests exactly as before.
+ */
+export function createEnvironmentRepository(injected?: Kysely<Database>): EnvironmentRepository {
+  const db = (): Kysely<Database> => injected ?? getDb();
+
   return {
     async list(userId) {
-      const rows = await db
+      const rows = await db()
         .selectFrom('environments')
         .selectAll()
         .where('userId', '=', userId)
@@ -93,7 +103,7 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
     },
 
     async find(userId, id) {
-      const row = await db
+      const row = await db()
         .selectFrom('environments')
         .selectAll()
         .where('userId', '=', userId)
@@ -115,7 +125,7 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
         createdAt: now,
         updatedAt: now,
       };
-      const result = await db
+      const result = await db()
         .insertInto('environments')
         .values(row)
         .onConflict((conflict) => conflict.columns(['userId', 'id']).doNothing())
@@ -143,7 +153,7 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
           ? { allowInstalls: input.allowInstalls ? 1 : 0 }
           : {}),
       };
-      const result = await db
+      const result = await db()
         .updateTable('environments')
         .set(update)
         .where('userId', '=', userId)
@@ -153,7 +163,7 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
     },
 
     async removable(userId, id) {
-      const environment = await db
+      const environment = await db()
         .selectFrom('environments')
         .select('id')
         .where('userId', '=', userId)
@@ -161,7 +171,7 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
         .executeTakeFirst();
       if (!environment) return 'missing';
 
-      const chat = await db
+      const chat = await db()
         .selectFrom('chats')
         .select('id')
         .where('userId', '=', userId)
@@ -169,7 +179,7 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
         .executeTakeFirst();
       if (chat) return 'referenced';
 
-      const mcpServer = await db
+      const mcpServer = await db()
         .selectFrom('mcp_servers')
         .select('id')
         .where('userId', '=', userId)
@@ -181,53 +191,55 @@ export function createEnvironmentRepository(db: Kysely<Database> = getDb()): Env
     },
 
     async remove(userId, id) {
-      return await db.transaction().execute(async (transaction) => {
-        const environment = await transaction
-          .selectFrom('environments')
-          .select('id')
-          .where('userId', '=', userId)
-          .where('id', '=', id)
-          .executeTakeFirst();
-        if (!environment) return 'missing';
+      return await db()
+        .transaction()
+        .execute(async (transaction) => {
+          const environment = await transaction
+            .selectFrom('environments')
+            .select('id')
+            .where('userId', '=', userId)
+            .where('id', '=', id)
+            .executeTakeFirst();
+          if (!environment) return 'missing';
 
-        const chat = await transaction
-          .selectFrom('chats')
-          .select('id')
-          .where('userId', '=', userId)
-          .where('environmentId', '=', id)
-          .executeTakeFirst();
-        if (chat) return 'referenced';
+          const chat = await transaction
+            .selectFrom('chats')
+            .select('id')
+            .where('userId', '=', userId)
+            .where('environmentId', '=', id)
+            .executeTakeFirst();
+          if (chat) return 'referenced';
 
-        // An MCP server row addresses one machine: its command or its URL only
-        // means something there. Deleting the environment out from under it
-        // would leave a server that can never connect and cannot say why.
-        const mcpServer = await transaction
-          .selectFrom('mcp_servers')
-          .select('id')
-          .where('userId', '=', userId)
-          .where('environmentId', '=', id)
-          .executeTakeFirst();
-        if (mcpServer) return 'referenced';
+          // An MCP server row addresses one machine: its command or its URL only
+          // means something there. Deleting the environment out from under it
+          // would leave a server that can never connect and cannot say why.
+          const mcpServer = await transaction
+            .selectFrom('mcp_servers')
+            .select('id')
+            .where('userId', '=', userId)
+            .where('environmentId', '=', id)
+            .executeTakeFirst();
+          if (mcpServer) return 'referenced';
 
-        // The library backup index is a listing cache for a machine that is
-        // going away. Left behind, its rows would sit on the backups page
-        // forever as an offline environment nobody can connect — the bytes are
-        // still on that machine's disk, but nothing here can reach them again.
-        // Chats and MCP servers block the delete instead; a cache does not get
-        // to.
-        await transaction
-          .deleteFrom('library_backups')
-          .where('userId', '=', userId)
-          .where('environmentId', '=', id)
-          .execute();
+          // The library backup index is a listing cache for a machine that is
+          // going away. Left behind, its rows would sit on the backups page
+          // forever as an offline environment nobody can connect — the bytes are
+          // still on that machine's disk, but nothing here can reach them again.
+          // Chats and MCP servers block the delete instead; a cache does not get
+          // to.
+          await transaction
+            .deleteFrom('library_backups')
+            .where('userId', '=', userId)
+            .where('environmentId', '=', id)
+            .execute();
 
-        await transaction
-          .deleteFrom('environments')
-          .where('userId', '=', userId)
-          .where('id', '=', id)
-          .executeTakeFirst();
-        return 'removed';
-      });
+          await transaction
+            .deleteFrom('environments')
+            .where('userId', '=', userId)
+            .where('id', '=', id)
+            .executeTakeFirst();
+          return 'removed';
+        });
     },
   };
 }

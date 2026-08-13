@@ -53,12 +53,19 @@ function toRecords(rows: readonly LibraryDivergenceAckSelect[]): DivergenceAckRe
   });
 }
 
+/**
+ * `injected` is resolved per call rather than defaulted at construction, so that
+ * `resolveDeps` in `conflict-resolution.ts` gets its stated guarantee from this
+ * factory instead of from the discipline of calling it lazily.
+ */
 export function createDivergenceAckRepository(
-  db: Kysely<Database> = getDb()
+  injected?: Kysely<Database>
 ): DivergenceAckRepository {
+  const db = (): Kysely<Database> => injected ?? getDb();
+
   return {
     async list(userId, profileId) {
-      const rows = await db
+      const rows = await db()
         .selectFrom('library_divergence_acks')
         .selectAll()
         .where('userId', '=', userId)
@@ -70,7 +77,7 @@ export function createDivergenceAckRepository(
 
     async listFor(userId, profileId, resourceKeys) {
       if (resourceKeys.length === 0) return [];
-      const rows = await db
+      const rows = await db()
         .selectFrom('library_divergence_acks')
         .selectAll()
         .where('userId', '=', userId)
@@ -90,7 +97,7 @@ export function createDivergenceAckRepository(
         contentHashesJson: JSON.stringify(record.contentHashes),
         acknowledgedAt: record.acknowledgedAtMs,
       };
-      await db
+      await db()
         .insertInto('library_divergence_acks')
         .values(values)
         // Re-acknowledging a resource replaces the accepted hash set instead of
@@ -107,7 +114,7 @@ export function createDivergenceAckRepository(
 
     async remove(userId, profileId, resourceKeys) {
       if (resourceKeys.length === 0) return;
-      await db
+      await db()
         .deleteFrom('library_divergence_acks')
         .where('userId', '=', userId)
         .where('profileId', '=', profileId)
