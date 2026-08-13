@@ -170,8 +170,8 @@ bun run --filter @mangostudio/shared test:unit
 
 ```typescript
 import { describe, expect, it } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
-import { Type } from '@sinclair/typebox';
+import Type from 'typebox';
+import Value from 'typebox/value';
 import { settingsRoutes } from '../../../src/routes/settings';
 import { createApiTestApp } from '../../support/harness/create-api-test-app';
 
