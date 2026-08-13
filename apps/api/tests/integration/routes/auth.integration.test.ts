@@ -3,6 +3,7 @@ import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors'
 import { Elysia } from 'elysia';
 import Value from 'typebox/value';
 import { requireAuth } from '../../../src/plugins/auth-middleware';
+import { errorHandler } from '../../../src/plugins/error-handler';
 import { authRoutes } from '../../../src/routes/auth';
 import { createApiTestApp } from '../../support/harness/create-api-test-app';
 
@@ -59,6 +60,40 @@ describe('Auth routes', () => {
       error: 'Method not allowed',
       code: ERROR_CODES.METHOD_NOT_ALLOWED,
     });
+  });
+
+  test('hands Better Auth a readable body when composed with the error handler', async () => {
+    // The passthrough route gives Better Auth the raw `Request` to read. Any
+    // globally scoped error handler makes Elysia materialise the body first,
+    // which consumes the stream and turns every sign-up and sign-in into
+    // `Invalid JSON in request body` — a 400 that the assertions above cannot
+    // tell apart from a legitimate rejection.
+    //
+    // `errorHandler` is therefore mounted here rather than relying on the
+    // shared harness, which does not include it: this pins the composition
+    // production actually runs, and a successful sign-up is the only outcome
+    // that proves the body survived.
+    // Mounted under `/api` because Better Auth matches against its configured
+    // `basePath` of `/api/auth`; the other tests here reach the passthrough
+    // route without it and get a 404 back from Better Auth, which their
+    // `>= 400` assertions cannot distinguish from a real rejection either.
+    const composed = createApiTestApp(
+      new Elysia({ prefix: '/api' }).use(errorHandler).use(authRoutes)
+    );
+
+    const res = await composed.handle(
+      new Request('http://localhost/api/auth/sign-up/email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: `body-intact-${crypto.randomUUID()}@mangostudio.test`,
+          password: 'correct-horse-battery-staple',
+          name: 'Body Intact',
+        }),
+      })
+    );
+
+    expect(res.status).toBe(200);
   });
 
   test('protected routes return canonical unauthorized error', async () => {

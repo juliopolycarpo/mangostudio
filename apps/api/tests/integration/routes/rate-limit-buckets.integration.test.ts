@@ -158,16 +158,21 @@ describe('rate-limit buckets under the /api prefix', () => {
   });
 
   /**
-   * Regression: the limiter must not consume the request body. The Better Auth
-   * passthrough route reads the raw `request` itself, so if the limiter's hooks
-   * make Elysia eagerly parse the body, the stream is already used and auth
-   * (e.g. sign-up) fails with `ERR_BODY_ALREADY_USED`.
+   * Regression: nothing in this chain may consume the request body. The Better
+   * Auth passthrough route reads the raw `request` itself, so anything that
+   * makes Elysia eagerly parse the body leaves the stream used and auth (e.g.
+   * sign-up) fails with `ERR_BODY_ALREADY_USED`.
+   *
+   * The limiter is the hook under test, but the eager parse is triggered by the
+   * globally scoped handlers in `errorHandler` — which is why it is mounted
+   * here, and why the route opts out of parsing exactly as the real one does.
    */
   it('leaves the request body intact for passthrough handlers', async () => {
     const limiter = rateLimit({ classify: classifyRateLimit, trustProxy: true });
-    // Mirrors the auth route: hand the untouched `request` to a downstream reader.
+    // Mirrors the auth route: hand the untouched `request` to a downstream
+    // reader, with the same `parse: 'none'` opt-out that route declares.
     const authRoutes = new Elysia().group('/auth', (group) =>
-      group.all('/*', async ({ request }) => ({ echo: await request.json() }))
+      group.all('/*', { parse: 'none' }, async ({ request }) => ({ echo: await request.json() }))
     );
     const api = new Elysia({ prefix: '/api' }).use(errorHandler).use(limiter).use(authRoutes);
     const app = new Elysia().use(api);
