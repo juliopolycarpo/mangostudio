@@ -11,6 +11,8 @@
 
 import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { SSEErrorEventSchema } from '@mangostudio/shared/streaming';
+import { Value } from '@sinclair/typebox/value';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import * as realCatalogNs from '../../../src/services/providers/catalog';
 import type {
@@ -200,17 +202,33 @@ describe('POST /respond/stream — legacy text-stream provider', () => {
     );
 
     expect(response.status).toBe(200);
-    const sseEvents = parseSseEvents(await response.text());
+    // The failure travels as an event-stream frame, not as an HTTP error: the
+    // status is already committed by the time a provider fails mid-turn, so the
+    // transport headers and the `data: `/blank-line framing are as much of the
+    // public contract as the payload is.
+    expect(response.headers.get('content-type')).toBe('text/event-stream');
+    expect(response.headers.get('cache-control')).toBe('no-cache');
+    const rawStream = await response.text();
+    expect(rawStream).toContain('data: ');
+    expect(rawStream).toContain('\n\n');
+    const sseEvents = parseSseEvents(rawStream);
 
     expect(sseEvents.find((event) => event.type === 'system_event')).toMatchObject({
       type: 'system_event',
       event: 'openai_internal_tool_call',
       detail: 'read_file',
     });
-    expect(sseEvents.find((event) => event.type === 'error')).toMatchObject({
+    const errorEvent = sseEvents.find((event) => event.type === 'error');
+    expect(errorEvent).toMatchObject({
       type: 'error',
       error: 'The provider run failed.',
     });
+    // `SSEErrorEvent` is one of the two error shapes the API is allowed to
+    // emit, and the terminal `done: true` is what tells a client to stop
+    // reading. Checked against the shared schema so a drift in either is caught
+    // here rather than in a browser.
+    expect(Value.Check(SSEErrorEventSchema, errorEvent)).toBe(true);
+    expect(errorEvent).toMatchObject({ done: true });
     expect(sseEvents.find((event) => event.type === 'done')).toBeUndefined();
 
     const aiMessage = insertedMessages.find((message) => message.role === 'ai');

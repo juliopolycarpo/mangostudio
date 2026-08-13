@@ -2,9 +2,11 @@ import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Value } from '@sinclair/typebox/value';
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
+import { errorHandler } from '../../../src/plugins/error-handler';
 import { uploadRoutes } from '../../../src/routes/upload';
 import {
   createApiTestApp,
@@ -158,22 +160,48 @@ afterEach(() => {
 });
 
 describe('POST /upload', () => {
-  it('rejects unauthenticated requests (401 or body validation before auth)', async () => {
-    const app = createApiTestApp(uploadRoutes);
+  it('rejects an unauthenticated request carrying a valid file with 401', async () => {
+    // `errorHandler` is mounted the way `app.ts` mounts it, so these assertions
+    // are against the response a client actually receives. Without it the route
+    // answers with the framework's own validation object, which is not a shape
+    // this API ever emits.
+    const app = createApiTestApp(errorHandler, uploadRoutes);
+
+    const formData = new FormData();
+    formData.append('image', new File([TINY_PNG], 'tiny.png', { type: 'image/png' }));
+
+    const response = await app.handle(
+      new Request('http://localhost/upload', { method: 'POST', body: formData })
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({
+      error: 'Unauthorized',
+      code: ERROR_CODES.UNAUTHORIZED,
+    });
+  });
+
+  it('rejects an unusable file before the auth guard runs', async () => {
+    // File-type validation is part of the route schema, so it fires ahead of
+    // the auth `onBeforeHandle` and an anonymous caller sending junk gets 422
+    // rather than 401. Pinned rather than accepted as "either is fine": the
+    // ordering is what decides whether an unauthenticated caller can probe
+    // which files this endpoint accepts, and a change to it should be a
+    // deliberate one.
+    const app = createApiTestApp(errorHandler, uploadRoutes);
 
     const formData = new FormData();
     formData.append('image', new Blob(['fake-content'], { type: 'image/png' }), 'test.png');
 
     const response = await app.handle(
-      new Request('http://localhost/upload', {
-        method: 'POST',
-        body: formData,
-      })
+      new Request('http://localhost/upload', { method: 'POST', body: formData })
     );
 
-    // Body validation (422) can fire before the auth middleware (401) depending on
-    // Elysia's lifecycle order. Either way, unauthenticated access must not return 200.
-    expect([401, 422]).toContain(response.status);
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: 'Unsupported file type',
+      code: ERROR_CODES.VALIDATION,
+    });
   });
 
   it('accepts a valid PNG upload and returns imageUrl', async () => {
@@ -197,8 +225,8 @@ describe('POST /upload', () => {
     expect((body.imageUrl as string).startsWith('/uploads/')).toBe(true);
   });
 
-  it('rejects uploads with invalid file content (non-image bytes)', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, uploadRoutes);
+  it('rejects uploads whose bytes are not the declared image type', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, errorHandler, uploadRoutes);
     restoreAuth = restore;
 
     const formData = new FormData();
@@ -216,8 +244,15 @@ describe('POST /upload', () => {
       })
     );
 
-    // Elysia schema validation (422) or our magic-bytes check (400) — either rejects the payload
-    expect([400, 422]).toContain(response.status);
+    // The declared MIME type says PNG and the bytes do not. Elysia raises this
+    // outside its `VALIDATION` code, and `errorHandler` maps it to 422 with the
+    // shared error shape — 400 would mean our own magic-byte check caught it
+    // instead, which is a different code path with a different message.
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: 'Unsupported file type',
+      code: ERROR_CODES.VALIDATION,
+    });
   });
 });
 
@@ -323,7 +358,7 @@ describe('POST /upload/chat', () => {
   });
 
   it('rejects files whose extension does not match detected content', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, uploadRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, errorHandler, uploadRoutes);
     restoreAuth = restore;
 
     const formData = new FormData();
@@ -337,11 +372,19 @@ describe('POST /upload/chat', () => {
       })
     );
 
+    // A domain check inside the handler, not a schema rejection: 400 with an
+    // `ApiErrorResponse` the user can act on. Distinct from the 422 above,
+    // which never reaches the handler at all.
     expect(response.status).toBe(400);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const payload = (await response.json()) as { error: string; code?: string };
+    expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
+    expect(payload.code).toBe(ERROR_CODES.VALIDATION);
+    expect(payload.error).toContain('extension does not match');
   });
 
   it('rejects unsupported binary attachments', async () => {
-    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, uploadRoutes);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, errorHandler, uploadRoutes);
     restoreAuth = restore;
 
     const formData = new FormData();
@@ -361,5 +404,9 @@ describe('POST /upload/chat', () => {
     );
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'Unsupported attachment file type.',
+      code: ERROR_CODES.VALIDATION,
+    });
   });
 });

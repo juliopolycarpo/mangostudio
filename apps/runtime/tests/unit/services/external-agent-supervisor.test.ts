@@ -127,6 +127,30 @@ describe('external-agent adapter registry and supervisor', () => {
     ).toBeUndefined();
   });
 
+  it('names the failing field when a method payload does not match its schema', async () => {
+    // Every external-agent method opens with a schema check whose refusal is
+    // rendered from the first error as `at "${path || '/'}"`. That pointer is
+    // what a hub operator reading a `RuntimeToolArgumentError` has to work
+    // from, so it is asserted as the rendered message rather than through the
+    // error iterator the renderer happens to read.
+    const value = await fixture();
+
+    await expect(
+      value.supervisor.discover({ targetIds: [], timeoutMs: 1_000 }, new AbortController().signal)
+    ).rejects.toThrow(/invalid external-agent payload at "\/targetIds"/);
+    await expect(
+      value.supervisor.discover(
+        { targetIds: ['codex'], timeoutMs: 0 },
+        new AbortController().signal
+      )
+    ).rejects.toThrow(/invalid external-agent payload at "\/timeoutMs"/);
+    await expect(
+      value.supervisor.discover(undefined as never, new AbortController().signal)
+    ).rejects.toThrow(/invalid external-agent payload at "\/"/);
+
+    await value.supervisor.close();
+  });
+
   it('rejects optional capability drift during discovery', async () => {
     const adapter = new FakeExternalAgentAdapter({ capabilities: { steering: true } });
     const value = await fixture({ adapter });

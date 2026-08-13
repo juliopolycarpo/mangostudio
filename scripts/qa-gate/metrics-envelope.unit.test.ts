@@ -112,6 +112,17 @@ describe('parseQaMetricsEnvelope', () => {
     ).toThrow('schema validation');
   });
 
+  it('names the failing location in a schema rejection', () => {
+    // Rendered as `${path || '/'}: ${message}` from the first schema error.
+    // The publisher runs against an untrusted artifact, so this pointer is the
+    // only description anyone gets of why a payload was refused.
+    expect(() => parse({ ...makeEnvelope(), extra: 'field' })).toThrow(/\(\/extra: .+\)/);
+    expect(() => parse(makeEnvelope({ headSha: 'not-a-sha' }))).toThrow(/\(\/headSha: .+\)/);
+    expect(() =>
+      parse(makeEnvelope({ metrics: { ...makeMetrics(HEAD_SHA), tests: 42 } as never }))
+    ).toThrow(/\(\/metrics\/tests: .+\)/);
+  });
+
   it('rejects provenance mismatches against trusted expectations', () => {
     expect(() => parse(makeEnvelope({ repository: 'evil/fork' }))).toThrow('repository');
     expect(() => parse(makeEnvelope({ headSha: BASE_SHA }))).toThrow('headSha');

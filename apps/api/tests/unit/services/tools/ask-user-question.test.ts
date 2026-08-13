@@ -94,6 +94,25 @@ describe('ask_user_question tool', () => {
       /Invalid ask_user_question arguments/
     );
   });
+
+  it('points the model at the field that failed', async () => {
+    // The detail is rendered from the first schema error as
+    // `${path || '/'}: ${message}`, and the model is expected to self-correct
+    // from it — a rejection that stops naming the offending field turns a
+    // one-retry fix into a guess. Asserted as the rendered message rather than
+    // through the iterator object the renderer reads.
+    await expect(
+      executeTool(
+        ASK_USER_QUESTION_TOOL_NAME,
+        { questions: [{ question: 'Pick?', options: [{ label: '' }, { label: 'B' }] }] },
+        context
+      )
+    ).rejects.toThrow(/\(\/questions\/0\/options\/0\/label: .+\)/);
+
+    await expect(executeTool(ASK_USER_QUESTION_TOOL_NAME, {}, context)).rejects.toThrow(
+      /\(\/questions: .+\)/
+    );
+  });
 });
 
 describe('ask_user_question execution pipeline', () => {
