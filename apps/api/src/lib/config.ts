@@ -676,6 +676,7 @@ function loadTestSandboxConfig(): MangoConfig {
   cfg.auth.secret = 'test-sandbox-secret-at-least-32-characters';
   cfg.uploads.dir = join(TEST_MANAGED_CONFIG_DIR, 'uploads');
   cfg.images.dir = join(TEST_MANAGED_CONFIG_DIR, 'images');
+  cfg.toolImages.dir = join(TEST_MANAGED_CONFIG_DIR, 'tool-images');
   cfg.agents.dir = join(TEST_MANAGED_CONFIG_DIR, 'agents');
   cfg.skills.dir = join(TEST_MANAGED_CONFIG_DIR, 'skills');
   cfg.library.backupDir = join(TEST_MANAGED_CONFIG_DIR, 'library-backups');

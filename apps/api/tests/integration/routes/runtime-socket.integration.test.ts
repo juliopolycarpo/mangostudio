@@ -441,9 +441,15 @@ describe('runtime dial-in socket', () => {
       socket.addEventListener('open', () => resolve(), { once: true });
     });
 
-    socket.send('x'.repeat(REALTIME_WEBSOCKET_OPTIONS.maxPayloadLength + 1));
+    // Text frames are a protocol error on this socket (binary chunks only), so
+    // an oversized string would close with PROTOCOL_ERROR even if the payload
+    // cap were gone. A binary message larger than the cap is legal framing and
+    // only the transport should refuse it.
+    socket.send(new Uint8Array(REALTIME_WEBSOCKET_OPTIONS.maxPayloadLength + 1));
 
-    expect((await closed).code).not.toBe(1000);
+    const close = await closed;
+    expect(close.code).not.toBe(1000);
+    expect(close.code).not.toBe(RUNTIME_CLOSE_CODES.PROTOCOL_ERROR);
   });
 
   it('carries the pre-upgrade credential decision into the opened socket', async () => {

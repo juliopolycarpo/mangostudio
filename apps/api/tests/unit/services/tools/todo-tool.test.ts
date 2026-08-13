@@ -92,10 +92,10 @@ describe('todo_write', () => {
     const chatId = `todo-write-invalid-${Date.now()}`;
     await seedChat(chatId);
 
-    expect(executeTool(TODO_WRITE_TOOL_NAME, {}, makeContext(chatId))).rejects.toThrow(
+    await expect(executeTool(TODO_WRITE_TOOL_NAME, {}, makeContext(chatId))).rejects.toThrow(
       /Invalid todo_write arguments/
     );
-    expect(
+    await expect(
       executeTool(TODO_WRITE_TOOL_NAME, { todos: [{ content: '' }] }, makeContext(chatId))
     ).rejects.toThrow(/Invalid todo_write arguments/);
   });
@@ -108,17 +108,17 @@ describe('todo_write', () => {
     const chatId = `todo-write-pointer-${Date.now()}`;
     await seedChat(chatId);
 
-    expect(
+    await expect(
       executeTool(
         TODO_WRITE_TOOL_NAME,
         { todos: [{ content: '', status: 'pending' }] },
         makeContext(chatId)
       )
     ).rejects.toThrow(/\(\/todos\/0\/content: .+\)/);
-    expect(
+    await expect(
       executeTool(TODO_WRITE_TOOL_NAME, { todos: [{ content: 'ship' }] }, makeContext(chatId))
     ).rejects.toThrow(/\(\/todos\/0\/status: .+\)/);
-    expect(executeTool(TODO_WRITE_TOOL_NAME, {}, makeContext(chatId))).rejects.toThrow(
+    await expect(executeTool(TODO_WRITE_TOOL_NAME, {}, makeContext(chatId))).rejects.toThrow(
       /\(\/todos: .+\)/
     );
   });
@@ -127,7 +127,7 @@ describe('todo_write', () => {
     const chatId = `todo-write-active-${Date.now()}`;
     await seedChat(chatId);
 
-    expect(
+    await expect(
       executeTool(
         TODO_WRITE_TOOL_NAME,
         { todos: [todo('a', 'in_progress'), todo('b', 'in_progress')] },

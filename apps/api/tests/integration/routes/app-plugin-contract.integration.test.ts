@@ -1,11 +1,12 @@
 /**
  * The plugin surface `app.ts` composes, asserted over the real application.
  *
- * CORS, OpenAPI, the two file-serving prefixes, and the request logger are all
- * configured once at the top of `app.ts` and never referenced again. Nothing
- * downstream would fail to compile if a plugin started answering on a different
- * path, dropped an origin check, or stopped emitting an operation — the only
- * evidence is the HTTP response, so that is what these assert.
+ * CORS, OpenAPI, the two file-serving prefixes, the root WebSocket transport,
+ * and the request logger are all configured once at the top of `app.ts` and
+ * never referenced again. Nothing downstream would fail to compile if a plugin
+ * started answering on a different path, dropped an origin check, stopped
+ * emitting an operation, or dropped the transport caps — the only evidence is
+ * the HTTP or WebSocket response, so that is what these assert.
  *
  * The OpenAPI document doubles as a route inventory. A framework change that
  * silently drops a route would leave every other suite green, because a suite
@@ -17,6 +18,7 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 import { app } from '../../../src/app';
+import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 
 const ROUTE_INVENTORY_FIXTURE = join(
   import.meta.dir,
@@ -229,9 +231,15 @@ describe('file-serving prefixes', () => {
   });
 
   it('refuses a generated-image path that escapes the images directory', async () => {
-    const response = await app.handle(new Request('http://localhost/images/../../etc/passwd'));
+    // `new Request` canonicalizes `/images/../../etc/passwd` to `/etc/passwd`
+    // before `app.handle` sees it, so that form never reaches `/images/*`.
+    // Encoded separators keep the `/images/` prefix and still decode to a
+    // traversal once the handler resolves the splat.
+    const response = await app.handle(new Request('http://localhost/images/..%2f..%2fetc/passwd'));
 
     expect(response.status).toBe(404);
+    expect(await response.text()).toBe('Not found');
+    expect(response.headers.get('content-type') ?? '').not.toContain('text/html');
   });
 
   it('leaves the uploads prefix unclaimed by any API route', async () => {
@@ -283,5 +291,58 @@ describe('request logging', () => {
       .map((entry) => entry.metadata?.path);
 
     expect(logged).toEqual(['/api/health']);
+  });
+});
+
+describe('root WebSocket transport', () => {
+  it('applies the payload cap on the exported application', async () => {
+    // The transport caps are a constructor option on this instance, not a
+    // route plugin. `app.handle` cannot see them, so the assertion has to
+    // listen on the composed app rather than rebuild a root that happens to
+    // pass the same object.
+    app.listen(0);
+    const port = (app.server as { port?: number } | null)?.port;
+    expect(port).toBeNumber();
+
+    try {
+      const signup = await fetch(`http://127.0.0.1:${port}/api/auth/sign-up/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: `ws-cap-${crypto.randomUUID()}@mangostudio.test`,
+          password: 'correct-horse-battery-staple',
+          name: 'Payload Cap Tester',
+        }),
+      });
+      expect(signup.status).toBe(200);
+      const cookie = signup.headers
+        .getSetCookie()
+        .map((value) => value.split(';', 1)[0])
+        .join('; ');
+      expect(cookie).not.toBe('');
+
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/api/ws`, {
+        headers: { Cookie: cookie },
+      });
+      const closed = new Promise<CloseEvent>((resolve) => {
+        socket.addEventListener('close', (event) => resolve(event as CloseEvent), { once: true });
+      });
+      const ready = new Promise<void>((resolve, reject) => {
+        socket.addEventListener('error', () => reject(new Error('WebSocket failed to open')), {
+          once: true,
+        });
+        socket.addEventListener('message', (event) => {
+          const message = JSON.parse(String(event.data)) as { type?: string };
+          if (message.type === 'ready') resolve();
+        });
+      });
+      await ready;
+
+      socket.send('x'.repeat(REALTIME_WEBSOCKET_OPTIONS.maxPayloadLength + 1));
+
+      expect((await closed).code).not.toBe(1000);
+    } finally {
+      void app.server?.stop(true);
+    }
   });
 });

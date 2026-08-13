@@ -363,6 +363,14 @@ describe('config precedence', () => {
 
     expect(cfg.library.backupDir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'library-backups'));
   });
+
+  test('test-runtime config fallback isolates writable directories from ~/.mango', () => {
+    const cfg = loadConfig();
+
+    expect(cfg.uploads.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'uploads'));
+    expect(cfg.images.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'images'));
+    expect(cfg.toolImages.dir).toBe(join(TEST_MANAGED_CONFIG_DIR, 'tool-images'));
+  });
 });
 
 describe('parseBooleanFlag', () => {

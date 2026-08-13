@@ -14,6 +14,7 @@
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
+import { inspect } from 'node:util';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Value } from '@sinclair/typebox/value';
 import { Elysia, t } from 'elysia';
@@ -53,7 +54,19 @@ function captureConsole(): ConsoleCapture {
   const originalWarn = console.warn;
   const lines: string[] = [];
   const record = (...args: unknown[]) => {
-    lines.push(args.map((arg) => (typeof arg === 'string' ? arg : String(arg))).join(' '));
+    // `String(error)` is `Error: message`; `String({ apiKey })` is
+    // `[object Object]`. Either would hide a credential sitting on a nested
+    // field of a structured argument, so walk the value the way the real
+    // console formatter would print it.
+    lines.push(
+      args
+        .map((arg) =>
+          typeof arg === 'string'
+            ? arg
+            : inspect(arg, { depth: 8, getters: true, showHidden: true })
+        )
+        .join(' ')
+    );
   };
 
   console.error = record;

@@ -135,20 +135,22 @@ describe('external-agent adapter registry and supervisor', () => {
     // error iterator the renderer happens to read.
     const value = await fixture();
 
-    await expect(
-      value.supervisor.discover({ targetIds: [], timeoutMs: 1_000 }, new AbortController().signal)
-    ).rejects.toThrow(/invalid external-agent payload at "\/targetIds"/);
-    await expect(
-      value.supervisor.discover(
-        { targetIds: ['codex'], timeoutMs: 0 },
-        new AbortController().signal
-      )
-    ).rejects.toThrow(/invalid external-agent payload at "\/timeoutMs"/);
-    await expect(
-      value.supervisor.discover(undefined as never, new AbortController().signal)
-    ).rejects.toThrow(/invalid external-agent payload at "\/"/);
-
-    await value.supervisor.close();
+    try {
+      await expect(
+        value.supervisor.discover({ targetIds: [], timeoutMs: 1_000 }, new AbortController().signal)
+      ).rejects.toThrow(/invalid external-agent payload at "\/targetIds"/);
+      await expect(
+        value.supervisor.discover(
+          { targetIds: ['codex'], timeoutMs: 0 },
+          new AbortController().signal
+        )
+      ).rejects.toThrow(/invalid external-agent payload at "\/timeoutMs"/);
+      await expect(
+        value.supervisor.discover(undefined as never, new AbortController().signal)
+      ).rejects.toThrow(/invalid external-agent payload at "\/"/);
+    } finally {
+      await value.supervisor.close();
+    }
   });
 
   it('rejects optional capability drift during discovery', async () => {
