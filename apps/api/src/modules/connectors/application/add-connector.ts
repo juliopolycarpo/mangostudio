@@ -40,7 +40,7 @@ export async function addConnector(userId: string, body: AddConnectorBody): Prom
   // new setup, not the connectors people already have.
   if (isDeprecatedProvider(provider)) {
     throw new ConnectorValidationError(
-      `MangoStudio no longer offers ${provider} as a provider. Existing connectors keep working; new ones are not accepted.`,
+      `MangoStudio no longer offers ${provider} as a provider. Existing connectors and their secrets are kept for editing or removal but no longer run turns; new ones are not accepted.`,
       ERROR_CODES.UNSUPPORTED,
       410
     );

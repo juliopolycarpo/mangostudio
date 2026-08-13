@@ -1,5 +1,6 @@
 export {
   DEPRECATED_PROVIDERS,
+  isDeprecatedModelId,
   isDeprecatedProvider,
   type PromptCachePreference,
   PromptCachePreferenceSchema,

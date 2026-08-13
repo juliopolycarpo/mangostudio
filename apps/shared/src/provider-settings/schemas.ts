@@ -27,8 +27,23 @@ export const ProviderTypeSchema = Type.Union([
 export const DEPRECATED_PROVIDERS: ReadonlyArray<Static<typeof ProviderTypeSchema>> = ['cursor'];
 
 /** True when this provider is deprecated. // Usage: isDeprecatedProvider('cursor') */
-export function isDeprecatedProvider(provider: Static<typeof ProviderTypeSchema>): boolean {
-  return DEPRECATED_PROVIDERS.includes(provider);
+export function isDeprecatedProvider(
+  provider: string
+): provider is (typeof DEPRECATED_PROVIDERS)[number] {
+  return (DEPRECATED_PROVIDERS as readonly string[]).includes(provider);
+}
+
+/**
+ * True when a stored model id belongs to a deprecated provider.
+ *
+ * Cursor ids are `cursor/…`. Hiding those providers from the catalog must not
+ * rewrite a chat that still carries one — the next turn has to send the stored
+ * id so the server can refuse it by name.
+ */
+export function isDeprecatedModelId(modelId: string): boolean {
+  const slash = modelId.indexOf('/');
+  if (slash <= 0) return false;
+  return isDeprecatedProvider(modelId.slice(0, slash));
 }
 
 export const ProviderSettingScopeSchema = Type.Literal('provider');
@@ -91,10 +106,10 @@ export const ProviderSettingsDescriptorSchema = Type.Object({
   maxOutputTokensLimit: Type.Integer({ minimum: 1 }),
   settings: ProviderRuntimeSettingsSchema,
   /**
-   * MangoStudio no longer offers this provider. Not a capability flag: the
-   * settings above stay meaningful for the connectors a user already has, and
-   * only new setup is closed off. The server is the authority — a client that
-   * hid a provider on its own would still be able to POST a connector for it.
+   * MangoStudio no longer offers this provider. Not a capability flag: existing
+   * connectors and their secrets stay, but execution is refused and new setup
+   * is closed. The server is the authority — a client that hid a provider on
+   * its own would still be able to POST a connector for it.
    */
   deprecated: Type.Boolean(),
 });

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { Value } from '@sinclair/typebox/value';
 import {
   DEPRECATED_PROVIDERS,
+  isDeprecatedModelId,
   isDeprecatedProvider,
   ProviderSettingsDescriptorSchema,
   ReasoningEffortSchema,
@@ -125,5 +126,12 @@ describe('provider settings contracts', () => {
     expect([...DEPRECATED_PROVIDERS]).toEqual(['cursor']);
     expect(isDeprecatedProvider('cursor')).toBe(true);
     expect(isDeprecatedProvider('openai')).toBe(false);
+  });
+
+  it('recognizes stored Cursor model ids even without a catalog entry', () => {
+    expect(isDeprecatedModelId('cursor/composer-2.5')).toBe(true);
+    expect(isDeprecatedModelId('cursor/auto')).toBe(true);
+    expect(isDeprecatedModelId('gpt-4o')).toBe(false);
+    expect(isDeprecatedModelId('cursor')).toBe(false);
   });
 });

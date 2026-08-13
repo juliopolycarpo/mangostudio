@@ -67,6 +67,30 @@ export function ProviderSettingsPage() {
 
   const providerName = t.providers[descriptor.provider] ?? descriptor.displayName;
 
+  if (descriptor.deprecated) {
+    return (
+      <div className="space-y-6">
+        <Link
+          to="/settings/providers"
+          className="inline-flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-on-surface transition-colors"
+        >
+          <ArrowLeft size={14} />
+          {s.backToMenu}
+        </Link>
+
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-bold text-on-surface">{providerName}</h2>
+            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200 border border-amber-500/20">
+              {s.deprecatedBadge}
+            </span>
+          </div>
+          <p className="mt-2 text-sm leading-relaxed text-on-surface-variant">{s.deprecatedNote}</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <ProviderSettingsEditor
       key={provider}

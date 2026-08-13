@@ -15,7 +15,10 @@ import { useI18n } from '@/hooks/use-i18n';
 import { useApp } from '@/lib/app-context';
 import { forkChatWithRunner } from '@/services/external-agent-service';
 
-export function useDeprecatedModelMigration(chatId: string | null) {
+export function useDeprecatedModelMigration(
+  chatId: string | null,
+  canForkTarget: (targetId: ExternalAgentTargetId) => boolean = () => true
+) {
   const app = useApp();
   const { t } = useI18n();
   const { toast } = useToast();
@@ -23,14 +26,14 @@ export function useDeprecatedModelMigration(chatId: string | null) {
 
   const continueWithRunner = useCallback(
     (targetId: ExternalAgentTargetId) => {
-      if (!chatId || isForking) return;
+      if (!chatId || isForking || !canForkTarget(targetId)) return;
       setForking(true);
       void forkChatWithRunner(chatId, { kind: 'external', targetId })
         .then((chat) => app.handleSelectChat(chat.id))
         .catch(() => toast(t.chat.deprecatedModel.forkFailed, 'error'))
         .finally(() => setForking(false));
     },
-    [app, chatId, isForking, t.chat.deprecatedModel.forkFailed, toast]
+    [app, canForkTarget, chatId, isForking, t.chat.deprecatedModel.forkFailed, toast]
   );
 
   return { isForking, continueWithRunner };

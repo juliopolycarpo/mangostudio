@@ -1,4 +1,4 @@
-import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
+import type { Connector, ModelCatalogResponse, ModelOption } from '@mangostudio/shared';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { ModelToggleList } from './ModelToggleList';
@@ -12,6 +12,34 @@ interface ConnectorModelsModalProps {
   onClose: () => void;
 }
 
+function tombstoneOption(modelId: string, provider: Connector['provider']): ModelOption {
+  return {
+    modelId,
+    resourceName: modelId,
+    displayName: modelId,
+    supportedActions: [],
+    provider,
+    capabilities: { text: true, image: false, streaming: false },
+  };
+}
+
+/**
+ * Discovered models for this connector, plus any enabled ids the catalog no
+ * longer lists. Deprecated providers advertise nothing, so without the
+ * tombstones the editor would claim the connector has no models at all.
+ */
+function modelsForConnector(
+  discoveredText: ModelOption[],
+  discoveredImage: ModelOption[],
+  connector: Connector
+): { textModels: ModelOption[]; imageModels: ModelOption[] } {
+  const known = new Set([...discoveredText, ...discoveredImage].map((model) => model.modelId));
+  const tombs = connector.enabledModels
+    .filter((modelId) => !known.has(modelId))
+    .map((modelId) => tombstoneOption(modelId, connector.provider));
+  return { textModels: [...discoveredText, ...tombs], imageModels: discoveredImage };
+}
+
 export function ConnectorModelsModal({
   connector,
   modelCatalog,
@@ -23,11 +51,16 @@ export function ConnectorModelsModal({
   const { t } = useI18n();
   const s = t.settings.connectors;
 
-  const textModels = modelCatalog.discoveredTextModels.filter(
+  const discoveredText = modelCatalog.discoveredTextModels.filter(
     (m) => !m.provider || m.provider === connector.provider
   );
-  const imageModels = modelCatalog.discoveredImageModels.filter(
+  const discoveredImage = modelCatalog.discoveredImageModels.filter(
     (m) => !m.provider || m.provider === connector.provider
+  );
+  const { textModels, imageModels } = modelsForConnector(
+    discoveredText,
+    discoveredImage,
+    connector
   );
 
   const query = modelSearchQuery.toLowerCase().trim();

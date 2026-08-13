@@ -77,6 +77,12 @@ describe('resolveActiveModeModel', () => {
     expect(resolveActiveModeModel('invalid', 'gemini-pro', options)).toBe('gemini-pro');
   });
 
+  it('keeps a stored Cursor model that the catalog no longer lists', () => {
+    expect(resolveActiveModeModel('cursor/composer-2.5', 'gemini-pro', options)).toBe(
+      'cursor/composer-2.5'
+    );
+  });
+
   it('falls back to first option when both are invalid', () => {
     expect(resolveActiveModeModel('invalid', 'also-invalid', options)).toBe('gpt-4');
   });

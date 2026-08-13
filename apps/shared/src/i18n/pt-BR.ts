@@ -239,6 +239,8 @@ export const messages = {
       title: 'O MangoStudio não executa mais modelos {provider}',
       body: 'Este chat está configurado com {model}. O {provider} agora roda como um agente de CLI próprio, dono das próprias ferramentas e aprovações, então continuar lá significa um novo chat — este mantém o histórico. Escolha outro modelo abaixo para continuar neste chat.',
       continueInNewChat: 'Continuar em um novo chat com o CLI {target}',
+      runnerUnavailable:
+        'O CLI {target} não está disponível neste ambiente. Instale e entre, ou escolha outro modelo abaixo.',
       dismiss: 'Dispensar',
       forkFailed: 'Não foi possível iniciar o novo chat. Tente novamente.',
     },
@@ -739,6 +741,9 @@ export const messages = {
       capabilityCompaction: 'Compactação',
       reservedForFuture: 'Reservado para configurações futuras',
       maxOutputTokensPlaceholder: '1 – {limit}',
+      deprecatedBadge: 'Legado',
+      deprecatedNote:
+        'O MangoStudio não executa mais este provedor. As configurações aqui não afetam turnos — use o runner CLI do Cursor no seletor de runner do chat.',
     },
     tools: {
       title: 'Ferramentas',

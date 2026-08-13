@@ -22,6 +22,7 @@ import { useI18n } from '@/hooks/use-i18n';
 interface DeprecatedModelNoticeProps {
   readonly details: ModelUnavailableDetails;
   readonly isForking: boolean;
+  readonly runnerAvailable: boolean;
   readonly onContinueWithRunner: (targetId: ExternalAgentTargetId) => void;
   readonly onDismiss: () => void;
 }
@@ -29,6 +30,7 @@ interface DeprecatedModelNoticeProps {
 export function DeprecatedModelNotice({
   details,
   isForking,
+  runnerAvailable,
   onContinueWithRunner,
   onDismiss,
 }: DeprecatedModelNoticeProps) {
@@ -53,6 +55,11 @@ export function DeprecatedModelNotice({
               <p className="text-xs leading-relaxed text-on-surface-variant/75">
                 {labels.body.replace('{model}', details.modelId ?? '')}
               </p>
+              {targetId && !runnerAvailable ? (
+                <p className="text-xs leading-relaxed text-on-surface-variant/75">
+                  {labels.runnerUnavailable.replace('{target}', targetId)}
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -60,7 +67,7 @@ export function DeprecatedModelNotice({
             <Button variant="secondary" size="sm" onClick={onDismiss}>
               {labels.dismiss}
             </Button>
-            {targetId ? (
+            {targetId && runnerAvailable ? (
               <Button
                 variant="primary"
                 size="sm"

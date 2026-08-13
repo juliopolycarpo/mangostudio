@@ -241,6 +241,8 @@ export const messages: Messages = {
       title: 'MangoStudio no longer runs {provider} models',
       body: 'This chat is set to {model}. {provider} now runs as its own CLI agent that owns its tools and approvals, so continuing there means a new chat — this one keeps its history. Pick another model below to stay in this chat.',
       continueInNewChat: 'Continue in a new chat with {target} CLI',
+      runnerUnavailable:
+        'The {target} CLI is not available in this environment. Install and sign in, or pick another model below.',
       dismiss: 'Dismiss',
       forkFailed: 'Could not start the new chat. Try again.',
     },
@@ -733,6 +735,9 @@ export const messages: Messages = {
       capabilityCompaction: 'Compaction',
       reservedForFuture: 'Reserved for future settings',
       maxOutputTokensPlaceholder: '1 – {limit}',
+      deprecatedBadge: 'Legacy',
+      deprecatedNote:
+        'MangoStudio no longer runs this provider. Runtime settings here do not affect turns — use the Cursor CLI runner in the chat runner selector instead.',
     },
     tools: {
       title: 'Tools',

@@ -85,6 +85,7 @@ export interface DoctorDeps {
   probeRuntimeSlots: () => Promise<RuntimeSlotProbe[]>;
   probeSshClient: () => Promise<SshClientProbe>;
   listChatGptConnectors: (config: MangoConfig) => SecretMetadataRow[];
+  listCursorConnectors: (config: MangoConfig) => SecretMetadataRow[];
   collectChatGptChecks: (
     config: MangoConfig,
     connectors: readonly SecretMetadataRow[],
@@ -169,7 +170,7 @@ async function collectResults(
     // refuses every turn, so what matters is whether anyone still has a key
     // sitting there, which is also the evidence the removal cycle needs before
     // the connector and its secret can go.
-    if (d.isCursorConfigured(config)) {
+    if (d.isCursorConfigured(config) || d.listCursorConnectors(config).length > 0) {
       results.push(
         warn(
           'Cursor connector',
@@ -307,6 +308,7 @@ function resolveDeps(deps: Partial<DoctorDeps>): Required<DoctorDeps> {
     controller: deps.controller ?? createProcessController(),
     readState: deps.readState ?? readState,
     isCursorConfigured: deps.isCursorConfigured ?? isCursorConnectorConfigured,
+    listCursorConnectors: deps.listCursorConnectors ?? listCursorConnectorRows,
     probeRuntimeBinary: deps.probeRuntimeBinary ?? probeRuntimeBinary,
     probeRuntimeSlots: deps.probeRuntimeSlots ?? (() => probeRuntimeSlots()),
     probeSshClient: deps.probeSshClient ?? (() => probeSshClient()),
@@ -353,6 +355,13 @@ function listChatGptConnectorRows(config: MangoConfig): SecretMetadataRow[] {
   return readDbRows<SecretMetadataRow>(
     config,
     "SELECT * FROM secret_metadata WHERE provider = 'chatgpt'"
+  );
+}
+
+function listCursorConnectorRows(config: MangoConfig): SecretMetadataRow[] {
+  return readDbRows<SecretMetadataRow>(
+    config,
+    "SELECT * FROM secret_metadata WHERE provider = 'cursor'"
   );
 }
 

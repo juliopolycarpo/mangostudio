@@ -75,6 +75,8 @@ interface ChatPageProps {
    */
   onContinueWithExternalRunner?: (targetId: ExternalAgentTargetId) => void;
   isForkingRunner?: boolean;
+  /** False when the vendor CLI the notice would fork onto cannot start a turn. */
+  migrationRunnerAvailable?: boolean;
 }
 
 /**
@@ -168,6 +170,7 @@ export function ChatPage({
   onDismissModelUnavailable,
   onContinueWithExternalRunner,
   isForkingRunner = false,
+  migrationRunnerAvailable = false,
 }: ChatPageProps) {
   const { messages, status } = useChatPageMessages({ chatId, seedContextInfo });
   const interruptedTurn = useMemo(() => findLatestInterruptedTurn(messages), [messages]);
@@ -204,6 +207,7 @@ export function ChatPage({
             <DeprecatedModelNotice
               details={modelUnavailable}
               isForking={isForkingRunner}
+              runnerAvailable={migrationRunnerAvailable}
               onContinueWithRunner={(targetId) => onContinueWithExternalRunner?.(targetId)}
               onDismiss={() => onDismissModelUnavailable?.()}
             />

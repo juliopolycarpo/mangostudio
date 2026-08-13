@@ -191,6 +191,8 @@ describe('deprecated cursor connector routes', () => {
     expect(Value.Check(ApiErrorResponseSchema, payload)).toBe(true);
     expect(payload.code).toBe(ERROR_CODES.UNSUPPORTED);
     expect(payload.error).toContain('cursor');
+    expect(payload.error).toContain('no longer run turns');
+    expect(payload.error).not.toContain('keep working');
   });
 
   it('keeps an existing cursor connector visible with its stored secret', async () => {

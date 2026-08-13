@@ -334,11 +334,16 @@ export function useTextGeneration({
   );
   /**
    * The last deprecated-provider refusal, held so the composer can offer the
-   * migration. Cleared when a turn starts rather than when one succeeds: the
-   * next send is the user acting on the notice, and leaving it up underneath a
-   * running turn would show a refusal that no longer applies.
+   * migration. Keyed by the chat that was refused: this hook lives on the
+   * authenticated layout, and a bare details object would follow the user into
+   * the next chat they open. Cleared when a turn starts rather than when one
+   * succeeds: the next send is the user acting on the notice, and leaving it up
+   * underneath a running turn would show a refusal that no longer applies.
    */
-  const [modelUnavailable, setModelUnavailable] = useState<ModelUnavailableDetails | null>(null);
+  const [modelUnavailable, setModelUnavailable] = useState<{
+    chatId: string;
+    details: ModelUnavailableDetails;
+  } | null>(null);
 
   const syncContextInfo = useCallback(
     (response: ContextCompactionResponse) => {
@@ -554,7 +559,7 @@ export function useTextGeneration({
           // Surfaced above the composer as well as in the transcript: the
           // transcript says what happened, the notice is where the way out is.
           const deprecated = deprecatedProviderRefusal(error);
-          if (deprecated) setModelUnavailable(deprecated);
+          if (deprecated) setModelUnavailable({ chatId: activeChatId, details: deprecated });
           const errorText = resolveApiErrorMessage(error, t.errors.textGenerationFailed);
           const alreadyHasError = streamState.parts.some((part) => part.type === 'error');
           const nextParts: MessagePart[] = alreadyHasError
@@ -727,7 +732,10 @@ export function useTextGeneration({
     seedContextInfo: stream.seedContextInfo,
     contextCache: stream.contextCache,
     isContextActionPending: pendingContextAction !== null,
-    modelUnavailable,
+    modelUnavailable:
+      modelUnavailable !== null && modelUnavailable.chatId === currentChatId
+        ? modelUnavailable.details
+        : null,
     dismissModelUnavailable: useCallback(() => setModelUnavailable(null), []),
   };
 }

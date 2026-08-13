@@ -219,6 +219,24 @@ describe('runDoctor', () => {
     expect(text).toContain('Deprecated provider');
   });
 
+  it('warns when a Cursor connector exists in secret_metadata', async () => {
+    const lines: string[] = [];
+
+    await runDoctor(
+      { ...DEFAULT_DOCTOR_ARGS },
+      {
+        ...makeDoctorDeps({
+          listCursorConnectors: () => [{ id: 'legacy-cursor', provider: 'cursor' }],
+        }),
+        log: (msg) => lines.push(msg),
+      }
+    );
+
+    const text = lines.join('\n');
+    expect(text).toContain('Cursor connector');
+    expect(text).toContain('Deprecated provider');
+  });
+
   it('says nothing about Cursor when no connector is configured', async () => {
     const lines: string[] = [];
 
