@@ -54,4 +54,28 @@ describe('api-client 401 handling', () => {
     expect(result.status).toBe(200);
     expect(scheduleLoginRedirectMock).not.toHaveBeenCalled();
   });
+
+  it('sends credentials and preserves the caller init', async () => {
+    // The session lives in a cookie, so a fetcher that drops
+    // `credentials: 'include'` logs every user out at the next request while
+    // every type and every status code stays exactly as it was. Asserted
+    // alongside the caller's own init, which the spread must not discard.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('ok', { status: 200 })) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
+
+    await import('../../../src/lib/api-client');
+    const fetcher = getFetcher();
+
+    const headers = { 'content-type': 'application/json' };
+    await fetcher('/api/chats', { method: 'POST', body: '{"title":"x"}', headers });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/chats', {
+      method: 'POST',
+      body: '{"title":"x"}',
+      headers,
+      credentials: 'include',
+    });
+  });
 });

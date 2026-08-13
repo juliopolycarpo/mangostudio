@@ -425,6 +425,58 @@ describe('runtime dial-in socket', () => {
     expect(status.runtimeVersionDrift).toBe(true);
   });
 
+  it('applies the same root payload cap the realtime socket gets', async () => {
+    // One `websocket` option object on the root instance covers both families.
+    // Asserted here as well as on `/api/ws` because the two routes are
+    // registered by different modules and only the shared root ties them
+    // together — a per-route transport config would leave this one uncapped.
+    const hub = await startHub();
+    const socket = new WebSocket(hub.url, {
+      headers: { Authorization: `Bearer ${hub.issued.token}` },
+    });
+    const closed = new Promise<CloseEvent>((resolve) => {
+      socket.addEventListener('close', (event) => resolve(event as CloseEvent), { once: true });
+    });
+    await new Promise<void>((resolve) => {
+      socket.addEventListener('open', () => resolve(), { once: true });
+    });
+
+    // Text frames are a protocol error on this socket (binary chunks only), so
+    // an oversized string would close with PROTOCOL_ERROR even if the payload
+    // cap were gone. A binary message larger than the cap is legal framing and
+    // only the transport should refuse it.
+    socket.send(new Uint8Array(REALTIME_WEBSOCKET_OPTIONS.maxPayloadLength + 1));
+
+    const close = await closed;
+    expect(close.code).not.toBe(1000);
+    expect(close.code).not.toBe(RUNTIME_CLOSE_CODES.PROTOCOL_ERROR);
+  });
+
+  it('carries the pre-upgrade credential decision into the opened socket', async () => {
+    // The credential is read from the request headers in a `derive` that runs
+    // before the upgrade, and the `open` handler acts on what it found. That
+    // hand-off is the part an Elysia context-model change moves, and it is
+    // asserted through public frames rather than through `ws.data`: a wrong
+    // credential closes with UNAUTHORIZED, a right one reaches a working
+    // method call, and a query string on the URL changes neither.
+    const hub = await startHub();
+
+    const wrong = await dialRuntime(`${hub.url}?environmentId=workshop`, 'mrt_nope.nothing');
+    expect((await wrong.closed).code).toBe(RUNTIME_CLOSE_CODES.UNAUTHORIZED);
+
+    const right = await dialRuntime(
+      `${hub.url}?environmentId=someone-else&environmentId=again`,
+      hub.issued.token,
+      echoHandlers('queried')
+    );
+    await right.host.waitUntilReady();
+
+    // The environment came from the verified token, never from the URL — a
+    // route that started trusting the query would bind to `someone-else`.
+    const client = await hub.manager.getClient(TEST_USER.id, ENVIRONMENT_ID);
+    expect(await client.shell.run(SHELL_CALL)).toEqual({ marker: 'queried' } as never);
+  });
+
   it('records a heartbeat without writing the credential to the logs', async () => {
     const captured: string[] = [];
     const originalWarn = console.warn;

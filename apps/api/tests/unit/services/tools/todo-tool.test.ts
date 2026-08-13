@@ -92,19 +92,42 @@ describe('todo_write', () => {
     const chatId = `todo-write-invalid-${Date.now()}`;
     await seedChat(chatId);
 
-    expect(executeTool(TODO_WRITE_TOOL_NAME, {}, makeContext(chatId))).rejects.toThrow(
+    await expect(executeTool(TODO_WRITE_TOOL_NAME, {}, makeContext(chatId))).rejects.toThrow(
       /Invalid todo_write arguments/
     );
-    expect(
+    await expect(
       executeTool(TODO_WRITE_TOOL_NAME, { todos: [{ content: '' }] }, makeContext(chatId))
     ).rejects.toThrow(/Invalid todo_write arguments/);
+  });
+
+  it('points the model at the field that failed', async () => {
+    // Rendered from the first schema error as `${path || '/'}: ${message}`.
+    // The model is expected to fix the call from this string alone, so the
+    // location is asserted as text — not through whatever object the renderer
+    // reads it out of.
+    const chatId = `todo-write-pointer-${Date.now()}`;
+    await seedChat(chatId);
+
+    await expect(
+      executeTool(
+        TODO_WRITE_TOOL_NAME,
+        { todos: [{ content: '', status: 'pending' }] },
+        makeContext(chatId)
+      )
+    ).rejects.toThrow(/\(\/todos\/0\/content: .+\)/);
+    await expect(
+      executeTool(TODO_WRITE_TOOL_NAME, { todos: [{ content: 'ship' }] }, makeContext(chatId))
+    ).rejects.toThrow(/\(\/todos\/0\/status: .+\)/);
+    await expect(executeTool(TODO_WRITE_TOOL_NAME, {}, makeContext(chatId))).rejects.toThrow(
+      /\(\/todos: .+\)/
+    );
   });
 
   it('rejects more than one in_progress item', async () => {
     const chatId = `todo-write-active-${Date.now()}`;
     await seedChat(chatId);
 
-    expect(
+    await expect(
       executeTool(
         TODO_WRITE_TOOL_NAME,
         { todos: [todo('a', 'in_progress'), todo('b', 'in_progress')] },

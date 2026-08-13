@@ -55,6 +55,9 @@ function startServer(
         .use(routes)
         .get('/realtime-scope-probe', () => ({ ok: true }));
     });
+  // Transport caps live on the composed root in `app.ts`. This helper omits
+  // them so protocol cases can run without the limits; the cap itself is
+  // asserted by listening on the exported application.
   const app = createApiTestApp(apiRoutes);
   app.listen(0);
   const port = (app.server as { port?: number } | null)?.port;
@@ -269,6 +272,21 @@ describe('realtime WebSocket origins and liveness', () => {
       backpressureLimit: 64 * 1024,
       closeOnBackpressureLimit: true,
     });
+  });
+
+  it('handshakes regardless of query parameters on the socket URL', async () => {
+    // The browser client connects to a bare `/api/ws` with no query string, so
+    // nothing in the handshake may depend on one. Duplicated and unknown keys
+    // are the shapes a proxy or a future client would introduce, and a query
+    // parser that starts rejecting or reshaping them must not reach this route.
+    const { httpUrl, wsUrl } = startServer();
+    const user = await signUp(httpUrl);
+
+    for (const suffix of ['', '?topic=a&topic=b', '?unexpected=1&unexpected=2&other=']) {
+      const client = connect(`${wsUrl}${suffix}`, { Cookie: user.cookie });
+      await client.opened;
+      expect(await client.nextMessage()).toEqual({ type: 'ready' });
+    }
   });
 
   it('accepts configured, public-auth, and absent origins but rejects other browser origins', async () => {
