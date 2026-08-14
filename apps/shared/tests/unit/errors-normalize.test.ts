@@ -79,6 +79,29 @@ describe('normalizeApiErrorBody', () => {
     expect(normalized.message).toBe('Not found');
   });
 
+  it('recognizes a problem document carrying neither type nor title', () => {
+    // Every standard member is optional and an omitted `type` means
+    // `about:blank`, so a conforming gateway can send exactly this. Reading it
+    // as legacy would drop the one usable string in the body.
+    const normalized = normalizeApiErrorBody({ status: 502, detail: 'Upstream failed' });
+    expect(normalized.problemDetails).toBe(true);
+    expect(normalized.message).toBe('Upstream failed');
+
+    expect(normalizeApiErrorBody({ detail: 'Upstream failed' }).message).toBe('Upstream failed');
+    expect(normalizeApiErrorBody({ instance: '/requests/1', status: 502 }).problemDetails).toBe(
+      true
+    );
+  });
+
+  it('keeps the message of a body carrying both spellings', () => {
+    // An `SSEErrorEvent` is `{ type: 'error', error, done }` — a literal `type`
+    // that has always satisfied problem-document detection. Reading `error` as
+    // the last fallback is what keeps a widened predicate from losing text.
+    expect(
+      normalizeApiErrorBody({ type: 'error', error: 'Generation failed', done: true }).message
+    ).toBe('Generation failed');
+  });
+
   it('reads a bare string', () => {
     expect(normalizeApiErrorBody('Network error').message).toBe('Network error');
   });

@@ -50,16 +50,27 @@ function readDetails(source: Record<string, unknown>): Readonly<Record<string, s
 }
 
 /**
+ * The message a problem document carries, or `null` when it carries none.
+ *
+ * `detail` first: it describes this occurrence and is the same string the legacy
+ * body would have put in `error`, while `title` only names the class of problem.
+ *
+ * `error` last. Detection below is deliberately loose, so this arm also sees
+ * bodies that carry both spellings — an `SSEErrorEvent`, whose `type: 'error'`
+ * has always tripped the `type` check, or a gateway that merged the two — and
+ * none of them should lose their text to that looseness.
+ */
+function problemMessage(source: Record<string, unknown>): string | null {
+  return readString(source, 'detail') ?? readString(source, 'title') ?? readString(source, 'error');
+}
+
+/**
  * Read an error body of either representation, or anything else.
  *
  * Accepts the legacy `ApiErrorResponse`, RFC 9457 problem details, a bare
  * string, and malformed or absent bodies. A body that is none of those
  * normalizes to all-`null` rather than throwing: a failed request must not fail
  * twice because the failure itself was unreadable.
- *
- * For problem details the message is `detail` before `title` — `detail`
- * describes this occurrence and is the same string the legacy body would have
- * put in `error`, while `title` only names the class of problem.
  */
 export function normalizeApiErrorBody(value: unknown): NormalizedApiError {
   if (typeof value === 'string') {
@@ -71,15 +82,24 @@ export function normalizeApiErrorBody(value: unknown): NormalizedApiError {
   const legacy = value as Partial<ApiErrorResponse>;
   const problem = value as Partial<ProblemDetails>;
 
-  // `type` and `title` are what a problem document has and the legacy shape
-  // never does. Testing for them rather than for the absence of `error` keeps a
-  // body carrying both — which nothing emits, but a proxy could synthesize —
+  // Every standard member of a problem document is optional, and an omitted
+  // `type` means `about:blank` rather than "not a problem document" — so a
+  // conforming intermediary can answer `{ status: 502, detail: 'Upstream
+  // failed' }` with neither `type` nor `title`. Testing only those two read that
+  // body as legacy and threw its `detail` away. Any problem-specific member is
+  // enough; `status` alone is not, since a number under that name says nothing
+  // about which contract produced the body.
+  //
+  // Testing for these rather than for the absence of `error` keeps a body
+  // carrying both — which nothing emits, but a proxy could synthesize —
   // readable as the richer of the two.
-  const isProblem = typeof problem.type === 'string' || typeof problem.title === 'string';
+  const isProblem =
+    typeof problem.type === 'string' ||
+    typeof problem.title === 'string' ||
+    typeof problem.detail === 'string' ||
+    typeof problem.instance === 'string';
 
-  const message = isProblem
-    ? (readString(source, 'detail') ?? readString(source, 'title'))
-    : readString(source, 'error');
+  const message = isProblem ? problemMessage(source) : readString(source, 'error');
 
   return {
     message,
