@@ -26,20 +26,25 @@ interface MediaRange {
 }
 
 /**
- * Split on commas that separate media ranges, ignoring commas inside quoted
- * parameter values (`;title="a,b"` is one range, not two).
+ * Split on a separator that is structural, ignoring the ones inside quoted
+ * parameter values.
+ *
+ * Both separators in an `Accept` header need this. A comma inside a quote is
+ * part of one range (`;title="a,b"`), and so is a semicolon
+ * (`;profile="a;q=0"`) — reading the second one naively invents a `q` parameter
+ * the client never sent.
  *
  * Hand-rolled rather than a regex: an `Accept` header is attacker-controlled on
  * every request, and a backtracking pattern over one is a denial-of-service
  * waiting to happen.
  */
-function splitRanges(header: string): string[] {
-  const ranges: string[] = [];
+function splitUnquoted(value: string, separator: ',' | ';'): string[] {
+  const parts: string[] = [];
   let current = '';
   let quoted = false;
   let escaped = false;
 
-  for (const char of header) {
+  for (const char of value) {
     if (escaped) {
       current += char;
       escaped = false;
@@ -55,16 +60,16 @@ function splitRanges(header: string): string[] {
       current += char;
       continue;
     }
-    if (char === ',' && !quoted) {
-      ranges.push(current);
+    if (char === separator && !quoted) {
+      parts.push(current);
       current = '';
       continue;
     }
     current += char;
   }
-  ranges.push(current);
+  parts.push(current);
 
-  return ranges;
+  return parts;
 }
 
 /**
@@ -90,8 +95,8 @@ function parseQuality(parameters: string[]): number {
 function parseAccept(header: string): MediaRange[] {
   const ranges: MediaRange[] = [];
 
-  for (const raw of splitRanges(header)) {
-    const [mediaRange, ...parameters] = raw.split(';');
+  for (const raw of splitUnquoted(header, ',')) {
+    const [mediaRange, ...parameters] = splitUnquoted(raw, ';');
     const trimmed = mediaRange?.trim().toLowerCase() ?? '';
     if (!trimmed) continue;
 
@@ -108,9 +113,33 @@ function parseAccept(header: string): MediaRange[] {
   return ranges;
 }
 
+/** How specifically a range names a media type; higher wins outright. */
+const PRECEDENCE = {
+  none: -1,
+  wildcard: 0,
+  subtype: 1,
+  exact: 2,
+} as const;
+
+type Precedence = (typeof PRECEDENCE)[keyof typeof PRECEDENCE];
+
+function precedenceFor(range: MediaRange, type: string, subtype: string): Precedence {
+  if (range.type === type && range.subtype === subtype) return PRECEDENCE.exact;
+  if (range.type === type && range.subtype === '*') return PRECEDENCE.subtype;
+  if (range.type === '*' && range.subtype === '*') return PRECEDENCE.wildcard;
+  return PRECEDENCE.none;
+}
+
 /**
- * Best quality the header assigns to a media type, or `undefined` when no range
+ * Quality the header assigns to a media type, or `undefined` when no range
  * covers it.
+ *
+ * Specificity decides before quality does, per RFC 9110 §12.5.1: the most
+ * precise range that matches is the one that applies, and `q` only breaks ties
+ * between ranges of equal precision. Taking the highest `q` across all matches
+ * instead would let a `q=1` wildcard overrule an explicit
+ * `application/json;q=0.1` and hand the legacy body to a client that named
+ * problem details at a higher `q`.
  *
  * `exactOnly` is what keeps this opt-in. A client sending only wildcards — bare
  * `*` over `*`, or a browser's `text/html` list ending in one — accepts problem
@@ -129,16 +158,23 @@ function qualityFor(
   const type = mediaType.slice(0, slash);
   const subtype = mediaType.slice(slash + 1);
 
+  let bestPrecedence: Precedence = PRECEDENCE.none;
   let best: number | undefined;
-  for (const range of ranges) {
-    const exact = range.type === type && range.subtype === subtype;
-    const wildcard =
-      (range.type === '*' && range.subtype === '*') ||
-      (range.type === type && range.subtype === '*');
 
-    if (!exact && (exactOnly || !wildcard)) continue;
+  for (const range of ranges) {
+    const precedence = precedenceFor(range, type, subtype);
+    if (precedence === PRECEDENCE.none) continue;
+    if (exactOnly && precedence !== PRECEDENCE.exact) continue;
+    if (precedence < bestPrecedence) continue;
+
+    if (precedence > bestPrecedence) {
+      bestPrecedence = precedence;
+      best = range.quality;
+      continue;
+    }
     if (best === undefined || range.quality > best) best = range.quality;
   }
+
   return best;
 }
 

@@ -74,6 +74,29 @@ describe('prefersProblemDetails', () => {
     expect(prefersProblemDetails('*/*;q=0.5, application/problem+json')).toBe(true);
   });
 
+  it('lets a specific range outrank a higher-quality wildcard', () => {
+    // RFC 9110 §12.5.1: the most precise matching range applies, and `q` only
+    // breaks ties within one precision. Reading the wildcard's q=1 as the
+    // legacy quality here would serve the legacy body to a client that named
+    // problem details five times higher than it named JSON.
+    expect(
+      prefersProblemDetails('application/json;q=0.1, application/problem+json;q=0.5, */*;q=1')
+    ).toBe(true);
+    // The same rule in the other direction: `application/*` is more precise
+    // than `*/*`, so it is the one that speaks for application/json.
+    expect(
+      prefersProblemDetails('application/*;q=1, application/problem+json;q=0.5, */*;q=0.1')
+    ).toBe(false);
+  });
+
+  it('does not let a quoted semicolon invent a q parameter', () => {
+    // `profile="a;q=0"` carries no quality at all, so the range keeps the
+    // default of 1 — splitting it naively reads a synthetic `q=0"` and turns an
+    // explicit ask into a refusal.
+    expect(prefersProblemDetails('application/problem+json;profile="a;q=0"')).toBe(true);
+    expect(prefersProblemDetails('application/problem+json;profile="a;q=0";q=0')).toBe(false);
+  });
+
   it('falls back to the legacy shape on anything unparseable', () => {
     // A header we could not read is not consent, and the safe answer is the
     // representation every client already handles.
