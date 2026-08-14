@@ -159,8 +159,11 @@ export const app = new Elysia()
   )
   .use(createGeneratedImageRoutes(IMAGES_DIR))
   // Adds the negotiated `application/problem+json` media type to the generated
-  // document. Seated before `openapi` on purpose — a global hook only reaches
-  // routes declared after it, and the spec route is declared by that plugin.
+  // document, and classifies the spec route's own failures — `errorHandler` is
+  // mounted inside `api` below, too late to reach them, and the plugin's local
+  // error hook would otherwise let Elysia answer with the raw exception message.
+  // Seated before `openapi` on purpose — a global hook only reaches routes
+  // declared after it, and the spec route is declared by that plugin.
   .use(openapiProblemDetails)
   // OpenAPI/Scalar documentation
   .use(
