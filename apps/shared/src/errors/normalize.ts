@@ -7,6 +7,7 @@
  * not add a second parsing path anywhere.
  */
 
+import { statusTitle } from './problem-details';
 import type { ApiErrorResponse, ProblemDetails } from './schemas';
 
 /** What a caller can rely on after reading any MangoStudio error body. */
@@ -55,13 +56,32 @@ function readDetails(source: Record<string, unknown>): Readonly<Record<string, s
  * `detail` first: it describes this occurrence and is the same string the legacy
  * body would have put in `error`, while `title` only names the class of problem.
  *
+ * The `title` fallback skips a title that is merely its own status's reason
+ * phrase. RFC 9457 §4.2.1 defines that title as carrying "no more information
+ * than the status code", so reporting it as a server message would both invent
+ * text the server never wrote and make the message depend on the `Accept`
+ * header: an `ApiErrorResponse` with an empty `error` — which the schema
+ * permits, and which any route forwarding a bare `Error.message` can produce —
+ * reads as no message at all, while its problem rendering would otherwise read
+ * `Not Found`. A title that is *not* the reason phrase is real information and
+ * is kept, so a producer pairing `about:blank` with a written title still gets
+ * through.
+ *
  * `error` last. Detection below is deliberately loose, so this arm also sees
  * bodies that carry both spellings — an `SSEErrorEvent`, whose `type: 'error'`
  * has always tripped the `type` check, or a gateway that merged the two — and
  * none of them should lose their text to that looseness.
  */
 function problemMessage(source: Record<string, unknown>): string | null {
-  return readString(source, 'detail') ?? readString(source, 'title') ?? readString(source, 'error');
+  const detail = readString(source, 'detail');
+  if (detail) return detail;
+
+  const title = readString(source, 'title');
+  const status = source.status;
+  const saysNothingNew = typeof status === 'number' && title === statusTitle(status);
+  if (title && !saysNothingNew) return title;
+
+  return readString(source, 'error');
 }
 
 /**

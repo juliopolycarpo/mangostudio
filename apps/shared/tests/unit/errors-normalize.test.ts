@@ -102,6 +102,41 @@ describe('normalizeApiErrorBody', () => {
     ).toBe('Generation failed');
   });
 
+  it('does not report a bare status reason phrase as a server message', () => {
+    // RFC 9457 §4.2.1: an `about:blank` title carries no more information than
+    // the status code, so surfacing it would report words the server never
+    // wrote — and would make the message depend on the `Accept` header.
+    const normalized = normalizeApiErrorBody({
+      type: 'about:blank',
+      title: 'Not Found',
+      status: 404,
+    });
+    expect(normalized.problemDetails).toBe(true);
+    expect(normalized.title).toBe('Not Found');
+    expect(normalized.message).toBeNull();
+  });
+
+  it('keeps an about:blank title that is not the reason phrase', () => {
+    expect(
+      normalizeApiErrorBody({ type: 'about:blank', title: 'Quota exhausted', status: 429 }).message
+    ).toBe('Quota exhausted');
+  });
+
+  it('reports the same message for both representations of an empty error', () => {
+    // `ApiErrorResponseSchema` permits `error: ''`, and routes forwarding a bare
+    // `Error.message` can produce it. Both representations have to agree that
+    // no message was sent, or the rendered text changes with the header.
+    const legacy = { error: '' };
+
+    for (const status of [404, 409, 500, 599]) {
+      const fromLegacy = normalizeApiErrorBody(legacy);
+      const fromProblem = normalizeApiErrorBody(toProblemDetails(legacy, status));
+
+      expect(fromProblem.message).toBe(fromLegacy.message);
+      expect(fromProblem.message).toBeNull();
+    }
+  });
+
   it('reads a bare string', () => {
     expect(normalizeApiErrorBody('Network error').message).toBe('Network error');
   });

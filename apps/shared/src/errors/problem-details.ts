@@ -159,8 +159,12 @@ const STATUS_REASON_PHRASES: Readonly<Record<number, string>> = {
  *
  * Statuses outside the table fall back to their class, which is what RFC 9110
  * §15 says a client must do with a status it does not recognize anyway.
+ *
+ * Exported because the reader needs the same table: a title equal to its own
+ * status's phrase is the one that, by §4.2.1, says nothing the status line did
+ * not, and `normalizeApiErrorBody` must not report it as a server message.
  */
-function fallbackTitle(status: number): string {
+export function statusTitle(status: number): string {
   const phrase = STATUS_REASON_PHRASES[status];
   if (phrase) return phrase;
   if (status >= 500) return 'Server Error';
@@ -201,7 +205,7 @@ export function toProblemDetails(body: ApiErrorResponse, status: number): Proble
 
   const problem: ProblemDetails = {
     type: known ? problemTypeUri(code) : 'about:blank',
-    title: known ? PROBLEM_TITLES[code] : fallbackTitle(status),
+    title: known ? PROBLEM_TITLES[code] : statusTitle(status),
     status,
   };
 
