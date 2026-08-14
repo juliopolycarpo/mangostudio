@@ -68,14 +68,67 @@ describe('api-client 401 handling', () => {
     await import('../../../src/lib/api-client');
     const fetcher = getFetcher();
 
-    const headers = { 'content-type': 'application/json' };
-    await fetcher('/api/chats', { method: 'POST', body: '{"title":"x"}', headers });
-
-    expect(fetchMock).toHaveBeenCalledWith('/api/chats', {
+    await fetcher('/api/chats', {
       method: 'POST',
       body: '{"title":"x"}',
-      headers,
-      credentials: 'include',
+      headers: { 'content-type': 'application/json' },
+    });
+
+    const [url, init] = (fetchMock as unknown as { mock: { calls: [string, RequestInit][] } }).mock
+      .calls[0];
+    expect(url).toBe('/api/chats');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe('{"title":"x"}');
+    expect(init.credentials).toBe('include');
+    expect(new Headers(init.headers).get('content-type')).toBe('application/json');
+  });
+
+  describe('problem details opt-in', () => {
+    function sentHeaders(fetchMock: unknown): Headers {
+      const [, init] = (fetchMock as { mock: { calls: [string, RequestInit][] } }).mock.calls[0];
+      return new Headers(init.headers);
+    }
+
+    it('asks for RFC 9457 problem details', async () => {
+      // Without this the server keeps answering with the legacy shape, and the
+      // whole negotiated path is dead code in production.
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response('ok', { status: 200 })) as unknown as typeof fetch;
+      globalThis.fetch = fetchMock;
+
+      await import('../../../src/lib/api-client');
+      await getFetcher()('/api/chats', {});
+
+      expect(sentHeaders(fetchMock).get('accept')).toContain('application/problem+json');
+    });
+
+    it('does not override an Accept the caller set', async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response('ok', { status: 200 })) as unknown as typeof fetch;
+      globalThis.fetch = fetchMock;
+
+      await import('../../../src/lib/api-client');
+      await getFetcher()('/api/export', { headers: { accept: 'text/csv' } });
+
+      expect(sentHeaders(fetchMock).get('accept')).toBe('text/csv');
+    });
+
+    it('still redirects on 401 whatever the body looks like', async () => {
+      // The redirect keys on the status, so a problem document must not be able
+      // to slip an expired session past it.
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ type: 'about:blank', title: 'Unauthorized', status: 401 }), {
+          status: 401,
+          headers: { 'content-type': 'application/problem+json' },
+        })
+      ) as unknown as typeof fetch;
+
+      await import('../../../src/lib/api-client');
+      await getFetcher()('/api/chats', {});
+
+      expect(scheduleLoginRedirectMock).toHaveBeenCalledOnce();
     });
   });
 });
