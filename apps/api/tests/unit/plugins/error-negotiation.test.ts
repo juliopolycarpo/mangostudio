@@ -103,6 +103,16 @@ function app() {
         recipe: { id: 'node-22' },
       };
     })
+    .get('/varied-array', ({ set }) => {
+      set.status = 404;
+      (set.headers as Record<string, unknown>).vary = ['Origin', 'Accept-Encoding'];
+      return { error: 'Missing', code: ERROR_CODES.NOT_FOUND };
+    })
+    .get('/varied-star', ({ set }) => {
+      set.status = 404;
+      set.headers.vary = '*';
+      return { error: 'Missing', code: ERROR_CODES.NOT_FOUND };
+    })
     .get('/ok', () => ({ ok: true }));
 }
 
@@ -269,6 +279,29 @@ describe('Vary', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('vary')).toBeNull();
     expect(await response.json()).toEqual({ ok: true });
+  });
+
+  it('keeps array-valued directives instead of replacing them', async () => {
+    // `HTTPHeaders` is `Record<string, string | number | string[]>`. Overwriting
+    // an array would drop `Origin`, and a CORS-varying response cached without
+    // it is one a shared cache may hand to the wrong origin.
+    for (const init of [LEGACY, PROBLEM]) {
+      const fields = ((await get('/varied-array', init)).headers.get('vary') ?? '')
+        .split(',')
+        .map((field) => field.trim());
+
+      expect(fields).toContain('Origin');
+      expect(fields).toContain('Accept-Encoding');
+      expect(fields).toContain('Accept');
+    }
+  });
+
+  it('leaves Vary: * alone', async () => {
+    // `*` already says the response varies on everything; `*, Accept` narrows
+    // nothing and is a worse header.
+    const response = await get('/varied-star', PROBLEM);
+
+    expect(response.headers.get('vary')).toBe('*');
   });
 });
 

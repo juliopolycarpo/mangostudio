@@ -27,9 +27,9 @@ import Value from 'typebox/value';
  *
  * The key check is not a formality. `InstallBlockedResponse` is an
  * `ApiErrorResponse` plus a `recipe` the frontend keys off to render the
- * refusal; problem details has nowhere to put `recipe`, so rewriting that body
- * would silently delete it. An endpoint whose error carries domain data keeps
- * its documented shape under either `Accept`.
+ * refusal, and `recipe` is outside the members this conversion covers, so
+ * rewriting that body would silently delete it. An endpoint whose error carries
+ * domain data keeps its documented shape under either `Accept`.
  */
 function asApiErrorResponse(value: unknown): ApiErrorResponse | null {
   if (!value || typeof value !== 'object') return null;
@@ -70,19 +70,29 @@ function resolveStatus(responseValue: unknown, set: Context['set']): number | nu
  * second key leaves both in the record — which Elysia faithfully emits as
  * `Vary: Origin, Origin, Accept`. Updating the existing key in place is what
  * keeps one well-formed header.
+ *
+ * The array arm is not reachable through today's CORS plugin, which writes a
+ * plain string, but `HTTPHeaders` is `Record<string, string | number | string[]>`
+ * and one plugin writing `['Origin']` would otherwise have its directive
+ * replaced outright — a CORS-varying response cached under no `Vary: Origin` is
+ * one a shared cache may hand to the wrong origin. Reading both spellings into
+ * one directive list costs a line and removes the trap.
  */
 function varyOnAccept(headers: Context['set']['headers']): void {
   const field = headers as Record<string, unknown>;
   const key = Object.keys(field).find((name) => name.toLowerCase() === 'vary');
   const existing = key ? field[key] : undefined;
 
-  if (typeof existing !== 'string' || !existing.trim()) {
-    field[key ?? 'Vary'] = 'Accept';
-    return;
-  }
+  const directives = (Array.isArray(existing) ? existing : [existing])
+    .flatMap((value) => (typeof value === 'string' ? value.split(',') : []))
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
 
-  const present = existing.split(',').some((value) => value.trim().toLowerCase() === 'accept');
-  if (!present) field[key ?? 'Vary'] = `${existing}, Accept`;
+  // `Vary: *` already says the response varies on everything; narrowing it to
+  // `*, Accept` would only make the header worse.
+  if (directives.some((value) => value === '*' || value.toLowerCase() === 'accept')) return;
+
+  field[key ?? 'Vary'] = [...directives, 'Accept'].join(', ');
 }
 
 /**
