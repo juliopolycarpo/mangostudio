@@ -23,9 +23,11 @@ export const PROBLEM_TYPE_BASE = 'https://mangostudio.dev/problems';
  * Every member a plain `ApiErrorResponse` may carry.
  *
  * A body with anything beyond these is not a plain error: it is an error plus
- * domain data, and problem details has nowhere to put the extra. Both the API's
- * runtime gate and its OpenAPI generator read this set, so the shape they agree
- * to negotiate cannot drift apart.
+ * domain data, and the conversion is defined only over this exact set. RFC 9457
+ * would happily carry the extra as extension members — minting a private one
+ * per endpoint is the thing this set exists to prevent. Both the API's runtime
+ * gate and its OpenAPI generator read it, so the shape they agree to negotiate
+ * cannot drift apart.
  */
 export const API_ERROR_RESPONSE_MEMBERS: ReadonlySet<string> = new Set([
   'error',
@@ -98,15 +100,71 @@ function isErrorCode(code: string | undefined): code is ErrorCode {
 }
 
 /**
+ * IANA reason phrases for the statuses an error response can carry.
+ *
+ * A constant table keyed by number, never the `statusText` off an incoming
+ * response: the point is that this title is derived from the status alone, so
+ * it can never become an echo of whatever string arrived.
+ */
+const STATUS_REASON_PHRASES: Readonly<Record<number, string>> = {
+  400: 'Bad Request',
+  401: 'Unauthorized',
+  402: 'Payment Required',
+  403: 'Forbidden',
+  404: 'Not Found',
+  405: 'Method Not Allowed',
+  406: 'Not Acceptable',
+  407: 'Proxy Authentication Required',
+  408: 'Request Timeout',
+  409: 'Conflict',
+  410: 'Gone',
+  411: 'Length Required',
+  412: 'Precondition Failed',
+  413: 'Content Too Large',
+  414: 'URI Too Long',
+  415: 'Unsupported Media Type',
+  416: 'Range Not Satisfiable',
+  417: 'Expectation Failed',
+  421: 'Misdirected Request',
+  422: 'Unprocessable Content',
+  423: 'Locked',
+  424: 'Failed Dependency',
+  425: 'Too Early',
+  426: 'Upgrade Required',
+  428: 'Precondition Required',
+  429: 'Too Many Requests',
+  431: 'Request Header Fields Too Large',
+  451: 'Unavailable For Legal Reasons',
+  500: 'Internal Server Error',
+  501: 'Not Implemented',
+  502: 'Bad Gateway',
+  503: 'Service Unavailable',
+  504: 'Gateway Timeout',
+  505: 'HTTP Version Not Supported',
+  506: 'Variant Also Negotiates',
+  507: 'Insufficient Storage',
+  508: 'Loop Detected',
+  510: 'Not Extended',
+  511: 'Network Authentication Required',
+};
+
+/**
  * Title used when a body carried no `code`, or one this build does not know.
  *
- * Falls back to the status class rather than to the raw status text so a body
- * missing its code still reads as something, and never as an echo of whatever
- * string arrived.
+ * RFC 9457 §4.2.1 defines `about:blank` as meaning "no more information than
+ * the status code", and says the title should then be that status's recommended
+ * reason phrase. Advertising `type: about:blank` alongside a title of our own
+ * invention would claim standard semantics while not following them, so a
+ * code-less 404 has to read `Not Found`.
+ *
+ * Statuses outside the table fall back to their class, which is what RFC 9110
+ * §15 says a client must do with a status it does not recognize anyway.
  */
 function fallbackTitle(status: number): string {
-  if (status >= 500) return PROBLEM_TITLES.INTERNAL;
-  if (status >= 400) return 'Request failed';
+  const phrase = STATUS_REASON_PHRASES[status];
+  if (phrase) return phrase;
+  if (status >= 500) return 'Server Error';
+  if (status >= 400) return 'Client Error';
   return 'Error';
 }
 

@@ -251,7 +251,7 @@ describe('toProblemDetails', () => {
   it('falls back to about:blank for a body with no code', () => {
     expect(toProblemDetails({ error: 'Something failed' }, 400)).toEqual({
       type: 'about:blank',
-      title: 'Request failed',
+      title: 'Bad Request',
       status: 400,
       detail: 'Something failed',
     });
@@ -264,7 +264,34 @@ describe('toProblemDetails', () => {
 
     expect(problem.type).toBe('about:blank');
     expect(problem.code).toBe('SOMETHING_NEW');
-    expect(problem.title).toBe('Internal server error');
+    expect(problem.title).toBe('Service Unavailable');
+  });
+
+  it('titles about:blank with the status reason phrase', () => {
+    // RFC 9457 §4.2.1 gives `about:blank` a fixed meaning — "no more
+    // information than the status code" — and pins its title to that status's
+    // reason phrase. Advertising the standard type under a title of our own
+    // invention would claim semantics we then did not follow.
+    const phrases: [number, string][] = [
+      [401, 'Unauthorized'],
+      [403, 'Forbidden'],
+      [404, 'Not Found'],
+      [409, 'Conflict'],
+      [422, 'Unprocessable Content'],
+      [429, 'Too Many Requests'],
+      [500, 'Internal Server Error'],
+      [502, 'Bad Gateway'],
+      [504, 'Gateway Timeout'],
+    ];
+
+    for (const [status, title] of phrases) {
+      expect(toProblemDetails({ error: 'x' }, status).title).toBe(title);
+    }
+  });
+
+  it('falls back to the status class for an unregistered status', () => {
+    expect(toProblemDetails({ error: 'x' }, 499).title).toBe('Client Error');
+    expect(toProblemDetails({ error: 'x' }, 599).title).toBe('Server Error');
   });
 
   it('omits detail rather than emitting an empty one', () => {
