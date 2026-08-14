@@ -54,6 +54,11 @@ HTTP errors use `ApiErrorResponse` from `@mangostudio/shared/errors`:
 { "error": "Human-readable message", "code": "OPTIONAL_CODE" }
 ```
 
+Send `Accept: application/problem+json` to receive RFC 9457 problem details
+instead, with the same status and the same `code`. This is opt-in and additive —
+no existing integration has to change. See
+[Error Response Format](./api.md#rfc-9457-problem-details) for the full contract.
+
 Common codes for external API traffic:
 
 | Code                      | Typical status | Meaning                                  |

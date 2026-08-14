@@ -158,6 +158,63 @@ Erros de streaming usam `SSEErrorEvent`:
 data: {"type":"error","error":"Provider API error","done":true}
 ```
 
+### Problem Details (RFC 9457)
+
+Respostas de erro são negociadas por conteúdo. `ApiErrorResponse` continua sendo
+o padrão, então um cliente que não envia nada, envia `*/*` ou
+`application/json` continua recebendo o body acima. Um cliente que nomeia
+`application/problem+json` no `Accept` recebe a mesma falha como um documento
+[RFC 9457](https://www.rfc-editor.org/rfc/rfc9457):
+
+```http
+GET /api/chats/does-not-exist
+Accept: application/problem+json, application/json;q=0.9
+```
+
+```http
+HTTP/1.1 404 Not Found
+Content-Type: application/problem+json;charset=utf-8
+Vary: Accept
+```
+
+```json
+{
+  "type": "https://mangostudio.dev/problems/not-found",
+  "title": "Not found",
+  "status": 404,
+  "detail": "Chat not found",
+  "code": "NOT_FOUND"
+}
+```
+
+As duas representações são geradas a partir de uma única classificação, então
+nada além da forma muda:
+
+- o HTTP status é idêntico, e `status` sempre é igual a ele;
+- `code` é a mesma constante, carregada como membro de extensão da RFC;
+- `detail` é a mesma string que `error` carregaria, com a mesma sanitização;
+- `details` é repassado sem alteração quando o endpoint reporta um;
+- `type` é um identificador público estável por código de erro — compare-o, não
+  faça dereference. Bodies sem código reconhecido usam `about:blank`;
+- `instance` nunca é emitido; MangoStudio não tem um identificador público de
+  request.
+
+Respostas que participam carregam `Vary: Accept` em qualquer representação, para
+que um cache compartilhado não entregue a um cliente o body do outro.
+
+Duas coisas ficam fora da negociação. SSE mantém `SSEErrorEvent` — é um stream
+de eventos, não uma resposta HTTP de erro. E alguns endpoints respondem 4xx com
+um erro *mais* dados de domínio, como uma recusa de instalação carregando sua
+`recipe`; esses mantêm o shape documentado em qualquer `Accept`, porque um
+documento problem não tem onde colocar os membros extras.
+
+`Accept: application/problem+json;q=0` recusa explicitamente. Quando os dois
+media types são nomeados, o maior `q` vence.
+
+O documento OpenAPI gerado em `/scalar/json` lista os dois media types em toda
+resposta de erro que participa, e publica o schema como
+`components.schemas.ProblemDetails`.
+
 ### Códigos De Erro Comuns
 
 | Código           | HTTP Status | Significado                               |

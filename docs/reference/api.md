@@ -166,6 +166,62 @@ Streaming errors use `SSEErrorEvent`:
 data: {"type":"error","error":"Provider API error","done":true}
 ```
 
+### RFC 9457 Problem Details
+
+Error responses are content-negotiated. `ApiErrorResponse` stays the default, so
+a client that sends nothing, `*/*`, or `application/json` keeps the body above.
+A client that names `application/problem+json` in `Accept` receives the same
+failure as an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) problem
+document instead:
+
+```http
+GET /api/chats/does-not-exist
+Accept: application/problem+json, application/json;q=0.9
+```
+
+```http
+HTTP/1.1 404 Not Found
+Content-Type: application/problem+json;charset=utf-8
+Vary: Accept
+```
+
+```json
+{
+  "type": "https://mangostudio.dev/problems/not-found",
+  "title": "Not found",
+  "status": 404,
+  "detail": "Chat not found",
+  "code": "NOT_FOUND"
+}
+```
+
+Both representations are rendered from one classification, so nothing but the
+spelling changes:
+
+- the HTTP status is identical, and `status` always equals it;
+- `code` is the same constant, carried as an RFC extension member;
+- `detail` is the same string `error` would have carried, redacted the same way;
+- `details` is carried across unchanged when the endpoint reports one;
+- `type` is a stable public identifier per error code — compare it, do not
+  dereference it. Bodies with no recognized code use `about:blank`;
+- `instance` is never emitted; MangoStudio has no public request identifier.
+
+Responses that participate carry `Vary: Accept` under either representation, so
+a shared cache cannot serve one client the other's body.
+
+Two things stay outside the negotiation. SSE keeps `SSEErrorEvent` — it is a
+stream of events, not an HTTP error response. And a handful of endpoints answer
+a 4xx with an error *plus* domain data, such as an install refusal carrying its
+`recipe`; those keep their documented shape under either `Accept`, because a
+problem document has nowhere to put the extra members.
+
+`Accept: application/problem+json;q=0` explicitly opts out. When both media
+types are named, the higher `q` wins.
+
+The generated OpenAPI document at `/scalar/json` lists both media types on every
+error response that participates, and publishes the schema as
+`components.schemas.ProblemDetails`.
+
 ### Common Error Codes
 
 | Code             | HTTP Status | Meaning                                    |

@@ -55,6 +55,12 @@ Erros HTTP usam `ApiErrorResponse` de `@mangostudio/shared/errors`:
 { "error": "Mensagem legível", "code": "CODIGO_OPCIONAL" }
 ```
 
+Envie `Accept: application/problem+json` para receber problem details da RFC
+9457, com o mesmo status e o mesmo `code`. É opt-in e aditivo — nenhuma
+integração existente precisa mudar. Veja
+[Formato Da Resposta De Erro](./api.md#problem-details-rfc-9457) para o contrato
+completo.
+
 Códigos comuns para tráfego de API externa:
 
 | Código                    | Status típico | Significado                                 |
