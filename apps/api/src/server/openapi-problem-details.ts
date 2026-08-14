@@ -1,6 +1,7 @@
 /**
- * Teaching the generated OpenAPI document about the second error media type.
+ * The spec route's two departures from the rest of the API.
  *
+ * First, the document does not describe the second error media type.
  * `@elysia/openapi` builds each response from the route's TypeBox schema, and a
  * route schema can describe exactly one body per status. The negotiated
  * representation is therefore invisible to it — not because the plugin is
@@ -8,20 +9,39 @@
  * schema can say. Rather than weaken response validation to express it, the
  * generated document is amended once, here, from the same contract the runtime
  * negotiator uses.
+ *
+ * Second, the spec route is the one route `errorHandler` never sees, so its own
+ * failures are classified and negotiated here too. Both concerns are hooks that
+ * have to precede `openapi()` in `app.ts`, which is why they share a module and
+ * a plugin instance: the ordering constraint is stated once and cannot be half
+ * satisfied.
  */
 
 import {
   API_ERROR_RESPONSE_MEMBERS,
+  type ApiErrorResponse,
+  ERROR_CODES,
   PROBLEM_JSON_MEDIA_TYPE,
   ProblemDetailsSchema,
 } from '@mangostudio/shared/errors';
-import { Elysia } from 'elysia';
+import { type Context, Elysia, NotFound, StatusMap } from 'elysia';
+import { negotiateErrorRepresentation } from '../plugins/error-negotiation';
 
 /** Where the OpenAPI UI and its document are mounted. */
 export const OPENAPI_PATH = '/scalar';
 
 /** The generated document itself, which is what gets amended. */
 export const OPENAPI_SPEC_PATH = `${OPENAPI_PATH}/json`;
+
+/**
+ * The document route, including the trailing-slash alias Elysia serves when
+ * `strictPath` is off (the default). `path` keeps the request spelling, so an
+ * exact match would leave `GET /scalar/json/` unhooked — both the sanitizer
+ * and the amendment.
+ */
+function isOpenApiSpecPath(path: string): boolean {
+  return path === OPENAPI_SPEC_PATH || path === `${OPENAPI_SPEC_PATH}/`;
+}
 
 const PROBLEM_DETAILS_SCHEMA_NAME = 'ProblemDetails';
 const PROBLEM_DETAILS_REF = `#/components/schemas/${PROBLEM_DETAILS_SCHEMA_NAME}`;
@@ -143,21 +163,77 @@ export function withProblemDetailsMedia<T>(document: T): T {
 }
 
 /**
- * Amend the generated document on its way out.
+ * Is this response a failure rather than the generated document?
  *
- * Must be registered on the app *before* `openapi()`: Elysia applies a global
- * hook only to routes declared after it, so mounting this later would leave the
- * spec route — and only the spec route — unhooked.
+ * `set.status` is the only signal available before the body is inspected, and
+ * it carries two spellings — a number from `set.status = 500` and a reason
+ * phrase from `set.status = 'Internal Server Error'`. Reading only the first
+ * would let a phrase-spelled failure through as a document.
  */
-export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details' }).mapResponse(
-  'global',
-  ({ path, responseValue }) => {
-    if (path !== OPENAPI_SPEC_PATH) return undefined;
+function isFailureStatus(status: Context['set']['status']): boolean {
+  if (typeof status === 'number') return status >= 400;
+  if (typeof status === 'string') {
+    const mapped = StatusMap[status as keyof typeof StatusMap];
+    return typeof mapped === 'number' && mapped >= 400;
+  }
+  return false;
+}
+
+/**
+ * Spec-route hooks: amend the document, and sanitize a failed generation.
+ *
+ * Both must be registered on the app *before* `openapi()`, which is why they
+ * live on one instance rather than two that could drift apart: Elysia applies a
+ * global hook only to routes declared after it, so mounting this later would
+ * leave the spec route — and only the spec route — unhooked.
+ *
+ * The error arm is the reason that constraint is load-bearing twice.
+ * `@elysia/openapi` puts its own local `error` hook on the spec route that logs
+ * and returns nothing; that hook consumes the failure before `errorHandler`'s
+ * arms — which are mounted later still, inside the `/api` instance — ever see
+ * it, so Elysia falls back to its built-in renderer and publishes the raw
+ * exception message as `detail` on an unauthenticated endpoint. This arm is
+ * seated early enough to answer first.
+ */
+export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details' })
+  .mapResponse('global', ({ path, request, responseValue, set }) => {
+    if (!isOpenApiSpecPath(path)) return undefined;
     if (!responseValue || typeof responseValue !== 'object') return undefined;
     if (responseValue instanceof Response) return undefined;
+
+    // Amend a document, never an error body. The arm below answers a failed
+    // generation with a plain `ApiErrorResponse` from this same path, which is
+    // also a plain object — without this gate it would be merged with
+    // `components.schemas` and served as a hybrid of the two. Gating on the
+    // status rather than on the error shape keeps this hook uncoupled from the
+    // error contract: a body it does not recognise is still not a document.
+    //
+    // The failure is handed to the negotiator instead. `errorHandler`'s copy
+    // cannot reach here — it is mounted inside `/api`, after `openapi` — and a
+    // spec failure answering only `application/json` while every other failure
+    // negotiates would be an inconsistency owed entirely to hook order.
+    if (isFailureStatus(set.status)) {
+      return negotiateErrorRepresentation(request, set, responseValue);
+    }
 
     return new Response(JSON.stringify(withProblemDetailsMedia(responseValue)), {
       headers: { 'content-type': 'application/json;charset=utf-8' },
     });
-  }
-);
+  })
+  .error('global', ({ error, set, path }): ApiErrorResponse | undefined => {
+    // Scoped to the document route this module owns. A miss on that path —
+    // POST, an unknown method — is still a NotFound, and rewriting it to
+    // INTERNAL would be this arm classifying a 404 it does not own. Returning
+    // `undefined` lets `errorHandler` answer those, which is what it does
+    // everywhere else.
+    if (!isOpenApiSpecPath(path)) return undefined;
+    if (error instanceof NotFound) return undefined;
+
+    // Logged the way `error-handler.ts` logs its catch-all arm — server-side is
+    // the only record of what actually failed, and the client is told nothing —
+    // under this module's own tag rather than `[error-handler]`, so a failure
+    // the error handler could not have produced is not filed under its name.
+    console.error(`[openapi-spec][${error instanceof Error ? error.name : 'unknown'}]`, error);
+    set.status = 500;
+    return { error: 'An internal error occurred', code: ERROR_CODES.INTERNAL };
+  });

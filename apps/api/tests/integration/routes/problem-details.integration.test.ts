@@ -156,12 +156,31 @@ describe('negotiation through the assembled app', () => {
     expect(fields).toContain('Accept');
     expect(new Set(fields).size).toBe(fields.length);
   });
+
+  it('answers a non-GET to the spec path as a 404', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/scalar/json', { method: 'POST' })
+    );
+    const body = (await response.json()) as { code?: string };
+
+    expect(response.status).toBe(404);
+    expect(body.code).toBe(ERROR_CODES.NOT_FOUND);
+  });
 });
 
 describe('the published OpenAPI document', () => {
   it('publishes the ProblemDetails schema', async () => {
     const document = await openApiDocument();
 
+    expect(document.components?.schemas?.ProblemDetails).toBeDefined();
+  });
+
+  it('amends the trailing-slash alias the same way', async () => {
+    // Elysia serves `GET /scalar/json/` as the same document. The amendment
+    // hook has to recognise that spelling or the alias ships the unamended spec.
+    const response = await app.handle(new Request('http://localhost/scalar/json/'));
+    expect(response.status).toBe(200);
+    const document = (await response.json()) as OpenApiDocument;
     expect(document.components?.schemas?.ProblemDetails).toBeDefined();
   });
 
