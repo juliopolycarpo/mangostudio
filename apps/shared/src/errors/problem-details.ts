@@ -172,17 +172,48 @@ function statusTitle(status: number): string {
  * True when `title` is one this module would have written from `status` or
  * `code` alone — a class label, not an occurrence message.
  *
- * RFC 9457 §4.2.1 already says that of the status reason phrase. The
+ * RFC 9457 §4.2.1 already says that of the status reason phrase, and only
+ * for `about:blank` (omitted `type` means the same). A foreign type that
+ * happens to reuse "Conflict" is still that producer's title. The
  * code-specific titles in `PROBLEM_TITLES` are the same kind of information,
  * keyed by `code` instead of by status, and they often differ from the IANA
- * phrase only by capitalization (`Not found` vs `Not Found`). A negotiated
- * body that omitted `detail` because the legacy `error` was empty must not
- * then invent a server message from that generated title, or the rendered
- * text changes with the `Accept` header.
+ * phrase only by capitalization (`Not found` vs `Not Found`). Those are
+ * generated only when `type` is this service's URI for that code. A
+ * negotiated body that omitted `detail` because the legacy `error` was empty
+ * must not then invent a server message from that generated title, or the
+ * rendered text changes with the `Accept` header.
  */
-export function isGeneratedProblemTitle(title: string, status: unknown, code: unknown): boolean {
-  if (typeof status === 'number' && title === statusTitle(status)) return true;
-  return typeof code === 'string' && isErrorCode(code) && title === PROBLEM_TITLES[code];
+export function isGeneratedProblemTitle(
+  title: string,
+  type: unknown,
+  status: unknown,
+  code: unknown
+): boolean {
+  if (
+    (type === undefined || type === 'about:blank') &&
+    typeof status === 'number' &&
+    title === statusTitle(status)
+  ) {
+    return true;
+  }
+
+  if (typeof type !== 'string') return false;
+
+  if (
+    typeof code === 'string' &&
+    isErrorCode(code) &&
+    type === problemTypeUri(code) &&
+    title === PROBLEM_TITLES[code]
+  ) {
+    return true;
+  }
+
+  // A merged or truncated body can omit `code` while still carrying this
+  // service's type URI. That URI names the class; matching its table title is
+  // the same generated label, not a foreign occurrence message.
+  return Object.values(ERROR_CODES).some(
+    (known) => type === problemTypeUri(known) && title === PROBLEM_TITLES[known]
+  );
 }
 
 /**

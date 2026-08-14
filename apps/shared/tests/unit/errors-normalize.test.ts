@@ -157,6 +157,19 @@ describe('normalizeApiErrorBody', () => {
     ).toBe('Quota exhausted');
   });
 
+  it('keeps a foreign type whose title matches a status reason phrase', () => {
+    // The IANA phrase is generated only for `about:blank`. A gateway that
+    // named its own type and wrote `Conflict` with no `detail` still sent a
+    // title; dropping it would invent silence the producer never wrote.
+    expect(
+      normalizeApiErrorBody({
+        type: 'urn:gateway:conflict',
+        title: 'Conflict',
+        status: 409,
+      }).message
+    ).toBe('Conflict');
+  });
+
   it('reports the same message for both representations of an empty error', () => {
     // `ApiErrorResponseSchema` permits `error: ''`, and routes forwarding a bare
     // `Error.message` can produce it. Both representations have to agree that

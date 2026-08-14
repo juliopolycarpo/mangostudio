@@ -57,15 +57,16 @@ function readDetails(source: Record<string, unknown>): Readonly<Record<string, s
  * body would have put in `error`, while `title` only names the class of problem.
  *
  * The `title` fallback skips a title this build would have generated from the
- * status or the error code. Those labels name the class of problem, not this
+ * status or the error code, and only when `type` says we generated it:
+ * `about:blank` (or omitted) for a status reason phrase, this service's URI
+ * for a code title. Those labels name the class of problem, not this
  * occurrence, so reporting them as a server message would invent text the
  * server never wrote and make the message depend on the `Accept` header: an
  * `ApiErrorResponse` with an empty `error` — which the schema permits, and
  * which any route forwarding a bare `Error.message` can produce — reads as no
  * message at all, while its problem rendering would otherwise read `Not found`
  * (the `NOT_FOUND` title) or `Not Found` (the 404 reason phrase). A title that
- * is neither is real information and is kept, so a producer pairing
- * `about:blank` with a written title still gets through.
+ * is neither — including a foreign type that reuses an IANA phrase — is kept.
  *
  * `error` last. Detection below is deliberately loose, so this arm also sees
  * a gateway that merged the two representations, and that body should not lose
@@ -77,7 +78,9 @@ function problemMessage(source: Record<string, unknown>): string | null {
   if (detail) return detail;
 
   const title = readString(source, 'title');
-  if (title && !isGeneratedProblemTitle(title, source.status, source.code)) return title;
+  if (title && !isGeneratedProblemTitle(title, source.type, source.status, source.code)) {
+    return title;
+  }
 
   return readString(source, 'error');
 }
