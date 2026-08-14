@@ -93,13 +93,48 @@ describe('normalizeApiErrorBody', () => {
     );
   });
 
-  it('keeps the message of a body carrying both spellings', () => {
-    // An `SSEErrorEvent` is `{ type: 'error', error, done }` — a literal `type`
-    // that has always satisfied problem-document detection. Reading `error` as
-    // the last fallback is what keeps a widened predicate from losing text.
+  it('does not treat an SSE error event as a problem document', () => {
+    // `SSEErrorEvent` is a distinct supported wire shape. Its literal
+    // `type: 'error'` must not trip RFC 9457 detection.
     expect(
-      normalizeApiErrorBody({ type: 'error', error: 'Generation failed', done: true }).message
-    ).toBe('Generation failed');
+      normalizeApiErrorBody({ type: 'error', error: 'Generation failed', done: true })
+    ).toEqual({
+      message: 'Generation failed',
+      code: null,
+      details: null,
+      type: null,
+      title: null,
+      problemDetails: false,
+    });
+    expect(
+      normalizeApiErrorBody({
+        type: 'error',
+        error: 'Generation failed',
+        code: 'PROVIDER_ERROR',
+        done: true,
+      })
+    ).toEqual({
+      message: 'Generation failed',
+      code: 'PROVIDER_ERROR',
+      details: null,
+      type: null,
+      title: null,
+      problemDetails: false,
+    });
+  });
+
+  it('keeps the message of a body carrying both spellings', () => {
+    // A proxy could merge the two HTTP representations. `detail` is absent, the
+    // title is the 409 reason phrase (so it is not an occurrence message), and
+    // `error` is the string that must survive.
+    expect(
+      normalizeApiErrorBody({
+        type: 'https://mangostudio.dev/problems/conflict',
+        title: 'Conflict',
+        status: 409,
+        error: 'Already exists',
+      }).message
+    ).toBe('Already exists');
   });
 
   it('does not report a bare status reason phrase as a server message', () => {
@@ -126,14 +161,27 @@ describe('normalizeApiErrorBody', () => {
     // `ApiErrorResponseSchema` permits `error: ''`, and routes forwarding a bare
     // `Error.message` can produce it. Both representations have to agree that
     // no message was sent, or the rendered text changes with the header.
-    const legacy = { error: '' };
+    //
+    // Known codes matter as much as code-less bodies: `NOT_FOUND` titles the
+    // problem `Not found`, which is not the 404 reason phrase `Not Found`, so
+    // skipping only the IANA phrase would still invent a message for the
+    // opted-in client.
+    const bodies: { error: string; code?: string }[] = [
+      { error: '' },
+      { error: '', code: 'NOT_FOUND' },
+      { error: '', code: 'RATE_LIMITED' },
+      { error: '', code: 'INTERNAL' },
+      { error: '', code: 'CONFLICT' },
+    ];
 
-    for (const status of [404, 409, 500, 599]) {
-      const fromLegacy = normalizeApiErrorBody(legacy);
-      const fromProblem = normalizeApiErrorBody(toProblemDetails(legacy, status));
+    for (const legacy of bodies) {
+      for (const status of [404, 409, 429, 500, 599]) {
+        const fromLegacy = normalizeApiErrorBody(legacy);
+        const fromProblem = normalizeApiErrorBody(toProblemDetails(legacy, status));
 
-      expect(fromProblem.message).toBe(fromLegacy.message);
-      expect(fromProblem.message).toBeNull();
+        expect(fromProblem.message).toBe(fromLegacy.message);
+        expect(fromProblem.message).toBeNull();
+      }
     }
   });
 

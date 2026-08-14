@@ -159,17 +159,30 @@ const STATUS_REASON_PHRASES: Readonly<Record<number, string>> = {
  *
  * Statuses outside the table fall back to their class, which is what RFC 9110
  * §15 says a client must do with a status it does not recognize anyway.
- *
- * Exported because the reader needs the same table: a title equal to its own
- * status's phrase is the one that, by §4.2.1, says nothing the status line did
- * not, and `normalizeApiErrorBody` must not report it as a server message.
  */
-export function statusTitle(status: number): string {
+function statusTitle(status: number): string {
   const phrase = STATUS_REASON_PHRASES[status];
   if (phrase) return phrase;
   if (status >= 500) return 'Server Error';
   if (status >= 400) return 'Client Error';
   return 'Error';
+}
+
+/**
+ * True when `title` is one this module would have written from `status` or
+ * `code` alone — a class label, not an occurrence message.
+ *
+ * RFC 9457 §4.2.1 already says that of the status reason phrase. The
+ * code-specific titles in `PROBLEM_TITLES` are the same kind of information,
+ * keyed by `code` instead of by status, and they often differ from the IANA
+ * phrase only by capitalization (`Not found` vs `Not Found`). A negotiated
+ * body that omitted `detail` because the legacy `error` was empty must not
+ * then invent a server message from that generated title, or the rendered
+ * text changes with the `Accept` header.
+ */
+export function isGeneratedProblemTitle(title: string, status: unknown, code: unknown): boolean {
+  if (typeof status === 'number' && title === statusTitle(status)) return true;
+  return typeof code === 'string' && isErrorCode(code) && title === PROBLEM_TITLES[code];
 }
 
 /**
