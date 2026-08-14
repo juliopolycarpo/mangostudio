@@ -78,7 +78,7 @@ function problemMessage(source: Record<string, unknown>): string | null {
   if (detail) return detail;
 
   const title = readString(source, 'title');
-  if (title && !isGeneratedProblemTitle(title, source.type, source.status, source.code)) {
+  if (title && !isGeneratedProblemTitle(title, source.type, source.status)) {
     return title;
   }
 

@@ -100,6 +100,17 @@ function isErrorCode(code: string | undefined): code is ErrorCode {
 }
 
 /**
+ * Every type URI this service mints, mapped to the title it generates with it.
+ *
+ * Built once rather than rebuilt per lookup: {@link isGeneratedProblemTitle}
+ * runs on every error a client renders, and the answer it needs is exactly
+ * "does this URI come with this title", which is a key lookup.
+ */
+const GENERATED_TITLE_BY_TYPE: ReadonlyMap<string, string> = new Map(
+  Object.values(ERROR_CODES).map((code) => [problemTypeUri(code), PROBLEM_TITLES[code]])
+);
+
+/**
  * IANA reason phrases for the statuses an error response can carry.
  *
  * A constant table keyed by number, never the `statusText` off an incoming
@@ -176,19 +187,14 @@ function statusTitle(status: number): string {
  * for `about:blank` (omitted `type` means the same). A foreign type that
  * happens to reuse "Conflict" is still that producer's title. The
  * code-specific titles in `PROBLEM_TITLES` are the same kind of information,
- * keyed by `code` instead of by status, and they often differ from the IANA
- * phrase only by capitalization (`Not found` vs `Not Found`). Those are
+ * keyed by the error code instead of by status, and they often differ from the
+ * IANA phrase only by capitalization (`Not found` vs `Not Found`). Those are
  * generated only when `type` is this service's URI for that code. A
  * negotiated body that omitted `detail` because the legacy `error` was empty
  * must not then invent a server message from that generated title, or the
  * rendered text changes with the `Accept` header.
  */
-export function isGeneratedProblemTitle(
-  title: string,
-  type: unknown,
-  status: unknown,
-  code: unknown
-): boolean {
+export function isGeneratedProblemTitle(title: string, type: unknown, status: unknown): boolean {
   if (
     (type === undefined || type === 'about:blank') &&
     typeof status === 'number' &&
@@ -199,21 +205,11 @@ export function isGeneratedProblemTitle(
 
   if (typeof type !== 'string') return false;
 
-  if (
-    typeof code === 'string' &&
-    isErrorCode(code) &&
-    type === problemTypeUri(code) &&
-    title === PROBLEM_TITLES[code]
-  ) {
-    return true;
-  }
-
-  // A merged or truncated body can omit `code` while still carrying this
-  // service's type URI. That URI names the class; matching its table title is
-  // the same generated label, not a foreign occurrence message.
-  return Object.values(ERROR_CODES).some(
-    (known) => type === problemTypeUri(known) && title === PROBLEM_TITLES[known]
-  );
+  // Keyed by the URI rather than by `code`, because a merged or truncated body
+  // can omit `code` while still carrying this service's type URI. That URI
+  // names the class on its own; matching the title it is minted with is the
+  // same generated label, not a foreign occurrence message.
+  return GENERATED_TITLE_BY_TYPE.get(type) === title;
 }
 
 /**
