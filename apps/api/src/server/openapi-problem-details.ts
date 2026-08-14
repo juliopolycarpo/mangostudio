@@ -24,7 +24,7 @@ import {
   PROBLEM_JSON_MEDIA_TYPE,
   ProblemDetailsSchema,
 } from '@mangostudio/shared/errors';
-import { type Context, Elysia, StatusMap } from 'elysia';
+import { type Context, Elysia, NotFound, StatusMap } from 'elysia';
 import { negotiateErrorRepresentation } from '../plugins/error-negotiation';
 
 /** Where the OpenAPI UI and its document are mounted. */
@@ -32,6 +32,16 @@ export const OPENAPI_PATH = '/scalar';
 
 /** The generated document itself, which is what gets amended. */
 export const OPENAPI_SPEC_PATH = `${OPENAPI_PATH}/json`;
+
+/**
+ * The document route, including the trailing-slash alias Elysia serves when
+ * `strictPath` is off (the default). `path` keeps the request spelling, so an
+ * exact match would leave `GET /scalar/json/` unhooked — both the sanitizer
+ * and the amendment.
+ */
+function isOpenApiSpecPath(path: string): boolean {
+  return path === OPENAPI_SPEC_PATH || path === `${OPENAPI_SPEC_PATH}/`;
+}
 
 const PROBLEM_DETAILS_SCHEMA_NAME = 'ProblemDetails';
 const PROBLEM_DETAILS_REF = `#/components/schemas/${PROBLEM_DETAILS_SCHEMA_NAME}`;
@@ -187,7 +197,7 @@ function isFailureStatus(status: Context['set']['status']): boolean {
  */
 export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details' })
   .mapResponse('global', ({ path, request, responseValue, set }) => {
-    if (path !== OPENAPI_SPEC_PATH) return undefined;
+    if (!isOpenApiSpecPath(path)) return undefined;
     if (!responseValue || typeof responseValue !== 'object') return undefined;
     if (responseValue instanceof Response) return undefined;
 
@@ -211,10 +221,13 @@ export const openapiProblemDetails = new Elysia({ name: 'openapi-problem-details
     });
   })
   .error('global', ({ error, set, path }): ApiErrorResponse | undefined => {
-    // Scoped to the one route this module owns. Every other failure belongs to
-    // `errorHandler`, which classifies validation and 404s rather than calling
-    // everything a 500 — returning `undefined` here lets it do that.
-    if (path !== OPENAPI_SPEC_PATH) return undefined;
+    // Scoped to the document route this module owns. A miss on that path —
+    // POST, an unknown method — is still a NotFound, and rewriting it to
+    // INTERNAL would be this arm classifying a 404 it does not own. Returning
+    // `undefined` lets `errorHandler` answer those, which is what it does
+    // everywhere else.
+    if (!isOpenApiSpecPath(path)) return undefined;
+    if (error instanceof NotFound) return undefined;
 
     // Logged the way `error-handler.ts` logs its catch-all arm — server-side is
     // the only record of what actually failed, and the client is told nothing —
