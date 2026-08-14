@@ -1,0 +1,155 @@
+/**
+ * Rendering `ApiErrorResponse` as RFC 9457 problem details.
+ *
+ * One classification, two representations: everything here is a pure function
+ * of an already-built `ApiErrorResponse` and its HTTP status, so a problem
+ * document can never report a different status, a different `code`, or less
+ * redaction than the legacy body it was derived from.
+ */
+
+import { ERROR_CODES, type ErrorCode } from './contracts';
+import type { ApiErrorResponse, ProblemDetails } from './schemas';
+
+/**
+ * Base for every problem type URI.
+ *
+ * These are permanent public identifiers, not links the code follows: clients
+ * are expected to compare them, and changing one is a breaking change even
+ * though nothing dereferences it.
+ */
+export const PROBLEM_TYPE_BASE = 'https://mangostudio.dev/problems';
+
+/**
+ * Every member a plain `ApiErrorResponse` may carry.
+ *
+ * A body with anything beyond these is not a plain error: it is an error plus
+ * domain data, and problem details has nowhere to put the extra. Both the API's
+ * runtime gate and its OpenAPI generator read this set, so the shape they agree
+ * to negotiate cannot drift apart.
+ */
+export const API_ERROR_RESPONSE_MEMBERS: ReadonlySet<string> = new Set([
+  'error',
+  'code',
+  'details',
+]);
+
+/**
+ * Problem type URI for one error code.
+ *
+ * Derived rather than written out forty times so a URI cannot drift from the
+ * code it names. `errors-problem-details.test.ts` pins the whole resulting
+ * table, which is what makes a rename show up as a reviewable diff instead of a
+ * silent contract break.
+ */
+export function problemTypeUri(code: ErrorCode): string {
+  return `${PROBLEM_TYPE_BASE}/${code.toLowerCase().replaceAll('_', '-')}`;
+}
+
+/**
+ * Stable, non-sensitive summary for each error code.
+ *
+ * Keyed by `ErrorCode` rather than by `string`, so adding a code to
+ * `ERROR_CODES` without giving it a title stops the build. Titles describe the
+ * *class* of problem and never the occurrence — the occurrence goes in
+ * `detail`, which is the already-sanitized legacy message.
+ */
+const PROBLEM_TITLES: Record<ErrorCode, string> = {
+  UNAUTHORIZED: 'Unauthorized',
+  METHOD_NOT_ALLOWED: 'Method not allowed',
+  NOT_FOUND: 'Not found',
+  NOT_A_DIRECTORY: 'Not a directory',
+  PERMISSION_DENIED: 'Permission denied',
+  VALIDATION: 'Invalid request',
+  CONFLICT: 'Conflict',
+  PROVIDER_ERROR: 'Provider error',
+  GENERATION_EMPTY: 'Empty generation',
+  OWNERSHIP: 'Not the owner',
+  RATE_LIMITED: 'Too many requests',
+  UNSUPPORTED: 'Unsupported operation',
+  CHATGPT_REAUTH_REQUIRED: 'ChatGPT re-authentication required',
+  NOTHING_TO_COMMIT: 'Nothing to commit',
+  AMEND_WITHOUT_HEAD: 'Amend without a HEAD commit',
+  SIGNING_FAILED: 'Commit signing failed',
+  STASH_CONFLICT: 'Stash conflict',
+  CHECKOUT_BLOCKED: 'Checkout blocked',
+  BRANCH_NOT_MERGED: 'Branch not merged',
+  AUTH_REQUIRED: 'Authentication required',
+  NON_FAST_FORWARD: 'Non-fast-forward update',
+  HISTORY_DIVERGED: 'History diverged',
+  GIT_LOCKED: 'Repository locked',
+  GIT_COMMAND_FAILED: 'Git command failed',
+  LAST_COPY_UNACKNOWLEDGED: 'Last copy not acknowledged',
+  EXTERNAL_API_DISABLED: 'External API disabled',
+  API_KEY_SCOPE_FORBIDDEN: 'API key scope forbidden',
+  API_KEY_LIMIT_REACHED: 'API key limit reached',
+  EXTERNAL_WORKSPACE_UNTRUSTED: 'Workspace not trusted',
+  EXTERNAL_ISOLATION_UNPROVEN: 'Agent isolation unproven',
+  EXTERNAL_DISCLOSURE_REQUIRED: 'Vendor disclosure required',
+  EXTERNAL_SESSION_HELD: 'Vendor session already held',
+  EXTERNAL_REVIEW_REQUIRES_GIT: 'Review requires a Git repository',
+  MODEL_PROVIDER_DEPRECATED: 'Model provider no longer offered',
+  INTERNAL: 'Internal server error',
+};
+
+const KNOWN_CODES = new Set<string>(Object.values(ERROR_CODES));
+
+function isErrorCode(code: string | undefined): code is ErrorCode {
+  return code !== undefined && KNOWN_CODES.has(code);
+}
+
+/**
+ * Title used when a body carried no `code`, or one this build does not know.
+ *
+ * Falls back to the status class rather than to the raw status text so a body
+ * missing its code still reads as something, and never as an echo of whatever
+ * string arrived.
+ */
+function fallbackTitle(status: number): string {
+  if (status >= 500) return PROBLEM_TITLES.INTERNAL;
+  if (status >= 400) return 'Request failed';
+  return 'Error';
+}
+
+/**
+ * The full public type/title table, in `ERROR_CODES` order.
+ *
+ * Exported for the contract test and for documentation generation; the API
+ * itself goes through {@link toProblemDetails}.
+ */
+export function problemTypeTable(): { code: ErrorCode; type: string; title: string }[] {
+  return Object.values(ERROR_CODES).map((code) => ({
+    code,
+    type: problemTypeUri(code),
+    title: PROBLEM_TITLES[code],
+  }));
+}
+
+/**
+ * Render an `ApiErrorResponse` as problem details for a given HTTP status.
+ *
+ * `detail` is the legacy `error` string verbatim. That is deliberate and load
+ * bearing: the legacy message is the one the error boundary already sanitized,
+ * so reusing it means the negotiated representation cannot leak something the
+ * default one withholds, and a client that switches representations sees the
+ * same words.
+ *
+ * `instance` is never set. It would have to identify this occurrence, and
+ * MangoStudio has no public request identifier to put there — a URL or a server
+ * path would be inventing one out of internals.
+ */
+export function toProblemDetails(body: ApiErrorResponse, status: number): ProblemDetails {
+  const code = body.code;
+  const known = isErrorCode(code);
+
+  const problem: ProblemDetails = {
+    type: known ? problemTypeUri(code) : 'about:blank',
+    title: known ? PROBLEM_TITLES[code] : fallbackTitle(status),
+    status,
+  };
+
+  if (body.error) problem.detail = body.error;
+  if (code !== undefined) problem.code = code;
+  if (body.details !== undefined) problem.details = body.details;
+
+  return problem;
+}
