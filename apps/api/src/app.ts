@@ -50,6 +50,7 @@ import { createGeneratedImageRoutes } from './routes/generated-images';
 import { settingsRoutes } from './routes/settings';
 import { uploadRoutes } from './routes/upload';
 import { frontendNotFound } from './server/frontend-fallback';
+import { OPENAPI_PATH, openapiProblemDetails } from './server/openapi-problem-details';
 import { registerApplicationServices } from './services/register-application-services';
 
 registerApplicationServices();
@@ -157,10 +158,14 @@ export const app = new Elysia()
     })
   )
   .use(createGeneratedImageRoutes(IMAGES_DIR))
+  // Adds the negotiated `application/problem+json` media type to the generated
+  // document. Seated before `openapi` on purpose — a global hook only reaches
+  // routes declared after it, and the spec route is declared by that plugin.
+  .use(openapiProblemDetails)
   // OpenAPI/Scalar documentation
   .use(
     openapi({
-      path: '/scalar',
+      path: OPENAPI_PATH,
       documentation: {
         info: {
           title: 'MangoStudio API',

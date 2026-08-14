@@ -4,13 +4,15 @@
  * Sanitizes raw error details from logs to prevent leaking internals to clients.
  *
  * These handlers are also what keeps Elysia's own RFC 9457 `problem+json`
- * default off the wire: every arm answers with `ApiErrorResponse` as
- * `application/json`, which is the contract every MangoStudio client is written
- * against. Adopting problem details is a deliberate, separate change.
+ * default off the wire: every arm classifies into an `ApiErrorResponse`, which
+ * is the contract every MangoStudio client is written against, and
+ * `negotiateErrorRepresentation` re-renders it as problem details only for the
+ * callers that explicitly ask.
  */
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia, NotFound, ValidationError } from 'elysia';
+import { negotiateErrorRepresentation } from './error-negotiation';
 
 /**
  * True when a body rejection came from the file-type detector rather than from
@@ -31,6 +33,17 @@ function isFileTypeRejection(errors: unknown): boolean {
 }
 
 export const errorHandler = new Elysia({ name: 'error-handler' })
+  // Seated before the `.error` arms so it also covers what they return.
+  //
+  // `global` reaches further than `/api/**`: the same scope that lets this
+  // plugin's `NotFound` arm answer a non-API miss also lets the negotiator
+  // re-render it. That is the right pairing — those responses already *are*
+  // `ApiErrorResponse` — and it is why the body gate matters more than the
+  // route scope. Anything that is not exactly an `ApiErrorResponse` at a 4xx or
+  // 5xx passes through untouched, whoever served it.
+  .mapResponse('global', ({ request, set, responseValue }) =>
+    negotiateErrorRepresentation(request, set, responseValue)
+  )
   .error('global', ValidationError, ({ error, set }): ApiErrorResponse => {
     // `error.value` carries the rejected payload, so never log the error
     // object itself — write-only credentials may be present there. `type`

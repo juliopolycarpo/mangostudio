@@ -1,4 +1,4 @@
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import { normalizeApiErrorBody } from '@mangostudio/shared/errors';
 import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -15,18 +15,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-function extractServerMessage(value: unknown): string | null {
-  if (typeof value === 'string') return value || null;
-  if (value && typeof value === 'object') {
-    const v = value as Partial<ApiErrorResponse>;
-    if (typeof v.error === 'string' && v.error) return v.error;
-  }
-  return null;
-}
-
 /**
  * Error thrown by data-layer modules for failed API requests. `serverMessage`
  * is null when the server sent no usable error text.
+ *
+ * The body may arrive as the legacy `ApiErrorResponse` or as RFC 9457 problem
+ * details, depending on what the request accepted and what the endpoint can
+ * re-render. Nothing above this class is allowed to care: `normalizeApiErrorBody`
+ * reads both, and for a negotiated body `serverMessage` is the problem's
+ * `detail` — which is the same string the legacy `error` field would have
+ * carried, so no rendered message changes.
  */
 export class ApiError extends Error {
   readonly serverMessage: string | null;
@@ -34,14 +32,12 @@ export class ApiError extends Error {
   readonly details: Readonly<Record<string, string>> | null;
 
   constructor(value: unknown) {
-    const serverMessage = extractServerMessage(value);
-    super(serverMessage ?? DEFAULT_API_ERROR_FALLBACK);
+    const normalized = normalizeApiErrorBody(value);
+    super(normalized.message ?? DEFAULT_API_ERROR_FALLBACK);
     this.name = 'ApiError';
-    this.serverMessage = serverMessage;
-    const response =
-      value && typeof value === 'object' ? (value as Partial<ApiErrorResponse>) : null;
-    this.code = typeof response?.code === 'string' ? response.code : null;
-    this.details = response?.details ?? null;
+    this.serverMessage = normalized.message;
+    this.code = normalized.code;
+    this.details = normalized.details;
   }
 }
 

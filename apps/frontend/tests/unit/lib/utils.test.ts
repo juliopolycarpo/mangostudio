@@ -86,6 +86,50 @@ describe('ApiError', () => {
     expect(err.code).toBe('CHECKOUT_BLOCKED');
     expect(err.details).toEqual({ path: '/tmp/repo' });
   });
+
+  it('reads an RFC 9457 problem document', () => {
+    const err = new ApiError({
+      type: 'https://mangostudio.dev/problems/checkout-blocked',
+      title: 'Checkout blocked',
+      status: 409,
+      detail: 'Uncommitted changes would be overwritten',
+      code: 'CHECKOUT_BLOCKED',
+      details: { path: '/tmp/repo' },
+    });
+
+    expect(err.serverMessage).toBe('Uncommitted changes would be overwritten');
+    expect(err.code).toBe('CHECKOUT_BLOCKED');
+    expect(err.details).toEqual({ path: '/tmp/repo' });
+  });
+
+  it('renders the same message whichever representation arrived', () => {
+    // The frontend asks for problem details, so every message users see now
+    // comes from `detail`. It has to be the string `error` used to carry.
+    const message = 'slug already exists';
+    const legacy = new ApiError({ error: message, code: 'CONFLICT' });
+    const problem = new ApiError({
+      type: 'https://mangostudio.dev/problems/conflict',
+      title: 'Conflict',
+      status: 409,
+      detail: message,
+      code: 'CONFLICT',
+    });
+
+    expect(problem.message).toBe(legacy.message);
+    expect(problem.serverMessage).toBe(legacy.serverMessage);
+    expect(problem.code).toBe(legacy.code);
+  });
+
+  it('falls back to the problem title when there is no detail', () => {
+    const err = new ApiError({ type: 'about:blank', title: 'Not found', status: 404 });
+    expect(err.serverMessage).toBe('Not found');
+  });
+
+  it('uses the fallback for a problem document with no usable text', () => {
+    const err = new ApiError({ type: 'about:blank', title: '', status: 500 });
+    expect(err.serverMessage).toBeNull();
+    expect(err.message).toBe(DEFAULT_API_ERROR_FALLBACK);
+  });
 });
 
 describe('resolveApiErrorMessage', () => {

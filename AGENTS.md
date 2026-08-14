@@ -35,7 +35,7 @@ Useful docs:
 - All user-visible frontend strings must come from `@mangostudio/shared/i18n`.
 - Public API shape changes must update the API code, shared contract, frontend consumer, and relevant tests in the same task.
 - Shared contracts are schema-first: the TypeBox schema in `apps/shared/src/<module>/schemas.ts` is the single source of truth, and public types are derived with `Static<>`. Never hand-write a duplicate interface for a shape that already has a schema. `apps/shared/src/contracts/index.ts` is a compatibility barrel only — import from the bounded-context entrypoint (e.g. `@mangostudio/shared/agents`) in new code.
-- API error responses must use `ApiErrorResponse` from `@mangostudio/shared/errors` or `SSEErrorEvent` from `@mangostudio/shared/streaming`.
+- API error responses must use `ApiErrorResponse` from `@mangostudio/shared/errors` or `SSEErrorEvent` from `@mangostudio/shared/streaming`. `ProblemDetails` (RFC 9457) is a third wire shape, but not a third thing to build: it is rendered from an `ApiErrorResponse` by the negotiation boundary in `apps/api/src/plugins/error-negotiation.ts` when the caller asks for `application/problem+json`. Never construct or return one from a route.
 - Add hub environment parsing only in `apps/api/src/lib/config.ts`, and runtime-host
   environment parsing only in `apps/runtime/src/config.ts`.
 - Shared code must remain framework-agnostic.
