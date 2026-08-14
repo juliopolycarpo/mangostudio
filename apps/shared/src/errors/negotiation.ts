@@ -92,6 +92,22 @@ function parseQuality(parameters: string[]): number {
   return 1;
 }
 
+/**
+ * Read `Accept` into media ranges of type, subtype and quality.
+ *
+ * Media parameters other than `q` are dropped rather than matched, which is a
+ * deliberate narrowing of RFC 9110 §12.5.1 and the one place this parser is not
+ * literal. Matching them would mean `application/problem+json;profile=v2` no
+ * longer selects anything this API can emit, so a caller who named problem
+ * details outright would silently receive the legacy body instead — the exact
+ * failure this feature exists to avoid. `application/problem+json` registers no
+ * parameters for a client to be meaningfully selecting on, so the only
+ * parameterised ranges reachable here are ones nothing could ever satisfy.
+ *
+ * The asymmetry is the point. Over-serving a representation the caller named is
+ * recoverable; withholding one they explicitly asked for is not, and this
+ * negotiation has no 406 to fall back on — it always returns one of two bodies.
+ */
 function parseAccept(header: string): MediaRange[] {
   const ranges: MediaRange[] = [];
 

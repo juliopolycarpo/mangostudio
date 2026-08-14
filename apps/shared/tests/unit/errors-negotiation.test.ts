@@ -53,6 +53,18 @@ describe('prefersProblemDetails', () => {
     expect(prefersProblemDetails('application/problem+json; charset=utf-8; q=0.9')).toBe(true);
   });
 
+  it('still negotiates for a range carrying parameters it cannot satisfy', () => {
+    // Deliberate, and a real narrowing of RFC 9110 §12.5.1: a parameterised
+    // range strictly matches only a representation carrying those parameters,
+    // and `application/problem+json` has none to carry. Honouring them would
+    // turn an outright ask into a silent legacy body, so a named type wins and
+    // the parameter is ignored.
+    expect(
+      prefersProblemDetails('application/problem+json;profile=v2, application/json;q=0.5')
+    ).toBe(true);
+    expect(prefersProblemDetails('application/problem+json;profile="a b"')).toBe(true);
+  });
+
   it('honours an explicit refusal', () => {
     expect(prefersProblemDetails('application/problem+json;q=0')).toBe(false);
     expect(prefersProblemDetails('application/json, application/problem+json;q=0')).toBe(false);
