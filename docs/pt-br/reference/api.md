@@ -205,8 +205,12 @@ que um cache compartilhado não entregue a um cliente o body do outro.
 Duas coisas ficam fora da negociação. SSE mantém `SSEErrorEvent` — é um stream
 de eventos, não uma resposta HTTP de erro. E alguns endpoints respondem 4xx com
 um erro *mais* dados de domínio, como uma recusa de instalação carregando sua
-`recipe`; esses mantêm o shape documentado em qualquer `Accept`, porque um
-documento problem não tem onde colocar os membros extras.
+`recipe`; esses mantêm o shape documentado em qualquer `Accept`, porque a
+conversão é definida apenas sobre bodies que são exatamente um
+`ApiErrorResponse`. A RFC 9457 permitiria esses campos como membros de extensão
+— o mesmo mecanismo que `code` e `details` já usam — mas converter um body que
+este contrato não descreve significaria criar uma extensão privada por endpoint,
+então essas respostas são deixadas intactas.
 
 `Accept: application/problem+json;q=0` recusa explicitamente. Quando os dois
 media types são nomeados, o maior `q` vence.
