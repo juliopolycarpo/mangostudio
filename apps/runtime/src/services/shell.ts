@@ -66,6 +66,17 @@ const defaultDeps: ShellExecDependencies = {
 
 const executableCache = new Map<ShellKind, string | null>();
 
+/**
+ * How long the capture may keep running once the direct child is gone.
+ *
+ * Anything still holding these pipes after the shell itself has exited is
+ * something the command backgrounded, and EOF then waits on work the caller
+ * never asked about — `server &` would hold the call for the whole timeout.
+ * The grace exists only so a capture that is merely a turn behind the exit is
+ * not cut short and reported as truncated.
+ */
+const LEFTOVER_PIPE_GRACE_MS = 100;
+
 type TerminationClaim = 'timed_out' | 'aborted';
 
 /**
@@ -106,7 +117,9 @@ export function isShellAvailable(kind: ShellKind): boolean {
  *
  * A claimed termination stops the capture rather than waiting for streams a
  * surviving descendant may never close, so a `timed_out` or `aborted` result
- * carries whatever had arrived by then and is flagged `truncated`.
+ * carries whatever had arrived by then and is flagged `truncated`. A shell that
+ * exits while a descendant still holds the pipes is bounded the same way, a
+ * short grace after its exit rather than at the timeout.
  *
  * // Usage: await runShellCommand({ kind: 'bash', command: 'echo hi', timeoutMs: 5000, maxOutputBytes: 65536 })
  */
@@ -141,7 +154,13 @@ export async function runShellCommandWithDeps(
     return true;
   };
 
+  let killedTree = false;
   const killChild = () => {
+    // Once per call: the same PID must not be tree-killed twice, because Bun
+    // reaps the child as soon as it exits and a later sweep would be addressing
+    // whatever process group has since inherited that number.
+    if (killedTree) return;
+    killedTree = true;
     // Stop the capture first: that is what bounds the call. The tree kill
     // may take a turn on Linux so the group leader can reap, and must not
     // sit on the path that unblocks the readers.
@@ -150,6 +169,7 @@ export async function runShellCommandWithDeps(
   };
 
   const alreadyFinished = () => proc.exitCode !== null || proc.signalCode !== null;
+  let captured = false;
 
   const timeoutId = deps.setTimeout(() => {
     // A shell that backgrounds work and then exits or is signalled still
@@ -170,11 +190,24 @@ export async function runShellCommandWithDeps(
   // until its own timeout.
   if (input.signal?.aborted) abortHandler();
 
+  // The shell can exit long before the pipes close. Waiting for the timeout to
+  // notice would charge a command that merely backgrounded something the full
+  // budget, so the exit starts a short grace of its own instead. Nothing is
+  // claimed here: the termination the call already has is the real one.
+  let graceId: ReturnType<typeof setTimeout> | undefined;
+  void proc.exited.then(() => {
+    if (captured) return;
+    graceId = deps.setTimeout(() => {
+      if (!captured) killChild();
+    }, LEFTOVER_PIPE_GRACE_MS);
+  });
+
   try {
     const [stdout, stderr] = await Promise.all([
       readStreamCapped(proc.stdout, input.maxOutputBytes, terminated.signal),
       readStreamCapped(proc.stderr, input.maxOutputBytes, terminated.signal),
     ]);
+    captured = true;
     await proc.exited;
 
     return {
@@ -189,7 +222,9 @@ export async function runShellCommandWithDeps(
       durationMs: deps.now() - startedAt,
     };
   } finally {
+    captured = true;
     deps.clearTimeout(timeoutId);
+    if (graceId !== undefined) deps.clearTimeout(graceId);
     input.signal?.removeEventListener('abort', abortHandler);
   }
 }
