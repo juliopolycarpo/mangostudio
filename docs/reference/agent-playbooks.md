@@ -142,7 +142,7 @@ Per-message **file checkpoints** cover the built-in filesystem mutation tools ab
 
 Two invariants the checkpoint path depends on:
 
-- A mutation and its manifest row are written under one per-path lock (`withMutationPersistence` in `apps/api/src/services/tools/file-mutation-snapshot.ts`). Every executor passes it the full set of paths its call can touch, so nothing on those paths can start a second mutation before the row exists.
+- A mutation and its manifest row run under one per-path lock (`withMutationPersistence` in `apps/api/src/services/tools/file-mutation-snapshot.ts`). Every executor passes it the full set of paths its call can touch, so nothing on those paths can start a second mutation before the row exists. The lock does not roll the filesystem back if blob or database I/O then fails: the file stays changed, no row is written, and the tool reports failure. That is accepted. Closing it needs a two-phase capture-then-mutate protocol or a runtime rollback, neither of which this path does.
 - Revert sends both the state the turn left behind (`afterHash`) and the state a completed revert produces (`revertedHash`). A retry after a revert whose bookkeeping write failed therefore recognises its own finished work instead of reporting the file as changed by someone else. A set that is half in each state is still a conflict — see the comment on `alreadyReverted` in `apps/runtime/src/services/snapshot.ts` for why resuming it is unsafe.
 
 ## Skills

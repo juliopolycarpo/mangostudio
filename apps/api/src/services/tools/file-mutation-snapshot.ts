@@ -60,6 +60,10 @@ export interface CapturedBefore {
  * `apply_patch`. Both this lock set and the runtime's own acquire in sorted
  * order, so nesting them is deadlock-free.
  *
+ * The lock serializes mutation and persist. It does not undo the filesystem
+ * write if blob or database I/O then fails, so that path still reports a tool
+ * failure for a mutation that already landed and has no row to revert.
+ *
  * // Usage: await withMutationPersistence(context, [resolvedPath], () => runtime.fs.editFile(params))
  */
 export async function withMutationPersistence<T>(
