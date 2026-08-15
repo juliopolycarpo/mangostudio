@@ -235,6 +235,100 @@ describe('revertMessageFileCheckpoints', () => {
 });
 
 /**
+ * Reverting restores files and then marks the rows. Nothing makes those two
+ * writes one unit, so the bookkeeping half can fail on its own and leave a
+ * message that is fully reverted on disk and still listed as revertable.
+ * Retrying has to converge on that state instead of reporting the file as
+ * changed by someone else.
+ */
+describe('revert retried after its bookkeeping write did not land', () => {
+  /** Exactly what a failed markMessageCheckpointsReverted leaves behind. */
+  async function reopenRevertedRows(): Promise<void> {
+    await getDb()
+      .updateTable('file_checkpoints')
+      .set({ revertedAt: null })
+      .where('chatId', '=', chat.id)
+      .execute();
+  }
+
+  async function revertTwice(): Promise<void> {
+    expect(await revert()).toEqual({ revertedFiles: 1 });
+    await reopenRevertedRows();
+    expect(await revert()).toEqual({ revertedFiles: 1 });
+  }
+
+  it('converges on a restored file', async () => {
+    const path = await seedAndRead('notes.md', 'original\n');
+    await executeWriteFile({ path, content: 'rewritten\n' }, turnContext());
+
+    await revertTwice();
+    expect(await readText(path)).toBe('original\n');
+    expect(await listChatFileCheckpointSummaries(getDb(), chat.id)).toEqual([]);
+  });
+
+  it('converges on a removed file', async () => {
+    const path = join(tempDir, 'created.txt');
+    await executeCreateFile({ path, content: 'hello\n' }, turnContext());
+
+    await revertTwice();
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('converges on a file moved back', async () => {
+    const from = await seedAndRead('a.ts', 'export const a = 1;\n');
+    const to = join(tempDir, 'b.ts');
+    await executeMoveFile({ from, to }, turnContext());
+
+    await revertTwice();
+    expect(existsSync(to)).toBe(false);
+    expect(await readText(from)).toBe('export const a = 1;\n');
+  });
+
+  it('converges on a chain of moves through the same intermediate path', async () => {
+    const first = await seedAndRead('one.txt', 'chained\n');
+    const second = join(tempDir, 'two.txt');
+    const third = join(tempDir, 'three.txt');
+    await executeMoveFile({ from: first, to: second }, turnContext());
+    await executeMoveFile({ from: second, to: third }, turnContext());
+
+    expect(await revert()).toEqual({ revertedFiles: 2 });
+    await reopenRevertedRows();
+    // Replaying the operations from here would move the restored file away
+    // again; the retry has to recognise its own finished work instead.
+    expect(await revert()).toEqual({ revertedFiles: 2 });
+    expect(existsSync(second)).toBe(false);
+    expect(existsSync(third)).toBe(false);
+    expect(await readText(first)).toBe('chained\n');
+  });
+
+  it('converges on a file recreated at a path the same turn moved away from', async () => {
+    const from = await seedAndRead('index.ts', 'export * from "./impl";\n');
+    const to = join(tempDir, 'impl.ts');
+    await executeMoveFile({ from, to }, turnContext());
+    await executeCreateFile(
+      { path: from, content: 'export const barrel = true;\n' },
+      turnContext()
+    );
+
+    await revertTwice();
+    expect(existsSync(to)).toBe(false);
+    expect(await readText(from)).toBe('export * from "./impl";\n');
+  });
+
+  it('still refuses when the file was changed by someone else after the revert', async () => {
+    const path = await seedAndRead('notes.md', 'original\n');
+    await executeWriteFile({ path, content: 'rewritten\n' }, turnContext());
+
+    expect(await revert()).toEqual({ revertedFiles: 1 });
+    await reopenRevertedRows();
+    await Bun.write(path, 'edited by the user\n');
+
+    await expect(revert()).rejects.toBeInstanceOf(FileCheckpointConflictError);
+    expect(await readText(path)).toBe('edited by the user\n');
+  });
+});
+
+/**
  * Restriction is evaluated at revert time, not capture time, so a turn that ran
  * unrestricted can be reverted after the setting is switched on. That is the
  * whole point of re-checking containment here.

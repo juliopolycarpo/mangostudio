@@ -125,9 +125,14 @@ export async function revertRuntimeSnapshots(
     }
   }
 
+  const revertedFiles = new Set(params.operations.map((operation) => operation.path)).size;
+
   return await withPathLocks(paths, async () => {
-    for (const entry of params.expected) {
-      await assertMatchesAfterHash(entry.path, entry.afterHash);
+    if (await alreadyReverted(params.expected)) {
+      // The filesystem half of a previous call finished; only its caller's
+      // bookkeeping did not. Replaying the operations from here would undo
+      // rows against the wrong baseline, so report the work as done instead.
+      return { revertedFiles };
     }
 
     for (const operation of params.operations) {
@@ -153,19 +158,40 @@ export async function revertRuntimeSnapshots(
       }
     }
 
-    return {
-      revertedFiles: new Set(params.operations.map((operation) => operation.path)).size,
-    };
+    return { revertedFiles };
   });
 }
 
-async function assertMatchesAfterHash(path: string, expectedAfterHash: string): Promise<void> {
-  const current = await hashFileAtPath(path);
-  if (expectedAfterHash === RUNTIME_ABSENT_HASH) {
-    if (current !== null) throw new RuntimeSnapshotConflictError(path);
-    return;
+/**
+ * Decides whether these paths still hold what the message left behind, or
+ * already hold what reverting it produces, and rejects anything else.
+ *
+ * The decision is taken for the set rather than per path: the operations are a
+ * replay in reverse, so a path touched by several of them has intermediate
+ * states that its final hash cannot distinguish. Resuming a half-applied replay
+ * from the middle could delete a file an earlier operation had just restored,
+ * which is why a genuinely mixed set is a conflict rather than a resume.
+ */
+async function alreadyReverted(
+  expected: RuntimeSnapshotRevertParams['expected']
+): Promise<boolean> {
+  let pendingPath: string | null = null;
+  let revertedPath: string | null = null;
+  for (const entry of expected) {
+    const observed = (await hashFileAtPath(entry.path)) ?? RUNTIME_ABSENT_HASH;
+    const matchesAfter = observed === entry.afterHash;
+    const matchesReverted = entry.revertedHash !== undefined && observed === entry.revertedHash;
+    if (!matchesAfter && !matchesReverted) throw new RuntimeSnapshotConflictError(entry.path);
+    // A path whose two states coincide matches both and settles nothing.
+    if (matchesAfter && !matchesReverted) pendingPath ??= entry.path;
+    else if (matchesReverted && !matchesAfter) revertedPath ??= entry.path;
   }
-  if (current !== expectedAfterHash) throw new RuntimeSnapshotConflictError(path);
+  // Name the path that is already reverted: it is the one whose state the
+  // remaining operations cannot be replayed against.
+  if (pendingPath !== null && revertedPath !== null) {
+    throw new RuntimeSnapshotConflictError(revertedPath);
+  }
+  return revertedPath !== null;
 }
 
 async function restoreBytes(chatId: string, path: string, contentBase64: string): Promise<void> {

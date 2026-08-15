@@ -6,7 +6,7 @@
 import type { RuntimePatchOperation } from '@mangostudio/runtime';
 import { getRuntimeClient } from '../../runtime-client';
 import { getRequiredTextArg, ToolArgumentError } from '../arg-parsing';
-import { persistRuntimeMutations } from '../file-mutation-snapshot';
+import { withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -85,17 +85,27 @@ export async function executeApplyPatch(
     paths: runtime.paths,
   };
   const operations = resolveOperations(parsed.operations, validationOptions);
-  const { result, mutations } = await runtime.fs.applyPatch(
-    {
-      chatId: context.chatId,
-      operations,
-      captureSnapshot: Boolean(context.assistantMessageId),
-      ...runtimePathPolicy(validationOptions),
-    },
-    context.signal ? { signal: context.signal } : undefined
+  const { result } = await withMutationPersistence(context, lockedPaths(operations), () =>
+    runtime.fs.applyPatch(
+      {
+        chatId: context.chatId,
+        operations,
+        captureSnapshot: Boolean(context.assistantMessageId),
+        ...runtimePathPolicy(validationOptions),
+      },
+      context.signal ? { signal: context.signal } : undefined
+    )
   );
-  await persistRuntimeMutations(context, mutations);
   return result;
+}
+
+/** Every path the patch can touch, so persistence spans the whole operation set. */
+function lockedPaths(operations: readonly RuntimePatchOperation[]): string[] {
+  return operations.flatMap((operation) =>
+    operation.type === 'update' && operation.resolvedMoveTo
+      ? [operation.resolvedPath, operation.resolvedMoveTo]
+      : [operation.resolvedPath]
+  );
 }
 
 function resolveOperations(

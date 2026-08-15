@@ -5,7 +5,7 @@
 
 import { getRuntimeClient } from '../../runtime-client';
 import { getOptionalBoolean, getRequiredTextArg } from '../arg-parsing';
-import { persistRuntimeMutations } from '../file-mutation-snapshot';
+import { withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -88,20 +88,21 @@ export async function executeEditFile(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
-  const { result, mutations } = await runtime.fs.editFile(
-    {
-      chatId: context.chatId,
-      inputPath: args.path,
-      resolvedPath,
-      oldString: args.oldString,
-      newString: args.newString,
-      ...(args.replaceAll !== undefined ? { replaceAll: args.replaceAll } : {}),
-      captureSnapshot: Boolean(context.assistantMessageId),
-      ...runtimePathPolicy(options),
-    },
-    context.signal ? { signal: context.signal } : undefined
+  const { result } = await withMutationPersistence(context, [resolvedPath], () =>
+    runtime.fs.editFile(
+      {
+        chatId: context.chatId,
+        inputPath: args.path,
+        resolvedPath,
+        oldString: args.oldString,
+        newString: args.newString,
+        ...(args.replaceAll !== undefined ? { replaceAll: args.replaceAll } : {}),
+        captureSnapshot: Boolean(context.assistantMessageId),
+        ...runtimePathPolicy(options),
+      },
+      context.signal ? { signal: context.signal } : undefined
+    )
   );
-  await persistRuntimeMutations(context, mutations);
   return result;
 }
 

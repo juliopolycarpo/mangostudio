@@ -140,6 +140,11 @@ Open these first:
 
 Per-message **file checkpoints** cover the built-in filesystem mutation tools above, including the ones a subagent (`delegate_to_agent`) runs — those inherit the delegating turn's `assistantMessageId`, so their mutations join the same manifest. Revert is whole-turn (`POST /api/chats/:id/checkpoints/:messageId/revert`) and compares on-disk hashes before restoring. **Not checkpointed:** shell tools and MCP file writes — only explicit builtin mutators participate.
 
+Two invariants the checkpoint path depends on:
+
+- A mutation and its manifest row are written under one per-path lock (`withMutationPersistence` in `apps/api/src/services/tools/file-mutation-snapshot.ts`). Every executor passes it the full set of paths its call can touch, so nothing on those paths can start a second mutation before the row exists.
+- Revert sends both the state the turn left behind (`afterHash`) and the state a completed revert produces (`revertedHash`). A retry after a revert whose bookkeeping write failed therefore recognises its own finished work instead of reporting the file as changed by someone else. A set that is half in each state is still a conflict — see the comment on `alreadyReverted` in `apps/runtime/src/services/snapshot.ts` for why resuming it is unsafe.
+
 ## Skills
 
 Open these first:
