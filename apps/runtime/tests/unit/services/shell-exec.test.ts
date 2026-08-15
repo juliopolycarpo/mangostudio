@@ -193,9 +193,73 @@ describe('runShellCommand', () => {
       expect(Number.isFinite(descendant)).toBe(true);
       // Signalling the group and reaping it are not the same instant, so this
       // waits for the descendant to go rather than asserting on the first look.
+      // `kill(pid, 0)` succeeds on a zombie, so this also fails if the leader
+      // was killed before it could waitpid the children.
       expect(await waitUntilGone(descendant, 10_000)).toBe(true);
     },
     60_000
+  );
+
+  it.skipIf(!hasBash)(
+    'returns when the shell exits but a descendant still holds the pipes',
+    async () => {
+      // `sleep 60 & echo done` is a successful shell: it backgrounds the work
+      // and exits 0. The descendant keeps the pipes, so waiting for EOF is
+      // waiting for the sleep. The wall-clock budget still has to end the call.
+      const startedAt = Date.now();
+      const result = await runShellCommand({
+        kind: 'bash',
+        command: 'sleep 60 & echo $!',
+        timeoutMs: 400,
+        maxOutputBytes: 1000,
+      });
+
+      expect(result.termination).toEqual({ kind: 'exited' });
+      expect(result.exitCode).toBe(0);
+      expect(result.truncated).toBe(true);
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+
+      const descendant = Number(result.stdout.trim().split('\n')[0]);
+      expect(Number.isFinite(descendant)).toBe(true);
+      expect(await waitUntilGone(descendant, 10_000)).toBe(true);
+    },
+    30_000
+  );
+
+  it.skipIf(!hasBash)(
+    'stops capture on abort after the shell has already exited',
+    async () => {
+      const marker = join(tempDir, 'exited');
+      const controller = new AbortController();
+      const startedAt = Date.now();
+      const run = runShellCommand({
+        kind: 'bash',
+        command: `sleep 60 & echo $!; echo ready > "${marker}"`,
+        timeoutMs: 30_000,
+        maxOutputBytes: 1000,
+        signal: controller.signal,
+      });
+
+      const deadline = Date.now() + 5_000;
+      while (!existsSync(marker) && Date.now() < deadline) {
+        await Bun.sleep(10);
+      }
+      expect(existsSync(marker)).toBe(true);
+      // The marker is written just before bash exits; give that exit a turn
+      // so this abort lands on the naturally-exited path, not the running one.
+      await Bun.sleep(50);
+      controller.abort();
+
+      const result = await run;
+      expect(result.termination).toEqual({ kind: 'exited' });
+      expect(result.truncated).toBe(true);
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+
+      const descendant = Number(result.stdout.trim().split('\n')[0]);
+      expect(Number.isFinite(descendant)).toBe(true);
+      expect(await waitUntilGone(descendant, 10_000)).toBe(true);
+    },
+    30_000
   );
 
   it.skipIf(!hasBash)('kills the process when the signal is already aborted', async () => {

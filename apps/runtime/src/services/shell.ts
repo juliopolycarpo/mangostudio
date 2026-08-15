@@ -142,20 +142,26 @@ export async function runShellCommandWithDeps(
   };
 
   const killChild = () => {
-    killProcessTree(proc.pid, () => proc.kill('SIGKILL'));
+    // Stop the capture first: that is what bounds the call. The tree kill
+    // may take a turn on Linux so the group leader can reap, and must not
+    // sit on the path that unblocks the readers.
     terminated.abort();
+    killProcessTree(proc.pid, () => proc.kill('SIGKILL'));
   };
 
   const naturallyExited = () => proc.exitCode !== null && proc.signalCode === null;
 
   const timeoutId = deps.setTimeout(() => {
-    if (naturallyExited()) return;
-    if (claim('timed_out')) killChild();
+    // A shell that backgrounds work and exits still leaves descendants
+    // holding these pipes. The exit code is real, so do not reclassify the
+    // call as a timeout; still stop the capture and the leftover group.
+    if (!naturallyExited() && !claim('timed_out')) return;
+    killChild();
   }, input.timeoutMs);
 
   const abortHandler = () => {
-    if (naturallyExited()) return;
-    if (claim('aborted')) killChild();
+    if (!naturallyExited() && !claim('aborted')) return;
+    killChild();
   };
   input.signal?.addEventListener('abort', abortHandler, { once: true });
   // A signal already aborted at spawn time never re-dispatches `abort` to a
