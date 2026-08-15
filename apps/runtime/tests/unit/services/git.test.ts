@@ -126,4 +126,21 @@ describe('git CLI boundary', () => {
     },
     60_000
   );
+
+  it.skipIf(!hasGit || isWindows)(
+    'returns when Git exits but a helper still holds the pipes',
+    async () => {
+      const startedAt = Date.now();
+      const result = await execGit({
+        args: ['-c', 'alias.hang=!sh -c "sleep 60 & echo done"', 'hang'],
+        cwd: process.cwd(),
+        timeoutMs: 400,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe('done');
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+    },
+    30_000
+  );
 });

@@ -195,11 +195,40 @@ describe('a cancelled runtime call refuses before it mutates', () => {
     ).rejects.toMatchObject({ name: 'AbortError' });
 
     await expect(
+      runtimeFsService.glob(
+        {
+          pattern: 'no-such-*',
+          cwd: tempDir,
+          maxResults: 10,
+          includeDotfiles: false,
+          absolute: false,
+        },
+        signal
+      )
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    await expect(
       runtimeFsService.grep(
         {
           pattern: 'original',
           inputPath: '.',
           resolvedPath: tempDir,
+          caseInsensitive: false,
+          maxResults: 10,
+          maxMatchesPerFile: 10,
+          maxFileSizeBytes: 1_000_000,
+          includeDotfiles: false,
+        },
+        signal
+      )
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    await expect(
+      runtimeFsService.grep(
+        {
+          pattern: 'original',
+          inputPath: 'readable.txt',
+          resolvedPath: path,
           caseInsensitive: false,
           maxResults: 10,
           maxMatchesPerFile: 10,

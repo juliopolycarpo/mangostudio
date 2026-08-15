@@ -262,6 +262,31 @@ describe('runShellCommand', () => {
     30_000
   );
 
+  it.skipIf(!hasBash)(
+    'keeps a signalled exit when leftover descendants hold the pipes',
+    async () => {
+      const startedAt = Date.now();
+      const result = await runShellCommand({
+        kind: 'bash',
+        command: 'sleep 60 & kill -TERM $$',
+        timeoutMs: 400,
+        maxOutputBytes: 1000,
+      });
+
+      expect(result.termination.kind).not.toBe('timed_out');
+      expect(result.truncated).toBe(true);
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+      if (result.termination.kind === 'signalled') {
+        expect(result.termination.signal).toBe('SIGTERM');
+      } else {
+        // bash may convert the signal into a 128+n exit instead of dying of it.
+        expect(result.termination).toEqual({ kind: 'exited' });
+        expect(result.exitCode).toBe(143);
+      }
+    },
+    30_000
+  );
+
   it.skipIf(!hasBash)('kills the process when the signal is already aborted', async () => {
     const controller = new AbortController();
     controller.abort();

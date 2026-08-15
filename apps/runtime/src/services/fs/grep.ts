@@ -41,9 +41,11 @@ export async function grepRuntimeFiles(
   params: RuntimeGrepParams,
   signal?: AbortSignal
 ): Promise<RuntimeGrepResult> {
+  throwIfAborted(signal);
   const regex = buildRegex(params.pattern, params.caseInsensitive);
   const allows = compilePolicyGuard(params.pathPolicy);
   const rootStats = await statSafe(params.resolvedPath, params.inputPath);
+  throwIfAborted(signal);
   const matches: Array<{ file: string; line: number; text: string }> = [];
   let filesScanned = 0;
   let truncated = false;
@@ -64,6 +66,7 @@ export async function grepRuntimeFiles(
         matches,
         params,
       });
+      throwIfAborted(signal);
       return {
         pattern: params.pattern,
         path: params.inputPath,
@@ -115,6 +118,7 @@ export async function grepRuntimeFiles(
       throw new PathAccessError(`Cannot search "${params.inputPath}": ${message}`);
     }
 
+    throwIfAborted(signal);
     return {
       pattern: params.pattern,
       path: params.inputPath,

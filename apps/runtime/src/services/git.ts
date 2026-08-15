@@ -101,9 +101,17 @@ export async function execGit(
   // take away the controlling terminal that `GPG_TTY` and `SSH_AUTH_SOCK` are
   // forwarded for. A helper that survives the kill is leaked; the call is not.
   const terminated = new AbortController();
+  // Set when Git already finished and leftover helpers still hold the pipes.
+  // Stopping the readers must not be reported as a timeout, abort, or cap hit.
+  let releasedAfterExit = false;
 
   const kill = (reason: 'timeout' | 'abort') => {
-    if (termination || proc.exitCode !== null) return;
+    if (termination) return;
+    if (proc.exitCode !== null || proc.signalCode !== null) {
+      releasedAfterExit = true;
+      terminated.abort();
+      return;
+    }
     termination = reason;
     try {
       proc.kill('SIGKILL');
@@ -142,7 +150,7 @@ export async function execGit(
         args,
       });
     }
-    if (stdout.truncated || stderr.truncated) {
+    if ((stdout.truncated || stderr.truncated) && !releasedAfterExit) {
       const message = `Git output exceeded ${MAX_OUTPUT_BYTES} bytes.`;
       throw new GitExecutionError(message, {
         exitCode,

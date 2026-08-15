@@ -149,18 +149,19 @@ export async function runShellCommandWithDeps(
     killProcessTree(proc.pid, () => proc.kill('SIGKILL'));
   };
 
-  const naturallyExited = () => proc.exitCode !== null && proc.signalCode === null;
+  const alreadyFinished = () => proc.exitCode !== null || proc.signalCode !== null;
 
   const timeoutId = deps.setTimeout(() => {
-    // A shell that backgrounds work and exits still leaves descendants
-    // holding these pipes. The exit code is real, so do not reclassify the
-    // call as a timeout; still stop the capture and the leftover group.
-    if (!naturallyExited() && !claim('timed_out')) return;
+    // A shell that backgrounds work and then exits or is signalled still
+    // leaves descendants holding these pipes. The termination it already
+    // has is real, so do not reclassify the call; still stop the capture
+    // and the leftover group.
+    if (!alreadyFinished() && !claim('timed_out')) return;
     killChild();
   }, input.timeoutMs);
 
   const abortHandler = () => {
-    if (!naturallyExited() && !claim('aborted')) return;
+    if (!alreadyFinished() && !claim('aborted')) return;
     killChild();
   };
   input.signal?.addEventListener('abort', abortHandler, { once: true });

@@ -91,27 +91,35 @@ function killLinuxProcessTree(leaderPid: number, killDirectChild: () => void): b
   const members = linuxProcessGroupMembers(leaderPid);
   if (members === null) return false;
 
-  const others = members.filter((pid) => pid !== leaderPid && pid > 1);
-  if (others.length === 0) {
+  // A command can spawn a new child after the first snapshot (`sleep 60;
+  // sleep 60 & wait`). Each tick re-lists and signals whatever is there now,
+  // and the leader is only taken down once the group is just it, or the
+  // budget runs out.
+  const sweep = (): boolean => {
+    const current = linuxProcessGroupMembers(leaderPid);
+    if (current === null) return false;
+    let remaining = false;
+    for (const pid of current) {
+      if (pid === leaderPid || pid <= 1) continue;
+      remaining = true;
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        // Already gone.
+      }
+    }
+    return remaining;
+  };
+
+  if (!sweep()) {
     invokeKill(killDirectChild);
     return true;
   }
 
-  for (const pid of others) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // Already gone.
-    }
-  }
-
   const deadline = Date.now() + LEADER_REAP_BUDGET_MS;
-  const finish = () => invokeKill(killDirectChild);
   const tick = () => {
-    const leftover = linuxProcessGroupMembers(leaderPid);
-    const remaining = leftover?.some((pid) => pid !== leaderPid && pid > 1);
-    if (!remaining || Date.now() >= deadline) {
-      finish();
+    if (!sweep() || Date.now() >= deadline) {
+      invokeKill(killDirectChild);
       return;
     }
     const timer = setTimeout(tick, LEADER_REAP_POLL_MS);

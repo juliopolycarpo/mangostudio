@@ -8,6 +8,7 @@ export async function globRuntimePaths(
   params: RuntimeGlobParams,
   signal?: AbortSignal
 ): Promise<RuntimeGlobResult> {
+  throwIfAborted(signal);
   const matches: string[] = [];
   let truncated = false;
   const glob = new Bun.Glob(params.pattern);
@@ -28,6 +29,7 @@ export async function globRuntimePaths(
       }
       matches.push(match);
     }
+    throwIfAborted(signal);
   } catch (error) {
     if (error instanceof PathAccessError) throw error;
     // A cancelled walk is the hub's answer, not a pattern failure.
