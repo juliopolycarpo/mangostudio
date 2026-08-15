@@ -4,7 +4,7 @@
  */
 
 import { getRuntimeClient } from '../../runtime-client';
-import { persistRuntimeMutations } from '../file-mutation-snapshot';
+import { withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -68,17 +68,18 @@ export async function executeDeleteFile(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
-  const { result, mutations } = await runtime.fs.deleteFile(
-    {
-      chatId: context.chatId,
-      inputPath: args.path,
-      resolvedPath,
-      captureSnapshot: Boolean(context.assistantMessageId),
-      ...runtimePathPolicy(options),
-    },
-    context.signal ? { signal: context.signal } : undefined
+  const { result } = await withMutationPersistence(context, [resolvedPath], () =>
+    runtime.fs.deleteFile(
+      {
+        chatId: context.chatId,
+        inputPath: args.path,
+        resolvedPath,
+        captureSnapshot: Boolean(context.assistantMessageId),
+        ...runtimePathPolicy(options),
+      },
+      context.signal ? { signal: context.signal } : undefined
+    )
   );
-  await persistRuntimeMutations(context, mutations);
   return result;
 }
 

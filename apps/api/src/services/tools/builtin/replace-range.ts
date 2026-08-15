@@ -5,7 +5,11 @@
 
 import { getRuntimeClient } from '../../runtime-client';
 import { getRequiredInteger, getRequiredTextArg } from '../arg-parsing';
-import { attachBeforeFields, persistRuntimeMutations } from '../file-mutation-snapshot';
+import {
+  attachBeforeFields,
+  type BeforeOmittedReason,
+  withMutationPersistence,
+} from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -32,7 +36,7 @@ export interface ReplaceRangeToolResult {
   newTotalLines: number;
   sha256: string;
   before?: string;
-  beforeOmitted?: 'binary' | 'too_large' | 'missing';
+  beforeOmitted?: BeforeOmittedReason;
 }
 
 export type ReplaceRangeToolSettings = PathValidationSettings;
@@ -93,21 +97,22 @@ export async function executeReplaceRange(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
-  const { result, mutations } = await runtime.fs.replaceRange(
-    {
-      chatId: context.chatId,
-      inputPath: args.path,
-      resolvedPath,
-      startLine: args.startLine,
-      endLine: args.endLine,
-      content: args.content,
-      captureSnapshot: Boolean(context.assistantMessageId),
-      ...runtimePathPolicy(options),
-    },
-    context.signal ? { signal: context.signal } : undefined
+  const { result, captured } = await withMutationPersistence(context, [resolvedPath], () =>
+    runtime.fs.replaceRange(
+      {
+        chatId: context.chatId,
+        inputPath: args.path,
+        resolvedPath,
+        startLine: args.startLine,
+        endLine: args.endLine,
+        content: args.content,
+        captureSnapshot: Boolean(context.assistantMessageId),
+        ...runtimePathPolicy(options),
+      },
+      context.signal ? { signal: context.signal } : undefined
+    )
   );
-  const [captured] = await persistRuntimeMutations(context, mutations);
-  return attachBeforeFields(result, captured);
+  return attachBeforeFields(result, captured[0]);
 }
 
 function execute(

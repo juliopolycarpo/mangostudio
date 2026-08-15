@@ -386,6 +386,12 @@ export interface RuntimeSnapshotRevertParams {
   readonly expected: readonly {
     readonly path: string;
     readonly afterHash: string;
+    /**
+     * Hash this path holds once the revert has completed, when the caller can
+     * derive it. Supplying it lets a retry after a revert whose bookkeeping
+     * failed recognise its own finished work instead of reporting a conflict.
+     */
+    readonly revertedHash?: string;
   }[];
   readonly operations: readonly (
     | { readonly type: 'create'; readonly path: string }

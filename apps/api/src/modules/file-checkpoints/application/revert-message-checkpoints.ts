@@ -20,10 +20,11 @@ import {
 } from '../infrastructure/checkpoint-repository';
 
 export class FileCheckpointConflictError extends Error {
-  constructor(readonly resolvedPath: string) {
-    super(
-      `Cannot revert "${resolvedPath}": the file changed on disk since this assistant message completed.`
-    );
+  constructor(
+    readonly resolvedPath: string,
+    message = `Cannot revert "${resolvedPath}": the file changed on disk since this assistant message completed.`
+  ) {
+    super(message);
     this.name = 'FileCheckpointConflictError';
   }
 }
@@ -37,10 +38,11 @@ export async function revertMessageFileCheckpoints(
   if (rows.length === 0) return { revertedFiles: 0 };
 
   const operations = await buildRevertOperations(rows);
-  const expected = [...finalStateByPath(rows)].map(([path, afterHash]) => ({
-    path,
-    afterHash,
-  }));
+  const reverted = revertedStateByPath(rows);
+  const expected = [...finalStateByPath(rows)].map(([path, afterHash]) => {
+    const revertedHash = reverted.get(path);
+    return { path, afterHash, ...(revertedHash === undefined ? {} : { revertedHash }) };
+  });
   const runtimeContext = await resolveRevertRuntimeContext(
     db,
     chatId,
@@ -157,9 +159,21 @@ async function buildRevertOperations(
 }
 
 async function readRequiredBlob(row: FileCheckpointSelect): Promise<string> {
-  if (!row.blobKey) throw new FileCheckpointConflictError(row.path);
+  if (!row.blobKey) {
+    throw new FileCheckpointConflictError(
+      row.path,
+      `Cannot revert "${row.path}": its content before this assistant message was not captured, ` +
+        'so there is nothing to restore.'
+    );
+  }
   const bytes = await readCheckpointBlob(row.blobKey);
-  if (!bytes) throw new FileCheckpointConflictError(row.path);
+  if (!bytes) {
+    throw new FileCheckpointConflictError(
+      row.path,
+      `Cannot revert "${row.path}": its stored content from before this assistant message is no ` +
+        'longer available.'
+    );
+  }
   return Buffer.from(bytes).toString('base64');
 }
 
@@ -179,4 +193,25 @@ function finalStateByPath(rows: readonly FileCheckpointSelect[]): Map<string, st
     }
   }
   return expected;
+}
+
+/**
+ * The mirror image of {@link finalStateByPath}: what a completed revert leaves
+ * on disk. Undoing a row hands its path back its captured `beforeHash` and
+ * empties whatever it had moved content to, so replaying the rows backwards —
+ * the order revert itself uses — lands on the earliest state of every path.
+ *
+ * A revert whose bookkeeping write failed leaves exactly this, and it is what
+ * lets the retry tell its own finished work apart from an outside edit.
+ */
+function revertedStateByPath(rows: readonly FileCheckpointSelect[]): Map<string, string> {
+  const reverted = new Map<string, string>();
+  for (const row of [...rows].reverse()) {
+    if (row.movedTo) reverted.set(row.movedTo, RUNTIME_ABSENT_HASH);
+    reverted.set(
+      row.path,
+      row.op === 'create' ? RUNTIME_ABSENT_HASH : (row.beforeHash ?? RUNTIME_ABSENT_HASH)
+    );
+  }
+  return reverted;
 }
