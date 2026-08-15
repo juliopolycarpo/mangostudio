@@ -100,23 +100,58 @@ export function scanLibraryInstances(
     LIBRARY_LOCATION_DEFINITIONS.map((location) => [location.id, location])
   );
 
-  const compute = async (): Promise<readonly ReadLibraryInstance[]> => {
-    throwIfAborted(options.signal);
+  const compute = async (signal?: AbortSignal): Promise<readonly ReadLibraryInstance[]> => {
+    throwIfAborted(signal);
     const scanned = await Promise.all(
       targets.map((target) => {
-        throwIfAborted(options.signal);
+        throwIfAborted(signal);
         const location = locationById.get(target.locationId);
         if (!location) return Promise.resolve([] as ReadLibraryInstance[]);
         return readLocationInstances(location, target.path, {
           cache,
           force,
-          signal: options.signal,
+          signal,
         });
       })
     );
     return scanned.flat();
   };
 
-  if (options.cacheScan === false) return compute();
-  return cache.getOrComputeScan(signature, (options.now ?? Date.now)(), force, compute);
+  // Cached scans are shared across callers. The walk must not close over one
+  // call's AbortSignal, or cancelling the first request rejects every other
+  // waiter and cancelling only a waiter is ignored. Each caller refuses on
+  // its own signal around the shared promise instead.
+  if (options.cacheScan === false) return compute(options.signal);
+  return settleUnlessAborted(
+    cache.getOrComputeScan(signature, (options.now ?? Date.now)(), force, () => compute()),
+    options.signal
+  );
+}
+
+async function settleUnlessAborted<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  throwIfAborted(signal);
+  if (!signal) return promise;
+
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      promise.then((value) => {
+        throwIfAborted(signal);
+        return value;
+      }),
+      new Promise<never>((_, reject) => {
+        onAbort = () => {
+          try {
+            throwIfAborted(signal);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      }),
+    ]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
 }

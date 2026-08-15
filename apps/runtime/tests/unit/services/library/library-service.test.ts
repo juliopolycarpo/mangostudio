@@ -261,4 +261,35 @@ describe('library.scan environments stay disjoint', () => {
     expect(scanA.entries.map((entry) => entry.ref.slug)).toEqual(['alpha']);
     expect(scanB.entries.map((entry) => entry.ref.slug)).toEqual(['beta']);
   });
+
+  it('does not cancel a coalesced scan when a different caller aborts', async () => {
+    const skills = join(root, 'skills', 'alpha');
+    mkdirSync(skills, { recursive: true });
+    writeFileSync(join(skills, 'SKILL.md'), '---\nname: alpha\ndescription: A\n---\n');
+
+    const cache = new LibraryCache();
+    const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+      home: { 'mango-skills': true },
+      workspace: {},
+    });
+    const params = {
+      locationSettings: libraryLocationsFor(settings),
+      force: false,
+      locationPathOverrides: { 'mango-skills': join(root, 'skills') },
+    };
+    const service = createLibraryService({
+      createPathEnv: () => createRuntimePathEnv(),
+      cache,
+      describeLocations: () => [],
+      now: () => 1,
+    });
+
+    const firstController = new AbortController();
+    const first = service.scan(params, firstController.signal);
+    const second = service.scan(params, new AbortController().signal);
+    firstController.abort();
+
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    expect((await second).entries.map((entry) => entry.ref.slug)).toEqual(['alpha']);
+  });
 });
