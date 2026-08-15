@@ -404,10 +404,12 @@ export async function readLibraryTree(
   const rootMetadata = await fs.stat(canonicalRoot);
   if (rootMetadata.isFile) {
     if (rootMetadata.size > MAX_LIBRARY_FILE_BYTES) throw new InstanceTooLargeError();
-    return [{ relativePath: basename(rootPath), bytes: await fs.readFile(canonicalRoot) }];
+    const bytes = await fs.readFile(canonicalRoot);
+    throwIfAborted(options.signal);
+    return [{ relativePath: basename(rootPath), bytes }];
   }
   const leaves = await collectLeafFiles(rootPath, fs, options.signal);
-  return await Promise.all(
+  const files = await Promise.all(
     leaves.map(async (leaf) => {
       throwIfAborted(options.signal);
       // Re-checked after resolution, exactly as the hash pass does: the walk
@@ -415,9 +417,13 @@ export async function readLibraryTree(
       // leaf pointing outside the tree is a different question.
       const canonicalPath = await fs.realPath(leaf.absolutePath);
       if (!isPathWithin(canonicalRoot, canonicalPath)) throw new PathEscapeError();
-      return { relativePath: leaf.relativePath, bytes: await fs.readFile(canonicalPath) };
+      const bytes = await fs.readFile(canonicalPath);
+      throwIfAborted(options.signal);
+      return { relativePath: leaf.relativePath, bytes };
     })
   );
+  throwIfAborted(options.signal);
+  return files;
 }
 
 async function collectLeafFiles(

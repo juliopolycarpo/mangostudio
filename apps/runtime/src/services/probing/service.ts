@@ -379,6 +379,7 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
         ...(currentNodePath !== undefined && { currentNodePath }),
         ...(latestByMajor !== undefined && { latestByMajor, liveDataAvailable: true }),
       });
+      throwIfAborted(signal);
       return { statuses: [status] };
     },
 

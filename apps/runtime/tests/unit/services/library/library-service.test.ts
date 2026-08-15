@@ -18,6 +18,7 @@ import {
   MAX_LIBRARY_FILE_BYTES,
   readLibraryContent,
 } from '../../../../src/services/library';
+import { readLibraryTree } from '../../../../src/services/library/instance-reader';
 import { createRuntimePathEnv } from '../../../../src/services/probing/host-env';
 
 let root: string;
@@ -291,5 +292,28 @@ describe('library.scan environments stay disjoint', () => {
 
     await expect(first).rejects.toMatchObject({ name: 'AbortError' });
     expect((await second).entries.map((entry) => entry.ref.slug)).toEqual(['alpha']);
+  });
+});
+
+describe('library.read-tree cancellation', () => {
+  it('refuses after a file read that was cancelled while in flight', async () => {
+    const file = join(root, 'note.md');
+    writeFileSync(file, 'hello');
+    const controller = new AbortController();
+
+    await expect(
+      readLibraryTree(file, root, {
+        signal: controller.signal,
+        fs: {
+          readDirectory: async () => [],
+          realPath: async (path) => path,
+          stat: async () => ({ size: 5, mtimeMs: 0, isFile: true, isDirectory: false }),
+          readFile: () => {
+            controller.abort();
+            return Promise.resolve(new Uint8Array([1]));
+          },
+        },
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

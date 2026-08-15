@@ -152,4 +152,21 @@ describe('version manager probing', () => {
     expect(statuses).toEqual([]);
     expect(nvmDepsCount).toBe(0);
   });
+
+  it('refuses a version-manager probe cancelled during detection', async () => {
+    const controller = new AbortController();
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly],
+      createPathEnv: () => LINUX_ENV,
+      createScanDeps: () => scanDeps({ pathExists: () => false }),
+      createNvmDeps: () => {
+        controller.abort();
+        return missingNvmDeps();
+      },
+    });
+
+    await expect(service.probeVersionManagers({}, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
 });
