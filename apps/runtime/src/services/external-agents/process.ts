@@ -1,6 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { OWN_PROCESS_GROUP, windowsTaskkillArguments } from '../process-tree';
+import { killProcessTree, OWN_PROCESS_GROUP, windowsTaskkillArguments } from '../process-tree';
 import { HIDDEN_WINDOW } from '../process-window';
 
 const DEFAULT_MAX_LINE_BYTES = 1024 * 1024;
@@ -468,8 +468,23 @@ async function exitedWithin(exit: Promise<unknown>, timeoutMs: number) {
   return await Promise.race([exit.then(() => true), delay(timeoutMs, false, { ref: false })]);
 }
 
+/**
+ * Signals the child's whole group, falling back to the direct handle.
+ *
+ * The two signals want different orderings. SIGTERM is the graceful ask, so it
+ * goes to the group as a unit and every member runs its own shutdown. SIGKILL
+ * cannot be handled, so it goes through {@link killProcessTree}: members first
+ * and the leader once it has had a chance to waitpid them. A single
+ * `kill(-pid, 'SIGKILL')` races the leader with its children, and the orphans
+ * land on PID 1 — which is the hub itself in this repo's Docker images, and
+ * does not reap what it adopts.
+ */
 function signalProcessTree(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
   if (child.exitCode !== null || child.signalCode !== null) return;
+  if (signal === 'SIGKILL') {
+    killProcessTree(child.pid, () => child.kill(signal));
+    return;
+  }
   const pid = child.pid;
   if (pid !== undefined && pid > 1) {
     try {
