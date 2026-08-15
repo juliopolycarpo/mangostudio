@@ -4,6 +4,7 @@ import type {
   RuntimeEditFileResult,
   RuntimeMutationResult,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import { FileNotReadError, readFreshFile, recordFileEdit, withPathLocks } from '../file-freshness';
 import {
   explainUnreadableMutationTarget,
@@ -16,9 +17,11 @@ import { looksBinary } from './read-file';
 const NEWLINE = 0x0a;
 
 export async function editRuntimeFile(
-  params: RuntimeEditFileParams
+  params: RuntimeEditFileParams,
+  signal?: AbortSignal
 ): Promise<RuntimeMutationResult<RuntimeEditFileResult>> {
   validateReplacement(params.oldString, params.newString);
+  throwIfAborted(signal);
 
   return await withPathLocks([params.resolvedPath], async () => {
     let observed: Awaited<ReturnType<typeof readFreshFile>>;
@@ -55,6 +58,8 @@ export async function editRuntimeFile(
     const selectedOffsets = params.replaceAll ? matchOffsets : [matchOffsets[0]];
     const updated = replaceAtOffsets(source, oldBytes.byteLength, newBytes, selectedOffsets);
     assertStillText(updated, params.inputPath);
+    // Everything above this line read; everything below it writes.
+    throwIfAborted(signal);
 
     let committed: { mtimeMs: number };
     try {

@@ -5,6 +5,7 @@
 
 import { RuntimeServiceError, RuntimeToolArgumentError } from '../errors';
 import type { RuntimeGitExecParams, RuntimeGitExecResult } from '../methods';
+import { readStreamCapped } from './child-output';
 import { HIDDEN_WINDOW } from './process-window';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -45,11 +46,6 @@ export class GitExecutionError extends RuntimeServiceError {
     super('git_execution', message, data);
     this.name = 'GitExecutionError';
   }
-}
-
-interface CappedOutput {
-  readonly text: string;
-  readonly truncated: boolean;
 }
 
 /** Builds the direct argv passed to Bun.spawn; no shell is involved. */
@@ -96,6 +92,15 @@ export async function execGit(
   }
 
   let termination: 'timeout' | 'abort' | null = null;
+  // Git starts helpers of its own — credential helpers, ssh, filter processes —
+  // and one that outlives the kill inherits these pipes, so waiting for EOF
+  // here would wait forever. Releasing the readers is what bounds the call.
+  //
+  // Unlike the shell service, Git is not put in a process group of its own: its
+  // argv is code-defined rather than model-supplied, and a new session would
+  // take away the controlling terminal that `GPG_TTY` and `SSH_AUTH_SOCK` are
+  // forwarded for. A helper that survives the kill is leaked; the call is not.
+  const terminated = new AbortController();
 
   const kill = (reason: 'timeout' | 'abort') => {
     if (termination || proc.exitCode !== null) return;
@@ -105,6 +110,7 @@ export async function execGit(
     } catch {
       // The child may have exited between the state check and kill.
     }
+    terminated.abort();
   };
 
   const timeoutId = setTimeout(() => kill('timeout'), timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -114,8 +120,8 @@ export async function execGit(
 
   try {
     const [stdout, stderr] = await Promise.all([
-      readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES),
-      readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES),
+      readStreamCapped(proc.stdout, MAX_OUTPUT_BYTES, terminated.signal),
+      readStreamCapped(proc.stderr, MAX_OUTPUT_BYTES, terminated.signal),
     ]);
     const exitCode = await proc.exited;
 
@@ -220,41 +226,4 @@ function spawnGit(args: readonly string[], cwd: string) {
     stderr: 'pipe',
     ...HIDDEN_WINDOW,
   });
-}
-
-async function readStreamCapped(
-  stream: ReadableStream<Uint8Array>,
-  maxBytes: number
-): Promise<CappedOutput> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let capturedBytes = 0;
-  let truncated = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-
-      const remaining = maxBytes - capturedBytes;
-      if (remaining <= 0) {
-        truncated = true;
-        continue;
-      }
-      chunks.push(value.subarray(0, remaining));
-      capturedBytes += Math.min(value.byteLength, remaining);
-      if (value.byteLength > remaining) truncated = true;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const bytes = new Uint8Array(capturedBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { text: new TextDecoder().decode(bytes), truncated };
 }

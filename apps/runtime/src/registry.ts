@@ -86,26 +86,52 @@ export function createRuntimeMethodHandlers(
 
   return {
     handlers: new Map<string, RuntimeMethodHandler>([
-      handler('fs.read-file', (params) => runtimeFsService.readFile(params)),
-      handler('fs.write-file', (params) => runtimeFsService.writeFile(params)),
-      handler('fs.create-file', (params) => runtimeFsService.createFile(params)),
-      handler('fs.edit-file', (params) => runtimeFsService.editFile(params)),
-      handler('fs.replace-range', (params) => runtimeFsService.replaceRange(params)),
-      handler('fs.delete-file', (params) => runtimeFsService.deleteFile(params)),
-      handler('fs.move-file', (params) => runtimeFsService.moveFile(params)),
-      handler('fs.list-directory', (params) => runtimeFsService.listDirectory(params)),
+      // Every handler below takes the call's `AbortSignal`. Forwarding it is not
+      // the same as honouring it: each service decides where cancelling is safe,
+      // and a mutation already under way is never abandoned. See
+      // `services/cancellation.ts`.
+      handler('fs.read-file', (params, context) =>
+        runtimeFsService.readFile(params, context.signal)
+      ),
+      handler('fs.write-file', (params, context) =>
+        runtimeFsService.writeFile(params, context.signal)
+      ),
+      handler('fs.create-file', (params, context) =>
+        runtimeFsService.createFile(params, context.signal)
+      ),
+      handler('fs.edit-file', (params, context) =>
+        runtimeFsService.editFile(params, context.signal)
+      ),
+      handler('fs.replace-range', (params, context) =>
+        runtimeFsService.replaceRange(params, context.signal)
+      ),
+      handler('fs.delete-file', (params, context) =>
+        runtimeFsService.deleteFile(params, context.signal)
+      ),
+      handler('fs.move-file', (params, context) =>
+        runtimeFsService.moveFile(params, context.signal)
+      ),
+      handler('fs.list-directory', (params, context) =>
+        runtimeFsService.listDirectory(params, context.signal)
+      ),
       handler('fs.glob', (params, context) => runtimeFsService.glob(params, context.signal)),
       handler('fs.grep', (params, context) => runtimeFsService.grep(params, context.signal)),
-      handler('fs.apply-patch', (params) => runtimeFsService.applyPatch(params)),
+      handler('fs.apply-patch', (params, context) =>
+        runtimeFsService.applyPatch(params, context.signal)
+      ),
       handler('shell.run', (params, context) =>
         runShellCommand({ ...params, signal: context.signal })
       ),
       handler('git.exec', (params, context) => execGit(params, context.signal)),
-      handler('snapshot.capture', (params) => captureFileSnapshot(params.path)),
-      handler('snapshot.hash', async (params) => ({
-        hash: await hashFileAtPath(params.path),
+      handler('snapshot.capture', (params, context) =>
+        captureFileSnapshot(params.path, context.signal)
+      ),
+      handler('snapshot.hash', async (params, context) => ({
+        hash: await hashFileAtPath(params.path, context.signal),
       })),
-      handler('snapshot.revert', (params) => revertRuntimeSnapshots(params)),
+      handler('snapshot.revert', (params, context) =>
+        revertRuntimeSnapshots(params, context.signal)
+      ),
       handler('workspace.browse', (params) => browseWorkspace(params)),
       handler('workspace.validate', (params) =>
         validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })

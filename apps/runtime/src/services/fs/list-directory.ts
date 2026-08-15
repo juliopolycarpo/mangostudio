@@ -2,10 +2,15 @@ import type { Dirent } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { PathAccessError } from '../../errors';
 import type { RuntimeListDirectoryParams, RuntimeListDirectoryResult } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 
 export async function listRuntimeDirectory(
-  params: RuntimeListDirectoryParams
+  params: RuntimeListDirectoryParams,
+  signal?: AbortSignal
 ): Promise<RuntimeListDirectoryResult> {
+  // One `readdir`: entry is the only point where refusing saves anything.
+  throwIfAborted(signal);
+
   let dirents: Dirent[];
   try {
     dirents = await readdir(params.resolvedPath, { withFileTypes: true });

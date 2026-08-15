@@ -18,6 +18,20 @@ import {
 const hasBash = isShellAvailable('bash');
 const isWindows = process.platform === 'win32';
 
+/** Polls until the pid is gone, or the budget runs out. */
+async function waitUntilGone(pid: number, budgetMs: number): Promise<boolean> {
+  const deadline = Date.now() + budgetMs;
+  while (Date.now() < deadline) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await Bun.sleep(20);
+  }
+  return false;
+}
+
 let tempDir: string;
 
 beforeEach(() => {
@@ -153,6 +167,36 @@ describe('runShellCommand', () => {
     expect(Number.isFinite(pid)).toBe(true);
     expect(() => process.kill(pid, 0)).toThrow();
   });
+
+  it.skipIf(!hasBash)(
+    'returns when a surviving descendant holds the pipes open',
+    async () => {
+      // The child backgrounds a process that inherits stdout and stderr, so
+      // killing the shell alone never brings either stream to EOF. Both sleeps
+      // outlast the assertions by far: without the fix this call does not return
+      // at all, and the test fails on its own timeout rather than an expectation.
+      const startedAt = Date.now();
+      const result = await runShellCommand({
+        kind: 'bash',
+        command: 'sleep 60 & echo $!; sleep 60',
+        timeoutMs: 2000,
+        maxOutputBytes: 1000,
+      });
+
+      expect(result.termination).toEqual({ kind: 'timed_out' });
+      expect(Date.now() - startedAt).toBeLessThan(30_000);
+      // Whatever was captured is what arrived before the kill, never the whole
+      // stream, so the result has to say so.
+      expect(result.truncated).toBe(true);
+
+      const descendant = Number(result.stdout.trim().split('\n')[0]);
+      expect(Number.isFinite(descendant)).toBe(true);
+      // Signalling the group and reaping it are not the same instant, so this
+      // waits for the descendant to go rather than asserting on the first look.
+      expect(await waitUntilGone(descendant, 10_000)).toBe(true);
+    },
+    60_000
+  );
 
   it.skipIf(!hasBash)('kills the process when the signal is already aborted', async () => {
     const controller = new AbortController();

@@ -8,6 +8,7 @@ import {
 } from '../../../src/services/git';
 
 const hasGit = Bun.which('git') !== null;
+const isWindows = process.platform === 'win32';
 
 describe('git CLI boundary', () => {
   it('assembles a direct argv without shell interpolation', () => {
@@ -105,4 +106,24 @@ describe('git CLI boundary', () => {
     });
     expect((error as GitExecutionError).data.stderr).not.toEndWith('\n');
   });
+
+  it.skipIf(!hasGit || isWindows)(
+    'times out even when a descendant keeps the pipes open',
+    async () => {
+      // A shell alias that backgrounds a process inheriting stdout and stderr.
+      // Killing Git alone leaves both streams open, so a capture that waits for
+      // EOF never returns and the timeout it reports never reaches the caller.
+      const startedAt = Date.now();
+      const error = await execGit({
+        args: ['-c', 'alias.hang=!sh -c "sleep 60 & echo started; sleep 60"', 'hang'],
+        cwd: process.cwd(),
+        timeoutMs: 1000,
+      }).catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(GitExecutionError);
+      expect((error as GitExecutionError).message).toBe('Git command timed out.');
+      expect(Date.now() - startedAt).toBeLessThan(30_000);
+    },
+    60_000
+  );
 });

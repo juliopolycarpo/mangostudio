@@ -9,6 +9,7 @@ import type {
   RuntimePatchHunk,
   RuntimePatchOperation,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import {
   FileNotReadError,
   forgetFile,
@@ -75,14 +76,20 @@ interface CommittedWrite {
 }
 
 export async function applyRuntimePatch(
-  params: RuntimeApplyPatchParams
+  params: RuntimeApplyPatchParams,
+  signal?: AbortSignal
 ): Promise<RuntimeMutationResult<RuntimeApplyPatchResult>> {
+  throwIfAborted(signal);
   const planned = await planOperations(params.operations, params.chatId);
   assertNoPathConflicts(planned);
   const lockedPaths = planned.flatMap(operationPaths);
 
   return await withPathLocks(lockedPaths, async () => {
     const revalidated = await revalidateOperations(planned, params.chatId);
+    // A patch commits several files as one change, so this is the only point at
+    // which it can be refused. Once the first write lands, stopping would leave
+    // the operations half applied.
+    throwIfAborted(signal);
     return await commitOperations(planned, revalidated, params);
   });
 }

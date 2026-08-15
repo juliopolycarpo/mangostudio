@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
+import { OWN_PROCESS_GROUP, windowsTaskkillArguments } from '../process-tree';
 import { HIDDEN_WINDOW } from '../process-window';
 
 const DEFAULT_MAX_LINE_BYTES = 1024 * 1024;
@@ -139,7 +140,7 @@ export function spawnExternalAgentProcess(
     cwd: options.cwd,
     env: buildExternalAgentEnvironment(options.envSource, options.vendorEnvironmentKeys),
     stdio: ['pipe', 'pipe', 'pipe'],
-    detached: process.platform !== 'win32',
+    ...OWN_PROCESS_GROUP,
     ...HIDDEN_WINDOW,
   });
   const exit = waitForExit(child);
@@ -345,13 +346,6 @@ async function terminateProcessTree(
 
   signalProcessTree(child, 'SIGKILL');
   await exit.catch(() => undefined);
-}
-
-export function windowsTaskkillArguments(pid: number): readonly string[] {
-  if (!Number.isSafeInteger(pid) || pid <= 1) {
-    throw new Error(`Cannot terminate invalid Windows process tree PID ${pid}.`);
-  }
-  return ['/PID', String(pid), '/T', '/F'];
 }
 
 type WindowsTaskkillRunner = (

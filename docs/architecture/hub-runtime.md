@@ -66,6 +66,30 @@ Protocol errors use stable codes such as `RUNTIME_UNAVAILABLE`, `METHOD_UNSUPPOR
 add a typed `details.kind`; the API facade translates those details back into its existing
 tool and checkpoint errors.
 
+### What a cancelled call is allowed to do
+
+Every handler receives the call's `AbortSignal`, and the rule they all follow is the same:
+
+> **A runtime method may refuse before it mutates, and must not abandon a mutation in
+> progress.**
+
+Cancelling is a hub decision about a result nobody wants any more, not a licence to leave the
+target machine in a state nobody asked for. A write stopped between its temporary file and the
+rename, or a revert stopped halfway down its operation list, produces exactly that: a
+filesystem no checkpoint describes and no retry can resume from.
+
+So the useful cancellation points are the ones with nothing to undo — on entry, inside the
+path lock before the first write, and inside the loops that only read: walking a directory in
+`fs.glob` and `fs.grep`, hashing the expected set in `snapshot.revert`. Once bytes start
+moving, the call finishes and reports what it did. `services/cancellation.ts` holds the one
+refusal every service raises; it carries the `AbortError` name the host maps to `CANCELLED`,
+so a cancelled call is never reported as a failed one.
+
+Long-running calls are bounded on their own terms rather than left for a cancel to rescue: a
+shell command kills its process group and stops reading the pipes at its timeout, and `fs.grep`
+gives each file a wall-clock budget in a worker thread, because a regular expression the model
+supplied can hold the event loop and no signal can interrupt one.
+
 ### Protocol evolution
 
 Additive protocol changes stay on major/minor `1.0` while the wire stays compatible:
@@ -427,8 +451,11 @@ Lifecycle:
   that ignores both signals delays the hub rather than holding it open — so none are orphaned.
 
 Known gap: Windows has no POSIX signals, so killing a runtime there terminates the runtime
-itself but not shell children it already spawned. The runtime's own cancellation path reaps
-those in the normal case; a hard kill can still leave them.
+itself but not shell children it already spawned. The runtime's own termination path reaps
+those in the normal case — a shell command runs in a process group of its own and the group is
+killed on timeout or abort, `taskkill /T` doing the same job on Windows — and stops reading the
+pipes either way, so a descendant that survives the kill cannot hold the call open. A hard kill
+of the runtime can still leave them.
 
 The hub and the runtime ship from one release. The handshake refuses a major/minor protocol
 mismatch, and for stdio it also refuses a runtime whose release version differs from the hub's

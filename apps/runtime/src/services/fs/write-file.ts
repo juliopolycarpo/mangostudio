@@ -5,6 +5,7 @@ import type {
   RuntimeWriteFileParams,
   RuntimeWriteFileResult,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import { assertFresh, FileNotReadError, recordFileRead, withPathLocks } from '../file-freshness';
 import {
   explainUnreadableMutationTarget,
@@ -15,8 +16,11 @@ import {
 import { captureFileSnapshot, mutationSnapshot } from '../snapshot';
 
 export async function writeRuntimeFile(
-  params: RuntimeWriteFileParams
+  params: RuntimeWriteFileParams,
+  signal?: AbortSignal
 ): Promise<RuntimeMutationResult<RuntimeWriteFileResult>> {
+  throwIfAborted(signal);
+
   return await withPathLocks([params.resolvedPath], async () => {
     const created = !(await Bun.file(params.resolvedPath).exists());
     const before = params.captureSnapshot
@@ -33,6 +37,10 @@ export async function writeRuntimeFile(
         throw error;
       }
     }
+
+    // Last point at which refusing is free: the lock is held and the file is
+    // still exactly as the checkpoint recorded it.
+    throwIfAborted(signal);
 
     let committed: { bytesWritten: number; mtimeMs: number };
     try {

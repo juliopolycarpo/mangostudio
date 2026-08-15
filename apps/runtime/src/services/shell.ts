@@ -7,6 +7,8 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { RuntimeServiceError } from '../errors';
 import type { RuntimeShellResult } from '../methods';
+import { readStreamCapped } from './child-output';
+import { killProcessTree, OWN_PROCESS_GROUP } from './process-tree';
 import { HIDDEN_WINDOW } from './process-window';
 import { type ShellEnvPolicy, sanitizeShellEnv } from './shell-env';
 
@@ -99,7 +101,12 @@ export function isShellAvailable(kind: ShellKind): boolean {
 
 /**
  * Runs a command through the given shell and returns captured output.
- * The process is killed after `timeoutMs`; output is capped at `maxOutputBytes`.
+ * The process tree is killed after `timeoutMs`; output is capped at
+ * `maxOutputBytes`.
+ *
+ * A claimed termination stops the capture rather than waiting for streams a
+ * surviving descendant may never close, so a `timed_out` or `aborted` result
+ * carries whatever had arrived by then and is flagged `truncated`.
  *
  * // Usage: await runShellCommand({ kind: 'bash', command: 'echo hi', timeoutMs: 5000, maxOutputBytes: 65536 })
  */
@@ -123,6 +130,10 @@ export async function runShellCommandWithDeps(
   const startedAt = deps.now();
   const proc = spawnShell(deps.spawn, executable, input);
   let claimed: TerminationClaim | null = null;
+  // Released the moment a termination is claimed. Both readers stop waiting on
+  // it, which is what bounds the call even when a descendant of the killed
+  // shell is still holding the pipes open.
+  const terminated = new AbortController();
 
   const claim = (kind: TerminationClaim): boolean => {
     if (claimed) return false;
@@ -131,11 +142,8 @@ export async function runShellCommandWithDeps(
   };
 
   const killChild = () => {
-    try {
-      proc.kill('SIGKILL');
-    } catch {
-      // Process may already have exited.
-    }
+    killProcessTree(proc.pid, () => proc.kill('SIGKILL'));
+    terminated.abort();
   };
 
   const naturallyExited = () => proc.exitCode !== null && proc.signalCode === null;
@@ -157,8 +165,8 @@ export async function runShellCommandWithDeps(
 
   try {
     const [stdout, stderr] = await Promise.all([
-      readStreamCapped(proc.stdout, input.maxOutputBytes),
-      readStreamCapped(proc.stderr, input.maxOutputBytes),
+      readStreamCapped(proc.stdout, input.maxOutputBytes, terminated.signal),
+      readStreamCapped(proc.stderr, input.maxOutputBytes, terminated.signal),
     ]);
     await proc.exited;
 
@@ -199,6 +207,9 @@ function spawnShell(spawn: typeof Bun.spawn, executable: string, input: RunShell
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
+      // The command is free to background whatever it likes; a group of its own
+      // is what makes those descendants reachable when the call is terminated.
+      ...OWN_PROCESS_GROUP,
       ...HIDDEN_WINDOW,
     });
   } catch (error) {
@@ -224,53 +235,4 @@ function expandHome(path: string): string {
   if (path === '~') return homedir();
   if (path.startsWith('~/')) return resolve(homedir(), path.slice(2));
   return path;
-}
-
-interface CappedRead {
-  text: string;
-  truncated: boolean;
-}
-
-/**
- * Reads a byte stream, retaining at most `maxBytes` worth of data.
- * Continues draining the stream past the cap (discarding bytes) so the child
- * never blocks on a full pipe; flags `truncated` when any bytes were dropped.
- */
-async function readStreamCapped(
-  stream: ReadableStream<Uint8Array>,
-  maxBytes: number
-): Promise<CappedRead> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let truncated = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      if (total >= maxBytes) {
-        truncated = true;
-        continue;
-      }
-      chunks.push(value);
-      total += value.byteLength;
-      if (total > maxBytes) truncated = true;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return { text: decodeCapped(chunks, maxBytes), truncated };
-}
-
-function decodeCapped(chunks: Uint8Array[], maxBytes: number): string {
-  const merged = new Uint8Array(chunks.reduce((sum, c) => sum + c.byteLength, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(merged.subarray(0, maxBytes));
 }
