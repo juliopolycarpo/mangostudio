@@ -214,6 +214,27 @@ describe('runShellCommand', () => {
   );
 
   it.skipIf(!hasBash)(
+    'reaps a background group that redirected both pipes before the shell exited',
+    async () => {
+      const result = await runShellCommand({
+        kind: 'bash',
+        command: 'sleep 60 >/dev/null 2>&1 & echo $!',
+        timeoutMs: 400,
+        maxOutputBytes: 1000,
+      });
+
+      expect(result.termination).toEqual({ kind: 'exited' });
+      expect(result.exitCode).toBe(0);
+      expect(result.truncated).toBe(false);
+
+      const descendant = Number(result.stdout.trim().split('\n')[0]);
+      expect(Number.isFinite(descendant)).toBe(true);
+      expect(await waitUntilGone(descendant, 10_000)).toBe(true);
+    },
+    30_000
+  );
+
+  it.skipIf(!hasBash)(
     'stops capture on abort after the shell has already exited',
     async () => {
       const marker = join(tempDir, 'exited');

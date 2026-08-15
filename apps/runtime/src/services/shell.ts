@@ -225,6 +225,11 @@ export async function runShellCommandWithDeps(
     captured = true;
     deps.clearTimeout(timeoutId);
     if (graceId !== undefined) deps.clearTimeout(graceId);
+    // The leader may have exited 0 while a descendant that redirected both
+    // pipes is still running. Capture already reached EOF in that case, so
+    // the leftover-pipe grace never starts and the timeout is about to be
+    // cleared; this is the teardown that still reaches that leftover group.
+    killChild();
     input.signal?.removeEventListener('abort', abortHandler);
   }
 }
