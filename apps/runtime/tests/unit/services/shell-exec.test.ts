@@ -14,23 +14,10 @@ import {
   createFakeShellDeps,
   createHangingFakeShellProcess,
 } from './support/fake-shell-exec';
+import { waitUntilGone } from './support/process-lifetime';
 
 const hasBash = isShellAvailable('bash');
 const isWindows = process.platform === 'win32';
-
-/** Polls until the pid is gone, or the budget runs out. */
-async function waitUntilGone(pid: number, budgetMs: number): Promise<boolean> {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    await Bun.sleep(20);
-  }
-  return false;
-}
 
 let tempDir: string;
 

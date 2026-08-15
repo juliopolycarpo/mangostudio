@@ -1,20 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { killProcessTree, OWN_PROCESS_GROUP } from '../../../src/services/process-tree';
 import { HIDDEN_WINDOW } from '../../../src/services/process-window';
-
-/** Polls until `kill(pid, 0)` fails. Zombies still occupy a PID, so they fail this. */
-async function waitUntilGone(pid: number, budgetMs: number): Promise<boolean> {
-  const deadline = Date.now() + budgetMs;
-  while (Date.now() < deadline) {
-    try {
-      process.kill(pid, 0);
-    } catch {
-      return true;
-    }
-    await Bun.sleep(20);
-  }
-  return false;
-}
+import { waitUntilGone } from './support/process-lifetime';
 
 async function readFirstLine(stream: ReadableStream<Uint8Array>): Promise<string> {
   const reader = stream.getReader();
