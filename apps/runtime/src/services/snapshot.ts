@@ -78,8 +78,13 @@ export function snapshotFromBytes(bytes: Uint8Array): RuntimeBeforeSnapshot {
 
 export async function hashFileAtPath(path: string, signal?: AbortSignal): Promise<string | null> {
   throwIfAborted(signal);
-  if (!(await Bun.file(path).exists())) return null;
-  return hashBytes(await Bun.file(path).bytes());
+  if (!(await Bun.file(path).exists())) {
+    throwIfAborted(signal);
+    return null;
+  }
+  const bytes = await Bun.file(path).bytes();
+  throwIfAborted(signal);
+  return hashBytes(bytes);
 }
 
 export function mutationSnapshot(

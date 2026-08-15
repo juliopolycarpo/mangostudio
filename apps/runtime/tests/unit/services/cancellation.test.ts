@@ -266,6 +266,15 @@ describe('a cancelled runtime call refuses before it mutates', () => {
     expect(await Bun.file(path).exists()).toBe(true);
   });
 
+  it('refuses a hash whose read finished after the caller cancelled', async () => {
+    const path = await seedReadFile('hash-inflight.txt');
+    const controller = new AbortController();
+    const pending = hashFileAtPath(path, controller.signal);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('refuses an already-reverted retry cancelled while hashing the last file', async () => {
     const path = await seedReadFile('already-reverted.txt', 'reverted\n');
     const revertedHash = await hashFileAtPath(path);
