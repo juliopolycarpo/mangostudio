@@ -323,36 +323,46 @@ describe('a cancelled runtime call never abandons a mutation in progress', () =>
     if (changedHash === null) throw new Error('fixture file is missing');
 
     const controller = new AbortController();
-    const restored = Buffer.from('restored\n').toString('base64');
-    // Aborting while the operations run: a revert that stopped halfway would
-    // leave one file restored and one not, which `alreadyReverted` reads as a
-    // conflict on the retry rather than as work to resume.
-    const watch = setInterval(async () => {
-      if ((await Bun.file(first).text()) === 'restored\n') controller.abort();
-    }, 0);
+    const restoredFirst = 'restored\n';
+    // Large enough that the second restore is still in flight after the first
+    // file is on disk. Two tiny writes finish in one microtask chain, so a
+    // timer watching the first file never sees a mid-revert moment.
+    const restoredSecond = 'r'.repeat(1024 * 1024);
 
-    try {
-      const result = await revertRuntimeSnapshots(
-        {
-          chatId: 'chat-1',
-          expected: [
-            { path: first, afterHash: changedHash },
-            { path: second, afterHash: changedHash },
-          ],
-          operations: [
-            { type: 'restore', path: first, contentBase64: restored },
-            { type: 'restore', path: second, contentBase64: restored },
-          ],
-        },
-        controller.signal
-      );
-      expect(result.revertedFiles).toBe(2);
-    } finally {
-      clearInterval(watch);
+    const revert = revertRuntimeSnapshots(
+      {
+        chatId: 'chat-1',
+        expected: [
+          { path: first, afterHash: changedHash },
+          { path: second, afterHash: changedHash },
+        ],
+        operations: [
+          {
+            type: 'restore',
+            path: first,
+            contentBase64: Buffer.from(restoredFirst).toString('base64'),
+          },
+          {
+            type: 'restore',
+            path: second,
+            contentBase64: Buffer.from(restoredSecond).toString('base64'),
+          },
+        ],
+      },
+      controller.signal
+    );
+
+    const deadline = Date.now() + 5_000;
+    while ((await Bun.file(first).text()) !== restoredFirst) {
+      if (Date.now() >= deadline) throw new Error('first file was never restored');
+      await Bun.sleep(0);
     }
+    controller.abort();
 
+    const result = await revert;
+    expect(result.revertedFiles).toBe(2);
     expect(controller.signal.aborted).toBe(true);
-    expect(await Bun.file(first).text()).toBe('restored\n');
-    expect(await Bun.file(second).text()).toBe('restored\n');
-  });
+    expect(await Bun.file(first).text()).toBe(restoredFirst);
+    expect(await Bun.file(second).text()).toBe(restoredSecond);
+  }, 15_000);
 });
