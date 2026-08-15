@@ -86,10 +86,11 @@ export function createRuntimeMethodHandlers(
 
   return {
     handlers: new Map<string, RuntimeMethodHandler>([
-      // Every handler below takes the call's `AbortSignal`. Forwarding it is not
-      // the same as honouring it: each service decides where cancelling is safe,
-      // and a mutation already under way is never abandoned. See
-      // `services/cancellation.ts`.
+      // Handlers that can refuse take the call's `AbortSignal`. Forwarding it is
+      // not the same as honouring it: each service decides where cancelling is
+      // safe, and a mutation already under way is never abandoned. See
+      // `services/cancellation.ts`. Short lookups and methods with their own
+      // cancel RPC still ignore the request signal.
       handler('fs.read-file', (params, context) =>
         runtimeFsService.readFile(params, context.signal)
       ),
@@ -132,7 +133,7 @@ export function createRuntimeMethodHandlers(
       handler('snapshot.revert', (params, context) =>
         revertRuntimeSnapshots(params, context.signal)
       ),
-      handler('workspace.browse', (params) => browseWorkspace(params)),
+      handler('workspace.browse', (params, context) => browseWorkspace(params, context.signal)),
       handler('workspace.validate', (params) =>
         validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })
       ),
@@ -166,14 +167,22 @@ export function createRuntimeMethodHandlers(
       handler('external-agent.refresh-account-usage', (params, context) =>
         externalAgents.refreshAccountUsage(params, context.signal)
       ),
-      handler('probing.runtimes', (params) => probingService.probeRuntimes(params)),
-      handler('probing.version-managers', (params) => probingService.probeVersionManagers(params)),
-      handler('probing.agent-clis', (params) => probingService.probeAgentClis(params)),
+      handler('probing.runtimes', (params, context) =>
+        probingService.probeRuntimes(params, context.signal)
+      ),
+      handler('probing.version-managers', (params, context) =>
+        probingService.probeVersionManagers(params, context.signal)
+      ),
+      handler('probing.agent-clis', (params, context) =>
+        probingService.probeAgentClis(params, context.signal)
+      ),
       handler('install.run', (params) => install.run(params)),
       handler('install.cancel', (params) => install.cancel(params)),
-      handler('library.scan', (params) => libraryService.scan(params)),
+      handler('library.scan', (params, context) => libraryService.scan(params, context.signal)),
       handler('library.read', (params) => libraryService.read(params)),
-      handler('library.read-tree', (params) => libraryService.readTree(params)),
+      handler('library.read-tree', (params, context) =>
+        libraryService.readTree(params, context.signal)
+      ),
       handler('library.locations', (params) => libraryService.locations(params)),
       handler('library.settings-sources', (params) => libraryService.settingsSources(params)),
       handler('library.apply', (params, context) => libraryService.apply(params, context.signal)),

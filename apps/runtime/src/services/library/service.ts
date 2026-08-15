@@ -40,6 +40,7 @@ import type {
   RuntimeLibraryUndoParams,
   RuntimeLibraryUndoResult,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import { createRuntimePathEnv, NODE_LOCATION_FS_PROBE } from '../probing/host-env';
 import { executePropagationWrites } from './apply-writes';
 import { collectBackupGarbage, createBackupStoreDeps, listBackupSets } from './backup-store';
@@ -85,9 +86,12 @@ const DEFAULT_ADAPTERS: LibraryHostAdapters = {
 };
 
 export interface LibraryService {
-  scan(params: RuntimeLibraryScanParams): Promise<RuntimeLibraryScanResult>;
+  scan(params: RuntimeLibraryScanParams, signal?: AbortSignal): Promise<RuntimeLibraryScanResult>;
   read(params: RuntimeLibraryReadParams): Promise<RuntimeLibraryReadResult>;
-  readTree(params: RuntimeLibraryReadTreeParams): Promise<RuntimeLibraryReadTreeResult>;
+  readTree(
+    params: RuntimeLibraryReadTreeParams,
+    signal?: AbortSignal
+  ): Promise<RuntimeLibraryReadTreeResult>;
   locations(params: RuntimeLibraryLocationsParams): Promise<RuntimeLibraryLocationsResult>;
   settingsSources(
     params: RuntimeLibrarySettingsSourcesParams
@@ -207,7 +211,8 @@ function decodeApplyOperations(params: RuntimeLibraryApplyParams): PreparedPropa
 export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {}): LibraryService {
   const adapters: LibraryHostAdapters = { ...DEFAULT_ADAPTERS, ...overrides };
   return {
-    async scan(params) {
+    async scan(params, signal) {
+      throwIfAborted(signal);
       assertLocationSettings(params.locationSettings);
       const pathEnv = pathEnvFrom(adapters, params);
       const entries = await scanLibraryInstances({
@@ -218,6 +223,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
         cache: adapters.cache,
         kinds: params.kinds,
         locationPathOverrides: params.locationPathOverrides,
+        signal,
       });
       return { entries: entries.map(serializeEntry) };
     },
@@ -256,7 +262,8 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
       }
     },
 
-    async readTree(params) {
+    async readTree(params, signal) {
+      throwIfAborted(signal);
       const pathEnv = pathEnvFrom(adapters, params);
       const root = libraryLocationRoot(params.locationId, pathEnv);
       if (root === null) {
@@ -279,7 +286,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
         };
       }
       try {
-        const files = await readLibraryTree(params.path, root);
+        const files = await readLibraryTree(params.path, root, { signal });
         return {
           files: files.map((file) => ({
             relativePath: file.relativePath,

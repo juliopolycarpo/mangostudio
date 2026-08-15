@@ -15,6 +15,7 @@ import {
 } from '@mangostudio/shared/library';
 import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import { throwIfAborted } from '../cancellation';
 import { type LibraryCache, libraryCache } from './cache';
 import { type ReadLibraryInstance, readLocationInstances } from './instance-reader';
 
@@ -37,6 +38,7 @@ export interface LibraryScanOptions {
    * under the same signature itself.
    */
   readonly cacheScan?: boolean;
+  readonly signal?: AbortSignal;
 }
 
 export interface LibraryScanTarget {
@@ -99,11 +101,17 @@ export function scanLibraryInstances(
   );
 
   const compute = async (): Promise<readonly ReadLibraryInstance[]> => {
+    throwIfAborted(options.signal);
     const scanned = await Promise.all(
       targets.map((target) => {
+        throwIfAborted(options.signal);
         const location = locationById.get(target.locationId);
         if (!location) return Promise.resolve([] as ReadLibraryInstance[]);
-        return readLocationInstances(location, target.path, { cache, force });
+        return readLocationInstances(location, target.path, {
+          cache,
+          force,
+          signal: options.signal,
+        });
       })
     );
     return scanned.flat();

@@ -9,14 +9,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_APP_SETTINGS, libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import { clearFileFreshness } from '../../../src';
 import { withPathLocks } from '../../../src/services/file-freshness';
 import { runtimeFsService } from '../../../src/services/fs';
+import { createLibraryService } from '../../../src/services/library';
+import { createProbingService } from '../../../src/services/probing/service';
 import {
   captureFileSnapshot,
   hashFileAtPath,
   revertRuntimeSnapshots,
 } from '../../../src/services/snapshot';
+import { browseWorkspace } from '../../../src/services/workspace';
 
 let tempDir: string;
 
@@ -260,6 +264,43 @@ describe('a cancelled runtime call refuses before it mutates', () => {
     // The revert refused before touching anything, so the file it would have
     // removed is still there.
     expect(await Bun.file(path).exists()).toBe(true);
+  });
+
+  it('refuses directory walks and host probes before they start', async () => {
+    const signal = abortedSignal();
+    let scanned = false;
+
+    await expect(browseWorkspace({ path: tempDir }, signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    const probing = createProbingService({
+      runtimeDefinitions: [],
+      createScanDeps: () => {
+        scanned = true;
+        throw new Error('probe must not run after cancel');
+      },
+    });
+    await expect(probing.probeRuntimes({}, signal)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(probing.probeVersionManagers({}, signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    await expect(
+      probing.probeAgentClis({ self: { version: '0.0.0' } }, signal)
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(scanned).toBe(false);
+
+    const library = createLibraryService({
+      createPathEnv: () => ({ platform: process.platform, homeDir: tempDir, env: {} }),
+      describeLocations: () => [],
+      now: () => 0,
+    });
+    await expect(
+      library.scan({ locationSettings: libraryLocationsFor(DEFAULT_APP_SETTINGS) }, signal)
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(
+      library.readTree({ locationId: 'mango-skills', path: tempDir }, signal)
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('refuses a cancel that arrives while the call waits for the path lock', async () => {
