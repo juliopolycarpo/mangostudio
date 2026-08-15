@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { killProcessTree, OWN_PROCESS_GROUP } from '../../../src/services/process-tree';
+import { EventEmitter } from 'node:events';
+import {
+  killProcessTree,
+  OWN_PROCESS_GROUP,
+  startWindowsTaskkillTree,
+  windowsTaskkillArguments,
+} from '../../../src/services/process-tree';
 import { HIDDEN_WINDOW } from '../../../src/services/process-window';
 import { waitUntilGone } from './support/process-lifetime';
 
@@ -41,4 +47,63 @@ describe('killProcessTree', () => {
     },
     20_000
   );
+});
+
+function fakeTaskkillProcess() {
+  const child = new EventEmitter();
+  return Object.assign(child, { unref: () => child });
+}
+
+describe('startWindowsTaskkillTree', () => {
+  it('starts taskkill without killing the root so /T can still see descendants', () => {
+    const calls: Array<{ command: string; args: readonly string[] }> = [];
+    const taskkill = fakeTaskkillProcess();
+    let directKilled = false;
+
+    startWindowsTaskkillTree(
+      42,
+      () => {
+        directKilled = true;
+      },
+      (command, args) => {
+        calls.push({ command, args });
+        return taskkill;
+      }
+    );
+
+    expect(calls).toEqual([{ command: 'taskkill', args: [...windowsTaskkillArguments(42)] }]);
+    expect(directKilled).toBe(false);
+  });
+
+  it('kills the direct child only when taskkill cannot start', () => {
+    let directKilled = false;
+
+    startWindowsTaskkillTree(
+      42,
+      () => {
+        directKilled = true;
+      },
+      () => {
+        throw new Error('taskkill is not on PATH');
+      }
+    );
+
+    expect(directKilled).toBe(true);
+  });
+
+  it('kills the direct child when the started taskkill fails', () => {
+    const taskkill = fakeTaskkillProcess();
+    let directKilled = false;
+
+    startWindowsTaskkillTree(
+      42,
+      () => {
+        directKilled = true;
+      },
+      () => taskkill
+    );
+
+    taskkill.emit('error', new Error('taskkill refused'));
+    expect(directKilled).toBe(true);
+  });
 });

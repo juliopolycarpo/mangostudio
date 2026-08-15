@@ -40,9 +40,11 @@ export function windowsTaskkillArguments(pid: number): readonly string[] {
  *
  * Fire-and-forget by design: the caller has already claimed a termination and
  * must not be able to block on the kill itself. `killDirectChild` is the
- * unconditional fallback, so a platform where the tree kill fails — a child that
- * never became a group leader, a `taskkill` that is not on PATH — still loses
- * the process it owns.
+ * fallback when the tree kill cannot start, so a platform where that fails — a
+ * child that never became a group leader, a `taskkill` that is not on PATH —
+ * still loses the process it owns. On Windows the fallback must not race the
+ * root: `/T` walks from the specified PID, and killing that PID first hides
+ * the descendants.
  *
  * On Linux the group members are signalled first and the leader a moment later.
  * A single `kill(-pid, SIGKILL)` races the leader with its children, so the
@@ -53,7 +55,10 @@ export function windowsTaskkillArguments(pid: number): readonly string[] {
  */
 export function killProcessTree(pid: number | undefined, killDirectChild: () => void): void {
   if (process.platform === 'win32') {
-    if (pid !== undefined && pid > 1) spawnWindowsTaskkill(pid);
+    if (pid !== undefined && pid > 1) {
+      startWindowsTaskkillTree(pid, killDirectChild);
+      return;
+    }
     invokeKill(killDirectChild);
     return;
   }
@@ -164,17 +169,39 @@ function linuxProcessGroupMembers(pgid: number): number[] | null {
   return members;
 }
 
-function spawnWindowsTaskkill(pid: number): void {
+/**
+ * Starts `taskkill /T /F` without waiting, and only kills the direct child if
+ * that spawn fails. Killing the root first is what hides the descendants from
+ * `/T`. `spawnTaskkill` is the production `spawn` and a test fake.
+ */
+export function startWindowsTaskkillTree(
+  pid: number,
+  killDirectChild: () => void,
+  spawnTaskkill: (
+    command: string,
+    args: readonly string[],
+    options: { readonly stdio: 'ignore'; readonly windowsHide: boolean }
+  ) => {
+    once(event: 'error' | 'close', listener: (codeOrError?: unknown) => void): unknown;
+    unref(): unknown;
+  } = spawn
+): void {
+  const fallback = () => invokeKill(killDirectChild);
   try {
-    const taskkill = spawn('taskkill', [...windowsTaskkillArguments(pid)], {
+    const taskkill = spawnTaskkill('taskkill', [...windowsTaskkillArguments(pid)], {
       stdio: 'ignore',
       ...HIDDEN_WINDOW,
     });
     // Nothing awaits this child, so its failure must not surface as an
-    // unhandled error event on the process.
-    taskkill.once('error', () => undefined);
+    // unhandled error event on the process. An error or a non-zero exit is
+    // the same fallback the awaited Windows teardown uses: the direct child
+    // only, with no claim on descendants.
+    taskkill.once('error', fallback);
+    taskkill.once('close', (code) => {
+      if (code !== 0) fallback();
+    });
     taskkill.unref();
   } catch {
-    // taskkill is missing or refused to start; the direct kill still runs.
+    fallback();
   }
 }
