@@ -236,9 +236,17 @@ describe('executeMoveFile', () => {
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
-    expect(await Bun.file(destination).text()).toBe('first');
-    expect(existsSync(first)).toBe(false);
-    expect(await Bun.file(second).text()).toBe('second');
+    // The lock is exclusive, not FIFO: whichever caller is scheduled first
+    // wins the destination, and the other keeps its source.
+    const destinationText = await Bun.file(destination).text();
+    expect(['first', 'second']).toContain(destinationText);
+    if (destinationText === 'first') {
+      expect(existsSync(first)).toBe(false);
+      expect(await Bun.file(second).text()).toBe('second');
+    } else {
+      expect(existsSync(second)).toBe(false);
+      expect(await Bun.file(first).text()).toBe('first');
+    }
   });
 });
 
