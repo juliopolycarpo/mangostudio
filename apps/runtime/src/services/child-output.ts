@@ -11,16 +11,18 @@
 
 interface CappedRead {
   readonly text: string;
+  /** Bytes were dropped because they exceeded `maxBytes`. */
   readonly truncated: boolean;
+  /** The reader was cancelled by `stopSignal` before EOF. */
+  readonly stopped: boolean;
 }
 
 /**
  * Reads a byte stream, retaining at most `maxBytes` worth of data.
  *
  * Continues draining the stream past the cap (discarding bytes) so the child
- * never blocks on a full pipe. `truncated` covers both ways the capture can be
- * short of what the child wrote: bytes dropped at the cap, and bytes never read
- * because `stopSignal` fired first.
+ * never blocks on a full pipe. `truncated` is the cap; `stopped` is a
+ * cancelled reader. Callers that want "short of what was written" OR them.
  *
  * // Usage: await readStreamCapped(proc.stdout, 65_536, terminated.signal)
  */
@@ -68,7 +70,7 @@ export async function readStreamCapped(
     if (!stopped) reader.releaseLock();
   }
 
-  return { text: decodeChunks(chunks, capturedBytes), truncated: truncated || stopped };
+  return { text: decodeChunks(chunks, capturedBytes), truncated, stopped };
 }
 
 function decodeChunks(chunks: readonly Uint8Array[], totalBytes: number): string {

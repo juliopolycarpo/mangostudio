@@ -143,4 +143,19 @@ describe('git CLI boundary', () => {
     },
     30_000
   );
+
+  it.skipIf(!hasGit || isWindows)(
+    'still reports a cap hit when leftover helpers hold the pipes',
+    async () => {
+      const error = await execGit({
+        args: ['-c', 'alias.hang=!sh -c "head -c 1100000 /dev/zero; sleep 60 &"', 'hang'],
+        cwd: process.cwd(),
+        timeoutMs: 5_000,
+      }).catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(GitExecutionError);
+      expect((error as GitExecutionError).message).toContain('exceeded');
+    },
+    30_000
+  );
 });

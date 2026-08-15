@@ -184,7 +184,7 @@ export async function runShellCommandWithDeps(
       signal: proc.signalCode,
       stdout: stdout.text,
       stderr: stderr.text,
-      truncated: stdout.truncated || stderr.truncated,
+      truncated: stdout.truncated || stderr.truncated || stdout.stopped || stderr.stopped,
       termination: resolveTermination(claimed, proc.signalCode),
       durationMs: deps.now() - startedAt,
     };
