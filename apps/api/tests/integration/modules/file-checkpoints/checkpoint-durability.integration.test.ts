@@ -16,6 +16,7 @@ import { revertMessageFileCheckpoints } from '../../../../src/modules/file-check
 import { hashCheckpointBytes } from '../../../../src/modules/file-checkpoints/infrastructure/checkpoint-blob-store';
 import { executeEditFile } from '../../../../src/services/tools/builtin/edit-file';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
+import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import {
   type FileMutationBeforeFields,
@@ -182,6 +183,21 @@ describe('mutation and checkpoint under one lock', () => {
     expect(rows[0]?.beforeHash).toBe(hashOf('one\n'));
     expect(rows[0]?.afterHash).toBe(hashOf('three\n'));
   });
+
+  it('stores an empty snapshot so revert can restore a zero-byte file', async () => {
+    const path = await seedAndRead('empty.txt', '');
+    const written = await executeWriteFile({ path, content: 'filled\n' }, turnContext());
+    expect(written.before).toBe('');
+    expect(written.beforeOmitted).toBeUndefined();
+
+    const rows = await checkpointRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.beforeHash).toBe(hashOf(''));
+    expect(rows[0]?.blobKey).not.toBeNull();
+
+    await revertMessageFileCheckpoints(getDb(), chat.id, messageId);
+    expect(await Bun.file(path).text()).toBe('');
+  });
 });
 
 describe('a snapshot that fails its integrity check', () => {
@@ -249,6 +265,21 @@ describe('a snapshot that fails its integrity check', () => {
     });
 
     expect((await checkpointRows())[0]?.blobKey).toBeNull();
+  });
+
+  it('keeps the corrupt reason when a later mutation collapses onto the same row', async () => {
+    const path = join(tempDir, 'collapsed.txt');
+    await Bun.write(path, 'v1\n');
+    await captureDiagnostics(async () => {
+      await withMutationPersistence(turnContext(), [path], () =>
+        stubMutation(path, 'v1\n', 'v2\n', { hash: hashOf('something else\n') })
+      );
+    });
+
+    const second = await withMutationPersistence(turnContext(), [path], () =>
+      stubMutation(path, 'v2\n', 'v3\n')
+    );
+    expect(second.captured[0]?.fields).toEqual({ beforeOmitted: 'corrupt' });
   });
 
   it('says what it cannot restore when the degraded row is reverted', async () => {

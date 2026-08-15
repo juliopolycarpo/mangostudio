@@ -121,7 +121,7 @@ async function persistRuntimeMutation(
       bytes,
       beforeHash: existing.beforeHash,
       blobKey: existing.blobKey,
-      fields: beforeFieldsFromBytes(bytes),
+      fields: beforeFieldsFromRow(existing, bytes),
     };
   }
 
@@ -139,7 +139,7 @@ async function persistRuntimeMutation(
   }
   const bytes = decoded.ok ? decoded.bytes : null;
   const beforeHash = decoded.ok ? decoded.beforeHash : null;
-  const blobKey = bytes ? await storeCheckpointBlob(bytes) : null;
+  const blobKey = bytes !== null ? await storeCheckpointBlob(bytes) : null;
   const rowId = await insertCheckpointRow(db, {
     chatId: context.chatId,
     messageId,
@@ -179,7 +179,10 @@ type DecodedSnapshot =
  */
 function decodeRuntimeSnapshot(snapshot: RuntimeBeforeSnapshot): DecodedSnapshot {
   if (!snapshot.exists) return { ok: true, bytes: null, beforeHash: null };
-  if (!snapshot.contentBase64 || !snapshot.hash) {
+  // Empty content is a complete snapshot (`contentBase64: ''` plus the SHA-256
+  // of zero bytes). A truthy check would classify that as incomplete and drop
+  // the only copy we could restore from.
+  if (typeof snapshot.contentBase64 !== 'string' || typeof snapshot.hash !== 'string') {
     return {
       ok: false,
       reason: 'incomplete',
@@ -226,6 +229,23 @@ function beforeFieldsFromBytes(bytes: Uint8Array | null): FileMutationBeforeFiel
   } catch {
     return { beforeOmitted: 'binary' };
   }
+}
+
+/**
+ * Rebuilds the tool-result before-fields from the row a later mutation of the
+ * same path collapsed onto. Bytes reconstruct binary / too-large / text. A
+ * non-create row that stored neither a blob nor a hash is the degraded insert
+ * (`corrupt`); a create with nothing on disk is `missing`.
+ */
+function beforeFieldsFromRow(
+  row: { op: string; beforeHash: string | null; blobKey: string | null },
+  bytes: Uint8Array | null
+): FileMutationBeforeFields {
+  if (bytes !== null) return beforeFieldsFromBytes(bytes);
+  if (row.op !== 'create' && row.blobKey === null && row.beforeHash === null) {
+    return { beforeOmitted: 'corrupt' };
+  }
+  return { beforeOmitted: 'missing' };
 }
 
 async function withPersistenceLocks<T>(
