@@ -58,9 +58,11 @@ export function killProcessTree(pid: number | undefined, killDirectChild: () => 
     return;
   }
 
-  if (pid !== undefined && pid > 1 && process.platform === 'linux') {
-    if (killLinuxProcessTree(pid, killDirectChild)) return;
-  } else if (pid !== undefined && pid > 1) {
+  if (pid !== undefined && pid > 1) {
+    // Linux takes the group down a member at a time so the leader can waitpid
+    // them. It declines when `/proc` is unreadable, and then the group call
+    // below is the fallback — the same one every other POSIX platform takes.
+    if (process.platform === 'linux' && killLinuxProcessTree(pid, killDirectChild)) return;
     try {
       // Negative PID addresses the group the child leads. Both this and the
       // direct kill below run: the group call fails on a child that never
@@ -88,16 +90,14 @@ function invokeKill(killDirectChild: () => void): void {
  * caller can fall back to signalling the group as a unit.
  */
 function killLinuxProcessTree(leaderPid: number, killDirectChild: () => void): boolean {
-  const members = linuxProcessGroupMembers(leaderPid);
-  if (members === null) return false;
-
-  // A command can spawn a new child after the first snapshot (`sleep 60;
+  // A command can spawn a new child after the first sweep (`sleep 60;
   // sleep 60 & wait`). Each tick re-lists and signals whatever is there now,
   // and the leader is only taken down once the group is just it, or the
-  // budget runs out.
-  const sweep = (): boolean => {
+  // budget runs out. `null` is an unreadable `/proc`, which the first sweep
+  // reports to the caller so it can signal the group as a unit instead.
+  const sweep = (): boolean | null => {
     const current = linuxProcessGroupMembers(leaderPid);
-    if (current === null) return false;
+    if (current === null) return null;
     let remaining = false;
     for (const pid of current) {
       if (pid === leaderPid || pid <= 1) continue;
@@ -111,19 +111,23 @@ function killLinuxProcessTree(leaderPid: number, killDirectChild: () => void): b
     return remaining;
   };
 
-  if (!sweep()) {
+  const first = sweep();
+  if (first === null) return false;
+  if (!first) {
     invokeKill(killDirectChild);
     return true;
   }
 
   const deadline = Date.now() + LEADER_REAP_BUDGET_MS;
   const tick = () => {
-    if (!sweep() || Date.now() >= deadline) {
+    // `!== true` covers a `/proc` that became unreadable mid-reap: nothing more
+    // can be observed, so the leader goes now rather than at the deadline.
+    if (sweep() !== true || Date.now() >= deadline) {
       invokeKill(killDirectChild);
       return;
     }
-    const timer = setTimeout(tick, LEADER_REAP_POLL_MS);
-    timer.unref?.();
+    const next = setTimeout(tick, LEADER_REAP_POLL_MS);
+    next.unref?.();
   };
   const timer = setTimeout(tick, LEADER_REAP_POLL_MS);
   timer.unref?.();
