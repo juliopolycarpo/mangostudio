@@ -480,4 +480,25 @@ describe('agent CLI detection', () => {
     });
     expect(Value.Check(AgentCliStatusSchema, status)).toBe(true);
   });
+
+  it('refuses an agent CLI probe cancelled while a version subprocess is in flight', async () => {
+    const controller = new AbortController();
+    const service = createProbingService({
+      agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
+      createPathEnv: () => LINUX_ENV,
+      createScanDeps: (_env, definition) => ({
+        ...scanDeps(definition),
+        probeVersion: () => {
+          controller.abort();
+          return Promise.reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+        },
+      }),
+      describeLocations: () => [],
+      authFs: new FakeAuthSignalFs(),
+    });
+
+    await expect(
+      service.probeAgentClis({ targetIds: ['claude'], self: SELF }, controller.signal)
+    ).rejects.toMatchObject({ name: 'AbortError' });
+  });
 });

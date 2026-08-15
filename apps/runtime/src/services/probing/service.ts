@@ -158,6 +158,10 @@ async function probeRuntimeDefinition(
     definition,
     adapters.createScanDeps(env, definition, params.budget, signal)
   );
+  // `scanRuntime` turns a rejected version probe into `null`, including an
+  // AbortError from the forwarded signal, so a cancelled call would otherwise
+  // come back as a normal missing/ok status.
+  throwIfAborted(signal);
   const minimumVersion =
     params.minimumVersions?.[definition.id] ?? DEFAULT_MINIMUM_VERSIONS[definition.id];
   return analyzeRuntimeScan(definition, scan, {
@@ -280,6 +284,7 @@ async function describeExternalAgent(
     definition.runtime,
     adapters.createScanDeps(env, definition.runtime, params.budget, signal)
   );
+  throwIfAborted(signal);
   const runtimeStatus = analyzeRuntimeScan(definition.runtime, scan, {
     probedAtMs: adapters.now(),
     installable: params.installable?.[definition.targetId] ?? false,

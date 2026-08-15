@@ -117,6 +117,25 @@ describe('runtime probing', () => {
 
     expect(seenEnv).toMatchObject({ PATH: '/node/bin', SKILLS_DIR: '/srv/skills' });
   });
+
+  it('refuses a runtime probe cancelled while a version subprocess is in flight', async () => {
+    const controller = new AbortController();
+    const service = createProbingService({
+      runtimeDefinitions: [nodeOnly],
+      createPathEnv: () => LINUX_ENV,
+      createScanDeps: () =>
+        scanDeps({
+          probeVersion: () => {
+            controller.abort();
+            return Promise.reject(Object.assign(new Error('aborted'), { name: 'AbortError' }));
+          },
+        }),
+    });
+
+    await expect(service.probeRuntimes({}, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+  });
 });
 
 describe('version manager probing', () => {

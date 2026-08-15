@@ -137,13 +137,12 @@ export async function revertRuntimeSnapshots(
   const revertedFiles = new Set(params.operations.map((operation) => operation.path)).size;
 
   return await withPathLocks(paths, async () => {
-    if (await alreadyReverted(params.expected, signal)) {
-      // The filesystem half of a previous call finished; only its caller's
-      // bookkeeping did not. Replaying the operations from here would undo
-      // rows against the wrong baseline, so report the work as done instead.
-      return { revertedFiles };
-    }
+    const reverted = await alreadyReverted(params.expected, signal);
     // The last point at which cancelling is safe.
+    //
+    // Recheck after the hash pass, not only on the mutating branch: an
+    // idempotent retry that finds everything already reverted used to return
+    // success when the cancel landed during the last file's hash.
     //
     // Deliberately not inside the loop below: the operations are one reverse
     // replay, and stopping partway leaves a set that is half in each state —
@@ -152,6 +151,12 @@ export async function revertRuntimeSnapshots(
     // there is, but the useful place to bound it is the hashing above, which
     // touches every expected path and changes nothing.
     throwIfAborted(signal);
+    if (reverted) {
+      // The filesystem half of a previous call finished; only its caller's
+      // bookkeeping did not. Replaying the operations from here would undo
+      // rows against the wrong baseline, so report the work as done instead.
+      return { revertedFiles };
+    }
 
     for (const operation of params.operations) {
       switch (operation.type) {
@@ -200,7 +205,7 @@ async function alreadyReverted(
     // Hashing a large set is the long part of a revert, and it is pure reading,
     // so a cancel that lands here costs nothing.
     throwIfAborted(signal);
-    const observed = (await hashFileAtPath(entry.path)) ?? RUNTIME_ABSENT_HASH;
+    const observed = (await hashFileAtPath(entry.path, signal)) ?? RUNTIME_ABSENT_HASH;
     const matchesAfter = observed === entry.afterHash;
     const matchesReverted = entry.revertedHash !== undefined && observed === entry.revertedHash;
     if (!matchesAfter && !matchesReverted) throw new RuntimeSnapshotConflictError(entry.path);

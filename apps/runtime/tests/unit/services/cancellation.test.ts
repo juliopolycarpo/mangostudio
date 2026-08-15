@@ -266,6 +266,28 @@ describe('a cancelled runtime call refuses before it mutates', () => {
     expect(await Bun.file(path).exists()).toBe(true);
   });
 
+  it('refuses an already-reverted retry cancelled while hashing the last file', async () => {
+    const path = await seedReadFile('already-reverted.txt', 'reverted\n');
+    const revertedHash = await hashFileAtPath(path);
+    if (revertedHash === null) throw new Error('expected a hash for the seeded file');
+
+    const controller = new AbortController();
+    const queued = revertRuntimeSnapshots(
+      {
+        chatId: 'chat-1',
+        expected: [{ path, afterHash: 'deadbeef', revertedHash }],
+        operations: [{ type: 'create', path }],
+      },
+      controller.signal
+    );
+    // Abort after the call has started so the entry check cannot be the one
+    // that refuses. The idempotent branch used to return success anyway.
+    controller.abort();
+
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await Bun.file(path).text()).toBe('reverted\n');
+  });
+
   it('refuses directory walks and host probes before they start', async () => {
     const signal = abortedSignal();
     let scanned = false;
