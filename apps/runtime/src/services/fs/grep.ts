@@ -152,9 +152,9 @@ async function searchFile(input: SearchFileInput): Promise<boolean> {
   for (const match of outcome.matches) {
     matches.push({ file: display, line: match.line, text: match.text });
   }
-  // A file the budget cut short was only partly examined, so the search cannot
-  // claim to have found everything in it.
-  return outcome.moreMatches || outcome.timedOut;
+  // A file the budget cut short — or one whose scan died with it — was only
+  // partly examined, so the search cannot claim to have found everything in it.
+  return outcome.moreMatches || outcome.incomplete;
 }
 
 async function looksBinary(file: ReturnType<typeof Bun.file>): Promise<boolean> {

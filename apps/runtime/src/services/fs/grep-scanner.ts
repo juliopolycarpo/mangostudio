@@ -22,21 +22,31 @@ interface GrepScanOutcome {
   readonly matches: ReadonlyArray<{ readonly line: number; readonly text: string }>;
   /** A further line matched after the allowance ran out. */
   readonly moreMatches: boolean;
-  /** The budget expired, so lines after the one being tested were never read. */
-  readonly timedOut: boolean;
+  /**
+   * The file was not read to the end: the budget expired, or the worker holding
+   * the scan died. Both have to be distinguishable from "no matches here",
+   * because reporting a search that never ran as empty is a wrong answer rather
+   * than a slow one.
+   */
+  readonly incomplete: boolean;
 }
 
 export interface GrepScanner {
   /**
    * Scans one file for the compiled pattern, collecting at most `maxMatches`.
    * Never rejects on a file it cannot read: an unreadable file has no matches,
-   * which is what the caller does with it either way.
+   * which is what the caller does with it either way. A scan that could not run
+   * is reported as `incomplete` instead, so the caller can flag the search.
    */
   scan(path: string, maxMatches: number, budgetMs: number): Promise<GrepScanOutcome>;
   close(): Promise<void>;
 }
 
-const EMPTY_OUTCOME: GrepScanOutcome = { matches: [], moreMatches: false, timedOut: false };
+/**
+ * Nothing matched because the scan never finished — a dead worker or an expired
+ * budget. Distinct from the worker's own empty answer, which did read the file.
+ */
+const UNFINISHED: GrepScanOutcome = { matches: [], moreMatches: false, incomplete: true };
 
 /**
  * The worker body, as source rather than a module of its own.
@@ -114,7 +124,7 @@ export function createGrepScanner(regex: RegExp): GrepScanner {
 
   return {
     async scan(path, maxMatches, budgetMs) {
-      if (closed) return EMPTY_OUTCOME;
+      if (closed) return UNFINISHED;
       worker ??= start();
       const active = worker;
 
@@ -123,27 +133,37 @@ export function createGrepScanner(regex: RegExp): GrepScanner {
           clearTimeout(timer);
           active.off('message', onMessage);
           active.off('error', onError);
+          active.off('exit', onExit);
           resolve(outcome);
         };
         const onMessage = (message: {
           matches: GrepScanOutcome['matches'];
           moreMatches: boolean;
-        }) => settle({ ...message, timedOut: false });
+        }) => settle({ ...message, incomplete: false });
         const onError = () => {
           // A worker that threw cannot be reused, and one file failing to scan
-          // is not a reason to fail the whole search.
+          // is not a reason to fail the whole search — but it is also not proof
+          // that the file holds nothing, so the caller is told the scan is short.
+          settle(UNFINISHED);
           discard(active);
-          settle(EMPTY_OUTCOME);
+        };
+        // A worker that exits with a scan outstanding answers nothing at all.
+        // Without this the file would sit out its whole budget and then be
+        // reported as a timeout it never reached.
+        const onExit = () => {
+          settle(UNFINISHED);
+          retire(active);
         };
         const timer = setTimeout(() => {
           // Terminating is the only way to stop a synchronous match; the worker
           // is past the point where it could answer a message.
+          settle(UNFINISHED);
           discard(active);
-          settle({ matches: [], moreMatches: false, timedOut: true });
         }, budgetMs);
 
         active.once('message', onMessage);
         active.once('error', onError);
+        active.once('exit', onExit);
         active.postMessage({ path, maxMatches });
       });
     },
