@@ -18,7 +18,9 @@
  *
  * `name` is `AbortError` because that is what the host's error mapping reads to
  * answer the hub `CANCELLED` instead of `INTERNAL` — a cancelled call is not a
- * failed one, and the tool result the user sees differs accordingly.
+ * failed one, and the tool result the user sees differs accordingly. The host
+ * maps from this name, not from the signal being aborted, so a mutation that
+ * failed after it had already begun still reports as that failure.
  */
 class RuntimeCancelledError extends Error {
   constructor() {

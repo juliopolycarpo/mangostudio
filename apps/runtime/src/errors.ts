@@ -40,8 +40,8 @@ export class RuntimeServiceError extends Error {
 }
 
 export class PathAccessError extends RuntimeServiceError {
-  constructor(message: string) {
-    super('path_access', message);
+  constructor(message: string, data: Readonly<Record<string, unknown>> = {}) {
+    super('path_access', message, data);
     this.name = 'PathAccessError';
   }
 }

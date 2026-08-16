@@ -3,6 +3,7 @@ import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-prot
 import {
   connectInProcessRuntime,
   createInProcessPortPair,
+  PathAccessError,
   RuntimeHost,
   type RuntimeMethodHandler,
   RuntimeProtocolClient,
@@ -188,6 +189,50 @@ describe('in-process runtime transport', () => {
       await expect(request).rejects.toMatchObject({ code: 'CANCELLED' });
       expect(receivedParams).toEqual({ path: '/workspace/file.txt' });
       expect(receivedParams).not.toHaveProperty('signal');
+    } finally {
+      connection.close();
+    }
+  });
+
+  it('keeps a post-commit service error instead of relabeling it CANCELLED', async () => {
+    const host = createHost(
+      new Map([
+        [
+          'snapshot.hash',
+          (_params, { signal }) =>
+            new Promise((_, reject) => {
+              const fail = () =>
+                reject(
+                  new PathAccessError(
+                    'Patch commit failed. Paths already modified: "/workspace/a.txt".',
+                    { changedPaths: ['/workspace/a.txt'] }
+                  )
+                );
+              if (signal.aborted) fail();
+              else signal.addEventListener('abort', fail, { once: true });
+            }),
+        ],
+      ])
+    );
+    const connection = await connectInProcessRuntime(host, {
+      hubVersion: 'hub-test',
+      validateFrames: true,
+    });
+    const controller = new AbortController();
+
+    try {
+      const request = connection.client.request(
+        'snapshot.hash',
+        { path: '/workspace/file.txt' },
+        { signal: controller.signal }
+      );
+      controller.abort();
+
+      await expect(request).rejects.toBeInstanceOf(RuntimeRemoteError);
+      await expect(request).rejects.toMatchObject({
+        code: 'INTERNAL',
+        details: { kind: 'path_access', changedPaths: ['/workspace/a.txt'] },
+      });
     } finally {
       connection.close();
     }

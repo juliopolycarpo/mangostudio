@@ -356,7 +356,11 @@ function deferredHandshake(): ReturnType<typeof Promise.withResolvers<void>> {
 }
 
 function errorPayloadFor(error: unknown, signal: AbortSignal): RuntimeErrorPayload {
-  if (signal.aborted || isAbortError(error)) {
+  // CANCELLED is the refusal the handler threw, not a flag on the signal. A
+  // mutation that continued past its last refusal point can still fail, and
+  // that failure (a partial patch, a disk error) is what the caller has to
+  // recover from, even if a cancel arrived after the writes began.
+  if (isAbortError(error)) {
     return {
       code: 'CANCELLED',
       message: error instanceof Error ? error.message : 'Runtime request was cancelled.',
@@ -389,6 +393,12 @@ function errorPayloadFor(error: unknown, signal: AbortSignal): RuntimeErrorPaylo
       code: 'INTERNAL',
       message: error.message,
       details: { kind: error.kind, ...error.data },
+    };
+  }
+  if (signal.aborted) {
+    return {
+      code: 'CANCELLED',
+      message: error instanceof Error ? error.message : 'Runtime request was cancelled.',
     };
   }
   return {

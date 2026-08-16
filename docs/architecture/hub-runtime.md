@@ -83,7 +83,9 @@ path lock before the first write, and inside the loops that only read: walking a
 `fs.glob` and `fs.grep`, hashing the expected set in `snapshot.revert`. Once bytes start
 moving, the call finishes and reports what it did. `services/cancellation.ts` holds the one
 refusal every service raises; it carries the `AbortError` name the host maps to `CANCELLED`,
-so a cancelled call is never reported as a failed one.
+so a cancelled call is never reported as a failed one. The host maps from that thrown name,
+not from the signal being aborted: a mutation that failed after it had already begun still
+reports as that failure, including any paths already changed.
 
 Long-running calls are bounded on their own terms rather than left for a cancel to rescue: a
 shell command kills its process group and stops reading the pipes at its timeout, and `fs.grep`
@@ -453,9 +455,11 @@ Lifecycle:
 Known gap: Windows has no POSIX signals, so killing a runtime there terminates the runtime
 itself but not shell children it already spawned. The runtime's own termination path reaps
 those in the normal case — a shell command runs in a process group of its own and the group is
-killed on timeout or abort, `taskkill /T` doing the same job on Windows — and stops reading the
-pipes either way, so a descendant that survives the kill cannot hold the call open. A hard kill
-of the runtime can still leave them.
+killed on timeout or abort, `taskkill /T` doing the same job on Windows (bounded, then the
+direct child) — and stops reading the pipes either way, so a descendant that survives the kill
+cannot hold the call open. On Linux, descendants that left the group (`setsid` / `setpgid`)
+are still signalled by parentage while the leader is alive. A hard kill of the runtime can
+still leave them.
 
 The hub and the runtime ship from one release. The handshake refuses a major/minor protocol
 mismatch, and for stdio it also refuses a runtime whose release version differs from the hub's

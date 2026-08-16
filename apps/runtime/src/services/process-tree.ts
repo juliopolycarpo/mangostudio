@@ -27,6 +27,14 @@ export const OWN_PROCESS_GROUP = { detached: process.platform !== 'win32' } as c
 const LEADER_REAP_BUDGET_MS = 100;
 const LEADER_REAP_POLL_MS = 5;
 
+/**
+ * How long a fire-and-forget `taskkill` may run before the direct child is
+ * killed instead. Matches the awaited Windows teardown in
+ * `external-agents/process.ts`. Unref'd: the caller is already waiting on the
+ * child it owns, and this timer must not keep the runtime alive by itself.
+ */
+const WINDOWS_TASKKILL_FALLBACK_MS = 2_000;
+
 /** Argv for the Windows tree-kill primitive; PID 0 and 1 are never valid targets. */
 export function windowsTaskkillArguments(pid: number): readonly string[] {
   if (!Number.isSafeInteger(pid) || pid <= 1) {
@@ -46,10 +54,11 @@ export function windowsTaskkillArguments(pid: number): readonly string[] {
  * root: `/T` walks from the specified PID, and killing that PID first hides
  * the descendants.
  *
- * On Linux the group members are signalled first and the leader a moment later.
- * A single `kill(-pid, SIGKILL)` races the leader with its children, so the
- * leader never waitpids them and they land on PID 1 as zombies. Docker images
- * in this repo run the hub as PID 1, which does not reap adopted children.
+ * On Linux the group members and any descendant that left the group are
+ * signalled first, and the leader a moment later. A single `kill(-pid, SIGKILL)`
+ * races the leader with its children, so the leader never waitpids them and
+ * they land on PID 1 as zombies. Docker images in this repo run the hub as
+ * PID 1, which does not reap adopted children.
  *
  * // Usage: killProcessTree(proc.pid, () => proc.kill('SIGKILL'))
  */
@@ -90,22 +99,22 @@ function invokeKill(killDirectChild: () => void): void {
 }
 
 /**
- * SIGKILL every group member except the leader, then the leader once it has
- * had a chance to reap. Returns false when `/proc` cannot be read, so the
- * caller can fall back to signalling the group as a unit.
+ * SIGKILL every group member and every descendant that left the group, then
+ * the leader once it has had a chance to reap. Returns false when `/proc`
+ * cannot be read, so the caller can fall back to signalling the group as a
+ * unit.
  */
 function killLinuxProcessTree(leaderPid: number, killDirectChild: () => void): boolean {
   // A command can spawn a new child after the first sweep (`sleep 60;
   // sleep 60 & wait`). Each tick re-lists and signals whatever is there now,
-  // and the leader is only taken down once the group is just it, or the
+  // and the leader is only taken down once nothing else remains, or the
   // budget runs out. `null` is an unreadable `/proc`, which the first sweep
   // reports to the caller so it can signal the group as a unit instead.
   const sweep = (): boolean | null => {
-    const current = linuxProcessGroupMembers(leaderPid);
+    const current = linuxTreeTargets(leaderPid);
     if (current === null) return null;
     let remaining = false;
     for (const pid of current) {
-      if (pid === leaderPid || pid <= 1) continue;
       remaining = true;
       try {
         process.kill(pid, 'SIGKILL');
@@ -140,10 +149,59 @@ function killLinuxProcessTree(leaderPid: number, killDirectChild: () => void): b
 }
 
 /**
- * PIDs whose process-group id is `pgid`, or `null` when `/proc` is unreadable.
- * Zombies are included: they still occupy a table slot until the leader waitpids.
+ * PIDs to signal before the leader, or `null` when `/proc` is unreadable.
+ *
+ * Union of the leader's process-group members and its descendants by parentage.
+ * Group membership is the cheap bulk path; parentage catches a child that
+ * called `setsid` or `setpgid` and left the group while the leader is still
+ * alive. Zombies are included: they still occupy a table slot until waitpid.
+ *
+ * A descendant that double-forks and is reparented to PID 1 is gone from both
+ * views. A cgroup around the call would cover that; this scan does not.
  */
-function linuxProcessGroupMembers(pgid: number): number[] | null {
+function linuxTreeTargets(leaderPid: number): number[] | null {
+  const rows = readLinuxProcRows();
+  if (rows === null) return null;
+
+  const children = new Map<number, number[]>();
+  const targets = new Set<number>();
+  for (const row of rows) {
+    if (row.pid <= 1) continue;
+    const siblings = children.get(row.ppid);
+    if (siblings) siblings.push(row.pid);
+    else children.set(row.ppid, [row.pid]);
+    if (row.pid !== leaderPid && row.pgid === leaderPid) targets.add(row.pid);
+  }
+
+  const stack = [...(children.get(leaderPid) ?? [])];
+  const seen = new Set<number>();
+  while (stack.length > 0) {
+    const pid = stack.pop();
+    if (
+      pid === undefined ||
+      pid <= 1 ||
+      pid === leaderPid ||
+      pid === process.pid ||
+      seen.has(pid)
+    ) {
+      continue;
+    }
+    seen.add(pid);
+    targets.add(pid);
+    const kids = children.get(pid);
+    if (kids) stack.push(...kids);
+  }
+
+  return [...targets];
+}
+
+interface LinuxProcRow {
+  readonly pid: number;
+  readonly ppid: number;
+  readonly pgid: number;
+}
+
+function readLinuxProcRows(): LinuxProcRow[] | null {
   let names: string[];
   try {
     names = readdirSync('/proc');
@@ -151,7 +209,7 @@ function linuxProcessGroupMembers(pgid: number): number[] | null {
     return null;
   }
 
-  const members: number[] = [];
+  const rows: LinuxProcRow[] = [];
   for (const name of names) {
     if (!/^[0-9]+$/.test(name)) continue;
     const pid = Number(name);
@@ -161,18 +219,23 @@ function linuxProcessGroupMembers(pgid: number): number[] | null {
       if (closeParen < 0) continue;
       const fields = stat.slice(closeParen + 2).split(' ');
       // After `pid (comm)`: state, ppid, pgrp.
-      if (Number(fields[2]) === pgid) members.push(pid);
+      const ppid = Number(fields[1]);
+      const pgid = Number(fields[2]);
+      if (!Number.isSafeInteger(ppid) || !Number.isSafeInteger(pgid)) continue;
+      rows.push({ pid, ppid, pgid });
     } catch {
       // Vanished between readdir and read.
     }
   }
-  return members;
+  return rows;
 }
 
 /**
  * Starts `taskkill /T /F` without waiting, and only kills the direct child if
- * that spawn fails. Killing the root first is what hides the descendants from
- * `/T`. `spawnTaskkill` is the production `spawn` and a test fake.
+ * that spawn fails, exits non-zero, or has not settled by `fallbackMs`.
+ * Killing the root first is what hides the descendants from `/T`, so the
+ * deadline is the bound that still lets `/T` walk before we give up.
+ * `spawnTaskkill` is the production `spawn` and a test fake.
  */
 export function startWindowsTaskkillTree(
   pid: number,
@@ -184,22 +247,46 @@ export function startWindowsTaskkillTree(
   ) => {
     once(event: 'error' | 'close', listener: (codeOrError?: unknown) => void): unknown;
     unref(): unknown;
-  } = spawn
+    kill?(): unknown;
+  } = spawn,
+  fallbackMs: number = WINDOWS_TASKKILL_FALLBACK_MS
 ): void {
-  const fallback = () => invokeKill(killDirectChild);
+  let settled = false;
+  const fallback = () => {
+    if (settled) return;
+    settled = true;
+    invokeKill(killDirectChild);
+  };
   try {
     const taskkill = spawnTaskkill('taskkill', [...windowsTaskkillArguments(pid)], {
       stdio: 'ignore',
       ...HIDDEN_WINDOW,
     });
     // Nothing awaits this child, so its failure must not surface as an
-    // unhandled error event on the process. An error or a non-zero exit is
-    // the same fallback the awaited Windows teardown uses: the direct child
-    // only, with no claim on descendants.
-    taskkill.once('error', fallback);
-    taskkill.once('close', (code) => {
-      if (code !== 0) fallback();
-    });
+    // unhandled error event on the process. An error, a non-zero exit, or a
+    // hung taskkill is the same fallback the awaited Windows teardown uses:
+    // the direct child only, with no claim on descendants. A hung taskkill
+    // is killed too: `/T /F` against a PID that has since been reused would
+    // hit whatever inherited that number.
+    const timer = setTimeout(
+      () => {
+        try {
+          taskkill.kill?.();
+        } catch {
+          // Already gone.
+        }
+        fallback();
+      },
+      Math.max(0, fallbackMs)
+    );
+    timer.unref?.();
+    const done = (failed: boolean) => {
+      clearTimeout(timer);
+      if (failed) fallback();
+      else settled = true;
+    };
+    taskkill.once('error', () => done(true));
+    taskkill.once('close', (code) => done(code !== 0));
     taskkill.unref();
   } catch {
     fallback();
