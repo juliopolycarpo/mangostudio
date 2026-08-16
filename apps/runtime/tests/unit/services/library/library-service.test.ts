@@ -18,6 +18,7 @@ import {
   MAX_LIBRARY_FILE_BYTES,
   readLibraryContent,
 } from '../../../../src/services/library';
+import { readLibraryTree } from '../../../../src/services/library/instance-reader';
 import { createRuntimePathEnv } from '../../../../src/services/probing/host-env';
 
 let root: string;
@@ -260,5 +261,59 @@ describe('library.scan environments stay disjoint', () => {
 
     expect(scanA.entries.map((entry) => entry.ref.slug)).toEqual(['alpha']);
     expect(scanB.entries.map((entry) => entry.ref.slug)).toEqual(['beta']);
+  });
+
+  it('does not cancel a coalesced scan when a different caller aborts', async () => {
+    const skills = join(root, 'skills', 'alpha');
+    mkdirSync(skills, { recursive: true });
+    writeFileSync(join(skills, 'SKILL.md'), '---\nname: alpha\ndescription: A\n---\n');
+
+    const cache = new LibraryCache();
+    const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+      home: { 'mango-skills': true },
+      workspace: {},
+    });
+    const params = {
+      locationSettings: libraryLocationsFor(settings),
+      force: false,
+      locationPathOverrides: { 'mango-skills': join(root, 'skills') },
+    };
+    const service = createLibraryService({
+      createPathEnv: () => createRuntimePathEnv(),
+      cache,
+      describeLocations: () => [],
+      now: () => 1,
+    });
+
+    const firstController = new AbortController();
+    const first = service.scan(params, firstController.signal);
+    const second = service.scan(params, new AbortController().signal);
+    firstController.abort();
+
+    await expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    expect((await second).entries.map((entry) => entry.ref.slug)).toEqual(['alpha']);
+  });
+});
+
+describe('library.read-tree cancellation', () => {
+  it('refuses after a file read that was cancelled while in flight', async () => {
+    const file = join(root, 'note.md');
+    writeFileSync(file, 'hello');
+    const controller = new AbortController();
+
+    await expect(
+      readLibraryTree(file, root, {
+        signal: controller.signal,
+        fs: {
+          readDirectory: async () => [],
+          realPath: async (path) => path,
+          stat: async () => ({ size: 5, mtimeMs: 0, isFile: true, isDirectory: false }),
+          readFile: () => {
+            controller.abort();
+            return Promise.resolve(new Uint8Array([1]));
+          },
+        },
+      })
+    ).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

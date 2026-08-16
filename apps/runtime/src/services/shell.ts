@@ -7,6 +7,8 @@ import { homedir } from 'node:os';
 import { resolve } from 'node:path';
 import { RuntimeServiceError } from '../errors';
 import type { RuntimeShellResult } from '../methods';
+import { readStreamCapped } from './child-output';
+import { killProcessTree, OWN_PROCESS_GROUP } from './process-tree';
 import { HIDDEN_WINDOW } from './process-window';
 import { type ShellEnvPolicy, sanitizeShellEnv } from './shell-env';
 
@@ -64,6 +66,17 @@ const defaultDeps: ShellExecDependencies = {
 
 const executableCache = new Map<ShellKind, string | null>();
 
+/**
+ * How long the capture may keep running once the direct child is gone.
+ *
+ * Anything still holding these pipes after the shell itself has exited is
+ * something the command backgrounded, and EOF then waits on work the caller
+ * never asked about — `server &` would hold the call for the whole timeout.
+ * The grace exists only so a capture that is merely a turn behind the exit is
+ * not cut short and reported as truncated.
+ */
+const LEFTOVER_PIPE_GRACE_MS = 100;
+
 type TerminationClaim = 'timed_out' | 'aborted';
 
 /**
@@ -99,7 +112,14 @@ export function isShellAvailable(kind: ShellKind): boolean {
 
 /**
  * Runs a command through the given shell and returns captured output.
- * The process is killed after `timeoutMs`; output is capped at `maxOutputBytes`.
+ * The process tree is killed after `timeoutMs`; output is capped at
+ * `maxOutputBytes`.
+ *
+ * A claimed termination stops the capture rather than waiting for streams a
+ * surviving descendant may never close, so a `timed_out` or `aborted` result
+ * carries whatever had arrived by then and is flagged `truncated`. A shell that
+ * exits while a descendant still holds the pipes is bounded the same way, a
+ * short grace after its exit rather than at the timeout.
  *
  * // Usage: await runShellCommand({ kind: 'bash', command: 'echo hi', timeoutMs: 5000, maxOutputBytes: 65536 })
  */
@@ -123,6 +143,10 @@ export async function runShellCommandWithDeps(
   const startedAt = deps.now();
   const proc = spawnShell(deps.spawn, executable, input);
   let claimed: TerminationClaim | null = null;
+  // Released the moment a termination is claimed. Both readers stop waiting on
+  // it, which is what bounds the call even when a descendant of the killed
+  // shell is still holding the pipes open.
+  const terminated = new AbortController();
 
   const claim = (kind: TerminationClaim): boolean => {
     if (claimed) return false;
@@ -130,24 +154,35 @@ export async function runShellCommandWithDeps(
     return true;
   };
 
+  let killedTree = false;
   const killChild = () => {
-    try {
-      proc.kill('SIGKILL');
-    } catch {
-      // Process may already have exited.
-    }
+    // Once per call: the same PID must not be tree-killed twice, because Bun
+    // reaps the child as soon as it exits and a later sweep would be addressing
+    // whatever process group has since inherited that number.
+    if (killedTree) return;
+    killedTree = true;
+    // Stop the capture first: that is what bounds the call. The tree kill
+    // may take a turn on Linux so the group leader can reap, and must not
+    // sit on the path that unblocks the readers.
+    terminated.abort();
+    killProcessTree(proc.pid, () => proc.kill('SIGKILL'));
   };
 
-  const naturallyExited = () => proc.exitCode !== null && proc.signalCode === null;
+  const alreadyFinished = () => proc.exitCode !== null || proc.signalCode !== null;
+  let captured = false;
 
   const timeoutId = deps.setTimeout(() => {
-    if (naturallyExited()) return;
-    if (claim('timed_out')) killChild();
+    // A shell that backgrounds work and then exits or is signalled still
+    // leaves descendants holding these pipes. The termination it already
+    // has is real, so do not reclassify the call; still stop the capture
+    // and the leftover group.
+    if (!alreadyFinished() && !claim('timed_out')) return;
+    killChild();
   }, input.timeoutMs);
 
   const abortHandler = () => {
-    if (naturallyExited()) return;
-    if (claim('aborted')) killChild();
+    if (!alreadyFinished() && !claim('aborted')) return;
+    killChild();
   };
   input.signal?.addEventListener('abort', abortHandler, { once: true });
   // A signal already aborted at spawn time never re-dispatches `abort` to a
@@ -155,11 +190,24 @@ export async function runShellCommandWithDeps(
   // until its own timeout.
   if (input.signal?.aborted) abortHandler();
 
+  // The shell can exit long before the pipes close. Waiting for the timeout to
+  // notice would charge a command that merely backgrounded something the full
+  // budget, so the exit starts a short grace of its own instead. Nothing is
+  // claimed here: the termination the call already has is the real one.
+  let graceId: ReturnType<typeof setTimeout> | undefined;
+  void proc.exited.then(() => {
+    if (captured) return;
+    graceId = deps.setTimeout(() => {
+      if (!captured) killChild();
+    }, LEFTOVER_PIPE_GRACE_MS);
+  });
+
   try {
     const [stdout, stderr] = await Promise.all([
-      readStreamCapped(proc.stdout, input.maxOutputBytes),
-      readStreamCapped(proc.stderr, input.maxOutputBytes),
+      readStreamCapped(proc.stdout, input.maxOutputBytes, terminated.signal),
+      readStreamCapped(proc.stderr, input.maxOutputBytes, terminated.signal),
     ]);
+    captured = true;
     await proc.exited;
 
     return {
@@ -169,12 +217,19 @@ export async function runShellCommandWithDeps(
       signal: proc.signalCode,
       stdout: stdout.text,
       stderr: stderr.text,
-      truncated: stdout.truncated || stderr.truncated,
+      truncated: stdout.truncated || stderr.truncated || stdout.stopped || stderr.stopped,
       termination: resolveTermination(claimed, proc.signalCode),
       durationMs: deps.now() - startedAt,
     };
   } finally {
+    captured = true;
     deps.clearTimeout(timeoutId);
+    if (graceId !== undefined) deps.clearTimeout(graceId);
+    // The leader may have exited 0 while a descendant that redirected both
+    // pipes is still running. Capture already reached EOF in that case, so
+    // the leftover-pipe grace never starts and the timeout is about to be
+    // cleared; this is the teardown that still reaches that leftover group.
+    killChild();
     input.signal?.removeEventListener('abort', abortHandler);
   }
 }
@@ -199,6 +254,9 @@ function spawnShell(spawn: typeof Bun.spawn, executable: string, input: RunShell
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
+      // The command is free to background whatever it likes; a group of its own
+      // is what makes those descendants reachable when the call is terminated.
+      ...OWN_PROCESS_GROUP,
       ...HIDDEN_WINDOW,
     });
   } catch (error) {
@@ -224,53 +282,4 @@ function expandHome(path: string): string {
   if (path === '~') return homedir();
   if (path.startsWith('~/')) return resolve(homedir(), path.slice(2));
   return path;
-}
-
-interface CappedRead {
-  text: string;
-  truncated: boolean;
-}
-
-/**
- * Reads a byte stream, retaining at most `maxBytes` worth of data.
- * Continues draining the stream past the cap (discarding bytes) so the child
- * never blocks on a full pipe; flags `truncated` when any bytes were dropped.
- */
-async function readStreamCapped(
-  stream: ReadableStream<Uint8Array>,
-  maxBytes: number
-): Promise<CappedRead> {
-  const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  let truncated = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      if (total >= maxBytes) {
-        truncated = true;
-        continue;
-      }
-      chunks.push(value);
-      total += value.byteLength;
-      if (total > maxBytes) truncated = true;
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  return { text: decodeCapped(chunks, maxBytes), truncated };
-}
-
-function decodeCapped(chunks: Uint8Array[], maxBytes: number): string {
-  const merged = new Uint8Array(chunks.reduce((sum, c) => sum + c.byteLength, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return new TextDecoder().decode(merged.subarray(0, maxBytes));
 }

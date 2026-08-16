@@ -8,6 +8,7 @@ import {
 } from '../../../src/services/git';
 
 const hasGit = Bun.which('git') !== null;
+const isWindows = process.platform === 'win32';
 
 describe('git CLI boundary', () => {
   it('assembles a direct argv without shell interpolation', () => {
@@ -105,4 +106,56 @@ describe('git CLI boundary', () => {
     });
     expect((error as GitExecutionError).data.stderr).not.toEndWith('\n');
   });
+
+  it.skipIf(!hasGit || isWindows)(
+    'times out even when a descendant keeps the pipes open',
+    async () => {
+      // A shell alias that backgrounds a process inheriting stdout and stderr.
+      // Killing Git alone leaves both streams open, so a capture that waits for
+      // EOF never returns and the timeout it reports never reaches the caller.
+      const startedAt = Date.now();
+      const error = await execGit({
+        args: ['-c', 'alias.hang=!sh -c "sleep 60 & echo started; sleep 60"', 'hang'],
+        cwd: process.cwd(),
+        timeoutMs: 1000,
+      }).catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(GitExecutionError);
+      expect((error as GitExecutionError).message).toBe('Git command timed out.');
+      expect(Date.now() - startedAt).toBeLessThan(30_000);
+    },
+    60_000
+  );
+
+  it.skipIf(!hasGit || isWindows)(
+    'returns when Git exits but a helper still holds the pipes',
+    async () => {
+      const startedAt = Date.now();
+      const result = await execGit({
+        args: ['-c', 'alias.hang=!sh -c "sleep 60 & echo done"', 'hang'],
+        cwd: process.cwd(),
+        timeoutMs: 400,
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout.trim()).toBe('done');
+      expect(Date.now() - startedAt).toBeLessThan(10_000);
+    },
+    30_000
+  );
+
+  it.skipIf(!hasGit || isWindows)(
+    'still reports a cap hit when leftover helpers hold the pipes',
+    async () => {
+      const error = await execGit({
+        args: ['-c', 'alias.hang=!sh -c "head -c 1100000 /dev/zero; sleep 60 &"', 'hang'],
+        cwd: process.cwd(),
+        timeoutMs: 5_000,
+      }).catch((cause: unknown) => cause);
+
+      expect(error).toBeInstanceOf(GitExecutionError);
+      expect((error as GitExecutionError).message).toContain('exceeded');
+    },
+    30_000
+  );
 });

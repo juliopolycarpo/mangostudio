@@ -7,6 +7,7 @@ import {
   type RuntimeSnapshotRevertParams,
   type RuntimeSnapshotRevertResult,
 } from '../methods';
+import { throwIfAborted } from './cancellation';
 import { forgetFile, recordFileRead, rekeyFile, withPathLocks } from './file-freshness';
 import {
   assertRegularFilePath,
@@ -53,7 +54,12 @@ export const RUNTIME_SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
  * letting the transport reject the frame would leave the mutation applied and
  * the checkpoint lost.
  */
-export async function captureFileSnapshot(path: string): Promise<RuntimeBeforeSnapshot> {
+export async function captureFileSnapshot(
+  path: string,
+  signal?: AbortSignal
+): Promise<RuntimeBeforeSnapshot> {
+  // One file, read once: entry is the only point where refusing saves anything.
+  throwIfAborted(signal);
   const file = Bun.file(path);
   if (!(await file.exists())) return { exists: false };
   if (file.size > RUNTIME_SNAPSHOT_MAX_BYTES) {
@@ -70,9 +76,15 @@ export function snapshotFromBytes(bytes: Uint8Array): RuntimeBeforeSnapshot {
   };
 }
 
-export async function hashFileAtPath(path: string): Promise<string | null> {
-  if (!(await Bun.file(path).exists())) return null;
-  return hashBytes(await Bun.file(path).bytes());
+export async function hashFileAtPath(path: string, signal?: AbortSignal): Promise<string | null> {
+  throwIfAborted(signal);
+  if (!(await Bun.file(path).exists())) {
+    throwIfAborted(signal);
+    return null;
+  }
+  const bytes = await Bun.file(path).bytes();
+  throwIfAborted(signal);
+  return hashBytes(bytes);
 }
 
 export function mutationSnapshot(
@@ -98,8 +110,10 @@ export function mutationSnapshot(
 }
 
 export async function revertRuntimeSnapshots(
-  params: RuntimeSnapshotRevertParams
+  params: RuntimeSnapshotRevertParams,
+  signal?: AbortSignal
 ): Promise<RuntimeSnapshotRevertResult> {
+  throwIfAborted(signal);
   const paths = [
     ...params.expected.map((entry) => entry.path),
     ...params.operations.flatMap((operation) =>
@@ -128,7 +142,21 @@ export async function revertRuntimeSnapshots(
   const revertedFiles = new Set(params.operations.map((operation) => operation.path)).size;
 
   return await withPathLocks(paths, async () => {
-    if (await alreadyReverted(params.expected)) {
+    const reverted = await alreadyReverted(params.expected, signal);
+    // The last point at which cancelling is safe.
+    //
+    // Recheck after the hash pass, not only on the mutating branch: an
+    // idempotent retry that finds everything already reverted used to return
+    // success when the cancel landed during the last file's hash.
+    //
+    // Deliberately not inside the loop below: the operations are one reverse
+    // replay, and stopping partway leaves a set that is half in each state —
+    // which `alreadyReverted` reads as a conflict, so a retry would refuse
+    // rather than resume. Reverting a large set is the longest snapshot call
+    // there is, but the useful place to bound it is the hashing above, which
+    // touches every expected path and changes nothing.
+    throwIfAborted(signal);
+    if (reverted) {
       // The filesystem half of a previous call finished; only its caller's
       // bookkeeping did not. Replaying the operations from here would undo
       // rows against the wrong baseline, so report the work as done instead.
@@ -173,12 +201,16 @@ export async function revertRuntimeSnapshots(
  * which is why a genuinely mixed set is a conflict rather than a resume.
  */
 async function alreadyReverted(
-  expected: RuntimeSnapshotRevertParams['expected']
+  expected: RuntimeSnapshotRevertParams['expected'],
+  signal?: AbortSignal
 ): Promise<boolean> {
   let pendingPath: string | null = null;
   let revertedPath: string | null = null;
   for (const entry of expected) {
-    const observed = (await hashFileAtPath(entry.path)) ?? RUNTIME_ABSENT_HASH;
+    // Hashing a large set is the long part of a revert, and it is pure reading,
+    // so a cancel that lands here costs nothing.
+    throwIfAborted(signal);
+    const observed = (await hashFileAtPath(entry.path, signal)) ?? RUNTIME_ABSENT_HASH;
     const matchesAfter = observed === entry.afterHash;
     const matchesReverted = entry.revertedHash !== undefined && observed === entry.revertedHash;
     if (!matchesAfter && !matchesReverted) throw new RuntimeSnapshotConflictError(entry.path);

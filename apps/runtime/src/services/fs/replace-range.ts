@@ -4,6 +4,7 @@ import type {
   RuntimeReplaceRangeParams,
   RuntimeReplaceRangeResult,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import {
   assertLineNumbersCurrent,
   FileNotReadError,
@@ -22,8 +23,11 @@ import { countTotalLines, looksBinary } from './read-file';
 const NEWLINE = 0x0a;
 
 export async function replaceRuntimeRange(
-  params: RuntimeReplaceRangeParams
+  params: RuntimeReplaceRangeParams,
+  signal?: AbortSignal
 ): Promise<RuntimeMutationResult<RuntimeReplaceRangeResult>> {
+  throwIfAborted(signal);
+
   return await withPathLocks([params.resolvedPath], async () => {
     let observed: Awaited<ReturnType<typeof readFreshFile>>;
     try {
@@ -49,6 +53,8 @@ export async function replaceRuntimeRange(
       observed.bytes[observed.bytes.byteLength - 1] === NEWLINE
     );
     assertStillText(updated, params.inputPath);
+    // Everything above this line read; everything below it writes.
+    throwIfAborted(signal);
 
     let committed: { mtimeMs: number };
     try {

@@ -192,7 +192,9 @@ describe('executeCreateFile', () => {
 
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
-    expect(await Bun.file(filePath).text()).toBe('first');
+    // The lock is exclusive, not FIFO: whichever caller is scheduled first
+    // wins, and the other is the existing-file rejection.
+    expect(['first', 'second']).toContain(await Bun.file(filePath).text());
   });
 });
 

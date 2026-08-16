@@ -14,6 +14,7 @@ import type {
   RuntimeWorkspaceResolveContainedResult,
   RuntimeWorkspaceValidateResult,
 } from '../methods';
+import { throwIfAborted } from './cancellation';
 import { resolveWorkspacePath, WorkspacePathError } from './workspace-path';
 
 /** Protocol-layer cap on directory listing size. */
@@ -109,8 +110,10 @@ function listFilesystemRoots(): Promise<string[]> {
 }
 
 export async function browseWorkspace(
-  params: RuntimeWorkspaceBrowseParams = {}
+  params: RuntimeWorkspaceBrowseParams = {},
+  signal?: AbortSignal
 ): Promise<ListDirectoryResponse> {
+  throwIfAborted(signal);
   const path = params.path ?? homedir();
   let resolvedPath: string;
   try {
@@ -133,9 +136,11 @@ export async function browseWorkspace(
     throw error;
   }
 
+  throwIfAborted(signal);
   const entries = (
     await Promise.all(
       rawEntries.map(async (entry): Promise<DirectoryEntry | undefined> => {
+        throwIfAborted(signal);
         const entryPath = resolve(resolvedPath, entry.name);
         if (!(await isDirectoryEntry(entryPath, entry))) {
           return undefined;
@@ -157,6 +162,7 @@ export async function browseWorkspace(
   const truncated = entries.length > MAX_WORKSPACE_DIRECTORY_ENTRIES;
   const cappedEntries = truncated ? entries.slice(0, MAX_WORKSPACE_DIRECTORY_ENTRIES) : entries;
 
+  throwIfAborted(signal);
   const root = parse(resolvedPath).root;
   return {
     path: resolvedPath,

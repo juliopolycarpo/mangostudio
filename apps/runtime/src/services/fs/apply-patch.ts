@@ -9,6 +9,7 @@ import type {
   RuntimePatchHunk,
   RuntimePatchOperation,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import {
   FileNotReadError,
   forgetFile,
@@ -75,14 +76,20 @@ interface CommittedWrite {
 }
 
 export async function applyRuntimePatch(
-  params: RuntimeApplyPatchParams
+  params: RuntimeApplyPatchParams,
+  signal?: AbortSignal
 ): Promise<RuntimeMutationResult<RuntimeApplyPatchResult>> {
+  throwIfAborted(signal);
   const planned = await planOperations(params.operations, params.chatId);
   assertNoPathConflicts(planned);
   const lockedPaths = planned.flatMap(operationPaths);
 
   return await withPathLocks(lockedPaths, async () => {
     const revalidated = await revalidateOperations(planned, params.chatId);
+    // A patch commits several files as one change, so this is the only point at
+    // which it can be refused. Once the first write lands, stopping would leave
+    // the operations half applied.
+    throwIfAborted(signal);
     return await commitOperations(planned, revalidated, params);
   });
 }
@@ -576,12 +583,14 @@ function throwPatchFailureMessages(failures: readonly string[]): never {
 }
 
 function throwCommitError(changedPaths: readonly string[], cause: unknown): never {
+  const unique = [...new Set(changedPaths)];
   const changed =
-    changedPaths.length > 0
-      ? ` Paths already modified: ${[...new Set(changedPaths)].map((path) => `"${path}"`).join(', ')}.`
+    unique.length > 0
+      ? ` Paths already modified: ${unique.map((path) => `"${path}"`).join(', ')}.`
       : '';
   throw new PathAccessError(
-    `Patch commit failed.${changed} Inspect any listed paths before retrying. Cause: ${errorMessage(cause)}`
+    `Patch commit failed.${changed} Inspect any listed paths before retrying. Cause: ${errorMessage(cause)}`,
+    unique.length > 0 ? { changedPaths: unique } : {}
   );
 }
 

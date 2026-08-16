@@ -5,6 +5,7 @@ import type {
   RuntimeDeleteFileResult,
   RuntimeMutationResult,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import {
   assertFresh,
   FileNotReadError,
@@ -21,8 +22,11 @@ import {
 import { mutationSnapshot, snapshotFromBytes } from '../snapshot';
 
 export async function deleteRuntimeFile(
-  params: RuntimeDeleteFileParams
+  params: RuntimeDeleteFileParams,
+  signal?: AbortSignal
 ): Promise<RuntimeMutationResult<RuntimeDeleteFileResult>> {
+  throwIfAborted(signal);
+
   return await withPathLocks([params.resolvedPath], async () => {
     await assertRegularFilePath(params.resolvedPath, 'delete');
 
@@ -40,6 +44,10 @@ export async function deleteRuntimeFile(
       }
       throw error;
     }
+
+    // The snapshot is captured and the file is still there; after the unlink
+    // the only way back is the checkpoint.
+    throwIfAborted(signal);
 
     try {
       await unlink(params.resolvedPath);

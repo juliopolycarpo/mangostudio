@@ -6,14 +6,22 @@ import type {
   RuntimeCreateFileResult,
   RuntimeMutationResult,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import { recordFileRead, withPathLocks } from '../file-freshness';
 import { isErrnoException, RegularFileWriteError, writeRegularFileAtomic } from '../fs-utils';
 import { mutationSnapshot } from '../snapshot';
 
 export async function createRuntimeFile(
-  params: RuntimeCreateFileParams
+  params: RuntimeCreateFileParams,
+  signal?: AbortSignal
 ): Promise<RuntimeMutationResult<RuntimeCreateFileResult>> {
+  throwIfAborted(signal);
+
   return await withPathLocks([params.resolvedPath], async () => {
+    // Refusing here costs nothing; refusing after the exclusive create would
+    // leave a file the caller was told it never got.
+    throwIfAborted(signal);
+
     let committed: { bytesWritten: number; mtimeMs: number };
     try {
       committed = await writeRegularFileAtomic(params.resolvedPath, params.content, {

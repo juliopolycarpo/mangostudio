@@ -86,27 +86,54 @@ export function createRuntimeMethodHandlers(
 
   return {
     handlers: new Map<string, RuntimeMethodHandler>([
-      handler('fs.read-file', (params) => runtimeFsService.readFile(params)),
-      handler('fs.write-file', (params) => runtimeFsService.writeFile(params)),
-      handler('fs.create-file', (params) => runtimeFsService.createFile(params)),
-      handler('fs.edit-file', (params) => runtimeFsService.editFile(params)),
-      handler('fs.replace-range', (params) => runtimeFsService.replaceRange(params)),
-      handler('fs.delete-file', (params) => runtimeFsService.deleteFile(params)),
-      handler('fs.move-file', (params) => runtimeFsService.moveFile(params)),
-      handler('fs.list-directory', (params) => runtimeFsService.listDirectory(params)),
+      // Handlers that can refuse take the call's `AbortSignal`. Forwarding it is
+      // not the same as honouring it: each service decides where cancelling is
+      // safe, and a mutation already under way is never abandoned. See
+      // `services/cancellation.ts`. Short lookups and methods with their own
+      // cancel RPC still ignore the request signal.
+      handler('fs.read-file', (params, context) =>
+        runtimeFsService.readFile(params, context.signal)
+      ),
+      handler('fs.write-file', (params, context) =>
+        runtimeFsService.writeFile(params, context.signal)
+      ),
+      handler('fs.create-file', (params, context) =>
+        runtimeFsService.createFile(params, context.signal)
+      ),
+      handler('fs.edit-file', (params, context) =>
+        runtimeFsService.editFile(params, context.signal)
+      ),
+      handler('fs.replace-range', (params, context) =>
+        runtimeFsService.replaceRange(params, context.signal)
+      ),
+      handler('fs.delete-file', (params, context) =>
+        runtimeFsService.deleteFile(params, context.signal)
+      ),
+      handler('fs.move-file', (params, context) =>
+        runtimeFsService.moveFile(params, context.signal)
+      ),
+      handler('fs.list-directory', (params, context) =>
+        runtimeFsService.listDirectory(params, context.signal)
+      ),
       handler('fs.glob', (params, context) => runtimeFsService.glob(params, context.signal)),
       handler('fs.grep', (params, context) => runtimeFsService.grep(params, context.signal)),
-      handler('fs.apply-patch', (params) => runtimeFsService.applyPatch(params)),
+      handler('fs.apply-patch', (params, context) =>
+        runtimeFsService.applyPatch(params, context.signal)
+      ),
       handler('shell.run', (params, context) =>
         runShellCommand({ ...params, signal: context.signal })
       ),
       handler('git.exec', (params, context) => execGit(params, context.signal)),
-      handler('snapshot.capture', (params) => captureFileSnapshot(params.path)),
-      handler('snapshot.hash', async (params) => ({
-        hash: await hashFileAtPath(params.path),
+      handler('snapshot.capture', (params, context) =>
+        captureFileSnapshot(params.path, context.signal)
+      ),
+      handler('snapshot.hash', async (params, context) => ({
+        hash: await hashFileAtPath(params.path, context.signal),
       })),
-      handler('snapshot.revert', (params) => revertRuntimeSnapshots(params)),
-      handler('workspace.browse', (params) => browseWorkspace(params)),
+      handler('snapshot.revert', (params, context) =>
+        revertRuntimeSnapshots(params, context.signal)
+      ),
+      handler('workspace.browse', (params, context) => browseWorkspace(params, context.signal)),
       handler('workspace.validate', (params) =>
         validateWorkdir(params.path, { requireAbsolute: params.requireAbsolute })
       ),
@@ -140,14 +167,22 @@ export function createRuntimeMethodHandlers(
       handler('external-agent.refresh-account-usage', (params, context) =>
         externalAgents.refreshAccountUsage(params, context.signal)
       ),
-      handler('probing.runtimes', (params) => probingService.probeRuntimes(params)),
-      handler('probing.version-managers', (params) => probingService.probeVersionManagers(params)),
-      handler('probing.agent-clis', (params) => probingService.probeAgentClis(params)),
+      handler('probing.runtimes', (params, context) =>
+        probingService.probeRuntimes(params, context.signal)
+      ),
+      handler('probing.version-managers', (params, context) =>
+        probingService.probeVersionManagers(params, context.signal)
+      ),
+      handler('probing.agent-clis', (params, context) =>
+        probingService.probeAgentClis(params, context.signal)
+      ),
       handler('install.run', (params) => install.run(params)),
       handler('install.cancel', (params) => install.cancel(params)),
-      handler('library.scan', (params) => libraryService.scan(params)),
+      handler('library.scan', (params, context) => libraryService.scan(params, context.signal)),
       handler('library.read', (params) => libraryService.read(params)),
-      handler('library.read-tree', (params) => libraryService.readTree(params)),
+      handler('library.read-tree', (params, context) =>
+        libraryService.readTree(params, context.signal)
+      ),
       handler('library.locations', (params) => libraryService.locations(params)),
       handler('library.settings-sources', (params) => libraryService.settingsSources(params)),
       handler('library.apply', (params, context) => libraryService.apply(params, context.signal)),

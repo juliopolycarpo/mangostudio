@@ -32,6 +32,7 @@ import type {
 } from '@mangostudio/shared/environments/detection';
 import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import { throwIfAborted } from '../cancellation';
 import { HIDDEN_WINDOW } from '../process-window';
 
 const execFileAsync = promisify(execFile);
@@ -100,15 +101,21 @@ const VERSION_PROBE_GRACE_MS = 250;
 async function probeBinaryVersion(
   binary: string,
   args: readonly string[],
-  timeoutMs: number
+  timeoutMs: number,
+  signal?: AbortSignal
 ): Promise<string | null> {
+  throwIfAborted(signal);
   try {
     const { stdout } = await execFileAsync(binary, [...args], {
       timeout: timeoutMs + VERSION_PROBE_GRACE_MS,
       ...HIDDEN_WINDOW,
+      ...(signal ? { signal } : {}),
     });
     return stdout.trim() || null;
-  } catch {
+  } catch (error) {
+    // A cancelled probe is the hub's answer, not "this binary is missing".
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    throwIfAborted(signal);
     return null;
   }
 }
@@ -124,14 +131,15 @@ export interface RuntimeProbeBudget {
 export function createBinaryScanDeps(
   env: PathEnv,
   _definition: RuntimeDefinition,
-  budget: RuntimeProbeBudget = {}
+  budget: RuntimeProbeBudget = {},
+  signal?: AbortSignal
 ): BinaryScanDeps {
   return {
     platform: env.platform,
     homeDir: env.homeDir,
     env: env.env,
     pathExists: existsSync,
-    probeVersion: probeBinaryVersion,
+    probeVersion: (binary, args, timeoutMs) => probeBinaryVersion(binary, args, timeoutMs, signal),
     realpath,
     ...(budget.probeTimeoutMs !== undefined && { probeTimeoutMs: budget.probeTimeoutMs }),
     ...(budget.totalTimeoutMs !== undefined && { totalTimeoutMs: budget.totalTimeoutMs }),

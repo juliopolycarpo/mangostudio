@@ -14,6 +14,7 @@ import {
 import type { LocationDefinition } from '@mangostudio/shared/library/host';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import { parse as parseToml } from 'smol-toml';
+import { throwIfAborted } from '../cancellation';
 import type { CachedInstanceDisplay, CachedInstanceHash, LibraryCache } from './cache';
 
 const textDecoder = new TextDecoder();
@@ -74,6 +75,7 @@ export interface ReadLibraryInstancesOptions {
   readonly cache: LibraryCache;
   readonly force: boolean;
   readonly fs?: LibraryInstanceReaderFs;
+  readonly signal?: AbortSignal;
 }
 
 export interface ReadLibraryInstance {
@@ -95,6 +97,7 @@ export async function readLocationInstances(
   options: ReadLibraryInstancesOptions
 ): Promise<ReadLibraryInstance[]> {
   const fs = options.fs ?? nodeFs;
+  throwIfAborted(options.signal);
   if (location.layout === 'single-file') {
     // The registry names the resource, so the vendor's filename never becomes
     // identity: CLAUDE.md and AGENTS.md are one `instruction:global` row, and
@@ -128,8 +131,9 @@ export async function readLocationInstances(
   );
 
   const described = await Promise.all(
-    matchingEntries.map((entry) =>
-      readOneEntry(
+    matchingEntries.map((entry) => {
+      throwIfAborted(options.signal);
+      return readOneEntry(
         location,
         fileSlug(entry.name),
         join(locationPath, entry.name),
@@ -137,8 +141,8 @@ export async function readLocationInstances(
         options,
         fs,
         canonicalLocationPath
-      )
-    )
+      );
+    })
   );
   return described.flat();
 }
@@ -243,6 +247,7 @@ async function readOneEntry(
 
     return [{ ref, instance, whitespaceHash: hashed.value.whitespaceHash }];
   } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') throw error;
     return [invalidInstance(ref, location, path, modifiedAtMs, invalidReasonFor(error))];
   }
 }
@@ -293,7 +298,7 @@ async function hashDirectory(
   options: ReadLibraryInstancesOptions,
   fs: LibraryInstanceReaderFs
 ): Promise<HashedInstance> {
-  const leaves = await collectLeafFiles(path, fs);
+  const leaves = await collectLeafFiles(path, fs, options.signal);
   assertWithinByteBudget(location, leaves);
   const fingerprint = [
     `.\0${rootMetadata.size}\0${rootMetadata.mtimeMs}\n`,
@@ -382,8 +387,13 @@ function assertWithinByteBudget(location: LocationDefinition, leaves: readonly L
 export async function readLibraryTree(
   rootPath: string,
   containmentRoot: string,
-  fs: LibraryInstanceReaderFs = nodeFs
+  options: {
+    readonly fs?: LibraryInstanceReaderFs;
+    readonly signal?: AbortSignal;
+  } = {}
 ): Promise<{ relativePath: string; bytes: Uint8Array }[]> {
+  const fs = options.fs ?? nodeFs;
+  throwIfAborted(options.signal);
   const canonicalRoot = await fs.realPath(rootPath);
   // Re-checked after resolution: the caller's containment check ran against
   // the unresolved path, so a symlinked location — a `CLAUDE.md` pointed at
@@ -394,31 +404,41 @@ export async function readLibraryTree(
   const rootMetadata = await fs.stat(canonicalRoot);
   if (rootMetadata.isFile) {
     if (rootMetadata.size > MAX_LIBRARY_FILE_BYTES) throw new InstanceTooLargeError();
-    return [{ relativePath: basename(rootPath), bytes: await fs.readFile(canonicalRoot) }];
+    const bytes = await fs.readFile(canonicalRoot);
+    throwIfAborted(options.signal);
+    return [{ relativePath: basename(rootPath), bytes }];
   }
-  const leaves = await collectLeafFiles(rootPath, fs);
-  return await Promise.all(
+  const leaves = await collectLeafFiles(rootPath, fs, options.signal);
+  const files = await Promise.all(
     leaves.map(async (leaf) => {
+      throwIfAborted(options.signal);
       // Re-checked after resolution, exactly as the hash pass does: the walk
       // proved containment for the directory it descended into, and a symlinked
       // leaf pointing outside the tree is a different question.
       const canonicalPath = await fs.realPath(leaf.absolutePath);
       if (!isPathWithin(canonicalRoot, canonicalPath)) throw new PathEscapeError();
-      return { relativePath: leaf.relativePath, bytes: await fs.readFile(canonicalPath) };
+      const bytes = await fs.readFile(canonicalPath);
+      throwIfAborted(options.signal);
+      return { relativePath: leaf.relativePath, bytes };
     })
   );
+  throwIfAborted(options.signal);
+  return files;
 }
 
 async function collectLeafFiles(
   rootPath: string,
-  fs: LibraryInstanceReaderFs
+  fs: LibraryInstanceReaderFs,
+  signal?: AbortSignal
 ): Promise<LeafFile[]> {
+  throwIfAborted(signal);
   const leaves: LeafFile[] = [];
   const visitedDirectories = new Set<string>();
   const canonicalRoot = await fs.realPath(rootPath);
   let totalBytes = 0;
 
   async function visit(directoryPath: string, depth: number): Promise<void> {
+    throwIfAborted(signal);
     if (depth > MAX_LIBRARY_INSTANCE_DEPTH) throw new InstanceTooLargeError();
     const canonicalDirectory = await fs.realPath(directoryPath);
     if (!isPathWithin(canonicalRoot, canonicalDirectory)) throw new PathEscapeError();
@@ -427,6 +447,7 @@ async function collectLeafFiles(
 
     const entries = await fs.readDirectory(directoryPath);
     for (const entry of entries) {
+      throwIfAborted(signal);
       const absolutePath = join(directoryPath, entry.name);
       const metadata = await fs.stat(absolutePath);
       if (metadata.isDirectory) {

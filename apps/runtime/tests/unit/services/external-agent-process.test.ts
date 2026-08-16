@@ -7,8 +7,8 @@ import {
   killWindowsProcessTree,
   spawnExternalAgentProcess,
   terminateWindowsProcessTree,
-  windowsTaskkillArguments,
 } from '../../../src/services/external-agents/process';
+import { windowsTaskkillArguments } from '../../../src/services/process-tree';
 
 const fixture = resolve(import.meta.dir, '../../support/external-agent-fixture.ts');
 const active: ExternalAgentManagedProcess[] = [];

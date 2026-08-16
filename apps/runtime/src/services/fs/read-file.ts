@@ -1,5 +1,6 @@
 import { PathAccessError } from '../../errors';
 import type { RuntimeReadFileParams, RuntimeReadFileResult } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import { recordFileRead } from '../file-freshness';
 import {
   BINARY_SNIFF_BYTES,
@@ -23,8 +24,11 @@ const HIGH_SURROGATE_LAST = 0xdbff;
 const textDecoder = new TextDecoder();
 
 export async function readRuntimeFile(
-  params: RuntimeReadFileParams
+  params: RuntimeReadFileParams,
+  signal?: AbortSignal
 ): Promise<RuntimeReadFileResult> {
+  // One bounded read: entry is the only point where refusing saves anything.
+  throwIfAborted(signal);
   const startLine = params.startLine ?? READ_FILE_DEFAULT_START_LINE;
   const maxLines = params.maxLines ?? READ_FILE_DEFAULT_MAX_LINES;
   const { bytes, mtimeMs } = await readFileWithObservedMtime(params.resolvedPath, {

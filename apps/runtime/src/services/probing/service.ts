@@ -51,6 +51,7 @@ import type {
   RuntimeProbeVersionManagersParams,
   RuntimeProbeVersionManagersResult,
 } from '../../methods';
+import { throwIfAborted } from '../cancellation';
 import {
   createBinaryScanDeps,
   createNvmDetectionDeps,
@@ -71,7 +72,8 @@ export interface ProbingHostAdapters {
   readonly createScanDeps: (
     env: PathEnv,
     definition: RuntimeDefinition,
-    budget?: RuntimeProbeBudget
+    budget?: RuntimeProbeBudget,
+    signal?: AbortSignal
   ) => BinaryScanDeps;
   readonly createNvmDeps: (env: PathEnv) => NvmDetectionDeps;
   readonly authFs: AuthSignalFs;
@@ -96,11 +98,18 @@ const DEFAULT_ADAPTERS: ProbingHostAdapters = {
 };
 
 export interface ProbingService {
-  probeRuntimes(params: RuntimeProbeRuntimesParams): Promise<RuntimeProbeRuntimesResult>;
+  probeRuntimes(
+    params: RuntimeProbeRuntimesParams,
+    signal?: AbortSignal
+  ): Promise<RuntimeProbeRuntimesResult>;
   probeVersionManagers(
-    params: RuntimeProbeVersionManagersParams
+    params: RuntimeProbeVersionManagersParams,
+    signal?: AbortSignal
   ): Promise<RuntimeProbeVersionManagersResult>;
-  probeAgentClis(params: RuntimeProbeAgentClisParams): Promise<RuntimeProbeAgentClisResult>;
+  probeAgentClis(
+    params: RuntimeProbeAgentClisParams,
+    signal?: AbortSignal
+  ): Promise<RuntimeProbeAgentClisResult>;
 }
 
 function parseMinimumVersion(value: string): MinimumRuntimeVersion {
@@ -141,12 +150,18 @@ async function probeRuntimeDefinition(
   adapters: ProbingHostAdapters,
   definition: RuntimeDefinition,
   env: PathEnv,
-  params: RuntimeProbeRuntimesParams
+  params: RuntimeProbeRuntimesParams,
+  signal?: AbortSignal
 ): Promise<RuntimeStatus> {
+  throwIfAborted(signal);
   const scan = await scanRuntime(
     definition,
-    adapters.createScanDeps(env, definition, params.budget)
+    adapters.createScanDeps(env, definition, params.budget, signal)
   );
+  // `scanRuntime` turns a rejected version probe into `null`, including an
+  // AbortError from the forwarded signal, so a cancelled call would otherwise
+  // come back as a normal missing/ok status.
+  throwIfAborted(signal);
   const minimumVersion =
     params.minimumVersions?.[definition.id] ?? DEFAULT_MINIMUM_VERSIONS[definition.id];
   return analyzeRuntimeScan(definition, scan, {
@@ -261,12 +276,15 @@ async function describeExternalAgent(
   adapters: ProbingHostAdapters,
   definition: ExternalAgentCliDefinition,
   env: PathEnv,
-  params: RuntimeProbeAgentClisParams
+  params: RuntimeProbeAgentClisParams,
+  signal?: AbortSignal
 ): Promise<AgentCliStatus> {
+  throwIfAborted(signal);
   const scan = await scanRuntime(
     definition.runtime,
-    adapters.createScanDeps(env, definition.runtime, params.budget)
+    adapters.createScanDeps(env, definition.runtime, params.budget, signal)
   );
+  throwIfAborted(signal);
   const runtimeStatus = analyzeRuntimeScan(definition.runtime, scan, {
     probedAtMs: adapters.now(),
     installable: params.installable?.[definition.targetId] ?? false,
@@ -309,7 +327,8 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
   const adapters: ProbingHostAdapters = { ...DEFAULT_ADAPTERS, ...overrides };
 
   return {
-    async probeRuntimes(params) {
+    async probeRuntimes(params, signal) {
+      throwIfAborted(signal);
       const env = adapters.createPathEnv(params.pathEnv);
       const definitions = selectById(
         adapters.runtimeDefinitions,
@@ -318,12 +337,15 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
         'runtime id'
       );
       const statuses = await Promise.all(
-        definitions.map((definition) => probeRuntimeDefinition(adapters, definition, env, params))
+        definitions.map((definition) =>
+          probeRuntimeDefinition(adapters, definition, env, params, signal)
+        )
       );
       return { statuses };
     },
 
-    async probeVersionManagers(params) {
+    async probeVersionManagers(params, signal) {
+      throwIfAborted(signal);
       // Only nvm is detected today; asking for another manager is answered with
       // an empty list rather than an error, the way the hub's registry already
       // does for an id it holds no definition for.
@@ -337,10 +359,17 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
       // Which Node nvm considers current is read from the same scan the
       // toolchain tab shows, so the two can never disagree about it.
       const nodeStatus = nodeDefinition
-        ? await probeRuntimeDefinition(adapters, nodeDefinition, env, {
-            ...(params.budget && { budget: params.budget }),
-          })
+        ? await probeRuntimeDefinition(
+            adapters,
+            nodeDefinition,
+            env,
+            {
+              ...(params.budget && { budget: params.budget }),
+            },
+            signal
+          )
         : null;
+      throwIfAborted(signal);
       const currentNodePath =
         nodeStatus?.effective?.managedBy === 'nvm' ? nodeStatus.effective.path : undefined;
       const latestByMajor = params.latestByMajor
@@ -355,10 +384,12 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
         ...(currentNodePath !== undefined && { currentNodePath }),
         ...(latestByMajor !== undefined && { latestByMajor, liveDataAvailable: true }),
       });
+      throwIfAborted(signal);
       return { statuses: [status] };
     },
 
-    async probeAgentClis(params) {
+    async probeAgentClis(params, signal) {
+      throwIfAborted(signal);
       // One env snapshot per listing: every target reads the same host state,
       // and rebuilding it per definition re-copies the process environment.
       const env = adapters.createPathEnv(params.pathEnv);
@@ -369,11 +400,12 @@ export function createProbingService(overrides: Partial<ProbingHostAdapters> = {
         'agent target id'
       );
       const statuses = await Promise.all(
-        definitions.map((definition) =>
-          definition.kind === 'self'
+        definitions.map((definition) => {
+          throwIfAborted(signal);
+          return definition.kind === 'self'
             ? Promise.resolve(describeSelfAgent(adapters, definition.targetId, env, params))
-            : describeExternalAgent(adapters, definition, env, params)
-        )
+            : describeExternalAgent(adapters, definition, env, params, signal);
+        })
       );
       return { statuses };
     },
