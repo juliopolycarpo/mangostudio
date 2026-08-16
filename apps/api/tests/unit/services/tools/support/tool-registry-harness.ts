@@ -11,30 +11,10 @@ import type { ToolContext } from '../../../../../src/services/tools/types';
  * every registry-contract suite covers the same shapes instead of each file
  * hand-picking a subset.
  */
-export const NON_STRING_ARGUMENTS = [
-  ['a number', 42],
-  ['null', null],
-  ['a boolean', true],
-  ['an object', {}],
-] as const;
+const NULL_ARGUMENT = ['null', null] as const;
 
-/**
- * Everything a tool that trims a string argument must reject or ignore: the
- * non-string shapes plus the strings that carry no content once trimmed.
- */
-export const EMPTY_STRING_ARGUMENTS = [
-  ...NON_STRING_ARGUMENTS,
-  ['an empty string', ''],
-  ['whitespace only', '   '],
-] as const;
-
-/**
- * Values an *optional* string argument reads as absent. `null` is how the
- * strict-mode schemas spell an omitted argument, and a string that trims away
- * carries no instruction to act on.
- */
-export const ABSENT_STRING_ARGUMENTS = [
-  ['null', null],
+/** Strings that carry no content once trimmed. */
+const BLANK_STRING_ARGUMENTS = [
   ['an empty string', ''],
   ['whitespace only', '   '],
 ] as const;
@@ -50,6 +30,21 @@ export const REJECTED_STRING_ARGUMENTS = [
   ['a boolean', true],
   ['an object', {}],
 ] as const;
+
+export const NON_STRING_ARGUMENTS = [...REJECTED_STRING_ARGUMENTS, NULL_ARGUMENT] as const;
+
+/**
+ * Everything a tool that trims a string argument must reject or ignore: the
+ * non-string shapes plus the strings that carry no content once trimmed.
+ */
+export const EMPTY_STRING_ARGUMENTS = [...NON_STRING_ARGUMENTS, ...BLANK_STRING_ARGUMENTS] as const;
+
+/**
+ * Values an *optional* string argument reads as absent. `null` is how the
+ * strict-mode schemas spell an omitted argument, and a string that trims away
+ * carries no instruction to act on.
+ */
+export const ABSENT_STRING_ARGUMENTS = [NULL_ARGUMENT, ...BLANK_STRING_ARGUMENTS] as const;
 
 export interface ToolRegistryHarness {
   /** Temp directory recreated before every test in the enclosing describe. */

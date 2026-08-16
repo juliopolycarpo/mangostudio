@@ -336,14 +336,6 @@ describe('grep registry contract', () => {
     });
   }
 
-  it('reads a null caseInsensitive as absent, matching the nullable-optional schema', async () => {
-    const result = await runGrep({ pattern: 'todo', caseInsensitive: null });
-
-    expect(result.matches).toEqual([
-      { file: join('nested', 'c.txt'), line: 1, text: 'todo at nested level' },
-    ]);
-  });
-
   it('accepts an explicit null for every optional argument at once', async () => {
     const result = await runGrep({
       pattern: 'todo',

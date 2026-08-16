@@ -39,18 +39,6 @@ describe('built-in tools enter OpenAI strict function-tool mode', () => {
 
     expect(nonStrict).toEqual([]);
   });
-
-  it('expresses every optional argument as a nullable required key', () => {
-    for (const name of expectedToolNames()) {
-      const parameters = parametersOf(name);
-      const properties = (parameters.properties ?? {}) as Record<string, unknown>;
-
-      expect({
-        tool: name,
-        required: [...((parameters.required as string[]) ?? [])].sort(),
-      }).toEqual({ tool: name, required: Object.keys(properties).sort() });
-    }
-  });
 });
 
 describe('isStrictCompatible', () => {

@@ -3,6 +3,7 @@ import type { GetCurrentDatetimeResult } from '../../../../src/services/tools/bu
 import { register as registerGetCurrentDatetimeTool } from '../../../../src/services/tools/builtin/get-current-datetime';
 import { clearRegistry, executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { REJECTED_STRING_ARGUMENTS } from './support/tool-registry-harness';
 
 const TOOL_NAME = 'get_current_datetime';
 
@@ -57,11 +58,7 @@ describe('get_current_datetime registry contract', () => {
     expect(result.locale).toBe('en-US');
   });
 
-  for (const [label, value] of [
-    ['a number', 42],
-    ['a boolean', true],
-    ['an object', {}],
-  ] as const) {
+  for (const [label, value] of REJECTED_STRING_ARGUMENTS) {
     it(`rejects ${label} timezone instead of silently answering in UTC`, async () => {
       // Returning UTC here reads to the model as the local time of the zone it
       // named — the same silent wrong answer a dropped grep flag produces.
