@@ -219,6 +219,21 @@ describe('isStrictCompatible', () => {
     ).toBe(true);
   });
 
+  it('reads a properties map as argument names, not as keywords', () => {
+    // An MCP tool may declare an argument literally called `maxLength` or
+    // `not`; treating the key as a keyword would drop strict mode from a
+    // schema the provider accepts.
+    for (const name of ['maxLength', 'minLength', 'not', '$ref', 'anyOf']) {
+      expect(
+        isStrictCompatible({
+          ...base,
+          properties: { a: { type: 'string' }, [name]: { type: 'string' } },
+          required: ['a', name],
+        })
+      ).toBe(true);
+    }
+  });
+
   it('rejects composition keywords at any depth', () => {
     for (const keyword of ['oneOf', 'anyOf', 'allOf', 'not', '$ref']) {
       expect(

@@ -69,15 +69,24 @@ function isStrictNode(node: unknown): boolean {
       // `typeof [] === 'object'`, and Object.keys on an array is `['0', ...]`,
       // which can vacuously match a `required` list. A properties map has to
       // be a plain object.
-      if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) {
-        return false;
-      }
+      if (!isPlainObject(properties)) return false;
       const required = new Set(Array.isArray(obj.required) ? obj.required : []);
       if (!Object.keys(properties).every((key) => required.has(key))) return false;
     }
   }
 
-  return Object.values(obj).every(isStrictNode);
+  return Object.entries(obj).every(([key, value]) =>
+    // A `properties` map is a dictionary of argument names, not a schema: its
+    // own keys must not be read as keywords, or a tool that happens to declare
+    // an argument called `maxLength` or `not` loses strict mode.
+    key === 'properties' && isPlainObject(value)
+      ? Object.values(value).every(isStrictNode)
+      : isStrictNode(value)
+  );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
