@@ -86,8 +86,15 @@ export function getToolHint(
   formatAdditionalCount: (count: number) => string = (count) => `+${count} more`
 ): string | null {
   switch (toolName) {
+    case 'read_file': {
+      // A byte view returns something entirely unlike file content, so the hint
+      // carries it: two calls on one path are otherwise indistinguishable here.
+      const path = abbreviatePath(args.path);
+      if (!path) return null;
+      const view = args.view;
+      return typeof view === 'string' && view !== 'text' ? `${path} (${view})` : path;
+    }
     case 'list_directory':
-    case 'read_file':
     case 'write_file':
     case 'edit_file':
     case 'create_file':

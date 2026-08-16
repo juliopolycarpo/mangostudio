@@ -7,6 +7,7 @@ export {
   staticConsentSource,
 } from './consent-source';
 export {
+  FileTooLargeError,
   LIBRARY_BACKUP_MISSING_KIND,
   PathAccessError,
   RuntimeConsentDeniedError,
@@ -92,6 +93,7 @@ export {
   BINARY_SNIFF_BYTES,
   containsNulByte,
   type ObservedFileRead,
+  READ_FILE_MAX_BINARY_VIEW_BYTES,
   READ_FILE_MAX_BYTES,
   readFileWithObservedMtime,
 } from './services/fs-utils';

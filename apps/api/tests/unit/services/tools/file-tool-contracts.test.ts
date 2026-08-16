@@ -1,10 +1,10 @@
 /**
  * Invariants that only exist between filesystem tools, and so belong to none of
- * them — starting with: a path one tool reports can be fed into another and
- * reach the same file.
+ * them: a path one tool reports can be fed into another and reach the same file,
+ * and one file classifies the same way everywhere.
  *
- * Broken by two tools agreeing with themselves and disagreeing with each other,
- * which is exactly what a per-tool suite cannot catch.
+ * Each half was broken by two tools agreeing with themselves and disagreeing
+ * with each other, which is exactly what a per-tool suite cannot catch.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -83,5 +83,41 @@ describe('a reported path can be read back', () => {
     const globbed = await executeGlob({ pattern: '**/shared.ts', cwd: 'src' }, context());
 
     expect(grepped.matches[0]?.file).toBe(globbed.matches[0] as string);
+  });
+});
+
+describe('one file classifies the same way for every tool', () => {
+  /** Text, then a NUL past grep's old 1 KiB probe but inside read_file's 8 KiB. */
+  async function seedLateNul(name: string, nulOffset: number): Promise<string> {
+    const filePath = join(workdir, name);
+    const head = new TextEncoder().encode(`marker\n${'a'.repeat(nulOffset - 7)}`);
+    const bytes = new Uint8Array(head.byteLength + 8);
+    bytes.set(head);
+    await Bun.write(filePath, bytes);
+    return filePath;
+  }
+
+  it('treats a file with a NUL at byte 2000 as binary in both grep and read_file', async () => {
+    await seedLateNul('late-nul.dat', 2000);
+
+    const grepped = await executeGrep({ pattern: 'marker', path: '.' }, context());
+    const read = await executeReadFile({ path: 'late-nul.dat' }, context()).catch(
+      (thrown: unknown) => thrown
+    );
+
+    // The disagreement this replaces: grep probed 1 KiB, read_file 8 KiB, so
+    // this exact file was searchable and then unreadable.
+    expect(grepped.matches).toEqual([]);
+    expect((read as Error).message).toMatch(/appears to be a binary file/);
+  });
+
+  it('treats a file whose NUL is past both probes as text in both', async () => {
+    await seedLateNul('very-late-nul.dat', 20_000);
+
+    const grepped = await executeGrep({ pattern: 'marker', path: '.' }, context());
+    const read = await executeReadFile({ path: 'very-late-nul.dat' }, context());
+
+    expect(grepped.matches.map((match) => match.file)).toEqual(['very-late-nul.dat']);
+    expect(read.content).toContain('marker');
   });
 });

@@ -1,10 +1,11 @@
-import { PathAccessError } from '../../errors';
+import { FileTooLargeError, PathAccessError } from '../../errors';
 import type { RuntimeReadFileParams, RuntimeReadFileResult } from '../../methods';
 import { throwIfAborted } from '../cancellation';
 import { recordFileRead } from '../file-freshness';
 import {
   BINARY_SNIFF_BYTES,
   containsNulByte,
+  READ_FILE_MAX_BINARY_VIEW_BYTES,
   READ_FILE_MAX_BYTES,
   readFileWithObservedMtime,
 } from '../fs-utils';
@@ -29,6 +30,9 @@ export async function readRuntimeFile(
 ): Promise<RuntimeReadFileResult> {
   // One bounded read: entry is the only point where refusing saves anything.
   throwIfAborted(signal);
+  const view = params.view ?? 'text';
+  if (view !== 'text') return await readByteView(params, view);
+
   const startLine = params.startLine ?? READ_FILE_DEFAULT_START_LINE;
   const maxLines = params.maxLines ?? READ_FILE_DEFAULT_MAX_LINES;
   const { bytes, mtimeMs } = await readFileWithObservedMtime(params.resolvedPath, {
@@ -37,7 +41,8 @@ export async function readRuntimeFile(
 
   if (looksBinary(bytes)) {
     throw new PathAccessError(
-      `"${params.inputPath}" appears to be a binary file and cannot be read as text.`
+      `"${params.inputPath}" appears to be a binary file and cannot be read as text. ` +
+        `Read it with view "hex" or "base64" instead (up to ${READ_FILE_MAX_BINARY_VIEW_BYTES} bytes).`
     );
   }
 
@@ -81,6 +86,49 @@ export async function readRuntimeFile(
     startLine,
     endLine: window.endLine,
     truncated: window.truncated,
+  };
+}
+
+/**
+ * Reads a whole file and hands back its bytes transcoded, with no line
+ * structure imposed on them.
+ *
+ * This is what makes the read-before-overwrite guard satisfiable for a binary
+ * file: the ledger only records what a read observed, and a text read refuses
+ * every file with a NUL byte in it. The bound is much tighter than the text
+ * ceiling because the transcoded string is not windowed — all of it reaches the
+ * model — so an oversized file is refused rather than truncated, which would
+ * record a partial observation as a complete one.
+ */
+async function readByteView(
+  params: RuntimeReadFileParams,
+  view: Exclude<NonNullable<RuntimeReadFileParams['view']>, 'text'>
+): Promise<RuntimeReadFileResult> {
+  const { bytes, mtimeMs } = await readFileWithObservedMtime(params.resolvedPath, {
+    maxBytes: READ_FILE_MAX_BINARY_VIEW_BYTES,
+  }).catch((error: unknown) => {
+    if (!(error instanceof FileTooLargeError)) throw error;
+    throw new PathAccessError(
+      `Cannot read "${params.inputPath}" as ${view}: a byte view is limited to ` +
+        `${READ_FILE_MAX_BINARY_VIEW_BYTES} bytes because the whole result reaches the model, ` +
+        'and it is not windowed. A text file can be read with view "text", which windows by line.'
+    );
+  });
+
+  return {
+    content: Buffer.from(bytes).toString(view),
+    path: params.inputPath,
+    size: bytes.byteLength,
+    // No observed range: the view holds every byte, so this is a complete
+    // observation and write_file's guard accepts it.
+    sha256: recordFileRead(params.chatId, params.resolvedPath, bytes, mtimeMs),
+    // A byte view has no lines. The empty-file branch of the text path reports
+    // the same shape for the same reason: there is no line 1 to point at.
+    totalLines: 0,
+    startLine: 1,
+    endLine: 0,
+    truncated: false,
+    view,
   };
 }
 

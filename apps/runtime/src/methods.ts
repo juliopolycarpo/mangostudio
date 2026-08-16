@@ -120,12 +120,23 @@ export interface RuntimeMutationResult<T> {
  */
 export type { RuntimePathFilter, RuntimePathPolicyParams };
 
+/**
+ * How a file's bytes are rendered into the string the model receives. `text`
+ * decodes as UTF-8 and refuses anything holding a NUL byte; `hex` and `base64`
+ * transcode the bytes verbatim, which is the only way a binary file can enter
+ * the freshness ledger and so the only way it can be overwritten through the
+ * read-before-write guard. Absent means `text`.
+ */
+export type RuntimeReadFileView = 'text' | 'hex' | 'base64';
+
 export interface RuntimeReadFileParams extends RuntimePathPolicyParams {
   readonly chatId: string;
   readonly inputPath: string;
   readonly resolvedPath: string;
   readonly startLine?: number;
   readonly maxLines?: number;
+  /** Absent means `text`; the line window applies to `text` only. */
+  readonly view?: RuntimeReadFileView;
 }
 
 export interface RuntimeReadFileResult {
@@ -137,6 +148,11 @@ export interface RuntimeReadFileResult {
   readonly startLine: number;
   readonly endLine: number;
   readonly truncated: boolean;
+  /**
+   * Echoed only for a byte view, so a `text` result keeps the shape it has
+   * always had and the model can tell a hex dump from file content.
+   */
+  readonly view?: Exclude<RuntimeReadFileView, 'text'>;
 }
 
 interface RuntimeMutationParams extends RuntimePathPolicyParams {

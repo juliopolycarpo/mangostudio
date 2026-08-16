@@ -785,7 +785,7 @@ export const messages = {
         grep: 'Grep',
       },
       toolDescriptions: {
-        readFile: 'Permite que a IA leia arquivos de texto do disco.',
+        readFile: 'Permite que a IA leia arquivos do disco, como texto ou como bytes brutos.',
         writeFile: 'Permite que a IA escreva conteúdo de texto em arquivos no disco.',
         editFile: 'Permite que a IA substitua texto exato em arquivos lidos neste chat.',
         replaceRange: 'Permite que a IA substitua trechos de linhas em arquivos lidos neste chat.',

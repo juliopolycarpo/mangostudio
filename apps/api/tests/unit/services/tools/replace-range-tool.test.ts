@@ -198,11 +198,12 @@ describe('executeReplaceRange', () => {
     expect(await Bun.file(stalePath).text()).toBe('changed outside the tool');
   });
 
-  it('names the binary blocker instead of demanding an impossible read', async () => {
+  it('names the binary blocker and the view that clears it', async () => {
     const filePath = join(tempDir, 'blob.bin');
     await Bun.write(filePath, new Uint8Array([0x41, 0x00, 0x42]));
 
-    // read_file refuses binary files, so "read it first" would loop forever.
+    // A text read refuses binary files, so a bare "read it first" would loop
+    // forever; the byte view is the move that actually satisfies the guard.
     await expect(executeReadFile({ path: filePath }, makeContext())).rejects.toThrow('binary file');
     const error = (await executeReplaceRange(
       { path: filePath, startLine: 1, endLine: 1, content: 'x' },
@@ -210,7 +211,9 @@ describe('executeReplaceRange', () => {
     ).catch((thrown: unknown) => thrown)) as Error;
 
     expect(error).not.toBeInstanceOf(FileNotReadError);
-    expect(error.message).toContain('read-before-edit guard cannot be satisfied');
+    expect(error.message).toContain('it is a binary file');
+    expect(error.message).toContain('view "hex"');
+    expect(error.message).toContain('read-before-edit guard');
   });
 
   it('refuses content that would turn a text file binary', async () => {

@@ -4,10 +4,8 @@ import { PathAccessError, RuntimeServiceError } from '../../errors';
 import type { RuntimeGrepParams, RuntimeGrepResult } from '../../methods';
 import { throwIfAborted } from '../cancellation';
 import { compilePolicyGuard } from '../fs-path-policy';
-import { containsNulByte } from '../fs-utils';
+import { BINARY_SNIFF_BYTES, containsNulByte } from '../fs-utils';
 import { createGrepScanner, type GrepScanner } from './grep-scanner';
-
-const BINARY_PROBE_BYTES = 1024;
 
 /**
  * Wall-clock allowance for matching one file, enforced by terminating the
@@ -157,10 +155,16 @@ async function searchFile(input: SearchFileInput): Promise<boolean> {
   return outcome.moreMatches || outcome.incomplete;
 }
 
+/**
+ * Shares {@link BINARY_SNIFF_BYTES} with `read_file` deliberately: a narrower
+ * probe here made the same file searchable but unreadable whenever its first NUL
+ * byte sat between the two windows, so grep would report a match in a file the
+ * model could not then open.
+ */
 async function looksBinary(file: ReturnType<typeof Bun.file>): Promise<boolean> {
-  const slice = file.slice(0, Math.min(file.size, BINARY_PROBE_BYTES));
+  const slice = file.slice(0, Math.min(file.size, BINARY_SNIFF_BYTES));
   const bytes = new Uint8Array(await slice.arrayBuffer());
-  return containsNulByte(bytes, BINARY_PROBE_BYTES);
+  return containsNulByte(bytes, BINARY_SNIFF_BYTES);
 }
 
 function buildRegex(pattern: string, caseInsensitive: boolean): RegExp {

@@ -46,6 +46,24 @@ export class PathAccessError extends RuntimeServiceError {
   }
 }
 
+/**
+ * A read was refused because the file is past the ceiling the call carried.
+ *
+ * A `path_access` refusal like any other on the wire — the subclass exists so a
+ * caller with a better remediation to offer (`read_file`'s byte view names its
+ * own, much lower, bound) can recognise the case without matching on message
+ * text.
+ */
+export class FileTooLargeError extends PathAccessError {
+  constructor(
+    message: string,
+    readonly limitBytes: number
+  ) {
+    super(message, { limitBytes });
+    this.name = 'FileTooLargeError';
+  }
+}
+
 export class RuntimeToolArgumentError extends RuntimeServiceError {
   constructor(message: string) {
     super('tool_argument', message);
