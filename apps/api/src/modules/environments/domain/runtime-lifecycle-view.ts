@@ -41,6 +41,11 @@ export interface BuildRuntimeLifecycleViewInput {
    * only the filesystem can answer, and this builder stays pure.
    */
   readonly stagedRuntime?: RuntimeStagedAsset | undefined;
+  /**
+   * What the connected peer said about enforcing path policy. Undefined when
+   * nothing is connected — see the field's note on the view schema.
+   */
+  readonly enforcesPathPolicy?: boolean | undefined;
 }
 
 export function buildRuntimeLifecycleView(
@@ -69,6 +74,9 @@ export function buildRuntimeLifecycleView(
     actions,
     ...(manualCommands ? { manualCommands } : {}),
     ...(input.stagedRuntime ? { stagedRuntime: input.stagedRuntime } : {}),
+    ...(input.enforcesPathPolicy === undefined
+      ? {}
+      : { enforcesPathPolicy: input.enforcesPathPolicy }),
   };
 }
 

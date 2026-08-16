@@ -437,11 +437,13 @@ export function createRuntimeLifecycleService(
         throw new RuntimeLifecycleUnavailableError(`Environment "${environmentId}" was not found.`);
       }
 
-      const status = manager.getStatus(userId, environmentId);
+      let status = manager.getStatus(userId, environmentId);
       if (status.state === 'connected') {
         // Prefer a fresh health read so the panel shows version/digest rather
-        // than waiting for the background freshness window.
+        // than waiting for the background freshness window. Re-read after it:
+        // the refresh replaces the cached manifest this view reports from.
         await manager.refreshManifest(userId, environmentId).catch(() => undefined);
+        status = manager.getStatus(userId, environmentId);
       }
 
       const cached = manager.getCachedHealth(userId, environmentId);
@@ -473,6 +475,9 @@ export function createRuntimeLifecycleService(
         slotBytes,
         managedPush,
         stagedRuntime: await resolveStagedRuntime(transportKind, cached?.health ?? null),
+        ...(status.state === 'connected'
+          ? { enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true }
+          : {}),
       });
     },
 

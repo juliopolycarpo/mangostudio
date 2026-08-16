@@ -5,6 +5,12 @@
  * function probes *this* process's shells and git. The health report already
  * carries the peer's platform facts and allow set; this just projects them into
  * the shape hello advertises.
+ *
+ * Health answers what the machine's owner allowed and what the machine has. It
+ * does not answer what the peer's *build* can do, and those answers only ever
+ * arrive on `hello` — so they are carried forward from the handshake rather
+ * than recomputed. Dropping them would silently downgrade a peer to "older"
+ * on the first refresh of a connection it already completed.
  */
 
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
@@ -16,7 +22,8 @@ import type {
 const SHELL_KINDS = new Set<string>(['bash', 'zsh', 'powershell']);
 
 export function capabilityManifestFromHealth(
-  report: RuntimeHealthReport
+  report: RuntimeHealthReport,
+  handshake?: RuntimeCapabilityManifest
 ): RuntimeCapabilityManifest {
   const allow = report.allow;
   const shells = allow.shell
@@ -65,6 +72,12 @@ export function capabilityManifestFromHealth(
     ...(report.externalAgents?.identityIsolation
       ? { identityIsolation: report.externalAgents.identityIsolation }
       : {}),
+    ...(handshake?.acceptsHubIdentity === undefined
+      ? {}
+      : { acceptsHubIdentity: handshake.acceptsHubIdentity }),
+    ...(handshake?.enforcesPathPolicy === undefined
+      ? {}
+      : { enforcesPathPolicy: handshake.enforcesPathPolicy }),
     profile: report.profile,
     allow,
   };

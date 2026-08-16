@@ -1006,6 +1006,17 @@ export const RuntimeLifecycleViewSchema = Type.Object({
    * that has never reported a platform.
    */
   stagedRuntime: Type.Optional(RuntimeStagedAssetSchema),
+  /**
+   * Whether the connected runtime re-checks the paths the hub names against
+   * the path policy each call carries — the enforcement that keeps a chat
+   * restricted to its working directory honest once the filesystem is not the
+   * hub's own.
+   *
+   * Absent while the environment is disconnected: this is a claim a peer makes
+   * on `hello`, so with no peer there is no answer, and rendering `false` would
+   * accuse a machine that has said nothing.
+   */
+  enforcesPathPolicy: Type.Optional(Type.Boolean()),
 });
 export type RuntimeLifecycleView = Static<typeof RuntimeLifecycleViewSchema>;
 

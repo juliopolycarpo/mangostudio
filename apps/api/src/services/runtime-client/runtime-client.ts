@@ -124,12 +124,18 @@ import {
   StaleLineNumbersError,
 } from '@mangostudio/runtime';
 import { ExternalAgentEventEnvelopeSchema } from '@mangostudio/shared/external-agents';
-import type { RuntimeEventFrame } from '@mangostudio/shared/runtime-protocol';
+import type {
+  RuntimeEventFrame,
+  RuntimePathPolicyParams,
+} from '@mangostudio/shared/runtime-protocol';
 import Value from 'typebox/value';
+import { createDiagnosticLogger } from '../../lib/logger';
 import { McpConnectionError } from '../mcp/types';
 import { ToolArgumentError } from '../tools/arg-parsing';
 import { ToolExecutionTimedOutError } from '../tools/execution-timeout';
 import { createTargetPaths, type TargetPaths } from './target-paths';
+
+const logger = createDiagnosticLogger('runtime-client');
 
 interface RuntimeFsClient {
   readFile(
@@ -413,10 +419,13 @@ export class RuntimeClient {
   readonly snapshot: RuntimeSnapshotClient;
   readonly workspace: RuntimeWorkspaceClient;
   private targetPaths?: TargetPaths;
+  private unenforcedContainment = false;
 
   constructor(
     private readonly protocol: RuntimeProtocolClient,
-    private readonly onUnavailable?: () => void
+    private readonly onUnavailable?: () => void,
+    /** Named in the warning when this peer turns out not to enforce containment. */
+    private readonly environmentId?: string
   ) {
     this.fs = {
       readFile: (params, options) => this.request('fs.read-file', params, options),
@@ -534,6 +543,15 @@ export class RuntimeClient {
     return this.protocol.runtimeVersion;
   }
 
+  /**
+   * Whether this peer says it re-checks the paths this hub names against the
+   * policy the call carried. False for any runtime that predates the
+   * declaration — the hub cannot read enforcement into silence.
+   */
+  get enforcesPathPolicy(): boolean {
+    return this.protocol.manifest.enforcesPathPolicy === true;
+  }
+
   /** One health truth: same payload as `mangostudio-runtime health --json`. */
   health(options?: RuntimeRequestOptions) {
     return this.request('runtime.health', {}, options);
@@ -570,6 +588,7 @@ export class RuntimeClient {
     params: RuntimeMethodMap[K]['params'],
     options?: RuntimeRequestOptions
   ): Promise<RuntimeMethodMap[K]['result']> {
+    this.noteUnenforcedContainment(method, params);
     try {
       return await this.protocol.request(method, params, options);
     } catch (error) {
@@ -579,6 +598,64 @@ export class RuntimeClient {
       throw translateRuntimeError(error);
     }
   }
+
+  /**
+   * Records that this hub sent a containment root to a peer that never said it
+   * would honour one.
+   *
+   * `pathPolicy` is optional on the wire so a hub can keep talking to a runtime
+   * built before the field existed, and that tolerance has no failure mode of
+   * its own — the older peer accepts the field, ignores it, and answers exactly
+   * like a peer that enforced it. What the hub loses is the enforcement, and
+   * silently. So the send site is where the gap is observable, and this is it:
+   * every path a restricted chat can take to the filesystem goes through
+   * {@link request}.
+   *
+   * Once per connection, because the alternative is a line per tool call for a
+   * condition that only an upgrade can change.
+   */
+  private noteUnenforcedContainment(method: RuntimeMethod, params: unknown): void {
+    if (this.unenforcedContainment) return;
+    // Every transport awaits the handshake before handing this client out, so
+    // the manifest is there — but reading it is what this method is for, and a
+    // diagnostic that can throw would fail the call it exists to describe. An
+    // unread manifest is also not an answer: silence is not a peer saying no.
+    const peer = this.peerIdentity();
+    if (!peer || peer.manifest.enforcesPathPolicy === true) return;
+    if (!containmentRootOf(params)) return;
+
+    this.unenforcedContainment = true;
+    logger.warn('containment_unenforced', {
+      environmentId: this.environmentId ?? 'unknown',
+      runtimeVersion: peer.runtimeVersion,
+      method,
+    });
+  }
+
+  /** Both handshake facts, or nothing when the handshake has not settled. */
+  private peerIdentity():
+    | { manifest: RuntimeCapabilityManifest; runtimeVersion: string }
+    | undefined {
+    try {
+      return { manifest: this.protocol.manifest, runtimeVersion: this.protocol.runtimeVersion };
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+/**
+ * The containment root a call carries, from either shape that can hold one:
+ * the `pathPolicy` every filesystem method mixes in, and `snapshot.revert`'s
+ * own top-level field. Absent means the call was never restricted, which is
+ * not a gap to report.
+ */
+function containmentRootOf(params: unknown): string | undefined {
+  if (typeof params !== 'object' || params === null) return undefined;
+  const direct = (params as { containmentRoot?: unknown }).containmentRoot;
+  if (typeof direct === 'string' && direct.length > 0) return direct;
+  const policy = (params as RuntimePathPolicyParams).pathPolicy;
+  return policy?.containmentRoot;
 }
 
 function translateRuntimeError(error: unknown): Error {

@@ -119,6 +119,8 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
 
       <HealthSummary view={data} />
 
+      <UnenforcedContainment view={data} />
+
       <RuntimeOffer view={data} />
 
       {data.actions.length > 0 ? (
@@ -235,6 +237,27 @@ function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
   ].filter((bit): bit is string => Boolean(bit));
 
   return <p className="font-mono text-[10px] text-on-surface-variant">{bits.join(' · ')}</p>;
+}
+
+/**
+ * Says when a connected runtime is too old to enforce the path policy the hub
+ * sends it. Nothing renders for a peer that enforces, and nothing renders while
+ * disconnected — the field is absent then, and `false` would be an accusation
+ * against a machine that has not spoken.
+ */
+function UnenforcedContainment({ view }: { view: RuntimeLifecycleView }) {
+  const { t } = useI18n();
+  if (view.enforcesPathPolicy !== false) return null;
+
+  return (
+    <p
+      className="rounded-md bg-warning/10 px-2 py-1.5 text-[11px] text-warning"
+      role="status"
+      data-testid="runtime-unenforced-containment"
+    >
+      {t.environments.entities.runtime.unenforcedContainment}
+    </p>
+  );
 }
 
 /**

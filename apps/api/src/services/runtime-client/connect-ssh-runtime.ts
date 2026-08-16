@@ -98,7 +98,7 @@ export async function connectSshRuntime(
     });
 
     return {
-      client: new RuntimeClient(connection.client, onUnavailable),
+      client: new RuntimeClient(connection.client, onUnavailable, definition.id),
       close: () => connection.close(),
     };
   } catch (error) {

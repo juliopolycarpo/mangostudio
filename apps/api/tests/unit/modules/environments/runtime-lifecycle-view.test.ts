@@ -99,6 +99,42 @@ describe('buildRuntimeLifecycleView', () => {
     expect(view.actions).toContain('setup');
   });
 
+  /**
+   * The card should accuse a machine of running unchecked only when a peer has
+   * actually said so. Disconnected, nobody has answered the question, and
+   * `false` would read as an answer.
+   */
+  it('reports containment enforcement only while a peer is connected to answer', () => {
+    const declared = buildRuntimeLifecycleView({
+      transportKind: 'ssh',
+      health: health({ slot: 'remote' }),
+      readAtMs: 10_000,
+      connected: true,
+      nowMs: 11_000,
+      enforcesPathPolicy: true,
+    });
+    expect(declared.enforcesPathPolicy).toBe(true);
+
+    const legacy = buildRuntimeLifecycleView({
+      transportKind: 'ssh',
+      health: health({ slot: 'remote' }),
+      readAtMs: 10_000,
+      connected: true,
+      nowMs: 11_000,
+      enforcesPathPolicy: false,
+    });
+    expect(legacy.enforcesPathPolicy).toBe(false);
+
+    const disconnected = buildRuntimeLifecycleView({
+      transportKind: 'ssh',
+      health: health({ slot: 'remote' }),
+      readAtMs: 10_000,
+      connected: false,
+      nowMs: 11_000,
+    });
+    expect(disconnected.enforcesPathPolicy).toBeUndefined();
+  });
+
   it('attaches manualCommands for websocket and http only', () => {
     const ws = buildRuntimeLifecycleView({
       transportKind: 'websocket',
