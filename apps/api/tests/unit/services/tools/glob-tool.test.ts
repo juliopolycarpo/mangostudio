@@ -15,7 +15,12 @@ import {
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { withTargetHome } from './support/target-home';
-import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
+import {
+  ABSENT_STRING_ARGUMENTS,
+  EMPTY_STRING_ARGUMENTS,
+  REJECTED_STRING_ARGUMENTS,
+  useToolRegistry,
+} from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -281,12 +286,23 @@ describe('glob registry contract', () => {
     expect(result.matches).toEqual(['b.ts']);
   });
 
-  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+  for (const [label, value] of ABSENT_STRING_ARGUMENTS) {
     it(`treats ${label} cwd as absent and searches the chat workdir`, async () => {
       const result = await runGlob({ pattern: '*.ts', cwd: value });
 
       expect(result.cwd).toBe(harness.dir);
       expect(result.matches).toEqual(['a.ts']);
+    });
+  }
+
+  for (const [label, value] of REJECTED_STRING_ARGUMENTS) {
+    it(`rejects ${label} cwd instead of searching the chat workdir`, async () => {
+      const error = await runGlob({ pattern: '*.ts', cwd: value }).catch(
+        (thrown: unknown) => thrown
+      );
+
+      expect(error).toBeInstanceOf(ToolArgumentError);
+      expect((error as Error).message).toBe('Field "cwd" must be a string.');
     });
   }
 

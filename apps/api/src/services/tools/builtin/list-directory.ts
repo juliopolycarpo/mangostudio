@@ -42,11 +42,12 @@ const definition = {
     type: 'object',
     properties: {
       path: {
-        type: 'string',
+        type: ['string', 'null'],
         description:
-          'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory when available.',
+          'Absolute path, ~ path, or path relative to the chat working directory. Pass null to list the chat working directory.',
       },
     },
+    required: ['path'],
     additionalProperties: false,
   },
 };
@@ -84,7 +85,7 @@ async function execute(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<ListDirectoryToolResult> {
-  const path = getOptionalString(args.path);
+  const path = getOptionalString(args.path, 'path');
   return executeListDirectory({ ...(path ? { path } : {}) }, context);
 }
 

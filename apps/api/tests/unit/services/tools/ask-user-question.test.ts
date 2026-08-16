@@ -3,9 +3,12 @@ import type { MessagePart } from '@mangostudio/shared';
 import { executeStandardToolCallsWithProgress } from '../../../../src/modules/generation/application/standard-tool-execution';
 import { collectToolExecutionResult } from '../../../../src/modules/generation/application/stream-text-turn-helpers';
 import type { StreamEvent } from '../../../../src/modules/generation/application/stream-text-turn-types';
+import { isStrictCompatible } from '../../../../src/services/providers/core/tool-mapper';
 import { executeTool, getTool } from '../../../../src/services/tools';
+import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 import {
   ASK_USER_QUESTION_TOOL_NAME,
+  parseAskUserQuestionArgs,
   register,
 } from '../../../../src/services/tools/builtin/ask-user-question';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';
@@ -56,9 +59,33 @@ describe('ask_user_question tool', () => {
     const tool = getTool(ASK_USER_QUESTION_TOOL_NAME);
     expect(tool).toBeDefined();
     expect(tool?.definition.parameters.required).toEqual(['questions']);
+    expect(isStrictCompatible(tool?.definition.parameters)).toBe(true);
     expect(tool?.settings.category).toBe('interaction');
     expect(tool?.settings.enabledByDefault).toBe(true);
     expect(tool?.settings.canDisable).toBe(true);
+  });
+
+  it('reads an explicit null for every nested optional as absent', () => {
+    // The nested optionals are advertised as ["string", "null"] so the schema
+    // stays strict-compatible; QuestionSpec keeps its plain optional keys.
+    const parsed = parseAskUserQuestionArgs({
+      questions: [
+        {
+          question: 'Which deploy target should I use?',
+          header: null,
+          allowMultiple: null,
+          options: [
+            { label: 'Staging', description: null },
+            { label: 'Production', description: 'Live traffic' },
+          ],
+        },
+      ],
+    });
+
+    expect(parsed.questions[0]).toEqual({
+      question: 'Which deploy target should I use?',
+      options: [{ label: 'Staging' }, { label: 'Production', description: 'Live traffic' }],
+    });
   });
 
   it('returns a presented status with the question count', async () => {
@@ -90,9 +117,11 @@ describe('ask_user_question tool', () => {
     ],
     ['missing questions entirely', {}],
   ])('rejects %s with a descriptive error', async (_name, args) => {
-    await expect(executeTool(ASK_USER_QUESTION_TOOL_NAME, args, context)).rejects.toThrow(
-      /Invalid ask_user_question arguments/
+    const error = await executeTool(ASK_USER_QUESTION_TOOL_NAME, args, context).catch(
+      (thrown: unknown) => thrown
     );
+    expect(error).toBeInstanceOf(ToolArgumentError);
+    expect((error as Error).message).toMatch(/Invalid ask_user_question arguments/);
   });
 
   it('points the model at the field that failed', async () => {

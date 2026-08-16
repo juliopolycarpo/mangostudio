@@ -108,7 +108,54 @@ describe('generate_image tool planning', () => {
         { prompt: 'Paint', count: 0 },
         { toolCallId: 'tool-4', parameters: {} }
       )
-    ).toThrow('Image count must be at least 1.');
+    ).toThrow('Field "count" must be at least 1.');
+
+    expect(() =>
+      createGenerateImageToolPlan(
+        { prompt: 'Paint', model: 42 },
+        { toolCallId: 'tool-4', parameters: {} }
+      )
+    ).toThrow('Field "model" must be a string.');
+  });
+
+  it('reads an explicit null for every optional argument as absent', () => {
+    const plan = createGenerateImageToolPlan(
+      { prompt: 'Paint', count: null, quality: null, model: null },
+      { toolCallId: 'tool-4b', parameters: { letAiDecideQuality: true } }
+    );
+
+    expect(plan).toMatchObject({ count: 1, quality: GENERATE_IMAGE_DEFAULT_QUALITY });
+    expect(plan.requestedModel).toBeUndefined();
+  });
+
+  it('falls back to the configured default when a stored setting is malformed', () => {
+    // Settings are not model output: a bad stored value degrades to the
+    // default rather than failing the call the user is waiting on.
+    const plan = createGenerateImageToolPlan(
+      { prompt: 'Paint' },
+      { toolCallId: 'tool-4c', parameters: { defaultModel: 42 } }
+    );
+
+    expect(plan.requestedModel).toBeUndefined();
+  });
+
+  it('falls back to the default when a stored quality is no longer a supported option', () => {
+    // A preset saved before a quality was renamed or dropped is stale config,
+    // not model output, so it degrades rather than throwing.
+    const plan = createGenerateImageToolPlan(
+      { prompt: 'Paint' },
+      { toolCallId: 'tool-4d', parameters: { defaultQuality: '8K' } }
+    );
+
+    expect(plan.quality).toBe(GENERATE_IMAGE_DEFAULT_QUALITY);
+  });
+
+  it('still builds a definition when a stored quality is no longer supported', () => {
+    // The same normalizer runs while the turn's tool definitions are assembled:
+    // throwing here would fail the whole turn, not just one call.
+    expect(() =>
+      buildGenerateImageToolDefinition({ enabled: true, parameters: { defaultQuality: '8K' } })
+    ).not.toThrow();
   });
 
   it('rejects invalid model quality when letAiDecideQuality is enabled', () => {

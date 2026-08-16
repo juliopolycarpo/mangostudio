@@ -27,21 +27,24 @@ const definition = {
         description: 'Specific, bounded task for the subagent to perform.',
       },
       context: {
-        type: 'string',
-        description: 'Optional context that helps the subagent avoid rediscovery.',
+        type: ['string', 'null'],
+        description:
+          'Context that helps the subagent avoid rediscovery. Pass null when there is none.',
       },
       expectedOutput: {
-        type: 'string',
-        description: 'Optional format or acceptance criteria for the result.',
+        type: ['string', 'null'],
+        description:
+          'Format or acceptance criteria for the result. Pass null to leave it unconstrained.',
       },
       maxTurns: {
-        type: 'number',
+        type: ['integer', 'null'],
         minimum: SUBAGENT_MAX_TURNS_MIN,
         maximum: SUBAGENT_MAX_TURNS_MAX,
-        description: 'Optional maximum subagent model/tool turns for this delegation.',
+        description:
+          'Maximum subagent model/tool turns for this delegation. Pass null to use the configured default.',
       },
     },
-    required: ['agentId', 'task'],
+    required: ['agentId', 'task', 'context', 'expectedOutput', 'maxTurns'],
     additionalProperties: false,
   },
 };
@@ -72,11 +75,20 @@ export function register(): void {
   });
 }
 
-function parseDelegateArgs(args: Record<string, unknown>): DelegateToAgentInput {
+/**
+ * Parses the raw `delegate_to_agent` arguments.
+ *
+ * Exported because the in-turn delegation path parses the same tool call
+ * without going through this executor; sharing the parse keeps the two from
+ * disagreeing about the same arguments.
+ *
+ * // Usage: const input = parseDelegateArgs(args);
+ */
+export function parseDelegateArgs(args: Record<string, unknown>): DelegateToAgentInput {
   const agentId = getRequiredString(args.agentId, 'agentId');
   const task = getRequiredString(args.task, 'task');
-  const context = getOptionalString(args.context);
-  const expectedOutput = getOptionalString(args.expectedOutput);
+  const context = getOptionalString(args.context, 'context');
+  const expectedOutput = getOptionalString(args.expectedOutput, 'expectedOutput');
   const maxTurns = getBoundedOptionalInteger(args.maxTurns, 'maxTurns', {
     min: SUBAGENT_MAX_TURNS_MIN,
     max: SUBAGENT_MAX_TURNS_MAX,

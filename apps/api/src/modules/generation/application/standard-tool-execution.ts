@@ -8,7 +8,6 @@ import type {
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
-import { SUBAGENT_MAX_TURNS_MAX, SUBAGENT_MAX_TURNS_MIN } from '@mangostudio/shared/app-settings';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -28,16 +27,15 @@ import {
 } from '../../../services/mcp/tool-bridge';
 import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import { executeTool, getSafeEffectiveToolSettings, getTool } from '../../../services/tools';
-import {
-  getBoundedOptionalInteger,
-  getOptionalString,
-  getRequiredString,
-} from '../../../services/tools/arg-parsing';
+import { getRequiredString } from '../../../services/tools/arg-parsing';
 import {
   ASK_USER_QUESTION_TOOL_NAME,
   parseAskUserQuestionArgs,
 } from '../../../services/tools/builtin/ask-user-question';
-import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
+import {
+  DELEGATE_TO_AGENT_TOOL_NAME,
+  parseDelegateArgs,
+} from '../../../services/tools/builtin/delegate-to-agent';
 import { TODO_WRITE_TOOL_NAME, type TodoToolResult } from '../../../services/tools/builtin/todo';
 import {
   resolveEffectiveToolTimeoutMs,
@@ -645,21 +643,7 @@ function parseDelegationRequest(args: Record<string, unknown>): DelegateToSubage
       'INVALID_AGENT_ID'
     );
   }
-  const task = getRequiredString(args.task, 'task');
-  const context = getOptionalString(args.context);
-  const expectedOutput = getOptionalString(args.expectedOutput);
-  const maxTurns = getBoundedOptionalInteger(args.maxTurns, 'maxTurns', {
-    min: SUBAGENT_MAX_TURNS_MIN,
-    max: SUBAGENT_MAX_TURNS_MAX,
-  });
-
-  return {
-    agentId: rawAgentId,
-    task,
-    ...(context ? { context } : {}),
-    ...(expectedOutput ? { expectedOutput } : {}),
-    ...(maxTurns !== undefined ? { maxTurns } : {}),
-  };
+  return { ...parseDelegateArgs(args), agentId: rawAgentId };
 }
 
 function createSubagentTraceForTool(

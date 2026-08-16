@@ -39,7 +39,7 @@ describe('skill tool', () => {
   it('registers with the expected definition and settings', () => {
     const tool = getTool(SKILL_TOOL_NAME);
     expect(tool).toBeDefined();
-    expect(tool?.definition.parameters.required).toEqual(['name']);
+    expect(tool?.definition.parameters.required).toEqual(['name', 'file']);
     expect(tool?.settings.enabledByDefault).toBe(true);
     expect(tool?.settings.canDisable).toBe(true);
   });
@@ -54,6 +54,22 @@ describe('skill tool', () => {
     expect(result.body).toBe('Use `reference.md` for details.');
     expect(result.baseDir).toBe(join(skillsDir, 'pdf-tools'));
     expect(result.files).toEqual(['reference.md']);
+  });
+
+  it('reads an explicit null "file" as absent and loads the skill body', async () => {
+    const result = (await executeTool(
+      SKILL_TOOL_NAME,
+      { name: 'pdf-tools', file: null },
+      context
+    )) as { body: string };
+
+    expect(result.body).toBe('Use `reference.md` for details.');
+  });
+
+  it('rejects a non-string "file" instead of loading the skill body', async () => {
+    await expect(
+      executeTool(SKILL_TOOL_NAME, { name: 'pdf-tools', file: 42 }, context)
+    ).rejects.toThrow('Field "file" must be a string.');
   });
 
   it('loads a bundled file with "file"', async () => {

@@ -13,6 +13,7 @@
  */
 
 import type Anthropic from '@anthropic-ai/sdk';
+import { toPlainJsonSchema } from '../core/tool-mapper';
 import type { ToolDefinition } from '../types';
 
 export interface BuildCachedRequestOpts {
@@ -44,13 +45,16 @@ export function buildCachedAnthropicRequest(opts: BuildCachedRequestOpts): {
       ]
     : undefined;
 
-  // Tools with cache_control on the LAST item only (maximises prefix match)
+  // Tools with cache_control on the LAST item only (maximises prefix match).
+  // Schemas are down-converted from the strict dialect: Anthropic reads an
+  // omitted key as optional, so shipping every argument in `required` would
+  // tell the model to always supply one.
   const tools: Anthropic.MessageCreateParams['tools'] =
     opts.toolDefinitions.length > 0
       ? opts.toolDefinitions.map((t, i, arr) => ({
           name: t.name,
           description: t.description,
-          input_schema: t.parameters as Anthropic.Tool['input_schema'],
+          input_schema: toPlainJsonSchema(t.parameters) as Anthropic.Tool['input_schema'],
           ...(i === arr.length - 1 ? { cache_control: EPHEMERAL } : {}),
         }))
       : undefined;

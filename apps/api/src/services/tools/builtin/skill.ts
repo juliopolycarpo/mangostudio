@@ -33,13 +33,13 @@ const definition = {
         description: 'Skill name exactly as listed in <available-skills>.',
       },
       file: {
-        type: 'string',
+        type: ['string', 'null'],
         description:
-          'Optional path of a bundled resource file, relative to the skill directory ' +
-          '(e.g. "reference.md"). Omit to load the skill instructions.',
+          'Path of a bundled resource file, relative to the skill directory ' +
+          '(e.g. "reference.md"). Pass null to load the skill instructions.',
       },
     },
-    required: ['name'],
+    required: ['name', 'file'],
     additionalProperties: false,
   },
 };
@@ -50,7 +50,7 @@ async function execute(
   context: ToolContext
 ): Promise<SkillBodyResult | SkillFileResult> {
   const name = getRequiredString(args.name, 'name');
-  const file = getOptionalString(args.file);
+  const file = getOptionalString(args.file, 'file');
   const db = getDb();
   return file
     ? loadSkillFile(db, context.userId, name, file)

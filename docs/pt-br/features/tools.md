@@ -227,7 +227,43 @@ Retorna 422 com `ToolSettingsError` se os parâmetros forem inválidos ou se a t
 | Gemini Interactions | `toolDefsToGeminiInteractions()` | `{ name, description, parameters }`                           |
 | OpenAI-compatible   | `toolDefsToChatCompletions()`    | `ChatCompletionTool[]`                                        |
 
-A API OpenAI Responses aplica `strict: true` quando o schema satisfaz os requisitos do strict mode, como `type: object`, `additionalProperties: false`, todas as propriedades obrigatórias e ausência de `oneOf`, `anyOf`, `allOf`, `not` e `$ref`.
+A API OpenAI Responses aplica `strict: true` quando o schema satisfaz os requisitos do strict mode, como `type: object`, `additionalProperties: false`, todas as propriedades obrigatórias **em qualquer nível de aninhamento** e ausência de `oneOf`, `anyOf`, `allOf`, `not`, `$ref`, `minLength` e `maxLength`.
+
+Espera-se que toda ferramenta embutida satisfaça esses requisitos. Uma ferramenta que falhe
+em `isStrictCompatible` deve ser corrigida, e não isentada —
+`tests/unit/services/providers/tool-mapper-strict.test.ts` verifica `strict: true` por id de
+ferramenta.
+
+### Argumentos opcionais são anuláveis, não ausentes
+
+O subconjunto strict não tem noção de chave opcional, então um argumento opcional permanece
+em `required` e amplia o próprio tipo:
+
+```jsonc
+// não assim                                   // e sim assim
+{ "properties": { "startLine": {              { "properties": { "startLine": {
+    "type": "integer", "minimum": 1 } },          "type": ["integer", "null"], "minimum": 1 } },
+  "required": ["path"] }                        "required": ["path", "startLine"] }
+```
+
+Os helpers de parsing em `services/tools/arg-parsing.ts` leem `null` como "ausente", de modo
+que os executores não precisam de tratamento especial. `minimum`/`maximum` numéricos, `enum`,
+`pattern` e `minItems`/`maxItems` sobrevivem junto de um tipo anulável; `minLength`/`maxLength`
+não fazem parte do subconjunto strict, então limites de comprimento ficam no executor, não no
+schema.
+
+### Argumentos malformados são rejeitados, não substituídos
+
+Um argumento presente com o tipo errado gera `ToolArgumentError` (classificado como
+`validation_failed`) em vez de recorrer a um padrão. Substituir um valor transforma um engano
+corrigível em uma resposta errada plausível: o `grep` descartando uma flag
+`caseInsensitive: "true"` devolve um conjunto vazio que o modelo lê como "o símbolo não
+existe", e `list_directory({"path": 42})` devolvendo o diretório de trabalho é lido como uma
+listagem bem-sucedida do diretório que o modelo nomeou.
+
+A regra vale apenas para saída do modelo. **Configurações** armazenadas continuam sendo
+coagidas aos seus padrões — `clampIntegerSetting` e `getStringSetting` — porque não há um
+turno do modelo a quem entregar um erro corrigível.
 
 ## Adicionando Uma Nova Tool
 

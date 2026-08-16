@@ -8,7 +8,12 @@ import { generateId } from '../../../utils/id';
 import { warmProviderForRequest } from '../../providers/core/provider-readiness';
 import { getProvider, getProviderForModel } from '../../providers/core/provider-registry';
 import type { ImageGenerationRequest, ImageGenerationResult } from '../../providers/types';
-import { getOptionalString, getRequiredString } from '../arg-parsing';
+import {
+  getOptionalString,
+  getRequiredString,
+  getStringSetting,
+  ToolArgumentError,
+} from '../arg-parsing';
 import {
   buildToolExecutionTimeoutDescriptor,
   TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
@@ -105,7 +110,7 @@ export function createGenerateImageToolPlan(
     settings.letAiDecideQuality ? args.quality : undefined,
     settings.defaultQuality
   );
-  const model = getOptionalString(args.model) ?? settings.defaultModel;
+  const model = getOptionalString(args.model, 'model') ?? settings.defaultModel;
   const imageIds = buildImageIds(count, input.imageIds);
 
   return {
@@ -310,26 +315,25 @@ function buildDefinitionFromMaxImages(maxImagesPerCall: number): ToolDefinition 
       properties: {
         prompt: {
           type: 'string',
-          minLength: 1,
           description: 'Detailed prompt describing the image to generate.',
         },
         count: {
-          type: 'integer',
+          type: ['integer', 'null'],
           minimum: 1,
           maximum: maxImagesPerCall,
-          description: 'Number of images to generate in this call. Defaults to 1.',
+          description: 'Number of images to generate in this call. Pass null to generate one.',
         },
         quality: {
-          type: 'string',
-          enum: [...QUALITY_OPTIONS],
-          description: `Optional quality preset. Defaults to ${GENERATE_IMAGE_DEFAULT_QUALITY}.`,
+          type: ['string', 'null'],
+          enum: [...QUALITY_OPTIONS, null],
+          description: `Quality preset. Pass null to use the configured default of ${GENERATE_IMAGE_DEFAULT_QUALITY}.`,
         },
         model: {
-          type: 'string',
-          description: 'Optional image-capable model ID. Omit to use the configured default.',
+          type: ['string', 'null'],
+          description: 'Image-capable model ID. Pass null to use the configured default.',
         },
       },
-      required: ['prompt'],
+      required: ['prompt', 'count', 'quality', 'model'],
       additionalProperties: false,
     },
   };
@@ -340,7 +344,7 @@ function normalizeGenerateImageToolSettings(
 ): GenerateImageToolSettings {
   const defaultQuality = getImageQuality(undefined, parameters.defaultQuality);
   const maxImagesPerCall = getSettingsMaxImages(parameters.maxImagesPerCall);
-  const defaultModel = getOptionalString(parameters.defaultModel) ?? GENERATE_IMAGE_AUTO_MODEL;
+  const defaultModel = getStringSetting(parameters.defaultModel) ?? GENERATE_IMAGE_AUTO_MODEL;
   const letAiDecideQuality = parameters.letAiDecideQuality === true;
 
   return { defaultQuality, maxImagesPerCall, defaultModel, letAiDecideQuality };
@@ -349,9 +353,9 @@ function normalizeGenerateImageToolSettings(
 function getRequestedImageCount(value: unknown, maxImagesPerCall: number): number {
   if (value === undefined || value === null) return 1;
   if (typeof value !== 'number' || !Number.isInteger(value)) {
-    throw new Error('Image count must be an integer.');
+    throw new ToolArgumentError('Field "count" must be an integer.');
   }
-  if (value < 1) throw new Error('Image count must be at least 1.');
+  if (value < 1) throw new ToolArgumentError('Field "count" must be at least 1.');
   return Math.min(value, maxImagesPerCall);
 }
 
@@ -362,13 +366,26 @@ function getSettingsMaxImages(value: unknown): number {
   return Math.min(Math.max(value, 1), GENERATE_IMAGE_HARD_MAX_IMAGES);
 }
 
-function getImageQuality(value: unknown, fallback: unknown): string {
-  const quality =
-    getOptionalString(value) ?? getOptionalString(fallback) ?? GENERATE_IMAGE_DEFAULT_QUALITY;
-  if (!isQualityOption(quality)) {
-    throw new Error(`Unsupported image quality: "${quality}".`);
+/**
+ * Resolves the quality preset. `argValue` is model output and is rejected when
+ * malformed; `settingValue` is stored configuration and falls back instead.
+ */
+function getImageQuality(argValue: unknown, settingValue: unknown): string {
+  const requested = getOptionalString(argValue, 'quality');
+  if (requested !== undefined) {
+    if (!isQualityOption(requested)) {
+      throw new ToolArgumentError(`Unsupported image quality: "${requested}".`);
+    }
+    return requested;
   }
-  return quality;
+
+  // A stored preset that no longer names a supported quality — one renamed or
+  // dropped from QUALITY_OPTIONS since it was saved — degrades to the default.
+  // Throwing here would fail every turn, not just this call: the settings
+  // normalizer also runs from `buildGenerateImageToolDefinition`, while the
+  // turn's tool definitions are still being assembled.
+  const stored = getStringSetting(settingValue);
+  return stored !== undefined && isQualityOption(stored) ? stored : GENERATE_IMAGE_DEFAULT_QUALITY;
 }
 
 function buildImageIds(count: number, providedIds: string[] | undefined): string[] {

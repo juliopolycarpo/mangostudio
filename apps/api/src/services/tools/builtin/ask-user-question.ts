@@ -16,6 +16,7 @@ import {
   QUESTION_MIN_OPTIONS,
 } from '@mangostudio/shared/questions';
 import Value from 'typebox/value';
+import { stripNullOptionals, ToolArgumentError } from '../arg-parsing';
 import { registerTool } from '../registry';
 
 export { ASK_USER_QUESTION_TOOL_NAME };
@@ -51,8 +52,9 @@ const definition = {
               description: 'The complete question to ask. Clear, specific, ends with "?".',
             },
             header: {
-              type: 'string',
-              description: 'Very short topic label displayed as a chip (max 24 chars).',
+              type: ['string', 'null'],
+              description:
+                'Very short topic label displayed as a chip (max 24 chars). Pass null for none.',
             },
             options: {
               type: 'array',
@@ -67,20 +69,21 @@ const definition = {
                     description: 'Concise display text for this choice (1-5 words).',
                   },
                   description: {
-                    type: 'string',
-                    description: 'What this option means or its trade-offs.',
+                    type: ['string', 'null'],
+                    description: 'What this option means or its trade-offs. Pass null for none.',
                   },
                 },
-                required: ['label'],
+                required: ['label', 'description'],
                 additionalProperties: false,
               },
             },
             allowMultiple: {
-              type: 'boolean',
-              description: 'Set true to let the user select more than one option.',
+              type: ['boolean', 'null'],
+              description:
+                'Set true to let the user select more than one option. Pass null or false for single-select.',
             },
           },
-          required: ['question', 'options'],
+          required: ['question', 'header', 'options', 'allowMultiple'],
           additionalProperties: false,
         },
       },
@@ -109,17 +112,18 @@ async function execute(args: Record<string, unknown>): Promise<AskUserQuestionRe
  * // Usage: const { questions } = parseAskUserQuestionArgs(args);
  */
 export function parseAskUserQuestionArgs(args: Record<string, unknown>): AskUserQuestionArgs {
-  if (!Value.Check(AskUserQuestionArgsSchema, args)) {
+  const normalized = stripNullOptionals(args);
+  if (!Value.Check(AskUserQuestionArgsSchema, normalized)) {
     const detail = describeSchemaError(
-      Value.Errors(AskUserQuestionArgsSchema, args),
+      Value.Errors(AskUserQuestionArgsSchema, normalized),
       'invalid payload'
     );
-    throw new Error(
+    throw new ToolArgumentError(
       `Invalid ask_user_question arguments (${detail}). Provide 1-${ASK_USER_QUESTION_MAX_QUESTIONS} questions, ` +
         `each with ${QUESTION_MIN_OPTIONS}-${QUESTION_MAX_OPTIONS} labeled options.`
     );
   }
-  return args;
+  return normalized;
 }
 
 /** Registers this built-in tool. // Usage: register() */

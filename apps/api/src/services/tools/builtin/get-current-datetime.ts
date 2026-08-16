@@ -3,6 +3,7 @@
  * Returns the current date and time in the requested timezone and locale.
  */
 
+import { getOptionalString, getStringSetting } from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 
@@ -23,16 +24,17 @@ const definition = {
     type: 'object',
     properties: {
       timezone: {
-        type: 'string',
+        type: ['string', 'null'],
         description:
-          'IANA timezone name (e.g. "America/Sao_Paulo", "Europe/London"). Defaults to "UTC".',
+          'IANA timezone name (e.g. "America/Sao_Paulo", "Europe/London"). Pass null to use the configured default.',
       },
       locale: {
-        type: 'string',
+        type: ['string', 'null'],
         description:
-          'BCP 47 locale tag for output formatting (e.g. "pt-BR", "en-US"). Defaults to "en-US".',
+          'BCP 47 locale tag for output formatting (e.g. "pt-BR", "en-US"). Pass null to use the configured default.',
       },
     },
+    required: ['timezone', 'locale'],
     additionalProperties: false,
   },
 };
@@ -41,8 +43,16 @@ function execute(
   args: Record<string, unknown>,
   context: ToolContext
 ): Promise<GetCurrentDatetimeResult> {
-  const timezone = getStringArg(args.timezone, context.parameters.timezone, 'UTC');
-  const locale = getStringArg(args.locale, context.parameters.locale, 'en-US');
+  // The argument is model output and is rejected when malformed; the parameter
+  // behind it is a stored setting and falls back instead.
+  const timezone =
+    getOptionalString(args.timezone, 'timezone') ??
+    getStringSetting(context.parameters.timezone) ??
+    'UTC';
+  const locale =
+    getOptionalString(args.locale, 'locale') ??
+    getStringSetting(context.parameters.locale) ??
+    'en-US';
 
   // Validate timezone by constructing a formatter — throws RangeError on invalid input
   try {
@@ -111,11 +121,4 @@ export function register(): void {
     },
     execute,
   });
-}
-
-function getStringArg(...values: unknown[]): string {
-  for (const value of values) {
-    if (typeof value === 'string' && value.length > 0) return value;
-  }
-  return '';
 }

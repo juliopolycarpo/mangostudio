@@ -149,6 +149,50 @@ describe('delegate_to_agent', () => {
     expect(captured[1].maxTurns).toBe(SUBAGENT_MAX_TURNS_MIN);
   });
 
+  it('reads an explicit null for every optional argument as absent', async () => {
+    const captured: DelegateToAgentInput[] = [];
+    const ctx: ToolContext = {
+      userId: 'u1',
+      chatId: 'c1',
+      parameters: {},
+      delegateToAgent: (input) => {
+        captured.push(input);
+        return Promise.resolve('ok');
+      },
+    };
+
+    await executeTool(
+      'delegate_to_agent',
+      {
+        agentId: 'explore',
+        task: 'Do work',
+        context: null,
+        expectedOutput: null,
+        maxTurns: null,
+      },
+      ctx
+    );
+
+    expect(captured[0]).toEqual({ agentId: 'explore', task: 'Do work' });
+  });
+
+  it('rejects a malformed optional argument instead of dropping it', async () => {
+    const ctx: ToolContext = {
+      userId: 'u1',
+      chatId: 'c1',
+      parameters: {},
+      delegateToAgent: () => Promise.resolve('ok'),
+    };
+
+    await expect(
+      executeTool('delegate_to_agent', { agentId: 'explore', task: 'Do work', context: 42 }, ctx)
+    ).rejects.toThrow('Field "context" must be a string.');
+
+    await expect(
+      executeTool('delegate_to_agent', { agentId: 'explore', task: 'Do work', maxTurns: 2.5 }, ctx)
+    ).rejects.toThrow('Field "maxTurns" must be an integer.');
+  });
+
   it('throws when delegateToAgent is not available', async () => {
     const ctx: ToolContext = {
       userId: 'u1',

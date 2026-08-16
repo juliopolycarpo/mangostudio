@@ -212,7 +212,41 @@ Returns 422 with `ToolSettingsError` if parameters are invalid or the tool canno
 | Gemini Interactions | `toolDefsToGeminiInteractions()` | `{ name, description, parameters }`                           |
 | OpenAI-compatible   | `toolDefsToChatCompletions()`    | `ChatCompletionTool[]`                                        |
 
-OpenAI Responses API applies `strict: true` when the schema satisfies strict mode requirements (`type: object`, `additionalProperties: false`, all properties required, no `oneOf`/`anyOf`/`allOf`/`not`/`$ref`).
+OpenAI Responses API applies `strict: true` when the schema satisfies strict mode requirements (`type: object`, `additionalProperties: false`, all properties required **at every nesting depth**, no `oneOf`/`anyOf`/`allOf`/`not`/`$ref`/`minLength`/`maxLength`).
+
+Every built-in tool is expected to pass. A tool that fails `isStrictCompatible` should be
+fixed rather than exempted — `tests/unit/services/providers/tool-mapper-strict.test.ts`
+asserts `strict: true` per tool id.
+
+### Optional arguments are nullable, not absent
+
+The strict subset has no notion of an optional key, so an optional argument keeps its place
+in `required` and widens its type instead:
+
+```jsonc
+// not this                                    // this
+{ "properties": { "startLine": {              { "properties": { "startLine": {
+    "type": "integer", "minimum": 1 } },          "type": ["integer", "null"], "minimum": 1 } },
+  "required": ["path"] }                        "required": ["path", "startLine"] }
+```
+
+The parsing helpers in `services/tools/arg-parsing.ts` read `null` as "absent", so executors
+need no special case. Numeric `minimum`/`maximum`, `enum`, `pattern` and `minItems`/`maxItems`
+survive alongside a nullable type; `minLength`/`maxLength` are not part of the strict subset,
+so length bounds live in the executor instead of the schema.
+
+### Malformed arguments are rejected, not substituted
+
+A tool argument that is present but the wrong type raises `ToolArgumentError`
+(classified `validation_failed`) rather than falling back to a default. Substituting a value
+turns a correctable mistake into a plausible wrong answer: `grep` dropping a
+`caseInsensitive: "true"` flag returns an empty result set the model reads as "the symbol
+does not exist", and `list_directory({"path": 42})` returning the working directory reads as
+a successful listing of the directory the model named.
+
+The rule applies to model output only. Stored **settings** keep coercing to their defaults —
+`clampIntegerSetting` and `getStringSetting` — because there is no model turn to hand a
+correctable error to.
 
 ## Adding a New Tool
 

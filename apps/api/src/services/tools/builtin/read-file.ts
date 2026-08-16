@@ -76,18 +76,18 @@ const definition = {
         description: 'Absolute path, ~ path, or path relative to the chat working directory.',
       },
       startLine: {
-        type: 'integer',
-        description: '1-based line to start reading from (default 1).',
+        type: ['integer', 'null'],
+        description: '1-based line to start reading from. Pass null to start at line 1.',
         minimum: 1,
       },
       maxLines: {
-        type: 'integer',
-        description: `Maximum number of lines to return (default ${READ_FILE_DEFAULT_MAX_LINES}, max ${READ_FILE_MAX_MAX_LINES}).`,
+        type: ['integer', 'null'],
+        description: `Maximum number of lines to return (max ${READ_FILE_MAX_MAX_LINES}). Pass null for the default of ${READ_FILE_DEFAULT_MAX_LINES}.`,
         minimum: READ_FILE_MIN_MAX_LINES,
         maximum: READ_FILE_MAX_MAX_LINES,
       },
     },
-    required: ['path'],
+    required: ['path', 'startLine', 'maxLines'],
     additionalProperties: false,
   },
 };

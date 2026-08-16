@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 import { PathAccessError } from '../../../../src/services/tools/builtin/_fs-utils';
 import {
   executeListDirectory,
@@ -12,7 +13,11 @@ import {
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { withTargetHome } from './support/target-home';
-import { EMPTY_STRING_ARGUMENTS, useToolRegistry } from './support/tool-registry-harness';
+import {
+  ABSENT_STRING_ARGUMENTS,
+  REJECTED_STRING_ARGUMENTS,
+  useToolRegistry,
+} from './support/tool-registry-harness';
 
 let tempDir: string;
 
@@ -243,7 +248,7 @@ describe('list_directory registry contract', () => {
     expect(result.entries).toEqual([{ name: 'b.txt', type: 'file' }]);
   });
 
-  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+  for (const [label, value] of ABSENT_STRING_ARGUMENTS) {
     it(`treats ${label} path as absent and lists the chat workdir`, async () => {
       const result = await list({ path: value });
 
@@ -257,6 +262,17 @@ describe('list_directory registry contract', () => {
 
       expect(error).toBeInstanceOf(PathAccessError);
       expect((error as Error).message).toBe('Missing required path.');
+    });
+  }
+
+  for (const [label, value] of REJECTED_STRING_ARGUMENTS) {
+    it(`rejects ${label} path instead of listing the chat workdir`, async () => {
+      // The failure this prevents: the model reads a workdir listing as the
+      // contents of the directory it named.
+      const error = await list({ path: value }).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(ToolArgumentError);
+      expect((error as Error).message).toBe('Field "path" must be a string.');
     });
   }
 
