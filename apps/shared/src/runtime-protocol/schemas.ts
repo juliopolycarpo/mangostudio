@@ -4,6 +4,7 @@ import {
   ExternalIdentityIsolationSchema,
 } from '../external-agents/schemas';
 import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
+import { ReadonlyArraySchema } from '../schema-helpers';
 
 /** Protocol version shared by every transport in this release. */
 export const RUNTIME_PROTOCOL_VERSION = '1.0.1' as const;
@@ -60,6 +61,37 @@ export const RuntimeShellKindSchema = Type.Union([
   Type.Literal('powershell'),
 ]);
 export type RuntimeShellKind = Static<typeof RuntimeShellKindSchema>;
+
+/**
+ * Which paths a call may reach, decided by the hub and enforced by the runtime.
+ *
+ * The two halves are not interchangeable. The hub knows the policy — the roots
+ * a tool was configured with, whether the chat is pinned to its working
+ * directory — but it checks that policy lexically, against strings. Only the
+ * host that owns the filesystem can say where a path actually lands, because
+ * only that host can follow the symlinks on the way and canonicalize the root
+ * in its own path style. A link inside the working directory that points out of
+ * it is invisible from anywhere else.
+ *
+ * So this travels on every filesystem method and is re-checked on arrival.
+ * `containmentRoot` is the chat's working directory when the chat is restricted
+ * to it; the roots are the configured allow and deny lists.
+ */
+export const RuntimePathFilterSchema = Type.Object({
+  allowedRoots: ReadonlyArraySchema(Type.String({ minLength: 1 })),
+  deniedRoots: ReadonlyArraySchema(Type.String({ minLength: 1 })),
+  containmentRoot: Type.Optional(Type.String({ minLength: 1 })),
+});
+export type RuntimePathFilter = Static<typeof RuntimePathFilterSchema>;
+
+/**
+ * Mixed into every filesystem method's parameters. Omitted when nothing is
+ * configured and nothing is restricted, so an unrestricted call stays one.
+ */
+export const RuntimePathPolicyParamsSchema = Type.Object({
+  pathPolicy: Type.Optional(RuntimePathFilterSchema),
+});
+export type RuntimePathPolicyParams = Static<typeof RuntimePathPolicyParamsSchema>;
 
 /**
  * Capability announcement in `hello`. Manifest objects tolerate unknown keys
@@ -121,6 +153,21 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * keys, where absent means granted.
    */
   acceptsHubIdentity: Type.Optional(Type.Boolean()),
+  /**
+   * Whether this runtime re-checks the paths the hub names against the
+   * {@link RuntimePathFilterSchema} the call carried.
+   *
+   * `pathPolicy` is optional on the wire so a hub can keep talking to a runtime
+   * built before it existed. That tolerance is invisible on its own: an older
+   * peer accepts the field, ignores it, and answers exactly like one that
+   * enforced it. Declaring enforcement is what makes the difference legible, so
+   * the hub can say which environment is running unchecked rather than assume.
+   *
+   * Absent means **false** — like `acceptsHubIdentity` and unlike the `features`
+   * keys, where absent means granted. A peer that does not answer the question
+   * has not answered it in the affirmative.
+   */
+  enforcesPathPolicy: Type.Optional(Type.Boolean()),
   /** Consent profile that produced `features`; absent on older peers. */
   profile: Type.Optional(
     Type.Union([
