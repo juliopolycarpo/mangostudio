@@ -71,6 +71,11 @@ export function createLocalRuntimeManifest(
     // This build decodes `hello_ack.hub`. Frame envelopes are closed, so the
     // hub withholds that field until a runtime says it will not choke on it.
     acceptsHubIdentity: true,
+    // Every filesystem method in this build re-checks its own targets against
+    // the call's `pathPolicy` (see `services/fs.ts`). Stated rather than
+    // inferred from the version, because the hub's alternative is to assume —
+    // and assuming enforcement is the failure this field exists to prevent.
+    enforcesPathPolicy: true,
     // Sent beside the intersection so a reader can tell the two apart: `git`
     // false in `features` with `allow.git` true is a machine without git, not
     // an owner who refused it.

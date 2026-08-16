@@ -144,7 +144,7 @@ export async function connectHttpRuntime(
   });
 
   return {
-    client: new RuntimeClient(client, notifyGone),
+    client: new RuntimeClient(client, notifyGone, definition.id),
     close(reason) {
       notified = true;
       stopLiveness();

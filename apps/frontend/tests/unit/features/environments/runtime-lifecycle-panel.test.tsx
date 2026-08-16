@@ -151,4 +151,70 @@ describe('RuntimeLifecyclePanel', () => {
     );
     expect(screen.getByText(labels.manual.verify)).toBeInTheDocument();
   });
+
+  // A runtime too old to re-check tool paths on its own machine leaves a
+  // restricted chat containable only lexically, which a symbolic link on that
+  // machine defeats. The card is where an operator finds out.
+  it('warns when a connected runtime does not enforce path containment', async () => {
+    const connected: Environment = { ...WSL, id: 'legacy-peer', status: { state: 'connected' } };
+    scenario
+      .respondWithJson('GET', '/api/environments/legacy-peer/runtime', {
+        body: { ...VIEW, enforcesPathPolicy: false } satisfies RuntimeLifecycleView,
+      })
+      .install();
+    render(<RuntimeLifecyclePanel environment={connected} />);
+
+    expect(await screen.findByTestId('runtime-unenforced-containment')).toHaveTextContent(
+      labels.unenforcedContainment
+    );
+  });
+
+  // stdio has no install buttons and may have no health yet. The card still
+  // has to say the connected peer will not re-check paths, or the warning
+  // exists only for transports that already had something else to show.
+  it('warns about unenforced containment even when the card has nothing else', async () => {
+    const stdio: Environment = {
+      ...WSL,
+      id: 'legacy-stdio',
+      transportKind: 'stdio',
+      config: {},
+      status: { state: 'connected' },
+    };
+    scenario
+      .respondWithJson('GET', '/api/environments/legacy-stdio/runtime', {
+        body: {
+          health: null,
+          readAt: null,
+          stale: false,
+          slotBytes: null,
+          actions: [],
+          enforcesPathPolicy: false,
+        } satisfies RuntimeLifecycleView,
+      })
+      .install();
+    render(<RuntimeLifecyclePanel environment={stdio} />);
+
+    expect(await screen.findByTestId('runtime-unenforced-containment')).toHaveTextContent(
+      labels.unenforcedContainment
+    );
+  });
+
+  it.each([
+    ['a peer that enforces', true],
+    ['a peer that has not connected to answer', undefined],
+  ])('stays silent about containment for %s', async (_case, enforcesPathPolicy) => {
+    const environment: Environment = { ...WSL, id: `quiet-${String(enforcesPathPolicy)}` };
+    scenario
+      .respondWithJson('GET', `/api/environments/${environment.id}/runtime`, {
+        body: {
+          ...VIEW,
+          ...(enforcesPathPolicy === undefined ? {} : { enforcesPathPolicy }),
+        } satisfies RuntimeLifecycleView,
+      })
+      .install();
+    render(<RuntimeLifecyclePanel environment={environment} />);
+
+    await screen.findByTestId('runtime-lifecycle-panel');
+    expect(screen.queryByTestId('runtime-unenforced-containment')).not.toBeInTheDocument();
+  });
 });

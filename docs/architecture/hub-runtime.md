@@ -98,7 +98,11 @@ Additive protocol changes stay on major/minor `1.0` while the wire stays compati
 
 - **Tolerant manifest.** Feature keys beyond the original six are optional. An absent value
   means the peer predates the key and should be treated as granted (`true`) so an older
-  runtime is not silently stripped of tools the hub already trusted.
+  runtime is not silently stripped of tools the hub already trusted. Top-level keys that
+  describe what the peer's *build* can do read the other way — `acceptsHubIdentity` and
+  `enforcesPathPolicy` are false when absent, because assuming a capability nobody claimed
+  is what they exist to prevent. Those arrive only on `hello`, so a `runtime.health`
+  refresh carries them forward rather than recomputing them.
 - **A new frame field is gated on the manifest, never just added.** Frame envelopes are
   `additionalProperties: false`, so an optional sibling on `req`, `hello` or `hello_ack` is
   not ignored by a peer that predates it — it fails that peer's decode and drops the
@@ -959,6 +963,19 @@ denied roots, and workdir containment lexically, then sends the same roots along
 `pathPolicy`; the runtime re-checks the call's paths after following symlinks, because a
 link inside the working directory that points out of it exists on the target's disk and is
 invisible from the hub. A call with nothing configured and no restriction carries no policy.
+
+`pathPolicy` is optional on the wire, so a hub can talk to a runtime built before it
+existed. That tolerance is the one place where it matters what "optional" costs: the older
+peer accepts the field, ignores it, and answers exactly like a peer that enforced it, so
+nothing about the call says the enforcement went missing. `enforcesPathPolicy` on the
+manifest is the answer to that — absent means **false**, unlike the `features` keys, because
+a peer that has not answered the question has not answered it in the affirmative. When the
+hub sends a containment root to a peer that does not declare enforcement it warns once per
+connection naming the environment, and the environment card says so.
+
+**Follow-up:** once no supported runtime predates `enforcesPathPolicy`, `pathPolicy` becomes
+required on every filesystem method and the tolerance above goes away with it. Until then
+the declaration is what keeps the gap legible rather than silent.
 
 ## Extending the Boundary
 

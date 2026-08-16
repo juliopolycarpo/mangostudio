@@ -149,7 +149,7 @@ export async function connectContainerRuntime(
   }
 
   return {
-    client: new RuntimeClient(connection.client, onUnavailable),
+    client: new RuntimeClient(connection.client, onUnavailable, definition.id),
     close: async () => {
       await connection.close();
       // Closing the child's stdin ends the runtime, which ends the container,

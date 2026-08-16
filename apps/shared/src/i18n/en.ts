@@ -2205,6 +2205,8 @@ export const messages: Messages = {
         actionFailed: 'The runtime action failed.',
         stale: 'Stale',
         noHealth: 'No runtime health yet. Connect or install to see version and digest.',
+        unenforcedContainment:
+          'This runtime is too old to re-check tool paths on its own machine. A chat restricted to its working directory can still be led out of it by a symbolic link there. Upgrade the runtime.',
         version: 'v{version}',
         slot: 'slot {slot}',
         digest: '{digest}…',

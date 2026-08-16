@@ -736,7 +736,7 @@ export class RuntimeConnectionManager {
     }
     entry.health = health;
     entry.healthReadAtMs = entry.manifestReadAtMs;
-    const manifest = capabilityManifestFromHealth(health);
+    const manifest = capabilityManifestFromHealth(health, client.manifest);
     client.replaceManifest(manifest);
     const changed = !Value.Equal(entry.status.manifest, manifest);
     // A peer that withdrew this consent has already closed its vendor sessions,
@@ -855,7 +855,7 @@ async function connectLocalRuntime(
     hubVersion: version,
   });
   return {
-    client: new RuntimeClient(connection.client, options.onUnavailable),
+    client: new RuntimeClient(connection.client, options.onUnavailable, LOCAL_ENVIRONMENT_ID),
     close: () => connection.close(),
   };
 }
@@ -1017,7 +1017,7 @@ async function connectStdioRuntime(
     // a child that dies mid-request reporting through both costs nothing. Neither
     // covers the other: the pipe closing catches a death with no request in
     // flight, and a request failing catches a child that answers but is gone.
-    client: new RuntimeClient(connection.client, onUnavailable),
+    client: new RuntimeClient(connection.client, onUnavailable, definition.id),
     close: () => connection.close(),
   };
 }
@@ -1057,7 +1057,7 @@ export async function connectWslRuntime(
     onClosed: onUnavailable,
   });
   return {
-    client: new RuntimeClient(connection.client, onUnavailable),
+    client: new RuntimeClient(connection.client, onUnavailable, definition.id),
     close: () => connection.close(),
   };
 }

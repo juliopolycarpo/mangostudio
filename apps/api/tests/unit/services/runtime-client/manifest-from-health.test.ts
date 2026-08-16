@@ -64,6 +64,43 @@ describe('capabilityManifestFromHealth', () => {
     });
   });
 
+  /**
+   * Health answers what the owner allowed and what the machine has. What the
+   * peer's *build* can do only ever arrives on `hello`, so a refresh that
+   * recomputed the manifest from health alone would downgrade a peer to
+   * "older" on the first background read of a connection it already completed —
+   * and the hub would start warning about a runtime that does enforce.
+   */
+  it('carries handshake-only build facts forward across a refresh', () => {
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: RUNTIME_CONSENT_PRESETS.full,
+    };
+
+    const refreshed = capabilityManifestFromHealth(report, {
+      ...capabilityManifestFromHealth(report),
+      acceptsHubIdentity: true,
+      enforcesPathPolicy: true,
+    });
+
+    expect(refreshed.acceptsHubIdentity).toBe(true);
+    expect(refreshed.enforcesPathPolicy).toBe(true);
+  });
+
+  it('does not invent build facts a handshake never claimed', () => {
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: RUNTIME_CONSENT_PRESETS.full,
+    };
+
+    const refreshed = capabilityManifestFromHealth(report, capabilityManifestFromHealth(report));
+
+    expect(refreshed.acceptsHubIdentity).toBeUndefined();
+    expect(refreshed.enforcesPathPolicy).toBeUndefined();
+  });
+
   it('does not infer adapter support or isolation from an older health report', () => {
     const { externalAgents: _externalAgents, ...oldAllow } = RUNTIME_CONSENT_PRESETS.readonly;
     const report: RuntimeHealthReport = {

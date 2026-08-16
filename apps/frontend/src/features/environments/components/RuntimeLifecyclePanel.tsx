@@ -96,8 +96,15 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
 
   if (!data) return null;
 
-  // Local/in-process and stdio with no actions and no health stay quiet.
-  if (data.actions.length === 0 && !data.manualCommands && !data.health) {
+  // Local/in-process and stdio with no actions and no health stay quiet,
+  // except when a connected peer has already said it will not enforce
+  // containment — that warning is the reason the card exists in that case.
+  if (
+    data.actions.length === 0 &&
+    !data.manualCommands &&
+    !data.health &&
+    data.enforcesPathPolicy !== false
+  ) {
     return null;
   }
 
@@ -118,6 +125,8 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
       </div>
 
       <HealthSummary view={data} />
+
+      <UnenforcedContainment view={data} />
 
       <RuntimeOffer view={data} />
 
@@ -235,6 +244,27 @@ function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
   ].filter((bit): bit is string => Boolean(bit));
 
   return <p className="font-mono text-[10px] text-on-surface-variant">{bits.join(' · ')}</p>;
+}
+
+/**
+ * Says when a connected runtime is too old to enforce the path policy the hub
+ * sends it. Nothing renders for a peer that enforces, and nothing renders while
+ * disconnected — the field is absent then, and `false` would be an accusation
+ * against a machine that has not spoken.
+ */
+function UnenforcedContainment({ view }: { view: RuntimeLifecycleView }) {
+  const { t } = useI18n();
+  if (view.enforcesPathPolicy !== false) return null;
+
+  return (
+    <p
+      className="rounded-lg border border-warning/35 bg-warning/5 px-2 py-1.5 text-[11px] text-on-surface-variant"
+      role="status"
+      data-testid="runtime-unenforced-containment"
+    >
+      {t.environments.entities.runtime.unenforcedContainment}
+    </p>
+  );
 }
 
 /**

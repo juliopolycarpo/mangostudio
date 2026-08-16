@@ -2211,6 +2211,8 @@ export const messages = {
         actionFailed: 'A ação do runtime falhou.',
         stale: 'Desatualizado',
         noHealth: 'Sem health do runtime ainda. Conecte ou instale para ver versão e digest.',
+        unenforcedContainment:
+          'Este runtime é antigo demais para reconferir os caminhos das ferramentas na própria máquina. Um chat restrito ao diretório de trabalho ainda pode ser levado para fora dele por um link simbólico que esteja lá. Atualize o runtime.',
         version: 'v{version}',
         slot: 'slot {slot}',
         digest: '{digest}…',

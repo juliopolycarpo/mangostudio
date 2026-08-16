@@ -49,7 +49,11 @@ import type {
   McpTransport,
 } from '@mangostudio/shared/mcp';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
-import type { RuntimeShellKind } from '@mangostudio/shared/runtime-protocol';
+import type {
+  RuntimePathFilter,
+  RuntimePathPolicyParams,
+  RuntimeShellKind,
+} from '@mangostudio/shared/runtime-protocol';
 import type {
   ListDirectoryResponse,
   WorkdirValidationReason,
@@ -108,23 +112,13 @@ export interface RuntimeMutationResult<T> {
   readonly mutations: readonly RuntimeMutationSnapshot[];
 }
 
-export interface RuntimePathFilter {
-  readonly allowedRoots: readonly string[];
-  readonly deniedRoots: readonly string[];
-  readonly containmentRoot?: string;
-}
-
 /**
  * Path policy the hub decided for a call, carried by every filesystem method.
- *
- * The hub owns the decision — which roots a tool may touch, whether the chat is
- * pinned to its working directory — but only this host can tell where a path
- * actually lands, because only this host can follow the symlinks on the way.
- * Omitted when nothing is configured and nothing is restricted.
+ * Schema-first in `@mangostudio/shared/runtime-protocol`, because it is a wire
+ * shape rather than a runtime-local one; re-exported here so the filesystem
+ * methods below read as one contract.
  */
-export interface RuntimePathPolicyParams {
-  readonly pathPolicy?: RuntimePathFilter;
-}
+export type { RuntimePathFilter, RuntimePathPolicyParams };
 
 export interface RuntimeReadFileParams extends RuntimePathPolicyParams {
   readonly chatId: string;

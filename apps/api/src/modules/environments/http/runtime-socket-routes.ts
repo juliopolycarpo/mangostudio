@@ -367,7 +367,7 @@ export function createRuntimeSocketRoutes(dependencies: RuntimeSocketRouteDepend
       },
     });
     return {
-      client: new RuntimeClient(client, onUnavailable),
+      client: new RuntimeClient(client, onUnavailable, peer.environmentId),
       close(reason) {
         // The manager is releasing this connection, so the socket's own close
         // handler must not turn around and release it again — by then the
