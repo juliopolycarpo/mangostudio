@@ -96,8 +96,15 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
 
   if (!data) return null;
 
-  // Local/in-process and stdio with no actions and no health stay quiet.
-  if (data.actions.length === 0 && !data.manualCommands && !data.health) {
+  // Local/in-process and stdio with no actions and no health stay quiet,
+  // except when a connected peer has already said it will not enforce
+  // containment — that warning is the reason the card exists in that case.
+  if (
+    data.actions.length === 0 &&
+    !data.manualCommands &&
+    !data.health &&
+    data.enforcesPathPolicy !== false
+  ) {
     return null;
   }
 
@@ -251,7 +258,7 @@ function UnenforcedContainment({ view }: { view: RuntimeLifecycleView }) {
 
   return (
     <p
-      className="rounded-md bg-warning/10 px-2 py-1.5 text-[11px] text-warning"
+      className="rounded-lg border border-warning/35 bg-warning/5 px-2 py-1.5 text-[11px] text-on-surface-variant"
       role="status"
       data-testid="runtime-unenforced-containment"
     >

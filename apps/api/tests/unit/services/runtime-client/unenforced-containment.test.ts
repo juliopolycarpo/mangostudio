@@ -10,7 +10,7 @@
  * answer and a line per tool call would bury it.
  */
 
-import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -88,6 +88,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await close?.();
   close = undefined;
+  mock.restore();
   if (previousLogGate === undefined) delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
   else process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousLogGate;
   rmSync(workdir, { recursive: true, force: true });

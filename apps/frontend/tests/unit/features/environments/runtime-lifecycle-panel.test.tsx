@@ -169,6 +169,36 @@ describe('RuntimeLifecyclePanel', () => {
     );
   });
 
+  // stdio has no install buttons and may have no health yet. The card still
+  // has to say the connected peer will not re-check paths, or the warning
+  // exists only for transports that already had something else to show.
+  it('warns about unenforced containment even when the card has nothing else', async () => {
+    const stdio: Environment = {
+      ...WSL,
+      id: 'legacy-stdio',
+      transportKind: 'stdio',
+      config: {},
+      status: { state: 'connected' },
+    };
+    scenario
+      .respondWithJson('GET', '/api/environments/legacy-stdio/runtime', {
+        body: {
+          health: null,
+          readAt: null,
+          stale: false,
+          slotBytes: null,
+          actions: [],
+          enforcesPathPolicy: false,
+        } satisfies RuntimeLifecycleView,
+      })
+      .install();
+    render(<RuntimeLifecyclePanel environment={stdio} />);
+
+    expect(await screen.findByTestId('runtime-unenforced-containment')).toHaveTextContent(
+      labels.unenforcedContainment
+    );
+  });
+
   it.each([
     ['a peer that enforces', true],
     ['a peer that has not connected to answer', undefined],
