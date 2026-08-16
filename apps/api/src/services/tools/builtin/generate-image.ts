@@ -371,14 +371,21 @@ function getSettingsMaxImages(value: unknown): number {
  * malformed; `settingValue` is stored configuration and falls back instead.
  */
 function getImageQuality(argValue: unknown, settingValue: unknown): string {
-  const quality =
-    getOptionalString(argValue, 'quality') ??
-    getStringSetting(settingValue) ??
-    GENERATE_IMAGE_DEFAULT_QUALITY;
-  if (!isQualityOption(quality)) {
-    throw new ToolArgumentError(`Unsupported image quality: "${quality}".`);
+  const requested = getOptionalString(argValue, 'quality');
+  if (requested !== undefined) {
+    if (!isQualityOption(requested)) {
+      throw new ToolArgumentError(`Unsupported image quality: "${requested}".`);
+    }
+    return requested;
   }
-  return quality;
+
+  // A stored preset that no longer names a supported quality — one renamed or
+  // dropped from QUALITY_OPTIONS since it was saved — degrades to the default.
+  // Throwing here would fail every turn, not just this call: the settings
+  // normalizer also runs from `buildGenerateImageToolDefinition`, while the
+  // turn's tool definitions are still being assembled.
+  const stored = getStringSetting(settingValue);
+  return stored !== undefined && isQualityOption(stored) ? stored : GENERATE_IMAGE_DEFAULT_QUALITY;
 }
 
 function buildImageIds(count: number, providedIds: string[] | undefined): string[] {

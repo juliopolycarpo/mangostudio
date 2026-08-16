@@ -139,6 +139,25 @@ describe('generate_image tool planning', () => {
     expect(plan.requestedModel).toBeUndefined();
   });
 
+  it('falls back to the default when a stored quality is no longer a supported option', () => {
+    // A preset saved before a quality was renamed or dropped is stale config,
+    // not model output, so it degrades rather than throwing.
+    const plan = createGenerateImageToolPlan(
+      { prompt: 'Paint' },
+      { toolCallId: 'tool-4d', parameters: { defaultQuality: '8K' } }
+    );
+
+    expect(plan.quality).toBe(GENERATE_IMAGE_DEFAULT_QUALITY);
+  });
+
+  it('still builds a definition when a stored quality is no longer supported', () => {
+    // The same normalizer runs while the turn's tool definitions are assembled:
+    // throwing here would fail the whole turn, not just one call.
+    expect(() =>
+      buildGenerateImageToolDefinition({ enabled: true, parameters: { defaultQuality: '8K' } })
+    ).not.toThrow();
+  });
+
   it('rejects invalid model quality when letAiDecideQuality is enabled', () => {
     expect(() =>
       createGenerateImageToolPlan(
