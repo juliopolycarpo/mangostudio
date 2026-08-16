@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   isStrictCompatible,
+  toolDefsToGeminiInteractions,
   toolDefsToResponsesAPI,
+  toPlainJsonSchema,
 } from '../../../../src/services/providers/core/tool-mapper';
 import type { ToolDefinition } from '../../../../src/services/providers/types';
 import { registerTools } from '../../../../src/services/tools/register-tools';
@@ -248,5 +250,120 @@ describe('isStrictCompatible', () => {
     expect(isStrictCompatible({ type: 'string' } as unknown as ToolDefinition['parameters'])).toBe(
       false
     );
+  });
+});
+
+describe('toPlainJsonSchema', () => {
+  it('collapses a nullable union and drops the key from required', () => {
+    expect(
+      toPlainJsonSchema({
+        type: 'object',
+        properties: { a: { type: 'string' }, b: { type: ['string', 'null'] } },
+        required: ['a', 'b'],
+        additionalProperties: false,
+      })
+    ).toEqual({
+      type: 'object',
+      properties: { a: { type: 'string' }, b: { type: 'string' } },
+      required: ['a'],
+      additionalProperties: false,
+    });
+  });
+
+  it('drops null from an enum without emptying it', () => {
+    expect(
+      toPlainJsonSchema({
+        type: 'object',
+        properties: { mode: { type: ['string', 'null'], enum: ['fast', 'slow', null] } },
+        required: ['mode'],
+        additionalProperties: false,
+      })
+    ).toMatchObject({
+      properties: { mode: { type: 'string', enum: ['fast', 'slow'] } },
+      required: [],
+    });
+  });
+
+  it('converts nested objects and array items', () => {
+    expect(
+      toPlainJsonSchema({
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { label: { type: 'string' }, note: { type: ['string', 'null'] } },
+              required: ['label', 'note'],
+              additionalProperties: false,
+            },
+          },
+          child: {
+            type: ['object', 'null'],
+            properties: { value: { type: 'string' } },
+            required: ['value'],
+            additionalProperties: false,
+          },
+        },
+        required: ['items', 'child'],
+        additionalProperties: false,
+      })
+    ).toMatchObject({
+      properties: {
+        items: { items: { properties: { note: { type: 'string' } }, required: ['label'] } },
+        child: { type: 'object' },
+      },
+      required: ['items'],
+    });
+  });
+
+  it('leaves a schema without nullable keys unchanged', () => {
+    const schema = {
+      type: 'object',
+      properties: { a: { type: 'string', enum: ['x'] } },
+      required: ['a'],
+      additionalProperties: false,
+    };
+
+    expect(toPlainJsonSchema(schema)).toEqual(schema);
+  });
+
+  it('does not read a properties map key as a schema keyword', () => {
+    expect(
+      toPlainJsonSchema({
+        type: 'object',
+        properties: { type: { type: ['string', 'null'] }, enum: { type: 'string' } },
+        required: ['type', 'enum'],
+        additionalProperties: false,
+      })
+    ).toMatchObject({
+      properties: { type: { type: 'string' }, enum: { type: 'string' } },
+      required: ['enum'],
+    });
+  });
+
+  it('sends every registered tool to Gemini free of union types and null enums', () => {
+    // Gemini takes a subset of OpenAPI, where `type` is one value.
+    const offenders: string[] = [];
+    const walk = (node: unknown, path: string): void => {
+      if (Array.isArray(node)) {
+        for (const [index, item] of node.entries()) walk(item, `${path}[${index}]`);
+        return;
+      }
+      if (!node || typeof node !== 'object') return;
+      for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === 'type' && Array.isArray(value)) offenders.push(`${path}.type`);
+        if (key === 'enum' && Array.isArray(value) && value.includes(null)) {
+          offenders.push(`${path}.enum`);
+        }
+        if (key !== 'description') walk(value, `${path}.${key}`);
+      }
+    };
+
+    for (const tool of toolDefsToGeminiInteractions(getAllTools().map((t) => t.definition))) {
+      walk(tool.parameters, tool.name);
+    }
+
+    expect(offenders).toEqual([]);
   });
 });

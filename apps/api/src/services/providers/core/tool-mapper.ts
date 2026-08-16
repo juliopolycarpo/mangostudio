@@ -19,9 +19,74 @@ export function toolDefsToChatCompletions(defs: ToolDefinition[]): OpenAI.ChatCo
     function: {
       name: def.name,
       description: def.description,
-      parameters: def.parameters,
+      parameters: toPlainJsonSchema(def.parameters),
     },
   }));
+}
+
+/**
+ * Rewrites a strict-subset schema as plain JSON Schema.
+ *
+ * A tool's `parameters` are stored in the dialect OpenAI Responses' strict mode
+ * demands: an optional argument is spelled as a nullable type union
+ * (`['string', 'null']`) and kept in `required`. That spelling is a provider
+ * requirement, not a description of the tool, and only the Responses path wants
+ * it. Gemini validates function declarations against the OpenAPI subset, where
+ * `type` is a single value rather than a union; Anthropic accepts the union but
+ * would be told every optional argument is mandatory.
+ *
+ * Both read the plain form instead: `null` dropped from the union and from
+ * `enum`, and the key dropped from `required`. Length bounds cannot be restored
+ * here — they are absent from the stored schema — and stay enforced by the
+ * executor.
+ */
+export function toPlainJsonSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const plain = plainSchemaNode(schema);
+  return isPlainObject(plain) ? plain : schema;
+}
+
+function plainSchemaNode(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(plainSchemaNode);
+  if (!isPlainObject(node)) return node;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'type') {
+      result[key] = withoutNullType(value);
+    } else if (key === 'enum' && Array.isArray(value)) {
+      const kept = value.filter((entry) => entry !== null);
+      result[key] = kept.length > 0 ? kept : value;
+    } else if (key === 'properties' && isPlainObject(value)) {
+      // Recurse through the map's values, never its keys: those are argument
+      // names, and one may collide with a schema keyword.
+      result[key] = Object.fromEntries(
+        Object.entries(value).map(([name, sub]) => [name, plainSchemaNode(sub)])
+      );
+    } else {
+      result[key] = plainSchemaNode(value);
+    }
+  }
+
+  const properties = node.properties;
+  if (Array.isArray(node.required) && isPlainObject(properties)) {
+    result.required = node.required.filter((name) => !isNullableSchema(properties[String(name)]));
+  }
+  return result;
+}
+
+/**
+ * Collapses `['string', 'null']` to `'string'`. A union that carries no `null`,
+ * or one that would be emptied by the removal, is left as it is.
+ */
+function withoutNullType(type: unknown): unknown {
+  if (!Array.isArray(type)) return type;
+  const kept = type.filter((entry) => entry !== 'null');
+  if (kept.length === 0) return type;
+  return kept.length === 1 ? kept[0] : kept;
+}
+
+function isNullableSchema(schema: unknown): boolean {
+  return isPlainObject(schema) && Array.isArray(schema.type) && schema.type.includes('null');
 }
 
 /**
@@ -137,6 +202,9 @@ export function toolDefsToResponsesAPI(defs: ToolDefinition[]): Array<Record<str
 
 /**
  * Converts internal ToolDefinitions to the Gemini Interactions API tool format.
+ *
+ * Gemini takes only a subset of OpenAPI, so the schemas are down-converted from
+ * the strict dialect first (see `toPlainJsonSchema`).
  */
 export function toolDefsToGeminiInteractions(
   defs: ToolDefinition[]
@@ -145,6 +213,6 @@ export function toolDefsToGeminiInteractions(
     type: 'function' as const,
     name: def.name,
     description: def.description,
-    parameters: def.parameters,
+    parameters: toPlainJsonSchema(def.parameters),
   }));
 }
