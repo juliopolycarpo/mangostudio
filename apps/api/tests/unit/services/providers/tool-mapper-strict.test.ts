@@ -1,11 +1,17 @@
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   isStrictCompatible,
   toolDefsToResponsesAPI,
 } from '../../../../src/services/providers/core/tool-mapper';
 import type { ToolDefinition } from '../../../../src/services/providers/types';
 import { registerTools } from '../../../../src/services/tools/register-tools';
-import { clearRegistry, getAllTools, getTool } from '../../../../src/services/tools/registry';
+import {
+  clearRegistry,
+  getAllTools,
+  getTool,
+  registerTool,
+} from '../../../../src/services/tools/registry';
+import type { RegisteredTool } from '../../../../src/services/tools/types';
 import { expectedToolNames } from '../../../support/registration-expectations';
 
 function parametersOf(name: string): Record<string, unknown> {
@@ -14,14 +20,32 @@ function parametersOf(name: string): Record<string, unknown> {
   return tool.definition.parameters as Record<string, unknown>;
 }
 
-beforeAll(() => {
+function snapshotRegistry(): RegisteredTool[] {
+  return getAllTools().map((tool) => ({
+    definition: { ...tool.definition },
+    settings: { ...tool.settings, parameterDescriptors: [...tool.settings.parameterDescriptors] },
+    execute: tool.execute,
+    buildDefinition: tool.buildDefinition,
+  }));
+}
+
+function restoreRegistry(snapshot: RegisteredTool[]): void {
+  clearRegistry();
+  for (const tool of snapshot) {
+    registerTool(tool);
+  }
+}
+
+let snapshot: RegisteredTool[];
+
+beforeEach(() => {
+  snapshot = snapshotRegistry();
   clearRegistry();
   registerTools();
 });
 
-afterAll(() => {
-  clearRegistry();
-  registerTools();
+afterEach(() => {
+  restoreRegistry(snapshot);
 });
 
 describe('built-in tools enter OpenAI strict function-tool mode', () => {
@@ -96,6 +120,78 @@ describe('isStrictCompatible', () => {
           nested: { type: 'object', properties: { a: { type: 'string' } }, required: ['a'] },
         },
         required: ['nested'],
+        additionalProperties: false,
+      })
+    ).toBe(false);
+  });
+
+  it('rejects a nested nullable object that allows additional properties', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: {
+          child: {
+            type: ['object', 'null'],
+            properties: { value: { type: 'string' } },
+            required: ['value'],
+            additionalProperties: true,
+          },
+        },
+        required: ['child'],
+        additionalProperties: false,
+      })
+    ).toBe(false);
+  });
+
+  it('rejects a nested nullable object with a property left out of required', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: {
+          child: {
+            type: ['object', 'null'],
+            properties: { value: { type: 'string' } },
+            required: [],
+            additionalProperties: false,
+          },
+        },
+        required: ['child'],
+        additionalProperties: false,
+      })
+    ).toBe(false);
+  });
+
+  it('accepts a nested nullable object that is itself strict', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: {
+          child: {
+            type: ['object', 'null'],
+            properties: { value: { type: 'string' } },
+            required: ['value'],
+            additionalProperties: false,
+          },
+        },
+        required: ['child'],
+        additionalProperties: false,
+      })
+    ).toBe(true);
+  });
+
+  it('rejects an array used as a properties map', () => {
+    expect(
+      isStrictCompatible({
+        type: 'object',
+        properties: {
+          child: {
+            type: 'object',
+            properties: [],
+            required: [],
+            additionalProperties: false,
+          },
+        },
+        required: ['child'],
         additionalProperties: false,
       })
     ).toBe(false);

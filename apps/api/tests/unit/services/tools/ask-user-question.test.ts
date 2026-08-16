@@ -5,6 +5,7 @@ import { collectToolExecutionResult } from '../../../../src/modules/generation/a
 import type { StreamEvent } from '../../../../src/modules/generation/application/stream-text-turn-types';
 import { isStrictCompatible } from '../../../../src/services/providers/core/tool-mapper';
 import { executeTool, getTool } from '../../../../src/services/tools';
+import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 import {
   ASK_USER_QUESTION_TOOL_NAME,
   parseAskUserQuestionArgs,
@@ -116,9 +117,11 @@ describe('ask_user_question tool', () => {
     ],
     ['missing questions entirely', {}],
   ])('rejects %s with a descriptive error', async (_name, args) => {
-    await expect(executeTool(ASK_USER_QUESTION_TOOL_NAME, args, context)).rejects.toThrow(
-      /Invalid ask_user_question arguments/
+    const error = await executeTool(ASK_USER_QUESTION_TOOL_NAME, args, context).catch(
+      (thrown: unknown) => thrown
     );
+    expect(error).toBeInstanceOf(ToolArgumentError);
+    expect((error as Error).message).toMatch(/Invalid ask_user_question arguments/);
   });
 
   it('points the model at the field that failed', async () => {

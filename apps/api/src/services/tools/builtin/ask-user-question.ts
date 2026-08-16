@@ -16,7 +16,7 @@ import {
   QUESTION_MIN_OPTIONS,
 } from '@mangostudio/shared/questions';
 import Value from 'typebox/value';
-import { stripNullOptionals } from '../arg-parsing';
+import { stripNullOptionals, ToolArgumentError } from '../arg-parsing';
 import { registerTool } from '../registry';
 
 export { ASK_USER_QUESTION_TOOL_NAME };
@@ -118,7 +118,7 @@ export function parseAskUserQuestionArgs(args: Record<string, unknown>): AskUser
       Value.Errors(AskUserQuestionArgsSchema, normalized),
       'invalid payload'
     );
-    throw new Error(
+    throw new ToolArgumentError(
       `Invalid ask_user_question arguments (${detail}). Provide 1-${ASK_USER_QUESTION_MAX_QUESTIONS} questions, ` +
         `each with ${QUESTION_MIN_OPTIONS}-${QUESTION_MAX_OPTIONS} labeled options.`
     );

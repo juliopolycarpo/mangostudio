@@ -62,17 +62,32 @@ function isStrictNode(node: unknown): boolean {
   const obj = node as Record<string, unknown>;
   if (UNSUPPORTED_STRICT_KEYWORDS.some((keyword) => keyword in obj)) return false;
 
-  if (obj.type === 'object') {
+  if (isObjectSchemaType(obj.type)) {
     if (obj.additionalProperties !== false) return false;
     const properties = obj.properties;
     if (properties !== undefined) {
-      if (typeof properties !== 'object' || properties === null) return false;
+      // `typeof [] === 'object'`, and Object.keys on an array is `['0', ...]`,
+      // which can vacuously match a `required` list. A properties map has to
+      // be a plain object.
+      if (typeof properties !== 'object' || properties === null || Array.isArray(properties)) {
+        return false;
+      }
       const required = new Set(Array.isArray(obj.required) ? obj.required : []);
       if (!Object.keys(properties).every((key) => required.has(key))) return false;
     }
   }
 
   return Object.values(obj).every(isStrictNode);
+}
+
+/**
+ * Strict object rules apply to `type: 'object'` and to a type union that
+ * includes it (`['object', 'null']`). The latter is how an optional nested
+ * object is spelled; skipping it would send `additionalProperties: true` or a
+ * missing `required` key with `strict: true`.
+ */
+function isObjectSchemaType(type: unknown): boolean {
+  return type === 'object' || (Array.isArray(type) && type.includes('object'));
 }
 
 /**

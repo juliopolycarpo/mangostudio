@@ -1,14 +1,35 @@
-import { beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { GetCurrentDatetimeResult } from '../../../../src/services/tools/builtin/get-current-datetime';
 import { register as registerGetCurrentDatetimeTool } from '../../../../src/services/tools/builtin/get-current-datetime';
-import { clearRegistry, executeTool } from '../../../../src/services/tools/registry';
-import type { ToolContext } from '../../../../src/services/tools/types';
+import {
+  clearRegistry,
+  executeTool,
+  getAllTools,
+  registerTool,
+} from '../../../../src/services/tools/registry';
+import type { RegisteredTool, ToolContext } from '../../../../src/services/tools/types';
 import { REJECTED_STRING_ARGUMENTS } from './support/tool-registry-harness';
 
 const TOOL_NAME = 'get_current_datetime';
 
 function context(parameters: Record<string, unknown> = {}): ToolContext {
   return { userId: 'u1', chatId: 'c1', parameters };
+}
+
+function snapshotRegistry(): RegisteredTool[] {
+  return getAllTools().map((tool) => ({
+    definition: { ...tool.definition },
+    settings: { ...tool.settings, parameterDescriptors: [...tool.settings.parameterDescriptors] },
+    execute: tool.execute,
+    buildDefinition: tool.buildDefinition,
+  }));
+}
+
+function restoreRegistry(snapshot: RegisteredTool[]): void {
+  clearRegistry();
+  for (const tool of snapshot) {
+    registerTool(tool);
+  }
 }
 
 function run(
@@ -21,9 +42,16 @@ function run(
   }) as Promise<GetCurrentDatetimeResult>;
 }
 
+let snapshot: RegisteredTool[];
+
 beforeEach(() => {
+  snapshot = snapshotRegistry();
   clearRegistry();
   registerGetCurrentDatetimeTool();
+});
+
+afterEach(() => {
+  restoreRegistry(snapshot);
 });
 
 describe('get_current_datetime registry contract', () => {
