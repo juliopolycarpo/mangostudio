@@ -43,38 +43,36 @@ export function toolDefsToChatCompletions(defs: ToolDefinition[]): OpenAI.ChatCo
 export function isStrictCompatible(schema: Record<string, unknown> | undefined | null): boolean {
   if (!schema || typeof schema !== 'object') return false;
   if (schema.type !== 'object') return false;
-  if (hasUnsupportedStrictKeywords(schema)) return false;
-  return hasCompleteRequired(schema);
+  return isStrictNode(schema);
 }
 
 /**
- * Checks required-completeness for every object schema reachable from `node`.
+ * Applies every strict rule to each schema node reachable from `node`, in one
+ * traversal.
  *
- * A nested object with an optional key is rejected by the provider just as a
- * top-level one is, so `ask_user_question`-shaped schemas cannot be validated
- * by inspecting the top level alone.
+ * A nested object with an optional key — or an unsupported keyword buried in
+ * one — is rejected by the provider just as a top-level one is, so
+ * `ask_user_question`-shaped schemas cannot be validated by inspecting the top
+ * level alone.
  */
-function hasCompleteRequired(node: unknown): boolean {
+function isStrictNode(node: unknown): boolean {
   if (!node || typeof node !== 'object') return true;
-  if (Array.isArray(node)) return node.every(hasCompleteRequired);
+  if (Array.isArray(node)) return node.every(isStrictNode);
 
   const obj = node as Record<string, unknown>;
+  if (UNSUPPORTED_STRICT_KEYWORDS.some((keyword) => keyword in obj)) return false;
+
   if (obj.type === 'object') {
     if (obj.additionalProperties !== false) return false;
     const properties = obj.properties;
-    if (properties !== undefined && (typeof properties !== 'object' || properties === null)) {
-      return false;
-    }
-    const propertyKeys =
-      properties && typeof properties === 'object' ? Object.keys(properties) : [];
-    const required = Array.isArray(obj.required) ? (obj.required as unknown[]) : [];
-    const requiredSet = new Set(required.filter((k): k is string => typeof k === 'string'));
-    for (const key of propertyKeys) {
-      if (!requiredSet.has(key)) return false;
+    if (properties !== undefined) {
+      if (typeof properties !== 'object' || properties === null) return false;
+      const required = new Set(Array.isArray(obj.required) ? obj.required : []);
+      if (!Object.keys(properties).every((key) => required.has(key))) return false;
     }
   }
 
-  return Object.values(obj).every(hasCompleteRequired);
+  return Object.values(obj).every(isStrictNode);
 }
 
 /**
@@ -95,21 +93,6 @@ const UNSUPPORTED_STRICT_KEYWORDS = [
   'minLength',
   'maxLength',
 ] as const;
-
-function hasUnsupportedStrictKeywords(node: unknown): boolean {
-  if (!node || typeof node !== 'object') return false;
-  if (Array.isArray(node)) {
-    return node.some((item) => hasUnsupportedStrictKeywords(item));
-  }
-  const obj = node as Record<string, unknown>;
-  for (const keyword of UNSUPPORTED_STRICT_KEYWORDS) {
-    if (keyword in obj) return true;
-  }
-  for (const value of Object.values(obj)) {
-    if (hasUnsupportedStrictKeywords(value)) return true;
-  }
-  return false;
-}
 
 /**
  * Converts internal ToolDefinitions to the OpenAI Responses API tool format.

@@ -16,6 +16,7 @@ import {
   QUESTION_MIN_OPTIONS,
 } from '@mangostudio/shared/questions';
 import Value from 'typebox/value';
+import { stripNullOptionals } from '../arg-parsing';
 import { registerTool } from '../registry';
 
 export { ASK_USER_QUESTION_TOOL_NAME };
@@ -123,25 +124,6 @@ export function parseAskUserQuestionArgs(args: Record<string, unknown>): AskUser
     );
   }
   return normalized;
-}
-
-/**
- * Drops `null`-valued keys so an explicitly-null optional reads as absent.
- *
- * The schema advertises optionals as `["string", "null"]` to stay inside the
- * provider strict subset, which is a wire-format concern only: `QuestionSpec`
- * keeps its plain optional keys, so nothing downstream has to spell `| null`.
- *
- * // Usage: const normalized = stripNullOptionals(args);
- */
-function stripNullOptionals(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stripNullOptionals);
-  if (!value || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([, entry]) => entry !== null)
-      .map(([key, entry]) => [key, stripNullOptionals(entry)])
-  );
 }
 
 /** Registers this built-in tool. // Usage: register() */

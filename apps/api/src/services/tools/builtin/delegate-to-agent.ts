@@ -75,7 +75,16 @@ export function register(): void {
   });
 }
 
-function parseDelegateArgs(args: Record<string, unknown>): DelegateToAgentInput {
+/**
+ * Parses the raw `delegate_to_agent` arguments.
+ *
+ * Exported because the in-turn delegation path parses the same tool call
+ * without going through this executor; sharing the parse keeps the two from
+ * disagreeing about the same arguments.
+ *
+ * // Usage: const input = parseDelegateArgs(args);
+ */
+export function parseDelegateArgs(args: Record<string, unknown>): DelegateToAgentInput {
   const agentId = getRequiredString(args.agentId, 'agentId');
   const task = getRequiredString(args.task, 'task');
   const context = getOptionalString(args.context, 'context');

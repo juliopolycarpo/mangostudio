@@ -168,7 +168,7 @@ function execute(args: Record<string, unknown>, context: ToolContext): Promise<G
       pattern,
       ...(path ? { path } : {}),
       ...(glob ? { glob } : {}),
-      caseInsensitive: caseInsensitive === true,
+      caseInsensitive: caseInsensitive ?? false,
     },
     context
   );

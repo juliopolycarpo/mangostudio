@@ -115,6 +115,30 @@ export function getBoundedOptionalInteger(
 }
 
 /**
+ * Drops `null`-valued keys, at any depth, so an explicitly-null optional reads
+ * as absent.
+ *
+ * The object-level counterpart of the `null`-is-absent branch the scalar
+ * readers above apply: tools that validate their arguments through a shared
+ * TypeBox schema rather than these helpers normalize with this first. The
+ * schema advertises optionals as `["string", "null"]` to stay inside the
+ * provider strict subset, which is a wire-format concern only — the shared
+ * contracts keep their plain optional keys, so nothing downstream has to spell
+ * `| null`.
+ *
+ * // Usage: const normalized = stripNullOptionals(args);
+ */
+export function stripNullOptionals(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripNullOptionals);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, entry]) => entry !== null)
+      .map(([key, entry]) => [key, stripNullOptionals(entry)])
+  );
+}
+
+/**
  * Reads an optional string *setting*, coercing anything else to "unset".
  *
  * Deliberately laxer than `getOptionalString`: settings are stored
