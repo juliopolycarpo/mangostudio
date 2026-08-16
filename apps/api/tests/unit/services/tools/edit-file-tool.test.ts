@@ -282,6 +282,18 @@ describe('edit_file argument handling', () => {
     expect(await Bun.file(filePath).text()).toBe('keep');
   });
 
+  it('reads an explicit null replaceAll as absent', async () => {
+    const filePath = await seedAndRead('raw-null-replace-all.txt', 'keep');
+
+    await executeTool(
+      'edit_file',
+      { path: filePath, oldString: 'keep', newString: 'kept', replaceAll: null },
+      makeContext()
+    );
+
+    expect(await Bun.file(filePath).text()).toBe('kept');
+  });
+
   it('rejects a relative path without a workdir', async () => {
     const relativePath = `edit-file-no-workdir-${crypto.randomUUID()}.txt`;
 

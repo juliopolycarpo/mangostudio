@@ -64,39 +64,78 @@ export function getRequiredInteger(value: unknown, name: string): number {
 
 /**
  * Reads an optional boolean argument, distinguishing "absent" from "not a
- * boolean" so a truthy string never silently enables a flag.
+ * boolean" so a truthy string never silently enables a flag. `null` reads as
+ * absent: that is how the strict-mode schemas spell an omitted argument.
  *
  * // Usage: const replaceAll = getOptionalBoolean(args.replaceAll, 'replaceAll');
  */
 export function getOptionalBoolean(value: unknown, name: string): boolean | undefined {
-  if (value === undefined) return undefined;
+  if (value === undefined || value === null) return undefined;
   if (typeof value !== 'boolean') {
     throw new ToolArgumentError(`Field "${name}" must be a boolean.`);
   }
   return value;
 }
 
-export function getOptionalString(value: unknown): string | undefined {
-  const text = typeof value === 'string' ? value.trim() : '';
-  return text || undefined;
+/**
+ * Reads an optional string argument, rejecting a non-string rather than
+ * reading it as absent: a model that sends `{"path": 42}` and gets the working
+ * directory back believes it listed the directory it named. `null` reads as
+ * absent, matching the nullable-optional schema convention.
+ *
+ * // Usage: const path = getOptionalString(args.path, 'path');
+ */
+export function getOptionalString(value: unknown, name: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    throw new ToolArgumentError(`Field "${name}" must be a string.`);
+  }
+  return value.trim() || undefined;
 }
 
+/**
+ * Reads an optional integer argument and clamps it into `bounds`. Clamping and
+ * rounding are deliberately split: bounding `5e9` down to a ceiling keeps a
+ * usable request usable, but rounding `2.6` to `3` reads a line the caller
+ * never asked for — the case `getRequiredInteger` calls a bug rather than an
+ * input to clamp.
+ *
+ * // Usage: const startLine = getBoundedOptionalInteger(args.startLine, 'startLine', bounds);
+ */
 export function getBoundedOptionalInteger(
   value: unknown,
   name: string,
   bounds: { min: number; max: number }
 ): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
-    throw new ToolArgumentError(`Field "${name}" must be a finite number.`);
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new ToolArgumentError(`Field "${name}" must be an integer.`);
   }
-  return Math.max(bounds.min, Math.min(bounds.max, Math.round(value)));
+  return Math.max(bounds.min, Math.min(bounds.max, value));
+}
+
+/**
+ * Reads an optional string *setting*, coercing anything else to "unset".
+ *
+ * Deliberately laxer than `getOptionalString`: settings are stored
+ * configuration, not model output, so a bad value falls back to the default
+ * instead of failing the tool call the user is waiting on.
+ *
+ * // Usage: const defaultModel = getStringSetting(parameters.defaultModel);
+ */
+export function getStringSetting(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.trim() || undefined;
 }
 
 /**
  * Clamps an unknown value to an integer inside [min, max], falling back to
  * `fallback` for non-numeric or non-finite input. Shared by tool settings
  * normalizers so bounds semantics never drift between tools.
+ *
+ * Rounds where `getBoundedOptionalInteger` rejects, for the same reason
+ * `getStringSetting` coerces: this reads a stored setting, not a model
+ * argument, and there is no one to hand a correctable error to.
  *
  * // Usage: clampIntegerSetting(parameters.maxResults, 100, 1, 5000)
  */

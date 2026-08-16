@@ -601,13 +601,21 @@ describe('read_file registry contract', () => {
     );
   });
 
-  it('rounds a fractional startLine rather than truncating it', async () => {
+  it('rejects a fractional startLine rather than rounding to a line nobody asked for', async () => {
     const filePath = await seedLines(5);
 
-    const result = await read({ path: filePath, startLine: 2.6 });
+    await expect(read({ path: filePath, startLine: 2.6 })).rejects.toThrow(
+      'Field "startLine" must be an integer.'
+    );
+  });
 
-    expect(result.startLine).toBe(3);
-    expect(result.content).toContain(numbered(3, 'line 3'));
+  it('reads an explicit null startLine and maxLines as absent', async () => {
+    const filePath = await seedLines(3);
+
+    const result = await read({ path: filePath, startLine: null, maxLines: null });
+
+    expect(result.startLine).toBe(1);
+    expect(result.endLine).toBe(3);
   });
 
   it('clamps maxLines up to the lower bound', async () => {
@@ -631,6 +639,7 @@ describe('read_file registry contract', () => {
   for (const [label, args] of [
     ['a non-numeric startLine', { startLine: '2' }],
     ['a NaN startLine', { startLine: Number.NaN }],
+    ['a fractional maxLines', { maxLines: 10.5 }],
     ['a non-numeric maxLines', { maxLines: '10' }],
     ['an infinite maxLines', { maxLines: Number.POSITIVE_INFINITY }],
   ] as const) {
@@ -639,7 +648,7 @@ describe('read_file registry contract', () => {
       const field = 'startLine' in args ? 'startLine' : 'maxLines';
 
       await expect(read({ path: filePath, ...args })).rejects.toThrow(
-        `Field "${field}" must be a finite number.`
+        `Field "${field}" must be an integer.`
       );
     });
   }

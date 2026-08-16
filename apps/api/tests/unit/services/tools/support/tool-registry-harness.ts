@@ -28,6 +28,29 @@ export const EMPTY_STRING_ARGUMENTS = [
   ['whitespace only', '   '],
 ] as const;
 
+/**
+ * Values an *optional* string argument reads as absent. `null` is how the
+ * strict-mode schemas spell an omitted argument, and a string that trims away
+ * carries no instruction to act on.
+ */
+export const ABSENT_STRING_ARGUMENTS = [
+  ['null', null],
+  ['an empty string', ''],
+  ['whitespace only', '   '],
+] as const;
+
+/**
+ * Values an *optional* string argument rejects rather than reading as absent.
+ * Falling back to a default here answers a question the model never asked —
+ * `list_directory({path: 42})` returning the workdir reads to the model as a
+ * successful listing of the directory it named.
+ */
+export const REJECTED_STRING_ARGUMENTS = [
+  ['a number', 42],
+  ['a boolean', true],
+  ['an object', {}],
+] as const;
+
 export interface ToolRegistryHarness {
   /** Temp directory recreated before every test in the enclosing describe. */
   readonly dir: string;

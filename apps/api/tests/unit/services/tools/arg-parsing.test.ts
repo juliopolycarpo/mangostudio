@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  clampIntegerSetting,
   getBoundedOptionalInteger,
   getOptionalBoolean,
   getOptionalString,
   getRequiredInteger,
   getRequiredString,
   getRequiredTextArg,
+  getStringSetting,
 } from '../../../../src/services/tools/arg-parsing';
 
 describe('getRequiredString', () => {
@@ -61,14 +63,18 @@ describe('getRequiredInteger', () => {
 });
 
 describe('getOptionalBoolean', () => {
-  it('returns undefined only when the field is absent', () => {
+  it('reads absent and null alike as "no value"', () => {
     expect(getOptionalBoolean(undefined, 'replaceAll')).toBeUndefined();
+    expect(getOptionalBoolean(null, 'replaceAll')).toBeUndefined();
+  });
+
+  it('returns booleans unchanged', () => {
     expect(getOptionalBoolean(false, 'replaceAll')).toBe(false);
     expect(getOptionalBoolean(true, 'replaceAll')).toBe(true);
   });
 
   it('rejects truthy stand-ins instead of coercing them', () => {
-    for (const value of ['true', 1, null]) {
+    for (const value of ['true', 'false', 1, 0, {}]) {
       expect(() => getOptionalBoolean(value, 'replaceAll')).toThrow(
         'Field "replaceAll" must be a boolean.'
       );
@@ -77,65 +83,70 @@ describe('getOptionalBoolean', () => {
 });
 
 describe('getOptionalString', () => {
+  it('reads absent and null alike as "no value"', () => {
+    expect(getOptionalString(undefined, 'path')).toBeUndefined();
+    expect(getOptionalString(null, 'path')).toBeUndefined();
+  });
+
   it('returns the trimmed string value', () => {
-    expect(getOptionalString('  hello  ')).toBe('hello');
+    expect(getOptionalString('  hello  ', 'path')).toBe('hello');
   });
 
-  it('returns undefined for an empty string', () => {
-    expect(getOptionalString('   ')).toBeUndefined();
+  it('reads a blank string as "no value"', () => {
+    expect(getOptionalString('   ', 'path')).toBeUndefined();
   });
 
-  it('returns undefined for a non-string value', () => {
-    expect(getOptionalString(42)).toBeUndefined();
-  });
-
-  it('returns undefined for null', () => {
-    expect(getOptionalString(null)).toBeUndefined();
-  });
-
-  it('returns undefined for undefined', () => {
-    expect(getOptionalString(undefined)).toBeUndefined();
+  it('rejects a non-string instead of reading it as absent', () => {
+    for (const value of [42, true, [], {}]) {
+      expect(() => getOptionalString(value, 'path')).toThrow('Field "path" must be a string.');
+    }
   });
 });
 
 describe('getBoundedOptionalInteger', () => {
   const bounds = { min: 1, max: 10 };
 
-  it('returns undefined when value is undefined', () => {
+  it('reads absent and null alike as "no value"', () => {
     expect(getBoundedOptionalInteger(undefined, 'count', bounds)).toBeUndefined();
+    expect(getBoundedOptionalInteger(null, 'count', bounds)).toBeUndefined();
   });
 
-  it('throws when value is not a number', () => {
-    expect(() => getBoundedOptionalInteger('abc', 'count', bounds)).toThrow(
-      'Field "count" must be a finite number.'
-    );
-  });
-
-  it('throws when value is NaN', () => {
-    expect(() => getBoundedOptionalInteger(NaN, 'count', bounds)).toThrow(
-      'Field "count" must be a finite number.'
-    );
-  });
-
-  it('throws when value is Infinity', () => {
-    expect(() => getBoundedOptionalInteger(Infinity, 'count', bounds)).toThrow(
-      'Field "count" must be a finite number.'
-    );
-  });
-
-  it('returns the value clamped to min', () => {
-    expect(getBoundedOptionalInteger(0, 'count', bounds)).toBe(1);
-  });
-
-  it('returns the value clamped to max', () => {
-    expect(getBoundedOptionalInteger(20, 'count', bounds)).toBe(10);
-  });
-
-  it('returns the value as-is when within bounds', () => {
+  it('returns an in-range integer unchanged', () => {
     expect(getBoundedOptionalInteger(5, 'count', bounds)).toBe(5);
   });
 
-  it('rounds float values before clamping', () => {
-    expect(getBoundedOptionalInteger(5.7, 'count', bounds)).toBe(6);
+  it('clamps an out-of-range integer to the nearest bound', () => {
+    expect(getBoundedOptionalInteger(0, 'count', bounds)).toBe(1);
+    expect(getBoundedOptionalInteger(20, 'count', bounds)).toBe(10);
+  });
+
+  it('rejects a fraction rather than rounding it to a value nobody asked for', () => {
+    for (const value of [5.7, 2.6, -0.5]) {
+      expect(() => getBoundedOptionalInteger(value, 'count', bounds)).toThrow(
+        'Field "count" must be an integer.'
+      );
+    }
+  });
+
+  it('rejects non-numbers and non-finite values', () => {
+    for (const value of ['abc', '5', true, NaN, Infinity, -Infinity, {}]) {
+      expect(() => getBoundedOptionalInteger(value, 'count', bounds)).toThrow(
+        'Field "count" must be an integer.'
+      );
+    }
+  });
+});
+
+describe('setting readers stay lax where argument readers reject', () => {
+  it('coerces a malformed string setting to "unset" rather than failing the call', () => {
+    expect(getStringSetting('  gpt-image-1  ')).toBe('gpt-image-1');
+    expect(getStringSetting('   ')).toBeUndefined();
+    expect(getStringSetting(42)).toBeUndefined();
+    expect(getStringSetting(null)).toBeUndefined();
+  });
+
+  it('rounds and clamps a numeric setting rather than rejecting it', () => {
+    expect(clampIntegerSetting(5.7, 100, 1, 10)).toBe(6);
+    expect(clampIntegerSetting('nope', 100, 1, 5000)).toBe(100);
   });
 });

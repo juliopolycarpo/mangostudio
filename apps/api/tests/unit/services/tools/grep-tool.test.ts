@@ -18,8 +18,9 @@ import {
 import { executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import {
-  EMPTY_STRING_ARGUMENTS,
+  ABSENT_STRING_ARGUMENTS,
   NON_STRING_ARGUMENTS,
+  REJECTED_STRING_ARGUMENTS,
   useToolRegistry,
 } from './support/tool-registry-harness';
 
@@ -281,7 +282,7 @@ describe('grep registry contract', () => {
     ]);
   });
 
-  for (const [label, value] of EMPTY_STRING_ARGUMENTS) {
+  for (const [label, value] of ABSENT_STRING_ARGUMENTS) {
     it(`treats ${label} path as absent and searches the chat workdir`, async () => {
       const result = await runGrep({ pattern: 'TODO', path: value });
 
@@ -292,6 +293,20 @@ describe('grep registry contract', () => {
       const result = await runGrep({ pattern: 'TODO', glob: value, caseInsensitive: true });
 
       expect(result.matches.some((match) => match.file === join('nested', 'c.txt'))).toBe(true);
+    });
+  }
+
+  for (const [label, value] of REJECTED_STRING_ARGUMENTS) {
+    it(`rejects ${label} path instead of silently searching the chat workdir`, async () => {
+      await expect(runGrep({ pattern: 'TODO', path: value })).rejects.toThrow(
+        'Field "path" must be a string.'
+      );
+    });
+
+    it(`rejects ${label} glob instead of silently scanning every file`, async () => {
+      await expect(runGrep({ pattern: 'TODO', glob: value })).rejects.toThrow(
+        'Field "glob" must be a string.'
+      );
     });
   }
 
@@ -310,16 +325,37 @@ describe('grep registry contract', () => {
   for (const [label, value] of [
     ['the string "true"', 'true'],
     ['a truthy number', 1],
-    ['null', null],
   ] as const) {
-    it(`does not enable caseInsensitive for ${label}`, async () => {
-      const result = await runGrep({ pattern: 'todo', caseInsensitive: value });
-
-      expect(result.matches).toEqual([
-        { file: join('nested', 'c.txt'), line: 1, text: 'todo at nested level' },
-      ]);
+    it(`rejects ${label} for caseInsensitive instead of searching case-sensitively`, async () => {
+      // Dropping the flag returns a plausible short result set with no signal
+      // it was dropped; the model's likely conclusion is that the symbol does
+      // not exist. A rejection is something it can correct.
+      await expect(runGrep({ pattern: 'todo', caseInsensitive: value })).rejects.toThrow(
+        'Field "caseInsensitive" must be a boolean.'
+      );
     });
   }
+
+  it('reads a null caseInsensitive as absent, matching the nullable-optional schema', async () => {
+    const result = await runGrep({ pattern: 'todo', caseInsensitive: null });
+
+    expect(result.matches).toEqual([
+      { file: join('nested', 'c.txt'), line: 1, text: 'todo at nested level' },
+    ]);
+  });
+
+  it('accepts an explicit null for every optional argument at once', async () => {
+    const result = await runGrep({
+      pattern: 'todo',
+      path: null,
+      glob: null,
+      caseInsensitive: null,
+    });
+
+    expect(result.matches).toEqual([
+      { file: join('nested', 'c.txt'), line: 1, text: 'todo at nested level' },
+    ]);
+  });
 
   it('surfaces an invalid regex as a pattern error, not a raw SyntaxError', async () => {
     const error = await runGrep({ pattern: '(' }).catch((thrown: unknown) => thrown);

@@ -58,7 +58,10 @@ describe('buildShellTool', () => {
     expect(tool.settings.enabledByDefault).toBe(false);
     expect(tool.settings.canDisable).toBe(true);
     expect(tool.definition.parameters).toMatchObject({
-      required: ['command'],
+      // cwd is optional but still required-and-nullable, so the schema stays
+      // inside the provider strict subset.
+      properties: { cwd: { type: ['string', 'null'] } },
+      required: ['command', 'cwd'],
       additionalProperties: false,
     });
   });
@@ -175,6 +178,28 @@ describe('shell tool registration and execution', () => {
     )) as { stdout: string };
 
     expect(result.stdout.trim()).toBe(tmpdir());
+  });
+
+  it.skipIf(!hasBash)('reads an explicit null cwd as absent', async () => {
+    const result = (await executeTool(
+      'bash',
+      { command: 'pwd', cwd: null },
+      { ...makeContext(), workdir: tmpdir() },
+      { enabled: true, parameters: {} }
+    )) as { stdout: string };
+
+    expect(result.stdout.trim()).toBe(tmpdir());
+  });
+
+  it('rejects a non-string cwd instead of falling back to the chat workdir', async () => {
+    await expect(
+      executeTool(
+        'bash',
+        { command: 'pwd', cwd: 42 },
+        { ...makeContext(), workdir: tmpdir() },
+        { enabled: true, parameters: {} }
+      )
+    ).rejects.toThrow('Field "cwd" must be a string.');
   });
 
   it.skipIf(!hasBash)('resolves a relative cwd from the chat workdir', async () => {

@@ -5,7 +5,12 @@
 
 import { GrepPatternError } from '@mangostudio/runtime';
 import { getRuntimeClient } from '../../runtime-client';
-import { clampIntegerSetting, getOptionalString, getRequiredVerbatimString } from '../arg-parsing';
+import {
+  clampIntegerSetting,
+  getOptionalBoolean,
+  getOptionalString,
+  getRequiredVerbatimString,
+} from '../arg-parsing';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -71,26 +76,26 @@ const definition = {
     properties: {
       pattern: {
         type: 'string',
-        minLength: 1,
         description:
           'JavaScript regular expression. Escape special characters when searching for literal text.',
       },
       path: {
-        type: 'string',
+        type: ['string', 'null'],
         description:
-          'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory when available.',
+          'Absolute path, ~ path, or path relative to the chat working directory. Pass null to search the chat working directory.',
       },
       glob: {
-        type: 'string',
+        type: ['string', 'null'],
         description:
-          'Optional glob filter applied to directory searches (e.g. "*.ts", "src/**/*.tsx"). Ignored when path is a single file.',
+          'Glob filter applied to directory searches (e.g. "*.ts", "src/**/*.tsx"). Ignored when path is a single file. Pass null for no filter.',
       },
       caseInsensitive: {
-        type: 'boolean',
-        description: 'When true, the regular expression is matched case-insensitively.',
+        type: ['boolean', 'null'],
+        description:
+          'When true, the regular expression is matched case-insensitively. Pass null or false for a case-sensitive search.',
       },
     },
-    required: ['pattern'],
+    required: ['pattern', 'path', 'glob', 'caseInsensitive'],
     additionalProperties: false,
   },
 };
@@ -155,14 +160,15 @@ export async function executeGrep(
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GrepToolResult> {
   // Verbatim: whitespace is part of the regular expression.
   const pattern = getRequiredVerbatimString(args.pattern, 'pattern');
-  const path = getOptionalString(args.path);
-  const glob = getOptionalString(args.glob);
+  const path = getOptionalString(args.path, 'path');
+  const glob = getOptionalString(args.glob, 'glob');
+  const caseInsensitive = getOptionalBoolean(args.caseInsensitive, 'caseInsensitive');
   return executeGrep(
     {
       pattern,
       ...(path ? { path } : {}),
       ...(glob ? { glob } : {}),
-      caseInsensitive: args.caseInsensitive === true,
+      caseInsensitive: caseInsensitive === true,
     },
     context
   );

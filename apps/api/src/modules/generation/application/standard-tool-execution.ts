@@ -646,8 +646,8 @@ function parseDelegationRequest(args: Record<string, unknown>): DelegateToSubage
     );
   }
   const task = getRequiredString(args.task, 'task');
-  const context = getOptionalString(args.context);
-  const expectedOutput = getOptionalString(args.expectedOutput);
+  const context = getOptionalString(args.context, 'context');
+  const expectedOutput = getOptionalString(args.expectedOutput, 'expectedOutput');
   const maxTurns = getBoundedOptionalInteger(args.maxTurns, 'maxTurns', {
     min: SUBAGENT_MAX_TURNS_MIN,
     max: SUBAGENT_MAX_TURNS_MAX,

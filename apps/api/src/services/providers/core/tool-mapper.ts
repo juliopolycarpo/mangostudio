@@ -29,32 +29,72 @@ export function toolDefsToChatCompletions(defs: ToolDefinition[]): OpenAI.ChatCo
  * OpenAI Responses' strict function tool mode:
  *   - top-level `type: 'object'`
  *   - `additionalProperties: false`
- *   - every property key appears in `required`
- *   - no unsupported keywords (`oneOf`, `anyOf`, `allOf`, `not`, `$ref`)
+ *   - every property key appears in `required`, at every nesting depth
+ *   - no unsupported keywords (see `UNSUPPORTED_STRICT_KEYWORDS`)
+ *
+ * An argument that is genuinely optional is expressed as a nullable type
+ * (`type: ['string', 'null']`) with the key still listed in `required`; the
+ * parsing helpers in `services/tools/arg-parsing` read `null` as absent.
  *
  * Strict is enabled per-tool; tools whose schemas don't pass are sent with
- * `strict: false` so validation never blocks the call.
+ * `strict: false` so validation never blocks the call. Every built-in tool is
+ * expected to pass — a tool that fails should be fixed rather than exempted.
  */
 export function isStrictCompatible(schema: Record<string, unknown> | undefined | null): boolean {
   if (!schema || typeof schema !== 'object') return false;
   if (schema.type !== 'object') return false;
-  if (schema.additionalProperties !== false) return false;
-
-  const properties = schema.properties;
-  if (properties !== undefined && (typeof properties !== 'object' || properties === null)) {
-    return false;
-  }
-  const propertyKeys = properties && typeof properties === 'object' ? Object.keys(properties) : [];
-  const required = Array.isArray(schema.required) ? (schema.required as unknown[]) : [];
-  const requiredSet = new Set(required.filter((k): k is string => typeof k === 'string'));
-  for (const key of propertyKeys) {
-    if (!requiredSet.has(key)) return false;
-  }
-
-  return !hasUnsupportedStrictKeywords(schema);
+  if (hasUnsupportedStrictKeywords(schema)) return false;
+  return hasCompleteRequired(schema);
 }
 
-const UNSUPPORTED_STRICT_KEYWORDS = ['oneOf', 'anyOf', 'allOf', 'not', '$ref'] as const;
+/**
+ * Checks required-completeness for every object schema reachable from `node`.
+ *
+ * A nested object with an optional key is rejected by the provider just as a
+ * top-level one is, so `ask_user_question`-shaped schemas cannot be validated
+ * by inspecting the top level alone.
+ */
+function hasCompleteRequired(node: unknown): boolean {
+  if (!node || typeof node !== 'object') return true;
+  if (Array.isArray(node)) return node.every(hasCompleteRequired);
+
+  const obj = node as Record<string, unknown>;
+  if (obj.type === 'object') {
+    if (obj.additionalProperties !== false) return false;
+    const properties = obj.properties;
+    if (properties !== undefined && (typeof properties !== 'object' || properties === null)) {
+      return false;
+    }
+    const propertyKeys =
+      properties && typeof properties === 'object' ? Object.keys(properties) : [];
+    const required = Array.isArray(obj.required) ? (obj.required as unknown[]) : [];
+    const requiredSet = new Set(required.filter((k): k is string => typeof k === 'string'));
+    for (const key of propertyKeys) {
+      if (!requiredSet.has(key)) return false;
+    }
+  }
+
+  return Object.values(obj).every(hasCompleteRequired);
+}
+
+/**
+ * Keywords the strict subset rejects outright.
+ *
+ * `minLength`/`maxLength` are absent from OpenAI's supported-keyword list —
+ * only `pattern` and `format` constrain strings there — so a schema carrying
+ * them is refused rather than downgraded. Length bounds belong in the executor,
+ * which enforces them anyway. Numeric `minimum`/`maximum`, `enum`, `pattern`
+ * and `minItems`/`maxItems` are supported and stay in the schema.
+ */
+const UNSUPPORTED_STRICT_KEYWORDS = [
+  'oneOf',
+  'anyOf',
+  'allOf',
+  'not',
+  '$ref',
+  'minLength',
+  'maxLength',
+] as const;
 
 function hasUnsupportedStrictKeywords(node: unknown): boolean {
   if (!node || typeof node !== 'object') return false;

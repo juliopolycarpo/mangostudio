@@ -88,7 +88,7 @@ async function execute(
   context: ToolContext
 ): Promise<ShellCommandResult> {
   const command = getRequiredString(args.command, 'command');
-  const requestedCwd = getOptionalString(args.cwd) ?? context.workdir;
+  const requestedCwd = getOptionalString(args.cwd, 'cwd') ?? context.workdir;
   const settings = normalizeShellToolSettings(context.parameters);
   const runtime = await getRuntimeClient(context.userId, context.environmentId);
   const resolution = { ...context, paths: runtime.paths };
@@ -139,16 +139,15 @@ function buildDefinition(kind: ShellKind, description: string) {
       properties: {
         command: {
           type: 'string',
-          minLength: 1,
           description: `Command to execute with ${description}.`,
         },
         cwd: {
-          type: 'string',
+          type: ['string', 'null'],
           description:
-            'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory when available.',
+            'Absolute path, ~ path, or path relative to the chat working directory. Pass null to run in the chat working directory.',
         },
       },
-      required: ['command'],
+      required: ['command', 'cwd'],
       additionalProperties: false,
     },
   };

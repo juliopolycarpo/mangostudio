@@ -119,6 +119,19 @@ Abra estes arquivos primeiro:
 - `apps/frontend/src/features/chat/components/ToolCallVisuals.tsx` (renderização por tool call)
 - `apps/frontend/src/features/settings/tools/`
 
+Duas convenções que toda definição de ferramenta segue, ambas verificadas por
+`tests/unit/services/providers/tool-mapper-strict.test.ts`:
+
+- **Argumentos opcionais são anuláveis, não ausentes.** O subconjunto strict do provider não
+  tem chave opcional, então um argumento opcional permanece em `required` e amplia o próprio
+  tipo (`type: ['string', 'null']`); os helpers em `services/tools/arg-parsing.ts` leem `null`
+  como ausente. Limites de comprimento (`minLength`/`maxLength`) não fazem parte do
+  subconjunto strict e pertencem ao executor. Espera-se que toda ferramenta embutida alcance
+  `strict: true`.
+- **Argumentos malformados são rejeitados, não substituídos.** Um argumento com o tipo errado
+  gera `ToolArgumentError`; apenas configurações armazenadas são coagidas a um padrão
+  (`clampIntegerSetting`, `getStringSetting`). Veja `docs/features/tools.md` para o porquê.
+
 ## Attachments
 
 Abra estes arquivos primeiro:

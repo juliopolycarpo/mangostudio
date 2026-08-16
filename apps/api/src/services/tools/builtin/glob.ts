@@ -51,17 +51,16 @@ const definition = {
     properties: {
       pattern: {
         type: 'string',
-        minLength: 1,
         description:
           'Glob pattern. Supports *, **, ?, [], {a,b} and ! for negation. Evaluated against paths relative to cwd.',
       },
       cwd: {
-        type: 'string',
+        type: ['string', 'null'],
         description:
-          'Optional absolute path, ~ path, or path relative to the chat working directory. Defaults to the chat working directory.',
+          'Absolute path, ~ path, or path relative to the chat working directory. Pass null to search the chat working directory.',
       },
     },
-    required: ['pattern'],
+    required: ['pattern', 'cwd'],
     additionalProperties: false,
   },
 };
@@ -132,7 +131,7 @@ function resolveCwd(
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GlobToolResult> {
   const pattern = getRequiredString(args.pattern, 'pattern');
-  const cwd = getOptionalString(args.cwd);
+  const cwd = getOptionalString(args.cwd, 'cwd');
   return executeGlob({ pattern, ...(cwd ? { cwd } : {}) }, context);
 }
 
