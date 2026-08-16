@@ -118,11 +118,6 @@ function restrictedContext(): ToolContext {
   };
 }
 
-/** The root the hub should have sent, in the form the wire carries it. */
-function expectedRoot(): string {
-  return workdir;
-}
-
 function sentPolicy(method: string): RuntimePathFilter | undefined {
   const params = sent.get(method);
   if (!params) throw new Error(`The runtime never received a "${method}" call.`);
@@ -150,19 +145,19 @@ describe('a restricted chat sends its containment root on every filesystem call'
 
     await executeReadFile({ path: 'file.txt' }, restrictedContext());
 
-    expect(sentPolicy('fs.read-file')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.read-file')?.containmentRoot).toBe(workdir);
   });
 
   it('write_file', async () => {
     await executeWriteFile({ path: 'new.txt', content: 'contents\n' }, restrictedContext());
 
-    expect(sentPolicy('fs.write-file')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.write-file')?.containmentRoot).toBe(workdir);
   });
 
   it('create_file', async () => {
     await executeCreateFile({ path: 'created.txt', content: 'contents\n' }, restrictedContext());
 
-    expect(sentPolicy('fs.create-file')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.create-file')?.containmentRoot).toBe(workdir);
   });
 
   it('edit_file', async () => {
@@ -172,7 +167,7 @@ describe('a restricted chat sends its containment root on every filesystem call'
 
     await executeEditFile({ path: 'file.txt', oldString: 'before', newString: 'after' }, context);
 
-    expect(sentPolicy('fs.edit-file')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.edit-file')?.containmentRoot).toBe(workdir);
   });
 
   it('replace_range', async () => {
@@ -185,7 +180,7 @@ describe('a restricted chat sends its containment root on every filesystem call'
       context
     );
 
-    expect(sentPolicy('fs.replace-range')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.replace-range')?.containmentRoot).toBe(workdir);
   });
 
   it('delete_file', async () => {
@@ -195,7 +190,7 @@ describe('a restricted chat sends its containment root on every filesystem call'
 
     await executeDeleteFile({ path: 'file.txt' }, context);
 
-    expect(sentPolicy('fs.delete-file')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.delete-file')?.containmentRoot).toBe(workdir);
   });
 
   it('move_file', async () => {
@@ -203,7 +198,7 @@ describe('a restricted chat sends its containment root on every filesystem call'
 
     await executeMoveFile({ from: 'file.txt', to: 'moved.txt' }, restrictedContext());
 
-    expect(sentPolicy('fs.move-file')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.move-file')?.containmentRoot).toBe(workdir);
   });
 
   it('list_directory', async () => {
@@ -211,13 +206,13 @@ describe('a restricted chat sends its containment root on every filesystem call'
 
     await executeListDirectory({ path: 'nested' }, restrictedContext());
 
-    expect(sentPolicy('fs.list-directory')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.list-directory')?.containmentRoot).toBe(workdir);
   });
 
   it('glob', async () => {
     await executeGlob({ pattern: '*.txt' }, restrictedContext());
 
-    expect(sentPolicy('fs.glob')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.glob')?.containmentRoot).toBe(workdir);
   });
 
   it('grep', async () => {
@@ -225,7 +220,7 @@ describe('a restricted chat sends its containment root on every filesystem call'
 
     await executeGrep({ pattern: 'needle' }, restrictedContext());
 
-    expect(sentPolicy('fs.grep')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.grep')?.containmentRoot).toBe(workdir);
   });
 
   it('apply_patch', async () => {
@@ -242,7 +237,7 @@ describe('a restricted chat sends its containment root on every filesystem call'
       restrictedContext()
     );
 
-    expect(sentPolicy('fs.apply-patch')?.containmentRoot).toBe(expectedRoot());
+    expect(sentPolicy('fs.apply-patch')?.containmentRoot).toBe(workdir);
   });
 });
 

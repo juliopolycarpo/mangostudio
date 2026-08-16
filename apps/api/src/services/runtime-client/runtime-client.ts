@@ -420,6 +420,7 @@ export class RuntimeClient {
   readonly workspace: RuntimeWorkspaceClient;
   private targetPaths?: TargetPaths;
   private unenforcedContainment = false;
+  private pathPolicyEnforced = false;
 
   constructor(
     private readonly protocol: RuntimeProtocolClient,
@@ -564,6 +565,7 @@ export class RuntimeClient {
   replaceManifest(manifest: RuntimeCapabilityManifest): void {
     this.protocol.replaceManifest(manifest);
     this.targetPaths = undefined;
+    this.pathPolicyEnforced = false;
   }
 
   /**
@@ -612,16 +614,22 @@ export class RuntimeClient {
    * {@link request}.
    *
    * Once per connection, because the alternative is a line per tool call for a
-   * condition that only an upgrade can change.
+   * condition that only an upgrade can change. An enforcing peer's manifest is
+   * cached the same way, so a connection that enforces never re-derives that
+   * fact past the first call.
    */
   private noteUnenforcedContainment(method: RuntimeMethod, params: unknown): void {
-    if (this.unenforcedContainment) return;
+    if (this.unenforcedContainment || this.pathPolicyEnforced) return;
     // Every transport awaits the handshake before handing this client out, so
     // the manifest is there — but reading it is what this method is for, and a
     // diagnostic that can throw would fail the call it exists to describe. An
     // unread manifest is also not an answer: silence is not a peer saying no.
     const peer = this.peerIdentity();
-    if (!peer || peer.manifest.enforcesPathPolicy === true) return;
+    if (!peer) return;
+    if (peer.manifest.enforcesPathPolicy === true) {
+      this.pathPolicyEnforced = true;
+      return;
+    }
     if (!containmentRootOf(params)) return;
 
     this.unenforcedContainment = true;

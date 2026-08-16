@@ -72,12 +72,12 @@ export function capabilityManifestFromHealth(
     ...(report.externalAgents?.identityIsolation
       ? { identityIsolation: report.externalAgents.identityIsolation }
       : {}),
-    ...(handshake?.acceptsHubIdentity === undefined
-      ? {}
-      : { acceptsHubIdentity: handshake.acceptsHubIdentity }),
-    ...(handshake?.enforcesPathPolicy === undefined
-      ? {}
-      : { enforcesPathPolicy: handshake.enforcesPathPolicy }),
+    ...(handshake?.acceptsHubIdentity !== undefined && {
+      acceptsHubIdentity: handshake.acceptsHubIdentity,
+    }),
+    ...(handshake?.enforcesPathPolicy !== undefined && {
+      enforcesPathPolicy: handshake.enforcesPathPolicy,
+    }),
     profile: report.profile,
     allow,
   };
