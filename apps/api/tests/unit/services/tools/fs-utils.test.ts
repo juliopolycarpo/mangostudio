@@ -10,6 +10,7 @@ import {
   normalizeStringList,
   PathAccessError,
   readFileWithObservedMtime,
+  reportWorkdirRelativePath,
   resolveAndValidatePath,
 } from '../../../../src/services/tools/builtin/_fs-utils';
 
@@ -305,6 +306,60 @@ describe('resolveAndValidatePath', () => {
       },
     });
     expect(resolved).toBe(subDir);
+  });
+});
+
+describe('reportWorkdirRelativePath', () => {
+  it('reports a path below the workdir relative to it', () => {
+    expect(
+      reportWorkdirRelativePath('/home/tester/proj/src/a.ts', {
+        paths,
+        workdir: '/home/tester/proj',
+      })
+    ).toBe('src/a.ts');
+  });
+
+  it('reports the workdir itself as "." rather than the empty string', () => {
+    expect(
+      reportWorkdirRelativePath('/home/tester/proj', { paths, workdir: '/home/tester/proj' })
+    ).toBe('.');
+  });
+
+  it('falls back to absolute when the path is outside the workdir', () => {
+    expect(reportWorkdirRelativePath('/etc/passwd', { paths, workdir: '/home/tester/proj' })).toBe(
+      '/etc/passwd'
+    );
+  });
+
+  it('falls back to absolute when no workdir is bound', () => {
+    expect(reportWorkdirRelativePath('/home/tester/proj/a.ts', { paths })).toBe(
+      '/home/tester/proj/a.ts'
+    );
+  });
+
+  it('prefers the restriction root over the plain workdir', () => {
+    expect(
+      reportWorkdirRelativePath('/home/tester/proj/src/a.ts', {
+        paths,
+        workdir: '/somewhere/else',
+        workdirPolicy: { root: '/home/tester/proj', restricted: true },
+      })
+    ).toBe('src/a.ts');
+  });
+
+  it('expands a ~ workdir against the target home', () => {
+    expect(reportWorkdirRelativePath('/home/tester/proj/a.ts', { paths, workdir: '~/proj' })).toBe(
+      'a.ts'
+    );
+  });
+
+  it('folds case on a Windows target, where a root and its contents may differ in casing', () => {
+    expect(
+      reportWorkdirRelativePath('c:\\users\\tester\\proj\\src\\a.ts', {
+        paths: windowsPaths,
+        workdir: 'C:\\Users\\tester\\Proj',
+      })
+    ).toBe('src\\a.ts');
   });
 });
 

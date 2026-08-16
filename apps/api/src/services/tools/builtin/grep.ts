@@ -18,6 +18,7 @@ import {
   normalizePathValidationSettings,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
+  reportWorkdirRelativePath,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';
@@ -70,7 +71,9 @@ const definition = {
   name: GREP_TOOL_NAME,
   description:
     'Searches files for lines that match a regular expression and returns the file, line number, and line text. ' +
-    'Use this when the user asks to find code, strings, or patterns across files.',
+    'Use this when the user asks to find code, strings, or patterns across files. ' +
+    'Each reported file is relative to the chat working directory rather than to the searched path — absolute ' +
+    'when it lies outside, or when no working directory is bound — so it can be passed straight to another tool.',
   parameters: {
     type: 'object',
     properties: {
@@ -154,7 +157,17 @@ export async function executeGrep(
     },
     context.signal ? { signal: context.signal } : undefined
   );
-  return { ...result, matches: [...result.matches] };
+
+  // Re-anchored to the working directory for the same reason glob's matches are:
+  // a directory search answers relative to the search root, so `path: 'src'`
+  // used to report `a.ts` for a file that only exists at `src/a.ts`. A
+  // single-file search already answers with an absolute path, and `join` leaves
+  // it alone, so both branches land on one convention.
+  const matches = result.matches.map((match) => ({
+    ...match,
+    file: reportWorkdirRelativePath(runtime.paths.join(rootPath, match.file), options),
+  }));
+  return { ...result, matches };
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GrepToolResult> {

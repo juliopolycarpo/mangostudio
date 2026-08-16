@@ -77,6 +77,16 @@ working directory. Tools such as `read_file`, `list_directory`, and `grep`
 still require an explicit `path`. When restriction is enabled, path
 containment policy applies to routed tools.
 
+**The path convention runs both ways: a path a tool reports can be passed back
+into another tool and reach the same file.** Every path in a result list —
+`grep.matches[].file`, `glob.matches[]` — is relative to the chat working
+directory, not to the search root the call named. Two cases report an absolute
+path instead, because a relative one would be worse than verbose: a chat with no
+working directory bound, and a match that lands outside the working directory.
+`glob`'s `absolute` setting stays the explicit opt-out and keeps meaning "give me
+absolute paths". Echoed inputs (`grep.path`, `glob.cwd`) are not results and are
+returned as given or as resolved.
+
 ### `generate_image`
 
 Creates one or more images via image generation models during a text chat turn.
@@ -134,6 +144,8 @@ Finds filesystem paths matching a glob pattern, evaluated by `Bun.Glob`.
 - **Parameters:** `pattern` (required, supports `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (optional base directory; absolute, `~`-prefixed, or relative to the chat working directory; defaults to the chat working directory, otherwise `process.cwd()`)
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 200), `includeDotfiles` (default `false`), `absolute` (default `false`)
 - **Execution:** Streams matches with `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, stops at the cap, and reports `truncated`.
+- **Result paths:** re-anchored from `cwd` to the chat working directory, so a match can be passed
+  straight into `read_file`. `absolute: true` opts out and returns absolute paths.
 
 ### `grep`
 
@@ -145,6 +157,9 @@ Searches files for lines matching a regular expression.
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 100), `maxMatchesPerFile` (default 20), `maxFileSizeBytes` (default 1 MB), `includeDotfiles`
 - **Safety:** Files containing a null byte in the first 1 KB are treated as binary and skipped; files above `maxFileSizeBytes` are skipped. The regex is compiled with `new RegExp` and rejected via `GrepPatternError` if invalid.
 - **Execution:** When `path` is a directory, walks it with `Bun.Glob` (filtered by the optional `glob`); for each candidate, reads with `Bun.file().text()`, splits by newline, and records `{ file, line, text }` matches.
+- **Result paths:** `matches[].file` is re-anchored from the search root to the chat working
+  directory, for both directory and single-file searches, so a match can be passed straight into
+  `read_file`.
 
 ### `bash` / `zsh` / `powershell`
 

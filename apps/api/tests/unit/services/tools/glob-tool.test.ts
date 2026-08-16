@@ -112,11 +112,17 @@ describe('executeGlob', () => {
     );
   });
 
-  it('matches files by pattern from the given cwd', async () => {
+  it('falls back to absolute matches when no workdir anchors them', async () => {
     await seedTree();
     const result = await executeGlob({ pattern: '**/*.ts', cwd: tempDir }, makeContext());
     const names = result.matches.sort();
-    expect(names).toEqual(['a.ts', 'b.ts', join('nested', 'c.ts')]);
+    // Nothing to be relative to, and an unresolvable relative path is worse
+    // than a verbose absolute one.
+    expect(names).toEqual([
+      join(tempDir, 'a.ts'),
+      join(tempDir, 'b.ts'),
+      join(tempDir, 'nested', 'c.ts'),
+    ]);
     expect(result.truncated).toBe(false);
   });
 
@@ -128,7 +134,7 @@ describe('executeGlob', () => {
     expect(result.matches).toEqual(['README.md']);
   });
 
-  it('resolves an explicit relative cwd from the chat workdir', async () => {
+  it('reports matches relative to the workdir, not to a deeper cwd', async () => {
     await seedTree();
 
     const result = await executeGlob(
@@ -136,7 +142,30 @@ describe('executeGlob', () => {
       { ...makeContext(), workdir: tempDir }
     );
 
-    expect(result.matches).toEqual(['c.ts']);
+    // `c.ts` would name a file that does not exist at the workdir root.
+    expect(result.matches).toEqual([join('nested', 'c.ts')]);
+  });
+
+  it('reports a match outside the workdir as an absolute path', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'glob-outside-'));
+    try {
+      const root = join(base, 'root');
+      const outside = join(base, 'outside');
+      mkdirSync(root);
+      mkdirSync(outside);
+      await seedFile(join(outside, 'note.txt'), 'ok');
+
+      const result = await executeGlob(
+        { pattern: '*.txt', cwd: outside },
+        { ...makeContext(), workdir: root }
+      );
+
+      // A climb like `../outside/note.txt` resolves too, but only for a reader
+      // who already knows the workdir.
+      expect(result.matches).toEqual([join(outside, 'note.txt')]);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 
   it('reports an absolute cwd so the model can feed it back verbatim', async () => {
@@ -169,12 +198,13 @@ describe('executeGlob', () => {
 
   it('skips dotfiles by default and includes them when enabled', async () => {
     await seedTree();
-    const without = await executeGlob({ pattern: '*.ts', cwd: tempDir }, makeContext());
+    const context = { ...makeContext(), workdir: tempDir };
+    const without = await executeGlob({ pattern: '*.ts', cwd: tempDir }, context);
     expect(without.matches).not.toContain('.hidden.ts');
 
     const withDot = await executeGlob(
       { pattern: '*.ts', cwd: tempDir },
-      makeContext({ includeDotfiles: true })
+      { ...context, parameters: { includeDotfiles: true } }
     );
     expect(withDot.matches).toContain('.hidden.ts');
   });
@@ -232,7 +262,7 @@ describe('executeGlob', () => {
   it('expands ~ in cwd to the home directory the runtime reports', async () => {
     await seedTree();
     const result = await withTargetHome(tempDir, () =>
-      executeGlob({ pattern: '*.ts', cwd: '~' }, makeContext())
+      executeGlob({ pattern: '*.ts', cwd: '~' }, { ...makeContext(), workdir: tempDir })
     );
     expect(result.matches.sort()).toEqual(['a.ts', 'b.ts']);
   });
@@ -283,7 +313,7 @@ describe('glob registry contract', () => {
     const result = await runGlob({ pattern: '*.ts', cwd: 'nested' });
 
     expect(result.cwd).toBe(harness.path('nested'));
-    expect(result.matches).toEqual(['b.ts']);
+    expect(result.matches).toEqual([join('nested', 'b.ts')]);
   });
 
   for (const [label, value] of ABSENT_STRING_ARGUMENTS) {

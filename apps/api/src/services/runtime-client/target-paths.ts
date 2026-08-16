@@ -29,10 +29,19 @@ export interface TargetPaths {
    * Joins a relative path onto an absolute base, canonicalizing the result.
    * A relative `base` would send the result to the hub's own working directory,
    * so callers check it first — see `resolveWorkdirRelativePath`.
+   *
+   * An absolute `path` wins over `base`, which is what lets a result mapper feed
+   * a mixed list of relative and absolute matches through one call.
    */
   join(base: string, path: string): string;
   /** True when `candidate` is `root` or a path below it. Both must be canonical. */
   contains(root: string, candidate: string): boolean;
+  /**
+   * Path from `from` to `to`, the inverse of {@link join}. Used to report a
+   * result path the way the tools accept one; callers that only want a path
+   * below `from` check {@link contains} first.
+   */
+  relative(from: string, to: string): string;
 }
 
 export function createTargetPaths(manifest: RuntimeCapabilityManifest): TargetPaths {
@@ -75,5 +84,9 @@ export function createTargetPaths(manifest: RuntimeCapabilityManifest): TargetPa
         )
       );
     },
+    // `relative` on the win32 implementation already folds case the way
+    // `contains` does, so a root and a candidate written with different casing
+    // still produce the path between them rather than a climb to the drive root.
+    relative: (from, to) => impl.relative(from, to),
   };
 }

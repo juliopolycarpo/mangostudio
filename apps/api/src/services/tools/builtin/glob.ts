@@ -13,6 +13,7 @@ import {
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   type ResolvePathOptions,
+  reportWorkdirRelativePath,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';
@@ -45,7 +46,9 @@ const definition = {
   name: GLOB_TOOL_NAME,
   description:
     'Finds files and directories whose paths match a glob pattern (e.g. "**/*.ts", "src/**/!(*.test).ts"). ' +
-    'Use this when the user asks to locate files by name or extension, or to enumerate paths matching a shape.',
+    'Use this when the user asks to locate files by name or extension, or to enumerate paths matching a shape. ' +
+    'Each match is relative to the chat working directory rather than to cwd — absolute when it lies outside, ' +
+    'or when no working directory is bound — so it can be passed straight to another tool.',
   parameters: {
     type: 'object',
     properties: {
@@ -104,7 +107,17 @@ export async function executeGlob(
     },
     context.signal ? { signal: context.signal } : undefined
   );
-  return { ...result, matches: [...result.matches] };
+
+  // The runtime answers relative to the search root, which is only the working
+  // directory when the caller passed no cwd. Re-anchoring here is what keeps a
+  // match feedable straight into read_file. The `absolute` setting is the
+  // documented opt-out and stays exactly what it says.
+  const matches = settings.absolute
+    ? [...result.matches]
+    : result.matches.map((match) =>
+        reportWorkdirRelativePath(runtime.paths.join(cwd, match), options)
+      );
+  return { ...result, matches };
 }
 
 /**

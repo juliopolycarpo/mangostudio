@@ -137,6 +137,41 @@ export function resolveWorkdirRelativePath(
   return paths.join(base, expanded);
 }
 
+/**
+ * Renders an absolute result path the way the tools accept one: relative to the
+ * chat working directory.
+ *
+ * The inverse of {@link resolveWorkdirRelativePath}, and deliberately its
+ * neighbour — together they are the round trip the tools promise, that a path
+ * one tool reports can be passed into another and reach the same file. Reporting
+ * a path relative to a *search root* breaks that promise the moment the search
+ * root is not the working directory: `grep(path: 'src')` used to answer `a.ts`
+ * for a file only reachable as `src/a.ts`.
+ *
+ * Two cases fall back to the absolute path, because a relative one would be
+ * worse than verbose: a chat with no working directory bound has nothing to
+ * anchor against, and a match outside the working directory would otherwise be
+ * reported as a climb out of it.
+ *
+ * // Usage: const file = reportWorkdirRelativePath(absolute, options);
+ */
+export function reportWorkdirRelativePath(
+  resolvedPath: string,
+  options: WorkdirResolutionOptions
+): string {
+  const { paths } = options;
+  const workdir = options.workdirPolicy?.root ?? options.workdir;
+  if (!workdir) return resolvedPath;
+
+  const base = expandHome(workdir, paths);
+  if (!paths.isAbsolute(base)) return resolvedPath;
+
+  const root = paths.canonical(base);
+  if (!paths.contains(root, resolvedPath)) return resolvedPath;
+  // The working directory itself relativizes to `''`, which no tool accepts.
+  return paths.relative(root, resolvedPath) || '.';
+}
+
 export function resolveAndValidatePath(inputPath: string, options: ResolvePathOptions): string {
   const resolved = resolveWorkdirRelativePath(inputPath, options);
   const { settings, paths } = options;
