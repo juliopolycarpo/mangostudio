@@ -5,6 +5,7 @@ import {
 } from '@mangostudio/runtime';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
+import type { RevertChatFileCheckpointsResponse } from '@mangostudio/shared/file-checkpoints';
 import type { Kysely } from 'kysely';
 import type { Database, FileCheckpointSelect } from '../../../db/types';
 import { getRuntimeClient } from '../../../services/runtime-client';
@@ -18,6 +19,7 @@ import {
   listActiveCheckpointsForMessage,
   markMessageCheckpointsReverted,
 } from '../infrastructure/checkpoint-repository';
+import { listUncheckpointedSourcesForMessage } from '../infrastructure/uncheckpointed-source-repository';
 
 export class FileCheckpointConflictError extends Error {
   constructor(
@@ -29,13 +31,24 @@ export class FileCheckpointConflictError extends Error {
   }
 }
 
+/**
+ * Undoes one assistant message's checkpointed file mutations, and reports what
+ * it could not undo.
+ *
+ * `revertedFiles` alone reads as "the turn was undone", which is false for any
+ * turn that also wrote through a shell command or an MCP server: those writes
+ * were never snapshotted, so nothing here restores them. `uncheckpointedSources`
+ * is the count's qualifier and is reported even when there was nothing to
+ * revert.
+ */
 export async function revertMessageFileCheckpoints(
   db: Kysely<Database>,
   chatId: string,
   messageId: string
-): Promise<{ revertedFiles: number }> {
+): Promise<RevertChatFileCheckpointsResponse> {
+  const uncheckpointedSources = await listUncheckpointedSourcesForMessage(db, chatId, messageId);
   const rows = await listActiveCheckpointsForMessage(db, chatId, messageId);
-  if (rows.length === 0) return { revertedFiles: 0 };
+  if (rows.length === 0) return { revertedFiles: 0, uncheckpointedSources };
 
   const operations = await buildRevertOperations(rows);
   const reverted = revertedStateByPath(rows);
@@ -67,7 +80,7 @@ export async function revertMessageFileCheckpoints(
   }
 
   await markMessageCheckpointsReverted(db, chatId, messageId, Date.now());
-  return result;
+  return { ...result, uncheckpointedSources };
 }
 
 /**

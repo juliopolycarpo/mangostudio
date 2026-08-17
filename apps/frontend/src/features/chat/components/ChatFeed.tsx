@@ -43,8 +43,11 @@ export function ChatFeed({
 }) {
   const { t } = useI18n();
   const { data: checkpointData } = useChatFileCheckpoints(chatId);
-  const revertableMessageIds = useMemo(
-    () => new Set(checkpointData?.checkpoints.map((entry) => entry.messageId) ?? []),
+  // The summary is both the revert affordance's gate and what the confirmation
+  // needs to say about the writes it cannot undo, so the row carries the entry
+  // rather than a boolean the dialog would then have to look up again.
+  const checkpointsByMessage = useMemo(
+    () => new Map((checkpointData?.checkpoints ?? []).map((entry) => [entry.messageId, entry])),
     [checkpointData]
   );
   const { parentRef, showScrollButton, handleScroll, scrollToBottom } = useChatAutoFollow(
@@ -88,7 +91,7 @@ export function ChatFeed({
               start={virtualRow.start}
               measureRef={rowVirtualizer.measureElement}
               chatId={chatId}
-              canRevertFileChanges={revertableMessageIds.has(messages[virtualRow.index]?.id ?? '')}
+              fileCheckpoint={checkpointsByMessage.get(messages[virtualRow.index]?.id ?? '')}
               onQuestionSubmit={
                 virtualRow.index === messages.length - 1 ? onQuestionSubmit : undefined
               }

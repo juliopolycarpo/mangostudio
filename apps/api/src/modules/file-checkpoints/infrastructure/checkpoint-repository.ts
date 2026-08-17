@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 import type { Database, FileCheckpointInsert, FileCheckpointSelect } from '../../../db/types';
 import { checkpointBlobSize, deleteCheckpointBlobIfUnreferenced } from './checkpoint-blob-store';
+import { deleteMessageUncheckpointedSources } from './uncheckpointed-source-repository';
 
 const MAX_CHECKPOINT_MESSAGES_PER_CHAT = 50;
 const MAX_CHECKPOINT_BYTES_PER_CHAT = 256 * 1024 * 1024;
@@ -200,5 +201,8 @@ async function deleteMessageCheckpoints(
     .where('chatId', '=', chatId)
     .where('messageId', '=', messageId)
     .execute();
+  // The uncheckpointed sources exist to qualify this manifest. Once it is gone
+  // there is no revert left for them to qualify, so they go with it.
+  await deleteMessageUncheckpointedSources(db, chatId, messageId);
   await releaseCheckpointBlobs(db, blobKeys);
 }

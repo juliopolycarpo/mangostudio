@@ -4,6 +4,7 @@
  */
 
 import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
+import { noteUncheckpointedSource } from '../../modules/file-checkpoints/application/note-uncheckpointed-source';
 import {
   getSafeEffectiveToolSettings,
   getToolDefinitionsForTools,
@@ -58,7 +59,6 @@ export function getToolDefinitionsForSettings(
  * Executes a registered tool by name.
  * Throws if the tool is not found.
  */
-// biome-ignore lint/suspicious/useAwait: Migrated from ESLint
 export async function executeTool(
   name: string,
   args: Record<string, unknown>,
@@ -75,6 +75,11 @@ export async function executeTool(
   if (!effectiveSettings.enabled) {
     throw new Error(`Tool "${name}" is disabled for this user.`);
   }
+  // Before the call, not after: a tool that writes outside the manifest has
+  // already done so by the time it reports either way. This is the one place
+  // any builtin executor runs, so declaring `uncheckpointedWriteSource` is
+  // enough to be covered — no dispatcher has to remember to record it.
+  await noteUncheckpointedSource(context, tool.settings.uncheckpointedWriteSource);
   return tool.execute(args, {
     ...context,
     parameters: { ...effectiveSettings.parameters, ...context.parameters },

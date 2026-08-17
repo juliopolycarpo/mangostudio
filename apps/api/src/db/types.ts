@@ -293,6 +293,19 @@ interface FileCheckpointsTable {
   revertedAt: number | null;
 }
 
+/**
+ * Classes of tool a message ran whose writes no `file_checkpoints` row
+ * describes. One row per source, so recording one is an idempotent insert that
+ * the concurrent tool calls of a turn cannot race each other over.
+ */
+interface MessageUncheckpointedSourcesTable {
+  chatId: string;
+  messageId: string;
+  /** `UncheckpointedWriteSource`: `shell` | `mcp`. */
+  source: string;
+  createdAt: number;
+}
+
 interface EnvironmentInstallRunsTable {
   id: string;
   userId: string;
@@ -499,6 +512,7 @@ export interface Database {
   mcp_servers: McpServersTable;
   chat_todos: ChatTodosTable;
   file_checkpoints: FileCheckpointsTable;
+  message_uncheckpointed_sources: MessageUncheckpointedSourcesTable;
   environment_install_runs: EnvironmentInstallRunsTable;
   library_divergence_acks: LibraryDivergenceAcksTable;
   library_backups: LibraryBackupsTable;

@@ -5,7 +5,17 @@ import type {
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { listActiveCheckpointsForChat } from '../infrastructure/checkpoint-repository';
+import { listUncheckpointedSourcesByMessage } from '../infrastructure/uncheckpointed-source-repository';
 
+/**
+ * The revert preview, per message: what reverting would undo, and — since the
+ * manifest only covers builtin mutators — which classes of write it would
+ * leave in place.
+ *
+ * Messages with no manifest rows stay out of the list even when they ran shell
+ * or MCP tools. Nothing there claims to be revertable, so there is nothing to
+ * qualify.
+ */
 export async function listChatFileCheckpointSummaries(
   db: Kysely<Database>,
   chatId: string
@@ -33,11 +43,18 @@ export async function listChatFileCheckpointSummaries(
     existing.createdAt = Math.min(existing.createdAt, row.createdAt);
   }
 
+  // Only the messages that made the list: the sources are its qualifier, so
+  // there is no reason to read the ones belonging to turns it never mentions.
+  const uncheckpointedByMessage = await listUncheckpointedSourcesByMessage(db, chatId, [
+    ...byMessage.keys(),
+  ]);
+
   return [...byMessage.entries()]
     .map(([messageId, summary]) => ({
       messageId,
       fileCount: summary.paths.size,
       ops: [...summary.ops],
+      uncheckpointedSources: uncheckpointedByMessage.get(messageId) ?? [],
       createdAt: summary.createdAt,
     }))
     .sort((left, right) => right.createdAt - left.createdAt);

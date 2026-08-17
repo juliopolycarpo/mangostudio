@@ -1,4 +1,5 @@
 import type { Message } from '@mangostudio/shared';
+import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { Sparkles } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { AssistantImageTurn } from './AssistantImageTurn';
@@ -9,7 +10,8 @@ interface AssistantMessageBlockProps {
   msg: Message;
   isImageTurn: boolean;
   chatId?: string | null;
-  canRevertFileChanges?: boolean;
+  /** Present when this turn has a revertable manifest; absent means no affordance. */
+  fileCheckpoint?: ChatFileCheckpointSummary;
   /** Present only on the last message while question cards may be answered. */
   onQuestionSubmit?: (prompt: string) => void;
 }
@@ -58,7 +60,7 @@ export function AssistantMessageBlock({
   msg,
   isImageTurn,
   chatId,
-  canRevertFileChanges,
+  fileCheckpoint,
   onQuestionSubmit,
 }: AssistantMessageBlockProps) {
   return (
@@ -67,7 +69,7 @@ export function AssistantMessageBlock({
         msg={msg}
         isImageTurn={isImageTurn}
         chatId={chatId}
-        canRevertFileChanges={canRevertFileChanges}
+        fileCheckpoint={fileCheckpoint}
       />
       <AssistantMessageBody
         msg={msg}

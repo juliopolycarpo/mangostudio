@@ -2,6 +2,7 @@
  * Core types for the tool registry.
  */
 
+import type { UncheckpointedWriteSource } from '@mangostudio/shared/file-checkpoints';
 import type { RuntimeCapabilityAllow } from '@mangostudio/shared/runtime-home';
 import type {
   ToolParameterDescriptor,
@@ -74,6 +75,17 @@ interface ToolSettingsMetadata {
    * connected machine's manifest denies any of these.
    */
   requiredCapabilities?: readonly (keyof RuntimeCapabilityAllow)[];
+  /**
+   * Set by tools that can write to the filesystem without producing a
+   * checkpoint, naming the class the revert copy speaks about. Declared here
+   * rather than matched on tool name so a shell added later is covered by
+   * building it, not by remembering to extend a list.
+   *
+   * Absent means one of two things and the difference does not matter to
+   * revert: the tool writes and checkpoints every path it touches, or it does
+   * not write at all.
+   */
+  uncheckpointedWriteSource?: UncheckpointedWriteSource;
 }
 
 /** A fully registered tool: its schema definition + its executor. */

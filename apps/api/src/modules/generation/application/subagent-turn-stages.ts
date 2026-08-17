@@ -23,6 +23,7 @@ import { ASK_USER_QUESTION_TOOL_NAME } from '../../../services/tools/builtin/ask
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import { TODO_READ_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../../../services/tools/builtin/todo';
 import type { EffectiveToolSettings, WorkdirPolicy } from '../../../services/tools/types';
+import { noteUncheckpointedSource } from '../../file-checkpoints/application/note-uncheckpointed-source';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
 import { resolveEnvironmentDisplayName } from './environment-display-name';
@@ -643,6 +644,14 @@ async function executeSubagentTools(input: {
               'TOOL_NOT_ALLOWED'
             );
           }
+          // A subagent's uncheckpointed writes are the delegating turn's to
+          // report, exactly as its checkpointed ones are. Builtins record
+          // themselves from `executeTool`; MCP tools have no registration to
+          // declare it on, so they are named here.
+          await noteUncheckpointedSource(
+            { chatId: input.chatId, assistantMessageId: input.assistantMessageId, db: input.db },
+            'mcp'
+          );
           const mcpResult = await executeMcpTool(
             input.db,
             input.userId,

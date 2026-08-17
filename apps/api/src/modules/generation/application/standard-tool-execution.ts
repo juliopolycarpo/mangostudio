@@ -46,6 +46,7 @@ import type {
   RegisteredTool,
   WorkdirPolicy,
 } from '../../../services/tools/types';
+import { noteUncheckpointedSource } from '../../file-checkpoints/application/note-uncheckpointed-source';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
 import {
@@ -247,6 +248,11 @@ async function executeStandardToolCall(
     const prepared = await prepareStandardToolCall(name, context);
     lifecycle.transition('running');
     if (prepared.kind === 'mcp') {
+      // Builtins record themselves from `executeTool`, off their declared
+      // metadata. MCP tools never become a `RegisteredTool`, so this is the
+      // only place the class can be named — and every call counts, because the
+      // hub cannot know whether a foreign tool writes.
+      await noteUncheckpointedSource(context, 'mcp');
       const mcpResult = await executeMcpToolCall(callId, args, lifecycle, context, prepared);
       result = mcpResult.result;
       isError = mcpResult.isError;

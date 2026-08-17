@@ -1,5 +1,6 @@
 import type { Message } from '@mangostudio/shared';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import type { Messages } from '@mangostudio/shared/i18n';
 import { format } from 'date-fns';
 import { Sparkles } from 'lucide-react';
@@ -14,7 +15,8 @@ interface AssistantMessageHeaderProps {
   msg: Message;
   isImageTurn: boolean;
   chatId?: string | null;
-  canRevertFileChanges?: boolean;
+  /** Present when this turn has a revertable manifest; absent means no affordance. */
+  fileCheckpoint?: ChatFileCheckpointSummary;
 }
 
 /** Picks the status verb shown next to the model name for an assistant turn. */
@@ -45,7 +47,7 @@ export function AssistantMessageHeader({
   msg,
   isImageTurn,
   chatId,
-  canRevertFileChanges,
+  fileCheckpoint,
 }: AssistantMessageHeaderProps) {
   const { t } = useI18n();
   const labels = t.chat.feed;
@@ -71,8 +73,12 @@ export function AssistantMessageHeader({
           copiedLabel={t.chat.messageCopied}
         />
       )}
-      {!msg.isGenerating && !isImageTurn && chatId && canRevertFileChanges && (
-        <RevertFileChangesButton chatId={chatId} messageId={msg.id} />
+      {!msg.isGenerating && !isImageTurn && chatId && fileCheckpoint && (
+        <RevertFileChangesButton
+          chatId={chatId}
+          messageId={msg.id}
+          uncheckpointedSources={fileCheckpoint.uncheckpointedSources}
+        />
       )}
       {!msg.isGenerating && (
         <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-200 text-[10px] text-on-surface-variant/50 font-label ml-auto">

@@ -97,14 +97,14 @@ async function readText(path: string): Promise<string> {
 
 describe('revertMessageFileCheckpoints', () => {
   it('reports nothing to revert for a message that touched no files', async () => {
-    expect(await revert()).toEqual({ revertedFiles: 0 });
+    expect(await revert()).toEqual({ revertedFiles: 0, uncheckpointedSources: [] });
   });
 
   it('removes a created file', async () => {
     const path = join(tempDir, 'created.txt');
     await executeCreateFile({ path, content: 'hello\n' }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(existsSync(path)).toBe(false);
   });
 
@@ -112,7 +112,7 @@ describe('revertMessageFileCheckpoints', () => {
     const path = await seedAndRead('notes.md', 'original\n');
     await executeWriteFile({ path, content: 'rewritten\n' }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(await readText(path)).toBe('original\n');
   });
 
@@ -121,7 +121,7 @@ describe('revertMessageFileCheckpoints', () => {
     await executeDeleteFile({ path }, turnContext());
     expect(existsSync(path)).toBe(false);
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(await readText(path)).toBe('keep me\n');
   });
 
@@ -130,7 +130,7 @@ describe('revertMessageFileCheckpoints', () => {
     const to = join(tempDir, 'b.ts');
     await executeMoveFile({ from, to }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(existsSync(to)).toBe(false);
     expect(await readText(from)).toBe('export const a = 1;\n');
   });
@@ -144,7 +144,7 @@ describe('revertMessageFileCheckpoints', () => {
     expect(summaries).toHaveLength(1);
     expect(summaries[0]?.fileCount).toBe(1);
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(await readText(path)).toBe('v1\n');
   });
 
@@ -167,7 +167,7 @@ describe('revertMessageFileCheckpoints', () => {
     );
     expect(await readText(to)).toBe('const value = 2;\n');
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(existsSync(to)).toBe(false);
     expect(await readText(from)).toBe('const value = 1;\n');
   });
@@ -181,7 +181,7 @@ describe('revertMessageFileCheckpoints', () => {
       turnContext()
     );
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(existsSync(to)).toBe(false);
     expect(await readText(from)).toBe('export * from "./impl";\n');
   });
@@ -193,7 +193,7 @@ describe('revertMessageFileCheckpoints', () => {
     await executeMoveFile({ from: first, to: second }, turnContext());
     await executeMoveFile({ from: second, to: third }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 2 });
+    expect(await revert()).toEqual({ revertedFiles: 2, uncheckpointedSources: [] });
     expect(existsSync(second)).toBe(false);
     expect(existsSync(third)).toBe(false);
     expect(await readText(first)).toBe('chained\n');
@@ -210,7 +210,7 @@ describe('revertMessageFileCheckpoints', () => {
     const other = join(tempDir, 'created.txt');
     await executeCreateFile({ path: other, content: 'ok\n' }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(await readText(path)).toBe('alpha\n');
     expect(existsSync(other)).toBe(false);
   });
@@ -228,8 +228,8 @@ describe('revertMessageFileCheckpoints', () => {
     const path = join(tempDir, 'created.txt');
     await executeCreateFile({ path, content: 'hello\n' }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
-    expect(await revert()).toEqual({ revertedFiles: 0 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
+    expect(await revert()).toEqual({ revertedFiles: 0, uncheckpointedSources: [] });
     expect(await listChatFileCheckpointSummaries(getDb(), chat.id)).toEqual([]);
   });
 });
@@ -252,9 +252,9 @@ describe('revert retried after its bookkeeping write did not land', () => {
   }
 
   async function revertTwice(): Promise<void> {
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     await reopenRevertedRows();
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
   }
 
   it('converges on a restored file', async () => {
@@ -291,11 +291,11 @@ describe('revert retried after its bookkeeping write did not land', () => {
     await executeMoveFile({ from: first, to: second }, turnContext());
     await executeMoveFile({ from: second, to: third }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 2 });
+    expect(await revert()).toEqual({ revertedFiles: 2, uncheckpointedSources: [] });
     await reopenRevertedRows();
     // Replaying the operations from here would move the restored file away
     // again; the retry has to recognise its own finished work instead.
-    expect(await revert()).toEqual({ revertedFiles: 2 });
+    expect(await revert()).toEqual({ revertedFiles: 2, uncheckpointedSources: [] });
     expect(existsSync(second)).toBe(false);
     expect(existsSync(third)).toBe(false);
     expect(await readText(first)).toBe('chained\n');
@@ -319,7 +319,7 @@ describe('revert retried after its bookkeeping write did not land', () => {
     const path = await seedAndRead('notes.md', 'original\n');
     await executeWriteFile({ path, content: 'rewritten\n' }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     await reopenRevertedRows();
     await Bun.write(path, 'edited by the user\n');
 
@@ -356,7 +356,7 @@ describe('revert containment against the chat workdir', () => {
     await bindWorkdir(false);
     const path = await checkpointOutsideWorkdir();
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(existsSync(path)).toBe(false);
   });
 
@@ -374,7 +374,7 @@ describe('revert containment against the chat workdir', () => {
     const path = join(tempDir, 'inside.txt');
     await executeCreateFile({ path, content: 'inside\n' }, turnContext());
 
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(existsSync(path)).toBe(false);
   });
 
@@ -385,7 +385,7 @@ describe('revert containment against the chat workdir', () => {
 
     // Paths and hashes describe the host the turn ran on. Following the chat's
     // new pointer would replay them somewhere they never applied.
-    expect(await revert()).toEqual({ revertedFiles: 1 });
+    expect(await revert()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
     expect(await readText(path)).toBe('original\n');
   });
 
