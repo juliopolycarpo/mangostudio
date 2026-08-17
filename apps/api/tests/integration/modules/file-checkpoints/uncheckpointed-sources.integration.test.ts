@@ -19,6 +19,7 @@ import { getDb } from '../../../../src/db/database';
 import { listChatFileCheckpointSummaries } from '../../../../src/modules/file-checkpoints/application/list-chat-checkpoints';
 import { revertMessageFileCheckpoints } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
 import { executeStandardToolCallsWithProgress } from '../../../../src/modules/generation/application/standard-tool-execution';
+import { insertMessage } from '../../../../src/modules/messages/infrastructure/message-repository';
 import {
   closeAllMcpClients,
   setMcpClientConnectorForTest,
@@ -43,25 +44,18 @@ beforeEach(async () => {
   const user = await insertTestUser();
   chat = await insertTestChat(user.id);
   messageId = faker.string.uuid();
-  await getDb()
-    .insertInto('messages')
-    .values({
+  await insertMessage(
+    {
       id: messageId,
       chatId: chat.id,
       role: 'ai',
       text: '',
-      imageUrl: null,
-      referenceImage: null,
       timestamp: Date.now(),
-      isGenerating: 0,
-      generationTime: null,
-      modelName: null,
-      styleParams: null,
+      isGenerating: false,
       interactionMode: 'chat',
-      parts: null,
-      providerState: null,
-    })
-    .execute();
+    },
+    getDb()
+  );
 });
 
 afterEach(async () => {

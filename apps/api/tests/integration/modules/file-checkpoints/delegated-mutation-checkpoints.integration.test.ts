@@ -33,6 +33,8 @@ import {
 } from '../../../../src/modules/agents/application/agent-settings-service';
 import { revertMessageFileCheckpoints } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
 import { runSubagentTurn } from '../../../../src/modules/generation/application/subagent-runner';
+import { insertMessage } from '../../../../src/modules/messages/infrastructure/message-repository';
+import { upsertToolSettings } from '../../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
 import {
   getProvider,
   registerProvider,
@@ -40,7 +42,12 @@ import {
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
 import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { registerTools } from '../../../../src/services/tools/register-tools';
-import { type ChatFixture, insertTestChat, insertTestUser } from '../../../support/factories';
+import {
+  type ChatFixture,
+  insertTestChat,
+  insertTestConnector,
+  insertTestUser,
+} from '../../../support/factories';
 
 const hasBash = isShellAvailable('bash');
 const MODEL_ID = 'delegated-checkpoints-model';
@@ -108,29 +115,6 @@ const multiAgentSettings: MultiAgentSettings = {
   defaultMaxTurns: 3,
 };
 
-/** The connector row `resolveModel` routes `MODEL_ID` through. */
-async function insertConnectorForModel(userId: string): Promise<void> {
-  await getDb()
-    .insertInto('secret_metadata')
-    .values({
-      id: `${userId}-delegated-connector`,
-      name: 'Delegated Checkpoints Connector',
-      provider: 'openai-compatible',
-      configured: 1,
-      source: 'config-file',
-      maskedSuffix: null,
-      updatedAt: Date.now(),
-      lastValidatedAt: null,
-      lastValidationError: null,
-      enabledModels: JSON.stringify([MODEL_ID]),
-      userId,
-      baseUrl: null,
-      organizationId: null,
-      projectId: null,
-    })
-    .execute();
-}
-
 /** Both built-in agents, stored the way the settings UI stores them. */
 async function configureAgents(userId: string, subagentToolNames: string[]): Promise<void> {
   await updateAgentProfile(getDb(), userId, SUBAGENT_ID, {
@@ -157,24 +141,15 @@ async function configureAgents(userId: string, subagentToolNames: string[]): Pro
 
 /** `bash` is opt-in, so a subagent only gets it from a stored user setting. */
 async function enableShellForUser(userId: string): Promise<void> {
-  const now = Date.now();
-  await getDb()
-    .insertInto('user_tool_settings')
-    .values({
-      id: faker.string.uuid(),
-      userId,
-      toolName: 'bash',
-      enabled: 1,
-      parametersJson: JSON.stringify({
-        timeoutSeconds: 10,
-        maxOutputBytes: 10_000,
-        allowedEnvVars: [],
-        deniedEnvVars: [],
-      }),
-      createdAt: now,
-      updatedAt: now,
-    })
-    .execute();
+  await upsertToolSettings(getDb(), userId, 'bash', {
+    enabled: true,
+    parameters: {
+      timeoutSeconds: 10,
+      maxOutputBytes: 10_000,
+      allowedEnvVars: [],
+      deniedEnvVars: [],
+    },
+  });
 }
 
 beforeEach(async () => {
@@ -188,27 +163,22 @@ beforeEach(async () => {
 
   const user = await insertTestUser();
   chat = await insertTestChat(user.id);
-  await insertConnectorForModel(user.id);
+  // `resolveModel` needs a connector row enabling MODEL_ID, or the turn rejects
+  // the model as unavailable before any tool runs.
+  await insertTestConnector(user.id, { enabledModels: [MODEL_ID] });
   parentMessageId = faker.string.uuid();
-  await getDb()
-    .insertInto('messages')
-    .values({
+  await insertMessage(
+    {
       id: parentMessageId,
       chatId: chat.id,
       role: 'ai',
       text: '',
-      imageUrl: null,
-      referenceImage: null,
       timestamp: Date.now(),
-      isGenerating: 0,
-      generationTime: null,
-      modelName: null,
-      styleParams: null,
+      isGenerating: false,
       interactionMode: 'chat',
-      parts: null,
-      providerState: null,
-    })
-    .execute();
+    },
+    getDb()
+  );
 });
 
 afterEach(() => {
