@@ -371,9 +371,12 @@ describe('a cancelled runtime call refuses before it mutates', () => {
 
 describe('a cancelled runtime call never abandons a mutation in progress', () => {
   it('finishes a write that had already started when the cancel arrived', async () => {
-    // Large enough that the atomic write's temporary file is observable for
-    // several event-loop turns; the abort is fired the moment it appears, which
-    // is unambiguously after the last cancellation point.
+    // Large enough that the exclusive open's destination entry — created by
+    // `open(path, 'wx')` before any bytes land — is observable for several
+    // event-loop turns; the abort is fired the moment it appears, which is
+    // unambiguously after the last cancellation point. There is no temporary
+    // file to watch for here: an exclusive create writes the destination
+    // directly, precisely because it has nothing to replace atomically.
     const content = 'x'.repeat(8 * 1024 * 1024);
     const directory = join(tempDir, 'nested');
     mkdirSync(directory, { recursive: true });
@@ -382,10 +385,8 @@ describe('a cancelled runtime call never abandons a mutation in progress', () =>
 
     let sawPartialWrite = false;
     const watch = setInterval(() => {
-      const temporary = readdirSync(directory).some(
-        (entry) => entry.startsWith('.') && entry.endsWith('.tmp')
-      );
-      if (!temporary) return;
+      const started = readdirSync(directory).includes('big.txt');
+      if (!started) return;
       sawPartialWrite = true;
       controller.abort();
     }, 0);

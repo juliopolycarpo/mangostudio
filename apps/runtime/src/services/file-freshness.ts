@@ -2,6 +2,31 @@ import { stat } from 'node:fs/promises';
 import { RuntimeServiceError } from '../errors';
 import { type ObservedFileRead, readFileWithObservedMtime } from './fs-utils';
 
+/**
+ * Read-before-destroy invariant and its actual boundary.
+ *
+ * `assertFresh`/`readFreshFile` require a chat to have read a file's current
+ * bytes before `delete_file` or a `write_file` overwrite may act on it — see
+ * `services/fs/delete-file.ts` and `services/fs/write-file.ts`.
+ * `services/fs/move-file.ts` does not call into this module at all: a rename
+ * does not require the source to have been read.
+ *
+ * That is not an oversight. Freshness and containment are different checks.
+ * Freshness is about content: has this chat observed the bytes it is about
+ * to destroy. Containment is about paths: `guardPaths` (`fs-path-policy.ts`)
+ * refuses, unconditionally, any move whose source or destination resolves
+ * outside a chat's `pathPolicy.containmentRoot` before `moveRuntimeFile`
+ * runs at all. Containment does not stand in for a read-first gate. A move
+ * inside the root can still relocate unread bytes. What it does prevent is
+ * a contained chat using a rename to park a file outside the root, read or
+ * not.
+ *
+ * The boundary this does not cover: a chat with no containment root (the
+ * default — empty `allowedPaths`/`deniedPaths`) can move a file anywhere
+ * without reading it first, which is functionally an unguarded delete. That
+ * gap is accepted, not closed. See #632.
+ */
+
 const MAX_ENTRIES_PER_CHAT = 256;
 const MAX_ENTRIES_GLOBAL = 10_000;
 
