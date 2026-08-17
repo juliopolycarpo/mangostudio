@@ -245,15 +245,23 @@ async function writeRegularFileExclusive(
   data: string | Uint8Array
 ): Promise<AtomicWriteResult> {
   const handle = await open(filePath, 'wx');
+  let committed = false;
   try {
     await handle.writeFile(data);
     // Taken from the write handle, like the replace path: the mtime this
     // returns must describe the bytes just written, not a later stat that
     // could race a concurrent modification.
     const mtimeMs = (await handle.stat()).mtimeMs;
+    committed = true;
     return { bytesWritten: byteLengthOf(data), mtimeMs };
   } finally {
     await handle.close();
+    if (!committed) {
+      // O_EXCL created the destination before any bytes landed. A failed
+      // write must not leave that entry behind, or a retry gets EEXIST for
+      // a file the caller was told it never got.
+      await unlink(filePath).catch(() => undefined);
+    }
   }
 }
 
