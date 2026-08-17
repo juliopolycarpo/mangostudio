@@ -16,7 +16,7 @@ import {
   describeFinding,
   findInstallRecipe,
   findingSeverity,
-  versionLabel,
+  prefixedVersionLabel,
   worstFinding,
 } from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
@@ -55,7 +55,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
       subtitle={
         <p className="text-xs text-on-surface-variant/60">
           {status.effective
-            ? `${e.agents.versionLabel} ${versionLabel(t, status.effective.version)}`
+            ? prefixedVersionLabel(t, status.effective.version)
             : e.agents.notInstalled}
         </p>
       }

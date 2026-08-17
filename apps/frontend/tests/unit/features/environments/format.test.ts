@@ -14,6 +14,7 @@ import {
   healthRollup,
   keyedFindings,
   pathPosition,
+  prefixedVersionLabel,
   versionLabel,
   worstFinding,
 } from '../../../../src/features/environments/format';
@@ -148,6 +149,17 @@ describe('versionLabel', () => {
   it('names an unreadable version instead of rendering nothing', () => {
     expect(versionLabel(en, null)).toBe(en.environments.versionUnknown);
     expect(versionLabel(en, 'v22.13.0')).toBe('v22.13.0');
+  });
+});
+
+describe('prefixedVersionLabel', () => {
+  it('does not stack Version onto the unknown-version phrase', () => {
+    expect(prefixedVersionLabel(en, null)).toBe(en.environments.versionUnknown);
+    expect(prefixedVersionLabel(ptBR, null)).toBe(ptBR.environments.versionUnknown);
+  });
+
+  it('keeps the field label in front of a parsed version', () => {
+    expect(prefixedVersionLabel(en, '1.2.3')).toBe(`${en.environments.agents.versionLabel} 1.2.3`);
   });
 });
 

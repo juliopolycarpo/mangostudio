@@ -87,6 +87,16 @@ export function versionLabel(t: Messages, version: string | null): string {
   return version ?? t.environments.versionUnknown;
 }
 
+/**
+ * Field-label plus version for agent card subtitles. The unknown-version
+ * phrase already names the field, so prefixing `Version` would read as
+ * "Version unknown version".
+ */
+export function prefixedVersionLabel(t: Messages, version: string | null): string {
+  const value = versionLabel(t, version);
+  return version === null ? value : `${t.environments.agents.versionLabel} ${value}`;
+}
+
 export function guardReasonLabel(t: Messages, reason: InstallGuardReason): string {
   return t.environments.install.guardBlocked[reason];
 }
