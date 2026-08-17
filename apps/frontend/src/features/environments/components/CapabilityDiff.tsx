@@ -92,7 +92,7 @@ function runtimeCell(column: Column, id: string): Cell {
   const status = column.runtimes.find((entry: RuntimeStatus) => entry.id === id);
   if (!status) return { state: 'unknown' };
   return status.effective
-    ? { state: 'present', detail: status.effective.version }
+    ? { state: 'present', detail: status.effective.version ?? undefined }
     : { state: 'absent' };
 }
 
@@ -101,7 +101,7 @@ function agentCell(column: Column, targetId: string): Cell {
   const status = column.agents.find((entry: AgentCliStatus) => entry.targetId === targetId);
   if (!status) return { state: 'unknown' };
   return status.effective
-    ? { state: 'present', detail: status.effective.version }
+    ? { state: 'present', detail: status.effective.version ?? undefined }
     : { state: 'absent' };
 }
 

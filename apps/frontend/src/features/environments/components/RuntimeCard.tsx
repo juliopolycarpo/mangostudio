@@ -96,7 +96,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
           <CardSectionLabel>{e.runtimes.effectiveLabel}</CardSectionLabel>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="font-mono text-base font-semibold text-on-surface">
-              {effective.version}
+              {effective.version ?? e.runtimes.versionUnknown}
             </span>
             <span className="min-w-0 break-all font-mono text-xs text-on-surface-variant/70">
               {effective.rawPath}

@@ -49,7 +49,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
       subtitle={
         <p className="text-xs text-on-surface-variant/60">
           {status.effective
-            ? `${e.agents.versionLabel} ${status.effective.version}`
+            ? `${e.agents.versionLabel} ${status.effective.version ?? e.agents.versionUnknown}`
             : e.agents.notInstalled}
         </p>
       }

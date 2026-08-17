@@ -27,7 +27,9 @@ export function OverviewToolchainCard({ status }: { readonly status: RuntimeStat
       dataAttributes={{ 'data-runtime-id': status.id }}
       subtitle={
         <p className="truncate font-mono text-xs text-on-surface-variant/70">
-          {installation ? installation.version : e.agents.notInstalled}
+          {installation
+            ? (installation.version ?? e.runtimes.versionUnknown)
+            : e.agents.notInstalled}
         </p>
       }
       actions={<HealthBadge health={status.health} />}

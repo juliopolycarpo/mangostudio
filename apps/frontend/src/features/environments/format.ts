@@ -29,6 +29,7 @@ import { formatMessage } from '@/lib/i18n-format';
 const IDENTIFIER_PARAM_KINDS: Record<string, ToolIdentityKind> = {
   runtime: 'runtime',
   targetId: 'agent',
+  consumer: 'agent',
   manager: 'version-manager',
 };
 
@@ -118,6 +119,7 @@ const FAIL_CODES = new Set<RuntimeFinding['code']>([
   'not-found',
   'not-executable',
   'version-below-minimum',
+  'version-below-minimum-for',
   'cli-not-installed',
   'version-probe-failed',
 ]);

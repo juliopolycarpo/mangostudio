@@ -41,7 +41,9 @@ export function ToolsStep({ environment, onContinue }: ToolsStepProps) {
     .filter((entry) => entry.health !== 'missing')
     .map((entry: RuntimeStatus) => {
       const { installation } = effectiveInstallation(entry);
-      return installation ? `${entry.id} ${installation.version}` : entry.id;
+      return installation
+        ? `${entry.id} ${installation.version ?? t.environments.runtimes.versionUnknown}`
+        : entry.id;
     });
 
   return (
