@@ -31,6 +31,15 @@ function compareVersions(left: SemVer, right: MinimumRuntimeVersion): number {
   return left.patch - (right.patch ?? 0);
 }
 
+/**
+ * Whether a parsed version falls short of a floor. A version the definition
+ * could not parse is never "below" anything — an unreadable version is its own
+ * finding, not a version claim — so both floor checks share this one answer.
+ */
+function isBelowFloor(version: SemVer | null, floor: MinimumRuntimeVersion): boolean {
+  return version !== null && compareVersions(version, floor) < 0;
+}
+
 function formatMinimumVersion(version: MinimumRuntimeVersion): string {
   return version.patch === undefined
     ? `${version.major}.${version.minor}`
@@ -126,7 +135,7 @@ export function analyzeRuntimeScan(
     for (const installation of canonicalInstallations) {
       if (installation.version === null) continue;
       const version = definition.parseVersion(installation.version);
-      if (!version || compareVersions(version, options.minimumVersion) >= 0) continue;
+      if (!isBelowFloor(version, options.minimumVersion)) continue;
       findings.push({
         code: 'version-below-minimum',
         params: {
@@ -141,10 +150,12 @@ export function analyzeRuntimeScan(
     }
   }
 
-  if (options.consumerRequirements && effective && effective.version !== null) {
+  // Only the binary that runs can fail a consumer's floor, so its version is
+  // parsed once here rather than per requirement.
+  if (options.consumerRequirements && effective?.version != null) {
+    const effectiveVersion = definition.parseVersion(effective.version);
     for (const requirement of options.consumerRequirements) {
-      const version = definition.parseVersion(effective.version);
-      if (!version || compareVersions(version, requirement) >= 0) continue;
+      if (!isBelowFloor(effectiveVersion, requirement)) continue;
       findings.push({
         code: 'version-below-minimum-for',
         params: {

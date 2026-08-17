@@ -2005,6 +2005,10 @@ export const messages: Messages = {
     title: 'Environments',
     nav: 'Environments',
     subtitle: 'What is installed, what is wrong, and what actually runs when you type.',
+    // A binary that answered but whose version output did not parse. Applies to
+    // runtimes and agent CLIs alike, which is why it lives here rather than
+    // inside either section.
+    versionUnknown: 'unknown version',
     tabs: {
       overview: 'Overview',
       // Label only: the tab still lives at /environments/runtimes and every
@@ -2561,7 +2565,6 @@ export const messages: Messages = {
       aliasReachable: 'reachable via {count} paths',
       otherInstallations: 'Other installations',
       noEffective: 'No usable binary was found.',
-      versionUnknown: 'unknown version',
       notInstalled: '{runtime} is not installed yet.',
       install: 'Install {runtime}',
       update: 'Update {runtime}',
@@ -2630,7 +2633,6 @@ export const messages: Messages = {
       locationUnsupported: 'unavailable on this platform',
       locationEntries: '{count} entries',
       notInstalled: 'Not installed',
-      versionUnknown: 'unknown version',
       empty: 'No agent CLIs were detected.',
       emptyHint: 'MangoStudio can install an agent CLI for you on this machine.',
     },

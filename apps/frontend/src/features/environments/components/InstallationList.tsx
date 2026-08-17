@@ -8,7 +8,7 @@
 
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { type InstallationGroup, pathPosition } from '../format';
+import { type InstallationGroup, pathPosition, versionLabel } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 
 interface InstallationListProps {
@@ -36,9 +36,7 @@ export function InstallationList({ groups }: InstallationListProps) {
             className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-sm"
             data-testid="installation-row"
           >
-            <span className="font-mono text-on-surface">
-              {canonical.version ?? e.runtimes.versionUnknown}
-            </span>
+            <span className="font-mono text-on-surface">{versionLabel(t, canonical.version)}</span>
             <span className="min-w-0 break-all font-mono text-xs text-on-surface-variant/70">
               {canonical.rawPath}
             </span>

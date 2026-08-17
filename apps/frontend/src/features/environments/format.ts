@@ -78,6 +78,15 @@ export function healthLabel(t: Messages, health: RuntimeHealth): string {
   return t.environments.status[health];
 }
 
+/**
+ * The version to print for an installation. `null` means the binary ran but its
+ * output did not parse, which every surface renders as a label rather than
+ * interpolating an empty value — the one place that decision lives.
+ */
+export function versionLabel(t: Messages, version: string | null): string {
+  return version ?? t.environments.versionUnknown;
+}
+
 export function guardReasonLabel(t: Messages, reason: InstallGuardReason): string {
   return t.environments.install.guardBlocked[reason];
 }
@@ -125,6 +134,12 @@ const FAIL_CODES = new Set<RuntimeFinding['code']>([
 ]);
 
 export function findingSeverity(finding: RuntimeFinding): FindingSeverity {
+  // The analyzer's own severity wins when it set one. An `info` finding is
+  // explicitly detail that must not escalate — a stale install below the floor,
+  // a floor belonging to a disabled consumer — so it renders and sorts below a
+  // fail even though its code is one the table would otherwise promote. Without
+  // this, a card could show a green `ok` badge above a red finding row.
+  if (finding.severity === 'info') return 'warn';
   return FAIL_CODES.has(finding.code) ? 'fail' : 'warn';
 }
 

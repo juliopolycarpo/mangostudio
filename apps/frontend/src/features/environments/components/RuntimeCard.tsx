@@ -10,7 +10,7 @@ import type { InstallRecipePreview, RuntimeStatus } from '@mangostudio/shared/en
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { effectiveInstallation, findInstallRecipe, pathPosition } from '../format';
+import { effectiveInstallation, findInstallRecipe, pathPosition, versionLabel } from '../format';
 import { useProbeRuntime } from '../hooks/use-runtime-status';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { FindingList } from './FindingList';
@@ -96,7 +96,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
           <CardSectionLabel>{e.runtimes.effectiveLabel}</CardSectionLabel>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <span className="font-mono text-base font-semibold text-on-surface">
-              {effective.version ?? e.runtimes.versionUnknown}
+              {versionLabel(t, effective.version)}
             </span>
             <span className="min-w-0 break-all font-mono text-xs text-on-surface-variant/70">
               {effective.rawPath}

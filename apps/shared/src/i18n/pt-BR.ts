@@ -2012,6 +2012,10 @@ export const messages = {
     title: 'Ambientes',
     nav: 'Ambientes',
     subtitle: 'O que está instalado, o que está errado e o que realmente roda quando você digita.',
+    // Um binário que respondeu, mas cuja saída de versão não foi reconhecida.
+    // Vale para runtimes e para CLIs de agente, por isso vive aqui e não dentro
+    // de uma das duas seções.
+    versionUnknown: 'versão desconhecida',
     tabs: {
       overview: 'Visão geral',
       // Rótulo apenas: a aba continua em /environments/runtimes e nenhum id de
@@ -2570,7 +2574,6 @@ export const messages = {
       aliasReachable: 'acessível por {count} caminhos',
       otherInstallations: 'Outras instalações',
       noEffective: 'Nenhum binário utilizável foi encontrado.',
-      versionUnknown: 'versão desconhecida',
       notInstalled: '{runtime} ainda não está instalado.',
       install: 'Instalar {runtime}',
       update: 'Atualizar {runtime}',
@@ -2642,7 +2645,6 @@ export const messages = {
       locationUnsupported: 'indisponível nesta plataforma',
       locationEntries: '{count} itens',
       notInstalled: 'Não instalada',
-      versionUnknown: 'versão desconhecida',
       empty: 'Nenhuma CLI de agente foi detectada.',
       emptyHint: 'O MangoStudio pode instalar uma CLI de agente para você nesta máquina.',
     },
