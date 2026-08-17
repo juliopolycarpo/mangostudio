@@ -2012,6 +2012,10 @@ export const messages = {
     title: 'Ambientes',
     nav: 'Ambientes',
     subtitle: 'O que está instalado, o que está errado e o que realmente roda quando você digita.',
+    // Um binário que respondeu, mas cuja saída de versão não foi reconhecida.
+    // Vale para runtimes e para CLIs de agente, por isso vive aqui e não dentro
+    // de uma das duas seções.
+    versionUnknown: 'versão desconhecida',
     tabs: {
       overview: 'Visão geral',
       // Rótulo apenas: a aba continua em /environments/runtimes e nenhum id de
@@ -2608,6 +2612,8 @@ export const messages = {
         'Há mais de uma versão de {runtime} instalada ({versions}); só a primeira do PATH roda.',
       'version-below-minimum':
         '{path} usa {version} e recursos que exigem {minimumVersion} ou superior vão falhar.',
+      'version-below-minimum-for':
+        '{version} está abaixo da {minimumVersion} que {consumer} exige.',
       'not-executable': '{path} existe, mas não respondeu a uma consulta de versão.',
       'outdated-lts': 'A versão {version} está em {ltsStatus} e deixará de receber correções.',
       'managed-but-not-on-path':

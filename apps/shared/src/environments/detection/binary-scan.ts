@@ -13,8 +13,15 @@ export interface RuntimeDefinition {
   readonly binaryNames: readonly string[];
   readonly versionArgs: readonly string[];
   readonly parseVersion: (stdout: string) => SemVer | null;
-  /** Finding to emit when the command runs but its output no longer parses. */
-  readonly unparsedVersionCode?: 'not-executable' | 'version-probe-failed';
+  /**
+   * Whether a binary that ran but whose version output did not parse still
+   * counts as installed. Off by default, which drops the candidate exactly as a
+   * probe that never ran does. On, it survives as an installation with a `null`
+   * version — for a vendor CLI whose `--version` output drifts on its own
+   * release cadence, "ran but unreadable" is not "not installed". The finding
+   * that explains the `null` is the analyzer's to raise, not the scan's.
+   */
+  readonly keepUnparsedVersion?: boolean;
   readonly wellKnownDirs: (env: PathEnv) => readonly string[];
   /** Retains the sidecar detector's final OS-resolved fallback. */
   readonly includeBareBinaryNames?: boolean;
@@ -65,7 +72,8 @@ type CandidateProbeResult =
       readonly kind: 'installation';
       readonly candidate: BinaryCandidate;
       readonly path: string;
-      readonly version: string;
+      /** `null` when the binary ran but its output did not parse as a version. */
+      readonly version: string | null;
     }
   | {
       readonly kind: 'failure';
@@ -325,13 +333,18 @@ export async function scanRuntime(
           : null;
       }
       if (!definition.parseVersion(version)) {
+        // A definition that opts in trades the raw failure for a known
+        // installation with an unreadable version: the binary answered, so
+        // "not installed" would be the wrong story. One that does not opt in
+        // keeps the old failure/drop split.
+        if (definition.keepUnparsedVersion) {
+          const path = await resolveRealpath(candidate.path, deps);
+          return { kind: 'installation', candidate, path, version: null };
+        }
         return candidate.requiresExistenceCheck
           ? {
               kind: 'failure',
-              failure: {
-                code: definition.unparsedVersionCode ?? 'not-executable',
-                path: candidate.path,
-              },
+              failure: { code: 'not-executable', path: candidate.path },
             }
           : null;
       }
@@ -339,7 +352,10 @@ export async function scanRuntime(
       const path = await resolveRealpath(candidate.path, deps);
       return { kind: 'installation', candidate, path, version };
     },
-    stopWhen ? (result) => result?.kind === 'installation' && stopWhen(result.version) : undefined
+    stopWhen
+      ? (result) =>
+          result?.kind === 'installation' && result.version !== null && stopWhen(result.version)
+      : undefined
   );
 
   for (const probeResult of probeResults) {

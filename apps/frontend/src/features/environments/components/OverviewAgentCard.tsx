@@ -12,7 +12,13 @@ import { Link } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { describeFinding, findInstallRecipe, findingSeverity, worstFinding } from '../format';
+import {
+  describeFinding,
+  findInstallRecipe,
+  findingSeverity,
+  prefixedVersionLabel,
+  worstFinding,
+} from '../format';
 import { useProbeAgentCli } from '../hooks/use-runtime-status';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { useEnvironmentEntitiesQuery } from '../queries';
@@ -49,7 +55,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
       subtitle={
         <p className="text-xs text-on-surface-variant/60">
           {status.effective
-            ? `${e.agents.versionLabel} ${status.effective.version}`
+            ? prefixedVersionLabel(t, status.effective.version)
             : e.agents.notInstalled}
         </p>
       }

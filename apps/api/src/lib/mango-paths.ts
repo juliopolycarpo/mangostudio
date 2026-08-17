@@ -40,11 +40,6 @@ export function getServerLogPath(startedAt: number): string {
   return join(getLogsDir(), `server-${formatTimestamp(startedAt)}.log`);
 }
 
-/** Managed working directory for Cursor SDK local agents (hooks + cwd). */
-export function getCursorAgentDir(): string {
-  return join(getHomeMangoDir(), 'cursor-agent');
-}
-
 /** Create the logs and run directories if missing. // Usage: await ensureRuntimeDirs() */
 export async function ensureRuntimeDirs(): Promise<void> {
   await mkdir(getLogsDir(), { recursive: true });

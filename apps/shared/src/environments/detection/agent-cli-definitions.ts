@@ -64,7 +64,7 @@ export const CLAUDE_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = {
     binaryNames: ['claude'],
     versionArgs: ['--version'],
     parseVersion: parseClaudeVersion,
-    unparsedVersionCode: 'version-probe-failed',
+    keepUnparsedVersion: true,
     wellKnownDirs: noWellKnownDirectories,
   },
   auth: {
@@ -84,7 +84,7 @@ export const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = {
     binaryNames: ['codex'],
     versionArgs: ['--version'],
     parseVersion: parseCodexVersion,
-    unparsedVersionCode: 'version-probe-failed',
+    keepUnparsedVersion: true,
     wellKnownDirs: noWellKnownDirectories,
   },
   auth: {
@@ -104,7 +104,7 @@ export const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = {
     binaryNames: ['cursor-agent'],
     versionArgs: ['--version'],
     parseVersion: parseCursorAgentVersion,
-    unparsedVersionCode: 'version-probe-failed',
+    keepUnparsedVersion: true,
     wellKnownDirs: noWellKnownDirectories,
   },
   auth: {

@@ -87,12 +87,15 @@ function useColumn(environments: readonly Environment[], environmentId: string) 
 
 type Column = ReturnType<typeof useColumn>;
 
+// A cell's `detail` is an optional annotation on `present`, not a label, so an
+// unreadable version drops to no detail here rather than to `versionLabel`'s
+// wording — the cell already says "present" on its own.
 function runtimeCell(column: Column, id: string): Cell {
   if (!column.permitted) return { state: 'not-permitted' };
   const status = column.runtimes.find((entry: RuntimeStatus) => entry.id === id);
   if (!status) return { state: 'unknown' };
   return status.effective
-    ? { state: 'present', detail: status.effective.version }
+    ? { state: 'present', detail: status.effective.version ?? undefined }
     : { state: 'absent' };
 }
 
@@ -101,7 +104,7 @@ function agentCell(column: Column, targetId: string): Cell {
   const status = column.agents.find((entry: AgentCliStatus) => entry.targetId === targetId);
   if (!status) return { state: 'unknown' };
   return status.effective
-    ? { state: 'present', detail: status.effective.version }
+    ? { state: 'present', detail: status.effective.version ?? undefined }
     : { state: 'absent' };
 }
 

@@ -2005,6 +2005,10 @@ export const messages: Messages = {
     title: 'Environments',
     nav: 'Environments',
     subtitle: 'What is installed, what is wrong, and what actually runs when you type.',
+    // A binary that answered but whose version output did not parse. Applies to
+    // runtimes and agent CLIs alike, which is why it lives here rather than
+    // inside either section.
+    versionUnknown: 'unknown version',
     tabs: {
       overview: 'Overview',
       // Label only: the tab still lives at /environments/runtimes and every
@@ -2599,6 +2603,7 @@ export const messages: Messages = {
         'More than one {runtime} is installed ({versions}); only the first one on PATH runs.',
       'version-below-minimum':
         '{path} reports {version}, so features that need {minimumVersion} or newer will fail.',
+      'version-below-minimum-for': '{version} is below the {minimumVersion} that {consumer} needs.',
       'not-executable': '{path} exists but did not answer a version query.',
       'outdated-lts': 'Version {version} is {ltsStatus} and will stop receiving fixes.',
       'managed-but-not-on-path':

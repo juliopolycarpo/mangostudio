@@ -7,10 +7,22 @@ export interface MinimumRuntimeVersion {
   readonly patch?: number;
 }
 
+/**
+ * A version floor that belongs to one consumer of this runtime, not the
+ * runtime itself — e.g. an agent CLI that needs a newer Node than MangoStudio
+ * requires generically. `enabled` decides whether falling short of it is the
+ * user's problem right now: a consumer that is off cannot fail on it yet.
+ */
+export interface ConsumerVersionRequirement extends MinimumRuntimeVersion {
+  readonly consumer: string;
+  readonly enabled: boolean;
+}
+
 export interface RuntimeAnalysisOptions {
   readonly installable: boolean;
   readonly probedAtMs: number;
   readonly minimumVersion?: MinimumRuntimeVersion;
+  readonly consumerRequirements?: readonly ConsumerVersionRequirement[];
 }
 
 function compareVersions(left: SemVer, right: MinimumRuntimeVersion): number {
@@ -19,17 +31,27 @@ function compareVersions(left: SemVer, right: MinimumRuntimeVersion): number {
   return left.patch - (right.patch ?? 0);
 }
 
+/**
+ * Whether a parsed version falls short of a floor. A version the definition
+ * could not parse is never "below" anything — an unreadable version is its own
+ * finding, not a version claim — so both floor checks share this one answer.
+ */
+function isBelowFloor(version: SemVer | null, floor: MinimumRuntimeVersion): boolean {
+  return version !== null && compareVersions(version, floor) < 0;
+}
+
 function formatMinimumVersion(version: MinimumRuntimeVersion): string {
   return version.patch === undefined
     ? `${version.major}.${version.minor}`
     : `${version.major}.${version.minor}.${version.patch}`;
 }
 
+/** Health is the worst severity carried by any finding; an absent severity counts as `warn`. */
 function healthFor(scan: RuntimeScanResult, findings: readonly RuntimeFinding[]): RuntimeHealth {
   if (scan.installations.length === 0) {
     return scan.failures.length > 0 ? 'error' : 'missing';
   }
-  return findings.length > 0 ? 'warn' : 'ok';
+  return findings.some((finding) => finding.severity !== 'info') ? 'warn' : 'ok';
 }
 
 export function analyzeRuntimeScan(
@@ -51,7 +73,11 @@ export function analyzeRuntimeScan(
       ? undefined
       : canonicalInstallations.find((installation) => installation.path === effective.path);
 
-  if (firstCanonical === undefined && scan.failures.length === 0) {
+  // A missing runtime and a broken candidate on PATH are different facts, and
+  // a user can have both at once (no real install, plus a dead shim). Neither
+  // should hide the other, so this no longer waits for `scan.failures` to be
+  // empty.
+  if (firstCanonical === undefined) {
     findings.push({ code: 'not-found', params: { runtime: definition.id } });
   }
   if (firstCanonical !== undefined && effective === undefined) {
@@ -64,11 +90,26 @@ export function analyzeRuntimeScan(
     });
   }
 
-  const versions = [...new Set(canonicalInstallations.map((installation) => installation.version))];
+  for (const installation of canonicalInstallations) {
+    if (installation.version !== null) continue;
+    findings.push({ code: 'version-probe-failed', params: { path: installation.rawPath } });
+  }
+
+  const versions = [
+    ...new Set(
+      canonicalInstallations
+        .map((installation) => installation.version)
+        .filter((version): version is string => version !== null)
+    ),
+  ];
   if (versions.length > 1) {
     findings.push({
       code: 'multiple-versions',
       params: { runtime: definition.id, versions: versions.join(', ') },
+      // Several installed versions is normal for anyone on a version manager.
+      // `shadowed-by-earlier-path` is the finding that fires when one of them
+      // is actually ambiguous — earlier on PATH and different from what runs.
+      severity: 'info',
     });
   }
 
@@ -92,8 +133,9 @@ export function analyzeRuntimeScan(
 
   if (options.minimumVersion) {
     for (const installation of canonicalInstallations) {
+      if (installation.version === null) continue;
       const version = definition.parseVersion(installation.version);
-      if (!version || compareVersions(version, options.minimumVersion) >= 0) continue;
+      if (!isBelowFloor(version, options.minimumVersion)) continue;
       findings.push({
         code: 'version-below-minimum',
         params: {
@@ -101,6 +143,28 @@ export function analyzeRuntimeScan(
           version: installation.version,
           minimumVersion: formatMinimumVersion(options.minimumVersion),
         },
+        // Only the binary that actually runs can make a feature fail today; a
+        // stale install sitting below the floor is detail, not a warning.
+        ...(!installation.effective && { severity: 'info' }),
+      });
+    }
+  }
+
+  // Only the binary that runs can fail a consumer's floor, so its version is
+  // parsed once here rather than per requirement.
+  if (options.consumerRequirements && effective?.version != null) {
+    const effectiveVersion = definition.parseVersion(effective.version);
+    for (const requirement of options.consumerRequirements) {
+      if (!isBelowFloor(effectiveVersion, requirement)) continue;
+      findings.push({
+        code: 'version-below-minimum-for',
+        params: {
+          consumer: requirement.consumer,
+          version: effective.version,
+          minimumVersion: formatMinimumVersion(requirement),
+        },
+        // A disabled consumer cannot fail on a version it never runs against yet.
+        ...(!requirement.enabled && { severity: 'info' }),
       });
     }
   }

@@ -107,6 +107,6 @@ It exists so a stored `cursor/*` id resolves to a provider that can be named rat
 unknown-provider crash.
 
 **Generic Node.js support is unaffected.** Node and NVM are first-class environment targets,
-detected and installable for reasons that have nothing to do with any provider; the supported-Node
-floor now lives in `apps/shared/src/environments/detection/runtime-definitions.ts` as
-`NODE_MINIMUM_SUPPORTED_VERSION`.
+detected and installable for reasons that have nothing to do with any provider. Detection reports
+no generic Node floor of its own — nothing in-tree needs one — and a caller with a genuine minimum
+(a specific consumer, not this deprecated provider) supplies it per probe instead.

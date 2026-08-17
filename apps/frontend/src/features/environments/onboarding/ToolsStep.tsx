@@ -13,7 +13,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { InstallTrustToggle } from '../components/InstallTrustToggle';
-import { effectiveInstallation } from '../format';
+import { effectiveInstallation, versionLabel } from '../format';
 import { agentCliStatusesQueryOptions, runtimeStatusesQueryOptions } from '../queries';
 import { StepActions } from './StepActions';
 
@@ -41,7 +41,7 @@ export function ToolsStep({ environment, onContinue }: ToolsStepProps) {
     .filter((entry) => entry.health !== 'missing')
     .map((entry: RuntimeStatus) => {
       const { installation } = effectiveInstallation(entry);
-      return installation ? `${entry.id} ${installation.version}` : entry.id;
+      return installation ? `${entry.id} ${versionLabel(t, installation.version)}` : entry.id;
     });
 
   return (
