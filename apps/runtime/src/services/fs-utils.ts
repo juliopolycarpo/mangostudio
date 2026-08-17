@@ -218,16 +218,42 @@ export async function writeRegularFileAtomic(
   options: { readonly exclusive?: boolean } = {}
 ): Promise<AtomicWriteResult> {
   await mkdir(dirname(filePath), { recursive: true });
-  const destinationMode = await inspectWriteDestination(filePath);
+  if (options.exclusive) return await writeRegularFileExclusive(filePath, data);
 
+  const destinationMode = await inspectWriteDestination(filePath);
   const tempPath = atomicTempPath(filePath);
   try {
     const mtimeMs = await writeTempFile(tempPath, data, destinationMode);
-    await commitTempFile(tempPath, filePath, options.exclusive ?? false);
+    await commitTempFile(tempPath, filePath);
     return { bytesWritten: byteLengthOf(data), mtimeMs };
   } catch (error) {
     await unlink(tempPath).catch(() => undefined);
     throw error;
+  }
+}
+
+/**
+ * An exclusive create has no destination to replace, so the temp-file dance
+ * that makes a *replace* atomic buys nothing here: there are no permission
+ * bits to carry forward and nothing to swap in. `open(path, 'wx')` gives the
+ * same no-overwrite guarantee — EEXIST when the path is already taken, even
+ * by a symlink — in one syscall instead of an lstat, an access probe, and a
+ * temp/link/unlink round trip.
+ */
+async function writeRegularFileExclusive(
+  filePath: string,
+  data: string | Uint8Array
+): Promise<AtomicWriteResult> {
+  const handle = await open(filePath, 'wx');
+  try {
+    await handle.writeFile(data);
+    // Taken from the write handle, like the replace path: the mtime this
+    // returns must describe the bytes just written, not a later stat that
+    // could race a concurrent modification.
+    const mtimeMs = (await handle.stat()).mtimeMs;
+    return { bytesWritten: byteLengthOf(data), mtimeMs };
+  } finally {
+    await handle.close();
   }
 }
 
@@ -280,17 +306,8 @@ async function writeTempFile(
   }
 }
 
-async function commitTempFile(
-  tempPath: string,
-  filePath: string,
-  exclusive: boolean
-): Promise<void> {
-  if (!exclusive) {
-    await rename(tempPath, filePath);
-    return;
-  }
-  await link(tempPath, filePath);
-  await unlink(tempPath);
+async function commitTempFile(tempPath: string, filePath: string): Promise<void> {
+  await rename(tempPath, filePath);
 }
 
 function atomicTempPath(filePath: string): string {

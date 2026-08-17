@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { clearFileFreshness, PathAccessError } from '../../../src';
 import { runtimeFsService } from '../../../src/services/fs';
+import { writeRegularFileAtomic } from '../../../src/services/fs-utils';
 
 let tempDir: string;
 
@@ -460,5 +462,67 @@ describe('containment holds for every path the hub names', () => {
         pathPolicy: contained(),
       })
     ).rejects.toThrow(PathAccessError);
+  });
+});
+
+describe('create_file exclusive fast path', () => {
+  it('takes the mtime from the write handle, not a later stat', async () => {
+    const path = join(tempDir, 'fast.txt');
+    const result = await writeRegularFileAtomic(path, 'content\n', { exclusive: true });
+
+    expect(Number.isFinite(result.mtimeMs)).toBe(true);
+    const onDisk = await stat(path);
+    expect(result.mtimeMs).toBe(onDisk.mtimeMs);
+  });
+
+  it('refuses an existing path without touching its content', async () => {
+    const path = join(tempDir, 'exists.txt');
+    await Bun.write(path, 'first\n');
+
+    await expect(writeRegularFileAtomic(path, 'second\n', { exclusive: true })).rejects.toThrow(
+      /EEXIST/
+    );
+    expect(await Bun.file(path).text()).toBe('first\n');
+  });
+
+  it('create_file gives a real mtime through recordFileRead and refuses a second create at the same path', async () => {
+    const path = join(tempDir, 'once.txt');
+    const created = await runtimeFsService.createFile({
+      chatId: 'chat-once',
+      inputPath: 'once.txt',
+      resolvedPath: path,
+      content: 'first\n',
+      captureSnapshot: false,
+    });
+    expect(created.result.bytesWritten).toBe(6);
+
+    await expect(
+      runtimeFsService.createFile({
+        chatId: 'chat-once',
+        inputPath: 'once.txt',
+        resolvedPath: path,
+        content: 'second\n',
+        captureSnapshot: false,
+      })
+    ).rejects.toThrow(/already exists/);
+    expect(await Bun.file(path).text()).toBe('first\n');
+  });
+
+  it('names the symbolic link when create_file targets one', async () => {
+    const target = join(tempDir, 'target.txt');
+    const link = join(tempDir, 'link.txt');
+    await Bun.write(target, 'real\n');
+    symlinkSync(target, link);
+
+    await expect(
+      runtimeFsService.createFile({
+        chatId: 'chat-symlink',
+        inputPath: 'link.txt',
+        resolvedPath: link,
+        content: 'planted\n',
+        captureSnapshot: false,
+      })
+    ).rejects.toThrow(/symbolic link/);
+    expect(await Bun.file(target).text()).toBe('real\n');
   });
 });
