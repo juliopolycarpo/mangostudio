@@ -11,12 +11,15 @@ import { type ObservedFileRead, readFileWithObservedMtime } from './fs-utils';
  * `services/fs/move-file.ts` does not call into this module at all: a rename
  * does not require the source to have been read.
  *
- * That is not an oversight. What stands in for the read-first gate on a move
- * is containment, not freshness: `guardPaths` (`fs-path-policy.ts`) refuses,
- * unconditionally, any move whose destination resolves outside a chat's
- * `pathPolicy.containmentRoot` — before `moveRuntimeFile` runs at all. That is
- * a stronger guarantee than gating on `assertFresh` would be, since the move
- * is never admitted, read or not.
+ * That is not an oversight. Freshness and containment are different checks.
+ * Freshness is about content: has this chat observed the bytes it is about
+ * to destroy. Containment is about paths: `guardPaths` (`fs-path-policy.ts`)
+ * refuses, unconditionally, any move whose source or destination resolves
+ * outside a chat's `pathPolicy.containmentRoot` before `moveRuntimeFile`
+ * runs at all. Containment does not stand in for a read-first gate. A move
+ * inside the root can still relocate unread bytes. What it does prevent is
+ * a contained chat using a rename to park a file outside the root, read or
+ * not.
  *
  * The boundary this does not cover: a chat with no containment root (the
  * default — empty `allowedPaths`/`deniedPaths`) can move a file anywhere
