@@ -41,19 +41,13 @@ export const messageUncheckpointedSources: Migration = {
         'source',
       ])
       .execute();
-
-    // The checkpoint list reads every uncheckpointed source of a chat in one
-    // query, alongside the manifest rows it qualifies.
-    await db.schema
-      .createIndex('idx_message_uncheckpointed_sources_chat')
-      .ifNotExists()
-      .on('message_uncheckpointed_sources')
-      .column('chatId')
-      .execute();
+    // No separate index on `chatId`: this is a rowid table, so the primary key
+    // is backed by an index whose leftmost column is already `chatId`, which
+    // serves every read and delete this table has. A second one would only add
+    // a b-tree write per row on the per-tool-call path.
   },
 
   async down(db): Promise<void> {
-    await db.schema.dropIndex('idx_message_uncheckpointed_sources_chat').ifExists().execute();
     await db.schema.dropTable('message_uncheckpointed_sources').ifExists().execute();
   },
 };

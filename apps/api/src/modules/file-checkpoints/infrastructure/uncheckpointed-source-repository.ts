@@ -36,22 +36,32 @@ export async function listUncheckpointedSourcesForMessage(
   return orderSources(rows.map((row) => row.source));
 }
 
-/** Every message of a chat that ran an uncheckpointed mutator, keyed by message. */
+/**
+ * The uncheckpointed sources of the given messages, keyed by message.
+ *
+ * Scoped to the ids the caller will actually read rather than the whole chat:
+ * rows survive for turns that never produced a manifest, and the manifest list
+ * itself is capped, so a long-lived chat accumulates sources that no response
+ * can ever mention.
+ */
 export async function listUncheckpointedSourcesByMessage(
   db: Kysely<Database>,
-  chatId: string
+  chatId: string,
+  messageIds: readonly string[]
 ): Promise<ReadonlyMap<string, ReadonlyArray<UncheckpointedWriteSource>>> {
+  if (messageIds.length === 0) return new Map();
   const rows = await db
     .selectFrom('message_uncheckpointed_sources')
     .select(['messageId', 'source'])
     .where('chatId', '=', chatId)
+    .where('messageId', 'in', messageIds)
     .execute();
 
-  const byMessage = new Map<string, string[]>();
+  const byMessage = new Map<string, Set<string>>();
   for (const row of rows) {
     const existing = byMessage.get(row.messageId);
-    if (existing) existing.push(row.source);
-    else byMessage.set(row.messageId, [row.source]);
+    if (existing) existing.add(row.source);
+    else byMessage.set(row.messageId, new Set([row.source]));
   }
   return new Map(
     [...byMessage].map(([messageId, sources]) => [messageId, orderSources(sources)] as const)
@@ -75,7 +85,7 @@ export async function deleteMessageUncheckpointedSources(
  * longer a source this build knows about is dropped. The column is free text in
  * SQLite, so this is the only place the union is actually enforced.
  */
-function orderSources(sources: readonly string[]): ReadonlyArray<UncheckpointedWriteSource> {
-  const present = new Set(sources);
+function orderSources(sources: Iterable<string>): ReadonlyArray<UncheckpointedWriteSource> {
+  const present = sources instanceof Set ? sources : new Set(sources);
   return UNCHECKPOINTED_WRITE_SOURCES.filter((source) => present.has(source));
 }

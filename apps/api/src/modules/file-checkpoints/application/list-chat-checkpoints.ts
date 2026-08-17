@@ -21,7 +21,6 @@ export async function listChatFileCheckpointSummaries(
   chatId: string
 ): Promise<ChatFileCheckpointSummary[]> {
   const rows = await listActiveCheckpointsForChat(db, chatId);
-  const uncheckpointedByMessage = await listUncheckpointedSourcesByMessage(db, chatId);
   const byMessage = new Map<
     string,
     { paths: Set<string>; ops: Set<FileCheckpointOp>; createdAt: number }
@@ -43,6 +42,12 @@ export async function listChatFileCheckpointSummaries(
     existing.ops.add(op);
     existing.createdAt = Math.min(existing.createdAt, row.createdAt);
   }
+
+  // Only the messages that made the list: the sources are its qualifier, so
+  // there is no reason to read the ones belonging to turns it never mentions.
+  const uncheckpointedByMessage = await listUncheckpointedSourcesByMessage(db, chatId, [
+    ...byMessage.keys(),
+  ]);
 
   return [...byMessage.entries()]
     .map(([messageId, summary]) => ({
