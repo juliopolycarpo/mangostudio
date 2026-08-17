@@ -132,6 +132,15 @@ export async function executeReadFile(
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
   const view = args.view ?? 'text';
+  // A byte view has no lines to window, so a line range asked for alongside one
+  // could only be dropped. Answering a request the tool cannot honour is the
+  // failure mode strict argument handling exists to remove: the model reads a
+  // full dump as the slice it asked for.
+  if (view !== 'text' && (args.startLine !== undefined || args.maxLines !== undefined)) {
+    throw new ToolArgumentError(
+      `Fields "startLine" and "maxLines" apply to view "text" only; view "${view}" returns the whole file.`
+    );
+  }
   const startLine = args.startLine ?? READ_FILE_DEFAULT_START_LINE;
   const maxLines = args.maxLines ?? READ_FILE_DEFAULT_MAX_LINES;
 
@@ -160,16 +169,6 @@ function execute(args: Record<string, unknown>, context: ToolContext): Promise<R
     max: READ_FILE_MAX_MAX_LINES,
   });
   const view = getOptionalEnum(args.view, 'view', RUNTIME_READ_FILE_VIEWS) ?? 'text';
-
-  // A byte view has no lines to window, so a line range asked for alongside one
-  // could only be dropped. Answering a request the tool cannot honour is the
-  // failure mode strict argument handling exists to remove: the model reads a
-  // full dump as the slice it asked for.
-  if (view !== 'text' && (startLine !== undefined || maxLines !== undefined)) {
-    throw new ToolArgumentError(
-      `Fields "startLine" and "maxLines" apply to view "text" only; view "${view}" returns the whole file.`
-    );
-  }
 
   return executeReadFile(
     {

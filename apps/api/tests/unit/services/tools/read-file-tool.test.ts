@@ -352,6 +352,15 @@ describe('executeReadFile', () => {
     expect(result.content).toBe('68690a');
   });
 
+  it('rejects a line window on a byte view when called directly, not only via execute', async () => {
+    const filePath = join(tempDir, 'notes.md');
+    await seedFile(filePath, 'hi\n');
+
+    await expect(
+      executeReadFile({ path: filePath, view: 'hex', startLine: 1 }, makeContext())
+    ).rejects.toThrow('apply to view "text" only');
+  });
+
   it('leaves a text read shaped exactly as it was before view existed', async () => {
     const filePath = join(tempDir, 'plain.txt');
     await seedFile(filePath, 'one\n');
