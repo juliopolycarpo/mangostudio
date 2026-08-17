@@ -37,6 +37,15 @@ const DEFAULT_CACHE_TTL_MS = 30_000;
 const NODE_RELEASE_CACHE_FILE = 'node-releases.json';
 
 /**
+ * After a forced probe completes, another force for the same (scope, kind,
+ * ids) reuses that result instead of starting a new scan. A stuck re-check
+ * button then costs one scan per second, not per click. A probe that started
+ * after the caller arrived still counts as fresh even inside this window —
+ * see the fresh-join check in `probe()`, which is ordered before this one.
+ */
+const FORCED_PROBE_MIN_INTERVAL_MS = 1_000;
+
+/**
  * Probe spawns on a remote machine are slower than local ones, so the budget
  * the runtime enforces is generous — and the hub's own deadline sits above it,
  * because an unset `timeoutMs` leaves a hung remote hanging the request forever.
@@ -107,6 +116,22 @@ interface CacheEntry<T> {
 
 type AnyStatus = RuntimeStatus | VersionManagerStatus | AgentCliStatus;
 
+interface Inflight {
+  /** When this scan started, so a forced caller can tell it apart from a stale one. */
+  readonly startedAt: number;
+  readonly promise: Promise<readonly AnyStatus[]>;
+}
+
+interface ForcedCompletion {
+  readonly completedAt: number;
+  readonly statuses: readonly AnyStatus[];
+}
+
+/** `value` if `predicate` holds for it, otherwise `undefined`. */
+function pickIf<T>(value: T | undefined, predicate: (value: T) => boolean): T | undefined {
+  return value !== undefined && predicate(value) ? value : undefined;
+}
+
 export interface EnvironmentProbingServiceOptions {
   readonly resolveClient?: (scope: ProbeScope) => Promise<RuntimeClient>;
   readonly loadReleaseMetadata?: (force: boolean) => Promise<NodeReleaseMetadata | null>;
@@ -149,9 +174,11 @@ export function createEnvironmentProbingService(
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const getSelfVersion = options.getSelfVersion ?? getVersion;
   const cache = new Map<string, CacheEntry<AnyStatus>>();
-  const inflight = new Map<string, Promise<readonly AnyStatus[]>>();
+  const inflight = new Map<string, Inflight>();
   /** Newest generation per scoped probe may write cache; older ones must not. */
   const generations = new Map<string, number>();
+  /** Last result a forced probe produced, keyed the same as `generations`. */
+  const forcedCompletions = new Map<string, ForcedCompletion>();
 
   // Environments are per-user rows, so two users can own the same id. The user
   // is part of the key for the same reason the connection is: neither of them
@@ -213,6 +240,10 @@ export function createEnvironmentProbingService(
     force: boolean,
     run: (client: RuntimeClient) => Promise<readonly AnyStatus[]>
   ): Promise<T[]> => {
+    // Captured before `resolveClient` so "fresh" means what the caller meant
+    // by it — a scan that started after this request arrived, not after the
+    // connection happened to resolve.
+    const requestArrivedAt = now();
     const client = await resolveClient(scope);
     if (!force) {
       const cached = readFresh<T>(scope, kind, ids, client);
@@ -223,28 +254,49 @@ export function createEnvironmentProbingService(
     // A forced probe never joins a lazy one — that is the whole point of asking
     // again — but a lazy caller happily rides the forced probe already running.
     const forcedKey = `${key}${SCOPE_SEP}force`;
-    const pending = force
-      ? inflight.get(forcedKey)
-      : (inflight.get(forcedKey) ?? inflight.get(key));
-    if (pending) return (await pending) as T[];
+
+    if (force) {
+      // A forced probe exists to observe state as of now. Joining a scan that
+      // began before this request arrived can answer with the filesystem as
+      // it was up to a full probe budget ago — the install-then-probe race.
+      const freshJoin = pickIf(
+        inflight.get(forcedKey),
+        (entry) => entry.startedAt >= requestArrivedAt
+      );
+      if (freshJoin) return (await freshJoin.promise) as T[];
+
+      // No fresher scan is already running: the minimum interval decides
+      // whether this request gets the last forced answer or a new scan. This
+      // check must come after the fresh-join check above, or a request that
+      // arrived after a still-running scan started would be answered with a
+      // stale, already-completed one instead of riding the fresh scan.
+      const lastForced = forcedCompletions.get(key);
+      if (lastForced && requestArrivedAt - lastForced.completedAt < FORCED_PROBE_MIN_INTERVAL_MS) {
+        return lastForced.statuses as T[];
+      }
+    } else {
+      const pending = inflight.get(forcedKey) ?? inflight.get(key);
+      if (pending) return (await pending.promise) as T[];
+    }
 
     const inflightKey = force ? forcedKey : key;
     // Forced vs lazy races: only the newest generation for this scoped probe
     // may land in the cache. An older completion still answers its caller.
     const generation = (generations.get(key) ?? 0) + 1;
     generations.set(key, generation);
-    const probing = run(client)
+    const promise: Promise<readonly AnyStatus[]> = run(client)
       .then((statuses) => {
         if (generations.get(key) === generation) {
           writeStatuses(scope, kind, client, statuses, idOf);
+          if (force) forcedCompletions.set(key, { completedAt: now(), statuses });
         }
         return statuses;
       })
       .finally(() => {
-        if (inflight.get(inflightKey) === probing) inflight.delete(inflightKey);
+        if (inflight.get(inflightKey)?.promise === promise) inflight.delete(inflightKey);
       });
-    inflight.set(inflightKey, probing);
-    return (await probing) as T[];
+    inflight.set(inflightKey, { startedAt: requestArrivedAt, promise });
+    return (await promise) as T[];
   };
 
   const probeRuntimes = (
@@ -371,6 +423,7 @@ export function createEnvironmentProbingService(
         cache.clear();
         inflight.clear();
         generations.clear();
+        forcedCompletions.clear();
         return;
       }
       for (const [key, entry] of [...cache.entries()]) {
@@ -382,6 +435,9 @@ export function createEnvironmentProbingService(
       }
       for (const key of [...generations.keys()]) {
         if (key.split(SCOPE_SEP)[1] === environmentId) generations.delete(key);
+      }
+      for (const key of [...forcedCompletions.keys()]) {
+        if (key.split(SCOPE_SEP)[1] === environmentId) forcedCompletions.delete(key);
       }
     },
   };

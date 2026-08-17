@@ -157,6 +157,65 @@ describe('rate-limit buckets under the /api prefix', () => {
     limiter.teardown();
   });
 
+  it('isolates forced-probe traffic from the general bucket on the same IP', async () => {
+    const limiter = rateLimit({ classify: classifyRateLimit, trustProxy: true });
+    const probeRoutes = new Elysia().post('/environments/runtimes/bun/probe', () => ({ ok: true }));
+    const chatRoutes = new Elysia().get('/chats', () => ({ ok: true }));
+    const api = new Elysia({ prefix: '/api' })
+      .use(errorHandler)
+      .use(limiter)
+      .use(chatRoutes)
+      .use(probeRoutes);
+    const app = new Elysia().use(api);
+    const postProbe = () =>
+      app.handle(
+        new Request('http://localhost/api/environments/runtimes/bun/probe', {
+          method: 'POST',
+          headers: CALLER,
+        })
+      );
+    const getChats = () =>
+      app.handle(new Request('http://localhost/api/chats', { headers: CALLER }));
+
+    const max = RATE_LIMIT_BUCKETS.probeForce.max;
+    for (let i = 0; i < max; i++) {
+      expect((await postProbe()).status).toBe(200);
+    }
+    const limited = await postProbe();
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get('retry-after')).toBeTruthy();
+
+    // General bucket on the same forwarded IP is untouched.
+    expect((await getChats()).status).toBe(200);
+
+    limiter.teardown();
+  });
+
+  it('shares the forced-probe bucket across all three force routes', async () => {
+    const limiter = rateLimit({ classify: classifyRateLimit, trustProxy: true });
+    const probeRoutes = new Elysia()
+      .post('/environments/runtimes/bun/probe', () => ({ ok: true }))
+      .post('/environments/version-managers/nvm/probe', () => ({ ok: true }))
+      .post('/environments/agents/claude/probe', () => ({ ok: true }));
+    const api = new Elysia({ prefix: '/api' }).use(errorHandler).use(limiter).use(probeRoutes);
+    const app = new Elysia().use(api);
+    const paths = [
+      '/api/environments/runtimes/bun/probe',
+      '/api/environments/version-managers/nvm/probe',
+      '/api/environments/agents/claude/probe',
+    ];
+    const post = (path: string) =>
+      app.handle(new Request(`http://localhost${path}`, { method: 'POST', headers: CALLER }));
+
+    const max = RATE_LIMIT_BUCKETS.probeForce.max;
+    for (let i = 0; i < max; i++) {
+      expect((await post(paths[i % paths.length] as string)).status).toBe(200);
+    }
+    expect((await post(paths[0] as string)).status).toBe(429);
+
+    limiter.teardown();
+  });
+
   /**
    * Regression: nothing in this chain may consume the request body. The Better
    * Auth passthrough route reads the raw `request` itself, so anything that

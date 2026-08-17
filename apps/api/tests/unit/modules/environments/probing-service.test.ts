@@ -231,3 +231,126 @@ describe('what the hub sends down with a probe', () => {
     expect(remote.pathEnvParams).toBeNull();
   });
 });
+
+describe('forced-probe admission', () => {
+  it('joins a forced probe that started no earlier than this request arrived', async () => {
+    const local = fakeClient();
+    local.holdRuntime = true;
+    const service = serviceFor(() => local);
+
+    // Same fake clock reading for both calls: the in-flight scan started no
+    // earlier than this request arrived, so it still counts as fresh.
+    const first = service.listRuntimeStatuses(LOCAL, { force: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(local.runtimeCalls).toBe(1);
+
+    const second = service.listRuntimeStatuses(LOCAL, { force: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(local.runtimeCalls).toBe(1);
+
+    local.settleRuntime();
+    await Promise.all([first, second]);
+  });
+
+  it('does not join a forced probe that started before this request arrived', async () => {
+    const local = fakeClient();
+    local.holdRuntime = true;
+    let clock = 1_000;
+    const service = serviceFor(
+      () => local,
+      () => clock
+    );
+
+    const first = service.listRuntimeStatuses(LOCAL, { force: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(local.runtimeCalls).toBe(1);
+
+    // Time passes — e.g. an install runs — before the second force arrives.
+    clock += 500;
+    const second = service.listRuntimeStatuses(LOCAL, { force: true });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(local.runtimeCalls).toBe(2);
+
+    local.settleRuntime();
+    await Promise.all([first, second]);
+  });
+
+  it('answers a forced probe issued after an install with post-install state', async () => {
+    let clock = 1_000;
+    const callVersions: string[] = [];
+    let currentVersion = 'missing';
+    const resolvers: Array<(value: unknown) => void> = [];
+
+    const client = {
+      manifest: MANIFEST,
+      runtimeVersion: '2.0.0-remote',
+      probing: {
+        runtimes: () =>
+          new Promise((resolve) => {
+            callVersions.push(currentVersion);
+            resolvers.push(resolve);
+          }),
+        versionManagers: () => Promise.reject(new Error('not used in this test')),
+        agentClis: () => Promise.reject(new Error('not used in this test')),
+      },
+    } as unknown as RuntimeClient;
+
+    const service = createEnvironmentProbingService({
+      resolveClient: () => Promise.resolve(client),
+      loadReleaseMetadata: () => Promise.resolve(null),
+      getSelfVersion: () => '9.9.9',
+      now: () => clock,
+    });
+
+    // A stale scan is already running — e.g. a poll that began before install.
+    const stale = service.listRuntimeStatuses(LOCAL, { force: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The install completes, and the UI's re-check button fires right after.
+    currentVersion = 'installed';
+    clock += 500;
+    const afterInstall = service.listRuntimeStatuses(LOCAL, { force: true });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Did not join the stale scan: a second, independent scan started.
+    expect(resolvers).toHaveLength(2);
+    resolvers[0]?.({
+      statuses: [{ id: 'bun', effective: { version: callVersions[0] } }],
+    });
+    resolvers[1]?.({
+      statuses: [{ id: 'bun', effective: { version: callVersions[1] } }],
+    });
+
+    const [, afterInstallResult] = await Promise.all([stale, afterInstall]);
+    expect(afterInstallResult[0]?.effective?.version).toBe('installed');
+  });
+
+  it('collapses forced probes inside the minimum interval into one scan', async () => {
+    const local = fakeClient();
+    let clock = 1_000;
+    const service = serviceFor(
+      () => local,
+      () => clock
+    );
+
+    await service.listRuntimeStatuses(LOCAL, { force: true });
+    expect(local.runtimeCalls).toBe(1);
+
+    clock += 200;
+    await service.listRuntimeStatuses(LOCAL, { force: true });
+    clock += 200;
+    await service.listRuntimeStatuses(LOCAL, { force: true });
+    expect(local.runtimeCalls).toBe(1);
+
+    // Past the minimum interval: a repeated force scans again.
+    clock += 1_000;
+    await service.listRuntimeStatuses(LOCAL, { force: true });
+    expect(local.runtimeCalls).toBe(2);
+  });
+});

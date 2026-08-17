@@ -53,6 +53,14 @@ export const RATE_LIMIT_BUCKETS = {
    * 429 every healthy runtime sharing its address.
    */
   runtimeSocket: { name: 'runtime-socket', max: 60, windowMs: ONE_MINUTE_MS },
+  /**
+   * The three `POST .../probe?force` routes deliberately bypass the probing
+   * cache, so they get their own bucket rather than leaning on `general` —
+   * the probing service's own per-key minimum interval (#690) already caps
+   * the scan cost of a stuck re-check button; this bounds the request volume
+   * itself, across every id a client can name.
+   */
+  probeForce: { name: 'probe-force', max: 30, windowMs: ONE_MINUTE_MS },
 } as const satisfies Record<string, RateLimitBucket>;
 
 /** True when `path` equals `base` or sits directly under it (`base/...`). */
@@ -73,6 +81,15 @@ export function isAuthPath(path: string): boolean {
 /** Matches the runtime dial-in endpoint and its `/api`-prefixed form. */
 export function isRuntimeSocketPath(path: string): boolean {
   return path === '/runtime' || path === '/api/runtime';
+}
+
+/** The three forced-probe routes, with or without the `/api` prefix. */
+const PROBE_FORCE_PATH_RE =
+  /^(?:\/api)?\/environments\/(?:runtimes|version-managers|agents)\/[^/]+\/probe$/;
+
+/** Matches `POST .../environments/{runtimes,version-managers,agents}/:id/probe`. */
+export function isProbeForcePath(path: string): boolean {
+  return PROBE_FORCE_PATH_RE.test(path);
 }
 
 function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined): string | null {
@@ -107,6 +124,7 @@ export function classifyRateLimit(
 ): RateLimitBucket | null {
   if (isHealthPath(path)) return RATE_LIMIT_BUCKETS.health;
   if (isAuthPath(path)) return RATE_LIMIT_BUCKETS.auth;
+  if (isProbeForcePath(path)) return RATE_LIMIT_BUCKETS.probeForce;
   // Exempt here and enforced in the route, on the same bucket. A dialing
   // runtime has no response body to read: an HTTP 429 before the upgrade is a
   // refusal it can only see as a socket that failed to open, so it would back

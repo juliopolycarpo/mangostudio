@@ -4,6 +4,7 @@ import {
   classifyRateLimit,
   isAuthPath,
   isHealthPath,
+  isProbeForcePath,
   RATE_LIMIT_BUCKETS,
   resolveRateLimitClientId,
 } from '../../../src/plugins/rate-limit-policy';
@@ -74,6 +75,25 @@ describe('rate-limit policy classification', () => {
     expect(isHealthPath('/api/healthcheck')).toBe(false);
     expect(classifyRateLimit('/api/authors')).toBe(RATE_LIMIT_BUCKETS.general);
     expect(classifyRateLimit('/api/healthcheck')).toBe(RATE_LIMIT_BUCKETS.general);
+  });
+
+  it('routes the three forced-probe routes to their own bucket', () => {
+    expect(classifyRateLimit('/api/environments/runtimes/bun/probe')).toBe(
+      RATE_LIMIT_BUCKETS.probeForce
+    );
+    expect(classifyRateLimit('/environments/version-managers/nvm/probe')).toBe(
+      RATE_LIMIT_BUCKETS.probeForce
+    );
+    expect(classifyRateLimit('/api/environments/agents/claude/probe')).toBe(
+      RATE_LIMIT_BUCKETS.probeForce
+    );
+  });
+
+  it('does not misclassify neighboring environments routes as forced probes', () => {
+    expect(isProbeForcePath('/api/environments/runtimes')).toBe(false);
+    expect(isProbeForcePath('/api/environments/runtimes/bun')).toBe(false);
+    expect(isProbeForcePath('/api/environments/runtimes/bun/probe/extra')).toBe(false);
+    expect(classifyRateLimit('/api/environments/runtimes/bun')).toBe(RATE_LIMIT_BUCKETS.general);
   });
 
   it('keeps health, auth, and api-key more lenient than the general bucket', () => {
