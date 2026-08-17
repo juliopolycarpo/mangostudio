@@ -126,23 +126,20 @@ describe('executeGrep', () => {
   });
 
   it('reports a match outside the workdir as an absolute path', async () => {
-    const base = mkdtempSync(join(tmpdir(), 'grep-outside-'));
-    try {
-      const root = join(base, 'root');
-      const outside = join(base, 'outside');
-      mkdirSync(root);
-      mkdirSync(outside);
-      await seedFile(join(outside, 'note.txt'), 'TODO elsewhere');
+    // Both roots live inside the per-test temp dir, which is not itself the
+    // workdir here — so the existing hooks own the cleanup.
+    const root = join(tempDir, 'root');
+    const outside = join(tempDir, 'outside');
+    mkdirSync(root);
+    mkdirSync(outside);
+    await seedFile(join(outside, 'note.txt'), 'TODO elsewhere');
 
-      const result = await executeGrep(
-        { pattern: 'TODO', path: outside },
-        { ...makeContext(), workdir: root }
-      );
+    const result = await executeGrep(
+      { pattern: 'TODO', path: outside },
+      { ...makeContext(), workdir: root }
+    );
 
-      expect(result.matches.map((match) => match.file)).toEqual([join(outside, 'note.txt')]);
-    } finally {
-      rmSync(base, { recursive: true, force: true });
-    }
+    expect(result.matches.map((match) => match.file)).toEqual([join(outside, 'note.txt')]);
   });
 
   it('respects the glob filter on directory searches', async () => {

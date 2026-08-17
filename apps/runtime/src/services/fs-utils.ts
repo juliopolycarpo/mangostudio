@@ -39,9 +39,16 @@ export const READ_FILE_MAX_BYTES = 10 * 1024 * 1024;
  * Far below {@link READ_FILE_MAX_BYTES} because a byte view lands in the
  * model's context rather than being windowed away: base64 inflates by 4/3 and
  * hex by 2, so 256 KiB of file is already ~512 KiB of tokens.
+ *
+ * It shares a value with `READ_FILE_MAX_WINDOW_BYTES` and nothing else: that one
+ * bounds the text a window may *emit*, while this bounds the bytes a view may
+ * *consume* before transcoding inflates them. Deriving either from the other
+ * would tie two budgets that are only coincidentally equal.
  */
 export const READ_FILE_MAX_BINARY_VIEW_BYTES = 256 * 1024;
 export const BINARY_SNIFF_BYTES = 8 * 1024;
+/** Floor for a bounded read's first buffer, so a `size: 0` hint costs one read. */
+const READ_CHUNK_BYTES = 64 * 1024;
 
 export async function readFileWithObservedMtime(
   resolvedPath: string,
@@ -60,20 +67,19 @@ export async function readFileWithObservedMtime(
     if (!before.isFile()) {
       throw new PathAccessError(`Cannot read "${resolvedPath}": it is not a regular file.`);
     }
-    if (before.size > maxBytes) {
-      throw new FileTooLargeError(
-        `Cannot read "${resolvedPath}": file is too large (${before.size} bytes; limit is ${maxBytes}).`,
+    const tooLarge = (observed: string): FileTooLargeError =>
+      new FileTooLargeError(
+        `Cannot read "${resolvedPath}": file is too large (${observed}; limit is ${maxBytes}).`,
         maxBytes
       );
-    }
+    // Refusing on the stat is not redundant with the check below: it is what
+    // keeps a file `stat` already condemns from being allocated and read at all.
+    if (before.size > maxBytes) throw tooLarge(`${before.size} bytes`);
 
+    // `readBounded` stops one byte past the ceiling, so this is all that is
+    // known about the size — the file was never drained to find out.
     const bytes = await readBounded(handle, before.size, maxBytes);
-    if (bytes.byteLength > maxBytes) {
-      throw new FileTooLargeError(
-        `Cannot read "${resolvedPath}": file is too large (more than ${maxBytes} bytes; limit is ${maxBytes}).`,
-        maxBytes
-      );
-    }
+    if (bytes.byteLength > maxBytes) throw tooLarge(`at least ${bytes.byteLength} bytes`);
 
     const after = await handle.stat();
     const stable = after.mtimeMs === before.mtimeMs && after.size === before.size;
@@ -89,8 +95,8 @@ export async function readFileWithObservedMtime(
  * The size from `stat` is a hint, not a bound: a procfs-style entry reports
  * `size: 0` and still streams content, and an ordinary file can grow between the
  * stat and the read. Sizing the first buffer from the hint keeps the common case
- * to one allocation and one syscall, while the growth loop keeps the descriptor
- * — not the stat — the thing the ceiling is actually applied to.
+ * to one allocation, while the growth loop keeps the descriptor — not the stat —
+ * the thing the ceiling is actually applied to.
  *
  * The one extra byte is what separates "exactly at the cap" from "over it";
  * without it the caller cannot tell a legal 10 MiB file from a 40 MiB one. It is
@@ -102,19 +108,23 @@ async function readBounded(
   sizeHint: number,
   maxBytes: number
 ): Promise<Uint8Array> {
-  const ceiling = Number.isFinite(maxBytes) ? maxBytes + 1 : Number.POSITIVE_INFINITY;
-  // At least one byte, so a `size: 0` hint still reads something and the growth
-  // loop has a length to double.
-  const initial = Math.min(Math.max(sizeHint, 0) + 1, ceiling);
-  // `alloc` rather than `allocUnsafe`: the tail past `filled` is never returned,
-  // but a pooled buffer holding another file's bytes is not worth the memset.
-  let buffer = Buffer.alloc(initial);
+  // `Infinity + 1` is `Infinity`, so an unbounded read needs no special case.
+  const ceiling = maxBytes + 1;
+  // A usable hint is trusted exactly, so an ordinary file still costs one
+  // right-sized allocation. `size: 0` is the case the hint carries nothing for —
+  // starting at one byte there made procfs walk up through a dozen round trips
+  // and a dozen allocations, so it starts at a chunk instead.
+  const initial = Math.min(sizeHint > 0 ? sizeHint + 1 : READ_CHUNK_BYTES, ceiling);
+  // `allocUnsafeSlow` rather than `alloc`: zero-filling costs ~0.65 ms/MiB and
+  // buys nothing, since the tail past `filled` is never returned. `Slow` is what
+  // keeps it off the shared pool, so no other file's bytes back this buffer.
+  let buffer = Buffer.allocUnsafeSlow(initial);
   let filled = 0;
 
   while (true) {
     if (filled === buffer.byteLength) {
       if (buffer.byteLength >= ceiling) break;
-      const grown = Buffer.alloc(Math.min(buffer.byteLength * 2, ceiling));
+      const grown = Buffer.allocUnsafeSlow(Math.min(buffer.byteLength * 2, ceiling));
       buffer.copy(grown, 0, 0, filled);
       buffer = grown;
     }
@@ -155,17 +165,17 @@ export async function explainUnreadableMutationTarget(
       // Binary is no longer a dead end: read_file's byte view records freshness
       // exactly as a text read does, so the guard is satisfiable under the view
       // bound. Naming it here is the difference between a refusal the model can
-      // act on and one it can only retry.
-      return sizeBytes > READ_FILE_MAX_BINARY_VIEW_BYTES
-        ? new PathAccessError(
-            `Cannot ${action} "${resolvedPath}": it is a binary file of ${sizeBytes} bytes, past the ` +
-              `${READ_FILE_MAX_BINARY_VIEW_BYTES}-byte read_file byte-view limit, so the ` +
-              `read-before-${action} guard cannot be satisfied for this path.`
-          )
-        : new PathAccessError(
-            `Cannot ${action} "${resolvedPath}": it is a binary file, so read_file cannot read it as ` +
-              `text. Read it with view "hex" or "base64" first to satisfy the read-before-${action} guard.`
-          );
+      // act on and one it can only retry — and staying silent about it past the
+      // bound is what stops us offering a remediation that would itself refuse.
+      const prefix = `Cannot ${action} "${resolvedPath}": it is a binary file`;
+      return new PathAccessError(
+        sizeBytes > READ_FILE_MAX_BINARY_VIEW_BYTES
+          ? `${prefix} of ${sizeBytes} bytes, past the ${READ_FILE_MAX_BINARY_VIEW_BYTES}-byte ` +
+              `read_file byte-view limit, so the read-before-${action} guard cannot be satisfied ` +
+              'for this path.'
+          : `${prefix}, so read_file cannot read it as text. Read it with view "hex" or "base64" ` +
+              `first to satisfy the read-before-${action} guard.`
+      );
     }
   }
   return unreadError;

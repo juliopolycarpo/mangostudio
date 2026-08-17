@@ -8,12 +8,12 @@ import { clampIntegerSetting, getOptionalString, getRequiredString } from '../ar
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  createResultPathReporter,
   normalizePathValidationSettings,
   PathAccessError,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
   type ResolvePathOptions,
-  reportWorkdirRelativePath,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';
@@ -112,12 +112,9 @@ export async function executeGlob(
   // directory when the caller passed no cwd. Re-anchoring here is what keeps a
   // match feedable straight into read_file. The `absolute` setting is the
   // documented opt-out and stays exactly what it says.
-  const matches = settings.absolute
-    ? [...result.matches]
-    : result.matches.map((match) =>
-        reportWorkdirRelativePath(runtime.paths.join(cwd, match), options)
-      );
-  return { ...result, matches };
+  if (settings.absolute) return { ...result, matches: [...result.matches] };
+  const report = createResultPathReporter(cwd, options);
+  return { ...result, matches: result.matches.map(report) };
 }
 
 /**

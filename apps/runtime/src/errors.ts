@@ -49,16 +49,15 @@ export class PathAccessError extends RuntimeServiceError {
 /**
  * A read was refused because the file is past the ceiling the call carried.
  *
- * A `path_access` refusal like any other on the wire — the subclass exists so a
- * caller with a better remediation to offer (`read_file`'s byte view names its
- * own, much lower, bound) can recognise the case without matching on message
- * text.
+ * A `path_access` refusal like any other on the wire — the subclass exists so an
+ * in-process caller with a better remediation to offer can recognise the case
+ * without matching on message text. Class identity does not survive the
+ * transport (every `RuntimeServiceError` flattens to `kind` + `data`), so this
+ * stays runtime-internal and is not exported from the package barrel; the
+ * `limitBytes` datum is what reaches a hub caller, as `details.limitBytes`.
  */
 export class FileTooLargeError extends PathAccessError {
-  constructor(
-    message: string,
-    readonly limitBytes: number
-  ) {
+  constructor(message: string, limitBytes: number) {
     super(message, { limitBytes });
     this.name = 'FileTooLargeError';
   }

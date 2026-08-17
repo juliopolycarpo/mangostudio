@@ -322,32 +322,26 @@ describe('executeReadFile', () => {
     expect((error as Error).message).toMatch(/view "hex" or "base64"/);
   });
 
-  it('returns the raw bytes of a binary file as hex', async () => {
-    const filePath = join(tempDir, 'image.bin');
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d]);
-    await seedFile(filePath, bytes);
+  const BINARY_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d]);
+  for (const [view, expected] of [
+    ['hex', '89504e47000d'],
+    ['base64', Buffer.from(BINARY_BYTES).toString('base64')],
+  ] as const) {
+    it(`returns the raw bytes of a binary file as ${view}`, async () => {
+      const filePath = join(tempDir, 'image.bin');
+      await seedFile(filePath, BINARY_BYTES);
 
-    const result = await executeReadFile({ path: filePath, view: 'hex' }, makeContext());
+      const result = await executeReadFile({ path: filePath, view }, makeContext());
 
-    expect(result.content).toBe('89504e47000d');
-    expect(result.view).toBe('hex');
-    expect(result.size).toBe(bytes.byteLength);
-    expect(result.sha256).toBe(await sha256Of(filePath));
-    // A byte view has no line structure to report.
-    expect(result.totalLines).toBe(0);
-    expect(result.truncated).toBe(false);
-  });
-
-  it('returns the raw bytes of a binary file as base64', async () => {
-    const filePath = join(tempDir, 'image.bin');
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d]);
-    await seedFile(filePath, bytes);
-
-    const result = await executeReadFile({ path: filePath, view: 'base64' }, makeContext());
-
-    expect(result.content).toBe(Buffer.from(bytes).toString('base64'));
-    expect(result.view).toBe('base64');
-  });
+      expect(result.content).toBe(expected);
+      expect(result.view).toBe(view);
+      expect(result.size).toBe(BINARY_BYTES.byteLength);
+      expect(result.sha256).toBe(await sha256Of(filePath));
+      // A byte view has no line structure to report.
+      expect(result.totalLines).toBe(0);
+      expect(result.truncated).toBe(false);
+    });
+  }
 
   it('reads a text file through a byte view too, since a view is only an encoding', async () => {
     const filePath = join(tempDir, 'notes.md');

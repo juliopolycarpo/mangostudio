@@ -98,7 +98,7 @@ export function getOptionalString(value: unknown, name: string): string | undefi
  * anything outside it. A value the schema advertises but the executor cannot
  * honour is model output to correct, not a default to silently substitute.
  *
- * // Usage: const view = getOptionalEnum(args.view, 'view', READ_FILE_VIEWS);
+ * // Usage: const view = getOptionalEnum(args.view, 'view', RUNTIME_READ_FILE_VIEWS);
  */
 export function getOptionalEnum<const T extends readonly string[]>(
   value: unknown,

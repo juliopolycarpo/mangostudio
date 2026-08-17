@@ -20,6 +20,16 @@ export const READ_FILE_MAX_WINDOW_BYTES = 256 * 1024;
 const LINE_TRUNCATION_MARKER = '…[truncated]';
 const WINDOW_TRUNCATION_NOTICE = '\n\n[truncated: use startLine/maxLines to read more]';
 const NEWLINE = 0x0a;
+/**
+ * The line fields a result carries when there is no line structure to report:
+ * an empty file, and a byte view, which holds bytes rather than lines.
+ */
+const NO_LINE_STRUCTURE = {
+  totalLines: 0,
+  startLine: 1,
+  endLine: 0,
+  truncated: false,
+} as const;
 const HIGH_SURROGATE_FIRST = 0xd800;
 const HIGH_SURROGATE_LAST = 0xdbff;
 const textDecoder = new TextDecoder();
@@ -64,10 +74,7 @@ export async function readRuntimeFile(
         endLine: 0,
         totalLines: 0,
       }),
-      totalLines: 0,
-      startLine: 1,
-      endLine: 0,
-      truncated: false,
+      ...NO_LINE_STRUCTURE,
     };
   }
 
@@ -108,26 +115,27 @@ async function readByteView(
     maxBytes: READ_FILE_MAX_BINARY_VIEW_BYTES,
   }).catch((error: unknown) => {
     if (!(error instanceof FileTooLargeError)) throw error;
-    throw new PathAccessError(
+    // Rethrown as the same type so `details.limitBytes` still reaches the hub;
+    // only the message improves, to name the bound the *view* carries rather
+    // than the one a text read would have reported.
+    throw new FileTooLargeError(
       `Cannot read "${params.inputPath}" as ${view}: a byte view is limited to ` +
         `${READ_FILE_MAX_BINARY_VIEW_BYTES} bytes because the whole result reaches the model, ` +
-        'and it is not windowed. A text file can be read with view "text", which windows by line.'
+        'and it is not windowed. A text file can be read with view "text", which windows by line.',
+      READ_FILE_MAX_BINARY_VIEW_BYTES
     );
   });
 
   return {
-    content: Buffer.from(bytes).toString(view),
+    // A view over the bytes, not a copy of them: `readFileWithObservedMtime`
+    // already hands back a buffer this can transcode in place.
+    content: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString(view),
     path: params.inputPath,
     size: bytes.byteLength,
     // No observed range: the view holds every byte, so this is a complete
     // observation and write_file's guard accepts it.
     sha256: recordFileRead(params.chatId, params.resolvedPath, bytes, mtimeMs),
-    // A byte view has no lines. The empty-file branch of the text path reports
-    // the same shape for the same reason: there is no line 1 to point at.
-    totalLines: 0,
-    startLine: 1,
-    endLine: 0,
-    truncated: false,
+    ...NO_LINE_STRUCTURE,
     view,
   };
 }

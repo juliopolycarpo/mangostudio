@@ -147,25 +147,22 @@ describe('executeGlob', () => {
   });
 
   it('reports a match outside the workdir as an absolute path', async () => {
-    const base = mkdtempSync(join(tmpdir(), 'glob-outside-'));
-    try {
-      const root = join(base, 'root');
-      const outside = join(base, 'outside');
-      mkdirSync(root);
-      mkdirSync(outside);
-      await seedFile(join(outside, 'note.txt'), 'ok');
+    // Both roots live inside the per-test temp dir, which is not itself the
+    // workdir here — so the existing hooks own the cleanup.
+    const root = join(tempDir, 'root');
+    const outside = join(tempDir, 'outside');
+    mkdirSync(root);
+    mkdirSync(outside);
+    await seedFile(join(outside, 'note.txt'), 'ok');
 
-      const result = await executeGlob(
-        { pattern: '*.txt', cwd: outside },
-        { ...makeContext(), workdir: root }
-      );
+    const result = await executeGlob(
+      { pattern: '*.txt', cwd: outside },
+      { ...makeContext(), workdir: root }
+    );
 
-      // A climb like `../outside/note.txt` resolves too, but only for a reader
-      // who already knows the workdir.
-      expect(result.matches).toEqual([join(outside, 'note.txt')]);
-    } finally {
-      rmSync(base, { recursive: true, force: true });
-    }
+    // A climb like `../outside/note.txt` resolves too, but only for a reader
+    // who already knows the workdir.
+    expect(result.matches).toEqual([join(outside, 'note.txt')]);
   });
 
   it('reports an absolute cwd so the model can feed it back verbatim', async () => {

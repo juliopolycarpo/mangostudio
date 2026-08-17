@@ -13,6 +13,7 @@ import {
   READ_FILE_MAX_START_LINE,
   READ_FILE_MAX_WINDOW_BYTES,
   READ_FILE_MIN_MAX_LINES,
+  RUNTIME_READ_FILE_VIEWS,
   type RuntimeReadFileView,
 } from '@mangostudio/runtime';
 import { getRuntimeClient } from '../../runtime-client';
@@ -44,13 +45,6 @@ export {
 
 const READ_FILE_DEFAULT_START_LINE = 1;
 const READ_FILE_DEFAULT_MAX_LINES = 2000;
-
-/** Renderings `view` accepts, in the order the tool description lists them. */
-export const READ_FILE_VIEWS = [
-  'text',
-  'hex',
-  'base64',
-] as const satisfies readonly RuntimeReadFileView[];
 
 export interface ReadFileToolArgs {
   path: string;
@@ -103,7 +97,7 @@ const definition = {
       },
       view: {
         type: ['string', 'null'],
-        enum: [...READ_FILE_VIEWS, null],
+        enum: [...RUNTIME_READ_FILE_VIEWS, null],
         description:
           'How to render the file\'s bytes. "text" decodes as UTF-8 and refuses binary files; ' +
           `"hex" and "base64" return the raw bytes of any file up to ${READ_FILE_MAX_BINARY_VIEW_BYTES} ` +
@@ -165,17 +159,13 @@ function execute(args: Record<string, unknown>, context: ToolContext): Promise<R
     min: READ_FILE_MIN_MAX_LINES,
     max: READ_FILE_MAX_MAX_LINES,
   });
-  const view = getOptionalEnum(args.view, 'view', READ_FILE_VIEWS);
+  const view = getOptionalEnum(args.view, 'view', RUNTIME_READ_FILE_VIEWS) ?? 'text';
 
   // A byte view has no lines to window, so a line range asked for alongside one
   // could only be dropped. Answering a request the tool cannot honour is the
   // failure mode strict argument handling exists to remove: the model reads a
   // full dump as the slice it asked for.
-  if (
-    view !== undefined &&
-    view !== 'text' &&
-    (startLine !== undefined || maxLines !== undefined)
-  ) {
+  if (view !== 'text' && (startLine !== undefined || maxLines !== undefined)) {
     throw new ToolArgumentError(
       `Fields "startLine" and "maxLines" apply to view "text" only; view "${view}" returns the whole file.`
     );
@@ -186,7 +176,7 @@ function execute(args: Record<string, unknown>, context: ToolContext): Promise<R
       path,
       ...(startLine !== undefined ? { startLine } : {}),
       ...(maxLines !== undefined ? { maxLines } : {}),
-      ...(view !== undefined ? { view } : {}),
+      view,
     },
     context
   );

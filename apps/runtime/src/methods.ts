@@ -126,8 +126,14 @@ export type { RuntimePathFilter, RuntimePathPolicyParams };
  * transcode the bytes verbatim, which is the only way a binary file can enter
  * the freshness ledger and so the only way it can be overwritten through the
  * read-before-write guard. Absent means `text`.
+ *
+ * The tuple is the source of truth and the union is derived from it: the hub
+ * needs the values at runtime for its argument check and its JSON-schema `enum`,
+ * and a union written separately would let a view added here compile cleanly
+ * while the hub silently refused it.
  */
-export type RuntimeReadFileView = 'text' | 'hex' | 'base64';
+export const RUNTIME_READ_FILE_VIEWS = ['text', 'hex', 'base64'] as const;
+export type RuntimeReadFileView = (typeof RUNTIME_READ_FILE_VIEWS)[number];
 
 export interface RuntimeReadFileParams extends RuntimePathPolicyParams {
   readonly chatId: string;

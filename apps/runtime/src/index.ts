@@ -7,7 +7,6 @@ export {
   staticConsentSource,
 } from './consent-source';
 export {
-  FileTooLargeError,
   LIBRARY_BACKUP_MISSING_KIND,
   PathAccessError,
   RuntimeConsentDeniedError,
@@ -30,6 +29,7 @@ export {
   RUNTIME_INSTALL_OUTPUT_TOPIC,
   RUNTIME_MCP_ELICITATION_TOPIC,
   RUNTIME_MCP_SESSION_TOPIC,
+  RUNTIME_READ_FILE_VIEWS,
 } from './methods';
 export {
   createRuntimeMethodHandlers,

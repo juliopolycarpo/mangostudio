@@ -14,11 +14,11 @@ import {
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  createResultPathReporter,
   getRequiredPathArg,
   normalizePathValidationSettings,
   type PathValidationSettings,
   pathPolicyParameterDescriptors,
-  reportWorkdirRelativePath,
   resolveAndValidatePath,
   runtimePathPolicy,
 } from './_fs-utils';
@@ -158,15 +158,10 @@ export async function executeGrep(
     context.signal ? { signal: context.signal } : undefined
   );
 
-  // Re-anchored to the working directory for the same reason glob's matches are:
-  // a directory search answers relative to the search root, so `path: 'src'`
-  // used to report `a.ts` for a file that only exists at `src/a.ts`. A
-  // single-file search already answers with an absolute path, and `join` leaves
-  // it alone, so both branches land on one convention.
-  const matches = result.matches.map((match) => ({
-    ...match,
-    file: reportWorkdirRelativePath(runtime.paths.join(rootPath, match.file), options),
-  }));
+  // A directory search answers relative to the search root, so `path: 'src'`
+  // used to report `a.ts` for a file that only exists at `src/a.ts`.
+  const report = createResultPathReporter(rootPath, options);
+  const matches = result.matches.map((match) => ({ ...match, file: report(match.file) }));
   return { ...result, matches };
 }
 

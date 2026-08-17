@@ -7,39 +7,29 @@
  * with each other, which is exactly what a per-tool suite cannot catch.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { beforeEach, describe, expect, it } from 'bun:test';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { executeGlob } from '../../../../src/services/tools/builtin/glob';
 import { executeGrep } from '../../../../src/services/tools/builtin/grep';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
-import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
+import { useToolRegistry } from './support/tool-registry-harness';
 
-let workdir: string;
+const harness = useToolRegistry('file-tool-contracts');
+const context = (parameters: Record<string, unknown> = {}): ToolContext =>
+  harness.context(parameters);
 
 beforeEach(() => {
-  clearFileFreshness();
-  workdir = mkdtempSync(join(tmpdir(), 'file-tool-contracts-'));
-  mkdirSync(join(workdir, 'src', 'deep'), { recursive: true });
+  mkdirSync(harness.path('src', 'deep'), { recursive: true });
 });
-
-afterEach(() => {
-  clearFileFreshness();
-  rmSync(workdir, { recursive: true, force: true });
-});
-
-function context(parameters: Record<string, unknown> = {}): ToolContext {
-  return { userId: 'u1', chatId: 'c1', parameters, workdir };
-}
 
 describe('a reported path can be read back', () => {
   // The search root is deliberately below the workdir: when the two are the
   // same, a search-root-relative path and a workdir-relative one are identical
   // and the bug is invisible.
   it('feeds a grep match straight into read_file', async () => {
-    await Bun.write(join(workdir, 'src', 'deep', 'a.ts'), 'const marker = 1;\n');
+    await Bun.write(harness.path('src', 'deep', 'a.ts'), 'const marker = 1;\n');
 
     const grepped = await executeGrep({ pattern: 'marker', path: 'src' }, context());
     const file = grepped.matches[0]?.file;
@@ -50,7 +40,7 @@ describe('a reported path can be read back', () => {
   });
 
   it('feeds a glob match straight into read_file', async () => {
-    await Bun.write(join(workdir, 'src', 'deep', 'b.ts'), 'export const b = 2;\n');
+    await Bun.write(harness.path('src', 'deep', 'b.ts'), 'export const b = 2;\n');
 
     const globbed = await executeGlob({ pattern: '**/*.ts', cwd: 'src' }, context());
     const match = globbed.matches[0];
@@ -61,10 +51,10 @@ describe('a reported path can be read back', () => {
   });
 
   it('feeds a grep match into read_file under a workdir-restricted chat', async () => {
-    await Bun.write(join(workdir, 'src', 'deep', 'c.ts'), 'const marker = 3;\n');
+    await Bun.write(harness.path('src', 'deep', 'c.ts'), 'const marker = 3;\n');
     const restricted: ToolContext = {
       ...context(),
-      workdirPolicy: { root: workdir, restricted: true },
+      workdirPolicy: { root: harness.dir, restricted: true },
     };
 
     const grepped = await executeGrep({ pattern: 'marker', path: 'src' }, restricted);
@@ -77,7 +67,7 @@ describe('a reported path can be read back', () => {
   });
 
   it('agrees with glob when both search the same root', async () => {
-    await Bun.write(join(workdir, 'src', 'deep', 'shared.ts'), 'const marker = 4;\n');
+    await Bun.write(harness.path('src', 'deep', 'shared.ts'), 'const marker = 4;\n');
 
     const grepped = await executeGrep({ pattern: 'marker', path: 'src' }, context());
     const globbed = await executeGlob({ pattern: '**/shared.ts', cwd: 'src' }, context());
@@ -89,7 +79,7 @@ describe('a reported path can be read back', () => {
 describe('one file classifies the same way for every tool', () => {
   /** Text, then a NUL past grep's old 1 KiB probe but inside read_file's 8 KiB. */
   async function seedLateNul(name: string, nulOffset: number): Promise<string> {
-    const filePath = join(workdir, name);
+    const filePath = harness.path(name);
     const head = new TextEncoder().encode(`marker\n${'a'.repeat(nulOffset - 7)}`);
     const bytes = new Uint8Array(head.byteLength + 8);
     bytes.set(head);
