@@ -6,6 +6,18 @@ describe('getToolHint', () => {
     expect(getToolHint('read_file', { path: '/home/ada/notes.md' })).toBe('~/notes.md');
   });
 
+  it('names a byte view for read_file, which returns something unlike file content', () => {
+    expect(getToolHint('read_file', { path: '/home/ada/logo.png', view: 'hex' })).toBe(
+      '~/logo.png (hex)'
+    );
+  });
+
+  it('leaves an explicit text view off the read_file hint', () => {
+    expect(getToolHint('read_file', { path: '/home/ada/notes.md', view: 'text' })).toBe(
+      '~/notes.md'
+    );
+  });
+
   it('returns an abbreviated path for write_file', () => {
     expect(getToolHint('write_file', { path: '/home/ada/src/index.ts' })).toBe('~/src/index.ts');
   });

@@ -137,6 +137,55 @@ export function resolveWorkdirRelativePath(
   return paths.join(base, expanded);
 }
 
+/**
+ * Builds the mapper that renders a search result the way the tools accept a
+ * path: relative to the chat working directory.
+ *
+ * The inverse of {@link resolveWorkdirRelativePath}, and deliberately its
+ * neighbour — together they are the round trip the tools promise, that a path
+ * one tool reports can be passed into another and reach the same file. Reporting
+ * a path relative to a *search root* breaks that promise the moment the search
+ * root is not the working directory: `grep(path: 'src')` used to answer `a.ts`
+ * for a file only reachable as `src/a.ts`.
+ *
+ * `searchRoot` is what the runtime answered relative to, so joining onto it is
+ * how a match becomes anchorable at all. An already-absolute match wins over the
+ * root (see `TargetPaths.join`), which is what lets grep's single-file branch and
+ * its directory branch run through one mapper.
+ *
+ * Two cases fall back to the absolute path, because a relative one would be
+ * worse than verbose: a chat with no working directory bound has nothing to
+ * anchor against, and a match outside the working directory would otherwise be
+ * reported as a climb out of it.
+ *
+ * Returned as a prepared mapper rather than a per-path call because the workdir
+ * root is fixed for the whole result set: resolving it once keeps a `maxResults`
+ * sweep off a repeated `canonical` of the same string.
+ *
+ * // Usage: const report = createResultPathReporter(rootPath, options);
+ */
+export function createResultPathReporter(
+  searchRoot: string,
+  options: WorkdirResolutionOptions
+): (resultPath: string) => string {
+  const { paths } = options;
+  const anchor = (resultPath: string): string => paths.join(searchRoot, resultPath);
+
+  const workdir = options.workdirPolicy?.root ?? options.workdir;
+  if (!workdir) return anchor;
+
+  const base = expandHome(workdir, paths);
+  if (!paths.isAbsolute(base)) return anchor;
+  const root = paths.canonical(base);
+
+  return (resultPath) => {
+    const resolved = anchor(resultPath);
+    if (!paths.contains(root, resolved)) return resolved;
+    // The working directory itself relativizes to `''`, which no tool accepts.
+    return paths.relative(root, resolved) || '.';
+  };
+}
+
 export function resolveAndValidatePath(inputPath: string, options: ResolvePathOptions): string {
   const resolved = resolveWorkdirRelativePath(inputPath, options);
   const { settings, paths } = options;

@@ -120,12 +120,29 @@ export interface RuntimeMutationResult<T> {
  */
 export type { RuntimePathFilter, RuntimePathPolicyParams };
 
+/**
+ * How a file's bytes are rendered into the string the model receives. `text`
+ * decodes as UTF-8 and refuses anything holding a NUL byte; `hex` and `base64`
+ * transcode the bytes verbatim, which is the only way a binary file can enter
+ * the freshness ledger and so the only way it can be overwritten through the
+ * read-before-write guard. Absent means `text`.
+ *
+ * The tuple is the source of truth and the union is derived from it: the hub
+ * needs the values at runtime for its argument check and its JSON-schema `enum`,
+ * and a union written separately would let a view added here compile cleanly
+ * while the hub silently refused it.
+ */
+export const RUNTIME_READ_FILE_VIEWS = ['text', 'hex', 'base64'] as const;
+export type RuntimeReadFileView = (typeof RUNTIME_READ_FILE_VIEWS)[number];
+
 export interface RuntimeReadFileParams extends RuntimePathPolicyParams {
   readonly chatId: string;
   readonly inputPath: string;
   readonly resolvedPath: string;
   readonly startLine?: number;
   readonly maxLines?: number;
+  /** Absent means `text`; the line window applies to `text` only. */
+  readonly view?: RuntimeReadFileView;
 }
 
 export interface RuntimeReadFileResult {
@@ -137,6 +154,11 @@ export interface RuntimeReadFileResult {
   readonly startLine: number;
   readonly endLine: number;
   readonly truncated: boolean;
+  /**
+   * Echoed only for a byte view, so a `text` result keeps the shape it has
+   * always had and the model can tell a hex dump from file content.
+   */
+  readonly view?: Exclude<RuntimeReadFileView, 'text'>;
 }
 
 interface RuntimeMutationParams extends RuntimePathPolicyParams {

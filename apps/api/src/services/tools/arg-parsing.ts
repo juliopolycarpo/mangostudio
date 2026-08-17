@@ -94,6 +94,28 @@ export function getOptionalString(value: unknown, name: string): string | undefi
 }
 
 /**
+ * Reads an optional argument constrained to a fixed set of strings, rejecting
+ * anything outside it. A value the schema advertises but the executor cannot
+ * honour is model output to correct, not a default to silently substitute.
+ *
+ * // Usage: const view = getOptionalEnum(args.view, 'view', RUNTIME_READ_FILE_VIEWS);
+ */
+export function getOptionalEnum<const T extends readonly string[]>(
+  value: unknown,
+  name: string,
+  allowed: T
+): T[number] | undefined {
+  const text = getOptionalString(value, name);
+  if (text === undefined) return undefined;
+  if (!allowed.includes(text)) {
+    throw new ToolArgumentError(
+      `Field "${name}" must be one of ${allowed.map((option) => `"${option}"`).join(', ')}.`
+    );
+  }
+  return text;
+}
+
+/**
  * Reads an optional integer argument and clamps it into `bounds`. Clamping and
  * rounding are deliberately split: bounding `5e9` down to a ceiling keeps a
  * usable request usable, but rounding `2.6` to `3` reads a line the caller

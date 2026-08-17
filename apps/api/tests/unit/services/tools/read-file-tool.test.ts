@@ -9,6 +9,7 @@ import {
   findWindowByteRange,
   looksBinary,
   normalizeReadFileToolSettings,
+  READ_FILE_MAX_BINARY_VIEW_BYTES,
   READ_FILE_MAX_LINE_CHARS,
   READ_FILE_MAX_MAX_LINES,
   READ_FILE_MAX_START_LINE,
@@ -307,13 +308,128 @@ describe('executeReadFile', () => {
     );
   });
 
-  it('rejects binary files with a clear error', async () => {
+  it('rejects binary files with a clear error that names the byte view', async () => {
     const filePath = join(tempDir, 'image.bin');
     await seedFile(filePath, new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d]));
 
-    await expect(executeReadFile({ path: filePath }, makeContext())).rejects.toThrow(
-      /appears to be a binary file/
+    const error = await executeReadFile({ path: filePath }, makeContext()).catch(
+      (thrown: unknown) => thrown
     );
+
+    expect((error as Error).message).toMatch(/appears to be a binary file/);
+    // #619 stopped the model retrying an impossible remediation; naming the one
+    // that works is what gives it a next move instead of only a dead end.
+    expect((error as Error).message).toMatch(/view "hex" or "base64"/);
+  });
+
+  const BINARY_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d]);
+  for (const [view, expected] of [
+    ['hex', '89504e47000d'],
+    ['base64', Buffer.from(BINARY_BYTES).toString('base64')],
+  ] as const) {
+    it(`returns the raw bytes of a binary file as ${view}`, async () => {
+      const filePath = join(tempDir, 'image.bin');
+      await seedFile(filePath, BINARY_BYTES);
+
+      const result = await executeReadFile({ path: filePath, view }, makeContext());
+
+      expect(result.content).toBe(expected);
+      expect(result.view).toBe(view);
+      expect(result.size).toBe(BINARY_BYTES.byteLength);
+      expect(result.sha256).toBe(await sha256Of(filePath));
+      // A byte view has no line structure to report.
+      expect(result.totalLines).toBe(0);
+      expect(result.truncated).toBe(false);
+    });
+  }
+
+  it('reads a text file through a byte view too, since a view is only an encoding', async () => {
+    const filePath = join(tempDir, 'notes.md');
+    await seedFile(filePath, 'hi\n');
+
+    const result = await executeReadFile({ path: filePath, view: 'hex' }, makeContext());
+
+    expect(result.content).toBe('68690a');
+  });
+
+  it('rejects a line window on a byte view when called directly, not only via execute', async () => {
+    const filePath = join(tempDir, 'notes.md');
+    await seedFile(filePath, 'hi\n');
+
+    await expect(
+      executeReadFile({ path: filePath, view: 'hex', startLine: 1 }, makeContext())
+    ).rejects.toThrow('apply to view "text" only');
+  });
+
+  it('leaves a text read shaped exactly as it was before view existed', async () => {
+    const filePath = join(tempDir, 'plain.txt');
+    await seedFile(filePath, 'one\n');
+
+    const explicit = await executeReadFile({ path: filePath, view: 'text' }, makeContext());
+
+    expect(explicit.content).toBe(numbered(1, 'one'));
+    expect(explicit.view).toBeUndefined();
+  });
+
+  it('refuses a byte view past its bound with the bound named', async () => {
+    const filePath = join(tempDir, 'big.bin');
+    const bytes = new Uint8Array(READ_FILE_MAX_BINARY_VIEW_BYTES + 1);
+    bytes[0] = 0x00;
+    await seedFile(filePath, bytes);
+
+    const error = await executeReadFile({ path: filePath, view: 'hex' }, makeContext()).catch(
+      (thrown: unknown) => thrown
+    );
+
+    expect((error as Error).message).toContain(String(READ_FILE_MAX_BINARY_VIEW_BYTES));
+    expect((error as Error).message).toContain('not windowed');
+  });
+
+  it('accepts a binary file exactly at the byte-view bound', async () => {
+    const filePath = join(tempDir, 'edge.bin');
+    await seedFile(filePath, new Uint8Array(READ_FILE_MAX_BINARY_VIEW_BYTES));
+
+    const result = await executeReadFile({ path: filePath, view: 'base64' }, makeContext());
+
+    expect(result.size).toBe(READ_FILE_MAX_BINARY_VIEW_BYTES);
+  });
+
+  it('lets write_file overwrite a binary file once a byte view has read it', async () => {
+    const filePath = join(tempDir, 'overwrite.bin');
+    await seedFile(filePath, new Uint8Array([0x50, 0x4b, 0x00, 0x01]));
+
+    // The whole point of the view: the freshness ledger is only populated by a
+    // successful read, so before this the guard was unsatisfiable for a binary.
+    await executeReadFile({ path: filePath, view: 'hex' }, makeContext());
+    const written = await executeWriteFile(
+      { path: filePath, content: 'text now\n' },
+      makeContext()
+    );
+
+    expect(written.created).toBe(false);
+    expect(await Bun.file(filePath).text()).toBe('text now\n');
+  });
+
+  it('still refuses an overwrite when the byte view was never read', async () => {
+    const filePath = join(tempDir, 'unread.bin');
+    await seedFile(filePath, new Uint8Array([0x50, 0x4b, 0x00, 0x01]));
+
+    await expect(
+      executeWriteFile({ path: filePath, content: 'text' }, makeContext())
+    ).rejects.toThrow(/it is a binary file/);
+  });
+
+  it('does not offer the byte view for a binary file past its bound', async () => {
+    const filePath = join(tempDir, 'huge.bin');
+    await seedFile(filePath, new Uint8Array(READ_FILE_MAX_BINARY_VIEW_BYTES + 1));
+
+    const error = await executeWriteFile({ path: filePath, content: 'text' }, makeContext()).catch(
+      (thrown: unknown) => thrown
+    );
+
+    // Naming a remediation that would itself be refused is what #619 removed.
+    expect((error as Error).message).toContain('byte-view limit');
+    expect((error as Error).message).not.toContain('Read it with view');
   });
 
   it('preserves UTF-8 multibyte content through numbering', async () => {
@@ -652,4 +768,54 @@ describe('read_file registry contract', () => {
       );
     });
   }
+
+  it('reads an explicit null view as text', async () => {
+    const filePath = await seedLines(2);
+
+    const result = await read({ path: filePath, view: null });
+
+    expect(result.view).toBeUndefined();
+    expect(result.totalLines).toBe(2);
+  });
+
+  for (const [label, value] of [
+    ['an unknown name', 'utf16'],
+    ['a mis-cased name', 'HEX'],
+  ] as const) {
+    it(`rejects ${label} for view instead of falling back to text`, async () => {
+      const filePath = await seedLines(2);
+
+      await expect(read({ path: filePath, view: value })).rejects.toThrow(
+        'Field "view" must be one of "text", "hex", "base64".'
+      );
+    });
+  }
+
+  it('rejects a non-string view', async () => {
+    const filePath = await seedLines(2);
+
+    await expect(read({ path: filePath, view: 2 })).rejects.toThrow(
+      'Field "view" must be a string.'
+    );
+  });
+
+  for (const field of ['startLine', 'maxLines'] as const) {
+    it(`rejects ${field} alongside a byte view rather than dropping the window`, async () => {
+      const filePath = await seedLines(5);
+
+      // Silently returning the whole file reads to the model as the slice it
+      // asked for — the failure mode strict argument handling exists to remove.
+      await expect(read({ path: filePath, view: 'hex', [field]: 2 })).rejects.toThrow(
+        'apply to view "text" only'
+      );
+    });
+  }
+
+  it('accepts a byte view with the line arguments explicitly null', async () => {
+    const filePath = await seedLines(2);
+
+    const result = await read({ path: filePath, view: 'hex', startLine: null, maxLines: null });
+
+    expect(result.view).toBe('hex');
+  });
 });

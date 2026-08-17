@@ -14,6 +14,7 @@ import {
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
+  createResultPathReporter,
   getRequiredPathArg,
   normalizePathValidationSettings,
   type PathValidationSettings,
@@ -70,7 +71,9 @@ const definition = {
   name: GREP_TOOL_NAME,
   description:
     'Searches files for lines that match a regular expression and returns the file, line number, and line text. ' +
-    'Use this when the user asks to find code, strings, or patterns across files.',
+    'Use this when the user asks to find code, strings, or patterns across files. ' +
+    'Each reported file is relative to the chat working directory rather than to the searched path — absolute ' +
+    'when it lies outside, or when no working directory is bound — so it can be passed straight to another tool.',
   parameters: {
     type: 'object',
     properties: {
@@ -154,7 +157,12 @@ export async function executeGrep(
     },
     context.signal ? { signal: context.signal } : undefined
   );
-  return { ...result, matches: [...result.matches] };
+
+  // A directory search answers relative to the search root, so `path: 'src'`
+  // used to report `a.ts` for a file that only exists at `src/a.ts`.
+  const report = createResultPathReporter(rootPath, options);
+  const matches = result.matches.map((match) => ({ ...match, file: report(match.file) }));
+  return { ...result, matches };
 }
 
 function execute(args: Record<string, unknown>, context: ToolContext): Promise<GrepToolResult> {

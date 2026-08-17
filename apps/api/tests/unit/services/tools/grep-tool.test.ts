@@ -73,7 +73,10 @@ describe('normalizeGrepToolSettings', () => {
 describe('executeGrep', () => {
   it('returns line matches across files in a directory', async () => {
     await seedTree();
-    const result = await executeGrep({ pattern: 'TODO', path: tempDir }, makeContext());
+    const result = await executeGrep(
+      { pattern: 'TODO', path: tempDir },
+      { ...makeContext(), workdir: tempDir }
+    );
 
     expect(result.matches.length).toBe(3);
     expect(result.filesScanned).toBeGreaterThanOrEqual(3);
@@ -86,6 +89,18 @@ describe('executeGrep', () => {
     expect(lines).toEqual([1, 1, 1]);
   });
 
+  it('falls back to absolute matches when no workdir anchors them', async () => {
+    await seedTree();
+    const result = await executeGrep({ pattern: 'TODO', path: tempDir }, makeContext());
+
+    const files = result.matches.map((m) => m.file).sort();
+    expect(files).toEqual([
+      join(tempDir, 'a.ts'),
+      join(tempDir, 'b.ts'),
+      join(tempDir, 'nested', 'c.txt'),
+    ]);
+  });
+
   it('uses the chat workdir when path is omitted', async () => {
     await seedFile(join(tempDir, 'workdir.txt'), 'find this marker');
 
@@ -95,7 +110,7 @@ describe('executeGrep', () => {
     expect(result.matches).toHaveLength(1);
   });
 
-  it('resolves an explicit relative path from the chat workdir', async () => {
+  it('reports matches relative to the workdir, not to a deeper search root', async () => {
     await seedTree();
 
     const result = await executeGrep(
@@ -104,7 +119,27 @@ describe('executeGrep', () => {
     );
 
     expect(result.path).toBe('nested');
-    expect(result.matches).toEqual([{ file: 'c.txt', line: 1, text: 'TODO at nested level' }]);
+    // `c.txt` would name a file that does not exist at the workdir root.
+    expect(result.matches).toEqual([
+      { file: join('nested', 'c.txt'), line: 1, text: 'TODO at nested level' },
+    ]);
+  });
+
+  it('reports a match outside the workdir as an absolute path', async () => {
+    // Both roots live inside the per-test temp dir, which is not itself the
+    // workdir here — so the existing hooks own the cleanup.
+    const root = join(tempDir, 'root');
+    const outside = join(tempDir, 'outside');
+    mkdirSync(root);
+    mkdirSync(outside);
+    await seedFile(join(outside, 'note.txt'), 'TODO elsewhere');
+
+    const result = await executeGrep(
+      { pattern: 'TODO', path: outside },
+      { ...makeContext(), workdir: root }
+    );
+
+    expect(result.matches.map((match) => match.file)).toEqual([join(outside, 'note.txt')]);
   });
 
   it('respects the glob filter on directory searches', async () => {
@@ -121,12 +156,12 @@ describe('executeGrep', () => {
     await seedTree();
     const result = await executeGrep(
       { pattern: 'console', path: join(tempDir, 'a.ts') },
-      makeContext()
+      { ...makeContext(), workdir: tempDir }
     );
     expect(result.filesScanned).toBe(1);
     expect(result.matches).toHaveLength(1);
-    // Absolute so the model can feed the reported file back into another tool.
-    expect(result.matches[0]?.file).toBe(join(tempDir, 'a.ts'));
+    // The same convention a directory search follows, so the two cannot disagree.
+    expect(result.matches[0]?.file).toBe('a.ts');
     expect(result.matches[0]?.line).toBe(3);
     expect(result.matches[0]?.text).toContain('console.log');
   });
@@ -168,7 +203,7 @@ describe('executeGrep', () => {
     await seedFile(join(tempDir, 'many.txt'), lines);
     const result = await executeGrep(
       { pattern: 'match-', path: tempDir },
-      makeContext({ maxMatchesPerFile: 3 })
+      { ...makeContext({ maxMatchesPerFile: 3 }), workdir: tempDir }
     );
     expect(result.matches.filter((m) => m.file === 'many.txt')).toHaveLength(3);
   });
@@ -187,7 +222,10 @@ describe('executeGrep', () => {
     const bytes = new Uint8Array([0, 1, 2, 3, 0, 4]);
     await Bun.write(join(tempDir, 'data.bin'), bytes);
     await seedFile(join(tempDir, 'data.txt'), 'plain TODO here');
-    const result = await executeGrep({ pattern: 'TODO', path: tempDir }, makeContext());
+    const result = await executeGrep(
+      { pattern: 'TODO', path: tempDir },
+      { ...makeContext(), workdir: tempDir }
+    );
     expect(result.matches.some((m) => m.file === 'data.bin')).toBe(false);
     expect(result.matches.some((m) => m.file === 'data.txt')).toBe(true);
   });

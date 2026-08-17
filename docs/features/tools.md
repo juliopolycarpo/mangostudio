@@ -77,6 +77,16 @@ working directory. Tools such as `read_file`, `list_directory`, and `grep`
 still require an explicit `path`. When restriction is enabled, path
 containment policy applies to routed tools.
 
+**The path convention runs both ways: a path a tool reports can be passed back
+into another tool and reach the same file.** Every path in a result list —
+`grep.matches[].file`, `glob.matches[]` — is relative to the chat working
+directory, not to the search root the call named. Two cases report an absolute
+path instead, because a relative one would be worse than verbose: a chat with no
+working directory bound, and a match that lands outside the working directory.
+`glob`'s `absolute` setting stays the explicit opt-out and keeps meaning "give me
+absolute paths". Echoed inputs (`grep.path`, `glob.cwd`) are not results and are
+returned as given or as resolved.
+
 ### `generate_image`
 
 Creates one or more images via image generation models during a text chat turn.
@@ -98,22 +108,33 @@ Returns the current date and time in a requested timezone and locale.
 
 ### `read_file`
 
-Reads the contents of a text file from disk with line-numbered output.
+Reads the contents of a file from disk, as line-numbered text or as raw bytes.
 
 - **Tool name:** `read_file`
 - **Category:** `system`
 - **Parameters:**
   - `path` (required, absolute, `~`-prefixed, or relative to the chat working directory)
-  - `startLine` (optional, 1-based; default `1`)
-  - `maxLines` (optional; default `2000`, max `5000`)
+  - `startLine` (optional, 1-based; default `1`; `view: 'text'` only)
+  - `maxLines` (optional; default `2000`, max `5000`; `view: 'text'` only)
+  - `view` (optional, `text` | `hex` | `base64`; default `text`)
 - **Settings:** `allowedPaths`, `deniedPaths` (path lists; enforced by `resolveAndValidatePath`)
-- **Execution:** Reads through a single file descriptor (with a 10 MiB size ceiling), rejects
-  NUL-sniffed binary files, and returns line-numbered (`cat -n` style) content for the
-  requested window. Whole-file `sha256` is always recorded for the freshness ledger, even
-  on a partial read. Result shape:
-  `{ content, path, size, sha256, totalLines, startLine, endLine, truncated }`.
-  Per-line and window byte caps may set `truncated` and append a notice to use
-  `startLine`/`maxLines` for more.
+- **Execution:** Reads through a single file descriptor, and the size ceiling bounds the bytes
+  the descriptor yields rather than the size `stat` claims — a file that under-reports its size
+  or grows mid-read is refused at the cap, not read past it. Whole-file `sha256` is always
+  recorded for the freshness ledger, even on a partial read. Result shape:
+  `{ content, path, size, sha256, totalLines, startLine, endLine, truncated }`, plus `view` when
+  it is not `text`.
+- **`view: 'text'`** (10 MiB ceiling): returns line-numbered (`cat -n` style) content for the
+  requested window and rejects any file with a NUL byte in its first 8 KiB, naming the byte
+  views in the refusal. Per-line and window byte caps may set `truncated` and append a notice to
+  use `startLine`/`maxLines` for more.
+- **`view: 'hex'` / `view: 'base64'`** (256 KiB ceiling): returns the file's bytes transcoded, for
+  any file, with no line structure (`totalLines: 0`) and no windowing — the whole result reaches
+  the model, which is why the ceiling is much lower. A file past it is refused rather than
+  truncated. `startLine`/`maxLines` are rejected alongside a byte view rather than dropped.
+  A byte view records freshness exactly as a text read does, which is what makes `write_file`'s
+  read-before-overwrite guard satisfiable for a binary file — no bypass argument exists on
+  `write_file`.
 
 ### `list_directory`
 
@@ -134,6 +155,8 @@ Finds filesystem paths matching a glob pattern, evaluated by `Bun.Glob`.
 - **Parameters:** `pattern` (required, supports `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (optional base directory; absolute, `~`-prefixed, or relative to the chat working directory; defaults to the chat working directory, otherwise `process.cwd()`)
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 200), `includeDotfiles` (default `false`), `absolute` (default `false`)
 - **Execution:** Streams matches with `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, stops at the cap, and reports `truncated`.
+- **Result paths:** re-anchored from `cwd` to the chat working directory, so a match can be passed
+  straight into `read_file`. `absolute: true` opts out and returns absolute paths.
 
 ### `grep`
 
@@ -143,8 +166,11 @@ Searches files for lines matching a regular expression.
 - **Category:** `system`
 - **Parameters:** `pattern` (required regex), `path` (required file or directory; absolute, `~`-prefixed, or relative to the chat working directory), `glob` (optional file filter for directory searches), `caseInsensitive`
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5,000; default 100), `maxMatchesPerFile` (default 20), `maxFileSizeBytes` (default 1 MB), `includeDotfiles`
-- **Safety:** Files containing a null byte in the first 1 KB are treated as binary and skipped; files above `maxFileSizeBytes` are skipped. The regex is compiled with `new RegExp` and rejected via `GrepPatternError` if invalid.
+- **Safety:** Files containing a null byte in the first 8 KiB are treated as binary and skipped; files above `maxFileSizeBytes` are skipped. The probe window is shared with `read_file`, so a file grep will search is a file `read_file` will open. The regex is compiled with `new RegExp` and rejected via `GrepPatternError` if invalid.
 - **Execution:** When `path` is a directory, walks it with `Bun.Glob` (filtered by the optional `glob`); for each candidate, reads with `Bun.file().text()`, splits by newline, and records `{ file, line, text }` matches.
+- **Result paths:** `matches[].file` is re-anchored from the search root to the chat working
+  directory, for both directory and single-file searches, so a match can be passed straight into
+  `read_file`.
 
 ### `bash` / `zsh` / `powershell`
 

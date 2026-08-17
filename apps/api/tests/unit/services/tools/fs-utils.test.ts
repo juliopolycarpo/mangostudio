@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';
 import {
+  createResultPathReporter,
   expandHome,
   getRequiredPathArg,
   normalizePathList,
@@ -308,6 +309,89 @@ describe('resolveAndValidatePath', () => {
   });
 });
 
+describe('createResultPathReporter', () => {
+  /** The reporter is prepared once per result set; these cases feed it one path. */
+  const report = (
+    searchRoot: string,
+    resultPath: string,
+    options: Parameters<typeof createResultPathReporter>[1]
+  ): string => createResultPathReporter(searchRoot, options)(resultPath);
+
+  it('reports a path below the workdir relative to it', () => {
+    expect(
+      report('/home/tester/proj', '/home/tester/proj/src/a.ts', {
+        paths,
+        workdir: '/home/tester/proj',
+      })
+    ).toBe('src/a.ts');
+  });
+
+  it('anchors a search-root-relative match onto the workdir', () => {
+    // The actual regression: the runtime answers `deep/a.ts` for a search rooted
+    // at `src`, which names nothing from the workdir.
+    expect(
+      report('/home/tester/proj/src', 'deep/a.ts', { paths, workdir: '/home/tester/proj' })
+    ).toBe('src/deep/a.ts');
+  });
+
+  it('lets an absolute match win over the search root', () => {
+    // grep's single-file branch answers absolute; both branches share one mapper.
+    expect(
+      report('/home/tester/proj/src', '/home/tester/proj/a.ts', {
+        paths,
+        workdir: '/home/tester/proj',
+      })
+    ).toBe('a.ts');
+  });
+
+  it('reports the workdir itself as "." rather than the empty string', () => {
+    expect(
+      report('/home/tester/proj', '/home/tester/proj', { paths, workdir: '/home/tester/proj' })
+    ).toBe('.');
+  });
+
+  it('falls back to absolute when the path is outside the workdir', () => {
+    expect(report('/etc', '/etc/passwd', { paths, workdir: '/home/tester/proj' })).toBe(
+      '/etc/passwd'
+    );
+  });
+
+  it('falls back to absolute when no workdir is bound', () => {
+    expect(report('/home/tester/proj', '/home/tester/proj/a.ts', { paths })).toBe(
+      '/home/tester/proj/a.ts'
+    );
+  });
+
+  it('anchors onto the search root when no workdir is bound', () => {
+    expect(report('/home/tester/proj', 'a.ts', { paths })).toBe('/home/tester/proj/a.ts');
+  });
+
+  it('prefers the restriction root over the plain workdir', () => {
+    expect(
+      report('/home/tester/proj', '/home/tester/proj/src/a.ts', {
+        paths,
+        workdir: '/somewhere/else',
+        workdirPolicy: { root: '/home/tester/proj', restricted: true },
+      })
+    ).toBe('src/a.ts');
+  });
+
+  it('expands a ~ workdir against the target home', () => {
+    expect(
+      report('/home/tester/proj', '/home/tester/proj/a.ts', { paths, workdir: '~/proj' })
+    ).toBe('a.ts');
+  });
+
+  it('folds case on a Windows target, where a root and its contents may differ in casing', () => {
+    expect(
+      report('C:\\Users\\tester\\Proj', 'c:\\users\\tester\\proj\\src\\a.ts', {
+        paths: windowsPaths,
+        workdir: 'C:\\Users\\tester\\Proj',
+      })
+    ).toBe('src\\a.ts');
+  });
+});
+
 describe('readFileWithObservedMtime', () => {
   it('reads file bytes when under the maxBytes ceiling', async () => {
     const filePath = join(tempDir, 'small.txt');
@@ -333,4 +417,46 @@ describe('readFileWithObservedMtime', () => {
     const { bytes } = await readFileWithObservedMtime(filePath);
     expect(bytes.byteLength).toBe(2);
   });
+
+  it('reads a file sized exactly at the ceiling', async () => {
+    const filePath = join(tempDir, 'exact.bin');
+    await Bun.write(filePath, new Uint8Array(64));
+
+    const { bytes } = await readFileWithObservedMtime(filePath, { maxBytes: 64 });
+    expect(bytes.byteLength).toBe(64);
+  });
+
+  it('reads a file larger than its own stat size, up to the ceiling', async () => {
+    // The growth loop is what keeps a stat-vs-read mismatch from truncating an
+    // ordinary read; the ceiling is the only thing that stops it.
+    const filePath = join(tempDir, 'grown.txt');
+    await Bun.write(filePath, '0123456789');
+
+    const { bytes } = await readFileWithObservedMtime(filePath, { maxBytes: 1_000 });
+    expect(new TextDecoder().decode(bytes)).toBe('0123456789');
+  });
+
+  // A procfs entry is the reproduction case from the issue: `stat` reports
+  // `size: 0`, so the pre-read check passes trivially, and the descriptor then
+  // streams however many bytes it likes. The ceiling has to bind the read.
+  it.skipIf(process.platform !== 'linux')(
+    'bounds a file whose stat under-reports its size by the bytes actually read',
+    async () => {
+      await expect(
+        readFileWithObservedMtime('/proc/self/status', { maxBytes: 64 })
+      ).rejects.toThrow(/too large \(at least 65 bytes; limit is 64\)/);
+    }
+  );
+
+  it.skipIf(process.platform !== 'linux')(
+    'still reads a stat-less file in full when it fits under the ceiling',
+    async () => {
+      const { bytes } = await readFileWithObservedMtime('/proc/self/status', {
+        maxBytes: 1024 * 1024,
+      });
+
+      expect(bytes.byteLength).toBeGreaterThan(0);
+      expect(new TextDecoder().decode(bytes)).toContain('Name:');
+    }
+  );
 });

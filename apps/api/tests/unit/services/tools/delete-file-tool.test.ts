@@ -115,19 +115,32 @@ describe('executeDeleteFile', () => {
     expect(await Bun.file(filePath).text()).toBe('replacement from elsewhere');
   });
 
-  it('names the binary blocker instead of demanding an impossible read', async () => {
+  it('names the binary blocker and the view that clears it', async () => {
     const filePath = join(tempDir, 'blob.bin');
     await Bun.write(filePath, new Uint8Array([0x01, 0x00, 0x02]));
 
-    // read_file refuses binary files, so "read it first" would loop forever.
+    // A text read refuses binary files, so a bare "read it first" would loop
+    // forever; the byte view is the move that actually satisfies the guard.
     await expect(executeReadFile({ path: filePath }, makeContext())).rejects.toThrow('binary file');
     const error = (await executeDeleteFile({ path: filePath }, makeContext()).catch(
       (thrown: unknown) => thrown
     )) as Error;
 
     expect(error).not.toBeInstanceOf(FileNotReadError);
-    expect(error.message).toContain('read-before-delete guard cannot be satisfied');
+    expect(error.message).toContain('it is a binary file');
+    expect(error.message).toContain('view "hex"');
+    expect(error.message).toContain('read-before-delete guard');
     expect(existsSync(filePath)).toBe(true);
+  });
+
+  it('deletes a binary file once a byte view has satisfied the guard', async () => {
+    const filePath = join(tempDir, 'deletable.bin');
+    await Bun.write(filePath, new Uint8Array([0x01, 0x00, 0x02]));
+
+    await executeReadFile({ path: filePath, view: 'hex' }, makeContext());
+    await executeDeleteFile({ path: filePath }, makeContext());
+
+    expect(existsSync(filePath)).toBe(false);
   });
 
   it('explains a partial read in terms of deletion, not overwriting', async () => {

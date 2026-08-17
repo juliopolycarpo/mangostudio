@@ -779,7 +779,7 @@ export const messages: Messages = {
         grep: 'Grep',
       },
       toolDescriptions: {
-        readFile: 'Allows the AI to read text files from disk.',
+        readFile: 'Allows the AI to read files from disk, as text or as raw bytes.',
         writeFile: 'Allows the AI to write text content to files on disk.',
         editFile: 'Allows the AI to replace exact text in files read in this chat.',
         replaceRange: 'Allows the AI to replace line ranges in files read in this chat.',

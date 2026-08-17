@@ -92,6 +92,17 @@ shells relacionados voltam ao diretório de trabalho do processo da API quando
 `path` explícito. Com restrição habilitada no modo agente, a política de
 contenção de caminhos se aplica às tools roteadas.
 
+**A convenção de caminhos vale nos dois sentidos: um caminho que uma tool
+reporta pode ser passado para outra tool e chegar no mesmo arquivo.** Todo
+caminho em uma lista de resultados — `grep.matches[].file`, `glob.matches[]` — é
+relativo ao diretório de trabalho do chat, e não à raiz da busca que a chamada
+nomeou. Dois casos reportam caminho absoluto, porque um relativo seria pior que
+verboso: um chat sem diretório de trabalho vinculado, e um match que cai fora do
+diretório de trabalho. A setting `absolute` do `glob` continua sendo o opt-out
+explícito e mantém o significado de "me dê caminhos absolutos". Ecos de entrada
+(`grep.path`, `glob.cwd`) não são resultados e voltam como recebidos ou como
+resolvidos.
+
 ### `generate_image`
 
 Cria uma ou mais imagens via modelos de geração de imagem durante um turno de chat de texto.
@@ -113,22 +124,33 @@ Retorna a data e hora atuais em um fuso horário e locale solicitados.
 
 ### `read_file`
 
-Lê o conteúdo de um arquivo de texto do disco com saída numerada por linha.
+Lê o conteúdo de um arquivo do disco, como texto numerado por linha ou como bytes brutos.
 
 - **Nome da tool:** `read_file`
 - **Categoria:** `system`
 - **Parâmetros:**
   - `path` (obrigatório, absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat)
-  - `startLine` (opcional, base 1; padrão `1`)
-  - `maxLines` (opcional; padrão `2000`, máximo `5000`)
+  - `startLine` (opcional, base 1; padrão `1`; apenas para `view: 'text'`)
+  - `maxLines` (opcional; padrão `2000`, máximo `5000`; apenas para `view: 'text'`)
+  - `view` (opcional, `text` | `hex` | `base64`; padrão `text`)
 - **Settings:** `allowedPaths`, `deniedPaths` (listas de caminhos; aplicadas por `resolveAndValidatePath`)
-- **Execução:** Lê por um único descritor de arquivo (com teto de 10 MiB), rejeita arquivos
-  binários detectados por byte NUL, e devolve conteúdo numerado (estilo `cat -n`) da janela
-  pedida. O `sha256` do arquivo inteiro sempre é registrado no ledger de freshness, mesmo
-  em leitura parcial. Formato do resultado:
-  `{ content, path, size, sha256, totalLines, startLine, endLine, truncated }`.
-  Limites por linha e por bytes da janela podem marcar `truncated` e acrescentar um aviso
+- **Execução:** Lê por um único descritor de arquivo, e o teto de tamanho limita os bytes que o
+  descritor entrega, não o tamanho que o `stat` declara — um arquivo que subdeclara o próprio
+  tamanho ou que cresce durante a leitura é recusado no teto, não lido além dele. O `sha256` do
+  arquivo inteiro sempre é registrado no ledger de freshness, mesmo em leitura parcial. Formato
+  do resultado: `{ content, path, size, sha256, totalLines, startLine, endLine, truncated }`, mais
+  `view` quando ele não é `text`.
+- **`view: 'text'`** (teto de 10 MiB): devolve conteúdo numerado (estilo `cat -n`) da janela pedida
+  e rejeita qualquer arquivo com byte NUL nos primeiros 8 KiB, nomeando as views de bytes na
+  recusa. Limites por linha e por bytes da janela podem marcar `truncated` e acrescentar um aviso
   para usar `startLine`/`maxLines`.
+- **`view: 'hex'` / `view: 'base64'`** (teto de 256 KiB): devolve os bytes do arquivo transcodificados,
+  para qualquer arquivo, sem estrutura de linhas (`totalLines: 0`) e sem janela — o resultado
+  inteiro chega ao modelo, e é por isso que o teto é muito menor. Um arquivo acima dele é recusado
+  em vez de truncado. `startLine`/`maxLines` são rejeitados junto de uma view de bytes em vez de
+  descartados. Uma view de bytes registra freshness exatamente como uma leitura de texto, e é isso
+  que torna satisfazível a guarda de leitura-antes-de-sobrescrever do `write_file` para um arquivo
+  binário — nenhum argumento de bypass existe no `write_file`.
 
 ### `list_directory`
 
@@ -149,6 +171,9 @@ Encontra caminhos do filesystem que correspondem a um padrão glob, avaliados po
 - **Parâmetros:** `pattern` (obrigatório, suporta `*`, `**`, `?`, `[]`, `{a,b}`, `!`), `cwd` (diretório base opcional; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat; padrão é o diretório de trabalho do chat, senão `process.cwd()`)
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5.000; padrão 200), `includeDotfiles` (padrão `false`), `absolute` (padrão `false`)
 - **Execução:** Itera os matches com `new Bun.Glob(pattern).scan({ cwd, dot, absolute, onlyFiles: false })`, para ao atingir o limite e sinaliza `truncated`.
+- **Caminhos do resultado:** reancorados do `cwd` para o diretório de trabalho do chat, para que um
+  match possa ser passado direto para o `read_file`. `absolute: true` faz opt-out e devolve caminhos
+  absolutos.
 
 ### `grep`
 
@@ -158,8 +183,11 @@ Pesquisa nos arquivos por linhas que correspondam a uma expressão regular.
 - **Categoria:** `system`
 - **Parâmetros:** `pattern` (regex obrigatória), `path` (arquivo ou diretório obrigatório; absoluto, começando com `~`, ou relativo ao diretório de trabalho do chat), `glob` (filtro opcional para buscas em diretório), `caseInsensitive`
 - **Settings:** `allowedPaths`, `deniedPaths`, `maxResults` (1–5.000; padrão 100), `maxMatchesPerFile` (padrão 20), `maxFileSizeBytes` (padrão 1 MB), `includeDotfiles`
-- **Segurança:** Arquivos com byte nulo nos primeiros 1 KB são tratados como binários e ignorados; arquivos acima de `maxFileSizeBytes` também são pulados. A regex é compilada com `new RegExp` e rejeitada via `GrepPatternError` quando inválida.
+- **Segurança:** Arquivos com byte nulo nos primeiros 8 KiB são tratados como binários e ignorados; arquivos acima de `maxFileSizeBytes` também são pulados. A janela de detecção é compartilhada com o `read_file`, então um arquivo que o grep pesquisa é um arquivo que o `read_file` abre. A regex é compilada com `new RegExp` e rejeitada via `GrepPatternError` quando inválida.
 - **Execução:** Quando `path` é um diretório, percorre-o com `Bun.Glob` (filtrado pelo `glob` opcional); para cada candidato lê com `Bun.file().text()`, divide por linha e registra matches `{ file, line, text }`.
+- **Caminhos do resultado:** `matches[].file` é reancorado da raiz da busca para o diretório de
+  trabalho do chat, tanto em buscas por diretório quanto por arquivo único, para que um match possa
+  ser passado direto para o `read_file`.
 
 ### `bash` / `zsh` / `powershell`
 
