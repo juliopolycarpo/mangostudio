@@ -5,7 +5,10 @@
 import { describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getDb } from '../../../../src/db/database';
-import { createEnvironmentLibraryService } from '../../../../src/modules/library/application/environment-library-service';
+import {
+  createEnvironmentLibraryService,
+  LibraryFeatureUnavailableError,
+} from '../../../../src/modules/library/application/environment-library-service';
 import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 
 function makeManifest(environmentId: string, library = true) {
@@ -199,5 +202,67 @@ describe('createEnvironmentLibraryService', () => {
     }).readContent(getDb(), { userId, environmentId: 'remote-c' }, resource, 'mango-instructions');
 
     expect(content?.content).toBe('# Agents');
+  });
+
+  it('reads locations through the shared probing-service cache', async () => {
+    const client = {
+      manifest: makeManifest('remote-d'),
+      library: {
+        scan: () => Promise.resolve({ entries: [] }),
+        read: () => Promise.resolve({ content: '', truncated: false, sizeBytes: 0 }),
+        locations: () => Promise.reject(new Error('should not call the runtime directly')),
+      },
+    } as unknown as RuntimeClient;
+    const calls: unknown[] = [];
+    const location = {
+      id: 'mango-skills' as const,
+      kind: 'skill' as const,
+      scope: 'home' as const,
+      path: '/tmp/remote-d/skills',
+      access: 'read-write' as const,
+      exists: true,
+      readable: true,
+      writable: true,
+      targetIds: ['mangostudio' as const],
+    };
+
+    const service = createEnvironmentLibraryService({
+      resolveClient: () => Promise.resolve(client),
+      listLocationStatuses: (scope) => {
+        calls.push(scope);
+        return Promise.resolve([location]);
+      },
+    });
+
+    const locations = await service.listLocations(getDb(), {
+      userId: 'library-env-locations-user',
+      environmentId: 'remote-d',
+    });
+
+    expect(locations).toEqual([location]);
+    expect(calls).toEqual([{ userId: 'library-env-locations-user', environmentId: 'remote-d' }]);
+  });
+
+  it('still refuses when the environment does not advertise library discovery', async () => {
+    const client = {
+      manifest: makeManifest('remote-e', false),
+      library: {
+        scan: () => Promise.resolve({ entries: [] }),
+        read: () => Promise.resolve({ content: '', truncated: false, sizeBytes: 0 }),
+        locations: () => Promise.reject(new Error('should not be reached')),
+      },
+    } as unknown as RuntimeClient;
+
+    const service = createEnvironmentLibraryService({
+      resolveClient: () => Promise.resolve(client),
+      listLocationStatuses: () => Promise.reject(new Error('should not be reached')),
+    });
+
+    await expect(
+      service.listLocations(getDb(), {
+        userId: 'library-env-locations-refused-user',
+        environmentId: 'remote-e',
+      })
+    ).rejects.toBeInstanceOf(LibraryFeatureUnavailableError);
   });
 });

@@ -69,6 +69,7 @@ function detectionServices() {
     getVersionManagerStatus: () => Promise.resolve(null),
     listAgentCliStatuses: () => Promise.resolve([]),
     getAgentCliStatus: () => Promise.resolve(null),
+    listLocationStatuses: () => Promise.resolve([]),
     resetCache: () => undefined,
   };
   return { probingService };

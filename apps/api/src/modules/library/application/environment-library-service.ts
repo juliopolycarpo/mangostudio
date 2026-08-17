@@ -28,6 +28,10 @@ import type { Database } from '../../../db/types';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
+import {
+  type EnvironmentProbingService,
+  environmentProbingService,
+} from '../../environments/application/probing-service';
 import { configuredLibraryEnv } from '../infrastructure/location-probe';
 import { groupLibraryScanEntries } from './library-discovery';
 import type { SettingsSourcePayload } from './settings-inspection';
@@ -83,6 +87,7 @@ export interface EnvironmentLibraryServiceOptions {
   readonly now?: () => number;
   readonly cacheTtlMs?: number;
   readonly requestTimeoutMs?: number;
+  readonly listLocationStatuses?: EnvironmentProbingService['listLocationStatuses'];
 }
 
 /**
@@ -115,6 +120,8 @@ export function createEnvironmentLibraryService(
   const now = options.now ?? Date.now;
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const requestTimeoutMs = options.requestTimeoutMs ?? LIBRARY_REQUEST_TIMEOUT_MS;
+  const listLocationStatuses =
+    options.listLocationStatuses ?? environmentProbingService.listLocationStatuses;
   const cache = new Map<string, CacheEntry>();
   const inflight = new Map<string, Promise<LibraryResource[]>>();
   const scanGeneration = new Map<string, number>();
@@ -203,19 +210,18 @@ export function createEnvironmentLibraryService(
     discover,
 
     // Location health is resolved entirely on the target machine, so no hub
-    // settings read stands between the request and the runtime.
-    async listLocations(_db, scope, workspaceRoot) {
+    // settings read stands between the request and the runtime. None of the
+    // registered locations are workspace-scoped, so `workspaceRoot` cannot
+    // change the answer — the probing service's shared cache does not key on
+    // it, matching how the agent-CLI probe already reads these same paths.
+    async listLocations(_db, scope, _workspaceRoot) {
       const client = await resolveClient(scope);
       if (!client.manifest.features.library) {
         throw new LibraryFeatureUnavailableError(
           `Environment "${scope.environmentId}" does not advertise library discovery.`
         );
       }
-      const result = await client.library.locations(
-        { pathEnv: pathEnvParams(scope, workspaceRoot) },
-        { timeoutMs: requestTimeoutMs }
-      );
-      return [...result.locations];
+      return [...(await listLocationStatuses(scope))];
     },
 
     // The instance already carries the absolute path the scan found, so this

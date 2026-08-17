@@ -22,7 +22,8 @@ import {
   AGENT_CLI_DEFINITIONS,
   NODE_RELEASE_LIVE_DATA_STALE_AFTER_MS,
 } from '@mangostudio/shared/environments/detection';
-import type { LibraryTargetId } from '@mangostudio/shared/library';
+import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
+import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import { getConfig, getHomeMangoDir, getVersion } from '../../../lib/config';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
@@ -58,6 +59,7 @@ const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm'];
 const AGENT_TARGET_IDS: readonly LibraryTargetId[] = AGENT_CLI_DEFINITIONS.map(
   (definition) => definition.targetId
 );
+const LIBRARY_LOCATION_IDS = LIBRARY_LOCATION_DEFINITIONS.map((definition) => definition.id);
 
 export interface ProbeScope {
   readonly userId: string;
@@ -100,11 +102,17 @@ export interface EnvironmentProbingService {
     targetId: LibraryTargetId,
     options?: ProbeOptions
   ): Promise<AgentCliStatus | null>;
+  /**
+   * Every library location the agent-CLI targets read, in one probe. Shared
+   * with the agent-CLI cache so the Environments panel and the Library matrix
+   * never walk the same paths twice for the same answer.
+   */
+  listLocationStatuses(scope: ProbeScope, options?: ProbeOptions): Promise<LibraryLocationStatus[]>;
   /** Drops cached answers; without an environment, for every one of them. */
   resetCache(environmentId?: string): void;
 }
 
-type ProbeKind = 'runtime' | 'version-manager' | 'agent';
+type ProbeKind = 'runtime' | 'version-manager' | 'agent' | 'location';
 
 interface CacheEntry<T> {
   readonly checkedAt: number;
@@ -114,7 +122,7 @@ interface CacheEntry<T> {
   readonly environmentId: string;
 }
 
-type AnyStatus = RuntimeStatus | VersionManagerStatus | AgentCliStatus;
+type AnyStatus = RuntimeStatus | VersionManagerStatus | AgentCliStatus | LibraryLocationStatus;
 
 interface Inflight {
   /** When this scan started, so a forced caller can tell it apart from a stale one. */
@@ -390,6 +398,23 @@ export function createEnvironmentProbingService(
       }
     );
 
+  const probeLocations = (scope: ProbeScope, force: boolean): Promise<LibraryLocationStatus[]> =>
+    probe<LibraryLocationStatus>(
+      scope,
+      'location',
+      LIBRARY_LOCATION_IDS,
+      (status) => (status as LibraryLocationStatus).id,
+      force,
+      async (client) => {
+        const local = isHubMachine(scope.environmentId);
+        const result = await client.library.locations(
+          { ...(local && { pathEnv: { env: configuredLibraryEnv() } }) },
+          { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
+        );
+        return result.locations;
+      }
+    );
+
   return {
     listRuntimeStatuses: (scope, probeOptions) =>
       probeRuntimes(scope, RUNTIME_IDS, probeOptions?.force === true),
@@ -417,6 +442,9 @@ export function createEnvironmentProbingService(
       const [status] = await probeAgentClis(scope, [targetId], probeOptions?.force === true);
       return status ?? null;
     },
+
+    listLocationStatuses: (scope, probeOptions) =>
+      probeLocations(scope, probeOptions?.force === true),
 
     resetCache(environmentId) {
       if (!environmentId) {

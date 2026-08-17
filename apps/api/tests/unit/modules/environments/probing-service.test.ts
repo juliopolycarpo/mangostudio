@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-protocol';
 import {
   createEnvironmentProbingService,
@@ -15,6 +16,7 @@ interface FakeClient {
   client: RuntimeClient;
   runtimeCalls: number;
   agentCalls: number;
+  locationCalls: number;
   version: string;
   selfParams: unknown;
   pathEnvParams: unknown;
@@ -33,6 +35,7 @@ function fakeClient(version = 'v1'): FakeClient {
     client: null as unknown as RuntimeClient,
     runtimeCalls: 0,
     agentCalls: 0,
+    locationCalls: 0,
     version,
     selfParams: null,
     pathEnvParams: null,
@@ -62,6 +65,19 @@ function fakeClient(version = 'v1'): FakeClient {
         state.selfParams = params.self ?? null;
         state.pathEnvParams = params.pathEnv ?? null;
         return Promise.resolve({ statuses: [{ targetId: 'claude', id: 'claude' }] });
+      },
+    },
+    library: {
+      locations: () => {
+        state.locationCalls += 1;
+        return Promise.resolve({
+          locations: LIBRARY_LOCATION_DEFINITIONS.map((definition) => ({
+            id: definition.id,
+            kind: definition.kind,
+            scope: definition.scope,
+            exists: true,
+          })),
+        });
       },
     },
   } as unknown as RuntimeClient;
@@ -352,5 +368,20 @@ describe('forced-probe admission', () => {
     clock += 1_000;
     await service.listRuntimeStatuses(LOCAL, { force: true });
     expect(local.runtimeCalls).toBe(2);
+  });
+});
+
+describe('the shared location cache', () => {
+  it('answers two consumers from one probe, and force refreshes both', async () => {
+    const local = fakeClient();
+    const service = serviceFor(() => local);
+
+    const first = await service.listLocationStatuses(LOCAL);
+    const second = await service.listLocationStatuses(LOCAL);
+    expect(local.locationCalls).toBe(1);
+    expect(first).toEqual(second);
+
+    await service.listLocationStatuses(LOCAL, { force: true });
+    expect(local.locationCalls).toBe(2);
   });
 });
