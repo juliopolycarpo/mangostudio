@@ -251,7 +251,9 @@ describe('agent CLI detection', () => {
     expect(findingCodes(status)).toContain('shadowed-by-earlier-path');
   });
 
-  it('fails soft when a found CLI no longer matches its version format', async () => {
+  it('keeps a CLI whose version drifted out of its expected format as a known installation', async () => {
+    // `codex --version`-style output drifts on its own release cadence; an
+    // installed, working CLI must not be reported as broken and uninstalled.
     const service = createProbingService({
       agentDefinitions: [CLAUDE_AGENT_CLI_DEFINITION],
       createScanDeps: (_env, definition) =>
@@ -265,8 +267,9 @@ describe('agent CLI detection', () => {
 
     const status = await statusFor(service, 'claude');
 
-    expect(status?.health).toBe('error');
-    expect(status?.effective).toBeUndefined();
+    expect(status?.health).toBe('warn');
+    expect(status?.effective).toBeDefined();
+    expect(status?.effective?.version).toBeNull();
     expect(findingCodes(status)).toContain('version-probe-failed');
     expect(findingCodes(status)).not.toContain('cli-not-installed');
   });
@@ -285,9 +288,12 @@ describe('agent CLI detection', () => {
 
     const status = await statusFor(service, 'claude');
 
+    // No candidate ever answered, so this is a genuinely missing CLI — distinct
+    // from the drifted-output case above, which keeps its installation.
+    expect(status?.health).toBe('missing');
     expect(findingCodes(status)).toContain('not-executable');
+    expect(findingCodes(status)).toContain('cli-not-installed');
     expect(findingCodes(status)).not.toContain('version-probe-failed');
-    expect(findingCodes(status)).not.toContain('cli-not-installed');
   });
 
   it('warns only for unwritable locations propagation would actually write to', async () => {

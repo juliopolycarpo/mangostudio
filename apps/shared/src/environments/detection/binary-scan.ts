@@ -13,7 +13,13 @@ export interface RuntimeDefinition {
   readonly binaryNames: readonly string[];
   readonly versionArgs: readonly string[];
   readonly parseVersion: (stdout: string) => SemVer | null;
-  /** Finding to emit when the command runs but its output no longer parses. */
+  /**
+   * What an executed-but-unparseable version probe means for this definition.
+   * `not-executable` (the default) drops the candidate, the same as a probe
+   * that never ran. `version-probe-failed` keeps it as an installation with a
+   * `null` version instead — for a vendor CLI whose `--version` output drifts
+   * on its own release cadence, "ran but unreadable" is not "not installed".
+   */
   readonly unparsedVersionCode?: 'not-executable' | 'version-probe-failed';
   readonly wellKnownDirs: (env: PathEnv) => readonly string[];
   /** Retains the sidecar detector's final OS-resolved fallback. */
@@ -65,7 +71,8 @@ type CandidateProbeResult =
       readonly kind: 'installation';
       readonly candidate: BinaryCandidate;
       readonly path: string;
-      readonly version: string;
+      /** `null` when the binary ran but its output did not parse as a version. */
+      readonly version: string | null;
     }
   | {
       readonly kind: 'failure';
@@ -325,6 +332,14 @@ export async function scanRuntime(
           : null;
       }
       if (!definition.parseVersion(version)) {
+        // A definition that opts in (`version-probe-failed`) trades the raw
+        // failure for a known installation with an unreadable version: the
+        // binary answered, so "not installed" would be the wrong story. A
+        // definition that does not opt in keeps the old failure/drop split.
+        if (definition.unparsedVersionCode === 'version-probe-failed') {
+          const path = await resolveRealpath(candidate.path, deps);
+          return { kind: 'installation', candidate, path, version: null };
+        }
         return candidate.requiresExistenceCheck
           ? {
               kind: 'failure',
@@ -339,7 +354,10 @@ export async function scanRuntime(
       const path = await resolveRealpath(candidate.path, deps);
       return { kind: 'installation', candidate, path, version };
     },
-    stopWhen ? (result) => result?.kind === 'installation' && stopWhen(result.version) : undefined
+    stopWhen
+      ? (result) =>
+          result?.kind === 'installation' && result.version !== null && stopWhen(result.version)
+      : undefined
   );
 
   for (const probeResult of probeResults) {

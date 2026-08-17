@@ -79,5 +79,5 @@ export function authStateFrom(status: AgentCliStatus): ExternalAgentAuthState {
 
 /** The installed version, when the scan parsed one. */
 export function versionFrom(status: AgentCliStatus): string | undefined {
-  return status.effective?.version;
+  return status.effective?.version ?? undefined;
 }

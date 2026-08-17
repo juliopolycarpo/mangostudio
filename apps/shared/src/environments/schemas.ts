@@ -586,6 +586,7 @@ export const RuntimeFindingCodeSchema = Type.Union([
   Type.Literal('shadowed-by-earlier-path'),
   Type.Literal('multiple-versions'),
   Type.Literal('version-below-minimum'),
+  Type.Literal('version-below-minimum-for'),
   Type.Literal('not-executable'),
   Type.Literal('outdated-lts'),
   Type.Literal('managed-but-not-on-path'),
@@ -595,6 +596,17 @@ export const RuntimeFindingCodeSchema = Type.Union([
   Type.Literal('not-authenticated'),
   Type.Literal('version-probe-failed'),
   Type.Literal('location-unwritable'),
+]);
+
+/**
+ * `warn` escalates the owning status's `health`; `info` is detail a card can
+ * still list but that never moves the badge. Absent means `warn` — every
+ * finding predating this field escalated unconditionally, so an old caller
+ * that never sets it keeps that behavior.
+ */
+export const RuntimeFindingSeveritySchema = Type.Union([
+  Type.Literal('warn'),
+  Type.Literal('info'),
 ]);
 
 export const AgentAuthSignalSchema = Type.Union([
@@ -610,7 +622,8 @@ export const AgentAuthSignalSchema = Type.Union([
 export const RuntimeInstallationSchema = Type.Object({
   path: Type.String({ minLength: 1 }),
   rawPath: Type.String({ minLength: 1 }),
-  version: Type.String({ minLength: 1 }),
+  /** `null` when the binary executed but its output did not parse as a version. */
+  version: Type.Union([Type.String({ minLength: 1 }), Type.Null()]),
   origin: RuntimeOriginSchema,
   pathIndex: Type.Optional(Type.Integer({ minimum: 0 })),
   effective: Type.Boolean(),
@@ -621,6 +634,7 @@ export const RuntimeInstallationSchema = Type.Object({
 export const RuntimeFindingSchema = Type.Object({
   code: RuntimeFindingCodeSchema,
   params: Type.Optional(Type.Record(Type.String(), Type.String())),
+  severity: Type.Optional(RuntimeFindingSeveritySchema),
 });
 
 export const RuntimeStatusSchema = Type.Object({
@@ -879,6 +893,7 @@ export type VersionManagerId = Static<typeof VersionManagerIdSchema>;
 export type LtsStatus = Static<typeof LtsStatusSchema>;
 export type RuntimeHealth = Static<typeof RuntimeHealthSchema>;
 export type RuntimeFindingCode = Static<typeof RuntimeFindingCodeSchema>;
+export type RuntimeFindingSeverity = Static<typeof RuntimeFindingSeveritySchema>;
 export type RuntimeInstallation = Static<typeof RuntimeInstallationSchema>;
 export type RuntimeFinding = Static<typeof RuntimeFindingSchema>;
 export type RuntimeStatus = Static<typeof RuntimeStatusSchema>;

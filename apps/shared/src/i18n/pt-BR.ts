@@ -2570,6 +2570,7 @@ export const messages = {
       aliasReachable: 'acessível por {count} caminhos',
       otherInstallations: 'Outras instalações',
       noEffective: 'Nenhum binário utilizável foi encontrado.',
+      versionUnknown: 'versão desconhecida',
       notInstalled: '{runtime} ainda não está instalado.',
       install: 'Instalar {runtime}',
       update: 'Atualizar {runtime}',
@@ -2608,6 +2609,8 @@ export const messages = {
         'Há mais de uma versão de {runtime} instalada ({versions}); só a primeira do PATH roda.',
       'version-below-minimum':
         '{path} usa {version} e recursos que exigem {minimumVersion} ou superior vão falhar.',
+      'version-below-minimum-for':
+        '{version} está abaixo da {minimumVersion} que {consumer} exige.',
       'not-executable': '{path} existe, mas não respondeu a uma consulta de versão.',
       'outdated-lts': 'A versão {version} está em {ltsStatus} e deixará de receber correções.',
       'managed-but-not-on-path':
@@ -2639,6 +2642,7 @@ export const messages = {
       locationUnsupported: 'indisponível nesta plataforma',
       locationEntries: '{count} itens',
       notInstalled: 'Não instalada',
+      versionUnknown: 'versão desconhecida',
       empty: 'Nenhuma CLI de agente foi detectada.',
       emptyHint: 'O MangoStudio pode instalar uma CLI de agente para você nesta máquina.',
     },

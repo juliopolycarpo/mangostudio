@@ -14,7 +14,6 @@ import type {
   AgentCliStatus,
   RuntimeFinding,
   RuntimeHealth,
-  RuntimeId,
   RuntimeStatus,
   VersionManagerId,
 } from '@mangostudio/shared/environments';
@@ -28,8 +27,6 @@ import {
   detectNvm,
   directoryExists,
   type ExternalAgentCliDefinition,
-  type MinimumRuntimeVersion,
-  NODE_MINIMUM_SUPPORTED_VERSION,
   NODE_RELEASE_SCHEDULE,
   NODE_RUNTIME_DEFINITION,
   type NvmDetectionDeps,
@@ -112,19 +109,6 @@ export interface ProbingService {
   ): Promise<RuntimeProbeAgentClisResult>;
 }
 
-function parseMinimumVersion(value: string): MinimumRuntimeVersion {
-  const [major, minor, patch] = value.split('.').map(Number);
-  return {
-    major: major ?? 0,
-    minor: minor ?? 0,
-    ...(patch !== undefined && { patch }),
-  };
-}
-
-const DEFAULT_MINIMUM_VERSIONS: Partial<Record<RuntimeId, MinimumRuntimeVersion>> = {
-  node: parseMinimumVersion(NODE_MINIMUM_SUPPORTED_VERSION),
-};
-
 function pathApi(platform: string): typeof posix | typeof win32 {
   return platform === 'win32' ? win32 : posix;
 }
@@ -162,12 +146,13 @@ async function probeRuntimeDefinition(
   // AbortError from the forwarded signal, so a cancelled call would otherwise
   // come back as a normal missing/ok status.
   throwIfAborted(signal);
-  const minimumVersion =
-    params.minimumVersions?.[definition.id] ?? DEFAULT_MINIMUM_VERSIONS[definition.id];
+  const minimumVersion = params.minimumVersions?.[definition.id];
+  const consumerRequirements = params.consumerMinimumVersions?.[definition.id];
   return analyzeRuntimeScan(definition, scan, {
     probedAtMs: adapters.now(),
     installable: params.installable?.[definition.id] ?? false,
     ...(minimumVersion !== undefined && { minimumVersion }),
+    ...(consumerRequirements !== undefined && { consumerRequirements }),
   });
 }
 

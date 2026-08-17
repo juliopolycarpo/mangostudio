@@ -75,6 +75,7 @@ describe('analyzeRuntimeScan', () => {
     expect(status.findings).toContainEqual({
       code: 'multiple-versions',
       params: { runtime: 'node', versions: 'v20.11.0, v22.13.0' },
+      severity: 'info',
     });
     expect(status.findings).toContainEqual({
       code: 'shadowed-by-earlier-path',
@@ -162,6 +163,16 @@ describe('analyzeRuntimeScan', () => {
       { installations: [], failures: [] },
       { installable: false, probedAtMs: 1_700_000_000_000 }
     );
+
+    expect(missing).toMatchObject({
+      health: 'missing',
+      findings: [{ code: 'not-found', params: { runtime: 'node' } }],
+    });
+  });
+
+  it('reports a missing runtime alongside a broken candidate rather than hiding it', () => {
+    // A dead shim on PATH used to suppress `not-found` entirely, so a user with
+    // no real Node install only ever heard about the broken shim.
     const failed = analyzeRuntimeScan(
       NODE_RUNTIME_DEFINITION,
       {
@@ -174,14 +185,126 @@ describe('analyzeRuntimeScan', () => {
       { installable: false, probedAtMs: 1_700_000_000_000 }
     );
 
-    expect(missing).toMatchObject({
-      health: 'missing',
-      findings: [{ code: 'not-found', params: { runtime: 'node' } }],
-    });
     expect(failed.health).toBe('error');
     expect(failed.findings).toEqual([
       { code: 'not-executable', params: { path: '/broken/bin/node' } },
       { code: 'probe-timeout', params: { path: '/stalled/bin/node' } },
+      { code: 'not-found', params: { runtime: 'node' } },
     ]);
+  });
+
+  it('only escalates health for the effective installation being below minimum', () => {
+    // A normal version-manager setup: three Node installs, the one that
+    // actually runs is current, an older one sits below the floor. That old
+    // install is still worth listing, but it must not turn the panel to warn.
+    const status = analyzeRuntimeScan(
+      NODE_RUNTIME_DEFINITION,
+      {
+        installations: [
+          {
+            path: '/home/tester/.nvm/versions/node/v22.13.0/bin/node',
+            rawPath: '/usr/local/bin/node',
+            version: 'v22.13.0',
+            origin: 'path',
+            pathIndex: 0,
+            effective: true,
+          },
+          {
+            path: '/home/tester/.nvm/versions/node/v18.20.0/bin/node',
+            rawPath: '/home/tester/.nvm/versions/node/v18.20.0/bin/node',
+            version: 'v18.20.0',
+            origin: 'well-known',
+            effective: false,
+          },
+        ],
+        failures: [],
+      },
+      {
+        installable: false,
+        probedAtMs: 1_700_000_000_000,
+        minimumVersion: { major: 22, minor: 13 },
+      }
+    );
+
+    expect(status.health).toBe('ok');
+    expect(status.findings).toContainEqual({
+      code: 'version-below-minimum',
+      params: {
+        path: '/home/tester/.nvm/versions/node/v18.20.0/bin/node',
+        version: 'v18.20.0',
+        minimumVersion: '22.13',
+      },
+      severity: 'info',
+    });
+  });
+
+  it('keeps an executed-but-unparseable version as an installation, not a dropped candidate', () => {
+    const status = analyzeRuntimeScan(
+      NODE_RUNTIME_DEFINITION,
+      {
+        installations: [
+          {
+            path: '/usr/local/bin/node',
+            rawPath: '/usr/local/bin/node',
+            version: null,
+            origin: 'path',
+            pathIndex: 0,
+            effective: true,
+          },
+        ],
+        failures: [],
+      },
+      { installable: false, probedAtMs: 1_700_000_000_000 }
+    );
+
+    expect(status.health).toBe('warn');
+    expect(status.effective?.version).toBeNull();
+    expect(status.findings).toContainEqual({
+      code: 'version-probe-failed',
+      params: { path: '/usr/local/bin/node' },
+    });
+  });
+
+  it('reports a consumer minimum against the consumer, and only warns while enabled', () => {
+    const effectiveInstallation = {
+      path: '/usr/local/bin/node',
+      rawPath: '/usr/local/bin/node',
+      version: 'v20.11.0',
+      origin: 'path' as const,
+      pathIndex: 0,
+      effective: true,
+    };
+    const requirement = { consumer: 'cursor', major: 22, minor: 13, enabled: false };
+
+    const disabled = analyzeRuntimeScan(
+      NODE_RUNTIME_DEFINITION,
+      { installations: [effectiveInstallation], failures: [] },
+      {
+        installable: false,
+        probedAtMs: 1_700_000_000_000,
+        consumerRequirements: [requirement],
+      }
+    );
+    const enabled = analyzeRuntimeScan(
+      NODE_RUNTIME_DEFINITION,
+      { installations: [effectiveInstallation], failures: [] },
+      {
+        installable: false,
+        probedAtMs: 1_700_000_000_000,
+        consumerRequirements: [{ ...requirement, enabled: true }],
+      }
+    );
+
+    expect(disabled.health).toBe('ok');
+    expect(disabled.findings).toContainEqual({
+      code: 'version-below-minimum-for',
+      params: { consumer: 'cursor', version: 'v20.11.0', minimumVersion: '22.13' },
+      severity: 'info',
+    });
+    expect(enabled.health).toBe('warn');
+    expect(enabled.findings).toContainEqual({
+      code: 'version-below-minimum-for',
+      params: { consumer: 'cursor', version: 'v20.11.0', minimumVersion: '22.13' },
+    });
   });
 });

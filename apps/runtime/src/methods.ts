@@ -6,7 +6,10 @@ import type {
   VersionManagerId,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
-import type { MinimumRuntimeVersion } from '@mangostudio/shared/environments/detection';
+import type {
+  ConsumerVersionRequirement,
+  MinimumRuntimeVersion,
+} from '@mangostudio/shared/environments/detection';
 import type {
   ExternalAgentAckResult,
   ExternalAgentCancelParams,
@@ -647,6 +650,10 @@ export interface RuntimeProbeRuntimesParams extends RuntimeProbeParams {
   /** Hub policy: which ids this release can offer an install recipe for. */
   readonly installable?: Readonly<Partial<Record<RuntimeId, boolean>>>;
   readonly minimumVersions?: Readonly<Partial<Record<RuntimeId, MinimumRuntimeVersion>>>;
+  /** Per-consumer floors — a feature that needs a newer runtime than the generic minimum. */
+  readonly consumerMinimumVersions?: Readonly<
+    Partial<Record<RuntimeId, readonly ConsumerVersionRequirement[]>>
+  >;
 }
 
 export interface RuntimeProbeRuntimesResult {

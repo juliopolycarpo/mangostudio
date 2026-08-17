@@ -2561,6 +2561,7 @@ export const messages: Messages = {
       aliasReachable: 'reachable via {count} paths',
       otherInstallations: 'Other installations',
       noEffective: 'No usable binary was found.',
+      versionUnknown: 'unknown version',
       notInstalled: '{runtime} is not installed yet.',
       install: 'Install {runtime}',
       update: 'Update {runtime}',
@@ -2599,6 +2600,7 @@ export const messages: Messages = {
         'More than one {runtime} is installed ({versions}); only the first one on PATH runs.',
       'version-below-minimum':
         '{path} reports {version}, so features that need {minimumVersion} or newer will fail.',
+      'version-below-minimum-for': '{version} is below the {minimumVersion} that {consumer} needs.',
       'not-executable': '{path} exists but did not answer a version query.',
       'outdated-lts': 'Version {version} is {ltsStatus} and will stop receiving fixes.',
       'managed-but-not-on-path':
@@ -2628,6 +2630,7 @@ export const messages: Messages = {
       locationUnsupported: 'unavailable on this platform',
       locationEntries: '{count} entries',
       notInstalled: 'Not installed',
+      versionUnknown: 'unknown version',
       empty: 'No agent CLIs were detected.',
       emptyHint: 'MangoStudio can install an agent CLI for you on this machine.',
     },
