@@ -637,18 +637,6 @@ async function executeSubagentTools(input: {
             'TOOL_NOT_ALLOWED'
           );
         }
-        // A subagent's uncheckpointed writes are the delegating turn's to
-        // report, exactly as its checkpointed ones are.
-        const noteSource = (source: 'shell' | 'mcp' | undefined) =>
-          noteUncheckpointedSource(
-            {
-              chatId: input.chatId,
-              assistantMessageId: input.assistantMessageId,
-              db: input.db,
-            },
-            source
-          );
-
         if (isMcpToolName(call.name)) {
           if (input.settingsByToolName.get(call.name)?.enabled === false) {
             throw new SubagentDelegationError(
@@ -656,7 +644,14 @@ async function executeSubagentTools(input: {
               'TOOL_NOT_ALLOWED'
             );
           }
-          await noteSource('mcp');
+          // A subagent's uncheckpointed writes are the delegating turn's to
+          // report, exactly as its checkpointed ones are. Builtins record
+          // themselves from `executeTool`; MCP tools have no registration to
+          // declare it on, so they are named here.
+          await noteUncheckpointedSource(
+            { chatId: input.chatId, assistantMessageId: input.assistantMessageId, db: input.db },
+            'mcp'
+          );
           const mcpResult = await executeMcpTool(
             input.db,
             input.userId,
@@ -674,7 +669,6 @@ async function executeSubagentTools(input: {
           const tool = getTool(call.name);
           if (!tool)
             throw new SubagentDelegationError(`Unknown tool: "${call.name}"`, 'UNKNOWN_TOOL');
-          await noteSource(tool.settings.uncheckpointedWriteSource);
           result = await executeTool(
             call.name,
             safeJsonParse(call.argsStr) ?? {},

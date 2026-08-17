@@ -7,10 +7,12 @@ import { recordUncheckpointedSource } from '../infrastructure/uncheckpointed-sou
 
 const logger = createDiagnosticLogger('file-checkpoints');
 
+/** Structural, so a `ToolContext` is one without the tool layer converting it. */
 export interface UncheckpointedSourceContext {
   readonly chatId: string;
   /** Absent outside a turn, where there is no manifest for this to qualify. */
   readonly assistantMessageId?: string;
+  /** Absent on direct, non-turn invocations, which fall back to the app handle. */
   readonly db?: Kysely<Database>;
 }
 
@@ -25,8 +27,6 @@ export interface UncheckpointedSourceContext {
  * Bookkeeping, so it never fails the call it describes. Losing the note costs
  * a warning the user would have seen; refusing the tool over a failed insert
  * costs them the work.
- *
- * // Usage: await noteUncheckpointedSource(context, 'shell')
  */
 export async function noteUncheckpointedSource(
   context: UncheckpointedSourceContext,
