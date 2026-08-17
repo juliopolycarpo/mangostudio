@@ -1,14 +1,21 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import type { UncheckpointedWriteSource } from '@mangostudio/shared/file-checkpoints';
 import { useState } from 'react';
 import { useToast } from '@/components/ui/Toast';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError } from '@/lib/utils';
 import { useRevertChatFileCheckpoints } from '../hooks/use-chat-file-checkpoints';
+import { revertedMessage } from '../lib/uncheckpointed-copy';
 import { RevertFileChangesDialog } from './RevertFileChangesDialog';
 
 interface RevertFileChangesButtonProps {
   chatId: string;
   messageId: string;
+  /**
+   * From the preview, so the dialog can name what the revert will leave in
+   * place before the user confirms.
+   */
+  uncheckpointedSources?: ReadonlyArray<UncheckpointedWriteSource>;
 }
 
 type RevertErrorMessages = { conflict: string; outsideWorkdir: string; failed: string };
@@ -29,7 +36,11 @@ export function revertErrorMessage(error: unknown, labels: RevertErrorMessages):
 }
 
 /** Reverts filesystem mutations recorded for one assistant message. */
-export function RevertFileChangesButton({ chatId, messageId }: RevertFileChangesButtonProps) {
+export function RevertFileChangesButton({
+  chatId,
+  messageId,
+  uncheckpointedSources,
+}: RevertFileChangesButtonProps) {
   const { t } = useI18n();
   const { toast } = useToast();
   const labels = t.chat.fileCheckpoints;
@@ -40,7 +51,12 @@ export function RevertFileChangesButton({ chatId, messageId }: RevertFileChanges
     revert.mutate(messageId, {
       onSuccess: (data) => {
         setIsConfirming(false);
-        toast(labels.reverted.replace('{count}', String(data?.revertedFiles ?? 0)), 'success');
+        // The server's own answer, not the preview: the turn may have run an
+        // uncheckpointed tool after the list was last fetched.
+        toast(
+          revertedMessage(data?.revertedFiles ?? 0, data?.uncheckpointedSources ?? [], labels),
+          'success'
+        );
       },
       onError: (error) => {
         setIsConfirming(false);
@@ -64,6 +80,7 @@ export function RevertFileChangesButton({ chatId, messageId }: RevertFileChanges
       {isConfirming && (
         <RevertFileChangesDialog
           isReverting={revert.isPending}
+          uncheckpointedSources={uncheckpointedSources}
           onConfirm={handleConfirm}
           onCancel={() => setIsConfirming(false)}
         />

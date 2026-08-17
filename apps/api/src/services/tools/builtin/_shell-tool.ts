@@ -162,6 +162,9 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
     enabledByDefault: false,
     canDisable: true,
     requiredCapabilities: ['shell'],
+    // The command runs in a child process, so there is no path list to snapshot
+    // before the fact and nothing a checkpoint could restore afterwards.
+    uncheckpointedWriteSource: 'shell',
     defaultParameters: {
       timeoutSeconds: SHELL_DEFAULT_TIMEOUT_SECONDS,
       maxOutputBytes: SHELL_DEFAULT_MAX_OUTPUT_BYTES,

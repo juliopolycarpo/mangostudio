@@ -287,7 +287,19 @@ export const messages = {
         'Isso restaura ou remove arquivos alterados neste turno do assistente. Edições suas depois disso podem impedir a reversão.',
       confirmAction: 'Reverter arquivos',
       cancel: 'Manter arquivos',
+      uncheckpointedShell:
+        'Este turno também executou comandos de shell. Essas alterações não têm checkpoint e não serão revertidas.',
+      uncheckpointedMcp:
+        'Este turno também executou ferramentas MCP. Quaisquer arquivos que elas tenham alterado não têm checkpoint e não serão revertidos.',
+      uncheckpointedBoth:
+        'Este turno também executou comandos de shell e ferramentas MCP. Essas alterações não têm checkpoint e não serão revertidas.',
       reverted: '{count} arquivo(s) revertido(s).',
+      revertedWithShell:
+        '{count} arquivo(s) revertido(s). As alterações feitas por comandos de shell não foram revertidas.',
+      revertedWithMcp:
+        '{count} arquivo(s) revertido(s). Quaisquer alterações feitas por ferramentas MCP não foram revertidas.',
+      revertedWithBoth:
+        '{count} arquivo(s) revertido(s). As alterações feitas por comandos de shell e ferramentas MCP não foram revertidas.',
       conflict:
         'Não foi possível reverter: um ou mais arquivos mudaram no disco desde que esta mensagem foi concluída.',
       outsideWorkdir:

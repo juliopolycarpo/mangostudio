@@ -8,6 +8,7 @@ import type {
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { isAgentId } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
+import type { UncheckpointedWriteSource } from '@mangostudio/shared/file-checkpoints';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
@@ -46,6 +47,7 @@ import type {
   RegisteredTool,
   WorkdirPolicy,
 } from '../../../services/tools/types';
+import { noteUncheckpointedSource } from '../../file-checkpoints/application/note-uncheckpointed-source';
 import { shouldExposeDelegateTool } from './delegate-tool-availability';
 import { ensureDelegationResult, isSubagentRunResult, logDelegationWarn } from './delegation-retry';
 import {
@@ -246,6 +248,12 @@ async function executeStandardToolCall(
   try {
     const prepared = await prepareStandardToolCall(name, context);
     lifecycle.transition('running');
+    // Before the call, not after: what it writes outside the manifest is
+    // already on disk by the time it reports either way.
+    await noteUncheckpointedSource(
+      { chatId: context.chatId, assistantMessageId: context.assistantMessageId, db: context.db },
+      uncheckpointedSourceOf(prepared)
+    );
     if (prepared.kind === 'mcp') {
       const mcpResult = await executeMcpToolCall(callId, args, lifecycle, context, prepared);
       result = mcpResult.result;
@@ -359,6 +367,22 @@ async function executeStandardToolCall(
     ...(shapedResult.questionPart ? { questionPart: shapedResult.questionPart } : {}),
     ...(shapedResult.todoPart ? { todoPart: shapedResult.todoPart } : {}),
   };
+}
+
+/**
+ * Which class of unsnapshotted write this call belongs to, if any.
+ *
+ * Every MCP call counts: the hub cannot know whether a foreign tool writes, and
+ * a warning that only appears for the servers we happened to classify is worse
+ * than one that says "may have". A delegation counts for nothing here — the
+ * subagent's own tool calls record themselves against the same message id.
+ */
+function uncheckpointedSourceOf(
+  prepared: PreparedStandardToolCall
+): UncheckpointedWriteSource | undefined {
+  if (prepared.kind === 'mcp') return 'mcp';
+  if (prepared.kind === 'delegation') return undefined;
+  return prepared.tool.settings.uncheckpointedWriteSource;
 }
 
 function shapeToolExecutionResult(

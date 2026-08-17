@@ -285,7 +285,18 @@ export const messages: Messages = {
         'This restores or removes files touched during this assistant turn. Changes you made afterward may block the revert.',
       confirmAction: 'Revert files',
       cancel: 'Keep files',
+      uncheckpointedShell:
+        'This turn also ran shell commands. Those changes are not checkpointed and will not be reverted.',
+      uncheckpointedMcp:
+        'This turn also ran MCP tools. Any files they changed are not checkpointed and will not be reverted.',
+      uncheckpointedBoth:
+        'This turn also ran shell commands and MCP tools. Those changes are not checkpointed and will not be reverted.',
       reverted: 'Reverted {count} file(s).',
+      revertedWithShell:
+        'Reverted {count} file(s). Changes made by shell commands were not reverted.',
+      revertedWithMcp: 'Reverted {count} file(s). Any changes made by MCP tools were not reverted.',
+      revertedWithBoth:
+        'Reverted {count} file(s). Changes made by shell commands and MCP tools were not reverted.',
       conflict: 'Could not revert: one or more files changed on disk since this message completed.',
       outsideWorkdir:
         'Could not revert: this message touched files outside the working directory, and tools are restricted to it.',

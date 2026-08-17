@@ -1,4 +1,5 @@
 import type { Message } from '@mangostudio/shared';
+import type { ChatFileCheckpointSummary } from '@mangostudio/shared/file-checkpoints';
 import { motion } from 'motion/react';
 import { memo } from 'react';
 import { AssistantMessageBlock } from './AssistantMessageBlock';
@@ -11,7 +12,8 @@ interface ChatMessageRowProps {
   start: number;
   measureRef: (element: Element | null) => void;
   chatId?: string | null;
-  canRevertFileChanges?: boolean;
+  /** Present when this turn has a revertable manifest; absent means no affordance. */
+  fileCheckpoint?: ChatFileCheckpointSummary;
   /** Present only on the last row while question cards may be answered. */
   onQuestionSubmit?: (prompt: string) => void;
 }
@@ -31,7 +33,7 @@ function ChatMessageRowComponent({
   start,
   measureRef,
   chatId,
-  canRevertFileChanges,
+  fileCheckpoint,
   onQuestionSubmit,
 }: ChatMessageRowProps) {
   const isImageTurn = isImageInteraction(message);
@@ -64,7 +66,7 @@ function ChatMessageRowComponent({
             msg={message}
             isImageTurn={isImageTurn}
             chatId={chatId}
-            canRevertFileChanges={canRevertFileChanges}
+            fileCheckpoint={fileCheckpoint}
             onQuestionSubmit={onQuestionSubmit}
           />
         )}

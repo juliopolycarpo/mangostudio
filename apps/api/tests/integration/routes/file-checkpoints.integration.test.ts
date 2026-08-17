@@ -123,6 +123,6 @@ describe('POST /chats/:id/checkpoints/:messageId/revert', () => {
     const response = await revert();
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ revertedFiles: 1 });
+    expect(await response.json()).toEqual({ revertedFiles: 1, uncheckpointedSources: [] });
   });
 });
