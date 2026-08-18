@@ -171,6 +171,29 @@ describe('runtime self-update', () => {
         await service.close();
       }
     });
+
+    // Request frames type `params` as unknown, and `RegExp.test` coerces a
+    // number to a string. `1234567` would otherwise pass the sha pattern and
+    // open a session; the slot schema would then reject a numeric field and
+    // discard the whole config, consent included.
+    it('refuses a numeric sourceSha, before staging anything', async () => {
+      const { env, service } = await fixture();
+      const bytes = new TextEncoder().encode('new-runtime');
+      try {
+        await expect(
+          service.begin({
+            version: '1.1.0',
+            digest: digestOf(bytes),
+            totalBytes: bytes.byteLength,
+            sourceSha: 1234567 as never,
+          })
+        ).rejects.toMatchObject({ data: { reason: 'invalid_source_sha' } });
+        expect(service.active).toBe(false);
+        expect((await readRuntimeSlotConfig('remote', env)).version).toBe('1.0.0');
+      } finally {
+        await service.close();
+      }
+    });
   });
 
   it('reports a scheduled restart and notifies its supervisor after replying', async () => {

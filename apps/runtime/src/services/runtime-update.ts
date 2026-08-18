@@ -193,7 +193,7 @@ export function createRuntimeUpdateService(
         if (
           params.sourceSha !== undefined &&
           params.sourceSha !== null &&
-          !SOURCE_SHA_PATTERN.test(params.sourceSha)
+          (typeof params.sourceSha !== 'string' || !SOURCE_SHA_PATTERN.test(params.sourceSha))
         ) {
           throw fail('Runtime update source commit is not a git commit sha.', {
             reason: 'invalid_source_sha',
