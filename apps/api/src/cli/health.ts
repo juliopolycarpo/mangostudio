@@ -2,6 +2,8 @@
  * Health probe for a running MangoStudio server via GET /api/health.
  */
 
+import { formatHostForUrl, isLoopback } from '../lib/ip-address';
+
 const DEFAULT_TIMEOUT_MS = 1000;
 
 /** True when the server answers /api/health with 200 {status:'ok'}. */
@@ -39,30 +41,9 @@ export async function probeHealth(
  * client targets, so they map to loopback.
  */
 function resolveLocalTarget(host: string): string | null {
-  const normalized = host.trim().toLowerCase();
+  const target = formatHostForUrl(host);
 
-  if (normalized === '0.0.0.0' || normalized === '127.0.0.1' || normalized === 'localhost') {
-    return normalized === '0.0.0.0' ? '127.0.0.1' : normalized;
-  }
-  if (
-    normalized === '::' ||
-    normalized === '::1' ||
-    normalized === '[::]' ||
-    normalized === '[::1]'
-  ) {
-    return '[::1]';
-  }
-  if (isLoopbackIPv4(normalized)) {
-    return normalized;
-  }
-  return null;
-}
-
-/** True for any address in the 127.0.0.0/8 loopback range. */
-function isLoopbackIPv4(host: string): boolean {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!match) return false;
-
-  const octets = match.slice(1).map(Number);
-  return octets.every((octet) => octet <= 255) && octets[0] === 127;
+  if (target === '0.0.0.0') return '127.0.0.1';
+  if (target === '[::]') return '[::1]';
+  return isLoopback(host) ? target : null;
 }
