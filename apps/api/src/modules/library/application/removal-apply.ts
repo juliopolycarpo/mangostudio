@@ -151,7 +151,20 @@ async function runRemoval(
   // The plan's own `kept` entries are merged here rather than shipped and
   // echoed: the hub decided them, and the engine returns only what it kept
   // itself — rolled back, or never attempted.
-  const removalResult = await runRemovalAcrossEnvironments(userId, batches, plan, deps);
+  let removalResult: RemovalApply;
+  try {
+    removalResult = await runRemovalAcrossEnvironments(userId, batches, plan, deps);
+  } catch (error) {
+    // A throw from the engine is not proof that nothing was deleted: machines
+    // are removed from one after another, so an earlier one may already be
+    // missing copies. Over-invalidating costs one rescan; under-invalidating
+    // reports the pre-removal matrix as current.
+    deps.resetCaches([...batches.keys()].map((environmentId) => ({ environmentId })));
+    throw error;
+  }
+  // Ahead of the backup indexing below: once copies are gone, the cached
+  // location health for those machines is wrong whatever the index does.
+  deps.resetCaches([...removalResult.removed, ...removalResult.backups]);
   // Pinned when it holds someone's last copy: the set is the only remaining
   // instance of that resource, and the index has to know that before retention
   // on the owning machine is ever asked about it.
@@ -168,9 +181,7 @@ async function runRemoval(
         console.error('[library] Could not index the backup set for this removal:', error);
       });
   }
-  const result = { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
-  deps.resetCaches([...result.removed, ...result.backups]);
-  return result;
+  return { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
 }
 
 /**

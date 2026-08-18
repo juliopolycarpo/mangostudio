@@ -264,7 +264,21 @@ async function runApply(
     return { partial: false, applied: [], skipped: plan.skipped, failed, backups: [] };
   }
 
-  const writeResult = await runPreparedWrites(userId, batches, plan.skipped, deps);
+  let writeResult: PropagationApply;
+  try {
+    writeResult = await runPreparedWrites(userId, batches, plan.skipped, deps);
+  } catch (error) {
+    // A throw from the engine is not proof that nothing landed: machines are
+    // written one after another, so an earlier one may already hold new files.
+    // Over-invalidating costs one rescan; under-invalidating reports the
+    // pre-write matrix as current.
+    deps.resetCaches([...batches.keys()].map((environmentId) => ({ environmentId })));
+    throw error;
+  }
+  // Ahead of the bookkeeping below, which can throw on its own: once bytes
+  // have landed, the cached location health for those machines is wrong no
+  // matter what the backup index or the acknowledgements do next.
+  deps.resetCaches([...writeResult.applied, ...writeResult.backups]);
 
   // Indexed even when the apply was partial: a partial apply is precisely the
   // one whose backup handles the user needs to find again later, and a failure
@@ -289,7 +303,6 @@ async function runApply(
     }
   }
 
-  deps.resetCaches([...writeResult.applied, ...writeResult.backups]);
   return writeResult;
 }
 
@@ -1094,11 +1107,10 @@ async function runUndo(
   // Stamped by the hub, not the machine: the environment id is the hub's own
   // name for the connection, and a store reachable from two hubs would answer
   // with two different ones.
-  const named = (result: LibraryUndoResult): PropagationUndo => {
-    const undone = { ...result, environmentId: deps.environmentId };
-    deps.resetCaches([undone]);
-    return undone;
-  };
+  const named = (result: LibraryUndoResult): PropagationUndo => ({
+    ...result,
+    environmentId: deps.environmentId,
+  });
 
   try {
     if (deps.writeEngine === 'in-process') {
@@ -1144,6 +1156,10 @@ async function runUndo(
       throw new LibraryRequestError(404, error.message);
     }
     throw error;
+  } finally {
+    // In `finally` because a restore that threw partway still put files back:
+    // the machine's cached location health has to be dropped either way.
+    deps.resetCaches([{ environmentId: deps.environmentId }]);
   }
 }
 
