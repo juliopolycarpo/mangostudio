@@ -534,11 +534,13 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       if (status) stream.publish({ type: 'probe', target, status, done: false });
     };
 
-    try {
-      // Which surfaces to refresh is the recipe's declaration, never a branch
-      // on its id here. Every one runs through the same forced probe the reset
-      // above set up, so the epoch guard still decides what may reach the cache.
-      for (const target of recipe.probe) {
+    // Which surfaces to refresh is the recipe's declaration, never a branch
+    // on its id here. Every one runs through the same forced probe the reset
+    // above set up, so the epoch guard still decides what may reach the cache.
+    // A failed target is logged and skipped so a later declared surface still
+    // refreshes — one detection service going down must not leave the rest stale.
+    for (const target of recipe.probe) {
+      try {
         switch (target.kind) {
           case 'runtime':
             publish(
@@ -565,15 +567,15 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
             throw new Error(`Unhandled install probe target: ${JSON.stringify(unreachable)}`);
           }
         }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown probe failure.';
+        stream.publish({
+          type: 'log',
+          stream: 'system',
+          line: `Post-install probe failed: ${detail}`,
+          done: false,
+        });
       }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Unknown probe failure.';
-      stream.publish({
-        type: 'log',
-        stream: 'system',
-        line: `Post-install probe failed: ${detail}`,
-        done: false,
-      });
     }
   };
 

@@ -131,7 +131,8 @@ export function InstallAction({
         <CopyCommandBlock recipe={flow.state.recipe} message={flow.state.message} />
       )}
 
-      {(flow.state.step === 'confirming' || flow.state.step === 'starting') && (
+      {(flow.state.step === 'confirming' ||
+        (flow.state.step === 'starting' && flow.state.chain.index === 0)) && (
         <InstallConfirmDialog
           preparation={flow.state.preparation}
           steps={flow.state.chain.steps}

@@ -208,6 +208,64 @@ describe('InstallAction', () => {
     expect(screen.getByTestId('install-step-label').textContent).toBe('Step 2 of 2 · Node.js');
   });
 
+  it('does not show the confirmation dialog again while a later chain step starts', async () => {
+    let releaseSecondStart: () => void = () => undefined;
+    const secondStartGate = new Promise<void>((resolve) => {
+      releaseSecondStart = resolve;
+    });
+    let prepared = 0;
+    let started = 0;
+    fetchMock.mockImplementation((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes('/install/prepare')) {
+        prepared += 1;
+        const recipe = prepared === 1 ? NVM_RECIPE : NODE_RECIPE;
+        return Promise.resolve(
+          json({ preparationId: `prep-${prepared}`, expiresAt: null, recipe })
+        );
+      }
+      if (isStartRequest(url)) {
+        started += 1;
+        const { recipeId } = JSON.parse(String(init?.body)) as { recipeId: string };
+        if (started === 2) {
+          return secondStartGate.then(() => json({ runId: `run-${recipeId}`, attached: false }));
+        }
+        return Promise.resolve(json({ runId: `run-${recipeId}`, attached: false }));
+      }
+      if (url.includes('/log')) {
+        const line = url.includes('nvm.install') ? 'installing nvm' : 'installing node';
+        return Promise.resolve(
+          sseResponse([
+            { type: 'log', stream: 'stdout', line, done: false },
+            exitEvent('succeeded'),
+          ])
+        );
+      }
+      return Promise.resolve(json({}));
+    });
+
+    render(
+      <InstallAction
+        recipe={NODE_RECIPE}
+        catalog={[NVM_RECIPE, NODE_RECIPE]}
+        input={{ kind: 'node-version', version: 'lts' }}
+        label="Install LTS"
+      />
+    );
+    await userEvent.click(screen.getByRole('button', { name: CHAIN_LABEL }));
+    await screen.findAllByTestId('install-step');
+    await userEvent.click(screen.getByRole('button', { name: en.environments.install.run }));
+
+    // The second start is held open so this assertion sits in `starting` for
+    // step 2. A second dialog here would let Cancel dismiss a run already
+    // in flight.
+    await waitFor(() => expect(started).toBe(2));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    releaseSecondStart();
+    await waitFor(() => expect(startedRecipeIds()).toEqual(['nvm.install', 'nvm.node.install']));
+  });
+
   it('stops the chain and says so when a prerequisite does not finish', async () => {
     fetchMock.mockImplementation((input: string | URL | Request) => {
       const url = String(input instanceof Request ? input.url : input);

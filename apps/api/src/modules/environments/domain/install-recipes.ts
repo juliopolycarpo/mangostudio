@@ -57,7 +57,7 @@ export interface InstallRecipe {
    * non-empty: a recipe whose effect nothing re-probes is invisible until the
    * next lazy read.
    */
-  readonly probe: readonly InstallRecipeProbe[];
+  readonly probe: readonly [InstallRecipeProbe, ...InstallRecipeProbe[]];
   readonly download?: DownloadedInstaller;
   readonly env?: Readonly<Record<string, string>>;
   readonly profileLines?: readonly string[];

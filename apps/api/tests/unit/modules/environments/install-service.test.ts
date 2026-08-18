@@ -376,6 +376,53 @@ describe('install service', () => {
     ]);
   });
 
+  it('continues later declared probes when one forced probe rejects', async () => {
+    const detection = createRecordingProbingService();
+    const originalGetRuntimeStatus = detection.probingService.getRuntimeStatus;
+    detection.probingService.getRuntimeStatus = (_scope, id, options) => {
+      if (options?.force) {
+        detection.forced.push({ kind: 'runtime', id });
+        return Promise.reject(new Error('runtime probe exploded'));
+      }
+      return originalGetRuntimeStatus(_scope, id, options);
+    };
+    const recipe = getInstallRecipe('nvm.node.install');
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      recipes: [recipe],
+      probingService: detection.probingService,
+      repository: memory.repository,
+      runner: succeedingRunner(),
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      generateId: () => 'partial-probe-run',
+      now: () => 1_700_000_000_000,
+      platform: 'linux',
+    });
+
+    const started = await service.start(
+      { recipeId: recipe.id, input: { kind: 'node-version', version: 'lts' } },
+      REQUEST_CONTEXT
+    );
+    const events = await collectEvents(
+      await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
+    );
+
+    expect(detection.forced).toEqual([
+      { kind: 'runtime', id: 'node' },
+      { kind: 'version-manager', id: 'nvm' },
+    ]);
+    expect(events).toContainEqual({
+      type: 'log',
+      stream: 'system',
+      line: 'Post-install probe failed: runtime probe exploded',
+      done: false,
+    });
+    expect(events.filter((event) => event.type === 'probe').map((event) => event.target)).toEqual([
+      'version-manager',
+    ]);
+    expect(events.at(-1)).toMatchObject({ type: 'exit', status: 'succeeded', done: true });
+  });
+
   it('coalesces starts that overlap before execution becomes active', async () => {
     const detection = createDetectionServices();
     const memory = createMemoryRepository();
