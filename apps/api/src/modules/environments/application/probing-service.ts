@@ -40,9 +40,9 @@ const NODE_RELEASE_CACHE_FILE = 'node-releases.json';
 /**
  * After a forced probe completes, another force for the same (scope, kind,
  * ids) reuses that result instead of starting a new scan. A stuck re-check
- * button then costs one scan per second, not per click. A probe that started
- * after the caller arrived still counts as fresh even inside this window —
- * see the fresh-join check in `probe()`, which is ordered before this one.
+ * button then costs one scan per second, not per click. An in-flight forced
+ * scan is joined first, so this window never answers a caller with a
+ * completed result while a newer scan is still running.
  */
 const FORCED_PROBE_MIN_INTERVAL_MS = 1_000;
 
@@ -124,12 +124,6 @@ interface CacheEntry<T> {
 
 type AnyStatus = RuntimeStatus | VersionManagerStatus | AgentCliStatus | LibraryLocationStatus;
 
-interface Inflight {
-  /** When this scan started, so a forced caller can tell it apart from a stale one. */
-  readonly startedAt: number;
-  readonly promise: Promise<readonly AnyStatus[]>;
-}
-
 interface ForcedCompletion {
   readonly completedAt: number;
   readonly statuses: readonly AnyStatus[];
@@ -177,11 +171,14 @@ export function createEnvironmentProbingService(
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const getSelfVersion = options.getSelfVersion ?? getVersion;
   const cache = new Map<string, CacheEntry<AnyStatus>>();
-  const inflight = new Map<string, Inflight>();
+  const inflight = new Map<string, Promise<readonly AnyStatus[]>>();
   /** Newest generation per scoped probe may write cache; older ones must not. */
   const generations = new Map<string, number>();
   /** Last result a forced probe produced, keyed the same as `generations`. */
   const forcedCompletions = new Map<string, ForcedCompletion>();
+  // Bumped on every resetCache so an in-flight scan cannot write pre-reset
+  // results after its generation key was cleared (both sides matching at 1).
+  let resetEpoch = 0;
 
   // Environments are per-user rows, so two users can own the same id. The user
   // is part of the key for the same reason the connection is: neither of them
@@ -269,9 +266,8 @@ export function createEnvironmentProbingService(
     force: boolean,
     run: (client: RuntimeClient) => Promise<readonly AnyStatus[]>
   ): Promise<T[]> => {
-    // Captured before `resolveClient` so "fresh" means what the caller meant
-    // by it — a scan that started after this request arrived, not after the
-    // connection happened to resolve.
+    // Captured before `resolveClient` so the minimum-interval window is the
+    // time since this request arrived, not since the connection resolved.
     const requestArrivedAt = now();
     const client = await resolveClient(scope);
     if (!force) {
@@ -285,24 +281,23 @@ export function createEnvironmentProbingService(
     const forcedKey = `${key}${SCOPE_SEP}force`;
 
     if (force) {
-      // A forced probe exists to observe state as of now. Joining a scan that
-      // began before this request arrived can answer with the filesystem as
-      // it was up to a full probe budget ago — the install-then-probe race.
+      // Join the scan already running for this key. A mutation that must not
+      // be observed as pre-change state calls resetCache, which drops inflight
+      // so the next force starts a new walk instead of riding the stale one.
       const running = inflight.get(forcedKey);
-      if (running && running.startedAt >= requestArrivedAt) return (await running.promise) as T[];
+      if (running) return (await running) as T[];
 
-      // No fresher scan is already running: the minimum interval decides
-      // whether this request gets the last forced answer or a new scan. This
-      // check must come after the fresh-join check above, or a request that
-      // arrived after a still-running scan started would be answered with a
-      // stale, already-completed one instead of riding the fresh scan.
+      // No scan is running: the minimum interval decides whether this request
+      // gets the last forced answer or a new one. Ordered after the join so a
+      // caller that arrives while a scan is in flight rides that scan rather
+      // than a completed result from before it started.
       const lastForced = forcedCompletions.get(key);
       if (lastForced && requestArrivedAt - lastForced.completedAt < FORCED_PROBE_MIN_INTERVAL_MS) {
         return lastForced.statuses as T[];
       }
     } else {
       const pending = inflight.get(forcedKey) ?? inflight.get(key);
-      if (pending) return (await pending.promise) as T[];
+      if (pending) return (await pending) as T[];
     }
 
     const inflightKey = force ? forcedKey : key;
@@ -310,18 +305,19 @@ export function createEnvironmentProbingService(
     // may land in the cache. An older completion still answers its caller.
     const generation = (generations.get(key) ?? 0) + 1;
     generations.set(key, generation);
+    const epochAtStart = resetEpoch;
     const promise: Promise<readonly AnyStatus[]> = run(client)
       .then((statuses) => {
-        if (generations.get(key) === generation) {
+        if (generations.get(key) === generation && resetEpoch === epochAtStart) {
           writeStatuses(scope, kind, client, statuses, idOf);
           if (force) recordForcedCompletion(key, statuses);
         }
         return statuses;
       })
       .finally(() => {
-        if (inflight.get(inflightKey)?.promise === promise) inflight.delete(inflightKey);
+        if (inflight.get(inflightKey) === promise) inflight.delete(inflightKey);
       });
-    inflight.set(inflightKey, { startedAt: requestArrivedAt, promise });
+    inflight.set(inflightKey, promise);
     return (await promise) as T[];
   };
 
@@ -464,6 +460,7 @@ export function createEnvironmentProbingService(
       probeLocations(scope, probeOptions?.force === true),
 
     resetCache(environmentId) {
+      resetEpoch += 1;
       if (!environmentId) {
         cache.clear();
         inflight.clear();

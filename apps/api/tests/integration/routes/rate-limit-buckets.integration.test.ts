@@ -94,8 +94,8 @@ describe('rate-limit buckets under the /api prefix', () => {
 
   it('isolates api-key traffic from the general bucket on the same IP', async () => {
     const tinyApiKey = { name: 'api-key', max: 3, windowMs: 60_000 };
-    const classify = (path: string, headers?: Headers) => {
-      const bucket = classifyRateLimit(path, headers);
+    const classify = (path: string, headers?: Headers, method?: string) => {
+      const bucket = classifyRateLimit(path, headers, method);
       if (bucket?.name === RATE_LIMIT_BUCKETS.apiKey.name) return tinyApiKey;
       return bucket;
     };
@@ -131,8 +131,8 @@ describe('rate-limit buckets under the /api prefix', () => {
     // Classification runs before apiKeyGuard, so a hash-of-header client id
     // would mint a fresh counter per garbage value and bypass both buckets.
     const tinyApiKey = { name: 'api-key', max: 3, windowMs: 60_000 };
-    const classify = (path: string, headers?: Headers) => {
-      const bucket = classifyRateLimit(path, headers);
+    const classify = (path: string, headers?: Headers, method?: string) => {
+      const bucket = classifyRateLimit(path, headers, method);
       if (bucket?.name === RATE_LIMIT_BUCKETS.apiKey.name) return tinyApiKey;
       return bucket;
     };
@@ -212,6 +212,30 @@ describe('rate-limit buckets under the /api prefix', () => {
       expect((await post(paths[i % paths.length] as string)).status).toBe(200);
     }
     expect((await post(paths[0] as string)).status).toBe(429);
+
+    limiter.teardown();
+  });
+
+  it('does not count GET probe-path requests against the forced-probe bucket', async () => {
+    const limiter = rateLimit({ classify: classifyRateLimit, trustProxy: true });
+    const probeRoutes = new Elysia()
+      .get('/environments/runtimes/bun/probe', () => ({ ok: true }))
+      .post('/environments/runtimes/bun/probe', () => ({ ok: true }));
+    const api = new Elysia({ prefix: '/api' }).use(errorHandler).use(limiter).use(probeRoutes);
+    const app = new Elysia().use(api);
+    const send = (method: string) =>
+      app.handle(
+        new Request('http://localhost/api/environments/runtimes/bun/probe', {
+          method,
+          headers: CALLER,
+        })
+      );
+
+    const max = RATE_LIMIT_BUCKETS.probeForce.max;
+    for (let i = 0; i < max + 1; i++) {
+      expect((await send('GET')).status).toBe(200);
+    }
+    expect((await send('POST')).status).toBe(200);
 
     limiter.teardown();
   });

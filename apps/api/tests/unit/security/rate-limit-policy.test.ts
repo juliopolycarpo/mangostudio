@@ -78,14 +78,26 @@ describe('rate-limit policy classification', () => {
   });
 
   it('routes the three forced-probe routes to their own bucket', () => {
+    expect(classifyRateLimit('/api/environments/runtimes/bun/probe', undefined, 'POST')).toBe(
+      RATE_LIMIT_BUCKETS.probeForce
+    );
+    expect(classifyRateLimit('/environments/version-managers/nvm/probe', undefined, 'POST')).toBe(
+      RATE_LIMIT_BUCKETS.probeForce
+    );
+    expect(classifyRateLimit('/api/environments/agents/claude/probe', undefined, 'POST')).toBe(
+      RATE_LIMIT_BUCKETS.probeForce
+    );
+  });
+
+  it('does not count non-POST probe-path requests against the forced-probe bucket', () => {
+    expect(classifyRateLimit('/api/environments/runtimes/bun/probe', undefined, 'GET')).toBe(
+      RATE_LIMIT_BUCKETS.general
+    );
+    expect(classifyRateLimit('/api/environments/runtimes/bun/probe', undefined, 'OPTIONS')).toBe(
+      RATE_LIMIT_BUCKETS.general
+    );
     expect(classifyRateLimit('/api/environments/runtimes/bun/probe')).toBe(
-      RATE_LIMIT_BUCKETS.probeForce
-    );
-    expect(classifyRateLimit('/environments/version-managers/nvm/probe')).toBe(
-      RATE_LIMIT_BUCKETS.probeForce
-    );
-    expect(classifyRateLimit('/api/environments/agents/claude/probe')).toBe(
-      RATE_LIMIT_BUCKETS.probeForce
+      RATE_LIMIT_BUCKETS.general
     );
   });
 

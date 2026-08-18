@@ -630,6 +630,9 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         }
       );
       await recordTerminal(active, result);
+      // Drop in-flight and cached probes before the post-install force, so
+      // that walk cannot join a scan that began against pre-install state.
+      deps.probingService.resetCache(scope.environmentId);
       await publishProbes(scope, recipe, active.stream);
       active.stream.publish({
         type: 'exit',

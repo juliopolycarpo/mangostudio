@@ -94,6 +94,7 @@ export interface EnvironmentLibraryServiceOptions {
   readonly cacheTtlMs?: number;
   readonly requestTimeoutMs?: number;
   readonly listLocationStatuses?: EnvironmentProbingService['listLocationStatuses'];
+  readonly resetLocationCache?: EnvironmentProbingService['resetCache'];
 }
 
 /**
@@ -128,6 +129,9 @@ export function createEnvironmentLibraryService(
   const requestTimeoutMs = options.requestTimeoutMs ?? LIBRARY_REQUEST_TIMEOUT_MS;
   const listLocationStatuses =
     options.listLocationStatuses ?? environmentProbingService.listLocationStatuses;
+  const resetLocationCache =
+    options.resetLocationCache ??
+    ((environmentId?: string) => environmentProbingService.resetCache(environmentId));
   const cache = new Map<string, CacheEntry>();
   const inflight = new Map<string, Promise<LibraryResource[]>>();
   const scanGeneration = new Map<string, number>();
@@ -285,6 +289,7 @@ export function createEnvironmentLibraryService(
 
     resetCache(environmentId) {
       resetEpoch += 1;
+      resetLocationCache(environmentId);
       if (!environmentId) {
         cache.clear();
         inflight.clear();

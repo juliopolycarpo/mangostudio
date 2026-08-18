@@ -39,7 +39,7 @@ interface RateLimitConfig {
    * path from rate limiting entirely. Defaults to a single 'global' bucket
    * built from `max`/`windowMs`.
    */
-  classify?: (path: string, headers?: Headers) => RateLimitBucket | null;
+  classify?: (path: string, headers?: Headers, method?: string) => RateLimitBucket | null;
   /** Trust proxy headers (X-Forwarded-For, etc.) for client IP (default: false) */
   trustProxy?: boolean;
 }
@@ -147,8 +147,8 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
   };
 
   /** Resolve the bucket for a path, or `null` when the path is exempt. */
-  function resolveBucket(path: string, headers: Headers): RateLimitBucket | null {
-    return mergedConfig.classify ? mergedConfig.classify(path, headers) : defaultBucket;
+  function resolveBucket(path: string, headers: Headers, method: string): RateLimitBucket | null {
+    return mergedConfig.classify ? mergedConfig.classify(path, headers, method) : defaultBucket;
   }
 
   /** Periodic expiry sweep; overflow eviction runs per-request via the store. */
@@ -210,7 +210,11 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         }
 
         const headers = ctx.request.headers;
-        const bucket = resolveBucket(resolvePath(ctx.path, ctx.request.url), headers);
+        const bucket = resolveBucket(
+          resolvePath(ctx.path, ctx.request.url),
+          headers,
+          ctx.request.method
+        );
         if (!bucket) {
           return; // path is exempt
         }

@@ -97,6 +97,10 @@ export function isProbeForcePath(path: string): boolean {
   return PROBE_FORCE_PATH_RE.test(path);
 }
 
+function isPostMethod(method: string | undefined): boolean {
+  return method !== undefined && method.toUpperCase() === 'POST';
+}
+
 function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined): string | null {
   const raw = headers?.get(API_KEY_HEADER);
   if (!raw) return null;
@@ -118,18 +122,19 @@ export function resolveRateLimitClientId(
 }
 
 /**
- * Classify a request path (and optional headers) into its rate-limit bucket,
- * or `null` for a path that enforces its own.
+ * Classify a request path (and optional headers and method) into its
+ * rate-limit bucket, or `null` for a path that enforces its own.
  *
  * Usage: classifyRateLimit('/api/auth/session') // → RATE_LIMIT_BUCKETS.auth
  */
 export function classifyRateLimit(
   path: string,
-  headers?: RateLimitHeaderLookup | null
+  headers?: RateLimitHeaderLookup | null,
+  method?: string
 ): RateLimitBucket | null {
   if (isHealthPath(path)) return RATE_LIMIT_BUCKETS.health;
   if (isAuthPath(path)) return RATE_LIMIT_BUCKETS.auth;
-  if (isProbeForcePath(path)) return RATE_LIMIT_BUCKETS.probeForce;
+  if (isProbeForcePath(path) && isPostMethod(method)) return RATE_LIMIT_BUCKETS.probeForce;
   // Exempt here and enforced in the route, on the same bucket. A dialing
   // runtime has no response body to read: an HTTP 429 before the upgrade is a
   // refusal it can only see as a socket that failed to open, so it would back

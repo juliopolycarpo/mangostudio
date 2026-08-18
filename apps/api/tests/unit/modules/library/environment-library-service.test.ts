@@ -265,4 +265,18 @@ describe('createEnvironmentLibraryService', () => {
       })
     ).rejects.toBeInstanceOf(LibraryFeatureUnavailableError);
   });
+
+  it('forwards resetCache to the probing location cache', () => {
+    const resetCalls: Array<string | undefined> = [];
+    const service = createEnvironmentLibraryService({
+      resetLocationCache: (environmentId) => {
+        resetCalls.push(environmentId);
+      },
+    });
+
+    service.resetCache('remote-d');
+    service.resetCache();
+
+    expect(resetCalls).toEqual(['remote-d', undefined]);
+  });
 });

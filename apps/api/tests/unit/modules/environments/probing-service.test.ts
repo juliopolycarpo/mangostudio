@@ -249,28 +249,7 @@ describe('what the hub sends down with a probe', () => {
 });
 
 describe('forced-probe admission', () => {
-  it('joins a forced probe that started no earlier than this request arrived', async () => {
-    const local = fakeClient();
-    local.holdRuntime = true;
-    const service = serviceFor(() => local);
-
-    // Same fake clock reading for both calls: the in-flight scan started no
-    // earlier than this request arrived, so it still counts as fresh.
-    const first = service.listRuntimeStatuses(LOCAL, { force: true });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(local.runtimeCalls).toBe(1);
-
-    const second = service.listRuntimeStatuses(LOCAL, { force: true });
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(local.runtimeCalls).toBe(1);
-
-    local.settleRuntime();
-    await Promise.all([first, second]);
-  });
-
-  it('does not join a forced probe that started before this request arrived', async () => {
+  it('joins a forced probe already running for the same key', async () => {
     const local = fakeClient();
     local.holdRuntime = true;
     let clock = 1_000;
@@ -284,18 +263,19 @@ describe('forced-probe admission', () => {
     await Promise.resolve();
     expect(local.runtimeCalls).toBe(1);
 
-    // Time passes — e.g. an install runs — before the second force arrives.
+    // Time passing does not start a second walk; the in-flight scan is
+    // the freshness bound until resetCache drops it.
     clock += 500;
     const second = service.listRuntimeStatuses(LOCAL, { force: true });
     await Promise.resolve();
     await Promise.resolve();
-    expect(local.runtimeCalls).toBe(2);
+    expect(local.runtimeCalls).toBe(1);
 
     local.settleRuntime();
     await Promise.all([first, second]);
   });
 
-  it('answers a forced probe issued after an install with post-install state', async () => {
+  it('starts a new forced probe after resetCache drops the in-flight scan', async () => {
     let clock = 1_000;
     const callVersions: string[] = [];
     let currentVersion = 'missing';
@@ -327,24 +307,35 @@ describe('forced-probe admission', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // The install completes, and the UI's re-check button fires right after.
+    // Install completion resets the cache, then the post-install force fires.
     currentVersion = 'installed';
     clock += 500;
+    service.resetCache(LOCAL.environmentId);
     const afterInstall = service.listRuntimeStatuses(LOCAL, { force: true });
     await Promise.resolve();
     await Promise.resolve();
 
-    // Did not join the stale scan: a second, independent scan started.
     expect(resolvers).toHaveLength(2);
     resolvers[0]?.({
-      statuses: [{ id: 'bun', effective: { version: callVersions[0] } }],
+      statuses: [
+        { id: 'bun', effective: { version: callVersions[0] } },
+        { id: 'node', effective: { version: callVersions[0] } },
+      ],
     });
     resolvers[1]?.({
-      statuses: [{ id: 'bun', effective: { version: callVersions[1] } }],
+      statuses: [
+        { id: 'bun', effective: { version: callVersions[1] } },
+        { id: 'node', effective: { version: callVersions[1] } },
+      ],
     });
 
     const [, afterInstallResult] = await Promise.all([stale, afterInstall]);
     expect(afterInstallResult[0]?.effective?.version).toBe('installed');
+
+    // The pre-reset completion must not overwrite the post-install cache.
+    const cached = await service.listRuntimeStatuses(LOCAL);
+    expect(cached[0]?.effective?.version).toBe('installed');
+    expect(callVersions).toEqual(['missing', 'installed']);
   });
 
   it('collapses forced probes inside the minimum interval into one scan', async () => {
