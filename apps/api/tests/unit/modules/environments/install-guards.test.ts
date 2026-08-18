@@ -36,9 +36,19 @@ describe('install guards', () => {
     }
   );
 
-  it.each(ADDRESS_FIXTURES)('matches the shared loopback table: $input', ({ input, loopback }) => {
-    expect(isLoopbackAddress(input)).toBe(loopback);
-  });
+  // Driven through evaluateInstallGuard rather than isLoopbackAddress: the guard is
+  // the surface that decides whether a request may install, and running the table
+  // against it also covers the peer-address field wiring, which a direct call to the
+  // one-line forwarder cannot break.
+  it.each(ADDRESS_FIXTURES)(
+    'admits a peer only when the shared table calls it loopback: $input',
+    ({ input, loopback }) => {
+      expect(evaluateInstallGuard({ ...ALLOWED_CONTEXT, clientIp: input })).toEqual({
+        allowed: loopback,
+        reasons: loopback ? [] : ['client-not-loopback'],
+      });
+    }
+  );
 
   it('refuses a non-loopback bind outside standalone mode', () => {
     expect(evaluateInstallGuard({ ...ALLOWED_CONTEXT, serverHost: '0.0.0.0' })).toEqual({

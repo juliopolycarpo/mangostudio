@@ -4,11 +4,15 @@
  */
 
 import { lookup } from 'node:dns/promises';
-import { isPrivateOrLocal } from '../../../lib/ip-address';
+import { isPrivateOrLocal, parseIpAddress } from '../../../lib/ip-address';
 
-type AddressFamily = 4 | 6;
-type ResolvedAddress = Readonly<{ address: string; family: AddressFamily }>;
+// The resolver's stated family is not part of the contract: every address is
+// classified by parsing its own text, so a resolver that mislabels one cannot
+// steer the decision.
+type ResolvedAddress = Readonly<{ address: string }>;
 type HostResolver = (hostname: string) => Promise<ReadonlyArray<ResolvedAddress>>;
+
+const BLOCKED_MESSAGE = 'URL resolves to a blocked private or loopback address.';
 
 export class UnsafeBaseUrlError extends Error {
   constructor(message: string) {
@@ -23,17 +27,10 @@ function resolveHostname(hostname: string): Promise<ReadonlyArray<ResolvedAddres
   const cached = hostnameResolutionCache.get(hostname);
   if (cached) return cached;
 
-  const pending = lookup(hostname, { all: true })
-    .then((results) =>
-      results.map((result) => ({
-        address: result.address,
-        family: result.family as AddressFamily,
-      }))
-    )
-    .catch((error) => {
-      hostnameResolutionCache.delete(hostname);
-      throw error;
-    });
+  const pending = lookup(hostname, { all: true }).catch((error) => {
+    hostnameResolutionCache.delete(hostname);
+    throw error;
+  });
 
   hostnameResolutionCache.set(hostname, pending);
   return pending;
@@ -66,30 +63,22 @@ export async function validateBaseUrl(
 
   const hostname = parsed.hostname;
 
-  // Direct IPv4 literal check
-  if (/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) {
+  // A hostname that parses as an address is judged directly; anything else is a
+  // name, which is exactly what the DNS branch below is for. `new URL` has already
+  // rejected every malformed literal (`http://256.1.1.1/` throws), so a dotted quad
+  // reaching here is well-formed and this discriminator never sends one to DNS.
+  if (parseIpAddress(hostname) !== null) {
     if (isPrivateOrLocal(hostname)) {
-      throw new UnsafeBaseUrlError('URL resolves to a blocked private or loopback address.');
+      throw new UnsafeBaseUrlError(BLOCKED_MESSAGE);
     }
     return;
   }
 
-  // Direct IPv6 literal check (brackets kept by URL parser)
-  if (hostname.startsWith('[') && hostname.endsWith(']')) {
-    const bare = hostname.slice(1, -1);
-    if (isPrivateOrLocal(bare)) {
-      throw new UnsafeBaseUrlError('URL resolves to a blocked private or loopback address.');
-    }
-    return;
-  }
-
-  // DNS resolution check — classification runs on the resolved address text
-  // itself (parsed by isPrivateOrLocal), not on the resolver's stated family.
   try {
     const results = await (options.resolveHostname ?? resolveHostname)(hostname);
     for (const result of results) {
       if (isPrivateOrLocal(result.address)) {
-        throw new UnsafeBaseUrlError('URL resolves to a blocked private or loopback address.');
+        throw new UnsafeBaseUrlError(BLOCKED_MESSAGE);
       }
     }
   } catch (err) {

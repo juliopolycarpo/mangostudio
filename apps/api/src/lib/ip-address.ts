@@ -13,18 +13,22 @@
 
 export type ParsedAddress =
   | { readonly family: 4; readonly octets: readonly [number, number, number, number] }
-  | { readonly family: 6; readonly groups: readonly number[] }
-  | null;
+  | { readonly family: 6; readonly groups: readonly number[] };
 
-/** Strips bracket, zone id and one trailing dot; does not touch case. */
+/**
+ * Strips bracket, zone id and one trailing dot; does not touch case. Applied
+ * exactly once per public call — it is deliberately not idempotent (`8.8.8.8..`
+ * survives one pass unparseable and a second pass as a public address), so every
+ * entry point normalises and then works on `parseNormalized`, never on
+ * `parseIpAddress` again.
+ */
 function normalize(value: string): string {
   const trimmed = value.trim().toLowerCase();
   const withoutBrackets =
     trimmed.startsWith('[') && trimmed.endsWith(']') ? trimmed.slice(1, -1) : trimmed;
-  const withoutZone = withoutBrackets.split('%', 1)[0] ?? withoutBrackets;
-  return withoutZone.length > 1 && withoutZone.endsWith('.')
-    ? withoutZone.slice(0, -1)
-    : withoutZone;
+  const zone = withoutBrackets.indexOf('%');
+  const withoutZone = zone === -1 ? withoutBrackets : withoutBrackets.slice(0, zone);
+  return withoutZone.endsWith('.') ? withoutZone.slice(0, -1) : withoutZone;
 }
 
 /** A dotted quad as four octets, or null when it is not a well-formed one. */
@@ -85,10 +89,8 @@ function parseIPv6(text: string): readonly number[] | null {
   return [...head, ...Array<number>(elided).fill(0), ...tail];
 }
 
-/** Parses a loopback, private-range or public address in any of the forms above. */
-export function parseIpAddress(value: string): ParsedAddress {
-  const normalized = normalize(value);
-
+/** Reads already-normalised text; every public entry point normalises first. */
+function parseNormalized(normalized: string): ParsedAddress | null {
   const octets = parseIPv4Literal(normalized);
   if (octets !== null) return { family: 4, octets };
 
@@ -96,6 +98,23 @@ export function parseIpAddress(value: string): ParsedAddress {
   if (groups !== null) return { family: 6, groups };
 
   return null;
+}
+
+/** Parses a loopback, private-range or public address in any of the forms above. */
+export function parseIpAddress(value: string): ParsedAddress | null {
+  return parseNormalized(normalize(value));
+}
+
+/**
+ * A host rendered so it can be interpolated into a URL: an IPv6 address gets the
+ * brackets `http://::1:3001` would otherwise read as part of the port. Bracketing
+ * is the parser's job rather than a call site's, because only the parser knows
+ * that `::1%lo0` is IPv6 *and* that the zone id has to come off first — `new URL`
+ * rejects a bracketed zone id.
+ */
+export function formatHostForUrl(value: string): string {
+  const normalized = normalize(value);
+  return parseNormalized(normalized)?.family === 6 ? `[${normalized}]` : normalized;
 }
 
 /**
@@ -126,34 +145,47 @@ function isLinkLocalIPv6(groups: readonly number[]): boolean {
   return (groups[0] & 0xffc0) === 0xfe80;
 }
 
-function ipv4Range(a: number, b: number, c: number, d: number, prefixBits: number) {
-  const network = ((a << 24) | (b << 16) | (c << 8) | d) >>> 0;
-  const mask = prefixBits === 0 ? 0 : (~0 << (32 - prefixBits)) >>> 0;
-  return [network & mask, mask] as const;
+function toNumber(octets: readonly [number, number, number, number]): number {
+  return ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0;
+}
+
+function ipv4Range(network: readonly [number, number, number, number], prefixBits: number) {
+  const mask = (~0 << (32 - prefixBits)) >>> 0;
+  return [toNumber(network) & mask, mask] as const;
 }
 
 /** Ranges that must never be reached by outbound requests or counted as public. */
 const PRIVATE_OR_LOCAL_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
-  ipv4Range(127, 0, 0, 0, 8), // loopback
-  ipv4Range(10, 0, 0, 0, 8), // RFC1918
-  ipv4Range(172, 16, 0, 0, 12), // RFC1918
-  ipv4Range(192, 168, 0, 0, 16), // RFC1918
-  ipv4Range(169, 254, 0, 0, 16), // link-local
-  ipv4Range(100, 64, 0, 0, 10), // CGNAT (RFC 6598)
-  ipv4Range(0, 0, 0, 0, 8), // "this network" / unspecified
+  ipv4Range([127, 0, 0, 0], 8), // loopback
+  ipv4Range([10, 0, 0, 0], 8), // RFC1918
+  ipv4Range([172, 16, 0, 0], 12), // RFC1918
+  ipv4Range([192, 168, 0, 0], 16), // RFC1918
+  ipv4Range([169, 254, 0, 0], 16), // link-local
+  ipv4Range([100, 64, 0, 0], 10), // CGNAT (RFC 6598)
+  ipv4Range([0, 0, 0, 0], 8), // "this network" / unspecified
 ];
 
 function isPrivateOrLocalIPv4(octets: readonly [number, number, number, number]): boolean {
-  const num = ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0;
+  const num = toNumber(octets);
   return PRIVATE_OR_LOCAL_IPV4_RANGES.some(([network, mask]) => (num & mask) === network);
 }
 
-/** True for `localhost` and any address in the 127.0.0.0/8 or `::1` loopback ranges. */
+/**
+ * True for `localhost` and any address in the 127.0.0.0/8 or `::1` loopback ranges.
+ *
+ * Fails **open** on an address it cannot parse (`false` — "not proven loopback"),
+ * the opposite of {@link isPrivateOrLocal}. The two directions are deliberate and
+ * not interchangeable: this one gates access *in* to the hub, where an unreadable
+ * address must not pass for local, while `isPrivateOrLocal` gates requests *out*,
+ * where an unreadable address must not pass for public. A caller that wants
+ * "is this host on my machine or my network?" wants `isPrivateOrLocal` guarded by
+ * a successful {@link parseIpAddress}, not either predicate alone.
+ */
 export function isLoopback(value: string): boolean {
   const normalized = normalize(value);
   if (normalized === 'localhost') return true;
 
-  const parsed = parseIpAddress(normalized);
+  const parsed = parseNormalized(normalized);
   if (parsed === null) return false;
   if (parsed.family === 4) return parsed.octets[0] === 127;
 
@@ -167,13 +199,14 @@ export function isLoopback(value: string): boolean {
  * any address this module cannot parse. An address it cannot read is one it cannot
  * vouch for, and every form a URL parser or a resolver actually hands us parses —
  * so refusing the rest costs nothing real and keeps an unreadable address out of
- * the public path.
+ * the public path. This fail-**closed** direction is the opposite of
+ * {@link isLoopback}'s; see the note there before picking between them.
  */
 export function isPrivateOrLocal(value: string): boolean {
   const normalized = normalize(value);
   if (normalized === 'localhost') return true;
 
-  const parsed = parseIpAddress(normalized);
+  const parsed = parseNormalized(normalized);
   if (parsed === null) return true;
   if (parsed.family === 4) return isPrivateOrLocalIPv4(parsed.octets);
 

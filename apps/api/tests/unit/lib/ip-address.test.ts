@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import { isLoopback, isPrivateOrLocal, parseIpAddress } from '../../../src/lib/ip-address';
+import {
+  formatHostForUrl,
+  isLoopback,
+  isPrivateOrLocal,
+  parseIpAddress,
+} from '../../../src/lib/ip-address';
 import { ADDRESS_FIXTURES } from './ip-address.fixtures';
 
 describe('ip-address', () => {
@@ -59,5 +64,39 @@ describe('ip-address', () => {
     for (const address of ['fc00::1', 'fd12:3456:789a::1']) {
       expect(isPrivateOrLocal(address)).toBe(true);
     }
+  });
+
+  it('normalizes exactly once, so a doubled trailing dot stays unparseable', () => {
+    // normalize() strips one trailing dot per pass, so running it twice would turn
+    // `8.8.8.8..` into a public address. Every entry point must normalize once.
+    expect(parseIpAddress('8.8.8.8..')).toBeNull();
+    expect(isPrivateOrLocal('8.8.8.8..')).toBe(true);
+    expect(isLoopback('127.0.0.1..')).toBe(false);
+  });
+
+  describe('formatHostForUrl', () => {
+    it.each([
+      ['127.0.0.1', '127.0.0.1'],
+      ['127.0.0.1.', '127.0.0.1'],
+      ['::1', '[::1]'],
+      ['[::1]', '[::1]'],
+      // A zone id names an interface, and `new URL` rejects it inside brackets.
+      ['::1%lo0', '[::1]'],
+      ['fe80::1%eth0', '[fe80::1]'],
+      ['::ffff:127.0.0.1', '[::ffff:127.0.0.1]'],
+      // Not an address: handed back normalized for the caller to reject.
+      ['localhost', 'localhost'],
+    ])('renders %s as %s', (input, expected) => {
+      expect(formatHostForUrl(input)).toBe(expected);
+    });
+
+    it('renders every accepted loopback form into a URL that parses', () => {
+      // The invariant health.ts depends on. Unparseable input (`256.1.1.1`) is handed
+      // back as-is and is not a usable host — but isLoopback rejects it, so no caller
+      // reaches a fetch with it.
+      for (const { input } of ADDRESS_FIXTURES.filter((fixture) => fixture.loopback)) {
+        expect(() => new URL(`http://${formatHostForUrl(input)}:3001/api/health`)).not.toThrow();
+      }
+    });
   });
 });

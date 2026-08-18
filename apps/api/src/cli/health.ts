@@ -2,7 +2,7 @@
  * Health probe for a running MangoStudio server via GET /api/health.
  */
 
-import { isLoopback } from '../lib/ip-address';
+import { formatHostForUrl, isLoopback } from '../lib/ip-address';
 
 const DEFAULT_TIMEOUT_MS = 1000;
 
@@ -41,17 +41,9 @@ export async function probeHealth(
  * client targets, so they map to loopback.
  */
 function resolveLocalTarget(host: string): string | null {
-  const normalized = host.trim().toLowerCase();
+  const target = formatHostForUrl(host);
 
-  if (normalized === '0.0.0.0') return '127.0.0.1';
-  if (normalized === '::' || normalized === '[::]') return '[::1]';
-  if (!isLoopback(normalized)) return null;
-
-  // isLoopback recognizes bracketed, `::ffff:`-mapped and trailing-dot forms that
-  // this function never saw before; re-bracket anything IPv6-shaped so the fetch
-  // URL below stays valid (`http://::1:PORT` would otherwise collide with the
-  // port separator).
-  const bracketless =
-    normalized.startsWith('[') && normalized.endsWith(']') ? normalized.slice(1, -1) : normalized;
-  return bracketless.includes(':') ? `[${bracketless}]` : bracketless;
+  if (target === '0.0.0.0') return '127.0.0.1';
+  if (target === '[::]') return '[::1]';
+  return isLoopback(host) ? target : null;
 }
