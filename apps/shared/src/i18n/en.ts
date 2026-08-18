@@ -2237,6 +2237,7 @@ export const messages: Messages = {
         },
         staged: {
           offer: 'Install the matching runtime ({version}, {platform}) on this machine.',
+          matched: 'This machine is running the matching runtime ({version}).',
           offerHint: 'Or download it to this hub and carry it over yourself.',
           downloadOffer: 'The matching runtime for this machine is {version} ({platform}).',
           title: 'Downloaded to this hub',

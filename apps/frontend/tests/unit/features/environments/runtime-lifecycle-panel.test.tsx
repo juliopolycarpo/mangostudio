@@ -217,4 +217,94 @@ describe('RuntimeLifecyclePanel', () => {
     await screen.findByTestId('runtime-lifecycle-panel');
     expect(screen.queryByTestId('runtime-unenforced-containment')).not.toBeInTheDocument();
   });
+
+  // #800: the offer rendered on every card with a push action, so a healthy,
+  // up-to-date machine read as though the matching runtime were still missing.
+  // Version equality settles it on a rolling channel too: a canary build's
+  // version carries its own commit, and only the asset filename is reused.
+  describe('runtime offer', () => {
+    const STAGED = {
+      version: '9.9.9',
+      platformId: 'linux-x64',
+      assetName: 'mangostudio-runtime-9.9.9-linux-x64',
+      path: '/home/test/.mango/runtime-cache/9.9.9/mangostudio-runtime-9.9.9-linux-x64',
+      verify: 'sha256sum -c -',
+      present: false,
+    };
+
+    function viewWith(installed: string | null): RuntimeLifecycleView {
+      if (installed === null) return { ...VIEW, stale: false, stagedRuntime: STAGED };
+      return {
+        ...VIEW,
+        stale: false,
+        stagedRuntime: STAGED,
+        health: {
+          schemaVersion: 1,
+          slot: 'wsl',
+          source: 'provisioned',
+          runtimeVersion: installed,
+          version: installed,
+          binaryPath: '/home/test/.mango/runtime/wsl/current/mangostudio-runtime',
+          digest: `sha256:${'a'.repeat(64)}`,
+          platformId: 'linux-x64',
+          profile: 'full',
+          allow: {
+            fsRead: true,
+            fsWrite: true,
+            shell: true,
+            git: true,
+            probing: true,
+            mcp: true,
+            library: true,
+            checkpoints: true,
+            update: true,
+            externalAgents: true,
+          },
+          setup: { state: 'configured' },
+          platform: 'linux',
+          arch: 'x64',
+          homeDir: '/home/test',
+          shells: ['bash'],
+          git: { available: true, version: '2.51.0' },
+          lastError: null,
+          audit: { enabled: false },
+        },
+      };
+    }
+
+    it('says so when the machine already runs the offered build', async () => {
+      const environment: Environment = { ...WSL, id: 'offer-matching' };
+      scenario
+        .respondWithJson('GET', '/api/environments/offer-matching/runtime', {
+          body: viewWith('9.9.9'),
+        })
+        .install();
+      render(<RuntimeLifecyclePanel environment={environment} />);
+
+      expect(await screen.findByTestId('runtime-offer-matched')).toHaveTextContent(
+        formatMessage(labels.staged.matched, { version: '9.9.9' })
+      );
+      expect(screen.queryByTestId('runtime-offer')).not.toBeInTheDocument();
+      // The actions stay: a reinstall is still a thing to want.
+      expect(screen.getByRole('button', { name: labels.actions.reinstall })).toBeInTheDocument();
+    });
+
+    it.each([
+      ['a machine on a different build', '9.9.8'],
+      ['a machine that has never reported one', null],
+    ])('keeps offering the install for %s', async (_case, installed) => {
+      const environment: Environment = { ...WSL, id: `offer-${installed ?? 'none'}` };
+      scenario
+        .respondWithJson('GET', `/api/environments/${environment.id}/runtime`, {
+          body: viewWith(installed),
+        })
+        .install();
+      render(<RuntimeLifecyclePanel environment={environment} />);
+
+      expect(await screen.findByTestId('runtime-offer')).toHaveTextContent(
+        formatMessage(labels.staged.offer, { version: '9.9.9', platform: 'linux-x64' })
+      );
+      expect(screen.queryByTestId('runtime-offer-matched')).not.toBeInTheDocument();
+    });
+  });
 });
