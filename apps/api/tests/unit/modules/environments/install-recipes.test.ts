@@ -64,8 +64,9 @@ describe('install recipes', () => {
 
   it('declares at least one probe target per recipe', () => {
     // A recipe whose completion re-probes nothing leaves the surface it changed
-    // showing pre-install state until the next lazy read. The type makes the
-    // field mandatory; this asserts nobody satisfies it with an empty array.
+    // showing pre-install state until the next lazy read. The non-empty tuple
+    // type already rejects `[]`, so this stands guard on the type being
+    // loosened rather than on any value the catalog can hold today.
     for (const recipe of INSTALL_RECIPES) {
       expect(recipe.probe.length).toBeGreaterThan(0);
     }
@@ -79,6 +80,26 @@ describe('install recipes', () => {
           expect(VERSION_MANAGER_IDS).toContain(target.versionManagerId);
         } else expect(AGENT_TARGET_IDS).toContain(target.targetId);
       }
+    }
+  });
+
+  /**
+   * The frontend's chain resolution satisfies a missing requirement with the
+   * first catalog entry that installs it unattended. That `find` is only
+   * unambiguous while at most one recipe per runtime qualifies on a platform: a
+   * second one would make which prerequisite runs depend on array order, with
+   * nothing failing loudly. Asserted here because the catalog is where the
+   * ambiguity would be introduced.
+   */
+  it('offers at most one unattended install per runtime on a platform', () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      const runtimeIds = INSTALL_RECIPES.filter(
+        (recipe) =>
+          recipe.action === 'install' &&
+          recipe.inputKind === 'none' &&
+          recipe.platforms.includes(platform)
+      ).map((recipe) => recipe.runtimeId);
+      expect(new Set(runtimeIds).size).toBe(runtimeIds.length);
     }
   });
 
