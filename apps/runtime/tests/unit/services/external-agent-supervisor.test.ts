@@ -635,20 +635,17 @@ describe('external-agent adapter registry and supervisor', () => {
     const adapter = new FakeExternalAgentAdapter({ openGate: openGate.promise });
     const value = await fixture({ adapter });
 
-    // `waitFor` pumps a ref'd timer. The open deadline itself is unref'd, and
-    // under coverage Bun's 5s test timeout used to win before that 5ms
-    // timer fired while this await sat on a hanging adapter promise.
-    const opening = openSession(value, 'late-session', 5);
-    let finished = false;
-    const openingOutcome = opening
-      .finally(() => {
-        finished = true;
-      })
-      .then(
-        () => new Error('Expected the open deadline to reject the session.'),
-        (error: unknown) => error
-      );
-    await waitFor(() => finished);
+    // Hang inside the adapter before the deadline. A 5ms budget expired during
+    // workspace authorization under coverage, so the adapter never started and
+    // waitFor sat on a promise that could not settle. The deadline timer is
+    // unref'd; waitFor's ref'd sleeps keep the isolate alive until it fires.
+    const opening = openSession(value, 'late-session', 1_000);
+    const openingOutcome = opening.then(
+      () => new Error('Expected the open deadline to reject the session.'),
+      (error: unknown) => error
+    );
+    await waitFor(() => adapter.opens.length === 1);
+    await waitFor(() => adapter.opens[0]?.context.signal.aborted === true);
     const openingError = await openingOutcome;
     expect(openingError).toBeInstanceOf(Error);
     expect((openingError as Error).message).toContain('Deadline exceeded');
@@ -1064,6 +1061,10 @@ describe('external-agent adapter registry and supervisor', () => {
   });
 
   it('stops extending the wait once the approval has expired', async () => {
+    // Stamp the TTL on first read, which is when the supervisor records the
+    // event. Constructing Date.now()+N before fixture/open left coverage
+    // already past the stamp, so the next wait used the 5ms idle path.
+    let expiresAtMs = 0;
     const adapter = new FakeExternalAgentAdapter({
       hangTurn: true,
       events: [
@@ -1074,7 +1075,10 @@ describe('external-agent adapter registry and supervisor', () => {
             kind: 'command',
             title: 'rm -rf build',
             options: [{ id: 'accept', isDestructive: false }],
-            expiresAtMs: Date.now() + 20,
+            get expiresAtMs() {
+              if (expiresAtMs === 0) expiresAtMs = Date.now() + 500;
+              return expiresAtMs;
+            },
           },
         },
       ],
@@ -1088,6 +1092,10 @@ describe('external-agent adapter registry and supervisor', () => {
       configuration: CONFIGURATION,
     });
 
+    await waitFor(() => value.events.length === 1);
+    expect(value.events[0]?.payload).toMatchObject({
+      event: { type: 'approval_requested' },
+    });
     await waitFor(() => adapter.cancellations.length === 1);
     expect(adapter.cancellations[0]?.reason).toBe('timeout');
     expect(value.events.at(-1)?.payload).toMatchObject({

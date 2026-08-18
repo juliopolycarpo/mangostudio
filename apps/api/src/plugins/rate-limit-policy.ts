@@ -53,6 +53,21 @@ export const RATE_LIMIT_BUCKETS = {
    * 429 every healthy runtime sharing its address.
    */
   runtimeSocket: { name: 'runtime-socket', max: 60, windowMs: ONE_MINUTE_MS },
+  /**
+   * The three `POST .../probe?force` routes deliberately bypass the probing
+   * cache, so they get their own bucket rather than leaning on `general` —
+   * the probing service's own per-key minimum interval (#690) already caps
+   * the scan cost of a stuck re-check button; this bounds the request volume
+   * itself, across every id a client can name.
+   *
+   * Below `general` because a forced scan is the expensive request, but not so
+   * far below that the bucket becomes the regression: these routes counted
+   * against `general` before they had one, the Environments page offers a
+   * re-check per card, and the counter keys on client IP — so, as with
+   * `runtimeSocket`, a limit tuned to one operator's cadence would let a
+   * single impatient user 429 everyone sharing their address.
+   */
+  probeForce: { name: 'probe-force', max: 60, windowMs: ONE_MINUTE_MS },
 } as const satisfies Record<string, RateLimitBucket>;
 
 /** True when `path` equals `base` or sits directly under it (`base/...`). */
@@ -73,6 +88,26 @@ export function isAuthPath(path: string): boolean {
 /** Matches the runtime dial-in endpoint and its `/api`-prefixed form. */
 export function isRuntimeSocketPath(path: string): boolean {
   return path === '/runtime' || path === '/api/runtime';
+}
+
+/** The three forced-probe routes, with or without the `/api` prefix. */
+const PROBE_FORCE_PATH_RE =
+  /^(?:\/api)?\/environments\/(?:runtimes|version-managers|agents)\/[^/]+\/probe$/;
+
+/** Elysia keeps a trailing slash on `ctx.path` when `strictPath` is false. */
+function withoutTrailingSlash(path: string): string {
+  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+}
+
+/** Matches `POST .../environments/{runtimes,version-managers,agents}/:id/probe`. */
+export function isProbeForcePath(path: string): boolean {
+  // The pattern is anchored on a literal prefix, so a non-probe path fails on
+  // its first characters — a hand-rolled segment pre-check buys nothing here.
+  return PROBE_FORCE_PATH_RE.test(withoutTrailingSlash(path));
+}
+
+function isPostMethod(method: string | undefined): boolean {
+  return method !== undefined && method.toUpperCase() === 'POST';
 }
 
 function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined): string | null {
@@ -96,14 +131,15 @@ export function resolveRateLimitClientId(
 }
 
 /**
- * Classify a request path (and optional headers) into its rate-limit bucket,
- * or `null` for a path that enforces its own.
+ * Classify a request path (and optional headers and method) into its
+ * rate-limit bucket, or `null` for a path that enforces its own.
  *
  * Usage: classifyRateLimit('/api/auth/session') // → RATE_LIMIT_BUCKETS.auth
  */
 export function classifyRateLimit(
   path: string,
-  headers?: RateLimitHeaderLookup | null
+  headers?: RateLimitHeaderLookup | null,
+  method?: string
 ): RateLimitBucket | null {
   if (isHealthPath(path)) return RATE_LIMIT_BUCKETS.health;
   if (isAuthPath(path)) return RATE_LIMIT_BUCKETS.auth;
@@ -114,6 +150,11 @@ export function classifyRateLimit(
   // Refusing after the upgrade costs one socket and buys a close code the peer
   // can act on.
   if (isRuntimeSocketPath(path)) return null;
+  // Ahead of the forced-probe bucket, not behind it: the api-key bucket exists
+  // so a noisy script cannot starve a browser session sharing its IP, and
+  // routing key-authenticated probes into the IP-keyed `probe-force` counter
+  // would hand automation exactly that lever back.
   if (trimmedApiKeyHeader(headers)) return RATE_LIMIT_BUCKETS.apiKey;
+  if (isProbeForcePath(path) && isPostMethod(method)) return RATE_LIMIT_BUCKETS.probeForce;
   return RATE_LIMIT_BUCKETS.general;
 }

@@ -5,7 +5,10 @@
 import { describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { getDb } from '../../../../src/db/database';
-import { createEnvironmentLibraryService } from '../../../../src/modules/library/application/environment-library-service';
+import {
+  createEnvironmentLibraryService,
+  resetLibraryCachesForEnvironments,
+} from '../../../../src/modules/library/application/environment-library-service';
 import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 
 function makeManifest(environmentId: string, library = true) {
@@ -199,5 +202,95 @@ describe('createEnvironmentLibraryService', () => {
     }).readContent(getDb(), { userId, environmentId: 'remote-c' }, resource, 'mango-instructions');
 
     expect(content?.content).toBe('# Agents');
+  });
+
+  it('reads locations through the shared probing-service cache', async () => {
+    const client = {
+      manifest: makeManifest('remote-d'),
+      library: {
+        scan: () => Promise.resolve({ entries: [] }),
+        read: () => Promise.resolve({ content: '', truncated: false, sizeBytes: 0 }),
+        locations: () => Promise.reject(new Error('should not call the runtime directly')),
+      },
+    } as unknown as RuntimeClient;
+    const calls: unknown[] = [];
+    const location = {
+      id: 'mango-skills' as const,
+      kind: 'skill' as const,
+      scope: 'home' as const,
+      path: '/tmp/remote-d/skills',
+      access: 'read-write' as const,
+      exists: true,
+      readable: true,
+      writable: true,
+      targetIds: ['mangostudio' as const],
+    };
+
+    const service = createEnvironmentLibraryService({
+      resolveClient: () => Promise.resolve(client),
+      listLocationStatuses: (scope) => {
+        calls.push(scope);
+        return Promise.resolve([location]);
+      },
+    });
+
+    const locations = await service.listLocations(getDb(), {
+      userId: 'library-env-locations-user',
+      environmentId: 'remote-d',
+    });
+
+    expect(locations).toEqual([location]);
+    expect(calls).toEqual([{ userId: 'library-env-locations-user', environmentId: 'remote-d' }]);
+  });
+
+  it('forwards resetCache to the probing location cache', () => {
+    const resetCalls: Array<string | undefined> = [];
+    const service = createEnvironmentLibraryService({
+      resetLocationCache: (environmentId) => {
+        resetCalls.push(environmentId);
+      },
+    });
+
+    service.resetCache('remote-d');
+    service.resetCache();
+
+    expect(resetCalls).toEqual(['remote-d', undefined]);
+  });
+
+  it('drops the shared location cache when a rescan is forced', async () => {
+    const client = {
+      manifest: makeManifest('remote-f'),
+      library: {
+        scan: () => Promise.resolve({ entries: [] }),
+        read: () => Promise.resolve({ content: '', truncated: false, sizeBytes: 0 }),
+      },
+    } as unknown as RuntimeClient;
+    const resetCalls: Array<string | undefined> = [];
+    const service = createEnvironmentLibraryService({
+      resolveClient: () => Promise.resolve(client),
+      resetLocationCache: (environmentId) => {
+        resetCalls.push(environmentId);
+      },
+    });
+    const scope = { userId: 'library-force-rescan-user', environmentId: 'remote-f' };
+
+    await service.discover(getDb(), scope);
+    expect(resetCalls).toEqual([]);
+
+    await service.discover(getDb(), scope, { force: true });
+    expect(resetCalls).toEqual(['remote-f']);
+  });
+
+  it('resetLibraryCachesForEnvironments drops each environment once', () => {
+    const resetCalls: string[] = [];
+    resetLibraryCachesForEnvironments(
+      [{ environmentId: 'a' }, { environmentId: 'a' }, { environmentId: 'b' }],
+      {
+        resetCache: (environmentId) => {
+          if (environmentId) resetCalls.push(environmentId);
+        },
+      }
+    );
+    expect(resetCalls).toEqual(['a', 'b']);
   });
 });

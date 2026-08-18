@@ -15,7 +15,6 @@ import {
   type RuntimeLibraryScanEntry,
 } from '@mangostudio/runtime';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   LibraryLocationId,
   LibraryLocationStatus,
@@ -28,7 +27,12 @@ import type { Database } from '../../../db/types';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
-import { configuredLibraryEnv } from '../infrastructure/location-probe';
+import {
+  type EnvironmentProbingService,
+  environmentProbingService,
+} from '../../environments/application/probing-service';
+import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
+import { hubLibraryEnvFor } from '../infrastructure/location-probe';
 import { groupLibraryScanEntries } from './library-discovery';
 import type { SettingsSourcePayload } from './settings-inspection';
 
@@ -55,6 +59,12 @@ export interface EnvironmentLibraryService {
     scope: LibraryScope,
     options?: EnvironmentLibraryDiscoverOptions
   ): Promise<LibraryResource[]>;
+  /**
+   * `workspaceRoot` is accepted and validated at the route, but cannot change
+   * the answer: v1 registers no workspace-scoped location, so the matrix is
+   * home-scoped either way. It stays in the signature for the day one does —
+   * see the reserved-parameter note on the `/library/locations` route.
+   */
   listLocations(
     db: Kysely<Database>,
     scope: LibraryScope,
@@ -83,6 +93,8 @@ export interface EnvironmentLibraryServiceOptions {
   readonly now?: () => number;
   readonly cacheTtlMs?: number;
   readonly requestTimeoutMs?: number;
+  readonly listLocationStatuses?: EnvironmentProbingService['listLocationStatuses'];
+  readonly resetLocationCache?: EnvironmentProbingService['resetLocationCache'];
 }
 
 /**
@@ -115,6 +127,11 @@ export function createEnvironmentLibraryService(
   const now = options.now ?? Date.now;
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const requestTimeoutMs = options.requestTimeoutMs ?? LIBRARY_REQUEST_TIMEOUT_MS;
+  const listLocationStatuses =
+    options.listLocationStatuses ?? environmentProbingService.listLocationStatuses;
+  const resetLocationCache =
+    options.resetLocationCache ??
+    ((environmentId?: string) => environmentProbingService.resetLocationCache(environmentId));
   const cache = new Map<string, CacheEntry>();
   const inflight = new Map<string, Promise<LibraryResource[]>>();
   const scanGeneration = new Map<string, number>();
@@ -123,18 +140,26 @@ export function createEnvironmentLibraryService(
   let resetEpoch = 0;
 
   const scopeKey = (scope: LibraryScope) => `${scope.userId}${SCOPE_SEP}${scope.environmentId}`;
-  const isHubMachine = (environmentId: string) => environmentId === LOCAL_ENVIRONMENT_ID;
-
-  const pathEnvParams = (scope: LibraryScope, workspaceRoot?: string) => ({
-    ...(isHubMachine(scope.environmentId) && { env: configuredLibraryEnv() }),
-    ...(workspaceRoot !== undefined && { workspaceRoot }),
-  });
+  const pathEnvParams = (scope: LibraryScope, workspaceRoot?: string) => {
+    const env = hubLibraryEnvFor(scope.environmentId);
+    return {
+      ...(env && { env }),
+      ...(workspaceRoot !== undefined && { workspaceRoot }),
+    };
+  };
 
   const discover = async (
     db: Kysely<Database>,
     scope: LibraryScope,
     discoverOptions: EnvironmentLibraryDiscoverOptions = {}
   ): Promise<LibraryResource[]> => {
+    const force = discoverOptions.force === true;
+    // Before the first await, so a caller that asks for both at once — the
+    // propagation preview does — cannot have its location read start against
+    // the pre-rescan cache. Locations share the probing TTL now, so without
+    // this the matrix redraws its columns from the state the rescan replaced.
+    if (force) resetLocationCache(scope.environmentId);
+
     const client = await resolveClient(scope);
     if (!client.manifest.features.library) {
       throw new LibraryFeatureUnavailableError(
@@ -144,7 +169,6 @@ export function createEnvironmentLibraryService(
 
     const settings = await getAppSettings(db, scope.userId);
     const locationSettings = libraryLocationsFor(settings);
-    const force = discoverOptions.force === true;
     const kindsKey = discoverOptions.kinds ? [...discoverOptions.kinds].sort().join(',') : '';
     const signature = [
       scopeKey(scope),
@@ -203,19 +227,16 @@ export function createEnvironmentLibraryService(
     discover,
 
     // Location health is resolved entirely on the target machine, so no hub
-    // settings read stands between the request and the runtime.
-    async listLocations(_db, scope, workspaceRoot) {
-      const client = await resolveClient(scope);
-      if (!client.manifest.features.library) {
-        throw new LibraryFeatureUnavailableError(
-          `Environment "${scope.environmentId}" does not advertise library discovery.`
-        );
-      }
-      const result = await client.library.locations(
-        { pathEnv: pathEnvParams(scope, workspaceRoot) },
-        { timeoutMs: requestTimeoutMs }
-      );
-      return [...result.locations];
+    // settings read stands between the request and the runtime. None of the
+    // registered locations are workspace-scoped, so `workspaceRoot` cannot
+    // change the answer — the probing service's shared cache does not key on
+    // it, matching how the agent-CLI probe already reads these same paths.
+    //
+    // The manifest guard lives with the RPC rather than here: resolving the
+    // connection twice would check one and call the other, so a reconnect
+    // between them passes a manifest that did not answer the request.
+    async listLocations(_db, scope, _workspaceRoot) {
+      return [...(await listLocationStatuses(scope))];
     },
 
     // The instance already carries the absolute path the scan found, so this
@@ -273,6 +294,7 @@ export function createEnvironmentLibraryService(
 
     resetCache(environmentId) {
       resetEpoch += 1;
+      resetLocationCache(environmentId);
       if (!environmentId) {
         cache.clear();
         inflight.clear();
@@ -294,12 +316,29 @@ export function createEnvironmentLibraryService(
   };
 }
 
-export class LibraryFeatureUnavailableError extends Error {
-  readonly code = 'LIBRARY_FEATURE_UNAVAILABLE' as const;
-  constructor(message: string) {
-    super(message);
-    this.name = 'LibraryFeatureUnavailableError';
+export const environmentLibraryService = createEnvironmentLibraryService();
+
+/**
+ * Drops scan and location-health caches for each distinct environment a write
+ * just touched. Location listing shares the probing TTL, so a create or delete
+ * would otherwise keep reporting the pre-write exists/entryCount until it
+ * expires.
+ */
+export function resetLibraryCachesForEnvironments(
+  rows: Iterable<{ readonly environmentId: string }>,
+  // An overrides object rather than a positional default, matching the apply
+  // and removal modules that hold this function as a dependency: a bare second
+  // parameter is one `.forEach` away from being handed an index that
+  // type-checks as the reset it is standing in for.
+  overrides: { readonly resetCache?: EnvironmentLibraryService['resetCache'] } = {}
+): void {
+  const resetCache =
+    overrides.resetCache ??
+    ((environmentId?: string) => environmentLibraryService.resetCache(environmentId));
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.environmentId)) continue;
+    seen.add(row.environmentId);
+    resetCache(row.environmentId);
   }
 }
-
-export const environmentLibraryService = createEnvironmentLibraryService();

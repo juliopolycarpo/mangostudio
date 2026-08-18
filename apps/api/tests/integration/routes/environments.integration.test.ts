@@ -136,7 +136,9 @@ function createTestRoutes() {
       lastAgentForce = options?.force ?? false;
       return Promise.resolve(targetId === 'claude' ? agentStatus : null);
     },
+    listLocationStatuses: () => Promise.resolve([]),
     resetCache: () => undefined,
+    resetLocationCache: () => undefined,
   };
 
   return {

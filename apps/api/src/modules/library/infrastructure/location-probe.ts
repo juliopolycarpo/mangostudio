@@ -9,6 +9,7 @@
 
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   LibraryLocationId,
   LibraryLocationStatus,
@@ -81,6 +82,16 @@ export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv 
 export function configuredLibraryEnv(): Record<string, string> {
   const config = getConfig();
   return { AGENTS_DIR: config.agents.dir, SKILLS_DIR: config.skills.dir };
+}
+
+/**
+ * The single place that decides which machines the paths above travel to: the
+ * hub's own, and no other. Returned rather than spread, because the two RPCs
+ * that ask carry it differently — a probe nests it under `pathEnv`, a scan
+ * puts it beside `workspaceRoot` — and only the decision is shared.
+ */
+export function hubLibraryEnvFor(environmentId: string): Record<string, string> | undefined {
+  return environmentId === LOCAL_ENVIRONMENT_ID ? configuredLibraryEnv() : undefined;
 }
 
 export function describeTargetLocations(

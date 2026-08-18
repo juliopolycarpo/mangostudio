@@ -41,6 +41,7 @@ const BUN_STATUS: RuntimeStatus = {
 
 function createDetectionServices() {
   let forcedRuntimeProbes = 0;
+  const resetCacheCalls: string[] = [];
   const probingService: EnvironmentProbingService = {
     listRuntimeStatuses: () => Promise.resolve([BUN_STATUS]),
     getRuntimeStatus: (_scope, id, options) => {
@@ -51,11 +52,16 @@ function createDetectionServices() {
     getVersionManagerStatus: () => Promise.resolve(null),
     listAgentCliStatuses: () => Promise.resolve([]),
     getAgentCliStatus: () => Promise.resolve(null),
-    resetCache: () => undefined,
+    listLocationStatuses: () => Promise.resolve([]),
+    resetCache: (environmentId) => {
+      if (environmentId) resetCacheCalls.push(environmentId);
+    },
+    resetLocationCache: () => undefined,
   };
   return {
     probingService,
     getForcedRuntimeProbes: () => forcedRuntimeProbes,
+    getResetCacheCalls: () => resetCacheCalls,
   };
 }
 
@@ -179,6 +185,7 @@ describe('install service', () => {
       durationMs: 1000,
       done: true,
     });
+    expect(detection.getResetCacheCalls()).toEqual(['local']);
     expect(detection.getForcedRuntimeProbes()).toBe(1);
     expect(memory.runs.get(started.runId)?.status).toBe('succeeded');
   });

@@ -166,6 +166,30 @@ describe('applyLibraryRemoval', () => {
     expect(result.backupId).toBeDefined();
   });
 
+  it('drops location caches for every targeted machine when the engine throws', async () => {
+    seedSkill(SKILL_LOCATION_ROOTS['claude-skills'], 'one');
+    const preview = previewOf([await entryFor(['claude-skills'])]);
+    const reset: string[] = [];
+
+    // A transport failure is not proof that nothing was deleted: machines are
+    // written one after another, so an earlier one can already be missing
+    // copies while a later one fails. Invalidating anyway costs a rescan;
+    // skipping it reports the pre-removal matrix as current for the whole TTL.
+    await expect(
+      applyLibraryRemoval('user-1', requestFor(preview, { acknowledgeLastCopy: ['skill:gh'] }), {
+        preview: () => Promise.resolve(preview),
+        pathEnv: env,
+        writeEngine: 'runtime',
+        runtimeRemove: () => Promise.reject(new Error('transport died')),
+        resetCaches: (rows) => {
+          for (const row of rows) reset.push(row.environmentId);
+        },
+      })
+    ).rejects.toThrow('transport died');
+
+    expect(reset).toEqual(['local']);
+  });
+
   it('leaves no staged temp tree beside the destination once it commits', async () => {
     seedSkill(SKILL_LOCATION_ROOTS['claude-skills'], 'one');
     const preview = previewOf([await entryFor(['claude-skills'])]);

@@ -39,6 +39,7 @@ import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/lo
 import { nodeTreeRemovalFs, type TreeRemovalFs } from '../infrastructure/tree-removal';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
+import { resetLibraryCachesForEnvironments } from './environment-library-service';
 import { compareText } from './preview-state';
 import { previewLibraryRemoval } from './removal-preview';
 
@@ -69,6 +70,11 @@ export interface RemovalApplyDeps {
       readonly createdAtMs: number;
     }
   ) => Promise<void>;
+  /**
+   * Drops cached location health for machines this removal touched. See
+   * `PropagationApplyDeps.resetCaches`.
+   */
+  resetCaches(rows: Iterable<{ readonly environmentId: string }>): void;
 }
 
 function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
@@ -81,6 +87,7 @@ function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
     writeEngine: overrides.writeEngine ?? 'runtime',
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     recordBackup: overrides.recordBackup ?? recordWrittenBackup,
+    resetCaches: overrides.resetCaches ?? resetLibraryCachesForEnvironments,
     ...(overrides.runtimeRemove && { runtimeRemove: overrides.runtimeRemove }),
   };
 }
@@ -144,7 +151,20 @@ async function runRemoval(
   // The plan's own `kept` entries are merged here rather than shipped and
   // echoed: the hub decided them, and the engine returns only what it kept
   // itself — rolled back, or never attempted.
-  const removalResult = await runRemovalAcrossEnvironments(userId, batches, plan, deps);
+  let removalResult: RemovalApply;
+  try {
+    removalResult = await runRemovalAcrossEnvironments(userId, batches, plan, deps);
+  } catch (error) {
+    // A throw from the engine is not proof that nothing was deleted: machines
+    // are removed from one after another, so an earlier one may already be
+    // missing copies. Over-invalidating costs one rescan; under-invalidating
+    // reports the pre-removal matrix as current.
+    deps.resetCaches([...batches.keys()].map((environmentId) => ({ environmentId })));
+    throw error;
+  }
+  // Ahead of the backup indexing below: once copies are gone, the cached
+  // location health for those machines is wrong whatever the index does.
+  deps.resetCaches([...removalResult.removed, ...removalResult.backups]);
   // Pinned when it holds someone's last copy: the set is the only remaining
   // instance of that resource, and the index has to know that before retention
   // on the owning machine is ever asked about it.
