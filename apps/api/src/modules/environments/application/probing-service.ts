@@ -28,7 +28,7 @@ import { getConfig, getHomeMangoDir, getVersion } from '../../../lib/config';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { LibraryFeatureUnavailableError } from '../../library/domain/library-feature-error';
-import { configuredLibraryEnv } from '../../library/infrastructure/location-probe';
+import { hubLibraryEnvFor } from '../../library/infrastructure/location-probe';
 import { hasInstallRecipeForRuntime } from '../domain/install-recipes';
 import {
   loadNodeReleaseMetadata,
@@ -267,8 +267,10 @@ export function createEnvironmentProbingService(
   const isHubMachine = (environmentId: string) => environmentId === LOCAL_ENVIRONMENT_ID;
 
   /** Spreadable: the hub's configured PATH, and nothing at all anywhere else. */
-  const pathEnvFor = (environmentId: string) =>
-    isHubMachine(environmentId) ? { pathEnv: { env: configuredLibraryEnv() } } : {};
+  const pathEnvFor = (environmentId: string) => {
+    const env = hubLibraryEnvFor(environmentId);
+    return env ? { pathEnv: { env } } : {};
+  };
 
   /**
    * A completion is only readable for `FORCED_PROBE_MIN_INTERVAL_MS`, so every

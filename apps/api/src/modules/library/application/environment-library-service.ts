@@ -15,7 +15,6 @@ import {
   type RuntimeLibraryScanEntry,
 } from '@mangostudio/runtime';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
-import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   LibraryLocationId,
   LibraryLocationStatus,
@@ -33,7 +32,7 @@ import {
   environmentProbingService,
 } from '../../environments/application/probing-service';
 import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
-import { configuredLibraryEnv } from '../infrastructure/location-probe';
+import { hubLibraryEnvFor } from '../infrastructure/location-probe';
 import { groupLibraryScanEntries } from './library-discovery';
 import type { SettingsSourcePayload } from './settings-inspection';
 
@@ -141,12 +140,13 @@ export function createEnvironmentLibraryService(
   let resetEpoch = 0;
 
   const scopeKey = (scope: LibraryScope) => `${scope.userId}${SCOPE_SEP}${scope.environmentId}`;
-  const isHubMachine = (environmentId: string) => environmentId === LOCAL_ENVIRONMENT_ID;
-
-  const pathEnvParams = (scope: LibraryScope, workspaceRoot?: string) => ({
-    ...(isHubMachine(scope.environmentId) && { env: configuredLibraryEnv() }),
-    ...(workspaceRoot !== undefined && { workspaceRoot }),
-  });
+  const pathEnvParams = (scope: LibraryScope, workspaceRoot?: string) => {
+    const env = hubLibraryEnvFor(scope.environmentId);
+    return {
+      ...(env && { env }),
+      ...(workspaceRoot !== undefined && { workspaceRoot }),
+    };
+  };
 
   const discover = async (
     db: Kysely<Database>,
