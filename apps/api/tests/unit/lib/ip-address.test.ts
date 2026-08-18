@@ -23,7 +23,15 @@ describe('ip-address', () => {
   });
 
   it('rejects an address it cannot parse rather than treating it as public', () => {
-    for (const value of ['not-an-address', '1:2:3:4:5:6:7:8:9', 'fe80::1::2', '::ffff:999.1.1.1']) {
+    for (const value of [
+      'not-an-address',
+      '1:2:3:4:5:6:7:8:9',
+      'fe80::1::2',
+      '::ffff:999.1.1.1',
+      '012.0.0.1',
+      '1.2.3.4::',
+      '::ffff:012.0.0.1',
+    ]) {
       expect(parseIpAddress(value)).toBeNull();
       expect(isLoopback(value)).toBe(false);
       expect(isPrivateOrLocal(value)).toBe(true);
@@ -63,6 +71,20 @@ describe('ip-address', () => {
   it('blocks IPv6 unique-local across both the fc.. and fd.. halves', () => {
     for (const address of ['fc00::1', 'fd12:3456:789a::1']) {
       expect(isPrivateOrLocal(address)).toBe(true);
+    }
+  });
+
+  it('blocks IPv4 multicast, reserved and IETF protocol-assignment ranges', () => {
+    for (const address of ['192.0.0.1', '224.0.0.1', '240.0.0.1', '255.255.255.255']) {
+      expect(isPrivateOrLocal(address)).toBe(true);
+      expect(isLoopback(address)).toBe(false);
+    }
+  });
+
+  it('blocks IPv6 multicast and v4-mapped multicast', () => {
+    for (const address of ['ff00::1', 'ff02::1', 'ffff::1', '::ffff:224.0.0.1']) {
+      expect(isPrivateOrLocal(address)).toBe(true);
+      expect(isLoopback(address)).toBe(false);
     }
   });
 

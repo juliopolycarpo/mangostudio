@@ -9,6 +9,8 @@
  * A bare short form like `127.1` is rejected rather than expanded to `127.0.0.1`:
  * every caller before this module required exactly four dot-separated octets, so
  * rejecting keeps behaviour unchanged rather than silently accepting a new form.
+ * Leading-zero octets (`012.0.0.1`) are rejected for the same reason: URL parsers
+ * and resolvers do not agree on the radix, so the form is not one we can vouch for.
  */
 
 export type ParsedAddress =
@@ -38,7 +40,10 @@ function parseIPv4Literal(text: string): readonly [number, number, number, numbe
 
   const octets: number[] = [];
   for (const part of parts) {
-    if (!/^\d{1,3}$/.test(part)) return null;
+    // Number("012") is 12, but URL parsers still read a leading zero as octal
+    // (`012.0.0.1` → 10.0.0.1) while some resolvers strip it as decimal. Reject
+    // the ambiguous form rather than pick a radix the next hop might not share.
+    if (!/^(0|[1-9]\d{0,2})$/.test(part)) return null;
     const octet = Number(part);
     if (octet > 255) return null;
     octets.push(octet);
@@ -46,8 +51,12 @@ function parseIPv4Literal(text: string): readonly [number, number, number, numbe
   return octets as [number, number, number, number];
 }
 
-/** The eight 16-bit groups of a run of IPv6 text, or null if it is malformed. */
-function parseHextets(text: string): number[] | null {
+/**
+ * The 16-bit groups of one side of an IPv6 address. A dotted quad is only legal
+ * as the last run of the whole address (the uncompressed form, or the tail of a
+ * `::` split) — `1.2.3.4::` is not an address.
+ */
+function parseHextets(text: string, allowIPv4: boolean): number[] | null {
   if (text === '') return [];
 
   const parts = text.split(':');
@@ -55,7 +64,7 @@ function parseHextets(text: string): number[] | null {
   for (const [index, part] of parts.entries()) {
     // A dotted quad stands for the final two groups, so it is only legal last.
     if (part.includes('.')) {
-      if (index !== parts.length - 1) return null;
+      if (!allowIPv4 || index !== parts.length - 1) return null;
       const octets = parseIPv4Literal(part);
       if (octets === null) return null;
       groups.push((octets[0] << 8) | octets[1], (octets[2] << 8) | octets[3]);
@@ -77,11 +86,11 @@ function parseIPv6(text: string): readonly number[] | null {
   const halves = text.split('::');
   if (halves.length > 2) return null;
 
-  const head = parseHextets(halves[0]);
+  const head = parseHextets(halves[0], halves.length === 1);
   if (head === null) return null;
   if (halves.length === 1) return head.length === 8 ? head : null;
 
-  const tail = parseHextets(halves[1]);
+  const tail = parseHextets(halves[1], true);
   if (tail === null) return null;
 
   const elided = 8 - head.length - tail.length;
@@ -145,6 +154,10 @@ function isLinkLocalIPv6(groups: readonly number[]): boolean {
   return (groups[0] & 0xffc0) === 0xfe80;
 }
 
+function isMulticastIPv6(groups: readonly number[]): boolean {
+  return (groups[0] & 0xff00) === 0xff00;
+}
+
 function toNumber(octets: readonly [number, number, number, number]): number {
   return ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0;
 }
@@ -163,6 +176,9 @@ const PRIVATE_OR_LOCAL_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
   ipv4Range([169, 254, 0, 0], 16), // link-local
   ipv4Range([100, 64, 0, 0], 10), // CGNAT (RFC 6598)
   ipv4Range([0, 0, 0, 0], 8), // "this network" / unspecified
+  ipv4Range([192, 0, 0, 0], 24), // IETF protocol assignments (RFC 6890)
+  ipv4Range([224, 0, 0, 0], 4), // multicast
+  ipv4Range([240, 0, 0, 0], 4), // reserved, covers 255.255.255.255 broadcast
 ];
 
 function isPrivateOrLocalIPv4(octets: readonly [number, number, number, number]): boolean {
@@ -195,12 +211,13 @@ export function isLoopback(value: string): boolean {
 }
 
 /**
- * True for `localhost`, loopback, RFC1918, link-local and CGNAT addresses, and for
- * any address this module cannot parse. An address it cannot read is one it cannot
- * vouch for, and every form a URL parser or a resolver actually hands us parses —
- * so refusing the rest costs nothing real and keeps an unreadable address out of
- * the public path. This fail-**closed** direction is the opposite of
- * {@link isLoopback}'s; see the note there before picking between them.
+ * True for `localhost`, loopback, RFC1918, link-local, CGNAT, IETF protocol
+ * assignment, multicast, reserved and broadcast addresses, and for any address
+ * this module cannot parse. An address it cannot read is one it cannot vouch for,
+ * and every form a URL parser or a resolver actually hands us parses — so refusing
+ * the rest costs nothing real and keeps an unreadable address out of the public
+ * path. This fail-**closed** direction is the opposite of {@link isLoopback}'s;
+ * see the note there before picking between them.
  */
 export function isPrivateOrLocal(value: string): boolean {
   const normalized = normalize(value);
@@ -212,5 +229,9 @@ export function isPrivateOrLocal(value: string): boolean {
 
   const embedded = embeddedIPv4(parsed.groups);
   if (embedded !== null) return isPrivateOrLocalIPv4(embedded);
-  return isUniqueLocalIPv6(parsed.groups) || isLinkLocalIPv6(parsed.groups);
+  return (
+    isUniqueLocalIPv6(parsed.groups) ||
+    isLinkLocalIPv6(parsed.groups) ||
+    isMulticastIPv6(parsed.groups)
+  );
 }

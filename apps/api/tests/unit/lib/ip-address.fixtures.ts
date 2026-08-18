@@ -10,16 +10,22 @@ export interface AddressFixture {
   readonly privateOrLocal: boolean;
 }
 
-export const ADDRESS_FIXTURES: AddressFixture[] = [
+export const ADDRESS_FIXTURES: ReadonlyArray<AddressFixture> = [
   { input: '127.0.0.1', loopback: true, privateOrLocal: true },
   { input: '127.0.0.1.', loopback: true, privateOrLocal: true },
   // Short forms are rejected rather than expanded (`127.1` !== `127.0.0.1`): every
   // implementation this module replaces required exactly four dot-separated
   // octets, so an unparseable address falls to each function's fail-safe default.
   { input: '127.1', loopback: false, privateOrLocal: true },
+  // Leading-zero octets are ambiguous (URL octal vs decimal Number/resolver).
+  { input: '012.0.0.1', loopback: false, privateOrLocal: true },
   { input: '10.0.0.1', loopback: false, privateOrLocal: true },
   { input: '100.64.0.1', loopback: false, privateOrLocal: true },
   { input: '169.254.1.1', loopback: false, privateOrLocal: true },
+  { input: '192.0.0.1', loopback: false, privateOrLocal: true },
+  { input: '224.0.0.1', loopback: false, privateOrLocal: true },
+  { input: '240.0.0.1', loopback: false, privateOrLocal: true },
+  { input: '255.255.255.255', loopback: false, privateOrLocal: true },
   { input: '8.8.8.8', loopback: false, privateOrLocal: false },
   { input: '256.1.1.1', loopback: false, privateOrLocal: true },
   { input: '::1', loopback: true, privateOrLocal: true },
@@ -27,5 +33,8 @@ export const ADDRESS_FIXTURES: AddressFixture[] = [
   { input: 'fe80::1%eth0', loopback: false, privateOrLocal: true },
   { input: '::ffff:127.0.0.1', loopback: true, privateOrLocal: true },
   { input: '::ffff:8.8.8.8', loopback: false, privateOrLocal: false },
+  { input: '::ffff:224.0.0.1', loopback: false, privateOrLocal: true },
+  { input: '1.2.3.4::', loopback: false, privateOrLocal: true },
+  { input: 'ff02::1', loopback: false, privateOrLocal: true },
   { input: '2001:db8::1', loopback: false, privateOrLocal: false },
 ];

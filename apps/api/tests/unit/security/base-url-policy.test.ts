@@ -71,6 +71,22 @@ describe('base-url-policy', () => {
     ) as unknown as Promise<void>);
   });
 
+  it('rejects IPv4 multicast, reserved, broadcast and IETF protocol-assignment ranges', async () => {
+    for (const address of ['192.0.0.1', '224.0.0.1', '240.0.0.1', '255.255.255.255']) {
+      await (expect(validateBaseUrl(`http://${address}/v1`)).rejects.toThrow(
+        UnsafeBaseUrlError
+      ) as unknown as Promise<void>);
+    }
+  });
+
+  it('rejects a leading-zero IPv4 literal after the URL parser canonicalizes it', async () => {
+    // `new URL` reads `012.0.0.1` as octal 10.0.0.1. The shared parser rejects the
+    // raw form; this asserts the URL path still lands on the blocked canonical host.
+    await (expect(validateBaseUrl('http://012.0.0.1/v1')).rejects.toThrow(
+      UnsafeBaseUrlError
+    ) as unknown as Promise<void>);
+  });
+
   it('rejects IPv6 loopback', async () => {
     await (expect(validateBaseUrl('http://[::1]/v1')).rejects.toThrow(
       UnsafeBaseUrlError
@@ -91,6 +107,14 @@ describe('base-url-policy', () => {
     // fc00::/7 is the v6 equivalent of RFC1918 and spans both fc.. and fd..,
     // the half that container and mesh networks actually hand out.
     for (const address of ['fc00::1', 'fd12:3456:789a::1']) {
+      await (expect(validateBaseUrl(`http://[${address}]/v1`)).rejects.toThrow(
+        UnsafeBaseUrlError
+      ) as unknown as Promise<void>);
+    }
+  });
+
+  it('rejects IPv6 multicast', async () => {
+    for (const address of ['ff00::1', 'ff02::1', 'ffff::1']) {
       await (expect(validateBaseUrl(`http://[${address}]/v1`)).rejects.toThrow(
         UnsafeBaseUrlError
       ) as unknown as Promise<void>);
@@ -200,6 +224,16 @@ describe('base-url-policy', () => {
       })
     ).rejects.toThrow(
       'DNS resolution failed for hostname "offline.example.test".'
+    ) as unknown as Promise<void>);
+  });
+
+  it('fails closed when resolution returns no addresses', async () => {
+    await (expect(
+      validateBaseUrl('https://empty.example.test/v1', {
+        resolveHostname: resolveHostnameTo(),
+      })
+    ).rejects.toThrow(
+      'DNS resolution failed for hostname "empty.example.test".'
     ) as unknown as Promise<void>);
   });
 });

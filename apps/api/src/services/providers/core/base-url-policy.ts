@@ -1,6 +1,7 @@
 /**
  * Validates outbound URLs to prevent SSRF attacks.
- * Rejects loopback, RFC1918 private, CGNAT, unique-local, and link-local addresses.
+ * Rejects loopback, RFC1918 private, CGNAT, unique-local, link-local,
+ * multicast, reserved, and other non-public unicast addresses.
  */
 
 import { lookup } from 'node:dns/promises';
@@ -76,6 +77,9 @@ export async function validateBaseUrl(
 
   try {
     const results = await (options.resolveHostname ?? resolveHostname)(hostname);
+    if (results.length === 0) {
+      throw new UnsafeBaseUrlError(`DNS resolution failed for hostname "${hostname}".`);
+    }
     for (const result of results) {
       if (isPrivateOrLocal(result.address)) {
         throw new UnsafeBaseUrlError(BLOCKED_MESSAGE);
