@@ -17,7 +17,7 @@ import { useEffect } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { formatBytes } from '../format';
+import { chainStepLabel, formatBytes } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import type { InstallChainStep } from '../install-chain';
 
@@ -98,11 +98,12 @@ export function InstallConfirmDialog({
             >
               {isChain && (
                 <p className="font-label text-[10px] font-bold uppercase tracking-widest text-on-surface-variant/70">
-                  {formatMessage(s.chainStep, {
-                    index: String(index + 1),
-                    count: String(recipes.length),
-                    name: resolve('runtime', recipe.runtimeId).name,
-                  })}
+                  {chainStepLabel(
+                    t,
+                    index,
+                    recipes.length,
+                    resolve('runtime', recipe.runtimeId).name
+                  )}
                 </p>
               )}
               <RecipeDetails recipe={recipe} />

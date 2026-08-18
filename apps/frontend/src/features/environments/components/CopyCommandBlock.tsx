@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/Button';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { guardReasonLabel } from '../format';
+import { guardReasonLabel, runtimeNameList } from '../format';
 import { useToolIdentities } from '../identity/use-tool-identities';
 
 interface CopyCommandBlockProps {
@@ -40,9 +40,7 @@ export function CopyCommandBlock({ recipe, message }: CopyCommandBlockProps) {
     reasons.push({
       key: 'missing-requirements',
       text: formatMessage(s.missingRequirements, {
-        requirements: recipe.missingRequirements
-          .map((id) => resolve('runtime', id).name)
-          .join(', '),
+        requirements: runtimeNameList(resolve, recipe.missingRequirements),
       }),
     });
   }

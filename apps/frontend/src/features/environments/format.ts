@@ -20,6 +20,7 @@ import type { Messages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { formatMessage } from '@/lib/i18n-format';
+import type { ResolvedToolIdentity } from './identity/resolve';
 
 /**
  * Params that name a runtime, agent, or version manager rather than a value,
@@ -311,4 +312,39 @@ export function formatDuration(durationMs: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+/**
+ * `useToolIdentities().resolve`, named structurally so this module keeps its
+ * React-free imports.
+ */
+type IdentityResolver = (
+  kind: ToolIdentityKind,
+  id: string,
+  fallbackName?: string
+) => ResolvedToolIdentity;
+
+/**
+ * Runtime ids as the product names a person reads, joined into one clause.
+ *
+ * Every sentence that names a set of runtimes — a missing requirement, a
+ * chain's prerequisites — reads them the same way, so the wording lives here
+ * rather than being rebuilt at each call site.
+ */
+export function runtimeNameList(resolve: IdentityResolver, ids: readonly string[]): string {
+  return ids.map((id) => resolve('runtime', id).name).join(', ');
+}
+
+/**
+ * "Step 2 of 3 · Node.js" — one wording for a chain's position, shared by the
+ * confirmation that lists the steps and the console that runs them.
+ *
+ * `index` is zero-based; what the user reads is not.
+ */
+export function chainStepLabel(t: Messages, index: number, count: number, name: string): string {
+  return formatMessage(t.environments.install.chainStep, {
+    index: String(index + 1),
+    count: String(count),
+    name,
+  });
 }

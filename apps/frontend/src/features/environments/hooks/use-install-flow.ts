@@ -49,12 +49,7 @@ export type InstallFlowState =
       readonly preparation: InstallPreparation;
     }
   | { readonly step: 'running'; readonly chain: InstallChainProgress }
-  | {
-      readonly step: 'finished';
-      readonly chain: InstallChainProgress;
-      /** A step ended without succeeding, so the steps after it never ran. */
-      readonly stopped: boolean;
-    }
+  | { readonly step: 'finished'; readonly chain: InstallChainProgress }
   /** No request was issued (or the server refused): show the copyable command. */
   | {
       readonly step: 'refused';
@@ -62,6 +57,15 @@ export type InstallFlowState =
       readonly message: string;
     }
   | { readonly step: 'error'; readonly recipe: InstallRecipePreview };
+
+/**
+ * A finished chain that never reached its target: the step it stopped on is not
+ * the last one, so the steps after it never ran. Read from the chain rather than
+ * stored beside it — two fields that must agree can stop agreeing.
+ */
+export function chainStopped(chain: InstallChainProgress): boolean {
+  return chain.index < chain.steps.length - 1;
+}
 
 function targetOf(steps: readonly InstallChainStep[]): InstallRecipePreview {
   const last = steps.at(-1);
@@ -151,6 +155,27 @@ export function useInstallFlow(environmentId?: string) {
   );
 
   /**
+   * One place decides what a thrown request means: the run is over and the
+   * chain's target is what failed to install. A superseded run owns no state —
+   * whichever run replaced it has already written its own.
+   */
+  const runGuarded = useCallback(
+    async (
+      requestId: number,
+      steps: readonly InstallChainStep[],
+      action: () => Promise<void>
+    ): Promise<void> => {
+      try {
+        await action();
+      } catch {
+        if (requestIdRef.current !== requestId) return;
+        setState({ step: 'error', recipe: targetOf(steps) });
+      }
+    },
+    []
+  );
+
+  /**
    * Runs the next step of a chain the user already confirmed. Nothing is asked
    * again: one affordance was pressed, so one decision was made.
    */
@@ -161,17 +186,14 @@ export function useInstallFlow(environmentId?: string) {
       const next: InstallChainProgress = { ...chain, index: chain.index + 1 };
 
       setState({ step: 'preparing', chain: next });
-      try {
+      await runGuarded(requestId, next.steps, async () => {
         const preparation = await prepareStep(next, requestId);
         if (!preparation || requestIdRef.current !== requestId) return;
         setState({ step: 'starting', chain: next, preparation });
         await startStep(next, preparation, requestId);
-      } catch {
-        if (requestIdRef.current !== requestId) return;
-        setState({ step: 'error', recipe: targetOf(next.steps) });
-      }
+      });
     },
-    [prepareStep, startStep]
+    [prepareStep, runGuarded, startStep]
   );
 
   const begin = useCallback(
@@ -187,16 +209,13 @@ export function useInstallFlow(environmentId?: string) {
 
       const chain: InstallChainProgress = { steps, index: 0, runId: null };
       setState({ step: 'preparing', chain });
-      try {
+      await runGuarded(requestId, steps, async () => {
         const preparation = await prepareStep(chain, requestId);
         if (!preparation || requestIdRef.current !== requestId) return;
         setState({ step: 'confirming', chain, preparation });
-      } catch {
-        if (requestIdRef.current !== requestId) return;
-        setState({ step: 'error', recipe: targetOf(steps) });
-      }
+      });
     },
-    [prepareStep]
+    [prepareStep, runGuarded]
   );
 
   const confirm = useCallback(async () => {
@@ -206,13 +225,10 @@ export function useInstallFlow(environmentId?: string) {
     requestIdRef.current = requestId;
 
     setState({ step: 'starting', chain: current.chain, preparation: current.preparation });
-    try {
-      await startStep(current.chain, current.preparation, requestId);
-    } catch {
-      if (requestIdRef.current !== requestId) return;
-      setState({ step: 'error', recipe: targetOf(current.chain.steps) });
-    }
-  }, [startStep, state]);
+    await runGuarded(requestId, current.chain.steps, () =>
+      startStep(current.chain, current.preparation, requestId)
+    );
+  }, [runGuarded, startStep, state]);
 
   const cancel = useCallback(async () => {
     if (state.step !== 'running' || !state.chain.runId) return;
@@ -238,15 +254,12 @@ export function useInstallFlow(environmentId?: string) {
       await invalidate();
       if (current.step !== 'running') return;
       const { chain } = current;
-      const remaining = chain.index + 1 < chain.steps.length;
-      if (exit.status === 'succeeded' && remaining) {
+      if (exit.status === 'succeeded' && chainStopped(chain)) {
         await advance(chain);
         return;
       }
       setState((previous) =>
-        previous.step === 'running'
-          ? { step: 'finished', chain: previous.chain, stopped: remaining }
-          : previous
+        previous.step === 'running' ? { step: 'finished', chain: previous.chain } : previous
       );
     },
     [advance, invalidate, state]

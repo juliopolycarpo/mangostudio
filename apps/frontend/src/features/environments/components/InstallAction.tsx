@@ -18,7 +18,8 @@ import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { useInstallFlow } from '../hooks/use-install-flow';
+import { chainStepLabel, runtimeNameList } from '../format';
+import { chainStopped, useInstallFlow } from '../hooks/use-install-flow';
 import { useInstallStream } from '../hooks/use-install-stream';
 import { useToolIdentities } from '../identity/use-tool-identities';
 import { resolveInstallChain } from '../install-chain';
@@ -66,9 +67,15 @@ export function InstallAction({
     onExit: (event) => void flow.complete(event),
   });
 
+  // Every call site writes `input` as a literal, so depending on the object
+  // itself would re-walk the catalog on every render of every card — and these
+  // cards re-render on a 15s status poll. The chain depends on the input's
+  // value, so the value is what the memo keys on.
+  const inputKey = input.kind === 'node-version' ? `node-version:${input.version}` : input.kind;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `inputKey` is `input` by value.
   const chain = useMemo(
     () => (recipe ? resolveInstallChain(catalog, recipe, input) : null),
-    [catalog, input, recipe]
+    [catalog, inputKey, recipe]
   );
 
   // A recipe the server never listed cannot be run or explained, so the whole
@@ -82,7 +89,7 @@ export function InstallAction({
       <p className="text-sm text-on-surface-variant/70" data-testid="install-unresolved">
         {formatMessage(s.requirementUnavailable, {
           target: runtimeName(recipe.runtimeId),
-          requirements: chain.missing.map(runtimeName).join(', '),
+          requirements: runtimeNameList(resolve, chain.missing),
         })}
       </p>
     );
@@ -95,11 +102,12 @@ export function InstallAction({
   const currentStep = progress ? progress.steps[progress.index] : undefined;
   const stepLabel =
     progress && progress.steps.length > 1 && currentStep
-      ? formatMessage(s.chainStep, {
-          index: String(progress.index + 1),
-          count: String(progress.steps.length),
-          name: runtimeName(currentStep.recipe.runtimeId),
-        })
+      ? chainStepLabel(
+          t,
+          progress.index,
+          progress.steps.length,
+          runtimeName(currentStep.recipe.runtimeId)
+        )
       : undefined;
 
   return (
@@ -115,9 +123,10 @@ export function InstallAction({
           {prerequisites.length === 0
             ? label
             : formatMessage(s.chainLabel, {
-                prerequisites: prerequisites
-                  .map((step) => runtimeName(step.recipe.runtimeId))
-                  .join(', '),
+                prerequisites: runtimeNameList(
+                  resolve,
+                  prerequisites.map((step) => step.recipe.runtimeId)
+                ),
                 target: runtimeName(recipe.runtimeId),
               })}
         </Button>
@@ -151,7 +160,7 @@ export function InstallAction({
         />
       )}
 
-      {flow.state.step === 'finished' && flow.state.stopped && currentStep && (
+      {flow.state.step === 'finished' && chainStopped(flow.state.chain) && currentStep && (
         <p className="text-sm text-error" data-testid="install-chain-stopped">
           {formatMessage(s.chainStopped, {
             target: runtimeName(recipe.runtimeId),
