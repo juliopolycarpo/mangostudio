@@ -635,20 +635,17 @@ describe('external-agent adapter registry and supervisor', () => {
     const adapter = new FakeExternalAgentAdapter({ openGate: openGate.promise });
     const value = await fixture({ adapter });
 
-    // `waitFor` pumps a ref'd timer. The open deadline itself is unref'd, and
-    // under coverage Bun's 5s test timeout used to win before that 5ms
-    // timer fired while this await sat on a hanging adapter promise.
-    const opening = openSession(value, 'late-session', 5);
-    let finished = false;
-    const openingOutcome = opening
-      .finally(() => {
-        finished = true;
-      })
-      .then(
-        () => new Error('Expected the open deadline to reject the session.'),
-        (error: unknown) => error
-      );
-    await waitFor(() => finished);
+    // Hang inside the adapter before the deadline. A 5ms budget expired during
+    // workspace authorization under coverage, so the adapter never started and
+    // waitFor sat on a promise that could not settle. The deadline timer is
+    // unref'd; waitFor's ref'd sleeps keep the isolate alive until it fires.
+    const opening = openSession(value, 'late-session', 1_000);
+    const openingOutcome = opening.then(
+      () => new Error('Expected the open deadline to reject the session.'),
+      (error: unknown) => error
+    );
+    await waitFor(() => adapter.opens.length === 1);
+    await waitFor(() => adapter.opens[0]?.context.signal.aborted === true);
     const openingError = await openingOutcome;
     expect(openingError).toBeInstanceOf(Error);
     expect((openingError as Error).message).toContain('Deadline exceeded');
