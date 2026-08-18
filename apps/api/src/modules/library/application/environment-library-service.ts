@@ -32,6 +32,7 @@ import {
   type EnvironmentProbingService,
   environmentProbingService,
 } from '../../environments/application/probing-service';
+import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
 import { configuredLibraryEnv } from '../infrastructure/location-probe';
 import { groupLibraryScanEntries } from './library-discovery';
 import type { SettingsSourcePayload } from './settings-inspection';
@@ -230,13 +231,11 @@ export function createEnvironmentLibraryService(
     // registered locations are workspace-scoped, so `workspaceRoot` cannot
     // change the answer — the probing service's shared cache does not key on
     // it, matching how the agent-CLI probe already reads these same paths.
+    //
+    // The manifest guard lives with the RPC rather than here: resolving the
+    // connection twice would check one and call the other, so a reconnect
+    // between them passes a manifest that did not answer the request.
     async listLocations(_db, scope, _workspaceRoot) {
-      const client = await resolveClient(scope);
-      if (!client.manifest.features.library) {
-        throw new LibraryFeatureUnavailableError(
-          `Environment "${scope.environmentId}" does not advertise library discovery.`
-        );
-      }
       return [...(await listLocationStatuses(scope))];
     },
 
@@ -315,14 +314,6 @@ export function createEnvironmentLibraryService(
       }
     },
   };
-}
-
-export class LibraryFeatureUnavailableError extends Error {
-  readonly code = 'LIBRARY_FEATURE_UNAVAILABLE' as const;
-  constructor(message: string) {
-    super(message);
-    this.name = 'LibraryFeatureUnavailableError';
-  }
 }
 
 export const environmentLibraryService = createEnvironmentLibraryService();

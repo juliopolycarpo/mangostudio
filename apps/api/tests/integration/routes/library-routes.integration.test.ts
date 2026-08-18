@@ -7,7 +7,7 @@ import type {
   LibraryTargetDescriptor,
 } from '@mangostudio/shared/library';
 import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
-import { LibraryFeatureUnavailableError } from '../../../src/modules/library/application/environment-library-service';
+import { LibraryFeatureUnavailableError } from '../../../src/modules/library/domain/library-feature-error';
 import {
   createLibraryRoutes,
   type LibraryRouteService,

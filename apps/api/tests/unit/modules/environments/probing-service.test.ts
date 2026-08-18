@@ -5,12 +5,15 @@ import {
   createEnvironmentProbingService,
   type ProbeScope,
 } from '../../../../src/modules/environments/application/probing-service';
+import { LibraryFeatureUnavailableError } from '../../../../src/modules/library/domain/library-feature-error';
 import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 
 const LOCAL: ProbeScope = { userId: 'ada', environmentId: 'local' };
 const WSL: ProbeScope = { userId: 'ada', environmentId: 'ubuntu' };
 
-const MANIFEST = { platform: 'linux' } as RuntimeCapabilityManifest;
+// `features.library` is real here because the location probe guards on it:
+// a fake without it would make every location test throw inside the guard.
+const MANIFEST = { platform: 'linux', features: { library: true } } as RuntimeCapabilityManifest;
 
 interface FakeClient {
   client: RuntimeClient;
@@ -509,5 +512,28 @@ describe('the shared location cache', () => {
     const refreshed = await service.listLocationStatuses(LOCAL);
     expect(local.locationCalls).toBe(0);
     expect(refreshed).toEqual(locations);
+  });
+
+  it('refuses a machine that does not advertise library discovery', async () => {
+    const client = {
+      manifest: { platform: 'linux', features: { library: false } } as RuntimeCapabilityManifest,
+      library: {
+        locations: () => Promise.reject(new Error('should not be reached')),
+      },
+    } as unknown as RuntimeClient;
+    const service = createEnvironmentProbingService({
+      resolveClient: () => Promise.resolve(client),
+      loadReleaseMetadata: () => Promise.resolve(null),
+      getSelfVersion: () => '9.9.9',
+      now: () => 1_000,
+    });
+
+    // The guard belongs to the scan, not to its caller: `EnvironmentLibraryService`
+    // used to resolve the connection a second time to check this, so a reconnect
+    // between the two could leave it checking a manifest that did not answer the
+    // request.
+    await expect(service.listLocationStatuses(LOCAL)).rejects.toBeInstanceOf(
+      LibraryFeatureUnavailableError
+    );
   });
 });

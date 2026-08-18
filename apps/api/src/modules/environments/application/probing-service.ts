@@ -27,6 +27,7 @@ import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import { getConfig, getHomeMangoDir, getVersion } from '../../../lib/config';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
+import { LibraryFeatureUnavailableError } from '../../library/domain/library-feature-error';
 import { configuredLibraryEnv } from '../../library/infrastructure/location-probe';
 import { hasInstallRecipeForRuntime } from '../domain/install-recipes';
 import {
@@ -531,6 +532,15 @@ export function createEnvironmentProbingService(
       (status) => (status as LibraryLocationStatus).id,
       force,
       async (client) => {
+        // Guarded here rather than at the caller: `probe` resolves the
+        // connection this scan actually runs on, and the consent gate would
+        // otherwise answer a machine without the feature with a raw RPC
+        // refusal instead of the 503 `handleLibraryError` renders.
+        if (!client.manifest.features.library) {
+          throw new LibraryFeatureUnavailableError(
+            `Environment "${scope.environmentId}" does not advertise library discovery.`
+          );
+        }
         const result = await client.library.locations(
           { ...pathEnvFor(scope.environmentId) },
           { timeoutMs: LOCATION_REQUEST_TIMEOUT_MS }

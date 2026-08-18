@@ -10,7 +10,7 @@
 
 import { RuntimeRemoteError } from '@mangostudio/runtime';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
-import { LibraryFeatureUnavailableError } from '../application/environment-library-service';
+import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
 
 export function handleLibraryError(
   error: unknown,
