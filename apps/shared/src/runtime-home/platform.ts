@@ -74,9 +74,13 @@ export type PlatformProbeResult =
  * failure that quotes what the host actually said.
  */
 export function parsePlatformProbe(stdout: string): PlatformProbeResult {
-  const lines = stdout.split(/\r?\n/).map((line) => line.trim());
-  while (lines.length > 0 && lines[0] === '') lines.shift();
-  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  // Trimmed whole before it is split, which is what drops the blank lines a
+  // banner or a trailing newline leaves at either end; trimming each line then
+  // handles the `\r` of a CRLF host.
+  const lines = stdout
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim());
 
   const [kernel, machine, libc = ''] = lines;
   if (!kernel || !machine) {

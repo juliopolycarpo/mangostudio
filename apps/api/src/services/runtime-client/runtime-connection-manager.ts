@@ -141,15 +141,6 @@ interface RuntimeConnectionEntry {
   connectedAtMs?: number;
   /** Epoch ms the cached manifest was last read from the peer. */
   manifestReadAtMs?: number;
-  /**
-   * The revision whose connect fell back to the hub's runtime cache.
-   *
-   * Held against a revision rather than as a flag to clear: every path out of
-   * `connect()` replaces the status wholesale, and a bare boolean would have to
-   * be reset by each of them or report a superseded attempt's offline launch as
-   * this one's.
-   */
-  offlineCacheRevision?: number;
   /** In-flight background refresh, so reads coalesce onto one round-trip. */
   manifestRefresh?: Promise<void>;
   /**
@@ -410,7 +401,10 @@ export class RuntimeConnectionManager {
           state: 'connected',
           manifest: connection.client.manifest,
           ...peerRelease(connection.client.runtimeVersion),
-          ...(entry.offlineCacheRevision === revision ? { offlineRuntimeCache: true } : {}),
+          // Carried over from the `connecting` status this replaces, which only
+          // this attempt could have set: the status was rebuilt from scratch
+          // when the attempt started, and a superseded attempt cannot paint it.
+          ...(entry.status.offlineRuntimeCache ? { offlineRuntimeCache: true } : {}),
         };
         this.#publish(userId);
         return connection.client;
@@ -644,10 +638,7 @@ export class RuntimeConnectionManager {
     if (entry.revision !== revision || entry.status.state !== 'connecting') return;
 
     if (phase === 'offline-cache') {
-      if (entry.offlineCacheRevision === revision) return;
-      // Recorded as well as shown: the status this paints is replaced when the
-      // attempt lands, and `connected` is where it actually matters.
-      entry.offlineCacheRevision = revision;
+      if (entry.status.offlineRuntimeCache) return;
       entry.status = { ...entry.status, offlineRuntimeCache: true };
       this.#publish(userId);
       return;

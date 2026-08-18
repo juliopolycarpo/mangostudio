@@ -49,9 +49,9 @@ import {
   runtimeSlotBytesScript,
 } from '../domain/runtime-push';
 import {
-  CHECKSUMS_CACHE_NAME,
   pruneRuntimeCache,
-  readVerifiedCacheEntry,
+  readOfflineCacheEntry,
+  rememberReleaseChecksums,
   runtimeDigestSidecarPath,
 } from '../domain/runtime-release-fetch';
 import {
@@ -304,7 +304,7 @@ interface RuntimeSource {
   readonly sourceSha?: string;
   /**
    * Whether the bytes came from the cache without the release confirming them
-   * this time — see {@link readVerifiedCacheEntry}. A checkout's own build is
+   * this time — see {@link readOfflineCacheEntry}. A checkout's own build is
    * never this: nothing verified it in the first place, and nothing claims to.
    */
   readonly offlineCache: boolean;
@@ -631,7 +631,7 @@ function manualInstallHint(
  * not already hold a copy whose digest matches the release.
  *
  * When the release cannot be reached at all, a cache entry backed by a digest
- * this hub recorded earlier answers instead — see {@link readVerifiedCacheEntry}
+ * this hub recorded earlier answers instead — see {@link readOfflineCacheEntry}
  * for why a recorded digest is the only kind that can. Provisioning a
  * distribution is otherwise impossible on an air-gapped or proxied host whose
  * cache already holds the exact bytes.
@@ -664,7 +664,18 @@ async function loadAsset(
     try {
       expected = await fetchExpectedChecksum(deps, release, assetName, versionDir);
     } catch (error) {
-      const offline = await offlineCacheEntry(deps, cachePath, versionDir, assetName, error);
+      // The same rule the shared loader applies, through the same helper: only
+      // an unreachable release qualifies, and only a digest this hub recorded
+      // earlier — never one re-derived from the bytes being checked — may vouch
+      // for what is on disk.
+      const offline = await readOfflineCacheEntry({
+        cachePath,
+        versionDir,
+        assetName,
+        readBytes: deps.readBytes,
+        unreachableReason:
+          error instanceof WslDownloadError && error.unreachable ? error.message : undefined,
+      });
       if (offline) return { bytes: offline, offlineCache: true };
       throw error;
     }
@@ -710,41 +721,11 @@ async function loadAsset(
 }
 
 /**
- * The cached asset, when the release could not be reached and a digest this
- * hub recorded earlier vouches for the bytes.
- *
- * The same rule the shared loader applies, through the same helper: only an
- * unreachable release qualifies, and only a recorded digest — never one
- * re-derived from the bytes being checked — may vouch for what is on disk.
- */
-async function offlineCacheEntry(
-  deps: WslProvisionerDeps,
-  cachePath: string,
-  versionDir: string,
-  assetName: string,
-  error: unknown
-): Promise<Uint8Array | null> {
-  if (!(error instanceof WslDownloadError) || !error.unreachable) return null;
-
-  const bytes = await readVerifiedCacheEntry({
-    cachePath,
-    versionDir,
-    assetName,
-    readBytes: deps.readBytes,
-  });
-  if (!bytes) return null;
-
-  logger.warn('offline_cache_used', { path: cachePath, reason: error.message });
-  return bytes;
-}
-
-/**
  * The digest the release publishes for the asset.
  *
- * Kept in the version directory on the way past so a later provision that
- * cannot reach the release still has a record of what it verified. A rolling
- * tag is left out: it republishes SHA256SUMS under one filename as new builds
- * land, so a copy says what the tag used to hold, not what it holds.
+ * Kept in the version directory on the way past — see
+ * {@link rememberReleaseChecksums} — so a later provision that cannot reach the
+ * release still has a record of what it verified.
  */
 async function fetchExpectedChecksum(
   deps: WslProvisionerDeps,
@@ -764,9 +745,12 @@ async function fetchExpectedChecksum(
       `Release v${tagVersion} does not publish ${assetName}, so there is no Linux runtime to install. Update MangoStudio, or put a matching runtime at ${DISTRO_RUNTIME_PATH} in the distribution yourself.`
     );
   }
-  if (!release.rolling) {
-    await deps.writeCache(join(versionDir, CHECKSUMS_CACHE_NAME), checksums).catch(() => undefined);
-  }
+  await rememberReleaseChecksums({
+    rolling: release.rolling,
+    versionDir,
+    checksums,
+    writeCache: deps.writeCache,
+  });
   return expected;
 }
 

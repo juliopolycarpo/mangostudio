@@ -265,7 +265,14 @@ async function loadAsset(
     try {
       expected = await fetchExpectedChecksum(load, versionDir);
     } catch (error) {
-      const offline = await offlineCacheEntry(load, cachePath, versionDir, error);
+      const offline = await readOfflineCacheEntry({
+        cachePath,
+        versionDir,
+        assetName,
+        readBytes: load.readBytes,
+        unreachableReason:
+          error instanceof RuntimeAssetLoadError && error.unreachable ? error.message : undefined,
+      });
       if (offline) return { bytes: offline, cached: true, offlineCache: true };
       throw error;
     }
@@ -303,42 +310,10 @@ async function loadAsset(
   return { bytes, cached, offlineCache: false };
 }
 
-/**
- * The cached asset, when the release could not be reached and a digest this
- * hub recorded earlier vouches for the bytes.
- *
- * Only an unreachable release qualifies. A 404 is an answer — the version does
- * not publish this asset — and a malformed SHA256SUMS is a broken release, not
- * an offline condition; neither may be answered from disk.
- */
-async function offlineCacheEntry(
-  load: AssetLoad,
-  cachePath: string,
-  versionDir: string,
-  error: unknown
-): Promise<Uint8Array | null> {
-  if (!(error instanceof RuntimeAssetLoadError) || !error.unreachable) return null;
-
-  const bytes = await readVerifiedCacheEntry({
-    cachePath,
-    versionDir,
-    assetName: load.assetName,
-    readBytes: load.readBytes,
-  });
-  if (!bytes) return null;
-
-  logger.warn('offline_cache_used', {
-    version: load.cacheVersion,
-    asset: load.assetName,
-    reason: error.message,
-  });
-  return bytes;
-}
-
 /** What a version directory remembers a release's published checksums under. */
 export const CHECKSUMS_CACHE_NAME = 'SHA256SUMS';
 
-export interface VerifiedCacheLookup {
+interface VerifiedCacheLookup {
   readonly cachePath: string;
   /** The version directory holding the asset and any remembered checksums. */
   readonly versionDir: string;
@@ -361,15 +336,71 @@ export interface VerifiedCacheLookup {
  * naming a version it could not fetch, which is a better answer than a binary
  * nothing vouches for.
  */
-export async function readVerifiedCacheEntry(
-  lookup: VerifiedCacheLookup
-): Promise<Uint8Array | null> {
+async function readVerifiedCacheEntry(lookup: VerifiedCacheLookup): Promise<Uint8Array | null> {
   const bytes = await lookup.readBytes(lookup.cachePath);
   if (!bytes) return null;
 
   const recorded = await recordedCacheDigest(lookup);
   if (!recorded) return null;
   return sha256(bytes) === recorded ? bytes : null;
+}
+
+export interface OfflineCacheLookup extends VerifiedCacheLookup {
+  /**
+   * Why the release could not be reached, or undefined when it answered.
+   *
+   * The caller decides this because the error class is its own — the shared
+   * loader's and the WSL provisioner's transports each raise their own — while
+   * what an unreachable release entitles a launch to is decided here. Carrying
+   * the reason rather than a boolean beside it leaves no way to claim a host
+   * was offline without saying what said so.
+   */
+  readonly unreachableReason: string | undefined;
+}
+
+/**
+ * The cached asset, when the release could not be reached and a digest this
+ * hub recorded earlier vouches for the bytes.
+ *
+ * Only an unreachable release qualifies. A 404 is an answer — the version does
+ * not publish this asset — and a malformed SHA256SUMS is a broken release, not
+ * an offline condition; neither may be answered from disk.
+ */
+export async function readOfflineCacheEntry(
+  lookup: OfflineCacheLookup
+): Promise<Uint8Array | null> {
+  if (lookup.unreachableReason === undefined) return null;
+
+  const bytes = await readVerifiedCacheEntry(lookup);
+  if (!bytes) return null;
+
+  logger.warn('offline_cache_used', {
+    asset: lookup.assetName,
+    path: lookup.cachePath,
+    reason: lookup.unreachableReason,
+  });
+  return bytes;
+}
+
+/**
+ * Keeps a release's published checksums in the version directory, so a later
+ * launch that cannot reach the release still has a record of what these bytes
+ * were verified against — see {@link recordedCacheDigest}.
+ *
+ * A rolling tag is left out: it republishes SHA256SUMS under one filename as
+ * new builds land, so a copy records what that tag used to hold, not what it
+ * holds. Failing to write is not a failure to install.
+ */
+export async function rememberReleaseChecksums(remember: {
+  readonly rolling: boolean;
+  readonly versionDir: string;
+  readonly checksums: Uint8Array;
+  readonly writeCache: (path: string, bytes: Uint8Array) => Promise<void>;
+}): Promise<void> {
+  if (remember.rolling) return;
+  await remember
+    .writeCache(join(remember.versionDir, CHECKSUMS_CACHE_NAME), remember.checksums)
+    .catch(() => undefined);
 }
 
 async function recordedCacheDigest(lookup: VerifiedCacheLookup): Promise<string | undefined> {
@@ -445,11 +476,9 @@ export async function pruneRuntimeCache(
 /**
  * The digest this release publishes for the asset, from the release itself.
  *
- * The answer is also written into the version directory on the way past, for
- * {@link recordedCacheDigest} to fall back on when a later launch cannot reach
- * the release at all. A rolling tag is left out: it republishes SHA256SUMS
- * under one filename as new builds land, so a copy of it is a record of what
- * that tag used to hold, not of what it holds.
+ * The answer is also kept in the version directory on the way past — see
+ * {@link rememberReleaseChecksums} — for a later launch that cannot reach the
+ * release at all.
  */
 async function fetchExpectedChecksum(load: AssetLoad, versionDir: string): Promise<string> {
   const { assetName, tagVersion } = load;
@@ -463,9 +492,12 @@ async function fetchExpectedChecksum(load: AssetLoad, versionDir: string): Promi
   if (!expected) {
     throw new RuntimeAssetMissingError(`Release v${tagVersion} does not publish ${assetName}.`);
   }
-  if (!load.rolling) {
-    await load.writeCache(join(versionDir, CHECKSUMS_CACHE_NAME), checksums).catch(() => undefined);
-  }
+  await rememberReleaseChecksums({
+    rolling: load.rolling,
+    versionDir,
+    checksums,
+    writeCache: load.writeCache,
+  });
   return expected;
 }
 

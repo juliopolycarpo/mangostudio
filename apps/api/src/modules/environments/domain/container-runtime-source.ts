@@ -116,7 +116,7 @@ export interface ContainerRuntimeBinary {
   readonly path: string;
   /**
    * Whether the bytes came from the cache without the release confirming them
-   * this time — see `readVerifiedCacheEntry` in `runtime-release-fetch.ts`.
+   * this time — see `readOfflineCacheEntry` in `runtime-release-fetch.ts`.
    * Carried up to the connect so the environment can say it launched offline.
    */
   readonly offlineCache: boolean;
