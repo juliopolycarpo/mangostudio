@@ -65,14 +65,21 @@ export async function readRuntimeFile(
   }
 
   if (totalLines === 0) {
+    // An empty text file still has line structure: zero lines, which the model
+    // was shown. That is not the byte-view "no lines observed" state. A later
+    // replace_range fails because the range is empty, not because numbering is
+    // unknown.
     return {
       content: '',
       path: params.inputPath,
       size,
       sha256: recordFileRead(params.chatId, params.resolvedPath, bytes, mtimeMs, {
-        startLine: 1,
-        endLine: 0,
-        totalLines: 0,
+        kind: 'window',
+        range: {
+          startLine: 1,
+          endLine: 0,
+          totalLines: 0,
+        },
       }),
       ...NO_LINE_STRUCTURE,
     };
@@ -85,9 +92,12 @@ export async function readRuntimeFile(
     path: params.inputPath,
     size,
     sha256: recordFileRead(params.chatId, params.resolvedPath, bytes, mtimeMs, {
-      startLine,
-      endLine: window.endLine,
-      totalLines,
+      kind: 'window',
+      range: {
+        startLine,
+        endLine: window.endLine,
+        totalLines,
+      },
     }),
     totalLines,
     startLine,
@@ -132,9 +142,12 @@ async function readByteView(
     content: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString(view),
     path: params.inputPath,
     size: bytes.byteLength,
-    // No observed range: the view holds every byte, so this is a complete
-    // observation and write_file's guard accepts it.
-    sha256: recordFileRead(params.chatId, params.resolvedPath, bytes, mtimeMs),
+    // Every byte was observed, so write_file's guard accepts this. Line numbers
+    // were not: a hex/base64 view has no line structure, and replace_range must
+    // not infer them. Re-read as text before a line-addressed edit.
+    sha256: recordFileRead(params.chatId, params.resolvedPath, bytes, mtimeMs, {
+      kind: 'byteView',
+    }),
     ...NO_LINE_STRUCTURE,
     view,
   };

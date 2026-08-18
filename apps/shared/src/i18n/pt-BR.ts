@@ -3083,6 +3083,10 @@ export const messages = {
       zsh: 'Zsh',
       powershell: 'PowerShell',
     },
+    errors: {
+      lineNumbersUnobserved:
+        'Os números de linha de "{path}" nunca foram observados: a última leitura foi uma visão de bytes (hex ou base64), que não atribui numeração. Leia o arquivo novamente como texto com read_file primeiro e então tente substituir este trecho.',
+    },
   },
 
   errors: {

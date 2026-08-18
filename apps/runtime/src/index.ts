@@ -67,6 +67,7 @@ export {
   assertLineNumbersCurrent,
   clearFileFreshness,
   FileNotReadError,
+  type FileReadObservation,
   forgetFile,
   type ObservedLineRange,
   PartialReadError,
@@ -76,6 +77,7 @@ export {
   rekeyFile,
   StaleFileError,
   StaleLineNumbersError,
+  UnobservedLineNumbersError,
   withPathLocks,
 } from './services/file-freshness';
 export { GrepPatternError } from './services/fs/grep';

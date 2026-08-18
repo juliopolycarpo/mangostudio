@@ -45,11 +45,12 @@ const definition = {
   name: REPLACE_RANGE_TOOL_NAME,
   description:
     'Replaces a 1-indexed inclusive line range in an existing text file. Line numbers refer ' +
-    'to the file as last read with read_file. The file must be read completely first. If the ' +
-    'file is stale, re-read it before retrying. The replacement may contain any number of lines ' +
-    'or be empty to delete the range. A call that changes the line count renumbers every line ' +
-    'after the range it replaced, so the tool then refuses later ranges reaching past that ' +
-    'point until the file is read again.',
+    'to the file as last read with read_file as text. A hex or base64 read does not ' +
+    'establish line numbers; re-read as text before replacing a range. The file must be read ' +
+    'completely first. If the file is stale, re-read it before retrying. The replacement may ' +
+    'contain any number of lines or be empty to delete the range. A call that changes the ' +
+    'line count renumbers every line after the range it replaced, so the tool then refuses ' +
+    'later ranges reaching past that point until the file is read again.',
   parameters: {
     type: 'object',
     properties: {

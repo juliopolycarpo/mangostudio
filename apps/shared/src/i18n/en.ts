@@ -3087,6 +3087,10 @@ export const messages: Messages = {
       zsh: 'Zsh',
       powershell: 'PowerShell',
     },
+    errors: {
+      lineNumbersUnobserved:
+        'Line numbers for "{path}" were never observed: the last read was a byte view (hex or base64), which does not assign line numbers. Re-read the file as text with read_file first, then retry replacing this range.',
+    },
   },
 
   errors: {

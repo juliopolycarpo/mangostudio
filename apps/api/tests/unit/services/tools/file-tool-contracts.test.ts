@@ -8,11 +8,18 @@
  */
 
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { executeDeleteFile } from '../../../../src/services/tools/builtin/delete-file';
 import { executeGlob } from '../../../../src/services/tools/builtin/glob';
 import { executeGrep } from '../../../../src/services/tools/builtin/grep';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
+import { executeReplaceRange } from '../../../../src/services/tools/builtin/replace-range';
+import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
+import {
+  StaleLineNumbersError,
+  UnobservedLineNumbersError,
+} from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { useToolRegistry } from './support/tool-registry-harness';
 
@@ -109,5 +116,118 @@ describe('one file classifies the same way for every tool', () => {
 
     expect(grepped.matches.map((match) => match.file)).toEqual(['very-late-nul.dat']);
     expect(read.content).toContain('marker');
+  });
+});
+
+describe('a byte view does not license line-addressed edits', () => {
+  async function seedText(name: string, content: string): Promise<string> {
+    const filePath = harness.path(name);
+    await Bun.write(filePath, content);
+    return filePath;
+  }
+
+  it.each(['hex', 'base64'] as const)(
+    'refuses replace_range after a %s read of a text file',
+    async (view) => {
+      const filePath = await seedText(`notes-${view}.txt`, 'one\ntwo\n');
+
+      await executeReadFile({ path: filePath, view }, context());
+      const error = await executeReplaceRange(
+        { path: filePath, startLine: 1, endLine: 1, content: 'ONE' },
+        context()
+      ).catch((thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(UnobservedLineNumbersError);
+      expect((error as Error).message).toMatch(/re-read the file as text/i);
+      expect(await Bun.file(filePath).text()).toBe('one\ntwo\n');
+    }
+  );
+
+  it('still replaces a range after a text read', async () => {
+    const filePath = await seedText('plain.txt', 'one\ntwo\n');
+
+    await executeReadFile({ path: filePath }, context());
+    await executeReplaceRange(
+      { path: filePath, startLine: 1, endLine: 1, content: 'ONE' },
+      context()
+    );
+
+    expect(await Bun.file(filePath).text()).toBe('ONE\ntwo\n');
+  });
+
+  it('re-establishes line numbers when a text read follows a byte view', async () => {
+    const filePath = await seedText('then-text.txt', 'one\ntwo\n');
+
+    await executeReadFile({ path: filePath, view: 'hex' }, context());
+    await executeReadFile({ path: filePath }, context());
+    await executeReplaceRange(
+      { path: filePath, startLine: 1, endLine: 1, content: 'ONE' },
+      context()
+    );
+
+    expect(await Bun.file(filePath).text()).toBe('ONE\ntwo\n');
+  });
+
+  it('does not let a byte view plus a partial text window license an unobserved line', async () => {
+    const filePath = await seedText('partial-after-hex.txt', 'one\ntwo\nthree\n');
+
+    await executeReadFile({ path: filePath, view: 'hex' }, context());
+    await executeReadFile({ path: filePath, maxLines: 1 }, context());
+    const outside = await executeReplaceRange(
+      { path: filePath, startLine: 2, endLine: 2, content: 'TWO' },
+      context()
+    ).catch((thrown: unknown) => thrown);
+
+    expect(outside).toBeInstanceOf(StaleLineNumbersError);
+    expect(await Bun.file(filePath).text()).toBe('one\ntwo\nthree\n');
+
+    await executeReplaceRange(
+      { path: filePath, startLine: 1, endLine: 1, content: 'ONE' },
+      context()
+    );
+    expect(await Bun.file(filePath).text()).toBe('ONE\ntwo\nthree\n');
+  });
+
+  it('still lets write_file and delete_file proceed after a byte view', async () => {
+    const writable = await seedText('overwrite.txt', 'old\n');
+    const deletable = await seedText('remove.txt', 'gone\n');
+
+    await executeReadFile({ path: writable, view: 'hex' }, context());
+    const written = await executeWriteFile({ path: writable, content: 'new\n' }, context());
+    expect(written.created).toBe(false);
+    expect(await Bun.file(writable).text()).toBe('new\n');
+
+    await executeReadFile({ path: deletable, view: 'hex' }, context());
+    await executeDeleteFile({ path: deletable }, context());
+    expect(existsSync(deletable)).toBe(false);
+  });
+
+  it('refuses replace_range on a binary file before splicing, not via the NUL check', async () => {
+    const filePath = harness.path('image.bin');
+    const original = new Uint8Array([0x61, 0x0a, 0x00, 0x62, 0x0a]);
+    await Bun.write(filePath, original);
+
+    await executeReadFile({ path: filePath, view: 'hex' }, context());
+    const error = await executeReplaceRange(
+      { path: filePath, startLine: 1, endLine: 1, content: 'x' },
+      context()
+    ).catch((thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(UnobservedLineNumbersError);
+    expect((error as Error).message).not.toMatch(/NUL byte/);
+    expect(await Bun.file(filePath).bytes()).toEqual(original);
+  });
+
+  it('keeps an empty text read numbered, so replace_range still fails on the range', async () => {
+    const filePath = await seedText('empty.txt', '');
+
+    await executeReadFile({ path: filePath }, context());
+    const error = await executeReplaceRange(
+      { path: filePath, startLine: 1, endLine: 1, content: 'x' },
+      context()
+    ).catch((thrown: unknown) => thrown);
+
+    expect(error).not.toBeInstanceOf(UnobservedLineNumbersError);
+    expect((error as Error).message).toMatch(/Invalid line range/);
   });
 });

@@ -122,6 +122,7 @@ import {
   ShellExecutionError,
   StaleFileError,
   StaleLineNumbersError,
+  UnobservedLineNumbersError,
 } from '@mangostudio/runtime';
 import { ExternalAgentEventEnvelopeSchema } from '@mangostudio/shared/external-agents';
 import type {
@@ -711,6 +712,8 @@ function translateRuntimeError(error: unknown): Error {
         new StaleLineNumbersError(resolvedPath, detailNumber(error, 'validThroughLine')),
         error.message
       );
+    case 'unobserved_line_numbers':
+      return withMessage(new UnobservedLineNumbersError(resolvedPath), error.message);
     case 'shell_execution':
       return new ShellExecutionError(error.message);
     case 'snapshot_conflict':
