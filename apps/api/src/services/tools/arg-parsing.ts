@@ -152,6 +152,8 @@ export function getBoundedOptionalInteger(
  *
  * // Usage: const normalized = stripNullOptionals(args);
  */
+export function stripNullOptionals(value: Record<string, unknown>): Record<string, unknown>;
+export function stripNullOptionals(value: unknown): unknown;
 export function stripNullOptionals(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(stripNullOptionals);
   if (!value || typeof value !== 'object') return value;

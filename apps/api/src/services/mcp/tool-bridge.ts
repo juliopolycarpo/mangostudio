@@ -10,6 +10,7 @@ import type { Kysely } from 'kysely';
 import type { Database, McpServerSelect } from '../../db/types';
 import { createDiagnosticLogger } from '../../lib/logger';
 import type { ToolDefinition } from '../providers/types';
+import { stripNullOptionals } from '../tools/arg-parsing';
 import { getMcpClient, listMcpToolsCached } from './connection-manager';
 import { toMcpRuntimeConfig } from './runtime-config';
 import {
@@ -234,7 +235,10 @@ export async function executeResolvedMcpTool(
   }
 
   const handle = await getMcpClient(userId, toMcpRuntimeConfig(target.server));
-  return handle.callTool(target.parsed.toolName, args, {
+  // Responses strict-function output spells omission as `null`. Built-in
+  // executors already read that as absent; MCP servers receive the payload
+  // verbatim, so drop those keys before `callTool`.
+  return handle.callTool(target.parsed.toolName, stripNullOptionals(args), {
     timeoutMs: target.server.timeoutMs ?? MCP_TOOL_EXECUTE_TIMEOUT_MS,
     signal: options.signal,
     toolCallId: options.toolCallId,

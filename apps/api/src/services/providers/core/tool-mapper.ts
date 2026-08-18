@@ -51,9 +51,15 @@ export function toPlainJsonSchema(schema: Record<string, unknown>): Record<strin
  *   - lists every `properties` key in `required`
  *   - widens keys that were not previously required into a nullable type
  *     union (`['string', 'null']`) and into `enum` when one is present
- *   - sets `additionalProperties: false`
+ *   - sets `additionalProperties: false` on structured objects
  *   - drops `minLength`/`maxLength`, the keywords the strict subset rejects
  *     that still have an executor fallback
+ *
+ * An object that already permits unspecified properties, such as
+ * `additionalProperties` true or a value schema, or `{ type: 'object' }` with
+ * no `properties` map, is left open. Closing it would advertise a closed bag
+ * the model cannot fill. `isStrictCompatible` then refuses strict mode for
+ * that tool.
  *
  * Composition keywords (`oneOf`, `anyOf`, `allOf`, `not`, `$ref`) are left
  * in place. Dropping them would ship a schema that silently lost its
@@ -62,11 +68,20 @@ export function toPlainJsonSchema(schema: Record<string, unknown>): Record<strin
  *
  * A `properties` map's keys are argument names, never keywords: a tool may
  * declare an argument called `maxLength` or `not` without losing either.
+ * Values under `const`, `enum`, `default`, and `examples` are instances, not
+ * subschemas, and are copied through.
  */
 export function toStrictSchema(schema: Record<string, unknown>): Record<string, unknown> {
   const strict = strictSchemaNode(schema);
   return isPlainObject(strict) ? strict : schema;
 }
+
+/**
+ * Keywords whose values are instance data, not nested schemas. Walking them
+ * would rewrite an enum value `{ maxLength: 5 }` as `{}` or treat a `const`
+ * object's keys as schema keywords.
+ */
+const INSTANCE_VALUE_KEYWORDS = new Set(['const', 'enum', 'default', 'examples']);
 
 function plainSchemaNode(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(plainSchemaNode);
@@ -79,6 +94,8 @@ function plainSchemaNode(node: unknown): unknown {
     } else if (key === 'enum' && Array.isArray(value)) {
       const kept = value.filter((entry) => entry !== null);
       result[key] = kept.length > 0 ? kept : value;
+    } else if (INSTANCE_VALUE_KEYWORDS.has(key)) {
+      result[key] = value;
     } else if (key === 'properties' && isPlainObject(value)) {
       // Recurse through the map's values, never its keys: those are argument
       // names, and one may collide with a schema keyword.
@@ -119,6 +136,10 @@ function strictSchemaNode(node: unknown): unknown {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(node)) {
     if (key === 'minLength' || key === 'maxLength') continue;
+    if (INSTANCE_VALUE_KEYWORDS.has(key)) {
+      result[key] = value;
+      continue;
+    }
     if (key === 'properties' && isPlainObject(value)) {
       // Recurse through the map's values, never its keys: those are argument
       // names, and one may collide with a schema keyword.
@@ -131,6 +152,10 @@ function strictSchemaNode(node: unknown): unknown {
   }
 
   if (!isObjectSchemaType(node.type)) return result;
+  // A free-form object (`{ type: 'object' }`) or one that names extra keys
+  // (`additionalProperties: true` or a value schema) cannot be closed without
+  // changing what the tool accepts. Leave it open; strict mode is refused.
+  if (objectAllowsUnspecifiedProperties(node)) return result;
 
   result.additionalProperties = false;
   const properties = result.properties;
@@ -225,14 +250,16 @@ function isStrictNode(node: unknown): boolean {
     }
   }
 
-  return Object.entries(obj).every(([key, value]) =>
+  return Object.entries(obj).every(([key, value]) => {
+    if (INSTANCE_VALUE_KEYWORDS.has(key)) return true;
     // A `properties` map is a dictionary of argument names, not a schema: its
     // own keys must not be read as keywords, or a tool that happens to declare
     // an argument called `maxLength` or `not` loses strict mode.
-    key === 'properties' && isPlainObject(value)
-      ? Object.values(value).every(isStrictNode)
-      : isStrictNode(value)
-  );
+    if (key === 'properties' && isPlainObject(value)) {
+      return Object.values(value).every(isStrictNode);
+    }
+    return isStrictNode(value);
+  });
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -247,6 +274,21 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  */
 function isObjectSchemaType(type: unknown): boolean {
   return type === 'object' || (Array.isArray(type) && type.includes('object'));
+}
+
+/**
+ * True when this object node is an open bag rather than a closed struct.
+ *
+ * Structured objects that merely omit `additionalProperties` still get closed:
+ * that is the dialect conversion. Explicit `true` / a value schema, and a
+ * node with no `properties` map at all (`metadata: { type: 'object' }`), keep
+ * their source semantics.
+ */
+function objectAllowsUnspecifiedProperties(node: Record<string, unknown>): boolean {
+  const additional = node.additionalProperties;
+  if (additional === false) return false;
+  if (additional !== undefined) return true;
+  return !('properties' in node);
 }
 
 /**
@@ -275,18 +317,20 @@ const UNSUPPORTED_STRICT_KEYWORDS = [
  *
  * Each tool's `strict` flag is set individually on the derived schema: tools
  * whose transform satisfies the strict subset get `strict: true` (the model
- * is forced to match the schema exactly); others keep `strict: false` to
- * preserve compatibility.
+ * is forced to match the schema exactly). A transform that still fails the
+ * subset is discarded. The original parameters go out with `strict: false`,
+ * so an optional `oneOf` is not rewritten into a required non-nullable field.
  */
 export function toolDefsToResponsesAPI(defs: ToolDefinition[]): Array<Record<string, unknown>> {
   return defs.map((def) => {
-    const parameters = toStrictSchema(def.parameters);
+    const derived = toStrictSchema(def.parameters);
+    const strict = isStrictCompatible(derived);
     return {
       type: 'function',
       name: def.name,
       description: def.description,
-      parameters,
-      strict: isStrictCompatible(parameters),
+      parameters: strict ? derived : def.parameters,
+      strict,
     };
   });
 }

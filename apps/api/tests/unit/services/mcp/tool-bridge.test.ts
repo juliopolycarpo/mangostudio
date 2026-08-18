@@ -265,6 +265,35 @@ describe('executeMcpTool', () => {
     ]);
   });
 
+  it('drops derived null optionals before forwarding args to the server', async () => {
+    const userId = nextUserId();
+    await insertServer(userId, 'github');
+    const calls: Array<Record<string, unknown>> = [];
+    setMcpClientConnectorForTest(() =>
+      Promise.resolve(
+        makeHandle({
+          callTool: (_name, args) => {
+            calls.push(args);
+            return Promise.resolve({
+              contentText: 'ok',
+              isError: false,
+              rawContentKinds: ['text'],
+              content: [{ type: 'text' as const, text: 'ok' }],
+            });
+          },
+        })
+      )
+    );
+
+    await executeMcpTool(getDb(), userId, 'mcp__github__create_issue', {
+      title: 'bug',
+      assignee: null,
+      labels: { extra: null, keep: 'p1' },
+    });
+
+    expect(calls).toEqual([{ title: 'bug', labels: { keep: 'p1' } }]);
+  });
+
   it('defaults the timeout when the server row has none', async () => {
     const userId = nextUserId();
     await insertServer(userId, 'srv');

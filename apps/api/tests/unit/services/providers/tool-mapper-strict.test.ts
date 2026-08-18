@@ -520,6 +520,87 @@ describe('toStrictSchema', () => {
     });
     expect(isStrictCompatible(withOneOf)).toBe(false);
   });
+
+  it('leaves free-form object nodes open instead of closing them', () => {
+    const strict = toStrictSchema({
+      type: 'object',
+      properties: {
+        metadata: { type: 'object' },
+        tags: { type: 'object', additionalProperties: { type: 'string' } },
+      },
+      required: ['metadata'],
+      additionalProperties: false,
+    });
+
+    expect(schemaProperty(strict, 'properties', 'metadata')).toEqual({ type: 'object' });
+    expect(schemaProperty(strict, 'properties', 'tags')).toEqual({
+      type: ['object', 'null'],
+      additionalProperties: { type: 'string' },
+    });
+    expect(isStrictCompatible(strict)).toBe(false);
+  });
+
+  it('does not walk const, enum, default, or examples values as subschemas', () => {
+    const strict = toStrictSchema({
+      type: 'object',
+      properties: {
+        payload: {
+          type: 'string',
+          enum: [{ maxLength: 5 }],
+          const: { minLength: 1 },
+          default: { type: 'object' },
+          examples: [{ not: true }],
+        },
+      },
+      required: ['payload'],
+      additionalProperties: false,
+    });
+
+    expect(schemaProperty(strict, 'properties', 'payload')).toEqual({
+      type: 'string',
+      enum: [{ maxLength: 5 }],
+      const: { minLength: 1 },
+      default: { type: 'object' },
+      examples: [{ not: true }],
+    });
+  });
+});
+
+describe('toolDefsToResponsesAPI', () => {
+  it('sends the source schema when the derived one is not strict-compatible', () => {
+    const def: ToolDefinition = {
+      name: 'search',
+      description: 'search',
+      parameters: {
+        type: 'object',
+        properties: {
+          q: { oneOf: [{ type: 'string' }, { type: 'number' }] },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    };
+
+    const [mapped] = toolDefsToResponsesAPI([def]);
+    expect(mapped?.strict).toBe(false);
+    expect(mapped?.parameters).toEqual(def.parameters);
+  });
+
+  it('does not mark a free-form object tool as strict', () => {
+    const def: ToolDefinition = {
+      name: 'annotate',
+      description: 'annotate',
+      parameters: {
+        type: 'object',
+        properties: { metadata: { type: 'object' } },
+        required: ['metadata'],
+      },
+    };
+
+    const [mapped] = toolDefsToResponsesAPI([def]);
+    expect(mapped?.strict).toBe(false);
+    expect(mapped?.parameters).toEqual(def.parameters);
+  });
 });
 
 describe('toPlainJsonSchema(toStrictSchema(s)) round-trip', () => {
