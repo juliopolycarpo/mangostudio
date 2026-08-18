@@ -91,7 +91,21 @@ interface EventBuffer {
   subscribe(): AsyncIterableIterator<InstallStreamEvent>;
 }
 
+/**
+ * What a streamed run is doing, which is not the same question as whether one
+ * is running.
+ *
+ * One run per environment owns the log stream, whatever its kind — that is what
+ * the conflict checks read the map for. Only an `install` also means "this
+ * environment is mid-mutation, do not touch it": a `download` writes to the
+ * hub's own version-keyed cache and nothing else, so blocking an edit or a
+ * delete on it told the user an install was in progress when the whole point of
+ * the action was that nothing was being installed.
+ */
+type ActiveRunKind = 'install' | 'download';
+
 interface ActiveRun {
+  readonly kind: ActiveRunKind;
   readonly runId: string;
   readonly userId: string;
   readonly environmentId: string;
@@ -154,7 +168,18 @@ export interface RuntimeLifecycleService {
   ): Promise<RuntimeLifecycleStartResponse>;
   getRunStream(runId: string, userId: string): Promise<AsyncIterable<InstallStreamEvent> | null>;
   cancel(runId: string, userId: string): Promise<boolean>;
+  /**
+   * Whether something is writing to this environment's machine right now, which
+   * is what makes editing or deleting it unsafe. A staged download is not that:
+   * see {@link ActiveRunKind}.
+   */
   hasActiveInstall(userId: string, environmentId: string): boolean;
+  /**
+   * Stops whatever run this environment has, by environment rather than by run
+   * id. For the caller that is removing the environment itself and has no run
+   * id to hand — see {@link EnvironmentService.remove}.
+   */
+  cancelForEnvironment(userId: string, environmentId: string): boolean;
 }
 
 export interface RuntimeLifecycleServiceDeps {
@@ -274,6 +299,24 @@ export function createRuntimeLifecycleService(
   const installKey = (userId: string, environmentId: string): string =>
     `${userId}:${environmentId}`;
 
+  /**
+   * Refuses a second run for an environment that already has one.
+   *
+   * Reads the whole map, not just installs: a run owns the environment's log
+   * stream, and two of them writing to it is the conflict this prevents
+   * regardless of what either is doing. The message names which kind is in the
+   * way, because "cancel it or wait" is only actionable if you can find it.
+   */
+  const refuseSecondRun = (userId: string, environmentId: string): void => {
+    const active = activeByEnvironment.get(installKey(userId, environmentId));
+    if (!active) return;
+    throw new RuntimeLifecycleConflictError(
+      active.kind === 'download'
+        ? `A runtime download is already running for environment "${environmentId}".`
+        : `A runtime install is already running for environment "${environmentId}".`
+    );
+  };
+
   const rememberStream = (runId: string, userId: string, stream: EventBuffer): void => {
     recentStreams.set(runId, { userId, stream });
     if (recentStreams.size <= MAX_RECENT_STREAMS) return;
@@ -285,8 +328,9 @@ export function createRuntimeLifecycleService(
   };
 
   /** Registers a new streamed run as the one active run for its environment. */
-  const beginRun = (userId: string, environmentId: string): ActiveRun => {
+  const beginRun = (userId: string, environmentId: string, kind: ActiveRunKind): ActiveRun => {
     const run: ActiveRun = {
+      kind,
       runId: generateId(),
       userId,
       environmentId,
@@ -357,13 +401,9 @@ export function createRuntimeLifecycleService(
       );
     }
 
-    if (activeByEnvironment.has(installKey(userId, environmentId))) {
-      throw new RuntimeLifecycleConflictError(
-        `A runtime install is already running for environment "${environmentId}".`
-      );
-    }
+    refuseSecondRun(userId, environmentId);
 
-    const run = beginRun(userId, environmentId);
+    const run = beginRun(userId, environmentId, 'download');
     const { runId, stream, abort } = run;
 
     stream.publish({
@@ -552,13 +592,9 @@ export function createRuntimeLifecycleService(
         );
       }
 
-      if (activeByEnvironment.has(installKey(userId, environmentId))) {
-        throw new RuntimeLifecycleConflictError(
-          `A runtime install is already running for environment "${environmentId}".`
-        );
-      }
+      refuseSecondRun(userId, environmentId);
 
-      const run = beginRun(userId, environmentId);
+      const run = beginRun(userId, environmentId, 'install');
       const { runId, stream, abort } = run;
 
       const forceReplace = action === 'reinstall';
@@ -710,13 +746,9 @@ export function createRuntimeLifecycleService(
           409
         );
       }
-      if (activeByEnvironment.has(installKey(userId, environmentId))) {
-        throw new RuntimeLifecycleConflictError(
-          `A runtime install is already running for environment "${environmentId}".`
-        );
-      }
+      refuseSecondRun(userId, environmentId);
 
-      const run = beginRun(userId, environmentId);
+      const run = beginRun(userId, environmentId, 'install');
       run.stream.publish({
         type: 'log',
         stream: 'system',
@@ -789,7 +821,16 @@ export function createRuntimeLifecycleService(
     },
 
     hasActiveInstall(userId, environmentId) {
-      return activeByEnvironment.has(installKey(userId, environmentId));
+      return activeByEnvironment.get(installKey(userId, environmentId))?.kind === 'install';
+    },
+
+    cancelForEnvironment(userId, environmentId) {
+      const run = activeByEnvironment.get(installKey(userId, environmentId));
+      if (!run) return false;
+      // Aborted rather than finished here, for the reason `cancel` gives: the
+      // run's own body unwinds it once whatever it holds is released.
+      run.abort.abort();
+      return true;
     },
   };
 }
