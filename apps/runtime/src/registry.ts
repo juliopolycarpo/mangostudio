@@ -13,6 +13,7 @@ import {
   type ExternalAgentSupervisorOptions,
 } from './services/external-agents/supervisor';
 import { runtimeFsService } from './services/fs';
+import { closeGrepPool } from './services/fs/grep-scanner';
 import { execGit } from './services/git';
 import { createInstallService } from './services/install';
 import { libraryService } from './services/library/service';
@@ -220,6 +221,9 @@ export function createRuntimeMethodHandlers(
         update.close(),
         mcp.close(),
         externalAgents.close(),
+        // The grep pool holds worker threads, not just memory: `unref` keeps
+        // them from blocking exit but does not release them.
+        closeGrepPool(),
       ]);
       const failures = results.flatMap((result) =>
         result.status === 'rejected' ? [result.reason] : []

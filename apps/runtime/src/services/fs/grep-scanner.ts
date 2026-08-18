@@ -22,9 +22,8 @@
  * a request queue in front, rather than one shared worker, is the deliberate
  * choice here: a worker terminated for an expired budget still takes down only
  * the one request it was running, the same isolation a fresh worker per call
- * gave for free. The cost that trades for is the pool's own lifecycle — idle
- * workers `unref`d so they never keep the process alive, `ref`d again for as
- * long as a request is actually in flight on them.
+ * gave for free. What it trades for is the pool's own lifecycle, handled at the
+ * `ref`/`unref` and teardown calls below.
  */
 
 import { Worker } from 'node:worker_threads';
@@ -135,35 +134,37 @@ function spawnPoolWorker(): PoolWorker {
   return entry;
 }
 
+/**
+ * Checks a worker out to a caller. Busy and ref'd travel together: a worker
+ * running a request must not be the reason the process can exit, and must not
+ * be handed to a second request.
+ */
+function checkOut(entry: PoolWorker): PoolWorker {
+  entry.busy = true;
+  entry.worker.ref();
+  return entry;
+}
+
+/** Spawns a worker already checked out to its caller and adds it to the pool. */
+function spawnCheckedOutWorker(): PoolWorker {
+  const entry = checkOut(spawnPoolWorker());
+  pool.push(entry);
+  return entry;
+}
+
 /** Removes a worker from the pool and hands a fresh one to whoever is waiting next. */
 function discard(entry: PoolWorker): void {
   pool = pool.filter((item) => item !== entry);
   void entry.worker.terminate().catch(() => undefined);
-  const waiter = waiters.shift();
-  if (waiter) {
-    const created = spawnPoolWorker();
-    created.busy = true;
-    created.worker.ref();
-    pool.push(created);
-    waiter(created);
-  }
+  // Optional call short-circuits, so no replacement is spawned with nobody waiting.
+  waiters.shift()?.(spawnCheckedOutWorker());
 }
 
 /** Hands back an idle worker, spawning one if the pool has room, or queues the request. */
 function acquire(): Promise<PoolWorker> {
   const idle = pool.find((entry) => !entry.busy);
-  if (idle) {
-    idle.busy = true;
-    idle.worker.ref();
-    return Promise.resolve(idle);
-  }
-  if (pool.length < GREP_POOL_SIZE) {
-    const created = spawnPoolWorker();
-    created.busy = true;
-    created.worker.ref();
-    pool.push(created);
-    return Promise.resolve(created);
-  }
+  if (idle) return Promise.resolve(checkOut(idle));
+  if (pool.length < GREP_POOL_SIZE) return Promise.resolve(spawnCheckedOutWorker());
   return new Promise((resolve) => {
     waiters.push(resolve);
   });
@@ -180,6 +181,22 @@ function release(entry: PoolWorker): void {
   }
   entry.busy = false;
   entry.worker.unref();
+}
+
+/**
+ * Terminates every pooled worker and clears the queue.
+ *
+ * The pool holds OS threads for the life of the process once a burst has grown
+ * it, and `unref` only stops them blocking exit — it does not release them. A
+ * runtime whose services have been closed should not still be holding four
+ * worker threads, so the registry's teardown calls this alongside the other
+ * service closers. A grep issued afterwards simply grows the pool again.
+ */
+export async function closeGrepPool(): Promise<void> {
+  const entries = pool;
+  pool = [];
+  waiters.length = 0;
+  await Promise.all(entries.map((entry) => entry.worker.terminate().catch(() => undefined)));
 }
 
 interface ScanMessage {
@@ -204,38 +221,30 @@ function runOnWorker(
     const settle = (outcome: GrepScanOutcome) => {
       clearTimeout(timer);
       worker.off('message', onMessage);
-      worker.off('error', onError);
-      worker.off('exit', onExit);
+      worker.off('error', abandon);
+      worker.off('exit', abandon);
       resolve(outcome);
     };
     const onMessage = (reply: { matches: GrepScanOutcome['matches']; moreMatches: boolean }) => {
       settle({ ...reply, incomplete: false });
       release(entry);
     };
-    const onError = () => {
-      // A worker that threw cannot be reused, and one file failing to scan
-      // is not a reason to fail the whole search — but it is also not proof
-      // that the file holds nothing, so the caller is told the scan is short.
+    // The three ways a scan ends without an answer, all handled alike. A worker
+    // that threw cannot be reused; one that exited answers nothing at all, and
+    // without this the file would sit out its whole budget and be reported as a
+    // timeout it never reached; and terminating is the only way to stop a
+    // synchronous match once the budget is gone. One file failing to scan is not
+    // a reason to fail the whole search — but it is also not proof that the file
+    // holds nothing, so the caller is told the scan is short either way.
+    const abandon = () => {
       settle(UNFINISHED);
       discard(entry);
     };
-    // A worker that exits with a scan outstanding answers nothing at all.
-    // Without this the file would sit out its whole budget and then be
-    // reported as a timeout it never reached.
-    const onExit = () => {
-      settle(UNFINISHED);
-      discard(entry);
-    };
-    const timer = setTimeout(() => {
-      // Terminating is the only way to stop a synchronous match; the worker
-      // is past the point where it could answer a message.
-      settle(UNFINISHED);
-      discard(entry);
-    }, budgetMs);
+    const timer = setTimeout(abandon, budgetMs);
 
     worker.once('message', onMessage);
-    worker.once('error', onError);
-    worker.once('exit', onExit);
+    worker.once('error', abandon);
+    worker.once('exit', abandon);
     worker.postMessage(message);
   });
 }
@@ -268,6 +277,8 @@ export function createGrepScanner(regex: RegExp): GrepScanner {
         budgetMs
       );
     },
+    // Not `async`: with the workers owned by the pool there is nothing left to
+    // await here, and biome's `useAwait` rejects an async function without one.
     close() {
       closed = true;
       return Promise.resolve();
