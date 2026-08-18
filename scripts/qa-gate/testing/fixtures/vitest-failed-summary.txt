@@ -1,0 +1,7 @@
+ FAIL  tests/unit/example.test.ts > does the thing
+AssertionError: expected true to be false
+
+ Test Files  1 failed | 143 passed (144)
+      Tests  2 failed | 1148 passed (1150)
+   Start at  12:00:00
+   Duration  10.00s

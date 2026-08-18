@@ -34,6 +34,41 @@ describe('QA gate document renderer', () => {
     expect(comment).toContain('Full repo check');
     expect(comment).not.toContain('ESLint');
     expect(comment).toContain('+0.50pp');
+    expect(comment).not.toContain('## Test failures');
+    expect(comment).not.toContain('no failure counts could be parsed');
+  });
+
+  it('leads a failed unhandled-error run with headlines before coverage tables', () => {
+    const head = makeMetrics('abcdef1234', {
+      tests: {
+        exitCode: 1,
+        durationSeconds: 165,
+        passed: 1_150,
+        root: 4,
+        frontend: 230,
+        api: 770,
+        shared: 96,
+        runtime: 57,
+        failed: 0,
+        failedFiles: 0,
+        errors: 2,
+        headlines: [
+          {
+            message: 'ReferenceError: window is not defined',
+            originatedIn: 'tests/unit/features/library/backup-list.test.tsx',
+          },
+        ],
+      },
+    });
+    const comment = renderDocument(makeMetrics('0123456789'), head);
+    const failuresAt = comment.indexOf('## Test failures');
+    const detailsAt = comment.indexOf('<summary>Metric details');
+
+    expect(failuresAt).toBeGreaterThan(0);
+    expect(failuresAt).toBeLessThan(detailsAt);
+    expect(comment).toContain('ReferenceError: window is not defined');
+    expect(comment).toContain('tests failing (exit 1, 2 unhandled errors)');
+    expect(comment).toContain('2 unhandled errors');
   });
 
   it('renders a legitimate zero denominator as n/a (0/0) without a delta', () => {

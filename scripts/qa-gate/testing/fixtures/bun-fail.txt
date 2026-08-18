@@ -1,0 +1,19 @@
+bun test v1.3.14 (0d9b296a)
+
+fail.test.ts:
+1 | import { expect, test } from 'bun:test';
+2 | test('fails', () => { expect(1).toBe(2); });
+                                    ^
+error: expect(received).toBe(expected)
+
+Expected: 2
+Received: 1
+
+      at <anonymous> (/tmp/tmp.wIFl1vA66O/fail.test.ts:2:33)
+(fail) fails [0.36ms]
+(pass) passes [0.08ms]
+
+ 1 pass
+ 1 fail
+ 2 expect() calls
+Ran 2 tests across 1 file. [66.00ms]

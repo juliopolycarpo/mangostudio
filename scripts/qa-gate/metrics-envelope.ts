@@ -133,6 +133,22 @@ const metricsSchema = Type.Object(
           api: Type.Number(),
           shared: Type.Number(),
           runtime: Type.Number(),
+          failed: Type.Optional(Type.Number()),
+          failedFiles: Type.Optional(Type.Number()),
+          errors: Type.Optional(Type.Number()),
+          headlines: Type.Optional(
+            Type.Array(
+              Type.Object(
+                {
+                  message: Type.String({ maxLength: 400 }),
+                  originatedIn: Type.Union([Type.String({ maxLength: 400 }), Type.Null()]),
+                },
+                { additionalProperties: false }
+              ),
+              { maxItems: 8 }
+            )
+          ),
+          parseMiss: Type.Optional(Type.Boolean()),
         },
         { additionalProperties: false }
       )

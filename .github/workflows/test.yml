@@ -108,4 +108,4 @@ jobs:
 
       - name: Coverage summary
         if: ${{ !cancelled() }}
-        run: bun ./scripts/qa-gate/render-coverage-summary.ts >> "$GITHUB_STEP_SUMMARY"
+        run: bun ./scripts/qa-gate/render-coverage-summary.ts test-metrics.json >> "$GITHUB_STEP_SUMMARY"

@@ -48,6 +48,9 @@ describe('unprivileged collection side', () => {
     expect(workflow).toMatch(
       /name: qa-test-metrics\n\s+path: test-metrics\.json\n\s+retention-days: 1\n/
     );
+    expect(workflow).toContain(
+      'bun ./scripts/qa-gate/render-coverage-summary.ts test-metrics.json'
+    );
     expect(workflow).toMatch(/- name: Upload coverage\n\s+if: failure\(\)/);
   });
 

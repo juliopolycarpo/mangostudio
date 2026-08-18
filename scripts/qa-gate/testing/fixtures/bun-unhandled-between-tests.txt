@@ -1,0 +1,25 @@
+bun test v1.3.14 (0d9b296a)
+
+unhandled.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+4 |   test('passes', () => {
+5 |     expect(1).toBe(1);
+6 |   });
+7 |   afterEach(() => {
+8 |     queueMicrotask(() => {
+9 |       throw new Error('boom between tests');
+                                              ^
+error: boom between tests
+      at <anonymous> (/tmp/tmp.wIFl1vA66O/unhandled.test.ts:9:43)
+-------------------------------
+
+(pass) a > passes [0.53ms]
+(pass) b > also passes [0.09ms]
+
+ 2 pass
+ 0 fail
+ 1 error
+ 2 expect() calls
+Ran 2 tests across 1 file. [37.00ms]

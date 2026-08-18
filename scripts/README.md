@@ -87,7 +87,8 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 `pr-qa-report.yml` workflow with default-branch tooling only:
 
 - `collect-test-metrics.ts` — emit the test fragment (suite outcome, duration,
-  coverage summaries) right after CI's single `bun run test --coverage` pass.
+  failure counts and error headlines, coverage summaries) right after CI's
+  single `bun run test --coverage` pass.
 - `collect.ts` + `collect/*` — merge the test fragment with LoC, bundle,
   dependency, duplication, and tooling metrics into the versioned `qa-metrics`
   envelope (`metrics-envelope.ts`), uploaded for PR heads and main baselines.

@@ -18,7 +18,13 @@ const formatSuiteBreakdown = (suite: TestSuiteStats | null): string => {
     `runtime ${formatNumber(suite.runtime)}`,
   ];
   const status = suite.exitCode == null ? 'status n/a' : `exit ${suite.exitCode}`;
-  return `${formatNumber(suite.passed)} passed (${parts.join(' / ')}) · ${status} · ${formatDuration(suite)}`;
+  const extras: string[] = [];
+  if (suite.parseMiss) extras.push('failure counts not parsed');
+  if (suite.failed) extras.push(`${formatNumber(suite.failed)} failed`);
+  if (suite.failedFiles) extras.push(`${formatNumber(suite.failedFiles)} failed files`);
+  if (suite.errors) extras.push(`${formatNumber(suite.errors)} unhandled errors`);
+  const extra = extras.length > 0 ? ` · ${extras.join(' · ')}` : '';
+  return `${formatNumber(suite.passed)} passed (${parts.join(' / ')}) · ${status} · ${formatDuration(suite)}${extra}`;
 };
 
 export const renderTestsSection = (base: Metrics | null, head: Metrics | null): string => {

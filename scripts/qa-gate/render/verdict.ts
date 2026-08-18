@@ -48,10 +48,18 @@ const bundleItem = (base: Metrics | null, head: Metrics | null): string | null =
 
 const testSuiteItem = (head: Metrics | null): string | null => {
   const stats = getTestSuite(head);
-  if (stats && stats.exitCode !== 0 && stats.exitCode !== null) {
-    return `tests failing (exit ${stats.exitCode})`;
+  if (!stats || stats.exitCode === 0 || stats.exitCode === null) return null;
+  if (stats.parseMiss) {
+    return `tests failing (exit ${stats.exitCode}; no failure counts could be parsed from the log)`;
   }
-  return null;
+  const bits = [`exit ${stats.exitCode}`];
+  if (stats.errors) {
+    bits.push(`${stats.errors} unhandled error${stats.errors === 1 ? '' : 's'}`);
+  }
+  if (stats.failed) {
+    bits.push(`${stats.failed} failed`);
+  }
+  return `tests failing (${bits.join(', ')})`;
 };
 
 /**

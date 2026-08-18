@@ -411,6 +411,56 @@ When raising or repairing coverage, prioritize release-critical surfaces first:
 - Chat orchestration and streaming UI states
 - Gallery loading, empty, pagination, and download flows
 
+## Unhandled Errors With Green Test Counts
+
+A frontend Vitest run can print every file and every test as passed, then an
+`Errors N errors` line, and still exit 1. That is not a flake. Do not re-run it.
+CI already failed correctly. The green counts are why it looks like noise.
+
+```
+Test Files  144 passed (144)
+     Tests  1150 passed (1150)
+    Errors  2 errors
+```
+
+The mechanism is always the same. Something schedules a timer that outlives the
+component that scheduled it. Vitest disposes that file's jsdom environment first.
+The callback then runs against a global that is gone: `ReferenceError: window is
+not defined`, attributed to whichever file happened to be running. It only
+reproduces when the suite is loaded enough for the timer to land in that gap, so
+it does not show up in a local single-file run, and re-running the job in CI is
+a coin flip.
+
+### Where to look
+
+The stack in the job log names the leaking library. The "originated in" file is
+where the run was when the timer fired, not where the timer was scheduled.
+Treating that path as the owner is half of why this class is expensive.
+
+### How to find the owner
+
+Log inside the suspect hook or module and run the whole suite. The file that
+reports the error is usually not the one that scheduled the timer.
+
+### The rule
+
+A component that schedules a timer clears it on unmount. A test never mounts a
+third-party client whose teardown is deferred.
+
+### Known instances
+
+- `4d936696`. `ToastProvider` scheduled a 4s auto-dismiss `setTimeout` per toast
+  and never cleared it. The originated-in file was
+  `tests/unit/components/git-panel.test.tsx`.
+- `b96e319a`. `useRealtimeInvalidation` reads the Better Auth session, so every
+  component that syncs anything subscribed the session atom. nanostores tears an
+  atom down 1s after its last listener leaves, and that disposer removes a
+  `window` event listener. 18 test files mounted the real client. The
+  originated-in file was `tests/unit/features/library/backup-list.test.tsx`.
+
+The QA report and the Test job step summary lead with these error headlines when
+the suite failed, and link here.
+
 ## CI Artifact Retention
 
 CI artifacts fall into four retention classes; keep new uploads aligned with them:

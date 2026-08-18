@@ -302,6 +302,59 @@ escreve LCOV da lógica pura em `.mango/artifacts/coverage/frontend/bun/`:
 bun run --filter @mangostudio/frontend test:coverage
 ```
 
+## Erros Não Tratados Com Contagens Verdes
+
+Uma execução Vitest do frontend pode imprimir todos os arquivos e todos os
+testes como passed, depois uma linha `Errors N errors`, e ainda assim sair com
+código 1. Isso não é flake. Não rode de novo. O CI já falhou corretamente. As
+contagens verdes é que fazem parecer ruído.
+
+```
+Test Files  144 passed (144)
+     Tests  1150 passed (1150)
+    Errors  2 errors
+```
+
+O mecanismo é sempre o mesmo. Algo agenda um timer que sobrevive ao componente
+que o criou. O Vitest descarta o jsdom daquele arquivo primeiro. O callback
+então corre contra um global que já não existe: `ReferenceError: window is not
+defined`, atribuído a qualquer arquivo que estivesse rodando. Só reproduz quando
+a suíte está carregada o bastante para o timer cair nesse intervalo, então não
+aparece num teste local de um arquivo só, e reexecutar o job no CI é cara ou
+coroa.
+
+### Onde olhar
+
+A stack no log do job nomeia a biblioteca que vazou. O arquivo "originated in"
+é onde a execução estava quando o timer disparou, não onde o timer foi
+agendado. Tratar esse caminho como o dono do bug é metade do custo dessa
+classe.
+
+### Como achar o dono
+
+Faça log dentro do hook ou módulo suspeito e rode a suíte inteira. O arquivo
+que reporta o erro quase nunca é o que agendou o timer.
+
+### A regra
+
+Um componente que agenda um timer limpa esse timer no unmount. Um teste nunca
+monta um cliente de terceiro cujo teardown é adiado.
+
+### Instâncias conhecidas
+
+- `4d936696`. `ToastProvider` agendava um `setTimeout` de 4s por toast e nunca
+  o limpava. O arquivo originated-in foi
+  `tests/unit/components/git-panel.test.tsx`.
+- `b96e319a`. `useRealtimeInvalidation` lê a sessão do Better Auth, então
+  todo componente que sincroniza qualquer coisa subscrevia o atom de sessão.
+  O nanostores derruba um atom 1s depois do último listener sair, e esse
+  disposer remove um listener de `window`. 18 arquivos de teste montavam o
+  cliente real. O arquivo originated-in foi
+  `tests/unit/features/library/backup-list.test.tsx`.
+
+O relatório de QA e o step summary do job Test começam por esses headlines
+quando a suíte falhou, e apontam para cá.
+
 ## Retenção De Artefatos No CI
 
 Os artefatos de CI se dividem em quatro classes de retenção; mantenha novos uploads alinhados a elas:

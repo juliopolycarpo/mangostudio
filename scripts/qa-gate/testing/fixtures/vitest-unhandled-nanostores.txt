@@ -1,0 +1,34 @@
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Unhandled Errors [49m[22m[31m⎯⎯⎯⎯⎯⎯[39m
+[31m[1m
+Vitest caught 2 unhandled errors during the test run.
+This might cause false positive tests. Resolve unhandled errors to make sure your tests are not affected.[22m[39m
+
+[31m⎯⎯⎯⎯⎯[39m[1m[41m Uncaught Exception [49m[22m[31m⎯⎯⎯⎯⎯[39m
+[31m[1mReferenceError[22m: window is not defined[39m
+[90m [2m❯[22m Object.cleanupBroadcastSetup ../../node_modules/.bun/better-auth@1.6.26+867b1358964fce74/node_modules/better-auth/dist/client/broadcast-channel.mjs:[2m35:4[22m[39m
+[90m [2m❯[22m Object.cleanup ../../node_modules/.bun/better-auth@1.6.26+867b1358964fce74/node_modules/better-auth/dist/client/session-refresh.mjs:[2m109:10[22m[39m
+[90m [2m❯[22m ../../node_modules/.bun/better-auth@1.6.26+867b1358964fce74/node_modules/better-auth/dist/client/session-atom.mjs:[2m144:19[22m[39m
+[90m [2m❯[22m Timeout._onTimeout ../../node_modules/.bun/nanostores@1.2.0/node_modules/nanostores/lifecycle/index.js:[2m139:55[22m[39m
+[90m [2m❯[22m listOnTimeout node:internal/timers:[2m585:17[22m[39m
+[90m [2m❯[22m processTimers node:internal/timers:[2m521:7[22m[39m
+
+[31mThis error originated in "[1mtests/unit/features/library/backup-list.test.tsx[22m" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.[39m
+
+[31m⎯⎯⎯⎯⎯[39m[1m[41m Uncaught Exception [49m[22m[31m⎯⎯⎯⎯⎯[39m
+[31m[1mReferenceError[22m: window is not defined[39m
+[90m [2m❯[22m Object.cleanupBroadcastSetup ../../node_modules/.bun/better-auth@1.6.26+867b1358964fce74/node_modules/better-auth/dist/client/broadcast-channel.mjs:[2m35:4[22m[39m
+[90m [2m❯[22m Object.cleanup ../../node_modules/.bun/better-auth@1.6.26+867b1358964fce74/node_modules/better-auth/dist/client/session-refresh.mjs:[2m109:10[22m[39m
+[90m [2m❯[22m ../../node_modules/.bun/better-auth@1.6.26+867b1358964fce74/node_modules/better-auth/dist/client/session-atom.mjs:[2m144:19[22m[39m
+[90m [2m❯[22m Timeout._onTimeout ../../node_modules/.bun/nanostores@1.2.0/node_modules/nanostores/lifecycle/index.js:[2m139:55[22m[39m
+[90m [2m❯[22m listOnTimeout node:internal/timers:[2m585:17[22m[39m
+[90m [2m❯[22m processTimers node:internal/timers:[2m521:7[22m[39m
+
+[31mThis error originated in "[1mtests/unit/features/library/backup-list.test.tsx[22m" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.[39m
+[31m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[39m
+
+
+[2m Test Files [22m [1m[32m144 passed[39m[22m[90m (144)[39m
+[2m      Tests [22m [1m[32m1150 passed[39m[22m[90m (1150)[39m
+[2m     Errors [22m [1m[31m2 errors[39m[22m
+[2m   Start at [22m 23:44:01
+[2m   Duration [22m 164.54s[2m (transform 34.74s, setup 17.97s, import 147.16s, tests 84.54s, environment 194.21s)[22m
