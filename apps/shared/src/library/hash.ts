@@ -9,7 +9,23 @@ const textEncoder = new TextEncoder();
  * the same resource would be grouped as identical content.
  */
 const FILE_HASH_DOMAIN = 'mangostudio/library/file\0';
-const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir\0';
+/**
+ * Versioned so the manifest-injectivity fix below changes every stored directory hash instead of
+ * silently colliding with the pre-fix encoding: a length-prefixed manifest and a
+ * `\0`/`\n`-delimited one can never be mistaken for each other once they hash into disjoint
+ * domains.
+ */
+const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir/v2\0';
+
+/**
+ * Which platform's path semantics apply to the paths a {@link LibraryHashReader} returns.
+ *
+ * `\` is a legal POSIX filename character, so rewriting it to `/` unconditionally invents a
+ * separator that is not there and lets an unrelated directory satisfy a containment check. This
+ * module cannot sniff the answer — `apps/shared` stays framework-agnostic and has no
+ * `process.platform` to read — so the adapter that owns a real filesystem supplies it.
+ */
+export type LibraryHashPathStyle = 'posix' | 'win32';
 
 export interface LibraryHashReader {
   /**
@@ -20,6 +36,7 @@ export interface LibraryHashReader {
   /** Resolves symlinks and returns the canonical absolute path. */
   realPath(path: string): string | Promise<string>;
   readFile(path: string): Uint8Array | Promise<Uint8Array>;
+  readonly pathStyle: LibraryHashPathStyle;
 }
 
 export interface LibraryContentHash {
@@ -46,21 +63,28 @@ export async function hashLibraryDirectory(
   rootPath: string,
   reader: LibraryHashReader
 ): Promise<LibraryDirectoryHash> {
-  const canonicalRoot = normalizeHashPath(await reader.realPath(rootPath));
+  const { pathStyle } = reader;
+  const canonicalRoot = normalizeHashPath(await reader.realPath(rootPath), pathStyle);
   const relativePaths = [...(await reader.listFiles(rootPath))].sort(comparePaths);
   const manifestLines: string[] = [];
   let sizeBytes = 0;
 
   for (const relativePath of relativePaths) {
-    if (!isSafeRelativePath(relativePath)) return pathEscape();
+    const violation = relativePathViolation(relativePath, pathStyle);
+    if (violation) return invalid(violation);
 
     const canonicalFile = normalizeHashPath(
-      await reader.realPath(joinPath(canonicalRoot, relativePath))
+      await reader.realPath(joinPath(canonicalRoot, relativePath)),
+      pathStyle
     );
-    if (!isPathWithin(canonicalRoot, canonicalFile)) return pathEscape();
+    if (!isPathWithin(canonicalRoot, canonicalFile, pathStyle)) return invalid('path-escape');
 
     const bytes = await reader.readFile(canonicalFile);
-    manifestLines.push(`${relativePath}\0${await sha256(FILE_HASH_DOMAIN, bytes)}\n`);
+    const fileHash = await sha256(FILE_HASH_DOMAIN, bytes);
+    // Length-prefixed so no filename can spell a manifest line: `relativePathViolation` below is
+    // the policy that rejects a `\n`/`\0` name outright, and this is the property that holds even
+    // if a future caller reaches the hasher another way.
+    manifestLines.push(`${relativePath.length}:${relativePath}${fileHash}`);
     sizeBytes += bytes.byteLength;
   }
 
@@ -82,11 +106,12 @@ async function sha256(domain: string, bytes: Uint8Array): Promise<string> {
 }
 
 /**
- * Canonical spelling of an already-resolved path, so a caller that wants to
- * recognize the paths this module hands to `readFile` keys them the same way.
+ * Canonical spelling of an already-resolved path, so a caller that wants to recognize the paths
+ * this module hands to `readFile` keys them the same way. Backslashes are only ever a separator
+ * under `'win32'` — under `'posix'` one is an ordinary filename character and survives untouched.
  */
-export function normalizeHashPath(path: string): string {
-  const normalized = path.replaceAll('\\', '/');
+export function normalizeHashPath(path: string, pathStyle: LibraryHashPathStyle): string {
+  const normalized = pathStyle === 'win32' ? path.replaceAll('\\', '/') : path;
   if (normalized === '/') return normalized;
   return normalized.replace(/\/+$/, '');
 }
@@ -101,20 +126,38 @@ function comparePaths(left: string, right: string): number {
   return 0;
 }
 
-function isSafeRelativePath(path: string): boolean {
-  if (path.length === 0 || path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)) return false;
+/**
+ * Why a relative path cannot be hashed: `path-escape` for anything that could climb out of the
+ * root (absolute, `.`, `..`, a Windows drive prefix), `unsafe-name` for a name that is safe to
+ * resolve but unsafe to put in the manifest verbatim (`\n` or `\0`, both legal POSIX filename
+ * bytes that could otherwise forge a manifest line).
+ */
+function relativePathViolation(
+  path: string,
+  pathStyle: LibraryHashPathStyle
+): 'path-escape' | 'unsafe-name' | undefined {
+  if (path.length === 0 || path.startsWith('/')) return 'path-escape';
+  if (pathStyle === 'win32' && /^[A-Za-z]:[\\/]/.test(path)) return 'path-escape';
+  if (path.includes('\n') || path.includes('\0')) return 'unsafe-name';
 
-  const segments = path.replaceAll('\\', '/').split('/');
-  return segments.every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+  const segments = pathStyle === 'win32' ? path.replaceAll('\\', '/').split('/') : path.split('/');
+  const hasBadSegment = segments.some(
+    (segment) => segment.length === 0 || segment === '.' || segment === '..'
+  );
+  return hasBadSegment ? 'path-escape' : undefined;
 }
 
-function isPathWithin(rootPath: string, candidatePath: string): boolean {
-  const caseInsensitive = /^[A-Za-z]:\//.test(rootPath);
+function isPathWithin(
+  rootPath: string,
+  candidatePath: string,
+  pathStyle: LibraryHashPathStyle
+): boolean {
+  const caseInsensitive = pathStyle === 'win32';
   const root = caseInsensitive ? rootPath.toLowerCase() : rootPath;
   const candidate = caseInsensitive ? candidatePath.toLowerCase() : candidatePath;
   return candidate === root || candidate.startsWith(`${root}/`);
 }
 
-function pathEscape(): LibraryDirectoryHash {
-  return { valid: false, invalidReason: 'path-escape' };
+function invalid(invalidReason: LibraryInvalidReason): LibraryDirectoryHash {
+  return { valid: false, invalidReason };
 }

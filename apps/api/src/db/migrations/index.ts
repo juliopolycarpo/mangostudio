@@ -49,6 +49,7 @@ import { externalAgentDisclosures } from './048_external_agent_disclosures';
 import { externalAccountLimitsCache } from './049_external_account_limits_cache';
 import { externalSessionAdoption } from './050_external_session_adoption';
 import { messageUncheckpointedSources } from './051_message_uncheckpointed_sources';
+import { clearStaleDivergenceAcks } from './052_clear_stale_divergence_acks';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -102,4 +103,5 @@ export const allMigrations = {
   '049_external_account_limits_cache': externalAccountLimitsCache,
   '050_external_session_adoption': externalSessionAdoption,
   '051_message_uncheckpointed_sources': messageUncheckpointedSources,
+  '052_clear_stale_divergence_acks': clearStaleDivergenceAcks,
 };

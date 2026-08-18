@@ -39,6 +39,7 @@ import type {
   LibraryResourceRef,
   LibraryTargetId,
   LibraryUndoResult,
+  LibraryUnreadableEntry,
   PropagationApply,
   RemovalApply,
   ResourceKind,
@@ -766,6 +767,7 @@ export interface RuntimeLibraryScanEntry {
 
 export interface RuntimeLibraryScanResult {
   readonly entries: readonly RuntimeLibraryScanEntry[];
+  readonly unreadableEntries: readonly LibraryUnreadableEntry[];
 }
 
 export interface RuntimeLibraryReadParams {

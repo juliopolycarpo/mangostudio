@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   hashLibraryDirectory,
   hashLibraryFile,
+  type LibraryHashPathStyle,
   type LibraryHashReader,
 } from '../../../src/library';
 
@@ -13,9 +14,11 @@ interface FakeFile {
 
 function fakeReader(
   files: Readonly<Record<string, FakeFile>>,
-  order = Object.keys(files)
+  order = Object.keys(files),
+  pathStyle: LibraryHashPathStyle = 'posix'
 ): LibraryHashReader {
   return {
+    pathStyle,
     listFiles() {
       return order;
     },
@@ -64,7 +67,7 @@ describe('library hashing', () => {
 
     expect(first).toEqual(second);
     expect(first).toEqual({
-      contentHash: '8043d74bf3554c1ce55088c39a1ee8e7506f644a5dcc08939baf9d2a160293e8',
+      contentHash: '3af450f69d1128b79fc09951e5e732c9408870c8004dd4e34e37a798d54abf1f',
       sizeBytes: 16,
       valid: true,
     });
@@ -113,6 +116,7 @@ describe('library hashing', () => {
   it('rejects a symlink escaping the resource root without reading its target', async () => {
     let targetRead = false;
     const reader: LibraryHashReader = {
+      pathStyle: 'posix',
       listFiles() {
         return ['outside.md'];
       },
@@ -159,6 +163,7 @@ describe('library hashing', () => {
       fakeReader({ 'alias.md': { bytes: 'content\n' } })
     );
     const symlink = await hashLibraryDirectory('/library', {
+      pathStyle: 'posix',
       listFiles() {
         return ['alias.md'];
       },
@@ -172,5 +177,121 @@ describe('library hashing', () => {
     });
 
     expect(symlink).toEqual(regular);
+  });
+
+  it('does not let a POSIX backslash in a directory name invent a separator', async () => {
+    // `/home/user/lib\rary` is one real directory whose name contains a
+    // backslash. A symlink inside it resolves to `/home/user/lib/rary/secret.md`
+    // — a genuinely unrelated directory that only looks contained if `\` is
+    // rewritten to `/` first.
+    let targetRead = false;
+    const reader: LibraryHashReader = {
+      pathStyle: 'posix',
+      listFiles: () => ['secret.md'],
+      realPath: (path) =>
+        path === '/home/user/lib\\rary' ? path : '/home/user/lib/rary/secret.md',
+      readFile: () => {
+        targetRead = true;
+        return new Uint8Array();
+      },
+    };
+
+    await expect(hashLibraryDirectory('/home/user/lib\\rary', reader)).resolves.toEqual({
+      valid: false,
+      invalidReason: 'path-escape',
+    });
+    expect(targetRead).toBe(false);
+  });
+
+  it('does not let a POSIX directory contain a same-prefix sibling', async () => {
+    let targetRead = false;
+    const reader: LibraryHashReader = {
+      pathStyle: 'posix',
+      listFiles: () => ['secret.md'],
+      realPath: (path) => (path === '/a/lib' ? path : '/a/library/secret.md'),
+      readFile: () => {
+        targetRead = true;
+        return new Uint8Array();
+      },
+    };
+
+    await expect(hashLibraryDirectory('/a/lib', reader)).resolves.toEqual({
+      valid: false,
+      invalidReason: 'path-escape',
+    });
+    expect(targetRead).toBe(false);
+  });
+
+  it('normalizes a win32 drive path and keeps containment working', async () => {
+    const reader: LibraryHashReader = {
+      pathStyle: 'win32',
+      listFiles: () => ['note.md'],
+      realPath: (path) => (path === 'C:\\a\\b' ? path : 'C:\\a\\b\\note.md'),
+      readFile: () => new TextEncoder().encode('hi\n'),
+    };
+
+    const result = await hashLibraryDirectory('C:\\a\\b', reader);
+    expect(result.valid).toBe(true);
+  });
+
+  it('normalizes a win32 UNC path and keeps containment working', async () => {
+    const reader: LibraryHashReader = {
+      pathStyle: 'win32',
+      listFiles: () => ['note.md'],
+      realPath: (path) =>
+        path === '\\\\server\\share\\a' ? path : '\\\\server\\share\\a\\note.md',
+      readFile: () => new TextEncoder().encode('hi\n'),
+    };
+
+    const result = await hashLibraryDirectory('\\\\server\\share\\a', reader);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects a relative path that carries a newline as unsafe-name, not hashed', async () => {
+    let targetRead = false;
+    const reader: LibraryHashReader = {
+      pathStyle: 'posix',
+      listFiles: () => ['a\nb.md'],
+      realPath: (path) => path,
+      readFile: () => {
+        targetRead = true;
+        return new Uint8Array();
+      },
+    };
+
+    await expect(hashLibraryDirectory('/library', reader)).resolves.toEqual({
+      valid: false,
+      invalidReason: 'unsafe-name',
+    });
+    expect(targetRead).toBe(false);
+  });
+
+  it('rejects the adversarial one-entry-manifest filename as unsafe-name', async () => {
+    // Under the old `\0`/`\n`-delimited manifest, a file named exactly
+    // `x\0<hash-of-x>\ny` would spell the same manifest line as a genuinely
+    // different single-file directory named `x`. The length-prefixed encoding
+    // closes that hole structurally; this name is also refused outright before
+    // it ever reaches the manifest.
+    const innerHash = await hashLibraryFile(
+      '/library/x',
+      fakeReader({ x: { bytes: 'x-content' } })
+    );
+    const adversarialName = `x\0${innerHash.contentHash}\ny`;
+    let targetRead = false;
+    const reader: LibraryHashReader = {
+      pathStyle: 'posix',
+      listFiles: () => [adversarialName],
+      realPath: (path) => path,
+      readFile: () => {
+        targetRead = true;
+        return new Uint8Array();
+      },
+    };
+
+    await expect(hashLibraryDirectory('/library', reader)).resolves.toEqual({
+      valid: false,
+      invalidReason: 'unsafe-name',
+    });
+    expect(targetRead).toBe(false);
   });
 });

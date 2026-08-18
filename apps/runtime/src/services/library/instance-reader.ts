@@ -6,9 +6,11 @@ import {
   hashLibraryFile,
   isValidKindSlug,
   isValidResourceSlug,
+  type LibraryHashPathStyle,
   type LibraryInstance,
   type LibraryInvalidReason,
   type LibraryResourceRef,
+  type LibraryUnreadableEntry,
   normalizeHashPath,
 } from '@mangostudio/shared/library';
 import type { LocationDefinition } from '@mangostudio/shared/library/host';
@@ -20,6 +22,13 @@ import type { CachedInstanceDisplay, CachedInstanceHash, LibraryCache } from './
 const textDecoder = new TextDecoder();
 /** The file inside a skill directory that carries its text and frontmatter. */
 export const SKILL_ENTRYPOINT = 'SKILL.md';
+
+/**
+ * This module only ever runs on Node, so it is the one place in the library
+ * stack allowed to read `process.platform` — the hasher itself stays
+ * framework-agnostic and takes the answer as a parameter instead.
+ */
+const NODE_HASH_PATH_STYLE: LibraryHashPathStyle = process.platform === 'win32' ? 'win32' : 'posix';
 
 /**
  * Byte budgets for a single instance. A cold scan reads and hashes every leaf
@@ -84,6 +93,36 @@ export interface ReadLibraryInstance {
   readonly whitespaceHash?: string;
 }
 
+/**
+ * One location's scan: instances that could be named as resources, plus
+ * entries that could not be named at all. The two never overlap — an entry is
+ * either nameable (and may still be `invalidReason`-flagged as an instance) or
+ * unreadable, never both.
+ */
+export interface ReadLocationInstancesResult {
+  readonly instances: readonly ReadLibraryInstance[];
+  readonly unreadableEntries: readonly LibraryUnreadableEntry[];
+}
+
+const EMPTY_RESULT: ReadLocationInstancesResult = { instances: [], unreadableEntries: [] };
+
+function oneInstance(entry: ReadLibraryInstance): ReadLocationInstancesResult {
+  return { instances: [entry], unreadableEntries: [] };
+}
+
+function oneUnreadableEntry(entry: LibraryUnreadableEntry): ReadLocationInstancesResult {
+  return { instances: [], unreadableEntries: [entry] };
+}
+
+function mergeResults(
+  results: readonly ReadLocationInstancesResult[]
+): ReadLocationInstancesResult {
+  return {
+    instances: results.flatMap((result) => result.instances),
+    unreadableEntries: results.flatMap((result) => result.unreadableEntries),
+  };
+}
+
 interface LeafFile {
   readonly absolutePath: string;
   readonly relativePath: string;
@@ -95,7 +134,7 @@ export async function readLocationInstances(
   location: LocationDefinition,
   locationPath: string,
   options: ReadLibraryInstancesOptions
-): Promise<ReadLibraryInstance[]> {
+): Promise<ReadLocationInstancesResult> {
   const fs = options.fs ?? nodeFs;
   throwIfAborted(options.signal);
   if (location.layout === 'single-file') {
@@ -120,7 +159,7 @@ export async function readLocationInstances(
     if (!isMissing(error)) {
       console.warn(`[library] Skipping unreadable location "${location.id}" at ${locationPath}.`);
     }
-    return [];
+    return EMPTY_RESULT;
   }
 
   const expectedType = location.layout === 'directory-of-dirs' ? 'directory' : 'file';
@@ -144,7 +183,7 @@ export async function readLocationInstances(
       );
     })
   );
-  return described.flat();
+  return mergeResults(described);
 }
 
 /** Reads a file-backed resource's raw bytes, for copying it to a destination. */
@@ -177,6 +216,7 @@ export async function hashResourceAt(
     listFiles: () => leaves.map((leaf) => leaf.relativePath),
     realPath: fs.realPath,
     readFile: fs.readFile,
+    pathStyle: NODE_HASH_PATH_STYLE,
   });
   if (!result.valid) throw new PathEscapeError();
   return result.contentHash;
@@ -190,30 +230,37 @@ async function readOneEntry(
   options: ReadLibraryInstancesOptions,
   fs: LibraryInstanceReaderFs,
   containmentRoot?: string
-): Promise<ReadLibraryInstance[]> {
+): Promise<ReadLocationInstancesResult> {
   // The library-wide pattern is what makes a slug expressible as a resource ref
-  // at all, so an entry that fails it cannot be reported — only skipped.
-  if (!isValidResourceSlug(slug)) return [];
+  // at all: an entry that fails it cannot be reported as a resource, but it is
+  // still reported — on the unreadable-entries channel, not silently dropped.
+  if (!isValidResourceSlug(slug)) {
+    return oneUnreadableEntry({
+      locationId: location.id,
+      name: basename(path),
+      reason: 'invalid-name',
+    });
+  }
 
   const ref = { kind: location.kind, slug } as const;
   let metadata: FileMetadata;
   try {
     metadata = await fs.stat(path);
   } catch (error) {
-    if (isMissing(error)) return [];
-    return [invalidInstance(ref, location, path, 0, 'unreadable')];
+    if (isMissing(error)) return EMPTY_RESULT;
+    return oneInstance(invalidInstance(ref, location, path, 0, 'unreadable'));
   }
 
   const modifiedAtMs = Math.max(0, Math.round(metadata.mtimeMs));
   const hasExpectedType = expectedType === 'directory' ? metadata.isDirectory : metadata.isFile;
   if (!hasExpectedType) {
-    return [invalidInstance(ref, location, path, modifiedAtMs, 'unexpected-entry-type')];
+    return oneInstance(invalidInstance(ref, location, path, modifiedAtMs, 'unexpected-entry-type'));
   }
   if (!isValidKindSlug(location.kind, slug)) {
-    return [invalidInstance(ref, location, path, modifiedAtMs, 'invalid-slug')];
+    return oneInstance(invalidInstance(ref, location, path, modifiedAtMs, 'invalid-slug'));
   }
   if (expectedType === 'file' && metadata.size > MAX_LIBRARY_FILE_BYTES) {
-    return [invalidInstance(ref, location, path, modifiedAtMs, 'too-large')];
+    return oneInstance(invalidInstance(ref, location, path, modifiedAtMs, 'too-large'));
   }
 
   try {
@@ -245,14 +292,15 @@ async function readOneEntry(
       ? { ...instanceBase, valid: false, invalidReason: display.invalidReason }
       : { ...instanceBase, valid: true };
 
-    return [{ ref, instance, whitespaceHash: hashed.value.whitespaceHash }];
+    return oneInstance({ ref, instance, whitespaceHash: hashed.value.whitespaceHash });
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error;
-    return [invalidInstance(ref, location, path, modifiedAtMs, invalidReasonFor(error))];
+    return oneInstance(invalidInstance(ref, location, path, modifiedAtMs, invalidReasonFor(error)));
   }
 }
 
 function invalidReasonFor(error: unknown): LibraryInvalidReason {
+  if (error instanceof LibraryHashInvalidError) return error.invalidReason;
   if (error instanceof PathEscapeError) return 'path-escape';
   if (error instanceof InstanceTooLargeError) return 'too-large';
   return 'unreadable';
@@ -318,7 +366,10 @@ async function hashDirectory(
       const relativePathsByCanonicalPath = new Map<string, string[]>();
       await Promise.all(
         leaves.map(async (leaf) => {
-          const canonicalPath = normalizeHashPath(await fs.realPath(leaf.absolutePath));
+          const canonicalPath = normalizeHashPath(
+            await fs.realPath(leaf.absolutePath),
+            NODE_HASH_PATH_STYLE
+          );
           const known = relativePathsByCanonicalPath.get(canonicalPath) ?? [];
           known.push(leaf.relativePath);
           relativePathsByCanonicalPath.set(canonicalPath, known);
@@ -330,6 +381,7 @@ async function hashDirectory(
       const result = await hashLibraryDirectory(path, {
         listFiles: () => leaves.map((leaf) => leaf.relativePath),
         realPath: fs.realPath,
+        pathStyle: NODE_HASH_PATH_STYLE,
         async readFile(filePath) {
           const bytes = await fs.readFile(filePath);
           // Digest each file as it is read and keep only the digest. Retaining
@@ -341,7 +393,7 @@ async function hashDirectory(
           return bytes;
         },
       });
-      if (!result.valid) throw new PathEscapeError();
+      if (!result.valid) throw new LibraryHashInvalidError(result.invalidReason);
 
       return {
         contentHash: result.contentHash,
@@ -595,3 +647,15 @@ export function isPathWithin(rootPath: string, candidatePath: string): boolean {
 
 export class PathEscapeError extends Error {}
 export class InstanceTooLargeError extends Error {}
+
+/**
+ * A directory hash pass failed for a reason `hashLibraryDirectory` already
+ * classified — `path-escape` or `unsafe-name` — and that classification must
+ * survive the throw/catch back to `readOneEntry` instead of collapsing to a
+ * generic escape.
+ */
+class LibraryHashInvalidError extends Error {
+  constructor(readonly invalidReason: LibraryInvalidReason) {
+    super(`Library directory hash invalid: ${invalidReason}`);
+  }
+}

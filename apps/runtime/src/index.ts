@@ -169,6 +169,7 @@ export {
   purgeBackupSet,
   type ReadLibraryInstance,
   type ReadLibraryInstancesOptions,
+  type ReadLocationInstancesResult,
   type RemovalWriteEngineDeps,
   type ResolvedDestination,
   type ResourceWriteResult,

@@ -100,13 +100,15 @@ function previewSkills(
     {
       snapshot: async (scanUserId, environmentId, kinds) => ({
         environmentId,
-        resources: await discoverLibraryResources(getDb(), scanUserId, {
-          force: true,
-          kinds,
-          cache,
-          pathEnv,
-          settings: skillLocationSettings(),
-        }),
+        resources: (
+          await discoverLibraryResources(getDb(), scanUserId, {
+            force: true,
+            kinds,
+            cache,
+            pathEnv,
+            settings: skillLocationSettings(),
+          })
+        ).resources,
         statuses: new Map(
           [...targetLocationIds].map((id) => [id, describeLocation(id, pathEnv)] as const)
         ),
@@ -120,14 +122,16 @@ function previewSkills(
 /** Drives the real acknowledgement store against the temp locations. */
 function ackDeps(): Partial<DivergenceAckDeps> {
   return {
-    discover: (userId, ref) =>
-      discoverLibraryResources(getDb(), userId, {
+    discover: async (userId, ref) => {
+      const scan = await discoverLibraryResources(getDb(), userId, {
         force: true,
         kinds: [ref.kind],
         cache: new LibraryCache(),
         pathEnv: libraryPathEnv(),
         settings: skillLocationSettings(),
-      }),
+      });
+      return scan.resources;
+    },
   };
 }
 

@@ -37,17 +37,22 @@ describe('readLocationInstances', () => {
       '---\nname: valid-skill\ndescription: Valid\n---\nBody\n'
     );
 
-    const results = await readLocationInstances(skillLocation(), root, {
+    const result = await readLocationInstances(skillLocation(), root, {
       cache: new LibraryCache(),
       force: false,
     });
 
-    expect(results).toHaveLength(2);
-    expect(results.find(({ ref }) => ref.slug === 'valid-skill')?.instance.valid).toBe(true);
-    expect(results.find(({ ref }) => ref.slug === 'broken-skill')?.instance).toMatchObject({
-      valid: false,
-      invalidReason: 'missing-entrypoint',
-    });
+    expect(result.instances).toHaveLength(2);
+    expect(result.unreadableEntries).toEqual([]);
+    expect(result.instances.find(({ ref }) => ref.slug === 'valid-skill')?.instance.valid).toBe(
+      true
+    );
+    expect(result.instances.find(({ ref }) => ref.slug === 'broken-skill')?.instance).toMatchObject(
+      {
+        valid: false,
+        invalidReason: 'missing-entrypoint',
+      }
+    );
   });
 
   it('returns an empty result for a missing location', async () => {
@@ -58,24 +63,24 @@ describe('readLocationInstances', () => {
       stat: () => Promise.reject(new Error('unused')),
     };
 
-    const results = await readLocationInstances(skillLocation(), '/missing', {
+    const result = await readLocationInstances(skillLocation(), '/missing', {
       cache: new LibraryCache(),
       force: false,
       fs: missingFs,
     });
 
-    expect(results).toEqual([]);
+    expect(result).toEqual({ instances: [], unreadableEntries: [] });
   });
 
   it('reports a file where a skill directory was expected', async () => {
     writeFileSync(join(root, 'not-a-directory'), 'content');
 
-    const results = await readLocationInstances(skillLocation(), root, {
+    const result = await readLocationInstances(skillLocation(), root, {
       cache: new LibraryCache(),
       force: false,
     });
 
-    expect(results[0]?.instance).toMatchObject({
+    expect(result.instances[0]?.instance).toMatchObject({
       valid: false,
       invalidReason: 'unexpected-entry-type',
     });
@@ -93,12 +98,12 @@ describe('readLocationInstances', () => {
     symlinkSync(outside, join(skillDir, 'references'));
 
     try {
-      const results = await readLocationInstances(skillLocation(), root, {
+      const result = await readLocationInstances(skillLocation(), root, {
         cache: new LibraryCache(),
         force: false,
       });
 
-      expect(results[0]?.instance).toMatchObject({
+      expect(result.instances[0]?.instance).toMatchObject({
         valid: false,
         invalidReason: 'path-escape',
       });
@@ -116,12 +121,12 @@ describe('readLocationInstances', () => {
     symlinkSync(outside, join(root, 'escaped-skill'));
 
     try {
-      const results = await readLocationInstances(skillLocation(), root, {
+      const result = await readLocationInstances(skillLocation(), root, {
         cache: new LibraryCache(),
         force: false,
       });
 
-      expect(results[0]?.instance).toMatchObject({
+      expect(result.instances[0]?.instance).toMatchObject({
         valid: false,
         invalidReason: 'path-escape',
       });
@@ -130,18 +135,60 @@ describe('readLocationInstances', () => {
     }
   });
 
+  it('reports a leaf file whose name carries a newline as unsafe-name, not path-escape', async () => {
+    const skillDir = join(root, 'newline-skill');
+    mkdirSync(skillDir);
+    writeFileSync(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: newline-skill\ndescription: Newline\n---\n'
+    );
+    writeFileSync(join(skillDir, 'a\nb.md'), 'content');
+
+    const result = await readLocationInstances(skillLocation(), root, {
+      cache: new LibraryCache(),
+      force: false,
+    });
+
+    expect(result.instances[0]?.instance).toMatchObject({
+      valid: false,
+      invalidReason: 'unsafe-name',
+    });
+  });
+
   it('reports a directory whose name breaks the per-kind slug rule', async () => {
     const badSlugDir = join(root, 'Not_A_Skill');
     mkdirSync(badSlugDir);
     writeFileSync(join(badSlugDir, 'SKILL.md'), '---\nname: Not_A_Skill\ndescription: X\n---\n');
 
-    const results = await readLocationInstances(skillLocation(), root, {
+    const result = await readLocationInstances(skillLocation(), root, {
       cache: new LibraryCache(),
       force: false,
     });
 
-    expect(results[0]?.ref.slug).toBe('Not_A_Skill');
-    expect(results[0]?.instance).toMatchObject({ valid: false, invalidReason: 'invalid-slug' });
+    expect(result.instances[0]?.ref.slug).toBe('Not_A_Skill');
+    expect(result.instances[0]?.instance).toMatchObject({
+      valid: false,
+      invalidReason: 'invalid-slug',
+    });
+  });
+
+  it('reports a directory whose name breaks the library-wide slug pattern as unreadable, not dropped', async () => {
+    const spacedDir = join(root, 'my skill');
+    mkdirSync(spacedDir);
+    writeFileSync(join(spacedDir, 'SKILL.md'), '---\nname: my skill\ndescription: X\n---\n');
+    const validDir = join(root, 'valid-skill');
+    mkdirSync(validDir);
+    writeFileSync(join(validDir, 'SKILL.md'), '---\nname: valid-skill\ndescription: Valid\n---\n');
+
+    const result = await readLocationInstances(skillLocation(), root, {
+      cache: new LibraryCache(),
+      force: false,
+    });
+
+    expect(result.unreadableEntries).toEqual([
+      { locationId: skillLocation().id, name: 'my skill', reason: 'invalid-name' },
+    ]);
+    expect(result.instances.map(({ ref }) => ref.slug)).toEqual(['valid-skill']);
   });
 
   it('reports an oversized skill entrypoint without reading it', async () => {
@@ -167,13 +214,16 @@ describe('readLocationInstances', () => {
       },
     };
 
-    const results = await readLocationInstances(skillLocation(), root, {
+    const result = await readLocationInstances(skillLocation(), root, {
       cache: new LibraryCache(),
       force: false,
       fs: countingFs,
     });
 
-    expect(results[0]?.instance).toMatchObject({ valid: false, invalidReason: 'too-large' });
+    expect(result.instances[0]?.instance).toMatchObject({
+      valid: false,
+      invalidReason: 'too-large',
+    });
     expect(contentReads).toBe(0);
   });
 
@@ -183,12 +233,12 @@ describe('readLocationInstances', () => {
     const instructionFile = join(root, 'CLAUDE.md');
     writeFileSync(instructionFile, '# Global\n');
 
-    const results = await readLocationInstances(location, instructionFile, {
+    const result = await readLocationInstances(location, instructionFile, {
       cache: new LibraryCache(),
       force: false,
     });
 
-    expect(results[0]?.ref).toEqual({ kind: 'instruction', slug: 'global' });
+    expect(result.instances[0]?.ref).toEqual({ kind: 'instruction', slug: 'global' });
   });
 
   it('does not reopen unchanged content when the instance fingerprint is cached', async () => {

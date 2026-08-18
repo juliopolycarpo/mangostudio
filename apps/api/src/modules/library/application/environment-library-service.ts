@@ -20,6 +20,7 @@ import type {
   LibraryLocationStatus,
   LibraryResource,
   LibraryResourceContent,
+  LibraryScanResult,
   ResourceKind,
 } from '@mangostudio/shared/library';
 import type { Kysely } from 'kysely';
@@ -58,7 +59,7 @@ export interface EnvironmentLibraryService {
     db: Kysely<Database>,
     scope: LibraryScope,
     options?: EnvironmentLibraryDiscoverOptions
-  ): Promise<LibraryResource[]>;
+  ): Promise<LibraryScanResult>;
   /**
    * `workspaceRoot` is accepted and validated at the route, but cannot change
    * the answer: v1 registers no workspace-scoped location, so the matrix is
@@ -84,7 +85,7 @@ export interface EnvironmentLibraryService {
 interface CacheEntry {
   readonly scannedAtMs: number;
   readonly client: RuntimeClient;
-  readonly resources: LibraryResource[];
+  readonly scan: LibraryScanResult;
   readonly environmentId: string;
 }
 
@@ -133,7 +134,7 @@ export function createEnvironmentLibraryService(
     options.resetLocationCache ??
     ((environmentId?: string) => environmentProbingService.resetLocationCache(environmentId));
   const cache = new Map<string, CacheEntry>();
-  const inflight = new Map<string, Promise<LibraryResource[]>>();
+  const inflight = new Map<string, Promise<LibraryScanResult>>();
   const scanGeneration = new Map<string, number>();
   // Bumped on every resetCache so an in-flight non-forced scan cannot write
   // pre-reset results after scanGeneration keys were cleared (both sides 0).
@@ -152,7 +153,7 @@ export function createEnvironmentLibraryService(
     db: Kysely<Database>,
     scope: LibraryScope,
     discoverOptions: EnvironmentLibraryDiscoverOptions = {}
-  ): Promise<LibraryResource[]> => {
+  ): Promise<LibraryScanResult> => {
     const force = discoverOptions.force === true;
     // Before the first await, so a caller that asks for both at once — the
     // propagation preview does — cannot have its location read start against
@@ -180,7 +181,7 @@ export function createEnvironmentLibraryService(
     if (!force) {
       const cached = cache.get(signature);
       if (cached && cached.client === client && now() - cached.scannedAtMs < cacheTtlMs) {
-        return cached.resources;
+        return cached.scan;
       }
     } else {
       scanGeneration.set(signature, (scanGeneration.get(signature) ?? 0) + 1);
@@ -202,7 +203,10 @@ export function createEnvironmentLibraryService(
         },
         { timeoutMs: requestTimeoutMs }
       );
-      const resources = groupLibraryScanEntries(result.entries as RuntimeLibraryScanEntry[]);
+      const scan: LibraryScanResult = {
+        resources: groupLibraryScanEntries(result.entries as RuntimeLibraryScanEntry[]),
+        unreadableEntries: [...result.unreadableEntries],
+      };
       if (
         (scanGeneration.get(signature) ?? 0) === generationAtStart &&
         resetEpoch === epochAtStart
@@ -210,11 +214,11 @@ export function createEnvironmentLibraryService(
         setBounded(
           cache,
           signature,
-          { scannedAtMs: now(), client, resources, environmentId: scope.environmentId },
+          { scannedAtMs: now(), client, scan, environmentId: scope.environmentId },
           MAX_CACHE_ENTRIES
         );
       }
-      return resources;
+      return scan;
     })().finally(() => {
       if (inflight.get(signature) === scanning) inflight.delete(signature);
     });

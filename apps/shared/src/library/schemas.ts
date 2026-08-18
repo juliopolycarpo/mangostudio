@@ -81,6 +81,8 @@ export const LibraryInvalidReasonSchema = Type.Union([
   Type.Literal('unreadable'),
   Type.Literal('too-large'),
   Type.Literal('invalid-metadata'),
+  /** A directory manifest entry whose relative path carries a `\n` or `\0` byte. */
+  Type.Literal('unsafe-name'),
 ]);
 
 export const LIBRARY_RESOURCE_SLUG_MAX_LENGTH = 128;
@@ -188,6 +190,35 @@ export const LibraryResourceSchema = Type.Object({
 });
 
 export const LibraryResourceListSchema = Type.Array(LibraryResourceSchema);
+
+/**
+ * Why an on-disk entry could not even be named as a {@link LibraryResourceRefSchema}: its name
+ * fails `LIBRARY_RESOURCE_SLUG_PATTERN` outright, or the reader refuses it for some other reason
+ * that has nothing to do with slug shape. Deliberately small and disjoint from
+ * `LibraryInvalidReasonSchema`, which says why a *nameable* resource is invalid — this union says
+ * why an entry cannot be named at all.
+ */
+export const LibraryUnreadableEntryReasonSchema = Type.Union([
+  Type.Literal('invalid-name'),
+  Type.Literal('unsupported-entry'),
+]);
+
+export const LibraryUnreadableEntrySchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  /** Raw directory or file name from disk. Untrusted: render as text, never as a path or link. */
+  name: Type.String({ minLength: 1 }),
+  reason: LibraryUnreadableEntryReasonSchema,
+});
+
+/**
+ * A scan's full answer: the resources it could name, plus the entries it could not. Kept as one
+ * channel outside `resources` rather than relaxing the ref shape, so a slug is always safe to use
+ * as a path segment everywhere one becomes a filesystem path.
+ */
+export const LibraryScanResultSchema = Type.Object({
+  resources: LibraryResourceListSchema,
+  unreadableEntries: Type.Array(LibraryUnreadableEntrySchema),
+});
 
 export const LibraryResourceContentSchema = Type.Object({
   key: Type.String({ minLength: 1 }),
@@ -1103,6 +1134,9 @@ export type LibraryCoverage = Static<typeof LibraryCoverageSchema>;
 export type LibraryDivergence = Static<typeof LibraryDivergenceSchema>;
 export type LibraryContentGroup = Static<typeof LibraryContentGroupSchema>;
 export type LibraryResource = Static<typeof LibraryResourceSchema>;
+export type LibraryUnreadableEntryReason = Static<typeof LibraryUnreadableEntryReasonSchema>;
+export type LibraryUnreadableEntry = Static<typeof LibraryUnreadableEntrySchema>;
+export type LibraryScanResult = Static<typeof LibraryScanResultSchema>;
 export type LibraryResourceContent = Static<typeof LibraryResourceContentSchema>;
 export type LibraryLocationStatus = Static<typeof LibraryLocationStatusSchema>;
 export type SettingsFieldPresentation = Static<typeof SettingsFieldPresentationSchema>;

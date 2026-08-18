@@ -42,7 +42,7 @@ describe('discoverLibraryResources', () => {
     );
     writeFileSync(join(agentsDir, 'gh.md'), '---\ndescription: GitHub agent\n---\n');
 
-    const resources = await discoverLibraryResources(getDb(), 'library-user', {
+    const { resources } = await discoverLibraryResources(getDb(), 'library-user', {
       cache: new LibraryCache(),
       pathEnv: fixturePathEnv(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
@@ -99,7 +99,7 @@ describe('discoverLibraryResources', () => {
     writeFileSync(settingsFile, 'theme = "dark"\n');
     writeFileSync(hooksFile, '{"hooks": []}\n');
 
-    const resources = await discoverLibraryResources(getDb(), 'five-kind-user', {
+    const { resources } = await discoverLibraryResources(getDb(), 'five-kind-user', {
       cache: new LibraryCache(),
       pathEnv: fixturePathEnv(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
@@ -136,21 +136,26 @@ describe('discoverLibraryResources', () => {
     writeFileSync(claudeFile, '# Shared\n');
     writeFileSync(codexFile, '# Shared\n');
 
-    const [resource, ...rest] = await discoverLibraryResources(getDb(), 'instruction-user', {
-      cache: new LibraryCache(),
-      pathEnv: fixturePathEnv(),
-      settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-        home: {
-          'claude-instructions': true,
-          'codex-instructions': true,
+    const { resources: instructionResources } = await discoverLibraryResources(
+      getDb(),
+      'instruction-user',
+      {
+        cache: new LibraryCache(),
+        pathEnv: fixturePathEnv(),
+        settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+          home: {
+            'claude-instructions': true,
+            'codex-instructions': true,
+          },
+          workspace: {},
+        }),
+        locationPathOverrides: {
+          'claude-instructions': claudeFile,
+          'codex-instructions': codexFile,
         },
-        workspace: {},
-      }),
-      locationPathOverrides: {
-        'claude-instructions': claudeFile,
-        'codex-instructions': codexFile,
-      },
-    });
+      }
+    );
+    const [resource, ...rest] = instructionResources;
 
     expect(rest).toEqual([]);
     expect(resource?.key).toBe('instruction:global');
@@ -169,7 +174,7 @@ describe('discoverLibraryResources', () => {
     const settingsFile = join(root, 'config.toml');
     writeFileSync(settingsFile, `note = "${'x'.repeat(MAX_LIBRARY_FILE_BYTES)}"\n`);
 
-    const [resource] = await discoverLibraryResources(getDb(), 'oversized-user', {
+    const { resources } = await discoverLibraryResources(getDb(), 'oversized-user', {
       cache: new LibraryCache(),
       pathEnv: fixturePathEnv(),
       settings: withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
@@ -180,6 +185,7 @@ describe('discoverLibraryResources', () => {
       }),
       locationPathOverrides: { 'mango-settings': settingsFile },
     });
+    const [resource] = resources;
 
     const [instance] = resource?.instances ?? [];
     expect(instance?.valid).toBe(false);

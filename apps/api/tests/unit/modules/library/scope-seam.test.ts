@@ -125,8 +125,8 @@ describe('scope-aware cache keys', () => {
     // being served as the home one; it has to hold before there is a workspace
     // location to rely on it.
     expect(second).not.toBe(first);
-    expect(first[0]?.instances[0]?.path).toBe(join(skillsDir, 'gh'));
-    expect(second[0]?.instances[0]?.path).toBe(join(otherSkillsDir, 'gh'));
+    expect(first.resources[0]?.instances[0]?.path).toBe(join(skillsDir, 'gh'));
+    expect(second.resources[0]?.instances[0]?.path).toBe(join(otherSkillsDir, 'gh'));
   });
 
   it('shares one entry across workspace roots while the seam is inert', async () => {

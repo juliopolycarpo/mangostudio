@@ -77,7 +77,7 @@ export async function listSkills(
 ): Promise<SkillDescriptor[]> {
   const appSettings = await getAppSettings(db, userId);
   const thirdPartyDirs = getThirdPartySkillDirs();
-  const [resources, savedSettings] = await Promise.all([
+  const [scan, savedSettings] = await Promise.all([
     discoverLibraryResources(db, userId, {
       settings: appSettings,
       now,
@@ -91,7 +91,7 @@ export async function listSkills(
     listSavedSkillSettings(db, userId),
   ]);
 
-  return resources
+  return scan.resources
     .filter((resource) => resource.ref.kind === 'skill')
     .flatMap((resource) => {
       const mangoCoverage = resource.coverage.find(

@@ -51,6 +51,7 @@ import {
   isPathWithin,
   PathEscapeError,
   type ReadLibraryInstance,
+  type ReadLocationInstancesResult,
   readLibraryTree,
 } from './instance-reader';
 import { LibraryReadDeniedError, libraryLocationRoot, readLibraryContent } from './read';
@@ -215,7 +216,7 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
       throwIfAborted(signal);
       assertLocationSettings(params.locationSettings);
       const pathEnv = pathEnvFrom(adapters, params);
-      const entries = await scanLibraryInstances({
+      const result = await scanLibraryInstances({
         locationSettings: params.locationSettings,
         pathEnv,
         force: params.force === true,
@@ -225,7 +226,10 @@ export function createLibraryService(overrides: Partial<LibraryHostAdapters> = {
         locationPathOverrides: params.locationPathOverrides,
         signal,
       });
-      return { entries: entries.map(serializeEntry) };
+      return {
+        entries: result.instances.map(serializeEntry),
+        unreadableEntries: result.unreadableEntries,
+      };
     },
 
     async read(params) {
@@ -435,7 +439,7 @@ export function scanLibraryInstancesForPathEnv(
     readonly locationPathOverrides?: Partial<Record<LibraryLocationId, string>>;
     readonly cacheScan?: boolean;
   } = {}
-): Promise<readonly ReadLibraryInstance[]> {
+): Promise<ReadLocationInstancesResult> {
   return scanLibraryInstances({
     locationSettings,
     pathEnv,
