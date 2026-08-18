@@ -11,7 +11,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SshEnvironmentConfig } from '@mangostudio/shared/environments';
 import { quoteForRemoteShell } from '@mangostudio/shared/environments';
-import { PLATFORM_PROBE_SCRIPT, resolveRuntimePlatformId } from '@mangostudio/shared/runtime-home';
+import {
+  PLATFORM_PROBE_SCRIPT,
+  parsePlatformProbe,
+  resolveRuntimePlatformId,
+} from '@mangostudio/shared/runtime-home';
 import {
   pushRuntimeBinary,
   type RuntimeCommandOptions,
@@ -82,13 +86,12 @@ describe('ssh runtime push over a real sshd', () => {
     const runner = isolatedRunner;
     const probe = await runner(PLATFORM_PROBE_SCRIPT);
     expect(probe.exitCode).toBe(0);
-    const lines = probe.stdout.trim().split(/\r?\n/);
-    const platformId = resolveRuntimePlatformId({
-      kernel: lines[0] ?? 'Linux',
-      machine: lines[1] ?? lines[0] ?? '',
-      libc: lines[2] ?? lines[1] ?? '',
-    });
-    expect(platformId).toBeTruthy();
+    // The same parser the push itself uses, against a real host's output —
+    // a private reading here would stop testing what production does.
+    const parsed = parsePlatformProbe(probe.stdout);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(resolveRuntimePlatformId(parsed)).toBeTruthy();
 
     await pushRuntimeBinary({
       runner,

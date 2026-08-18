@@ -35,6 +35,65 @@ export interface RuntimePlatformProbe {
  */
 export const PLATFORM_PROBE_SCRIPT = 'uname -s; uname -m; (ldd --version 2>&1 || true) | head -n 1';
 
+/** The most of a probe's own output any refusal repeats back. */
+const MAX_RAW_PROBE_CHARS = 200;
+
+/**
+ * What {@link parsePlatformProbe} made of a probe's output.
+ *
+ * A discriminated result rather than a partly-filled probe: every field of
+ * {@link RuntimePlatformProbe} has to come from the line it was read from, and
+ * an object with a guessed `kernel` in it is indistinguishable downstream from
+ * one a host actually reported.
+ */
+export type PlatformProbeResult =
+  | ({ readonly ok: true } & RuntimePlatformProbe)
+  | {
+      readonly ok: false;
+      readonly reason: 'unexpected-shape';
+      /** The output itself, on one bounded line, for a refusal to quote. */
+      readonly raw: string;
+    };
+
+/**
+ * Reads {@link PLATFORM_PROBE_SCRIPT}'s output, for every transport that runs
+ * it.
+ *
+ * It lives here because the script does: the hub sends this exact text and
+ * reads back what it produced, so there is no version skew to tolerate and no
+ * second shape to guess at. A caller that guessed one — reading a two-line
+ * answer as machine-and-libc with the kernel assumed to be `Linux` — misread
+ * `uname -s` as the machine on every host whose `ldd` writes nothing, which is
+ * how a silent `ldd` produces two lines in the first place.
+ *
+ * Tolerated, because they say nothing about the shape: `\r\n`, blank lines
+ * before or after the answer, and a missing final line from an `ldd` that
+ * printed nothing. Extra lines past the third are ignored the way a login
+ * banner has to be. Anything with fewer than two lines is reported rather than
+ * completed from a guess — a confidently wrong platform is worse than a
+ * failure that quotes what the host actually said.
+ */
+export function parsePlatformProbe(stdout: string): PlatformProbeResult {
+  // Trimmed whole before it is split, which is what drops the blank lines a
+  // banner or a trailing newline leaves at either end; trimming each line then
+  // handles the `\r` of a CRLF host.
+  const lines = stdout
+    .trim()
+    .split(/\r?\n/)
+    .map((line) => line.trim());
+
+  const [kernel, machine, libc = ''] = lines;
+  if (!kernel || !machine) {
+    const raw = lines.join(' / ');
+    return {
+      ok: false,
+      reason: 'unexpected-shape',
+      raw: raw.length > MAX_RAW_PROBE_CHARS ? `${raw.slice(0, MAX_RAW_PROBE_CHARS)}…` : raw,
+    };
+  }
+  return { ok: true, kernel, machine, libc };
+}
+
 function architectureSuffix(machine: string): 'x64' | 'arm64' | null {
   const normalized = machine.trim().toLowerCase();
   if (normalized === 'x86_64' || normalized === 'amd64') return 'x64';

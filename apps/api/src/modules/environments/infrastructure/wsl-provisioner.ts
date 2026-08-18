@@ -28,7 +28,12 @@ import { HIDDEN_WINDOW } from '@mangostudio/runtime';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
-import { type SafeFetchDeps, SafeFetchError, safeFetchBytes } from '../../../lib/safe-fetch';
+import {
+  isUnreachableFailure,
+  type SafeFetchDeps,
+  SafeFetchError,
+  safeFetchBytes,
+} from '../../../lib/safe-fetch';
 import {
   CANARY_MANIFEST_ASSET,
   type CanaryManifest,
@@ -43,7 +48,13 @@ import {
   runtimeRemoveSlotBytesScript,
   runtimeSlotBytesScript,
 } from '../domain/runtime-push';
-import { pruneRuntimeCache, runtimeDigestSidecarPath } from '../domain/runtime-release-fetch';
+import {
+  pruneRuntimeCache,
+  readOfflineCacheEntry,
+  rememberReleaseChecksums,
+  runtimeDigestSidecarPath,
+  type VerifiedAsset,
+} from '../domain/runtime-release-fetch';
 import {
   type RuntimeReleaseResolution,
   resolveRuntimeRelease,
@@ -94,8 +105,19 @@ export class WslProvisioningError extends Error {
 /**
  * Failing to *reach* the release, as opposed to reaching one that has nothing
  * to offer. Only this one has an offline answer worth printing.
+ *
+ * `unreachable` narrows it once more: a host that never got an answer may fall
+ * back to bytes it verified earlier, while one that was refused or handed
+ * something unreadable got an answer and has to report it.
  */
-class WslDownloadError extends WslProvisioningError {}
+class WslDownloadError extends WslProvisioningError {
+  readonly unreachable: boolean;
+
+  constructor(message: string, options: { readonly unreachable?: boolean } = {}) {
+    super(message);
+    this.unreachable = options.unreachable ?? false;
+  }
+}
 
 export type DistroCommandResult = RuntimeCommandResult;
 
@@ -138,6 +160,12 @@ export interface WslProvisioner {
        * rather than a silent minute.
        */
       readonly onTransferProgress?: (written: number, total: number) => void;
+      /**
+       * Told when the runtime came from this hub's cache because the release
+       * could not be reached. A connect that only succeeded because of that is
+       * worth saying out loud on the card, not only in a diagnostic log.
+       */
+      readonly onOfflineCache?: () => void;
     }
   ): Promise<void>;
   /** Removes version dirs and `current`; leaves consent (`runtime.json`) alone. */
@@ -189,10 +217,11 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
 
       const platformId = resolvePlatformId(slot, distro);
       const source = await loadSource(deps, distro, version, platformId);
+      if (source.offlineCache) options.onOfflineCache?.();
       if (signal?.aborted) {
         throw new WslProvisioningError(`Runtime provision for "${distro}" was cancelled.`);
       }
-      const digest = `sha256:${sha256(source.bytes)}`;
+      const digest = `sha256:${source.digest}`;
 
       // A checkout rebuilds under the same `dev` name, so nothing but the
       // digest can tell one build from another — and that is the hole this
@@ -254,9 +283,14 @@ async function loadSource(
   version: string,
   platformId: LinuxPlatformId
 ): Promise<RuntimeSource> {
-  return isDevelopmentVersion(version)
-    ? { fromArchive: false, bytes: await loadLocalBuild(deps, distro, platformId) }
-    : await loadRelease(deps, distro, version, platformId);
+  if (!isDevelopmentVersion(version)) {
+    return await loadRelease(deps, distro, version, platformId);
+  }
+  // The one source nothing else has hashed: a checkout's own build answers to
+  // no release, so its digest is derived here rather than carried out of a
+  // verification.
+  const bytes = await loadLocalBuild(deps, distro, platformId);
+  return { fromArchive: false, bytes, digest: sha256(bytes), offlineCache: false };
 }
 
 /**
@@ -269,7 +303,15 @@ async function loadSource(
 interface RuntimeSource {
   readonly fromArchive: boolean;
   readonly bytes: Uint8Array;
+  /** Lowercase hex of `bytes`, from whatever already verified them. */
+  readonly digest: string;
   readonly sourceSha?: string;
+  /**
+   * Whether the bytes came from the cache without the release confirming them
+   * this time — see {@link readOfflineCacheEntry}. A checkout's own build is
+   * never this: nothing verified it in the first place, and nothing claims to.
+   */
+  readonly offlineCache: boolean;
 }
 
 /**
@@ -453,7 +495,8 @@ async function removeLegacyRuntime(deps: WslProvisionerDeps, distro: string): Pr
 
 /**
  * Prefers the raw runtime asset; falls back to the platform archive when the
- * raw asset is missing from SHA256SUMS or 404s (older releases).
+ * raw asset is missing from SHA256SUMS or 404s (older releases), and when the
+ * release cannot be reached at all but a verified archive is already cached.
  *
  * Names and tag both come from the channel resolver rather than the hub's own
  * version string. A canary hub calls itself `<root>-canary.<sha7>` while the
@@ -480,11 +523,25 @@ async function loadRelease(
   // `manifestRuntimeDigest`.
   const boundDigest = manifest ? manifestRuntimeDigest(manifest, platformId, rawName) : undefined;
 
+  let rawFailure: unknown;
   try {
-    const bytes = await loadAsset(deps, version, release, rawName, boundDigest);
-    return { fromArchive: false, bytes, ...provenance };
+    const raw = await loadAsset(deps, version, release, rawName, boundDigest);
+    return {
+      fromArchive: false,
+      bytes: raw.bytes,
+      digest: raw.digest,
+      offlineCache: raw.offlineCache,
+      ...provenance,
+    };
   } catch (error) {
-    if (!(error instanceof WslAssetMissingError)) {
+    // Same split the shared loader makes: a 404 or unpublished raw asset is
+    // the older-release archive fallback, and an unreachable raw load is that
+    // fallback with the network gone. Anything else is a real failure of the
+    // asset this hub normally wants, and the hint still names it.
+    const tryArchive =
+      error instanceof WslAssetMissingError ||
+      (error instanceof WslDownloadError && error.unreachable);
+    if (!tryArchive) {
       if (error instanceof WslDownloadError) {
         throw new WslProvisioningError(
           `${error.message} ${manualInstallHint(deps, distro, version, release, rawName)}`
@@ -492,12 +549,27 @@ async function loadRelease(
       }
       throw error;
     }
+    rawFailure = error;
   }
 
   try {
-    const bytes = await loadAsset(deps, version, release, archiveName);
-    return { fromArchive: true, bytes, ...provenance };
+    const archive = await loadAsset(deps, version, release, archiveName);
+    return {
+      fromArchive: true,
+      bytes: archive.bytes,
+      digest: archive.digest,
+      offlineCache: archive.offlineCache,
+      ...provenance,
+    };
   } catch (error) {
+    // Unreachable raw with no archive cache: keep the original hint, which
+    // names the asset this hub normally wants. A missing raw asset still
+    // reports the archive, because that is the only file the release had.
+    if (rawFailure instanceof WslDownloadError && rawFailure.unreachable) {
+      throw new WslProvisioningError(
+        `${rawFailure.message} ${manualInstallHint(deps, distro, version, release, rawName)}`
+      );
+    }
     if (error instanceof WslDownloadError || error instanceof WslAssetMissingError) {
       throw new WslProvisioningError(
         `${error.message} ${manualInstallHint(deps, distro, version, release, archiveName)}`
@@ -586,6 +658,12 @@ function manualInstallHint(
 /**
  * Returns the verified asset bytes, downloading them only when the cache does
  * not already hold a copy whose digest matches the release.
+ *
+ * When the release cannot be reached at all, a cache entry backed by a digest
+ * this hub recorded earlier answers instead — see {@link readOfflineCacheEntry}
+ * for why a recorded digest is the only kind that can. Provisioning a
+ * distribution is otherwise impossible on an air-gapped or proxied host whose
+ * cache already holds the exact bytes.
  */
 async function loadAsset(
   deps: WslProvisionerDeps,
@@ -593,11 +671,12 @@ async function loadAsset(
   release: RuntimeReleaseResolution,
   assetName: string,
   expectedDigest?: string
-): Promise<Uint8Array> {
+): Promise<VerifiedAsset & { offlineCache: boolean }> {
   // Cached under the hub's own version, downloaded from the resolved tag. On a
   // rolling channel those differ, and it is the difference that keeps two
   // canary builds in separate cache directories while both read one tag.
-  const cachePath = join(deps.cacheDir(version), assetName);
+  const versionDir = deps.cacheDir(version);
+  const cachePath = join(versionDir, assetName);
   // Never cached, on any channel: the manifest is what decides whether the
   // bytes on disk are still the bytes this tag publishes. A rolling tag
   // republishes under one filename, so a cached copy of yesterday's canary is
@@ -607,11 +686,36 @@ async function loadAsset(
   // validated manifest read — see `manifestRuntimeDigest`. Trusting it instead
   // of a fresh SHA256SUMS fetch here is what keeps the tag from moving between
   // the manifest check and this download.
-  const expected =
-    expectedDigest ?? (await fetchExpectedChecksum(deps, release.tagVersion, assetName));
+  let expected: string;
+  if (expectedDigest) {
+    expected = expectedDigest;
+  } else {
+    try {
+      expected = await fetchExpectedChecksum(deps, release, assetName, versionDir);
+    } catch (error) {
+      // The same rule the shared loader applies, through the same helper: only
+      // an unreachable release qualifies, and only a digest this hub recorded
+      // earlier — never one re-derived from the bytes being checked — may vouch
+      // for what is on disk.
+      const offline = await readOfflineCacheEntry({
+        cachePath,
+        versionDir,
+        assetName,
+        readBytes: deps.readBytes,
+        unreachableReason:
+          error instanceof WslDownloadError && error.unreachable ? error.message : undefined,
+      });
+      if (offline) return { ...offline, offlineCache: true };
+      throw error;
+    }
+  }
 
   const cached = await deps.readBytes(cachePath);
-  if (cached && sha256(cached) === expected) return cached;
+  // `expected` *is* this file's digest once the comparison holds, so it is
+  // handed back rather than hashed a second time for the caller's benefit.
+  if (cached && sha256(cached) === expected) {
+    return { bytes: cached, digest: expected, offlineCache: false };
+  }
 
   const bytes = await download(
     deps,
@@ -643,17 +747,26 @@ async function loadAsset(
       .writeCache(runtimeDigestSidecarPath(cachePath), new TextEncoder().encode(actual))
       .catch(() => undefined);
   }
-  await pruneRuntimeCache(deps.cacheDir(version), version).catch((error: unknown) => {
-    logger.warn('cache_prune_failed', { path: deps.cacheDir(version), error: String(error) });
+  await pruneRuntimeCache(versionDir, version).catch((error: unknown) => {
+    logger.warn('cache_prune_failed', { path: versionDir, error: String(error) });
   });
-  return bytes;
+  return { bytes, digest: actual, offlineCache: false };
 }
 
+/**
+ * The digest the release publishes for the asset.
+ *
+ * Kept in the version directory on the way past — see
+ * {@link rememberReleaseChecksums} — so a later provision that cannot reach the
+ * release still has a record of what it verified.
+ */
 async function fetchExpectedChecksum(
   deps: WslProvisionerDeps,
-  tagVersion: string,
-  assetName: string
+  release: RuntimeReleaseResolution,
+  assetName: string,
+  versionDir: string
 ): Promise<string> {
+  const { tagVersion } = release;
   const checksums = await download(
     deps,
     releaseAssetUrl(tagVersion, 'SHA256SUMS'),
@@ -665,6 +778,12 @@ async function fetchExpectedChecksum(
       `Release v${tagVersion} does not publish ${assetName}, so there is no Linux runtime to install. Update MangoStudio, or put a matching runtime at ${DISTRO_RUNTIME_PATH} in the distribution yourself.`
     );
   }
+  await rememberReleaseChecksums({
+    rolling: release.rolling,
+    versionDir,
+    checksums,
+    writeCache: deps.writeCache,
+  });
   return expected;
 }
 
@@ -682,10 +801,15 @@ async function download(
     return result.bytes;
   } catch (error) {
     if (error instanceof SafeFetchError) {
-      if (error.message.includes('404') || /\b404\b/.test(error.message)) {
+      // The status, not the sentence: a release URL can carry the digits of a
+      // status code in its own version, and a body-derived message can carry
+      // any of them.
+      if (error.status === 404) {
         throw new WslAssetMissingError(`Could not download ${url}: ${error.message}.`);
       }
-      throw new WslDownloadError(`Could not download ${url}: ${error.message}.`);
+      throw new WslDownloadError(`Could not download ${url}: ${error.message}.`, {
+        unreachable: isUnreachableFailure(error),
+      });
     }
     throw error;
   }

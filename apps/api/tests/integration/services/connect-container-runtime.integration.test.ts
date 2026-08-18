@@ -84,7 +84,7 @@ function open(config: Partial<ContainerEnvironmentConfig> = {}) {
     { id: 'e2e-sandbox', config: { image, engine, ...config } },
     () => undefined,
     undefined,
-    { resolveRuntimeBinary: () => Promise.resolve(runtimeBinary) }
+    { resolveRuntimeBinary: () => Promise.resolve({ path: runtimeBinary, offlineCache: false }) }
   );
 }
 

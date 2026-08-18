@@ -14,6 +14,17 @@ function ok(stdout = ''): RuntimeCommandResult {
   return { stdout, stderr: '', exitCode: 0 };
 }
 
+/**
+ * Which of the two scripts a push runs this is.
+ *
+ * Not `--version`: the platform probe's own last line is `ldd --version`, and a
+ * runner that discriminated on that substring answered the probe with the
+ * version check's reply.
+ */
+function isPlatformProbe(script: string): boolean {
+  return script.startsWith('uname -s');
+}
+
 describe('buildSetupCommand', () => {
   it('sends a preset profile through --profile with no --allow', () => {
     const body: RuntimeSetupBody = { profile: 'readonly' };
@@ -135,7 +146,11 @@ describe('pushRuntimeOverSsh', () => {
       // An unresolvable platform probe fails fast and deterministically right
       // after the probe, with no network call — the test only cares that the
       // version mismatch let the flow reach the probe at all.
-      return Promise.resolve(script.includes('--version') ? ok('0.0.1-old') : ok('BeOS\nz80\n'));
+      //
+      // Matched on `uname`, not on `--version`: the probe script runs
+      // `ldd --version` itself, so the looser test answered the probe with the
+      // version string and never reached this fixture at all.
+      return Promise.resolve(isPlatformProbe(script) ? ok('BeOS\nz80\n') : ok('0.0.1-old'));
     };
 
     const stream = {
@@ -159,5 +174,44 @@ describe('pushRuntimeOverSsh', () => {
 
     expect(calls.length).toBeGreaterThan(1);
     expect(calls[0]).toContain('--version');
+  });
+
+  /** A runner that answers the version check as stale and the probe with `stdout`. */
+  function runnerProbing(stdout: string) {
+    return (script: string, _options?: RuntimeCommandOptions): Promise<RuntimeCommandResult> =>
+      Promise.resolve(isPlatformProbe(script) ? ok(stdout) : ok('0.0.1-old'));
+  }
+
+  const silentStream = {
+    events: [],
+    closed: false,
+    publish: () => undefined,
+    close: () => undefined,
+    subscribe: () => {
+      throw new Error('not used in this test');
+    },
+  };
+
+  function push(runner: ReturnType<typeof runnerProbing>): Promise<void> {
+    return pushRuntimeOverSsh(
+      runner,
+      'example.test',
+      silentStream as unknown as Parameters<typeof pushRuntimeOverSsh>[2],
+      new AbortController().signal
+    );
+  }
+
+  // Regression: a host whose `ldd` prints nothing answers the probe in two
+  // lines, and this call site used to read those as machine-and-libc with the
+  // kernel assumed — so `uname -s` became the machine and the refusal named a
+  // platform the host never reported.
+  it('reads a two-line probe the way every other transport does', async () => {
+    await expect(push(runnerProbing('Linux\nz80\n'))).rejects.toThrow('(Linux z80)');
+  });
+
+  it('quotes an unreadable probe instead of guessing a platform from it', async () => {
+    await expect(push(runnerProbing('Linux\n'))).rejects.toThrow(
+      'Could not read what "example.test" reported about itself: Linux'
+    );
   });
 });

@@ -95,11 +95,15 @@ export type RuntimeEnvironmentResolver = (
 ) => Promise<RuntimeEnvironmentDefinition | null>;
 
 /**
- * A step long enough that the card has to name it, rather than showing
- * `connecting` for minutes and reading as a hub that has stopped answering.
- * Only container launches raise one so far — a cold image pull.
+ * Something about an attempt the card has to name.
+ *
+ * `pulling` is a step long enough that showing `connecting` for minutes would
+ * read as a hub that has stopped answering. `offline-cache` is not a step at
+ * all: it says the runtime came from this hub's cache because the release could
+ * not be reached, which is the one thing about a successful launch worth
+ * saying. Only container and WSL launches raise either.
  */
-export type RuntimeConnectPhase = 'pulling';
+export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
 
 export type RuntimeEnvironmentConnector = (
   definition: RuntimeEnvironmentDefinition,
@@ -397,6 +401,10 @@ export class RuntimeConnectionManager {
           state: 'connected',
           manifest: connection.client.manifest,
           ...peerRelease(connection.client.runtimeVersion),
+          // Carried over from the `connecting` status this replaces, which only
+          // this attempt could have set: the status was rebuilt from scratch
+          // when the attempt started, and a superseded attempt cannot paint it.
+          ...(entry.status.offlineRuntimeCache ? { offlineRuntimeCache: true } : {}),
         };
         this.#publish(userId);
         return connection.client;
@@ -628,8 +636,15 @@ export class RuntimeConnectionManager {
     phase: RuntimeConnectPhase
   ): void {
     if (entry.revision !== revision || entry.status.state !== 'connecting') return;
-    if (phase === 'pulling' && entry.status.pullingImage) return;
 
+    if (phase === 'offline-cache') {
+      if (entry.status.offlineRuntimeCache) return;
+      entry.status = { ...entry.status, offlineRuntimeCache: true };
+      this.#publish(userId);
+      return;
+    }
+
+    if (entry.status.pullingImage) return;
     entry.status = { ...entry.status, pullingImage: true };
     this.#publish(userId);
   }
@@ -1035,7 +1050,8 @@ async function connectStdioRuntime(
  */
 export async function connectWslRuntime(
   definition: RuntimeEnvironmentDefinition,
-  onUnavailable: () => void
+  onUnavailable: () => void,
+  report?: (phase: RuntimeConnectPhase) => void
 ): Promise<ManagedRuntimeConnection> {
   if (process.platform !== 'win32') {
     throw unavailable(
@@ -1043,7 +1059,7 @@ export async function connectWslRuntime(
     );
   }
   const { distro } = environmentConfigFor('wsl', definition.config);
-  await wslProvisioner.ensure(distro);
+  await wslProvisioner.ensure(distro, { onOfflineCache: () => report?.('offline-cache') });
 
   const wslExecutable = resolveWslExecutable();
   const connection = await spawnRuntimeChild({

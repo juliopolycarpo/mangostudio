@@ -208,6 +208,14 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
                 ) : null}
                 {environment.virtual ? <span>{labels.virtual}</span> : null}
                 {!environment.enabled ? <span>{labels.disabled}</span> : null}
+                {environment.status.offlineRuntimeCache ? (
+                  <span
+                    className="rounded-full bg-tertiary/10 px-1.5 py-0.5 font-semibold text-tertiary"
+                    title={labels.offlineCacheHint}
+                  >
+                    {labels.offlineCache}
+                  </span>
+                ) : null}
               </p>
             </div>
           </div>

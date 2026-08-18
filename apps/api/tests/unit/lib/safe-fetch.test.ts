@@ -7,7 +7,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { SafeFetchError, safeFetchBytes } from '../../../src/lib/safe-fetch';
+import { isUnreachableFailure, SafeFetchError, safeFetchBytes } from '../../../src/lib/safe-fetch';
 
 const PUBLIC_ADDRESS = { address: '93.184.216.34', family: 4 as const };
 
@@ -233,5 +233,123 @@ describe('safeFetchBytes', () => {
     controller.abort();
 
     await expect(pending).rejects.toThrow('cancelled');
+  });
+
+  describe('failure classification', () => {
+    async function failureOf(run: () => Promise<unknown>): Promise<SafeFetchError> {
+      try {
+        await run();
+      } catch (error) {
+        if (error instanceof SafeFetchError) return error;
+        throw error;
+      }
+      throw new Error('Expected a SafeFetchError.');
+    }
+
+    it('carries the HTTP status rather than leaving it in the sentence', async () => {
+      // The URL carries the digits of a different status than the response
+      // does, which is exactly what a message-matching caller gets wrong.
+      const stub = respondWith(new Response('gone', { status: 404 }));
+
+      const error = await failureOf(() =>
+        safeFetchBytes('https://example.test/v1.500.0/file', limits, {
+          fetch: stub.fetch,
+          resolveHostname: publicResolver,
+        })
+      );
+
+      expect(error.kind).toBe('http');
+      expect(error.status).toBe(404);
+      expect(isUnreachableFailure(error)).toBe(false);
+    });
+
+    it('counts a rate limit and a gateway failure as not having reached the server', async () => {
+      for (const status of [408, 429, 500, 503]) {
+        const stub = respondWith(new Response('later', { status }));
+
+        const error = await failureOf(() =>
+          safeFetchBytes('https://example.test/file', limits, {
+            fetch: stub.fetch,
+            resolveHostname: publicResolver,
+          })
+        );
+
+        expect(isUnreachableFailure(error)).toBe(true);
+      }
+    });
+
+    it('reports a name that will not resolve as a network failure, not a refusal', async () => {
+      const stub = respondWith(new Response('unreachable'));
+
+      const error = await failureOf(() =>
+        safeFetchBytes('https://example.test/file', limits, {
+          fetch: stub.fetch,
+          resolveHostname: () => Promise.reject(new Error('EAI_AGAIN')),
+        })
+      );
+
+      expect(error.kind).toBe('network');
+      expect(isUnreachableFailure(error)).toBe(true);
+      expect(stub.calls).toEqual([]);
+    });
+
+    it('keeps a blocked address a refusal, which no cache may answer for', async () => {
+      const stub = respondWith(new Response('secret'));
+
+      const error = await failureOf(() =>
+        safeFetchBytes('https://internal.test/file', limits, {
+          fetch: stub.fetch,
+          resolveHostname: resolverFor({
+            'internal.test': { address: '169.254.169.254', family: 4 },
+          }),
+        })
+      );
+
+      expect(error.kind).toBe('address-refused');
+      expect(isUnreachableFailure(error)).toBe(false);
+    });
+
+    it("does not call a caller's own cancellation unreachable", async () => {
+      const controller = new AbortController();
+      const stub = {
+        fetch: ((_input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            if (init?.signal?.aborted) {
+              reject(new Error('aborted'));
+              return;
+            }
+            init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+          })) as unknown as typeof fetch,
+      };
+
+      const pending = safeFetchBytes(
+        'https://example.test/file',
+        { ...limits, signal: controller.signal },
+        { fetch: stub.fetch, resolveHostname: publicResolver }
+      );
+      controller.abort();
+
+      const error = await failureOf(() => pending);
+      expect(error.kind).toBe('cancelled');
+      expect(isUnreachableFailure(error)).toBe(false);
+    });
+
+    it.each([204, 200])(
+      'treats a %s response with no body as an answer, not a network miss',
+      async (status) => {
+        const stub = respondWith(new Response(null, { status }));
+
+        const error = await failureOf(() =>
+          safeFetchBytes('https://example.test/file', limits, {
+            fetch: stub.fetch,
+            resolveHostname: publicResolver,
+          })
+        );
+
+        expect(error.kind).toBe('http');
+        expect(error.status).toBe(status);
+        expect(isUnreachableFailure(error)).toBe(false);
+      }
+    );
   });
 });

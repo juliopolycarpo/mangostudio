@@ -27,6 +27,7 @@ import {
 } from '@mangostudio/shared/environments';
 import {
   PLATFORM_PROBE_SCRIPT,
+  parsePlatformProbe,
   RUNTIME_CAPABILITY_KEYS,
   RUNTIME_CONSENT_PRESETS,
   type RuntimeCapabilityAllow,
@@ -1015,11 +1016,12 @@ export async function pushRuntimeOverSsh(
       `Could not probe "${host}": ${probe.stderr.trim() || probe.stdout.trim() || `exit ${probe.exitCode}`}`
     );
   }
-  const lines = probe.stdout.trim().split(/\r?\n/);
-  const platformProbe =
-    lines.length >= 3
-      ? { kernel: lines[0] ?? '', machine: lines[1] ?? '', libc: lines[2] ?? '' }
-      : { kernel: 'Linux', machine: lines[0] ?? '', libc: lines[1] ?? '' };
+  const platformProbe = parsePlatformProbe(probe.stdout);
+  if (!platformProbe.ok) {
+    throw new RuntimePushError(
+      `Could not read what "${host}" reported about itself: ${platformProbe.raw || '(nothing)'}`
+    );
+  }
   const platformId = resolveRuntimePlatformId(platformProbe);
   if (!platformId) {
     throw new RuntimePushError(
@@ -1037,6 +1039,17 @@ export async function pushRuntimeOverSsh(
 
   const asset = await loadRuntimeReleaseBytes(platformId, { signal });
   if (signal.aborted) return;
+  if (asset.offlineCache) {
+    // The release could not be reached and the hub's own cache answered for it.
+    // Said in the install log rather than only in a diagnostic one: this stream
+    // is what somebody is watching while the push happens.
+    stream.publish({
+      type: 'log',
+      stream: 'system',
+      line: `Could not reach the ${version} release; using the runtime already verified in this hub's cache.`,
+      done: false,
+    });
+  }
   const onProgress = transferProgressPublisher(stream);
   await pushRuntimeBinary({
     runner,

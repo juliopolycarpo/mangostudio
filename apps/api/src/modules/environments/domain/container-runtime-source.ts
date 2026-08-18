@@ -111,6 +111,17 @@ const defaultDeps: ContainerRuntimeSourceDeps = {
   markExecutable,
 };
 
+/** Where the binary is, and whether reaching it needed the network. */
+export interface ContainerRuntimeBinary {
+  readonly path: string;
+  /**
+   * Whether the bytes came from the cache without the release confirming them
+   * this time — see `readOfflineCacheEntry` in `runtime-release-fetch.ts`.
+   * Carried up to the connect so the environment can say it launched offline.
+   */
+  readonly offlineCache: boolean;
+}
+
 /**
  * Host path of a runtime binary that runs on `platformId`.
  *
@@ -123,7 +134,7 @@ const defaultDeps: ContainerRuntimeSourceDeps = {
 export async function resolveContainerRuntimeBinary(
   platformId: LinuxPlatformId,
   overrides: Partial<ContainerRuntimeSourceDeps> = {}
-): Promise<string> {
+): Promise<ContainerRuntimeBinary> {
   const deps = { ...defaultDeps, ...overrides };
 
   if (isDevelopmentVersion(deps.version)) {
@@ -133,7 +144,7 @@ export async function resolveContainerRuntimeBinary(
       // extracted tarball, a copy off a Windows share — can arrive without the
       // bit, and this path is otherwise the one place nothing sets it.
       await deps.markExecutable(built);
-      return built;
+      return { path: built, offlineCache: false };
     }
     throw new ContainerRuntimeSourceError(
       `This checkout has no ${platformId} runtime to mount into the container. Build one with: ${localRuntimeBuildCommand(platformId, built)}`
@@ -165,16 +176,16 @@ export async function resolveContainerRuntimeBinary(
     );
   }
 
-  // `cached` is the path the fetch caches to, so a hit above already left the
-  // verified bytes there and rewriting ~100 MB of them would change nothing.
-  // The one thing the fetch does not do is mark the file executable, which the
-  // mount needs. Written only when the fetch's own cache write did not land —
-  // it is best-effort — because a mount source that may or may not be there is
-  // not a source.
-  if (await deps.fileExists(cached)) {
+  // The loader already knows whether those bytes are on disk: `asset.cached`
+  // is the cache write it just attempted, not a later stat. A leftover file
+  // at this path after a failed write is the previous entry — the one the
+  // loader just refused — and mounting it would launch those bytes instead
+  // of the ones it verified. The fetch still does not mark the file
+  // executable, which the mount needs.
+  if (asset.cached) {
     await deps.markExecutable(cached);
   } else {
     await deps.writeBinary(cached, asset.bytes);
   }
-  return cached;
+  return { path: cached, offlineCache: asset.offlineCache };
 }

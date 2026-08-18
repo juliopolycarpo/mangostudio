@@ -2156,6 +2156,9 @@ export const messages = {
       description: 'Onde rodam as ferramentas do chat, os workspaces e os comandos Git.',
       virtual: 'Integrado',
       disabled: 'Desativado',
+      offlineCache: 'Cache offline',
+      offlineCacheHint:
+        'Não foi possível alcançar a release, então isto iniciou com um runtime que o hub já havia verificado.',
       status: {
         connected: 'Conectado',
         connecting: 'Conectando',

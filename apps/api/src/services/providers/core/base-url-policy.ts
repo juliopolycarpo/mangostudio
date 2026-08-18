@@ -15,10 +15,30 @@ type HostResolver = (hostname: string) => Promise<ReadonlyArray<ResolvedAddress>
 
 const BLOCKED_MESSAGE = 'URL resolves to a blocked private or loopback address.';
 
+/**
+ * Why a URL was refused.
+ *
+ * `unresolvable` is the odd one out and the reason this is not a boolean: it
+ * says nothing about the address, only that this host could not ask. A caller
+ * that has an offline answer — a previously verified cache — needs to tell that
+ * apart from a policy refusal, and the message already distinguishes the two,
+ * so naming it costs no information a reader of the text did not have.
+ */
+export type UnsafeBaseUrlReason =
+  /** Not a URL, or not a scheme this policy allows. */
+  | 'invalid-url'
+  /** Resolved to loopback, private, unique-local, or link-local space. */
+  | 'blocked-address'
+  /** The hostname could not be resolved at all. */
+  | 'unresolvable';
+
 export class UnsafeBaseUrlError extends Error {
-  constructor(message: string) {
+  readonly reason: UnsafeBaseUrlReason;
+
+  constructor(message: string, reason: UnsafeBaseUrlReason = 'blocked-address') {
     super(message);
     this.name = 'UnsafeBaseUrlError';
+    this.reason = reason;
   }
 }
 
@@ -55,11 +75,11 @@ export async function validateBaseUrl(
   try {
     parsed = new URL(rawUrl);
   } catch {
-    throw new UnsafeBaseUrlError('Invalid URL.');
+    throw new UnsafeBaseUrlError('Invalid URL.', 'invalid-url');
   }
 
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new UnsafeBaseUrlError('Only http and https URLs are allowed.');
+    throw new UnsafeBaseUrlError('Only http and https URLs are allowed.', 'invalid-url');
   }
 
   const hostname = parsed.hostname;
@@ -90,6 +110,9 @@ export async function validateBaseUrl(
     }
   } catch (err) {
     if (err instanceof UnsafeBaseUrlError) throw err;
-    throw new UnsafeBaseUrlError(`DNS resolution failed for hostname "${hostname}".`);
+    throw new UnsafeBaseUrlError(
+      `DNS resolution failed for hostname "${hostname}".`,
+      'unresolvable'
+    );
   }
 }
