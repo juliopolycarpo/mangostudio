@@ -33,7 +33,11 @@ import {
   containerPullCommand,
 } from '@mangostudio/shared/environments';
 import type { LinuxPlatformId } from '@mangostudio/shared/runtime-home';
-import { PLATFORM_PROBE_SCRIPT, resolveRuntimePlatformId } from '@mangostudio/shared/runtime-home';
+import {
+  PLATFORM_PROBE_SCRIPT,
+  parsePlatformProbe,
+  resolveRuntimePlatformId,
+} from '@mangostudio/shared/runtime-home';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { classifyContainerFailure, describeContainerFailure } from '../domain/container-failure';
 
@@ -349,15 +353,16 @@ export function createContainerEngineService(
 }
 
 /**
- * Turns the probe's three lines into a release platform id.
+ * Turns a platform probe's output into a release platform id.
  *
  * Only Linux ids are usable: the container runs a Linux kernel whatever the
  * host is, and a probe that says anything else means the engine is in Windows
  * container mode, which this transport does not support.
  */
 export function platformFromProbe(stdout: string): LinuxPlatformId | null {
-  const [kernel = '', machine = '', libc = ''] = stdout.trim().split(/\r?\n/);
-  const resolved = resolveRuntimePlatformId({ kernel, machine, libc });
+  const probe = parsePlatformProbe(stdout);
+  if (!probe.ok) return null;
+  const resolved = resolveRuntimePlatformId(probe);
   return resolved?.startsWith('linux-') ? (resolved as LinuxPlatformId) : null;
 }
 
