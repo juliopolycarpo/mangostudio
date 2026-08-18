@@ -6,6 +6,11 @@
 // `This error originated in "…" test file` under Unhandled Errors.
 // Bun (`bun test`): `N pass` / `N fail` / `N error(s)`, plus
 // `# Unhandled error between tests` blocks.
+//
+// Turbo `--ui=stream` prefixes are `<package>:<task>: ` (colon, not space):
+// `@mangostudio/shared:test:coverage:  1 fail` and `//:test:scripts:  6 pass`.
+// GitHub Actions grouped logs often omit the per-line prefix; those lines
+// still parse, and Bun pass counts land on `root`.
 
 import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../lib/config';
 import type { TestErrorHeadline, TestSuiteStats } from './collect/types';
@@ -17,11 +22,12 @@ const MAX_HEADLINE_CHARS = 400;
 
 const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
-const WORKSPACE_LINE_RE = new RegExp(
-  `^@mangostudio/(${ALL_WORKSPACE_NAMES.join('|')}) test:[^\\s]+:\\s+(.*)$`
-);
+const WORKSPACE_NAMES = ALL_WORKSPACE_NAMES.join('|');
 
-// Bun: "  6 pass" / "@mangostudio/api test:unit:  120 pass"
+// Turbo stream / --log-prefix=task. Task names contain colons (`test:coverage`).
+const TURBO_STREAM_RE = new RegExp(`^(?:@mangostudio/(${WORKSPACE_NAMES})|//):(\\S+):\\s+(.*)$`);
+
+// Bun: "  6 pass" / "@mangostudio/api:test:unit:  120 pass"
 const BUN_PASS_RE = /^(\d+)\s+pass$/;
 const BUN_FAIL_RE = /^(\d+)\s+fail$/;
 const BUN_ERROR_COUNT_RE = /^(\d+)\s+errors?$/;
@@ -38,6 +44,11 @@ const VITEST_HEADLINE_RE =
   /^(?:Unhandled Rejection:\s+)?((?:[A-Za-z]+)?Error|AggregateError):(?:\s+.*)?$/;
 const VITEST_FAIL_LINE_RE = /^\s*FAIL\s+(\S+)/;
 
+const WORKSPACE_NAME_SET: ReadonlySet<string> = new Set(ALL_WORKSPACE_NAMES);
+
+const isWorkspaceName = (value: string | undefined): value is WorkspaceName =>
+  value !== undefined && WORKSPACE_NAME_SET.has(value);
+
 const emptyPassCounts = (): Record<WorkspaceName | 'root', number> =>
   Object.fromEntries(['root', ...ALL_WORKSPACE_NAMES].map((workspace) => [workspace, 0])) as Record<
     WorkspaceName | 'root',
@@ -49,6 +60,9 @@ const stripAnsi = (line: string): string => line.replace(ANSI_RE, '');
 const clip = (text: string): string =>
   text.length <= MAX_HEADLINE_CHARS ? text : `${text.slice(0, MAX_HEADLINE_CHARS - 1)}…`;
 
+const headlineKey = (message: string, originatedIn: string | null): string =>
+  `${message}\0${originatedIn ?? ''}`;
+
 const pushHeadline = (
   headlines: TestErrorHeadline[],
   seen: Set<string>,
@@ -58,16 +72,48 @@ const pushHeadline = (
   if (headlines.length >= MAX_HEADLINES) return;
   const clippedMessage = clip(message.trim());
   const clippedOrigin = originatedIn ? clip(originatedIn.trim()) : null;
-  const key = `${clippedMessage}\0${clippedOrigin ?? ''}`;
-  if (seen.has(key)) return;
-  seen.add(key);
+  // Same message with no origin yet is not a duplicate: a later originated-in
+  // line may belong to a different file. Dedup once the origin is known.
+  if (clippedOrigin !== null) {
+    const key = headlineKey(clippedMessage, clippedOrigin);
+    if (seen.has(key)) return;
+    seen.add(key);
+  }
   headlines.push({ message: clippedMessage, originatedIn: clippedOrigin });
 };
 
-const assignOrigin = (headlines: TestErrorHeadline[], originatedIn: string): void => {
+const assignOrigin = (
+  headlines: TestErrorHeadline[],
+  seen: Set<string>,
+  originatedIn: string
+): void => {
   const last = headlines.at(-1);
   if (!last || last.originatedIn !== null) return;
-  headlines[headlines.length - 1] = { ...last, originatedIn: clip(originatedIn) };
+  const clippedOrigin = clip(originatedIn);
+  const key = headlineKey(last.message, clippedOrigin);
+  if (seen.has(key)) {
+    headlines.pop();
+    return;
+  }
+  seen.add(key);
+  headlines[headlines.length - 1] = { ...last, originatedIn: clippedOrigin };
+};
+
+const splitTurboStreamLine = (
+  stripped: string
+): {
+  readonly workspace: WorkspaceName | 'root' | null;
+  readonly taskKey: string;
+  readonly body: string;
+} => {
+  const turboMatch = stripped.match(TURBO_STREAM_RE);
+  if (!turboMatch) {
+    return { workspace: null, taskKey: '', body: stripped.trim() };
+  }
+  const workspace = isWorkspaceName(turboMatch[1]) ? turboMatch[1] : 'root';
+  const packageLabel = isWorkspaceName(turboMatch[1]) ? `@mangostudio/${turboMatch[1]}` : '//';
+  const taskKey = `${packageLabel}:${turboMatch[2]}`;
+  return { workspace, taskKey, body: (turboMatch[3] ?? '').trim() };
 };
 
 export interface ParsedTestResults {
@@ -92,32 +138,30 @@ export const parseTestResultCounts = (text: string): ParsedTestResults => {
   let vitestErrors = 0;
   const headlines: TestErrorHeadline[] = [];
   const seen = new Set<string>();
-  let inBunUnhandled = false;
+  const bunUnhandledOpen = new Set<string>();
   let sawBunUnhandledHeading = false;
 
   for (const rawLine of text.split('\n')) {
     const stripped = stripAnsi(rawLine).replace(/\r$/, '');
     if (stripped.startsWith('##[')) continue;
 
-    const workspaceMatch = stripped.match(WORKSPACE_LINE_RE);
-    const workspace = (workspaceMatch?.[1] as WorkspaceName | undefined) ?? null;
-    const body = (workspaceMatch?.[2] ?? stripped).trim();
+    const { workspace, taskKey, body } = splitTurboStreamLine(stripped);
 
     if (stripped.includes(BUN_UNHANDLED_HEADING) || body === BUN_UNHANDLED_HEADING) {
-      inBunUnhandled = true;
+      bunUnhandledOpen.add(taskKey);
       sawBunUnhandledHeading = true;
       continue;
     }
 
-    if (inBunUnhandled) {
+    if (bunUnhandledOpen.has(taskKey)) {
       const bunHeadline = body.match(BUN_ERROR_HEADLINE_RE);
       if (bunHeadline) {
         pushHeadline(headlines, seen, `error: ${bunHeadline[1]}`, null);
-        inBunUnhandled = false;
+        bunUnhandledOpen.delete(taskKey);
         continue;
       }
       if (body.startsWith('(pass)') || body.startsWith('(fail)') || BUN_PASS_RE.test(body)) {
-        inBunUnhandled = false;
+        bunUnhandledOpen.delete(taskKey);
       }
     }
 
@@ -141,7 +185,7 @@ export const parseTestResultCounts = (text: string): ParsedTestResults => {
 
     const originated = stripped.match(VITEST_ORIGINATED_RE);
     if (originated) {
-      assignOrigin(headlines, originated[1]);
+      assignOrigin(headlines, seen, originated[1]);
       continue;
     }
 
@@ -163,12 +207,13 @@ export const parseTestResultCounts = (text: string): ParsedTestResults => {
     const testsFailed = stripped.match(VITEST_TESTS_FAILED_RE);
     if (testsFailed) vitestTestsFailed += Number(testsFailed[1]);
 
-    // Prefixed `Tests N passed` is the historical workspace pass line. Bare
-    // Vitest summaries (Turbo stream UI) are not added here: counting them
-    // would change green-run totals against stored baselines.
+    // Prefixed `Tests N passed` is the workspace pass line. Bare Vitest
+    // summaries (GitHub Actions grouped logs with no per-line prefix) are not
+    // added here: counting them would change green-run totals against stored
+    // baselines.
     const testsPassed = body.match(VITEST_TESTS_PASSED_RE);
-    if (testsPassed && workspaceMatch) {
-      passed[workspaceMatch[1] as WorkspaceName] += Number(testsPassed[1]);
+    if (testsPassed && workspace && workspace !== 'root') {
+      passed[workspace] += Number(testsPassed[1]);
     }
 
     const vitestErrorCount = stripped.match(VITEST_ERRORS_RE);

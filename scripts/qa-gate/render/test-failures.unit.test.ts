@@ -55,5 +55,34 @@ describe('renderTestFailureLead', () => {
 
     expect(markdown).toContain('Run failed; no failure counts could be parsed from the log.');
     expect(markdown).not.toContain('0 unhandled');
+    expect(markdown).not.toContain('Do not re-run');
+  });
+
+  it('uses generic failure guidance when tests failed without unhandled errors', () => {
+    const markdown = renderTestFailureLead({
+      exitCode: 1,
+      durationSeconds: 12,
+      passed: 10,
+      root: 0,
+      frontend: 10,
+      api: 0,
+      shared: 0,
+      runtime: 0,
+      failed: 2,
+      failedFiles: 1,
+      errors: 0,
+      headlines: [
+        {
+          message: 'FAIL tests/unit/example.test.ts',
+          originatedIn: 'tests/unit/example.test.ts',
+        },
+      ],
+    });
+
+    expect(markdown).toContain('2 failed tests');
+    expect(markdown).toContain('See the coverage-run log for the failing assertions.');
+    expect(markdown).not.toContain('Do not re-run');
+    expect(markdown).not.toContain(TESTING_DOC_UNHANDLED_ERRORS_URL);
+    expect(markdown).not.toContain('leaking timer');
   });
 });

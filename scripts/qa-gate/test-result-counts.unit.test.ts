@@ -14,11 +14,11 @@ describe('parseTestPassCounts', () => {
   it('sums root and workspace test output from nested scripts', () => {
     const stats = parseTestPassCounts(`
   6 pass
-@mangostudio/frontend test:unit:bun:  31 pass
-@mangostudio/frontend test:unit:vitest: Tests 42 passed
-@mangostudio/api test:unit:  120 pass
-@mangostudio/shared test:unit:  18 pass
-@mangostudio/runtime test:unit:  57 pass
+@mangostudio/frontend:test:unit:  31 pass
+@mangostudio/frontend:test:unit: Tests 42 passed
+@mangostudio/api:test:unit:  120 pass
+@mangostudio/shared:test:unit:  18 pass
+@mangostudio/runtime:test:unit:  57 pass
 `);
 
     expect(stats).toEqual({
@@ -30,14 +30,14 @@ describe('parseTestPassCounts', () => {
     });
   });
 
-  it('counts the coverage-pass task names emitted by the single CI test run', () => {
+  it('counts Turbo stream prefixes including the root //: task', () => {
     const stats = parseTestPassCounts(`
-  470 pass
-@mangostudio/frontend test:coverage: Tests  254 passed (254)
-@mangostudio/frontend test:coverage:  31 pass
-@mangostudio/api test:coverage:  812 pass
-@mangostudio/shared test:coverage:  96 pass
-@mangostudio/runtime test:coverage:  57 pass
+//:test:scripts:  470 pass
+@mangostudio/frontend:test:coverage: Tests  254 passed (254)
+@mangostudio/frontend:test:coverage:  31 pass
+@mangostudio/api:test:coverage:  812 pass
+@mangostudio/shared:test:coverage:  96 pass
+@mangostudio/runtime:test:coverage:  57 pass
 `);
 
     expect(stats).toEqual({
@@ -111,10 +111,10 @@ describe('parseTestResultCounts', () => {
 
   it('parses Turbo-prefixed Vitest Errors and originated-in lines', () => {
     const parsed = parseTestResultCounts(`
-@mangostudio/frontend test:coverage: Tests  1150 passed (1150)
-@mangostudio/frontend test:coverage:     Errors  2 errors
-@mangostudio/frontend test:coverage: ReferenceError: window is not defined
-@mangostudio/frontend test:coverage: This error originated in "tests/unit/features/library/backup-list.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+@mangostudio/frontend:test:coverage: Tests  1150 passed (1150)
+@mangostudio/frontend:test:coverage:     Errors  2 errors
+@mangostudio/frontend:test:coverage: ReferenceError: window is not defined
+@mangostudio/frontend:test:coverage: This error originated in "tests/unit/features/library/backup-list.test.tsx" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
 `);
 
     expect(parsed.passed.frontend).toBe(1150);
@@ -124,6 +124,56 @@ describe('parseTestResultCounts', () => {
         message: 'ReferenceError: window is not defined',
         originatedIn: 'tests/unit/features/library/backup-list.test.tsx',
       },
+    ]);
+  });
+
+  it('parses Turbo-prefixed Bun fail counts for workspace and root tasks', () => {
+    const parsed = parseTestResultCounts(`
+@mangostudio/shared:test:unit:  18 pass
+@mangostudio/shared:test:unit:  1 fail
+@mangostudio/shared:test:unit:  1 error
+//:test:scripts:  4 pass
+//:test:scripts:  2 fail
+`);
+
+    expect(parsed.passed.shared).toBe(18);
+    expect(parsed.passed.root).toBe(4);
+    expect(parsed.failed).toBe(3);
+    expect(parsed.errors).toBe(1);
+    expect(parsed.hasFailureSignal).toBe(true);
+  });
+
+  it('keeps two identical Vitest headlines when they originated in different files', () => {
+    const parsed = parseTestResultCounts(`
+ReferenceError: window is not defined
+This error originated in "a.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+ReferenceError: window is not defined
+This error originated in "b.test.ts" test file. It doesn't mean the error was thrown inside the file itself, but while it was running.
+     Errors  2 errors
+`);
+
+    expect(parsed.errors).toBe(2);
+    expect(parsed.headlines).toEqual([
+      { message: 'ReferenceError: window is not defined', originatedIn: 'a.test.ts' },
+      { message: 'ReferenceError: window is not defined', originatedIn: 'b.test.ts' },
+    ]);
+  });
+
+  it('keeps a Bun unhandled headline when another task emits a pass line in between', () => {
+    const parsed = parseTestResultCounts(`
+@mangostudio/api:test:coverage: # Unhandled error between tests
+@mangostudio/shared:test:coverage: (pass) unrelated
+@mangostudio/shared:test:coverage:  1 pass
+@mangostudio/api:test:coverage: error: boom between tests
+@mangostudio/api:test:coverage:  2 pass
+@mangostudio/api:test:coverage:  1 error
+`);
+
+    expect(parsed.passed.shared).toBe(1);
+    expect(parsed.passed.api).toBe(2);
+    expect(parsed.errors).toBe(1);
+    expect(parsed.headlines).toEqual([
+      { message: 'error: boom between tests', originatedIn: null },
     ]);
   });
 });
@@ -156,10 +206,10 @@ describe('buildTestSuiteStats', () => {
     const stats = buildTestSuiteStats(
       `
   6 pass
-@mangostudio/frontend test:unit:bun:  31 pass
-@mangostudio/api test:unit:  120 pass
-@mangostudio/shared test:unit:  18 pass
-@mangostudio/runtime test:unit:  57 pass
+@mangostudio/frontend:test:unit:  31 pass
+@mangostudio/api:test:unit:  120 pass
+@mangostudio/shared:test:unit:  18 pass
+@mangostudio/runtime:test:unit:  57 pass
 `,
       0,
       240

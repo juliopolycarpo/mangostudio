@@ -72,15 +72,19 @@ export const renderTestFailureLead = (
       lines.push(renderHeadline(tests, headline.message, headline.originatedIn));
     }
     lines.push('');
-    if (headlines.some((headline) => headline.originatedIn)) {
+    if (tests.errors && headlines.some((headline) => headline.originatedIn)) {
       lines.push(ORIGINATED_IN_NOTE);
       lines.push('');
     }
   }
 
-  lines.push(
-    `This is not a flake. Do not re-run it. See [Unhandled errors with green test counts](${TESTING_DOC_UNHANDLED_ERRORS_URL}).`
-  );
+  if (tests.errors) {
+    lines.push(
+      `This is not a flake. Do not re-run it. See [Unhandled errors with green test counts](${TESTING_DOC_UNHANDLED_ERRORS_URL}).`
+    );
+  } else {
+    lines.push('See the coverage-run log for the failing assertions.');
+  }
   lines.push('');
   return `${lines.join('\n')}`;
 };
