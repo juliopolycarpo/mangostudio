@@ -9,11 +9,11 @@
  * real ReDoS finding to static analysis when constructed directly here.
  */
 
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createGrepScanner } from '../../../src/services/fs/grep-scanner';
+import { closeGrepPool, createGrepScanner } from '../../../src/services/fs/grep-scanner';
 
 function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'runtime-grep-scanner-pool-'));
@@ -21,6 +21,10 @@ function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
 }
 
 describe('grep scanner pool', () => {
+  afterEach(async () => {
+    await closeGrepPool();
+  });
+
   it('does not cross-talk between concurrent scans on different patterns', async () => {
     await withTempDir(async (dir) => {
       await Bun.write(join(dir, 'alpha.txt'), 'alpha\n');
@@ -63,6 +67,43 @@ describe('grep scanner pool', () => {
         expect(otherOutcome.matches).toEqual([{ line: 1, text: 'needle' }]);
       } finally {
         await other.close();
+      }
+    });
+  });
+
+  it('reports queued scans as incomplete when the pool is closed', async () => {
+    await withTempDir(async (dir) => {
+      await Bun.write(join(dir, 'file.txt'), 'needle\n');
+      const scanner = createGrepScanner(/needle/);
+
+      try {
+        // More scans than workers, issued in one turn so the extras are still
+        // queued when teardown runs — the hang this covers.
+        const started = Array.from({ length: 8 }, () =>
+          scanner.scan(join(dir, 'file.txt'), 10, 2000)
+        );
+        const closedAt = Date.now();
+        await closeGrepPool();
+        const outcomes = await Promise.all(started);
+        expect(Date.now() - closedAt).toBeLessThan(1000);
+
+        const unfinished = outcomes.filter((outcome) => outcome.incomplete);
+        expect(unfinished.length).toBeGreaterThan(0);
+        for (const outcome of unfinished) {
+          expect(outcome).toEqual({ matches: [], moreMatches: false, incomplete: true });
+        }
+
+        // Teardown is not terminal: a later grep grows the pool again.
+        const other = createGrepScanner(/needle/);
+        try {
+          const otherOutcome = await other.scan(join(dir, 'file.txt'), 10, 2000);
+          expect(otherOutcome.incomplete).toBe(false);
+          expect(otherOutcome.matches).toEqual([{ line: 1, text: 'needle' }]);
+        } finally {
+          await other.close();
+        }
+      } finally {
+        await scanner.close();
       }
     });
   });

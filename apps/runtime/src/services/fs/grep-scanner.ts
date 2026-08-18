@@ -110,8 +110,21 @@ interface PoolWorker {
 }
 
 let pool: PoolWorker[] = [];
+
+interface Waiter {
+  readonly resolve: (entry: PoolWorker) => void;
+  /** Settles the queued acquire with no worker, because the pool was torn down. */
+  readonly abandon: () => void;
+}
+
 /** FIFO of scans waiting for a worker, once the pool is full and all busy. */
-const waiters: Array<(entry: PoolWorker) => void> = [];
+const waiters: Waiter[] = [];
+
+/**
+ * Identity of the rejection `closeGrepPool` uses to wake queued acquires.
+ * Compared by reference in `scan` so a real worker failure still propagates.
+ */
+const POOL_CLOSED = new Error('Grep worker pool closed');
 
 function spawnPoolWorker(): PoolWorker {
   const worker = new Worker(WORKER_SOURCE, { eval: true });
@@ -157,7 +170,7 @@ function discard(entry: PoolWorker): void {
   pool = pool.filter((item) => item !== entry);
   void entry.worker.terminate().catch(() => undefined);
   // Optional call short-circuits, so no replacement is spawned with nobody waiting.
-  waiters.shift()?.(spawnCheckedOutWorker());
+  waiters.shift()?.resolve(spawnCheckedOutWorker());
 }
 
 /** Hands back an idle worker, spawning one if the pool has room, or queues the request. */
@@ -165,8 +178,8 @@ function acquire(): Promise<PoolWorker> {
   const idle = pool.find((entry) => !entry.busy);
   if (idle) return Promise.resolve(checkOut(idle));
   if (pool.length < GREP_POOL_SIZE) return Promise.resolve(spawnCheckedOutWorker());
-  return new Promise((resolve) => {
-    waiters.push(resolve);
+  return new Promise((resolve, reject) => {
+    waiters.push({ resolve, abandon: () => reject(POOL_CLOSED) });
   });
 }
 
@@ -176,7 +189,7 @@ function release(entry: PoolWorker): void {
   if (waiter) {
     // Stays busy and ref'd — handed directly to the next queued scan rather
     // than going idle in between.
-    waiter(entry);
+    waiter.resolve(entry);
     return;
   }
   entry.busy = false;
@@ -184,18 +197,21 @@ function release(entry: PoolWorker): void {
 }
 
 /**
- * Terminates every pooled worker and clears the queue.
+ * Terminates every pooled worker and settles the queue.
  *
  * The pool holds OS threads for the life of the process once a burst has grown
  * it, and `unref` only stops them blocking exit — it does not release them. A
  * runtime whose services have been closed should not still be holding four
  * worker threads, so the registry's teardown calls this alongside the other
- * service closers. A grep issued afterwards simply grows the pool again.
+ * service closers. Scans still queued have no worker coming, so they are told
+ * the scan is short rather than left pending forever. A grep issued afterwards
+ * simply grows the pool again.
  */
 export async function closeGrepPool(): Promise<void> {
   const entries = pool;
+  const queued = waiters.splice(0, waiters.length);
   pool = [];
-  waiters.length = 0;
+  for (const waiter of queued) waiter.abandon();
   await Promise.all(entries.map((entry) => entry.worker.terminate().catch(() => undefined)));
 }
 
@@ -263,7 +279,15 @@ export function createGrepScanner(regex: RegExp): GrepScanner {
   return {
     async scan(path, maxMatches, budgetMs) {
       if (closed) return UNFINISHED;
-      const entry = await acquire();
+      let entry: PoolWorker;
+      try {
+        entry = await acquire();
+      } catch (error) {
+        // Pool torn down while this scan was queued: same outcome as a scan
+        // that could not run, not a reason to reject the whole search.
+        if (error !== POOL_CLOSED) throw error;
+        return UNFINISHED;
+      }
       if (closed) {
         // Closed while queued for a worker: the caller has abandoned this
         // scan, but the worker itself is fine and belongs back in the shared
