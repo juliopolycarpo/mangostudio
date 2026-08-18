@@ -58,6 +58,8 @@ const writeDefinition = {
           properties: {
             content: {
               type: 'string',
+              minLength: 1,
+              maxLength: TODO_CONTENT_MAX_LENGTH,
               description: `Short, actionable task description (1-${TODO_CONTENT_MAX_LENGTH} characters).`,
             },
             status: {

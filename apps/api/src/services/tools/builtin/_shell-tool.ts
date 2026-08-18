@@ -139,15 +139,16 @@ function buildDefinition(kind: ShellKind, description: string) {
       properties: {
         command: {
           type: 'string',
+          minLength: 1,
           description: `Command to execute with ${description}.`,
         },
         cwd: {
-          type: ['string', 'null'],
+          type: 'string',
           description:
-            'Absolute path, ~ path, or path relative to the chat working directory. Pass null to run in the chat working directory.',
+            'Absolute path, ~ path, or path relative to the chat working directory. Omit or pass null to run in the chat working directory.',
         },
       },
-      required: ['command', 'cwd'],
+      required: ['command'],
       additionalProperties: false,
     },
   };

@@ -65,7 +65,8 @@ export function getRequiredInteger(value: unknown, name: string): number {
 /**
  * Reads an optional boolean argument, distinguishing "absent" from "not a
  * boolean" so a truthy string never silently enables a flag. `null` reads as
- * absent: that is how the strict-mode schemas spell an omitted argument.
+ * absent: OpenAI Responses strict schemas send null for an omitted optional,
+ * and the executor treats both null and a missing key as absent.
  *
  * // Usage: const replaceAll = getOptionalBoolean(args.replaceAll, 'replaceAll');
  */
@@ -81,7 +82,8 @@ export function getOptionalBoolean(value: unknown, name: string): boolean | unde
  * Reads an optional string argument, rejecting a non-string rather than
  * reading it as absent: a model that sends `{"path": 42}` and gets the working
  * directory back believes it listed the directory it named. `null` reads as
- * absent, matching the nullable-optional schema convention.
+ * absent, matching both an omitted key and the nullable-optional spelling
+ * Responses strict mode still uses on the wire.
  *
  * // Usage: const path = getOptionalString(args.path, 'path');
  */

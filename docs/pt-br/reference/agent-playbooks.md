@@ -122,12 +122,11 @@ Abra estes arquivos primeiro:
 Duas convenções que toda definição de ferramenta segue, ambas verificadas por
 `tests/unit/services/providers/tool-mapper-strict.test.ts`:
 
-- **Argumentos opcionais são anuláveis, não ausentes.** O subconjunto strict do provider não
-  tem chave opcional, então um argumento opcional permanece em `required` e amplia o próprio
-  tipo (`type: ['string', 'null']`); os helpers em `services/tools/arg-parsing.ts` leem `null`
-  como ausente. Limites de comprimento (`minLength`/`maxLength`) não fazem parte do
-  subconjunto strict e pertencem ao executor. Espera-se que toda ferramenta embutida alcance
-  `strict: true`.
+- **Argumentos opcionais são opcionais.** Escreva JSON Schema comum: um único `type`, a chave
+  ausente de `required` e `minLength`/`maxLength` reais. O limite do Responses deriva o
+  dialeto strict (`toStrictSchema`); os helpers em `services/tools/arg-parsing.ts` ainda
+  leem `null` como ausente. Espera-se que toda ferramenta embutida alcance `strict: true`
+  depois da transformação.
 - **Argumentos malformados são rejeitados, não substituídos.** Um argumento com o tipo errado
   gera `ToolArgumentError`; apenas configurações armazenadas são coagidas a um padrão
   (`clampIntegerSetting`, `getStringSetting`). Veja `docs/features/tools.md` para o porquê.

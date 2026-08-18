@@ -54,16 +54,17 @@ const definition = {
     properties: {
       pattern: {
         type: 'string',
+        minLength: 1,
         description:
           'Glob pattern. Supports *, **, ?, [], {a,b} and ! for negation. Evaluated against paths relative to cwd.',
       },
       cwd: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
-          'Absolute path, ~ path, or path relative to the chat working directory. Pass null to search the chat working directory.',
+          'Absolute path, ~ path, or path relative to the chat working directory. Omit or pass null to search the chat working directory.',
       },
     },
-    required: ['pattern', 'cwd'],
+    required: ['pattern'],
     additionalProperties: false,
   },
 };

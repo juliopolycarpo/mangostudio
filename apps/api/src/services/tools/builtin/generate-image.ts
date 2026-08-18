@@ -315,25 +315,27 @@ function buildDefinitionFromMaxImages(maxImagesPerCall: number): ToolDefinition 
       properties: {
         prompt: {
           type: 'string',
+          minLength: 1,
           description: 'Detailed prompt describing the image to generate.',
         },
         count: {
-          type: ['integer', 'null'],
+          type: 'integer',
           minimum: 1,
           maximum: maxImagesPerCall,
-          description: 'Number of images to generate in this call. Pass null to generate one.',
+          description:
+            'Number of images to generate in this call. Omit or pass null to generate one.',
         },
         quality: {
-          type: ['string', 'null'],
-          enum: [...QUALITY_OPTIONS, null],
-          description: `Quality preset. Pass null to use the configured default of ${GENERATE_IMAGE_DEFAULT_QUALITY}.`,
+          type: 'string',
+          enum: [...QUALITY_OPTIONS],
+          description: `Quality preset. Omit or pass null to use the configured default of ${GENERATE_IMAGE_DEFAULT_QUALITY}.`,
         },
         model: {
-          type: ['string', 'null'],
-          description: 'Image-capable model ID. Pass null to use the configured default.',
+          type: 'string',
+          description: 'Image-capable model ID. Omit or pass null to use the configured default.',
         },
       },
-      required: ['prompt', 'count', 'quality', 'model'],
+      required: ['prompt'],
       additionalProperties: false,
     },
   };

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import type { TodoItem } from '@mangostudio/shared/todos';
+import { TODO_CONTENT_MAX_LENGTH, type TodoItem } from '@mangostudio/shared/todos';
 import { getDb } from '../../../../src/db/database';
 import { getChatTodos } from '../../../../src/modules/todos/infrastructure/todo-repository';
 import { executeTool, getTool } from '../../../../src/services/tools';
@@ -97,6 +97,20 @@ describe('todo_write', () => {
     );
     await expect(
       executeTool(TODO_WRITE_TOOL_NAME, { todos: [{ content: '' }] }, makeContext(chatId))
+    ).rejects.toThrow(/Invalid todo_write arguments/);
+    await expect(
+      executeTool(
+        TODO_WRITE_TOOL_NAME,
+        {
+          todos: [
+            {
+              content: 'x'.repeat(TODO_CONTENT_MAX_LENGTH + 1),
+              status: 'pending',
+            },
+          ],
+        },
+        makeContext(chatId)
+      )
     ).rejects.toThrow(/Invalid todo_write arguments/);
   });
 

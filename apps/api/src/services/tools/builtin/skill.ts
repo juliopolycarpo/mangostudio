@@ -33,13 +33,13 @@ const definition = {
         description: 'Skill name exactly as listed in <available-skills>.',
       },
       file: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
           'Path of a bundled resource file, relative to the skill directory ' +
-          '(e.g. "reference.md"). Pass null to load the skill instructions.',
+          '(e.g. "reference.md"). Omit or pass null to load the skill instructions.',
       },
     },
-    required: ['name', 'file'],
+    required: ['name'],
     additionalProperties: false,
   },
 };

@@ -3,7 +3,10 @@ import type { MessagePart } from '@mangostudio/shared';
 import { executeStandardToolCallsWithProgress } from '../../../../src/modules/generation/application/standard-tool-execution';
 import { collectToolExecutionResult } from '../../../../src/modules/generation/application/stream-text-turn-helpers';
 import type { StreamEvent } from '../../../../src/modules/generation/application/stream-text-turn-types';
-import { isStrictCompatible } from '../../../../src/services/providers/core/tool-mapper';
+import {
+  isStrictCompatible,
+  toStrictSchema,
+} from '../../../../src/services/providers/core/tool-mapper';
 import { executeTool, getTool } from '../../../../src/services/tools';
 import { ToolArgumentError } from '../../../../src/services/tools/arg-parsing';
 import {
@@ -59,15 +62,16 @@ describe('ask_user_question tool', () => {
     const tool = getTool(ASK_USER_QUESTION_TOOL_NAME);
     expect(tool).toBeDefined();
     expect(tool?.definition.parameters.required).toEqual(['questions']);
-    expect(isStrictCompatible(tool?.definition.parameters)).toBe(true);
+    expect(isStrictCompatible(toStrictSchema(tool?.definition.parameters ?? {}))).toBe(true);
     expect(tool?.settings.category).toBe('interaction');
     expect(tool?.settings.enabledByDefault).toBe(true);
     expect(tool?.settings.canDisable).toBe(true);
   });
 
   it('reads an explicit null for every nested optional as absent', () => {
-    // The nested optionals are advertised as ["string", "null"] so the schema
-    // stays strict-compatible; QuestionSpec keeps its plain optional keys.
+    // Nested optionals are omitted from required in the source schema; the
+    // Responses boundary widens them to nullable unions. QuestionSpec keeps
+    // its plain optional keys, and null still reads as absent.
     const parsed = parseAskUserQuestionArgs({
       questions: [
         {

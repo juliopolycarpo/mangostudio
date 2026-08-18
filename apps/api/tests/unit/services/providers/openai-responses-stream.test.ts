@@ -185,8 +185,9 @@ describe('toolDefsToResponsesAPI strict flag', () => {
         description: 'loose',
         parameters: {
           type: 'object',
-          properties: { query: { type: 'string' } },
-          required: [],
+          properties: { query: { oneOf: [{ type: 'string' }, { type: 'number' }] } },
+          required: ['query'],
+          additionalProperties: false,
         },
       },
     ]);

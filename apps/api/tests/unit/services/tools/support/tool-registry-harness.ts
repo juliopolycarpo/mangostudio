@@ -40,9 +40,9 @@ export const NON_STRING_ARGUMENTS = [...REJECTED_STRING_ARGUMENTS, NULL_ARGUMENT
 export const EMPTY_STRING_ARGUMENTS = [...NON_STRING_ARGUMENTS, ...BLANK_STRING_ARGUMENTS] as const;
 
 /**
- * Values an *optional* string argument reads as absent. `null` is how the
- * strict-mode schemas spell an omitted argument, and a string that trims away
- * carries no instruction to act on.
+ * Values an *optional* string argument reads as absent. `null` is how
+ * Responses strict schemas spell an omitted argument, and a string that trims
+ * away carries no instruction to act on.
  */
 export const ABSENT_STRING_ARGUMENTS = [NULL_ARGUMENT, ...BLANK_STRING_ARGUMENTS] as const;
 

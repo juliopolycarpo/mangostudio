@@ -27,24 +27,24 @@ const definition = {
         description: 'Specific, bounded task for the subagent to perform.',
       },
       context: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
-          'Context that helps the subagent avoid rediscovery. Pass null when there is none.',
+          'Context that helps the subagent avoid rediscovery. Omit or pass null when there is none.',
       },
       expectedOutput: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
-          'Format or acceptance criteria for the result. Pass null to leave it unconstrained.',
+          'Format or acceptance criteria for the result. Omit or pass null to leave it unconstrained.',
       },
       maxTurns: {
-        type: ['integer', 'null'],
+        type: 'integer',
         minimum: SUBAGENT_MAX_TURNS_MIN,
         maximum: SUBAGENT_MAX_TURNS_MAX,
         description:
-          'Maximum subagent model/tool turns for this delegation. Pass null to use the configured default.',
+          'Maximum subagent model/tool turns for this delegation. Omit or pass null to use the configured default.',
       },
     },
-    required: ['agentId', 'task', 'context', 'expectedOutput', 'maxTurns'],
+    required: ['agentId', 'task'],
     additionalProperties: false,
   },
 };

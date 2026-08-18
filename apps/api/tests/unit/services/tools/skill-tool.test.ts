@@ -39,7 +39,7 @@ describe('skill tool', () => {
   it('registers with the expected definition and settings', () => {
     const tool = getTool(SKILL_TOOL_NAME);
     expect(tool).toBeDefined();
-    expect(tool?.definition.parameters.required).toEqual(['name', 'file']);
+    expect(tool?.definition.parameters.required).toEqual(['name']);
     expect(tool?.settings.enabledByDefault).toBe(true);
     expect(tool?.settings.canDisable).toBe(true);
   });

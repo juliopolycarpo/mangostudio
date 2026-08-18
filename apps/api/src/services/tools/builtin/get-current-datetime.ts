@@ -24,17 +24,17 @@ const definition = {
     type: 'object',
     properties: {
       timezone: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
-          'IANA timezone name (e.g. "America/Sao_Paulo", "Europe/London"). Pass null to use the configured default.',
+          'IANA timezone name (e.g. "America/Sao_Paulo", "Europe/London"). Omit or pass null to use the configured default.',
       },
       locale: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
-          'BCP 47 locale tag for output formatting (e.g. "pt-BR", "en-US"). Pass null to use the configured default.',
+          'BCP 47 locale tag for output formatting (e.g. "pt-BR", "en-US"). Omit or pass null to use the configured default.',
       },
     },
-    required: ['timezone', 'locale'],
+    required: [],
     additionalProperties: false,
   },
 };

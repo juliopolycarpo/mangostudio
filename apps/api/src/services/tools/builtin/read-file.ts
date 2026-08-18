@@ -84,27 +84,27 @@ const definition = {
         description: 'Absolute path, ~ path, or path relative to the chat working directory.',
       },
       startLine: {
-        type: ['integer', 'null'],
+        type: 'integer',
         description:
-          '1-based line to start reading from. Pass null to start at line 1. Applies to view "text" only.',
+          '1-based line to start reading from. Omit or pass null to start at line 1. Applies to view "text" only.',
         minimum: 1,
       },
       maxLines: {
-        type: ['integer', 'null'],
-        description: `Maximum number of lines to return (max ${READ_FILE_MAX_MAX_LINES}). Pass null for the default of ${READ_FILE_DEFAULT_MAX_LINES}. Applies to view "text" only.`,
+        type: 'integer',
+        description: `Maximum number of lines to return (max ${READ_FILE_MAX_MAX_LINES}). Omit or pass null for the default of ${READ_FILE_DEFAULT_MAX_LINES}. Applies to view "text" only.`,
         minimum: READ_FILE_MIN_MAX_LINES,
         maximum: READ_FILE_MAX_MAX_LINES,
       },
       view: {
-        type: ['string', 'null'],
-        enum: [...RUNTIME_READ_FILE_VIEWS, null],
+        type: 'string',
+        enum: [...RUNTIME_READ_FILE_VIEWS],
         description:
           'How to render the file\'s bytes. "text" decodes as UTF-8 and refuses binary files; ' +
           `"hex" and "base64" return the raw bytes of any file up to ${READ_FILE_MAX_BINARY_VIEW_BYTES} ` +
-          'bytes, unwindowed. Pass null for "text".',
+          'bytes, unwindowed. Omit or pass null for "text".',
       },
     },
-    required: ['path', 'startLine', 'maxLines', 'view'],
+    required: ['path'],
     additionalProperties: false,
   },
 };
