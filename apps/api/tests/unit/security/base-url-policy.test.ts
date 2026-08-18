@@ -3,6 +3,7 @@ import {
   UnsafeBaseUrlError,
   validateBaseUrl,
 } from '../../../src/services/providers/core/base-url-policy';
+import { ADDRESS_FIXTURES } from '../lib/ip-address.fixtures';
 
 function resolveHostnameTo(
   ...results: ReadonlyArray<{ address: string; family: 4 | 6 }>
@@ -175,6 +176,20 @@ describe('base-url-policy', () => {
       })
     ).rejects.toThrow(UnsafeBaseUrlError) as unknown as Promise<void>);
   });
+
+  it.each(ADDRESS_FIXTURES)(
+    'enforces the shared private/local table via DNS resolution: $input',
+    async ({ input, privateOrLocal }) => {
+      const promise = validateBaseUrl('https://mesh.example.test/v1', {
+        resolveHostname: resolveHostnameTo({ address: input, family: 6 }),
+      });
+      if (privateOrLocal) {
+        await (expect(promise).rejects.toThrow(UnsafeBaseUrlError) as unknown as Promise<void>);
+      } else {
+        await (expect(promise).resolves.toBeUndefined() as unknown as Promise<void>);
+      }
+    }
+  );
 
   it('wraps resolver failures with the hostname context', async () => {
     await (expect(

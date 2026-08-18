@@ -2,6 +2,8 @@
  * Health probe for a running MangoStudio server via GET /api/health.
  */
 
+import { isLoopback } from '../lib/ip-address';
+
 const DEFAULT_TIMEOUT_MS = 1000;
 
 /** True when the server answers /api/health with 200 {status:'ok'}. */
@@ -41,28 +43,15 @@ export async function probeHealth(
 function resolveLocalTarget(host: string): string | null {
   const normalized = host.trim().toLowerCase();
 
-  if (normalized === '0.0.0.0' || normalized === '127.0.0.1' || normalized === 'localhost') {
-    return normalized === '0.0.0.0' ? '127.0.0.1' : normalized;
-  }
-  if (
-    normalized === '::' ||
-    normalized === '::1' ||
-    normalized === '[::]' ||
-    normalized === '[::1]'
-  ) {
-    return '[::1]';
-  }
-  if (isLoopbackIPv4(normalized)) {
-    return normalized;
-  }
-  return null;
-}
+  if (normalized === '0.0.0.0') return '127.0.0.1';
+  if (normalized === '::' || normalized === '[::]') return '[::1]';
+  if (!isLoopback(normalized)) return null;
 
-/** True for any address in the 127.0.0.0/8 loopback range. */
-function isLoopbackIPv4(host: string): boolean {
-  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
-  if (!match) return false;
-
-  const octets = match.slice(1).map(Number);
-  return octets.every((octet) => octet <= 255) && octets[0] === 127;
+  // isLoopback recognizes bracketed, `::ffff:`-mapped and trailing-dot forms that
+  // this function never saw before; re-bracket anything IPv6-shaped so the fetch
+  // URL below stays valid (`http://::1:PORT` would otherwise collide with the
+  // port separator).
+  const bracketless =
+    normalized.startsWith('[') && normalized.endsWith(']') ? normalized.slice(1, -1) : normalized;
+  return bracketless.includes(':') ? `[${bracketless}]` : bracketless;
 }

@@ -6,6 +6,7 @@ import {
   type InstallGuardContext,
   isLoopbackAddress,
 } from '../../../../src/modules/environments/domain/install-guards';
+import { ADDRESS_FIXTURES } from '../../lib/ip-address.fixtures';
 
 const ALLOWED_CONTEXT: InstallGuardContext = {
   serverHost: '127.0.0.1',
@@ -34,6 +35,10 @@ describe('install guards', () => {
       expect(isLoopbackAddress(address)).toBe(false);
     }
   );
+
+  it.each(ADDRESS_FIXTURES)('matches the shared loopback table: $input', ({ input, loopback }) => {
+    expect(isLoopbackAddress(input)).toBe(loopback);
+  });
 
   it('refuses a non-loopback bind outside standalone mode', () => {
     expect(evaluateInstallGuard({ ...ALLOWED_CONTEXT, serverHost: '0.0.0.0' })).toEqual({

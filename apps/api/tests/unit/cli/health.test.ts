@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { probeHealth } from '../../../src/cli/health';
+import { ADDRESS_FIXTURES } from '../lib/ip-address.fixtures';
 
 const realFetch = globalThis.fetch;
 
@@ -62,6 +63,15 @@ describe('probeHealth', () => {
       const { calls } = recordingFetch();
       expect(await probeHealth(host, 3001)).toBe(false);
       expect(calls).toEqual([]);
+    }
+  );
+
+  it.each(ADDRESS_FIXTURES)(
+    'probes only the loopback addresses in the shared table: $input',
+    async ({ input, loopback }) => {
+      const { calls } = recordingFetch();
+      expect(await probeHealth(input, 3001)).toBe(loopback);
+      expect(calls.length).toBe(loopback ? 1 : 0);
     }
   );
 });
