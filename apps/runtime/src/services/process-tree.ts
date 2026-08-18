@@ -12,7 +12,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { HIDDEN_WINDOW } from './process-window';
 
 /**
@@ -26,6 +26,14 @@ export const OWN_PROCESS_GROUP = { detached: process.platform !== 'win32' } as c
 /** How long the group leader is kept alive to waitpid SIGKILL'd children. */
 const LEADER_REAP_BUDGET_MS = 100;
 const LEADER_REAP_POLL_MS = 5;
+
+/**
+ * The narrow slice of `node:fs/promises` the Linux tree walk needs. Its own
+ * type rather than `typeof readdir` / `typeof readFile` so a test fake only
+ * has to implement the one call shape actually used, not every overload.
+ */
+type ReadDirFn = (path: string) => Promise<string[]>;
+type ReadFileFn = (path: string, encoding: 'utf8') => Promise<string>;
 
 /**
  * How long a fire-and-forget `taskkill` may run before the direct child is
@@ -76,7 +84,13 @@ export function killProcessTree(pid: number | undefined, killDirectChild: () => 
     // Linux takes the group down a member at a time so the leader can waitpid
     // them. It declines when `/proc` is unreadable, and then the group call
     // below is the fallback — the same one every other POSIX platform takes.
-    if (process.platform === 'linux' && killLinuxProcessTree(pid, killDirectChild)) return;
+    // The walk is async (readdir/readFile land on the event loop rather than
+    // blocking it), so it cannot report its outcome synchronously here; it
+    // runs the same fallback and the direct-child kill itself once it knows.
+    if (process.platform === 'linux') {
+      void attemptLinuxProcessTreeKill(pid, killDirectChild);
+      return;
+    }
     try {
       // Negative PID addresses the group the child leads. Both this and the
       // direct kill below run: the group call fails on a child that never
@@ -88,6 +102,34 @@ export function killProcessTree(pid: number | undefined, killDirectChild: () => 
   }
 
   invokeKill(killDirectChild);
+}
+
+/**
+ * Fire-and-forget wrapper around {@link killLinuxProcessTree}: runs the async
+ * walk, then either it already invoked the direct-child kill (a normal or
+ * empty sweep) or `/proc` was unreadable and the group-signal fallback plus
+ * the direct kill still have to run — the same fallback every other POSIX
+ * platform takes in {@link killProcessTree}.
+ */
+async function attemptLinuxProcessTreeKill(
+  leaderPid: number,
+  killDirectChild: () => void
+): Promise<void> {
+  try {
+    const handled = await killLinuxProcessTree(leaderPid, killDirectChild);
+    if (handled) return;
+    try {
+      process.kill(-leaderPid, 'SIGKILL');
+    } catch {
+      // The group is already gone, or the leader never led one.
+    }
+    invokeKill(killDirectChild);
+  } catch {
+    // Every read and kill inside the walk already swallows its own errors;
+    // this is only a last-resort net so the direct child is not left running
+    // if something outside that still throws.
+    invokeKill(killDirectChild);
+  }
 }
 
 function invokeKill(killDirectChild: () => void): void {
@@ -102,16 +144,36 @@ function invokeKill(killDirectChild: () => void): void {
  * SIGKILL every group member and every descendant that left the group, then
  * the leader once it has had a chance to reap. Returns false when `/proc`
  * cannot be read, so the caller can fall back to signalling the group as a
- * unit.
+ * unit. Already fire-and-forget from the caller's side ({@link
+ * attemptLinuxProcessTreeKill} does not await it either), so awaiting the
+ * poll loop out here keeps the shape simple without blocking anything.
+ *
+ * `readdirFn`/`readFileFn` are the production `node:fs/promises` functions
+ * and a test seam — a synchronous walk over a large `/proc` is exactly the
+ * cost this rewrite exists to move off the event loop, so a test has to be
+ * able to make the walk itself slow without a real filesystem that size.
  */
-function killLinuxProcessTree(leaderPid: number, killDirectChild: () => void): boolean {
+export async function killLinuxProcessTree(
+  leaderPid: number,
+  killDirectChild: () => void,
+  readdirFn: ReadDirFn = readdir,
+  readFileFn: ReadFileFn = readFile
+): Promise<boolean> {
+  const deadline = Date.now() + LEADER_REAP_BUDGET_MS;
+
   // A command can spawn a new child after the first sweep (`sleep 60;
   // sleep 60 & wait`). Each tick re-lists and signals whatever is there now,
   // and the leader is only taken down once nothing else remains, or the
   // budget runs out. `null` is an unreadable `/proc`, which the first sweep
   // reports to the caller so it can signal the group as a unit instead.
-  const sweep = (): boolean | null => {
-    const current = linuxTreeTargets(leaderPid);
+  //
+  // Each sweep always reads every `/proc` entry to completion — cutting a
+  // sweep short partway through the listing would mean never having read the
+  // one entry that was the actual target, silently leaving it unsignalled
+  // rather than merely signalling it late. The budget bounds how many sweeps
+  // run, exactly as it did synchronously; it does not truncate one.
+  const sweep = async (): Promise<boolean | null> => {
+    const current = await linuxTreeTargets(leaderPid, readdirFn, readFileFn);
     if (current === null) return null;
     let remaining = false;
     for (const pid of current) {
@@ -125,27 +187,29 @@ function killLinuxProcessTree(leaderPid: number, killDirectChild: () => void): b
     return remaining;
   };
 
-  const first = sweep();
+  const first = await sweep();
   if (first === null) return false;
   if (!first) {
     invokeKill(killDirectChild);
     return true;
   }
 
-  const deadline = Date.now() + LEADER_REAP_BUDGET_MS;
-  const tick = () => {
-    // `!== true` covers a `/proc` that became unreadable mid-reap: nothing more
-    // can be observed, so the leader goes now rather than at the deadline.
-    if (sweep() !== true || Date.now() >= deadline) {
-      invokeKill(killDirectChild);
-      return;
-    }
-    const next = setTimeout(tick, LEADER_REAP_POLL_MS);
-    next.unref?.();
-  };
-  const timer = setTimeout(tick, LEADER_REAP_POLL_MS);
-  timer.unref?.();
+  while (Date.now() < deadline) {
+    await sleep(LEADER_REAP_POLL_MS);
+    // `!== true` covers a `/proc` that became unreadable mid-reap: nothing
+    // more can be observed, so the leader goes now rather than waiting out
+    // the rest of the budget.
+    if ((await sweep()) !== true) break;
+  }
+  invokeKill(killDirectChild);
   return true;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 }
 
 /**
@@ -159,8 +223,12 @@ function killLinuxProcessTree(leaderPid: number, killDirectChild: () => void): b
  * A descendant that double-forks and is reparented to PID 1 is gone from both
  * views. A cgroup around the call would cover that; this scan does not.
  */
-function linuxTreeTargets(leaderPid: number): number[] | null {
-  const rows = readLinuxProcRows();
+export async function linuxTreeTargets(
+  leaderPid: number,
+  readdirFn: ReadDirFn,
+  readFileFn: ReadFileFn
+): Promise<number[] | null> {
+  const rows = await readLinuxProcRows(readdirFn, readFileFn);
   if (rows === null) return null;
 
   const children = new Map<number, number[]>();
@@ -201,10 +269,27 @@ interface LinuxProcRow {
   readonly pgid: number;
 }
 
-function readLinuxProcRows(): LinuxProcRow[] | null {
+/**
+ * There is no cheaper Linux membership primitive than this for an arbitrary
+ * process group: `/proc` has no index from a `pgid` to its members, only from
+ * a `pid` to its own `stat`. A cgroup placed around the spawn would give one,
+ * but that is a call the spawn site would have to make, not this reaper — so
+ * the full walk is kept deliberately and moved off the event loop instead.
+ *
+ * Async so each read is a yield point: a sweep against a host with thousands
+ * of processes lets timers and other tool calls run between reads rather than
+ * holding the loop for the whole walk. Always reads every entry — the point
+ * this rewrite fixes is what a walk costs the loop while it runs, not how
+ * long the walk itself takes, and a walk that gives up partway through could
+ * give up before it ever reached the one entry it was looking for.
+ */
+async function readLinuxProcRows(
+  readdirFn: ReadDirFn,
+  readFileFn: ReadFileFn
+): Promise<LinuxProcRow[] | null> {
   let names: string[];
   try {
-    names = readdirSync('/proc');
+    names = await readdirFn('/proc');
   } catch {
     return null;
   }
@@ -214,7 +299,7 @@ function readLinuxProcRows(): LinuxProcRow[] | null {
     if (!/^[0-9]+$/.test(name)) continue;
     const pid = Number(name);
     try {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const stat = await readFileFn(`/proc/${pid}/stat`, 'utf8');
       const closeParen = stat.lastIndexOf(')');
       if (closeParen < 0) continue;
       const fields = stat.slice(closeParen + 2).split(' ');
