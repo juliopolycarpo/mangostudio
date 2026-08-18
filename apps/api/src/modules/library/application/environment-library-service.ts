@@ -59,6 +59,12 @@ export interface EnvironmentLibraryService {
     scope: LibraryScope,
     options?: EnvironmentLibraryDiscoverOptions
   ): Promise<LibraryResource[]>;
+  /**
+   * `workspaceRoot` is accepted and validated at the route, but cannot change
+   * the answer: v1 registers no workspace-scoped location, so the matrix is
+   * home-scoped either way. It stays in the signature for the day one does —
+   * see the reserved-parameter note on the `/library/locations` route.
+   */
   listLocations(
     db: Kysely<Database>,
     scope: LibraryScope,

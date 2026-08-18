@@ -135,11 +135,6 @@ interface ForcedCompletion {
   readonly statuses: readonly AnyStatus[];
 }
 
-/** `value` if `predicate` holds for it, otherwise `undefined`. */
-function pickIf<T>(value: T | undefined, predicate: (value: T) => boolean): T | undefined {
-  return value !== undefined && predicate(value) ? value : undefined;
-}
-
 export interface EnvironmentProbingServiceOptions {
   readonly resolveClient?: (scope: ProbeScope) => Promise<RuntimeClient>;
   readonly loadReleaseMetadata?: (force: boolean) => Promise<NodeReleaseMetadata | null>;
@@ -196,6 +191,12 @@ export function createEnvironmentProbingService(
   const scopeKey = (scope: ProbeScope) => `${scope.userId}${SCOPE_SEP}${scope.environmentId}`;
   const entryKey = (scope: ProbeScope, kind: ProbeKind, id: string) =>
     `${scopeKey(scope)}${SCOPE_SEP}${kind}${SCOPE_SEP}${id}`;
+  /** Drops every entry a `scopeKey`-prefixed map holds for one environment. */
+  const dropScopedTo = <V>(entries: Map<string, V>, environmentId: string): void => {
+    for (const key of [...entries.keys()]) {
+      if (key.split(SCOPE_SEP)[1] === environmentId) entries.delete(key);
+    }
+  };
 
   const readFresh = <T extends AnyStatus>(
     scope: ProbeScope,
@@ -240,6 +241,26 @@ export function createEnvironmentProbingService(
    */
   const isHubMachine = (environmentId: string) => environmentId === LOCAL_ENVIRONMENT_ID;
 
+  /** Spreadable: the hub's configured PATH, and nothing at all anywhere else. */
+  const pathEnvFor = (environmentId: string) =>
+    isHubMachine(environmentId) ? { pathEnv: { env: configuredLibraryEnv() } } : {};
+
+  /**
+   * A completion is only readable for `FORCED_PROBE_MIN_INTERVAL_MS`, so every
+   * older one is dead weight. Sweeping on write keeps the map to the handful
+   * of keys forced within that window instead of one entry per (user,
+   * environment, kind, ids) combination ever probed, for the life of the hub.
+   */
+  const recordForcedCompletion = (key: string, statuses: readonly AnyStatus[]): void => {
+    const completedAt = now();
+    for (const [existing, entry] of forcedCompletions) {
+      if (completedAt - entry.completedAt >= FORCED_PROBE_MIN_INTERVAL_MS) {
+        forcedCompletions.delete(existing);
+      }
+    }
+    forcedCompletions.set(key, { completedAt, statuses });
+  };
+
   const probe = async <T extends AnyStatus>(
     scope: ProbeScope,
     kind: ProbeKind,
@@ -267,11 +288,8 @@ export function createEnvironmentProbingService(
       // A forced probe exists to observe state as of now. Joining a scan that
       // began before this request arrived can answer with the filesystem as
       // it was up to a full probe budget ago — the install-then-probe race.
-      const freshJoin = pickIf(
-        inflight.get(forcedKey),
-        (entry) => entry.startedAt >= requestArrivedAt
-      );
-      if (freshJoin) return (await freshJoin.promise) as T[];
+      const running = inflight.get(forcedKey);
+      if (running && running.startedAt >= requestArrivedAt) return (await running.promise) as T[];
 
       // No fresher scan is already running: the minimum interval decides
       // whether this request gets the last forced answer or a new scan. This
@@ -296,7 +314,7 @@ export function createEnvironmentProbingService(
       .then((statuses) => {
         if (generations.get(key) === generation) {
           writeStatuses(scope, kind, client, statuses, idOf);
-          if (force) forcedCompletions.set(key, { completedAt: now(), statuses });
+          if (force) recordForcedCompletion(key, statuses);
         }
         return statuses;
       })
@@ -324,7 +342,7 @@ export function createEnvironmentProbingService(
             ids,
             installable: installableFor(ids, client.manifest.platform),
             budget: PROBE_BUDGET,
-            ...(isHubMachine(scope.environmentId) && { pathEnv: { env: configuredLibraryEnv() } }),
+            ...pathEnvFor(scope.environmentId),
           },
           { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
         );
@@ -355,7 +373,7 @@ export function createEnvironmentProbingService(
                 [...live.latestByMajor].map(([major, version]) => [String(major), version])
               ),
             }),
-            ...(isHubMachine(scope.environmentId) && { pathEnv: { env: configuredLibraryEnv() } }),
+            ...pathEnvFor(scope.environmentId),
           },
           { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
         );
@@ -390,7 +408,7 @@ export function createEnvironmentProbingService(
                 executablePath: process.execPath,
               }),
             },
-            ...(local && { pathEnv: { env: configuredLibraryEnv() } }),
+            ...pathEnvFor(scope.environmentId),
           },
           { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
         );
@@ -406,9 +424,8 @@ export function createEnvironmentProbingService(
       (status) => (status as LibraryLocationStatus).id,
       force,
       async (client) => {
-        const local = isHubMachine(scope.environmentId);
         const result = await client.library.locations(
-          { ...(local && { pathEnv: { env: configuredLibraryEnv() } }) },
+          { ...pathEnvFor(scope.environmentId) },
           { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
         );
         return result.locations;
@@ -457,16 +474,10 @@ export function createEnvironmentProbingService(
       for (const [key, entry] of [...cache.entries()]) {
         if (entry.environmentId === environmentId) cache.delete(key);
       }
-      for (const key of [...inflight.keys()]) {
-        // scopeKey is userId SEP environmentId SEP … — environment is field 1.
-        if (key.split(SCOPE_SEP)[1] === environmentId) inflight.delete(key);
-      }
-      for (const key of [...generations.keys()]) {
-        if (key.split(SCOPE_SEP)[1] === environmentId) generations.delete(key);
-      }
-      for (const key of [...forcedCompletions.keys()]) {
-        if (key.split(SCOPE_SEP)[1] === environmentId) forcedCompletions.delete(key);
-      }
+      // scopeKey is userId SEP environmentId SEP … — environment is field 1.
+      dropScopedTo(inflight, environmentId);
+      dropScopedTo(generations, environmentId);
+      dropScopedTo(forcedCompletions, environmentId);
     },
   };
 }

@@ -89,6 +89,11 @@ const PROBE_FORCE_PATH_RE =
 
 /** Matches `POST .../environments/{runtimes,version-managers,agents}/:id/probe`. */
 export function isProbeForcePath(path: string): boolean {
+  // classifyRateLimit runs per request, and almost none of them are probes:
+  // the cheap segment check keeps the regex off the general hot path.
+  if (!matchesSegment(path, '/environments') && !matchesSegment(path, '/api/environments')) {
+    return false;
+  }
   return PROBE_FORCE_PATH_RE.test(path);
 }
 
