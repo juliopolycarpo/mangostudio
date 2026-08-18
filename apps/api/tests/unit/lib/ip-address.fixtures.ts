@@ -10,7 +10,7 @@ export interface AddressFixture {
   readonly privateOrLocal: boolean;
 }
 
-export const ADDRESS_FIXTURES: ReadonlyArray<AddressFixture> = [
+export const ADDRESS_FIXTURES: AddressFixture[] = [
   { input: '127.0.0.1', loopback: true, privateOrLocal: true },
   { input: '127.0.0.1.', loopback: true, privateOrLocal: true },
   // Short forms are rejected rather than expanded (`127.1` !== `127.0.0.1`): every
