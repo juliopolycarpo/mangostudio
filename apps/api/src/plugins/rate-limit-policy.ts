@@ -59,8 +59,15 @@ export const RATE_LIMIT_BUCKETS = {
    * the probing service's own per-key minimum interval (#690) already caps
    * the scan cost of a stuck re-check button; this bounds the request volume
    * itself, across every id a client can name.
+   *
+   * Below `general` because a forced scan is the expensive request, but not so
+   * far below that the bucket becomes the regression: these routes counted
+   * against `general` before they had one, the Environments page offers a
+   * re-check per card, and the counter keys on client IP — so, as with
+   * `runtimeSocket`, a limit tuned to one operator's cadence would let a
+   * single impatient user 429 everyone sharing their address.
    */
-  probeForce: { name: 'probe-force', max: 30, windowMs: ONE_MINUTE_MS },
+  probeForce: { name: 'probe-force', max: 60, windowMs: ONE_MINUTE_MS },
 } as const satisfies Record<string, RateLimitBucket>;
 
 /** True when `path` equals `base` or sits directly under it (`base/...`). */
