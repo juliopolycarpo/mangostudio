@@ -88,11 +88,13 @@ export interface ContainerConnectContext {
 export interface ConnectContainerRuntimeDeps {
   readonly engines: ContainerEngineService;
   readonly resolveRuntimeBinary: typeof resolveContainerRuntimeBinary;
+  readonly spawn: typeof spawnRuntimeChild;
 }
 
 const defaultDeps: ConnectContainerRuntimeDeps = {
   engines: containerEngineService,
   resolveRuntimeBinary: resolveContainerRuntimeBinary,
+  spawn: spawnRuntimeChild,
 };
 
 export async function connectContainerRuntime(
@@ -138,7 +140,7 @@ export async function connectContainerRuntime(
   let failureReason: ContainerFailureReason = 'unknown';
   let connection: Awaited<ReturnType<typeof spawnRuntimeChild>>;
   try {
-    connection = await spawnRuntimeChild({
+    connection = await deps.spawn({
       environmentId: definition.id,
       launch,
       hubVersion: getVersion(),

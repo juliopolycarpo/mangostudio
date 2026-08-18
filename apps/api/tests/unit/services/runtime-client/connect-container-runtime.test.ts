@@ -190,7 +190,9 @@ describe('connectContainerRuntime progress', () => {
   });
 
   // #791: a launch that only worked because the release was unreachable and the
-  // cache answered for it has to be visible, not silent.
+  // cache answered for it has to be visible, not silent. Spawn is stubbed: the
+  // engine is not this test, and a missing `docker` waits out the handshake
+  // instead of failing closed.
   it('reports a runtime that came from the cache without the release confirming it', async () => {
     const phases: string[] = [];
 
@@ -202,9 +204,10 @@ describe('connectContainerRuntime progress', () => {
         {
           engines: engines(),
           resolveRuntimeBinary: () => Promise.resolve({ ...RUNTIME_BINARY, offlineCache: true }),
+          spawn: () => Promise.reject(new Error('launch is not this test')),
         }
       )
-    ).rejects.toThrow();
+    ).rejects.toThrow(/launch is not this test/);
 
     expect(phases).toEqual(['offline-cache']);
   });
