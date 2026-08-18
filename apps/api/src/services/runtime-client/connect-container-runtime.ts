@@ -30,6 +30,7 @@ import {
 } from '@mangostudio/shared/environments';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
+import { throwIfAborted } from '../../modules/environments/domain/cancellation';
 import {
   classifyContainerFailure,
   describeContainerFailure,
@@ -82,7 +83,12 @@ export type ContainerConnectProgress = (phase: 'pulling' | 'offline-cache') => v
  */
 export interface ContainerConnectContext {
   readonly report?: ContainerConnectProgress;
-  /** Aborted when the attempt is released; only the pull can run long enough to care. */
+  /**
+   * Aborted when the attempt is released. The image pull and the matching
+   * runtime download can both outlive the click that started them; spawn is
+   * still bounded by its handshake timeout, so this is rechecked before it
+   * rather than threaded into it.
+   */
   readonly signal?: AbortSignal;
 }
 
@@ -126,7 +132,10 @@ export async function connectContainerRuntime(
       signal: context.signal,
     })
   );
-  const runtime = await withFailureReason(() => deps.resolveRuntimeBinary(platformId));
+  throwIfAborted(context.signal, 'Container connection was cancelled.');
+  const runtime = await withFailureReason(() =>
+    deps.resolveRuntimeBinary(platformId, { signal: context.signal })
+  );
   // The release could not be reached and the cache answered for it. The launch
   // is as verified as the day those bytes were downloaded, which is worth
   // saying: an operator otherwise has no way to tell it happened.
@@ -137,6 +146,8 @@ export async function connectContainerRuntime(
   // it is killing this connection's container and not another chat's.
   const name = containerName(definition.id, randomBytes(4).toString('hex'));
   const launch = containerLaunchCommand({ config, name, runtimeBinaryPath: runtime.path });
+
+  throwIfAborted(context.signal, 'Container connection was cancelled.');
 
   let failureReason: ContainerFailureReason = 'unknown';
   let connection: Awaited<ReturnType<typeof spawnRuntimeChild>>;

@@ -212,3 +212,62 @@ describe('connectContainerRuntime progress', () => {
     expect(phases).toEqual(['offline-cache']);
   });
 });
+
+describe('connectContainerRuntime cancellation', () => {
+  it('does not resolve the runtime binary when cancelled after the pull', async () => {
+    const controller = new AbortController();
+    let resolved = false;
+    let spawned = false;
+
+    const attempt = connectContainerRuntime(
+      definition({ image: 'node:22' }),
+      noop,
+      { signal: controller.signal },
+      {
+        engines: engines({
+          prepare: () => {
+            controller.abort();
+            return Promise.resolve('linux-x64' as const);
+          },
+        }),
+        resolveRuntimeBinary: () => {
+          resolved = true;
+          return Promise.resolve(RUNTIME_BINARY);
+        },
+        spawn: () => {
+          spawned = true;
+          return Promise.reject(new Error('launch is not this test'));
+        },
+      }
+    );
+
+    await expect(attempt).rejects.toMatchObject({ name: 'AbortError' });
+    expect(resolved).toBe(false);
+    expect(spawned).toBe(false);
+  });
+
+  it('does not spawn when cancelled while resolving the runtime binary', async () => {
+    const controller = new AbortController();
+    let spawned = false;
+
+    const attempt = connectContainerRuntime(
+      definition({ image: 'node:22' }),
+      noop,
+      { signal: controller.signal },
+      {
+        engines: engines(),
+        resolveRuntimeBinary: () => {
+          controller.abort();
+          return Promise.resolve(RUNTIME_BINARY);
+        },
+        spawn: () => {
+          spawned = true;
+          return Promise.reject(new Error('launch is not this test'));
+        },
+      }
+    );
+
+    await expect(attempt).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spawned).toBe(false);
+  });
+});
