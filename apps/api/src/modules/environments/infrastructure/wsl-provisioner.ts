@@ -53,6 +53,7 @@ import {
   readOfflineCacheEntry,
   rememberReleaseChecksums,
   runtimeDigestSidecarPath,
+  type VerifiedAsset,
 } from '../domain/runtime-release-fetch';
 import {
   type RuntimeReleaseResolution,
@@ -220,7 +221,7 @@ export function createWslProvisioner(overrides: Partial<WslProvisionerDeps> = {}
       if (signal?.aborted) {
         throw new WslProvisioningError(`Runtime provision for "${distro}" was cancelled.`);
       }
-      const digest = `sha256:${sha256(source.bytes)}`;
+      const digest = `sha256:${source.digest}`;
 
       // A checkout rebuilds under the same `dev` name, so nothing but the
       // digest can tell one build from another — and that is the hole this
@@ -282,13 +283,14 @@ async function loadSource(
   version: string,
   platformId: LinuxPlatformId
 ): Promise<RuntimeSource> {
-  return isDevelopmentVersion(version)
-    ? {
-        fromArchive: false,
-        bytes: await loadLocalBuild(deps, distro, platformId),
-        offlineCache: false,
-      }
-    : await loadRelease(deps, distro, version, platformId);
+  if (!isDevelopmentVersion(version)) {
+    return await loadRelease(deps, distro, version, platformId);
+  }
+  // The one source nothing else has hashed: a checkout's own build answers to
+  // no release, so its digest is derived here rather than carried out of a
+  // verification.
+  const bytes = await loadLocalBuild(deps, distro, platformId);
+  return { fromArchive: false, bytes, digest: sha256(bytes), offlineCache: false };
 }
 
 /**
@@ -301,6 +303,8 @@ async function loadSource(
 interface RuntimeSource {
   readonly fromArchive: boolean;
   readonly bytes: Uint8Array;
+  /** Lowercase hex of `bytes`, from whatever already verified them. */
+  readonly digest: string;
   readonly sourceSha?: string;
   /**
    * Whether the bytes came from the cache without the release confirming them
@@ -520,7 +524,13 @@ async function loadRelease(
 
   try {
     const raw = await loadAsset(deps, version, release, rawName, boundDigest);
-    return { fromArchive: false, bytes: raw.bytes, offlineCache: raw.offlineCache, ...provenance };
+    return {
+      fromArchive: false,
+      bytes: raw.bytes,
+      digest: raw.digest,
+      offlineCache: raw.offlineCache,
+      ...provenance,
+    };
   } catch (error) {
     if (!(error instanceof WslAssetMissingError)) {
       if (error instanceof WslDownloadError) {
@@ -537,6 +547,7 @@ async function loadRelease(
     return {
       fromArchive: true,
       bytes: archive.bytes,
+      digest: archive.digest,
       offlineCache: archive.offlineCache,
       ...provenance,
     };
@@ -642,7 +653,7 @@ async function loadAsset(
   release: RuntimeReleaseResolution,
   assetName: string,
   expectedDigest?: string
-): Promise<{ bytes: Uint8Array; offlineCache: boolean }> {
+): Promise<VerifiedAsset & { offlineCache: boolean }> {
   // Cached under the hub's own version, downloaded from the resolved tag. On a
   // rolling channel those differ, and it is the difference that keeps two
   // canary builds in separate cache directories while both read one tag.
@@ -676,13 +687,17 @@ async function loadAsset(
         unreachableReason:
           error instanceof WslDownloadError && error.unreachable ? error.message : undefined,
       });
-      if (offline) return { bytes: offline, offlineCache: true };
+      if (offline) return { ...offline, offlineCache: true };
       throw error;
     }
   }
 
   const cached = await deps.readBytes(cachePath);
-  if (cached && sha256(cached) === expected) return { bytes: cached, offlineCache: false };
+  // `expected` *is* this file's digest once the comparison holds, so it is
+  // handed back rather than hashed a second time for the caller's benefit.
+  if (cached && sha256(cached) === expected) {
+    return { bytes: cached, digest: expected, offlineCache: false };
+  }
 
   const bytes = await download(
     deps,
@@ -717,7 +732,7 @@ async function loadAsset(
   await pruneRuntimeCache(versionDir, version).catch((error: unknown) => {
     logger.warn('cache_prune_failed', { path: versionDir, error: String(error) });
   });
-  return { bytes, offlineCache: false };
+  return { bytes, digest: actual, offlineCache: false };
 }
 
 /**

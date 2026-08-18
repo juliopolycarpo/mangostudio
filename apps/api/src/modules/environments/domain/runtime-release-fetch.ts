@@ -179,7 +179,7 @@ export async function loadRuntimeReleaseBytes(
     return {
       bytes: raw.bytes,
       fromArchive: false,
-      digest: `sha256:${sha256(raw.bytes)}`,
+      digest: `sha256:${raw.digest}`,
       cached: raw.cached,
       offlineCache: raw.offlineCache,
       ...provenance,
@@ -195,7 +195,7 @@ export async function loadRuntimeReleaseBytes(
   return {
     bytes: archive.bytes,
     fromArchive: true,
-    digest: `sha256:${sha256(archive.bytes)}`,
+    digest: `sha256:${archive.digest}`,
     cached: archive.cached,
     offlineCache: archive.offlineCache,
     ...provenance,
@@ -253,7 +253,7 @@ interface AssetLoad {
 
 async function loadAsset(
   load: AssetLoad
-): Promise<{ bytes: Uint8Array; cached: boolean; offlineCache: boolean }> {
+): Promise<VerifiedAsset & { cached: boolean; offlineCache: boolean }> {
   const { assetName, cacheVersion, tagVersion } = load;
   const versionDir = load.cacheDir(cacheVersion);
   const cachePath = join(versionDir, assetName);
@@ -273,14 +273,16 @@ async function loadAsset(
         unreachableReason:
           error instanceof RuntimeAssetLoadError && error.unreachable ? error.message : undefined,
       });
-      if (offline) return { bytes: offline, cached: true, offlineCache: true };
+      if (offline) return { ...offline, cached: true, offlineCache: true };
       throw error;
     }
   }
 
   const fromCache = await load.readBytes(cachePath);
+  // `expected` *is* this file's digest once the comparison holds, so it is
+  // handed back rather than hashed a second time for the caller's benefit.
   if (fromCache && sha256(fromCache) === expected) {
-    return { bytes: fromCache, cached: true, offlineCache: false };
+    return { bytes: fromCache, digest: expected, cached: true, offlineCache: false };
   }
 
   const bytes = await download(
@@ -307,11 +309,26 @@ async function loadAsset(
       .catch(() => undefined);
   }
   await pruneRuntimeCache(versionDir, cacheVersion).catch(() => undefined);
-  return { bytes, cached, offlineCache: false };
+  return { bytes, digest: actual, cached, offlineCache: false };
 }
 
 /** What a version directory remembers a release's published checksums under. */
 export const CHECKSUMS_CACHE_NAME = 'SHA256SUMS';
+
+/**
+ * Bytes and the digest that vouched for them.
+ *
+ * Carried together because every path that produces these bytes has already
+ * hashed them — against the release's SHA256SUMS, a manifest, or a recorded
+ * sidecar — and the runtime asset is up to {@link MAX_ARCHIVE_BYTES}. A caller
+ * that needs the digest re-deriving it costs a second full pass over a quarter
+ * of a gigabyte to learn what the loader just proved.
+ */
+export interface VerifiedAsset {
+  readonly bytes: Uint8Array;
+  /** Lowercase hex, no `sha256:` prefix — the form SHA256SUMS publishes. */
+  readonly digest: string;
+}
 
 interface VerifiedCacheLookup {
   readonly cachePath: string;
@@ -336,13 +353,13 @@ interface VerifiedCacheLookup {
  * naming a version it could not fetch, which is a better answer than a binary
  * nothing vouches for.
  */
-async function readVerifiedCacheEntry(lookup: VerifiedCacheLookup): Promise<Uint8Array | null> {
+async function readVerifiedCacheEntry(lookup: VerifiedCacheLookup): Promise<VerifiedAsset | null> {
   const bytes = await lookup.readBytes(lookup.cachePath);
   if (!bytes) return null;
 
   const recorded = await recordedCacheDigest(lookup);
   if (!recorded) return null;
-  return sha256(bytes) === recorded ? bytes : null;
+  return sha256(bytes) === recorded ? { bytes, digest: recorded } : null;
 }
 
 export interface OfflineCacheLookup extends VerifiedCacheLookup {
@@ -368,18 +385,18 @@ export interface OfflineCacheLookup extends VerifiedCacheLookup {
  */
 export async function readOfflineCacheEntry(
   lookup: OfflineCacheLookup
-): Promise<Uint8Array | null> {
+): Promise<VerifiedAsset | null> {
   if (lookup.unreachableReason === undefined) return null;
 
-  const bytes = await readVerifiedCacheEntry(lookup);
-  if (!bytes) return null;
+  const verified = await readVerifiedCacheEntry(lookup);
+  if (!verified) return null;
 
   logger.warn('offline_cache_used', {
     asset: lookup.assetName,
     path: lookup.cachePath,
     reason: lookup.unreachableReason,
   });
-  return bytes;
+  return verified;
 }
 
 /**
