@@ -58,10 +58,8 @@ describe('buildShellTool', () => {
     expect(tool.settings.enabledByDefault).toBe(false);
     expect(tool.settings.canDisable).toBe(true);
     expect(tool.definition.parameters).toMatchObject({
-      // cwd is optional but still required-and-nullable, so the schema stays
-      // inside the provider strict subset.
-      properties: { cwd: { type: ['string', 'null'] } },
-      required: ['command', 'cwd'],
+      properties: { cwd: { type: 'string' } },
+      required: ['command'],
       additionalProperties: false,
     });
   });

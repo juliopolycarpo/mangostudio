@@ -79,26 +79,27 @@ const definition = {
     properties: {
       pattern: {
         type: 'string',
+        minLength: 1,
         description:
           'JavaScript regular expression. Escape special characters when searching for literal text.',
       },
       path: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
-          'Absolute path, ~ path, or path relative to the chat working directory. Pass null to search the chat working directory.',
+          'Absolute path, ~ path, or path relative to the chat working directory. Omit or pass null to search the chat working directory.',
       },
       glob: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
-          'Glob filter applied to directory searches (e.g. "*.ts", "src/**/*.tsx"). Ignored when path is a single file. Pass null for no filter.',
+          'Glob filter applied to directory searches (e.g. "*.ts", "src/**/*.tsx"). Ignored when path is a single file. Omit or pass null for no filter.',
       },
       caseInsensitive: {
-        type: ['boolean', 'null'],
+        type: 'boolean',
         description:
-          'When true, the regular expression is matched case-insensitively. Pass null or false for a case-sensitive search.',
+          'When true, the regular expression is matched case-insensitively. Omit, pass null, or false for a case-sensitive search.',
       },
     },
-    required: ['pattern', 'path', 'glob', 'caseInsensitive'],
+    required: ['pattern'],
     additionalProperties: false,
   },
 };

@@ -27,23 +27,61 @@ export function toolDefsToChatCompletions(defs: ToolDefinition[]): OpenAI.ChatCo
 /**
  * Rewrites a strict-subset schema as plain JSON Schema.
  *
- * A tool's `parameters` are stored in the dialect OpenAI Responses' strict mode
- * demands: an optional argument is spelled as a nullable type union
- * (`['string', 'null']`) and kept in `required`. That spelling is a provider
- * requirement, not a description of the tool, and only the Responses path wants
- * it. Gemini validates function declarations against the OpenAPI subset, where
- * `type` is a single value rather than a union; Anthropic accepts the union but
- * would be told every optional argument is mandatory.
+ * Tool `parameters` are stored as plain JSON Schema: a genuine optional is a
+ * single `type` omitted from `required`, and length bounds stay on the source.
+ * OpenAI Responses cannot consume that shape, so `toStrictSchema` derives the
+ * strict dialect at that boundary. This walk is the inverse: `null` dropped
+ * from the type union and from `enum`, and the key dropped from `required`.
  *
- * Both read the plain form instead: `null` dropped from the union and from
- * `enum`, and the key dropped from `required`. Length bounds cannot be restored
- * here — they are absent from the stored schema — and stay enforced by the
- * executor.
+ * Anthropic, Gemini, and Chat Completions all run it so a leftover
+ * strict-dialect schema (an MCP tool authored that way, a test fixture) is
+ * still down-converted. Length bounds the strict subset dropped cannot be
+ * restored here; they survive only because the source kept them.
  */
 export function toPlainJsonSchema(schema: Record<string, unknown>): Record<string, unknown> {
   const plain = plainSchemaNode(schema);
   return isPlainObject(plain) ? plain : schema;
 }
+
+/**
+ * Derives OpenAI Responses' strict-function dialect from plain JSON Schema.
+ *
+ * The walk, at every object node (including a type union that contains
+ * `'object'`):
+ *   - lists every `properties` key in `required`
+ *   - widens keys that were not previously required into a nullable type
+ *     union (`['string', 'null']`) and into `enum` when one is present
+ *   - sets `additionalProperties: false` on structured objects
+ *   - drops `minLength`/`maxLength`, the keywords the strict subset rejects
+ *     that still have an executor fallback
+ *
+ * An object that already permits unspecified properties, such as
+ * `additionalProperties` true or a value schema, or `{ type: 'object' }` with
+ * no `properties` map, is left open. Closing it would advertise a closed bag
+ * the model cannot fill. `isStrictCompatible` then refuses strict mode for
+ * that tool.
+ *
+ * Composition keywords (`oneOf`, `anyOf`, `allOf`, `not`, `$ref`) are left
+ * in place. Dropping them would ship a schema that silently lost its
+ * constraint under `strict: true`; leaving them lets `isStrictCompatible`
+ * refuse strict mode instead.
+ *
+ * A `properties` map's keys are argument names, never keywords: a tool may
+ * declare an argument called `maxLength` or `not` without losing either.
+ * Values under `const`, `enum`, `default`, and `examples` are instances, not
+ * subschemas, and are copied through.
+ */
+export function toStrictSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const strict = strictSchemaNode(schema);
+  return isPlainObject(strict) ? strict : schema;
+}
+
+/**
+ * Keywords whose values are instance data, not nested schemas. Walking them
+ * would rewrite an enum value `{ maxLength: 5 }` as `{}` or treat a `const`
+ * object's keys as schema keywords.
+ */
+const INSTANCE_VALUE_KEYWORDS = new Set(['const', 'enum', 'default', 'examples']);
 
 function plainSchemaNode(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(plainSchemaNode);
@@ -56,6 +94,8 @@ function plainSchemaNode(node: unknown): unknown {
     } else if (key === 'enum' && Array.isArray(value)) {
       const kept = value.filter((entry) => entry !== null);
       result[key] = kept.length > 0 ? kept : value;
+    } else if (INSTANCE_VALUE_KEYWORDS.has(key)) {
+      result[key] = value;
     } else if (key === 'properties' && isPlainObject(value)) {
       // Recurse through the map's values, never its keys: those are argument
       // names, and one may collide with a schema keyword.
@@ -89,6 +129,73 @@ function isNullableSchema(schema: unknown): boolean {
   return isPlainObject(schema) && Array.isArray(schema.type) && schema.type.includes('null');
 }
 
+function strictSchemaNode(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(strictSchemaNode);
+  if (!isPlainObject(node)) return node;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'minLength' || key === 'maxLength') continue;
+    if (INSTANCE_VALUE_KEYWORDS.has(key)) {
+      result[key] = value;
+      continue;
+    }
+    if (key === 'properties' && isPlainObject(value)) {
+      // Recurse through the map's values, never its keys: those are argument
+      // names, and one may collide with a schema keyword.
+      result[key] = Object.fromEntries(
+        Object.entries(value).map(([name, sub]) => [name, strictSchemaNode(sub)])
+      );
+    } else {
+      result[key] = strictSchemaNode(value);
+    }
+  }
+
+  if (!isObjectSchemaType(node.type)) return result;
+  // A free-form object (`{ type: 'object' }`) or one that names extra keys
+  // (`additionalProperties: true` or a value schema) cannot be closed without
+  // changing what the tool accepts. Leave it open; strict mode is refused.
+  if (objectAllowsUnspecifiedProperties(node)) return result;
+
+  result.additionalProperties = false;
+  const properties = result.properties;
+  if (!isPlainObject(properties)) return result;
+
+  const propertyKeys = Object.keys(properties);
+  if (propertyKeys.length === 0) return result;
+
+  const previouslyRequired = new Set(Array.isArray(node.required) ? node.required.map(String) : []);
+  const originalRequired = Array.isArray(node.required)
+    ? node.required.map(String).filter((name) => name in properties)
+    : [];
+  const extras = propertyKeys.filter((name) => !previouslyRequired.has(name));
+  result.required = [...originalRequired, ...extras];
+  result.properties = Object.fromEntries(
+    propertyKeys.map((name) => [
+      name,
+      previouslyRequired.has(name) ? properties[name] : makeNullable(properties[name]),
+    ])
+  );
+  return result;
+}
+
+function makeNullable(schema: unknown): unknown {
+  if (!isPlainObject(schema)) return schema;
+  const result: Record<string, unknown> = { ...schema, type: withNullType(schema.type) };
+  if (Array.isArray(schema.enum) && !schema.enum.includes(null)) {
+    result.enum = [...schema.enum, null];
+  }
+  return result;
+}
+
+function withNullType(type: unknown): unknown {
+  if (type === undefined) return type;
+  if (Array.isArray(type)) {
+    return type.includes('null') ? type : [...type, 'null'];
+  }
+  return [type, 'null'];
+}
+
 /**
  * Returns true when the given JSON Schema satisfies the subset required by
  * OpenAI Responses' strict function tool mode:
@@ -97,13 +204,16 @@ function isNullableSchema(schema: unknown): boolean {
  *   - every property key appears in `required`, at every nesting depth
  *   - no unsupported keywords (see `UNSUPPORTED_STRICT_KEYWORDS`)
  *
- * An argument that is genuinely optional is expressed as a nullable type
- * (`type: ['string', 'null']`) with the key still listed in `required`; the
- * parsing helpers in `services/tools/arg-parsing` read `null` as absent.
+ * An argument that is genuinely optional is expressed in this dialect as a
+ * nullable type (`type: ['string', 'null']`) with the key still listed in
+ * `required`. That spelling is derived by `toStrictSchema`; source schemas
+ * use a real optional. The parsing helpers in `services/tools/arg-parsing`
+ * read `null` as absent.
  *
- * Strict is enabled per-tool; tools whose schemas don't pass are sent with
- * `strict: false` so validation never blocks the call. Every built-in tool is
- * expected to pass — a tool that fails should be fixed rather than exempted.
+ * Strict is enabled per-tool on the *transformed* schema; tools whose
+ * transform cannot satisfy the subset are sent with `strict: false` so
+ * validation never blocks the call. Every built-in tool is expected to pass
+ * after the transform — a tool that fails should be fixed rather than exempted.
  */
 export function isStrictCompatible(schema: Record<string, unknown> | undefined | null): boolean {
   if (!schema || typeof schema !== 'object') return false;
@@ -140,14 +250,16 @@ function isStrictNode(node: unknown): boolean {
     }
   }
 
-  return Object.entries(obj).every(([key, value]) =>
+  return Object.entries(obj).every(([key, value]) => {
+    if (INSTANCE_VALUE_KEYWORDS.has(key)) return true;
     // A `properties` map is a dictionary of argument names, not a schema: its
     // own keys must not be read as keywords, or a tool that happens to declare
     // an argument called `maxLength` or `not` loses strict mode.
-    key === 'properties' && isPlainObject(value)
-      ? Object.values(value).every(isStrictNode)
-      : isStrictNode(value)
-  );
+    if (key === 'properties' && isPlainObject(value)) {
+      return Object.values(value).every(isStrictNode);
+    }
+    return isStrictNode(value);
+  });
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -165,13 +277,30 @@ function isObjectSchemaType(type: unknown): boolean {
 }
 
 /**
+ * True when this object node is an open bag rather than a closed struct.
+ *
+ * Structured objects that merely omit `additionalProperties` still get closed:
+ * that is the dialect conversion. Explicit `true` / a value schema, and a
+ * node with no `properties` map at all (`metadata: { type: 'object' }`), keep
+ * their source semantics.
+ */
+function objectAllowsUnspecifiedProperties(node: Record<string, unknown>): boolean {
+  const additional = node.additionalProperties;
+  if (additional === false) return false;
+  if (additional !== undefined) return true;
+  return !('properties' in node);
+}
+
+/**
  * Keywords the strict subset rejects outright.
  *
  * `minLength`/`maxLength` are absent from OpenAI's supported-keyword list —
  * only `pattern` and `format` constrain strings there — so a schema carrying
- * them is refused rather than downgraded. Length bounds belong in the executor,
- * which enforces them anyway. Numeric `minimum`/`maximum`, `enum`, `pattern`
- * and `minItems`/`maxItems` are supported and stay in the schema.
+ * them is refused rather than downgraded. `toStrictSchema` drops those two at
+ * the Responses boundary; source schemas keep them so Anthropic and Gemini
+ * still see the constraint, and the executor continues to enforce it.
+ * Numeric `minimum`/`maximum`, `enum`, `pattern` and `minItems`/`maxItems`
+ * are supported and stay in the schema.
  */
 const UNSUPPORTED_STRICT_KEYWORDS = [
   'oneOf',
@@ -186,25 +315,32 @@ const UNSUPPORTED_STRICT_KEYWORDS = [
 /**
  * Converts internal ToolDefinitions to the OpenAI Responses API tool format.
  *
- * Each tool's `strict` flag is set individually: tools whose schemas satisfy
- * the strict subset get `strict: true` (the model is forced to match the
- * schema exactly); others keep `strict: false` to preserve compatibility.
+ * Each tool's `strict` flag is set individually on the derived schema: tools
+ * whose transform satisfies the strict subset get `strict: true` (the model
+ * is forced to match the schema exactly). A transform that still fails the
+ * subset is discarded. The original parameters go out with `strict: false`,
+ * so an optional `oneOf` is not rewritten into a required non-nullable field.
  */
 export function toolDefsToResponsesAPI(defs: ToolDefinition[]): Array<Record<string, unknown>> {
-  return defs.map((def) => ({
-    type: 'function',
-    name: def.name,
-    description: def.description,
-    parameters: def.parameters,
-    strict: isStrictCompatible(def.parameters),
-  }));
+  return defs.map((def) => {
+    const derived = toStrictSchema(def.parameters);
+    const strict = isStrictCompatible(derived);
+    return {
+      type: 'function',
+      name: def.name,
+      description: def.description,
+      parameters: strict ? derived : def.parameters,
+      strict,
+    };
+  });
 }
 
 /**
  * Converts internal ToolDefinitions to the Gemini Interactions API tool format.
  *
- * Gemini takes only a subset of OpenAPI, so the schemas are down-converted from
- * the strict dialect first (see `toPlainJsonSchema`).
+ * Gemini takes only a subset of OpenAPI, so the schemas are passed through
+ * `toPlainJsonSchema` first (a no-op for a plain source, and a down-convert
+ * for any leftover strict-dialect schema).
  */
 export function toolDefsToGeminiInteractions(
   defs: ToolDefinition[]

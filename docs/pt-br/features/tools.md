@@ -255,30 +255,37 @@ Retorna 422 com `ToolSettingsError` se os parâmetros forem inválidos ou se a t
 | Gemini Interactions | `toolDefsToGeminiInteractions()` | `{ name, description, parameters }`                           |
 | OpenAI-compatible   | `toolDefsToChatCompletions()`    | `ChatCompletionTool[]`                                        |
 
-A API OpenAI Responses aplica `strict: true` quando o schema satisfaz os requisitos do strict mode, como `type: object`, `additionalProperties: false`, todas as propriedades obrigatórias **em qualquer nível de aninhamento** e ausência de `oneOf`, `anyOf`, `allOf`, `not`, `$ref`, `minLength` e `maxLength`.
+A API OpenAI Responses aplica `strict: true` quando o schema *derivado* satisfaz os requisitos
+do strict mode (`type: object`, `additionalProperties: false`, todas as propriedades
+obrigatórias **em qualquer nível de aninhamento**, sem `oneOf`/`anyOf`/`allOf`/`not`/`$ref`/`minLength`/`maxLength`).
+`toStrictSchema` produz esse dialeto no limite do Responses; os schemas de origem permanecem
+JSON Schema comum.
 
-Espera-se que toda ferramenta embutida satisfaça esses requisitos. Uma ferramenta que falhe
-em `isStrictCompatible` deve ser corrigida, e não isentada —
+Espera-se que toda ferramenta embutida passe depois da transformação. Uma ferramenta que
+falhe em `isStrictCompatible` no schema derivado deve ser corrigida, e não isentada —
 `tests/unit/services/providers/tool-mapper-strict.test.ts` verifica `strict: true` por id de
 ferramenta.
 
-### Argumentos opcionais são anuláveis, não ausentes
+### Argumentos opcionais são opcionais
 
-O subconjunto strict não tem noção de chave opcional, então um argumento opcional permanece
-em `required` e amplia o próprio tipo:
+Escreva JSON Schema comum: um argumento opcional usa um único `type` e fica de fora de
+`required`, e `minLength`/`maxLength` permanecem na origem para o Anthropic e o Gemini
+anunciarem o limite. O OpenAI Responses não tem chave opcional, então `toStrictSchema`
+deriva esse dialeto no limite: toda propriedade entra em `required`, as chaves que eram
+opcionais viram uma união anulável (`type: ['string', 'null']`), e os limites de
+comprimento são descartados. O executor continua a aplicá-los.
 
 ```jsonc
-// não assim                                   // e sim assim
+// origem (JSON Schema comum)                 // fio do Responses (derivado)
 { "properties": { "startLine": {              { "properties": { "startLine": {
     "type": "integer", "minimum": 1 } },          "type": ["integer", "null"], "minimum": 1 } },
   "required": ["path"] }                        "required": ["path", "startLine"] }
 ```
 
 Os helpers de parsing em `services/tools/arg-parsing.ts` leem `null` como "ausente", de modo
-que os executores não precisam de tratamento especial. `minimum`/`maximum` numéricos, `enum`,
-`pattern` e `minItems`/`maxItems` sobrevivem junto de um tipo anulável; `minLength`/`maxLength`
-não fazem parte do subconjunto strict, então limites de comprimento ficam no executor, não no
-schema.
+que um modelo que envia null (Responses strict) e um que omite a chave seguem o mesmo
+caminho. `minimum`/`maximum` numéricos, `enum`, `pattern` e `minItems`/`maxItems` sobrevivem
+nos dois dialetos.
 
 ### Argumentos malformados são rejeitados, não substituídos
 

@@ -42,12 +42,12 @@ const definition = {
     type: 'object',
     properties: {
       path: {
-        type: ['string', 'null'],
+        type: 'string',
         description:
-          'Absolute path, ~ path, or path relative to the chat working directory. Pass null to list the chat working directory.',
+          'Absolute path, ~ path, or path relative to the chat working directory. Omit or pass null to list the chat working directory.',
       },
     },
-    required: ['path'],
+    required: [],
     additionalProperties: false,
   },
 };

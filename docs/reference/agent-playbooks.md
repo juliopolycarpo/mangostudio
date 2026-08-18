@@ -141,11 +141,11 @@ Open these first:
 Two conventions every tool definition follows, both enforced by
 `tests/unit/services/providers/tool-mapper-strict.test.ts`:
 
-- **Optional arguments are nullable, not absent.** The provider strict subset has no optional
-  key, so an optional argument stays in `required` and widens its type
-  (`type: ['string', 'null']`); the helpers in `services/tools/arg-parsing.ts` read `null` as
-  absent. Length bounds (`minLength`/`maxLength`) are not in the strict subset and belong in
-  the executor. Every built-in is expected to reach `strict: true`.
+- **Optional arguments are optional.** Author plain JSON Schema: a single `type`, the key
+  absent from `required`, and real `minLength`/`maxLength`. The Responses boundary derives
+  the strict dialect (`toStrictSchema`); the helpers in `services/tools/arg-parsing.ts`
+  still read `null` as absent. Every built-in is expected to reach `strict: true` after
+  the transform.
 - **Malformed arguments are rejected, not substituted.** A wrong-typed argument raises
   `ToolArgumentError`; only stored settings coerce to a default (`clampIntegerSetting`,
   `getStringSetting`). See `docs/features/tools.md` for why.

@@ -238,28 +238,35 @@ Returns 422 with `ToolSettingsError` if parameters are invalid or the tool canno
 | Gemini Interactions | `toolDefsToGeminiInteractions()` | `{ name, description, parameters }`                           |
 | OpenAI-compatible   | `toolDefsToChatCompletions()`    | `ChatCompletionTool[]`                                        |
 
-OpenAI Responses API applies `strict: true` when the schema satisfies strict mode requirements (`type: object`, `additionalProperties: false`, all properties required **at every nesting depth**, no `oneOf`/`anyOf`/`allOf`/`not`/`$ref`/`minLength`/`maxLength`).
+OpenAI Responses API applies `strict: true` when the *derived* schema satisfies strict mode
+requirements (`type: object`, `additionalProperties: false`, all properties required **at every
+nesting depth**, no `oneOf`/`anyOf`/`allOf`/`not`/`$ref`/`minLength`/`maxLength`).
+`toStrictSchema` produces that dialect at the Responses boundary; source schemas stay plain.
 
-Every built-in tool is expected to pass. A tool that fails `isStrictCompatible` should be
-fixed rather than exempted — `tests/unit/services/providers/tool-mapper-strict.test.ts`
-asserts `strict: true` per tool id.
+Every built-in tool is expected to pass after the transform. A tool that fails
+`isStrictCompatible` on the derived schema should be fixed rather than exempted —
+`tests/unit/services/providers/tool-mapper-strict.test.ts` asserts `strict: true` per tool id.
 
-### Optional arguments are nullable, not absent
+### Optional arguments are optional
 
-The strict subset has no notion of an optional key, so an optional argument keeps its place
-in `required` and widens its type instead:
+Author plain JSON Schema: a genuine optional uses a single `type` and is absent from
+`required`, and `minLength`/`maxLength` stay on the source so Anthropic and Gemini can
+advertise them. OpenAI Responses has no optional key, so `toStrictSchema` derives that
+dialect at the boundary: every property is added to `required`, previously-optional keys
+become a nullable union (`type: ['string', 'null']`), and length bounds are dropped. The
+executor still enforces the bounds.
 
 ```jsonc
-// not this                                    // this
+// source (plain JSON Schema)                 // Responses wire (derived)
 { "properties": { "startLine": {              { "properties": { "startLine": {
     "type": "integer", "minimum": 1 } },          "type": ["integer", "null"], "minimum": 1 } },
   "required": ["path"] }                        "required": ["path", "startLine"] }
 ```
 
-The parsing helpers in `services/tools/arg-parsing.ts` read `null` as "absent", so executors
-need no special case. Numeric `minimum`/`maximum`, `enum`, `pattern` and `minItems`/`maxItems`
-survive alongside a nullable type; `minLength`/`maxLength` are not part of the strict subset,
-so length bounds live in the executor instead of the schema.
+The parsing helpers in `services/tools/arg-parsing.ts` read `null` as "absent", so a model
+that sends null (Responses strict) and a model that omits the key take the same path.
+Numeric `minimum`/`maximum`, `enum`, `pattern` and `minItems`/`maxItems` survive in both
+dialects.
 
 ### Malformed arguments are rejected, not substituted
 

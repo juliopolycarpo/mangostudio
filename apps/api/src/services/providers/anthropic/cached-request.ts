@@ -46,9 +46,9 @@ export function buildCachedAnthropicRequest(opts: BuildCachedRequestOpts): {
     : undefined;
 
   // Tools with cache_control on the LAST item only (maximises prefix match).
-  // Schemas are down-converted from the strict dialect: Anthropic reads an
-  // omitted key as optional, so shipping every argument in `required` would
-  // tell the model to always supply one.
+  // Schemas are passed through `toPlainJsonSchema` so Anthropic sees genuine
+  // optionals (an omitted key, not a nullable required one) and keeps length
+  // bounds the source advertised.
   const tools: Anthropic.MessageCreateParams['tools'] =
     opts.toolDefinitions.length > 0
       ? opts.toolDefinitions.map((t, i, arr) => ({

@@ -52,9 +52,9 @@ const definition = {
               description: 'The complete question to ask. Clear, specific, ends with "?".',
             },
             header: {
-              type: ['string', 'null'],
+              type: 'string',
               description:
-                'Very short topic label displayed as a chip (max 24 chars). Pass null for none.',
+                'Very short topic label displayed as a chip (max 24 chars). Omit or pass null for none.',
             },
             options: {
               type: 'array',
@@ -69,21 +69,22 @@ const definition = {
                     description: 'Concise display text for this choice (1-5 words).',
                   },
                   description: {
-                    type: ['string', 'null'],
-                    description: 'What this option means or its trade-offs. Pass null for none.',
+                    type: 'string',
+                    description:
+                      'What this option means or its trade-offs. Omit or pass null for none.',
                   },
                 },
-                required: ['label', 'description'],
+                required: ['label'],
                 additionalProperties: false,
               },
             },
             allowMultiple: {
-              type: ['boolean', 'null'],
+              type: 'boolean',
               description:
-                'Set true to let the user select more than one option. Pass null or false for single-select.',
+                'Set true to let the user select more than one option. Omit, pass null, or false for single-select.',
             },
           },
-          required: ['question', 'header', 'options', 'allowMultiple'],
+          required: ['question', 'options'],
           additionalProperties: false,
         },
       },

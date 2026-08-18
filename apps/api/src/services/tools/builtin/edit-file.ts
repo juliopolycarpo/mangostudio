@@ -58,12 +58,12 @@ const definition = {
         description: 'Exact replacement text. May be empty to delete the matched text.',
       },
       replaceAll: {
-        type: ['boolean', 'null'],
+        type: 'boolean',
         description:
-          'Replace every occurrence instead of requiring one unique match. Pass null or false to require a unique match.',
+          'Replace every occurrence instead of requiring one unique match. Omit, pass null, or false to require a unique match.',
       },
     },
-    required: ['path', 'oldString', 'newString', 'replaceAll'],
+    required: ['path', 'oldString', 'newString'],
     additionalProperties: false,
   },
 };
