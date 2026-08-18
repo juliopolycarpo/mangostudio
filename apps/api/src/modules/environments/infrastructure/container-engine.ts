@@ -245,6 +245,11 @@ export function createContainerEngineService(
     });
     if (result.exitCode === 0) return result.stdout.trim() || null;
 
+    // A killed CLI reports as an ordinary failure with no stderr, which would
+    // be classified as an engine failure and painted on the card as one. Asked
+    // before the classification so a cancelled inspect says so — the pull path
+    // has the same rule.
+    signal?.throwIfAborted();
     // A missing image is the expected answer here, not a failure: it is what
     // says a pull is needed. Anything else — no engine, no daemon — is real.
     const error = refuse(result, { engine, image: config.image });

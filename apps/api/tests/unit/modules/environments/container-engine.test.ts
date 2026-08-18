@@ -275,6 +275,33 @@ describe('container image preparation', () => {
   // #792: the request stops waiting on a cold pull, so the pull is what has to
   // be stoppable instead — and a killed CLI must not be reported as a registry
   // failure on a card nobody is looking at any more.
+  it('ends a cancelled inspect as a cancellation, before classifying it', async () => {
+    const cancel = new AbortController();
+    const subcommands: string[] = [];
+    const run = (_command: string, args: readonly string[]) => {
+      subcommands.push(args[0] ?? '');
+      // What a killed inspect leaves behind: no stderr, no numeric exit —
+      // indistinguishable from a missing engine without the signal.
+      cancel.abort();
+      return Promise.resolve({
+        stdout: '',
+        stderr: '',
+        exitCode: null,
+        spawnErrorCode: 'ABORT_ERR',
+      });
+    };
+
+    const attempt = createContainerEngineService({ run }).prepare(config, {
+      signal: cancel.signal,
+    });
+
+    await expect(attempt).rejects.toThrow();
+    const error = await attempt.catch((reason: unknown) => reason);
+    expect(error).not.toBeInstanceOf(ContainerEngineError);
+    expect((error as Error).name).toBe('AbortError');
+    expect(subcommands).toEqual(['image']);
+  });
+
   it('ends a cancelled pull as a cancellation, before the probe', async () => {
     const cancel = new AbortController();
     const subcommands: string[] = [];
