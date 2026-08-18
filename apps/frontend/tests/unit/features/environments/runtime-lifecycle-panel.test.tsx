@@ -290,13 +290,17 @@ describe('RuntimeLifecyclePanel', () => {
     });
 
     it.each([
-      ['a machine on a different build', '9.9.8'],
-      ['a machine that has never reported one', null],
-    ])('keeps offering the install for %s', async (_case, installed) => {
-      const environment: Environment = { ...WSL, id: `offer-${installed ?? 'none'}` };
+      ['a machine on a different build', '9.9.8', false],
+      ['a machine that has never reported one', null, false],
+      ['matching health that is stale', '9.9.9', true],
+    ])('keeps offering the install for %s', async (_case, installed, stale) => {
+      const environment: Environment = {
+        ...WSL,
+        id: `offer-${installed ?? 'none'}-${String(stale)}`,
+      };
       scenario
         .respondWithJson('GET', `/api/environments/${environment.id}/runtime`, {
-          body: viewWith(installed),
+          body: { ...viewWith(installed), stale },
         })
         .install();
       render(<RuntimeLifecyclePanel environment={environment} />);

@@ -309,8 +309,12 @@ function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
   // (`…-canary.<sha>`), and it is only the asset *filename* that is reused
   // across builds. A machine that has never reported one has nothing to
   // compare, which is the never-installed case and keeps the offer.
+  //
+  // Health is retained after disconnect, marked stale. The confirming line is a
+  // claim about what is running now, so a stale report falls through to the
+  // offer rather than saying a matching runtime is already there.
   const installed = view.health ? (view.health.version ?? view.health.runtimeVersion) : null;
-  if (installed === staged.version) {
+  if (!view.stale && installed === staged.version) {
     return (
       <p className="text-[11px] text-on-surface-variant/80" data-testid="runtime-offer-matched">
         {formatMessage(labels.matched, { version: staged.version })}
