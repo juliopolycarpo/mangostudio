@@ -535,34 +535,36 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     };
 
     try {
-      if (recipe.runtimeId === 'nvm') {
-        publish(
-          'version-manager',
-          await deps.probingService.getVersionManagerStatus(scope, 'nvm', { force: true })
-        );
-        return;
-      }
-      if (
-        recipe.runtimeId === 'claude' ||
-        recipe.runtimeId === 'codex' ||
-        recipe.runtimeId === 'cursor'
-      ) {
-        publish(
-          'agent',
-          await deps.probingService.getAgentCliStatus(scope, recipe.runtimeId, { force: true })
-        );
-        return;
-      }
-
-      publish(
-        'runtime',
-        await deps.probingService.getRuntimeStatus(scope, recipe.runtimeId, { force: true })
-      );
-      if (recipe.requires.includes('nvm')) {
-        publish(
-          'version-manager',
-          await deps.probingService.getVersionManagerStatus(scope, 'nvm', { force: true })
-        );
+      // Which surfaces to refresh is the recipe's declaration, never a branch
+      // on its id here. Every one runs through the same forced probe the reset
+      // above set up, so the epoch guard still decides what may reach the cache.
+      for (const target of recipe.probe) {
+        switch (target.kind) {
+          case 'runtime':
+            publish(
+              'runtime',
+              await deps.probingService.getRuntimeStatus(scope, target.runtimeId, { force: true })
+            );
+            break;
+          case 'version-manager':
+            publish(
+              'version-manager',
+              await deps.probingService.getVersionManagerStatus(scope, target.versionManagerId, {
+                force: true,
+              })
+            );
+            break;
+          case 'agent':
+            publish(
+              'agent',
+              await deps.probingService.getAgentCliStatus(scope, target.targetId, { force: true })
+            );
+            break;
+          default: {
+            const unreachable: never = target;
+            throw new Error(`Unhandled install probe target: ${JSON.stringify(unreachable)}`);
+          }
+        }
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : 'Unknown probe failure.';

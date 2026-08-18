@@ -175,12 +175,17 @@ function isUsableLiveMetadata(metadata: NodeReleaseMetadata | null, now: number)
   return age >= 0 && age <= NODE_RELEASE_LIVE_DATA_STALE_AFTER_MS;
 }
 
-function installableFor<Id extends string>(
+/**
+ * `LibraryTargetId` is a subset of `RuntimeId`, so agent targets and runtimes
+ * both answer the recipe registry directly — the constraint is what keeps this
+ * cast-free while still serving both lists.
+ */
+function installableFor<Id extends RuntimeId>(
   ids: readonly Id[],
   platform: string
 ): Record<string, boolean> {
   const installable: Record<string, boolean> = {};
-  for (const id of ids) installable[id] = hasInstallRecipeForRuntime(id as RuntimeId, platform);
+  for (const id of ids) installable[id] = hasInstallRecipeForRuntime(id, platform);
   return installable;
 }
 

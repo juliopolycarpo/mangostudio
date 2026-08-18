@@ -56,6 +56,7 @@ function directRecipe(argv: readonly string[]): InstallRecipe {
     writes: ['$BUN_INSTALL/bin/bun'],
     networkAccess: false,
     timeoutMs: 5000,
+    probe: [{ kind: 'runtime', runtimeId: 'bun' }],
     argv: () => argv,
     copyCommand: () => argv.join(' '),
   };

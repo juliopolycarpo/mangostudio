@@ -4,8 +4,10 @@ import type {
   InstallRecipeId,
   RecipeInput,
   RuntimeId,
+  VersionManagerId,
 } from '@mangostudio/shared/environments';
 import { renderShellCommand, shellQuote } from '@mangostudio/shared/environments';
+import type { LibraryTargetId } from '@mangostudio/shared/library';
 import { assertRecipeInput, toNvmDefaultArgument, toNvmVersionArgument } from './recipe-input';
 
 const INSTALLER_MIN_BYTES = 256;
@@ -24,6 +26,20 @@ interface InstallRecipeBuildContext {
   readonly nvmDir?: string;
 }
 
+/**
+ * One status surface a finished recipe invalidates.
+ *
+ * A union rather than a single id because the three detection services do not
+ * share an id type: `getVersionManagerStatus` takes a `VersionManagerId`,
+ * `getAgentCliStatus` takes a `LibraryTargetId`, and neither is a `RuntimeId`.
+ * Carrying the id beside its kind is what lets the post-install probe dispatch
+ * without a cast.
+ */
+export type InstallRecipeProbe =
+  | { readonly kind: 'runtime'; readonly runtimeId: RuntimeId }
+  | { readonly kind: 'version-manager'; readonly versionManagerId: VersionManagerId }
+  | { readonly kind: 'agent'; readonly targetId: LibraryTargetId };
+
 export interface InstallRecipe {
   readonly id: InstallRecipeId;
   readonly runtimeId: RuntimeId;
@@ -34,6 +50,14 @@ export interface InstallRecipe {
   readonly writes: readonly string[];
   readonly networkAccess: boolean;
   readonly timeoutMs: number;
+  /**
+   * Which status surfaces this recipe's completion makes stale, so the
+   * post-install probe is a fact the recipe declares rather than a branch in
+   * the application layer that a ninth recipe would silently miss. Required and
+   * non-empty: a recipe whose effect nothing re-probes is invisible until the
+   * next lazy read.
+   */
+  readonly probe: readonly InstallRecipeProbe[];
   readonly download?: DownloadedInstaller;
   readonly env?: Readonly<Record<string, string>>;
   readonly profileLines?: readonly string[];
@@ -99,6 +123,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['$HOME/.bun', '$HOME/.bashrc or $HOME/.zshrc'],
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    probe: [{ kind: 'runtime', runtimeId: 'bun' }],
     download: {
       url: 'https://bun.com/install',
       interpreter: 'bash',
@@ -122,6 +147,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['$BUN_INSTALL/bin/bun'],
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    probe: [{ kind: 'runtime', runtimeId: 'bun' }],
     argv: noInputArgv(['bun', 'upgrade']),
     copyCommand: (input) => renderShellCommand(noInputArgv(['bun', 'upgrade'])(input)),
   },
@@ -135,6 +161,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['$NVM_DIR'],
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    probe: [{ kind: 'version-manager', versionManagerId: 'nvm' }],
     download: {
       url: 'https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.6/install.sh',
       interpreter: 'bash',
@@ -163,6 +190,12 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['$NVM_DIR/versions/node'],
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    // Both surfaces move: a new managed version is a node the machine can
+    // now run and a version nvm now lists.
+    probe: [
+      { kind: 'runtime', runtimeId: 'node' },
+      { kind: 'version-manager', versionManagerId: 'nvm' },
+    ],
     argv: (input, context) => nvmNodeArgv('install', input, context),
     copyCommand: (input) => {
       const validated = assertRecipeInput(input, 'node-version');
@@ -180,6 +213,10 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['$NVM_DIR/alias/default'],
     networkAccess: false,
     timeoutMs: 30_000,
+    probe: [
+      { kind: 'runtime', runtimeId: 'node' },
+      { kind: 'version-manager', versionManagerId: 'nvm' },
+    ],
     argv: (input, context) => nvmNodeArgv('set-default', input, context),
     copyCommand: (input) => {
       const validated = assertRecipeInput(input, 'node-version');
@@ -197,6 +234,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['$HOME/.local/bin/claude', '$HOME/.claude'],
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    probe: [{ kind: 'agent', targetId: 'claude' }],
     download: {
       url: 'https://claude.ai/install.sh',
       interpreter: 'bash',
@@ -219,6 +257,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['$HOME/.local/bin/codex', '$HOME/.codex'],
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    probe: [{ kind: 'agent', targetId: 'codex' }],
     download: {
       url: 'https://chatgpt.com/codex/install.sh',
       interpreter: 'sh',
@@ -241,6 +280,7 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     writes: ['$HOME/.local/bin', '$HOME/.cursor'],
     networkAccess: true,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
+    probe: [{ kind: 'agent', targetId: 'cursor' }],
     download: {
       url: 'https://cursor.com/install',
       interpreter: 'bash',
