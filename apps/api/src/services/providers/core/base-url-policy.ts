@@ -77,6 +77,9 @@ export async function validateBaseUrl(
 
   try {
     const results = await (options.resolveHostname ?? resolveHostname)(hostname);
+    // `lookup({ all: true })` rejects on NXDOMAIN rather than returning [], but
+    // `options.resolveHostname` is injectable and an empty array must not count
+    // as "every address is public".
     if (results.length === 0) {
       throw new UnsafeBaseUrlError(`DNS resolution failed for hostname "${hostname}".`);
     }
