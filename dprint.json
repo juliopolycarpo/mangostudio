@@ -8,7 +8,8 @@
     "textWrap": "maintain",
     "emphasisKind": "asterisks",
     "strongKind": "asterisks",
-    "lineWidth": 100
+    "lineWidth": 100,
+    "associations": ["**/*.{md,mdc,mdx}"]
   },
   "dockerfile": {
     "associations": ["**/Dockerfile", "**/Dockerfile.*"]
