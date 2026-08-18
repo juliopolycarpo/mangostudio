@@ -219,6 +219,43 @@ describe('file freshness ledger', () => {
     expect(() => assertLineNumbersCurrent('chat-1', filePath, 3)).not.toThrow();
   });
 
+  it('does not reuse byte-view content coverage as numbered-text coverage', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), { kind: 'byteView' });
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), windowed(1, 1, 3));
+
+    await expect(assertFresh('chat-1', filePath)).resolves.toBeUndefined();
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 1)).not.toThrow();
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 2)).toThrow(StaleLineNumbersError);
+  });
+
+  it('accumulates numbered windows after a byte view until they cover the file', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), { kind: 'byteView' });
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), windowed(1, 1, 3));
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), windowed(2, 2, 3));
+
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 2)).not.toThrow();
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 3)).toThrow(StaleLineNumbersError);
+
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), windowed(3, 3, 3));
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 3)).not.toThrow();
+  });
+
+  it('keeps line numbers unobserved when a text window after a byte view skips the prefix', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), { kind: 'byteView' });
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), windowed(2, 2, 3));
+
+    await expect(assertFresh('chat-1', filePath)).resolves.toBeUndefined();
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 1)).toThrow(
+      UnobservedLineNumbersError
+    );
+  });
+
   it('does not let a byte-view state floor a later edit frontier', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'a\nb\nc\n');

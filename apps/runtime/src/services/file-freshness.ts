@@ -76,7 +76,9 @@ export interface ObservedLineRange {
  * `wholeFile` is a complete text observation: every byte and every line number.
  * `window` is a numbered slice; sequential windows accumulate. `byteView` saw
  * every byte (writes may proceed) but assigned no line numbers (`replace_range`
- * must not infer them).
+ * must not infer them). Content completeness from a byte view does not count as
+ * numbered-text coverage: a later partial window only validates the lines it
+ * actually showed.
  */
 export type FileReadObservation =
   | { readonly kind: 'window'; readonly range: ObservedLineRange }
@@ -185,9 +187,10 @@ export class UnobservedLineNumbersError extends RuntimeServiceError {
  * observation and an unobserved line-number state: writes may proceed,
  * `replace_range` may not.
  *
- * Whole-file and windowed text callers are authoritative about line numbering
- * — read_file shows it, create_file and write_file author it — so those reset
- * any shift recorded by {@link recordFileEdit}. A byte view does not.
+ * Whole-file text callers, and windows that cover every line, are
+ * authoritative about numbering — they reset any shift recorded by
+ * {@link recordFileEdit}. A partial window after a byte view only validates
+ * the numbered prefix it showed. A byte view does not assign numbers.
  */
 export function recordFileRead(
   chatId: string,
@@ -208,7 +211,7 @@ export function recordFileRead(
     coveredThroughLine,
     complete:
       observation.kind === 'window' ? coveredThroughLine >= observation.range.totalLines : true,
-    lineNumbers: observation.kind === 'byteView' ? LINES_UNOBSERVED : ALL_LINES_VALID,
+    lineNumbers: lineNumbersForObservation(chatId, resolvedPath, sha256, observation),
   });
   return sha256;
 }
@@ -268,6 +271,38 @@ function extendCoverage(
   const carried = previous?.sha256 === sha256 ? previous.coveredThroughLine : 0;
   if (observedRange.startLine > carried + 1) return carried;
   return Math.max(carried, observedRange.endLine);
+}
+
+/**
+ * Numbered-text coverage is independent of content completeness. A byte view
+ * saw every byte, so {@link extendCoverage} carries `MAX_SAFE_INTEGER`; that
+ * must not become {@link ALL_LINES_VALID} when a later window only numbered a
+ * prefix.
+ */
+function lineNumbersForObservation(
+  chatId: string,
+  resolvedPath: string,
+  sha256: string,
+  observation: FileReadObservation
+): LineNumberState {
+  if (observation.kind === 'byteView') return LINES_UNOBSERVED;
+  if (observation.kind === 'wholeFile') return ALL_LINES_VALID;
+
+  const previous = entriesByChat.get(chatId)?.get(resolvedPath);
+  const sameBytes = previous !== undefined && previous.sha256 === sha256;
+  const carried =
+    sameBytes && previous.lineNumbers.kind === 'validThrough'
+      ? previous.lineNumbers.throughLine
+      : 0;
+  if (observation.range.startLine > carried + 1) {
+    return sameBytes && previous.lineNumbers.kind === 'unobserved'
+      ? LINES_UNOBSERVED
+      : { kind: 'validThrough', throughLine: carried };
+  }
+  const throughLine = Math.max(carried, observation.range.endLine);
+  return throughLine >= observation.range.totalLines
+    ? ALL_LINES_VALID
+    : { kind: 'validThrough', throughLine };
 }
 
 function getCompleteEntry(chatId: string, resolvedPath: string): FileFreshnessEntry {

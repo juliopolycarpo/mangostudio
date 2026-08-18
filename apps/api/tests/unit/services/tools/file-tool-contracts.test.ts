@@ -16,7 +16,10 @@ import { executeGrep } from '../../../../src/services/tools/builtin/grep';
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeReplaceRange } from '../../../../src/services/tools/builtin/replace-range';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
-import { UnobservedLineNumbersError } from '../../../../src/services/tools/file-freshness';
+import {
+  StaleLineNumbersError,
+  UnobservedLineNumbersError,
+} from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
 import { useToolRegistry } from './support/tool-registry-harness';
 
@@ -163,6 +166,26 @@ describe('a byte view does not license line-addressed edits', () => {
     );
 
     expect(await Bun.file(filePath).text()).toBe('ONE\ntwo\n');
+  });
+
+  it('does not let a byte view plus a partial text window license an unobserved line', async () => {
+    const filePath = await seedText('partial-after-hex.txt', 'one\ntwo\nthree\n');
+
+    await executeReadFile({ path: filePath, view: 'hex' }, context());
+    await executeReadFile({ path: filePath, maxLines: 1 }, context());
+    const outside = await executeReplaceRange(
+      { path: filePath, startLine: 2, endLine: 2, content: 'TWO' },
+      context()
+    ).catch((thrown: unknown) => thrown);
+
+    expect(outside).toBeInstanceOf(StaleLineNumbersError);
+    expect(await Bun.file(filePath).text()).toBe('one\ntwo\nthree\n');
+
+    await executeReplaceRange(
+      { path: filePath, startLine: 1, endLine: 1, content: 'ONE' },
+      context()
+    );
+    expect(await Bun.file(filePath).text()).toBe('ONE\ntwo\nthree\n');
   });
 
   it('still lets write_file and delete_file proceed after a byte view', async () => {
