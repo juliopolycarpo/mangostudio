@@ -68,12 +68,28 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
         <p className="text-sm text-on-surface-variant/70">
           {formatMessage(e.versions.managerMissing, { manager })}
         </p>
-        <InstallAction
-          recipe={managerInstallRecipe}
-          input={{ kind: 'none' }}
-          label={formatMessage(e.versions.installManager, { manager })}
-          environmentId={environmentId}
-        />
+        {/* What the user wants here is a Node, not a version manager. The Node
+            recipe needs the manager, so offering the Node install offers the
+            whole chain — one affordance instead of two the user must order
+            themselves. Only when there is no Node recipe at all does the bare
+            manager install stand on its own. */}
+        {nodeInstallRecipe ? (
+          <InstallAction
+            recipe={nodeInstallRecipe}
+            catalog={recipes}
+            input={{ kind: 'node-version', version: 'lts' }}
+            label={e.versions.installLts}
+            environmentId={environmentId}
+          />
+        ) : (
+          <InstallAction
+            recipe={managerInstallRecipe}
+            catalog={recipes}
+            input={{ kind: 'none' }}
+            label={formatMessage(e.versions.installManager, { manager })}
+            environmentId={environmentId}
+          />
+        )}
       </section>
     );
   }
@@ -139,6 +155,7 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
               {!version.isDefault && setDefaultRecipe && (
                 <InstallAction
                   recipe={setDefaultRecipe}
+                  catalog={recipes}
                   input={{ kind: 'node-version', version: version.version }}
                   label={e.versions.setDefault}
                   variant="ghost"
@@ -153,6 +170,7 @@ export function NodeVersionTable({ status, recipes, environmentId }: NodeVersion
       {(offersUpgrade || status.versions.length === 0) && (
         <InstallAction
           recipe={nodeInstallRecipe}
+          catalog={recipes}
           input={{ kind: 'node-version', version: 'lts' }}
           label={e.versions.installLts}
           environmentId={environmentId}

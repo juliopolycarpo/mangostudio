@@ -1,36 +1,55 @@
 /**
- * Drives one install from button press to re-probe.
+ * Drives one install from button press to re-probe — or a whole prerequisite
+ * chain, which is the same thing with more than one step.
  *
  * The guard is evaluated from the recipe preview *before* any request goes out:
  * when installs are refused the feature degrades to a copyable command instead
  * of firing a request the server would only reject.
+ *
+ * A chain confirms once and then runs unattended. Each step is still prepared
+ * against the server immediately before it runs, because a step's argv and its
+ * requirements are only knowable once the step before it has landed — nvm's
+ * directory does not exist while nvm is still being installed.
  */
 
 import type {
+  InstallExitEvent,
   InstallPreparation,
   InstallRecipePreview,
-  RecipeInput,
 } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import { cancelInstall, prepareInstall, startInstall } from '../api';
+import type { InstallChainStep } from '../install-chain';
 import { environmentKeys } from '../queries';
+
+export interface InstallChainProgress {
+  /** Prerequisites first; the recipe the user asked for is last. */
+  readonly steps: readonly InstallChainStep[];
+  readonly index: number;
+  /**
+   * The run whose console is on screen. It outlives its own step so the output
+   * of the step that just finished stays visible while the next one is being
+   * prepared, rather than blinking out between runs.
+   */
+  readonly runId: string | null;
+}
 
 export type InstallFlowState =
   | { readonly step: 'idle' }
-  | { readonly step: 'preparing'; readonly recipe: InstallRecipePreview }
+  | { readonly step: 'preparing'; readonly chain: InstallChainProgress }
   | {
       readonly step: 'confirming';
-      readonly recipe: InstallRecipePreview;
+      readonly chain: InstallChainProgress;
       readonly preparation: InstallPreparation;
     }
   | {
       readonly step: 'starting';
-      readonly recipe: InstallRecipePreview;
+      readonly chain: InstallChainProgress;
       readonly preparation: InstallPreparation;
     }
-  | { readonly step: 'running'; readonly recipe: InstallRecipePreview; readonly runId: string }
-  | { readonly step: 'finished'; readonly recipe: InstallRecipePreview; readonly runId: string }
+  | { readonly step: 'running'; readonly chain: InstallChainProgress }
+  | { readonly step: 'finished'; readonly chain: InstallChainProgress }
   /** No request was issued (or the server refused): show the copyable command. */
   | {
       readonly step: 'refused';
@@ -39,9 +58,37 @@ export type InstallFlowState =
     }
   | { readonly step: 'error'; readonly recipe: InstallRecipePreview };
 
-/** True when the recipe cannot run here, so no request should be attempted. */
-function isInstallRefused(recipe: InstallRecipePreview): boolean {
-  return !recipe.guard.allowed || !recipe.supported || recipe.missingRequirements.length > 0;
+/**
+ * A finished chain that never reached its target: the step it stopped on is not
+ * the last one, so the steps after it never ran. Read from the chain rather than
+ * stored beside it — two fields that must agree can stop agreeing.
+ */
+export function chainStopped(chain: InstallChainProgress): boolean {
+  return chain.index < chain.steps.length - 1;
+}
+
+function targetOf(steps: readonly InstallChainStep[]): InstallRecipePreview {
+  const last = steps.at(-1);
+  if (!last) throw new Error('An install chain needs at least one step.');
+  return last.recipe;
+}
+
+/**
+ * The recipe to report when nothing should be attempted, or `null` when the
+ * chain is runnable.
+ *
+ * Guards and platform support are properties of the machine, so they refuse the
+ * whole chain. Missing requirements are only a refusal on the *first* step:
+ * every later step's requirements are what the steps before it install.
+ */
+function chainRefusal(steps: readonly InstallChainStep[]): InstallRecipePreview | null {
+  const target = targetOf(steps);
+  if (!target.guard.allowed) return target;
+  const unsupported = steps.find((step) => !step.recipe.supported);
+  if (unsupported) return unsupported.recipe;
+  const first = steps[0];
+  if (first && first.recipe.missingRequirements.length > 0) return first.recipe;
+  return null;
 }
 
 export function useInstallFlow(environmentId?: string) {
@@ -59,94 +106,164 @@ export function useInstallFlow(environmentId?: string) {
   }, []);
 
   /**
-   * Prepares the recipe so the confirmation dialog can show the exact argv the
-   * server will run, including a downloaded installer's origin and size.
+   * Prepares one step so the confirmation can show the exact argv the server
+   * will run, including a downloaded installer's origin and size. Returns the
+   * preparation, or `null` when the request was refused or superseded — both
+   * of which have already written the state they need.
    */
-  const begin = useCallback(
-    async (recipe: InstallRecipePreview, input: RecipeInput) => {
-      const requestId = requestIdRef.current + 1;
-      requestIdRef.current = requestId;
-
-      if (isInstallRefused(recipe)) {
-        setState({ step: 'refused', recipe, message: '' });
-        return;
+  const prepareStep = useCallback(
+    async (chain: InstallChainProgress, requestId: number): Promise<InstallPreparation | null> => {
+      const step = chain.steps[chain.index];
+      if (!step) return null;
+      const result = await prepareInstall({
+        recipeId: step.recipe.id,
+        input: step.input,
+        ...(environmentId && { environmentId }),
+      });
+      if (requestIdRef.current !== requestId) return null;
+      if (result.outcome === 'refused') {
+        setState({ step: 'refused', recipe: result.recipe, message: result.message });
+        return null;
       }
-
-      setState({ step: 'preparing', recipe });
-      try {
-        const result = await prepareInstall({
-          recipeId: recipe.id,
-          input,
-          ...(environmentId && { environmentId }),
-        });
-        if (requestIdRef.current !== requestId) return;
-        if (result.outcome === 'refused') {
-          setState({ step: 'refused', recipe: result.recipe, message: result.message });
-          return;
-        }
-        setState({
-          step: 'confirming',
-          recipe: result.preparation.recipe,
-          preparation: result.preparation,
-        });
-      } catch {
-        if (requestIdRef.current !== requestId) return;
-        setState({ step: 'error', recipe });
-      }
+      return result.preparation;
     },
     [environmentId]
   );
 
-  const confirm = useCallback(
-    async (input: RecipeInput) => {
-      const current = state;
-      if (current.step !== 'confirming') return;
+  const startStep = useCallback(
+    async (
+      chain: InstallChainProgress,
+      preparation: InstallPreparation,
+      requestId: number
+    ): Promise<void> => {
+      const step = chain.steps[chain.index];
+      if (!step) return;
+      const result = await startInstall({
+        recipeId: step.recipe.id,
+        input: step.input,
+        ...(environmentId && { environmentId }),
+        ...(preparation.preparationId && { preparationId: preparation.preparationId }),
+      });
+      if (requestIdRef.current !== requestId) return;
+      if (result.outcome === 'refused') {
+        setState({ step: 'refused', recipe: result.recipe, message: result.message });
+        return;
+      }
+      setState({ step: 'running', chain: { ...chain, runId: result.run.runId } });
+    },
+    [environmentId]
+  );
+
+  /**
+   * One place decides what a thrown request means: the run is over and the
+   * chain's target is what failed to install. A superseded run owns no state —
+   * whichever run replaced it has already written its own.
+   */
+  const runGuarded = useCallback(
+    async (
+      requestId: number,
+      steps: readonly InstallChainStep[],
+      action: () => Promise<void>
+    ): Promise<void> => {
+      try {
+        await action();
+      } catch {
+        if (requestIdRef.current !== requestId) return;
+        setState({ step: 'error', recipe: targetOf(steps) });
+      }
+    },
+    []
+  );
+
+  /**
+   * Runs the next step of a chain the user already confirmed. Nothing is asked
+   * again: one affordance was pressed, so one decision was made.
+   */
+  const advance = useCallback(
+    async (chain: InstallChainProgress): Promise<void> => {
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      const next: InstallChainProgress = { ...chain, index: chain.index + 1 };
+
+      setState({ step: 'preparing', chain: next });
+      await runGuarded(requestId, next.steps, async () => {
+        const preparation = await prepareStep(next, requestId);
+        if (!preparation || requestIdRef.current !== requestId) return;
+        setState({ step: 'starting', chain: next, preparation });
+        await startStep(next, preparation, requestId);
+      });
+    },
+    [prepareStep, runGuarded, startStep]
+  );
+
+  const begin = useCallback(
+    async (steps: readonly InstallChainStep[]) => {
       const requestId = requestIdRef.current + 1;
       requestIdRef.current = requestId;
 
-      setState({ step: 'starting', recipe: current.recipe, preparation: current.preparation });
-      try {
-        const result = await startInstall({
-          recipeId: current.recipe.id,
-          input,
-          ...(environmentId && { environmentId }),
-          ...(current.preparation.preparationId && {
-            preparationId: current.preparation.preparationId,
-          }),
-        });
-        if (requestIdRef.current !== requestId) return;
-        if (result.outcome === 'refused') {
-          setState({ step: 'refused', recipe: result.recipe, message: result.message });
-          return;
-        }
-        setState({ step: 'running', recipe: current.recipe, runId: result.run.runId });
-      } catch {
-        if (requestIdRef.current !== requestId) return;
-        setState({ step: 'error', recipe: current.recipe });
+      const refused = chainRefusal(steps);
+      if (refused) {
+        setState({ step: 'refused', recipe: refused, message: '' });
+        return;
       }
+
+      const chain: InstallChainProgress = { steps, index: 0, runId: null };
+      setState({ step: 'preparing', chain });
+      await runGuarded(requestId, steps, async () => {
+        const preparation = await prepareStep(chain, requestId);
+        if (!preparation || requestIdRef.current !== requestId) return;
+        setState({ step: 'confirming', chain, preparation });
+      });
     },
-    [environmentId, state]
+    [prepareStep, runGuarded]
   );
 
+  const confirm = useCallback(async () => {
+    const current = state;
+    if (current.step !== 'confirming') return;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+
+    setState({ step: 'starting', chain: current.chain, preparation: current.preparation });
+    await runGuarded(requestId, current.chain.steps, () =>
+      startStep(current.chain, current.preparation, requestId)
+    );
+  }, [runGuarded, startStep, state]);
+
   const cancel = useCallback(async () => {
-    if (state.step !== 'running') return;
+    if (state.step !== 'running' || !state.chain.runId) return;
     try {
-      await cancelInstall(state.runId);
+      await cancelInstall(state.chain.runId);
     } catch {
       // The run may have finished between render and click; the exit event is
       // the authority on the outcome either way.
     }
   }, [state]);
 
-  /** Called when the stream reports its exit: the probe results land here. */
-  const complete = useCallback(async () => {
-    setState((previous) =>
-      previous.step === 'running'
-        ? { step: 'finished', recipe: previous.recipe, runId: previous.runId }
-        : previous
-    );
-    await invalidate();
-  }, [invalidate]);
+  /**
+   * Called when the stream reports its exit: the probe results land here, and
+   * so does the decision to run the next step.
+   *
+   * Only a success continues the chain. Installing Node on top of an nvm that
+   * failed would fail too — with a worse message than the one already on
+   * screen — so a step that did not succeed ends the run.
+   */
+  const complete = useCallback(
+    async (exit: InstallExitEvent) => {
+      const current = state;
+      await invalidate();
+      if (current.step !== 'running') return;
+      const { chain } = current;
+      if (exit.status === 'succeeded' && chainStopped(chain)) {
+        await advance(chain);
+        return;
+      }
+      setState((previous) =>
+        previous.step === 'running' ? { step: 'finished', chain: previous.chain } : previous
+      );
+    },
+    [advance, invalidate, state]
+  );
 
   return { state, begin, confirm, cancel, complete, dismiss };
 }

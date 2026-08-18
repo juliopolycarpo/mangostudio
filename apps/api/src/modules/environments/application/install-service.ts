@@ -534,44 +534,48 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       if (status) stream.publish({ type: 'probe', target, status, done: false });
     };
 
-    try {
-      if (recipe.runtimeId === 'nvm') {
-        publish(
-          'version-manager',
-          await deps.probingService.getVersionManagerStatus(scope, 'nvm', { force: true })
-        );
-        return;
+    // Which surfaces to refresh is the recipe's declaration, never a branch
+    // on its id here. Every one runs through the same forced probe the reset
+    // above set up, so the epoch guard still decides what may reach the cache.
+    // A failed target is logged and skipped so a later declared surface still
+    // refreshes — one detection service going down must not leave the rest stale.
+    for (const target of recipe.probe) {
+      try {
+        switch (target.kind) {
+          case 'runtime':
+            publish(
+              target.kind,
+              await deps.probingService.getRuntimeStatus(scope, target.runtimeId, { force: true })
+            );
+            break;
+          case 'version-manager':
+            publish(
+              target.kind,
+              await deps.probingService.getVersionManagerStatus(scope, target.versionManagerId, {
+                force: true,
+              })
+            );
+            break;
+          case 'agent':
+            publish(
+              target.kind,
+              await deps.probingService.getAgentCliStatus(scope, target.targetId, { force: true })
+            );
+            break;
+          default: {
+            const unreachable: never = target;
+            throw new Error(`Unhandled install probe target: ${JSON.stringify(unreachable)}`);
+          }
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown probe failure.';
+        stream.publish({
+          type: 'log',
+          stream: 'system',
+          line: `Post-install probe failed: ${detail}`,
+          done: false,
+        });
       }
-      if (
-        recipe.runtimeId === 'claude' ||
-        recipe.runtimeId === 'codex' ||
-        recipe.runtimeId === 'cursor'
-      ) {
-        publish(
-          'agent',
-          await deps.probingService.getAgentCliStatus(scope, recipe.runtimeId, { force: true })
-        );
-        return;
-      }
-
-      publish(
-        'runtime',
-        await deps.probingService.getRuntimeStatus(scope, recipe.runtimeId, { force: true })
-      );
-      if (recipe.requires.includes('nvm')) {
-        publish(
-          'version-manager',
-          await deps.probingService.getVersionManagerStatus(scope, 'nvm', { force: true })
-        );
-      }
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Unknown probe failure.';
-      stream.publish({
-        type: 'log',
-        stream: 'system',
-        line: `Post-install probe failed: ${detail}`,
-        done: false,
-      });
     }
   };
 

@@ -16,6 +16,8 @@ import type { InstallStreamState } from '../hooks/use-install-stream';
 
 interface InstallConsoleProps {
   stream: InstallStreamState;
+  /** Which step of a prerequisite chain this run is; absent for a lone install. */
+  stepLabel?: string;
   onCancel: () => void;
   onClose: () => void;
 }
@@ -29,7 +31,7 @@ const STREAM_STYLES = {
   system: 'text-on-surface-variant/60 italic',
 } as const;
 
-export function InstallConsole({ stream, onCancel, onClose }: InstallConsoleProps) {
+export function InstallConsole({ stream, stepLabel, onCancel, onClose }: InstallConsoleProps) {
   const { t } = useI18n();
   const s = t.environments.install;
   const logRef = useRef<HTMLDivElement>(null);
@@ -58,11 +60,19 @@ export function InstallConsole({ stream, onCancel, onClose }: InstallConsoleProp
       data-testid="install-console"
     >
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <StatusIcon phase={stream.phase} exitStatus={exit?.status} />
           <span className="text-sm font-semibold text-on-surface">
             {exit ? s.runStatus[exit.status] : s.runStatus.running}
           </span>
+          {stepLabel && (
+            <span
+              className="truncate text-xs text-on-surface-variant/60"
+              data-testid="install-step-label"
+            >
+              {stepLabel}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 text-xs text-on-surface-variant/70">

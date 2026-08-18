@@ -1,12 +1,24 @@
 import { describe, expect, it } from 'bun:test';
-import type { InstallGuard, InstallRun, RuntimeStatus } from '@mangostudio/shared/environments';
+import type {
+  AgentCliStatus,
+  InstallGuard,
+  InstallRun,
+  RecipeInput,
+  RuntimeStatus,
+  VersionManagerStatus,
+} from '@mangostudio/shared/environments';
 import {
   createInstallService,
   InstallBlockedError,
   InstallPreparationError,
 } from '../../../../src/modules/environments/application/install-service';
 import type { EnvironmentProbingService } from '../../../../src/modules/environments/application/probing-service';
-import { getInstallRecipe } from '../../../../src/modules/environments/domain/install-recipes';
+import {
+  getInstallRecipe,
+  INSTALL_RECIPES,
+  type InstallRecipe,
+  type InstallRecipeProbe,
+} from '../../../../src/modules/environments/domain/install-recipes';
 import type { InstallRunRepository } from '../../../../src/modules/environments/infrastructure/install-run-repository';
 import type { InstallRunner } from '../../../../src/modules/environments/infrastructure/install-runner';
 import type {
@@ -62,6 +74,98 @@ function createDetectionServices() {
     probingService,
     getForcedRuntimeProbes: () => forcedRuntimeProbes,
     getResetCacheCalls: () => resetCacheCalls,
+  };
+}
+
+/**
+ * Every forced probe the service asked for, in order, flattened to the same
+ * `{ kind, id }` shape a recipe's `probe` declaration reduces to. Lazy reads —
+ * the ones `inspectRequirements` makes — are deliberately not recorded: only
+ * the post-install refresh is what the declaration is about.
+ */
+interface ForcedProbe {
+  readonly kind: InstallRecipeProbe['kind'];
+  readonly id: string;
+}
+
+function declaredProbes(probe: readonly InstallRecipeProbe[]): ForcedProbe[] {
+  return probe.map((target) => {
+    if (target.kind === 'runtime') return { kind: target.kind, id: target.runtimeId };
+    if (target.kind === 'version-manager')
+      return { kind: target.kind, id: target.versionManagerId };
+    return { kind: target.kind, id: target.targetId };
+  });
+}
+
+/**
+ * Answers every id as installed, so any recipe's requirements resolve and the
+ * run reaches its post-install probe whatever it declares.
+ */
+function createRecordingProbingService() {
+  const forced: ForcedProbe[] = [];
+  const runtimeStatus = (id: RuntimeStatus['id']): RuntimeStatus => ({ ...BUN_STATUS, id });
+  const probingService: EnvironmentProbingService = {
+    listRuntimeStatuses: () => Promise.resolve([BUN_STATUS]),
+    getRuntimeStatus: (_scope, id, options) => {
+      if (options?.force) forced.push({ kind: 'runtime', id });
+      return Promise.resolve(runtimeStatus(id));
+    },
+    listVersionManagerStatuses: () => Promise.resolve([]),
+    getVersionManagerStatus: (_scope, id, options) => {
+      if (options?.force) forced.push({ kind: 'version-manager', id });
+      const status: VersionManagerStatus = {
+        id,
+        installed: true,
+        root: '/home/tester/.nvm',
+        versions: [],
+        findings: [],
+      };
+      return Promise.resolve(status);
+    },
+    listAgentCliStatuses: () => Promise.resolve([]),
+    getAgentCliStatus: (_scope, targetId, options) => {
+      if (options?.force) forced.push({ kind: 'agent', id: targetId });
+      const status: AgentCliStatus = {
+        ...runtimeStatus(targetId),
+        targetId,
+        configHome: `/home/tester/.${targetId}`,
+        configHomeExists: true,
+        authenticated: false,
+        authSignal: 'unknown',
+        locations: [],
+      };
+      return Promise.resolve(status);
+    },
+    listLocationStatuses: () => Promise.resolve([]),
+    resetCache: () => undefined,
+    resetLocationCache: () => undefined,
+  };
+  return { probingService, forced };
+}
+
+function succeedingRunner(): InstallRunner {
+  return {
+    run: () =>
+      Promise.resolve({
+        exitCode: 0,
+        status: 'succeeded',
+        truncated: false,
+        finishedAt: 1_700_000_001_000,
+        durationMs: 1000,
+      }),
+  };
+}
+
+function stubDownloader(): InstallerDownloader {
+  return {
+    download: () =>
+      Promise.resolve({
+        path: '/tmp/installer/installer.sh',
+        url: 'https://example.test/install.sh',
+        sizeBytes: 512,
+        sha256: 'b'.repeat(64),
+        cleanup: () => Promise.resolve(),
+      }),
   };
 }
 
@@ -188,6 +292,135 @@ describe('install service', () => {
     expect(detection.getResetCacheCalls()).toEqual(['local']);
     expect(detection.getForcedRuntimeProbes()).toBe(1);
     expect(memory.runs.get(started.runId)?.status).toBe('succeeded');
+  });
+
+  // Table-driven over the registry itself so a ninth recipe joins without
+  // anyone remembering to extend this file — which is the failure #699 is about.
+  for (const recipe of INSTALL_RECIPES) {
+    it(`re-probes exactly what ${recipe.id} declares`, async () => {
+      const detection = createRecordingProbingService();
+      const memory = createMemoryRepository();
+      let nextId = 0;
+      const service = createInstallService({
+        recipes: [recipe],
+        probingService: detection.probingService,
+        repository: memory.repository,
+        runner: succeedingRunner(),
+        downloader: stubDownloader(),
+        resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+        generateId: () => {
+          nextId += 1;
+          return `${recipe.id}-${nextId}`;
+        },
+        now: () => 1_700_000_000_000,
+        platform: 'linux',
+      });
+
+      const input: RecipeInput =
+        recipe.inputKind === 'node-version' ? { kind: 'node-version', version: 'lts' } : NO_INPUT;
+      const body = { recipeId: recipe.id, input } as const;
+      // A downloaded installer may only run from a preparation the caller holds.
+      const preparation = recipe.download ? await service.prepare(body, REQUEST_CONTEXT) : null;
+      const started = await service.start(
+        {
+          ...body,
+          ...(preparation?.preparationId && { preparationId: preparation.preparationId }),
+        },
+        REQUEST_CONTEXT
+      );
+      const events = await collectEvents(
+        await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
+      );
+
+      const expected = declaredProbes(recipe.probe);
+      expect(detection.forced).toEqual(expected);
+      expect(events.filter((event) => event.type === 'probe').map((event) => event.target)).toEqual(
+        expected.map((target) => target.kind)
+      );
+    });
+  }
+
+  it('dispatches on the declaration rather than the recipe id', async () => {
+    // `bun` is neither an agent id nor a version manager, so the id-branching
+    // this replaced could only ever have re-probed the runtime here. Both
+    // surfaces refreshing is the proof that the declaration is what is read.
+    const detection = createRecordingProbingService();
+    const memory = createMemoryRepository();
+    const recipe: InstallRecipe = {
+      ...getInstallRecipe('bun.update'),
+      probe: [
+        { kind: 'agent', targetId: 'claude' },
+        { kind: 'version-manager', versionManagerId: 'nvm' },
+      ],
+    };
+    const service = createInstallService({
+      recipes: [recipe],
+      probingService: detection.probingService,
+      repository: memory.repository,
+      runner: succeedingRunner(),
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      generateId: () => 'declared-run',
+      now: () => 1_700_000_000_000,
+      platform: 'linux',
+    });
+
+    const started = await service.start(
+      { recipeId: 'bun.update', input: NO_INPUT },
+      REQUEST_CONTEXT
+    );
+    await collectEvents(await service.getRunStream(started.runId, REQUEST_CONTEXT.userId));
+
+    expect(detection.forced).toEqual([
+      { kind: 'agent', id: 'claude' },
+      { kind: 'version-manager', id: 'nvm' },
+    ]);
+  });
+
+  it('continues later declared probes when one forced probe rejects', async () => {
+    const detection = createRecordingProbingService();
+    const originalGetRuntimeStatus = detection.probingService.getRuntimeStatus;
+    detection.probingService.getRuntimeStatus = (_scope, id, options) => {
+      if (options?.force) {
+        detection.forced.push({ kind: 'runtime', id });
+        return Promise.reject(new Error('runtime probe exploded'));
+      }
+      return originalGetRuntimeStatus(_scope, id, options);
+    };
+    const recipe = getInstallRecipe('nvm.node.install');
+    const memory = createMemoryRepository();
+    const service = createInstallService({
+      recipes: [recipe],
+      probingService: detection.probingService,
+      repository: memory.repository,
+      runner: succeedingRunner(),
+      resolveGuard: () => Promise.resolve(ALLOWED_GUARD),
+      generateId: () => 'partial-probe-run',
+      now: () => 1_700_000_000_000,
+      platform: 'linux',
+    });
+
+    const started = await service.start(
+      { recipeId: recipe.id, input: { kind: 'node-version', version: 'lts' } },
+      REQUEST_CONTEXT
+    );
+    const events = await collectEvents(
+      await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
+    );
+
+    expect(detection.forced).toEqual([
+      { kind: 'runtime', id: 'node' },
+      { kind: 'version-manager', id: 'nvm' },
+    ]);
+    expect(events).toContainEqual({
+      type: 'log',
+      stream: 'system',
+      line: 'Post-install probe failed: runtime probe exploded',
+      done: false,
+    });
+    expect(events.filter((event) => event.type === 'probe').map((event) => event.target)).toEqual([
+      'version-manager',
+    ]);
+    expect(events.at(-1)).toMatchObject({ type: 'exit', status: 'succeeded', done: true });
   });
 
   it('coalesces starts that overlap before execution becomes active', async () => {

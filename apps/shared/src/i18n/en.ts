@@ -2674,6 +2674,13 @@ export const messages: Messages = {
       reconnecting: 'Reconnecting to the console...',
       unsupported: 'This install is not supported on this platform.',
       missingRequirements: 'Install first: {requirements}',
+      chainLabel: 'Install {prerequisites}, then {target}',
+      chainDescription:
+        'This runs {count} commands on this machine, in order. Review them before continuing.',
+      chainStep: 'Step {index} of {count} · {name}',
+      chainStopped: '{target} was not installed: {prerequisite} did not finish.',
+      requirementUnavailable:
+        '{target} needs {requirements}, and MangoStudio cannot install {requirements} on this machine. Install it yourself, then re-check.',
       runStatus: {
         running: 'Installing...',
         succeeded: 'Install finished',
