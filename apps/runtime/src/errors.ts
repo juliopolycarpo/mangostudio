@@ -10,6 +10,7 @@ export type RuntimeServiceErrorKind =
   | 'partial_read'
   | 'stale_file'
   | 'stale_line_numbers'
+  | 'unobserved_line_numbers'
   | 'shell_execution'
   | 'git_execution'
   | 'workspace_browser'

@@ -75,4 +75,17 @@ describe('i18n provider-neutral copy', () => {
     expect(ptBR.settings.connectors.chatgptSignInButton).toBe('Entrar com ChatGPT');
     expect(ptBR.settings.connectors.chatgptPortBusyError).toContain('1455');
   });
+
+  it('tells both locales to re-read as text after a byte view', () => {
+    const path = '/tmp/notes.txt';
+    const english = en.tools.errors.lineNumbersUnobserved.replace('{path}', path);
+    const portuguese = ptBR.tools.errors.lineNumbersUnobserved.replace('{path}', path);
+
+    expect(english).toContain(path);
+    expect(portuguese).toContain(path);
+    expect(english).toMatch(/Re-read the file as text/);
+    expect(portuguese).toMatch(/como texto/);
+    expect(english).not.toContain('{path}');
+    expect(portuguese).not.toContain('{path}');
+  });
 });

@@ -30,6 +30,24 @@ import { type ObservedFileRead, readFileWithObservedMtime } from './fs-utils';
 const MAX_ENTRIES_PER_CHAT = 256;
 const MAX_ENTRIES_GLOBAL = 10_000;
 
+/**
+ * How far the model's last-shown line numbers still address these bytes.
+ *
+ * Unobserved is a distinct state, not `validThrough: 0`. A byte view saw every
+ * byte and none of the line numbers; storing 0 would let {@link recordFileEdit}'s
+ * `Math.min` floor a later text read that re-established numbering.
+ */
+type LineNumberState =
+  | { readonly kind: 'unobserved' }
+  | { readonly kind: 'validThrough'; readonly throughLine: number };
+
+const ALL_LINES_VALID = {
+  kind: 'validThrough',
+  throughLine: Number.MAX_SAFE_INTEGER,
+} as const satisfies LineNumberState;
+
+const LINES_UNOBSERVED = { kind: 'unobserved' } as const satisfies LineNumberState;
+
 interface FileFreshnessEntry {
   readonly sha256: string;
   readonly size: number;
@@ -42,13 +60,7 @@ interface FileFreshnessEntry {
   readonly coveredThroughLine: number;
   /** Whether the observation covers the entire file. Only writes gate on this. */
   readonly complete: boolean;
-  /**
-   * Highest line number that still means what the model was last shown. A write
-   * that changes the line count renumbers everything after the first line it
-   * touched, so only the untouched prefix keeps its numbers. Line-addressed
-   * tools gate on this; content-addressed ones do not care.
-   */
-  readonly lineNumbersValidThroughLine: number;
+  readonly lineNumbers: LineNumberState;
 }
 
 /** The slice of a file a single windowed read put in front of the model. */
@@ -57,6 +69,19 @@ export interface ObservedLineRange {
   readonly endLine: number;
   readonly totalLines: number;
 }
+
+/**
+ * What a read put in front of the model, for freshness and line numbering.
+ *
+ * `wholeFile` is a complete text observation: every byte and every line number.
+ * `window` is a numbered slice; sequential windows accumulate. `byteView` saw
+ * every byte (writes may proceed) but assigned no line numbers (`replace_range`
+ * must not infer them).
+ */
+export type FileReadObservation =
+  | { readonly kind: 'window'; readonly range: ObservedLineRange }
+  | { readonly kind: 'wholeFile' }
+  | { readonly kind: 'byteView' };
 
 interface FileFreshnessLocation {
   readonly chatId: string;
@@ -126,6 +151,26 @@ export class StaleLineNumbersError extends RuntimeServiceError {
 }
 
 /**
+ * A line-addressed edit quoted numbers a byte view never assigned.
+ *
+ * Distinct from {@link StaleLineNumbersError}: the file did not change on disk
+ * and no earlier splice shifted numbering. The model has to read the file as
+ * text before `replace_range` can trust a line range.
+ */
+export class UnobservedLineNumbersError extends RuntimeServiceError {
+  constructor(resolvedPath: string) {
+    super(
+      'unobserved_line_numbers',
+      `Line numbers for "${resolvedPath}" were never observed: the last read was a byte view ` +
+        '(hex or base64), which does not assign line numbers. Re-read the file as text with ' +
+        'read_file first, then retry replacing this range.',
+      { resolvedPath }
+    );
+    this.name = 'UnobservedLineNumbersError';
+  }
+}
+
+/**
  * Records the exact bytes a chat observed and returns their SHA-256 digest.
  *
  * `observedMtimeMs` must come from the descriptor those bytes were read from —
@@ -134,33 +179,36 @@ export class StaleLineNumbersError extends RuntimeServiceError {
  * entry then always takes the hashing path instead of the metadata fast path.
  *
  * `content` is always the whole file, because the digest has to answer "did
- * this file change on disk". `observedRange` narrows what the model was
- * actually shown; omit it when the caller put the entire content in front of
- * the model. Sequential windows accumulate, so paging through a file from
- * line 1 eventually covers it.
+ * this file change on disk". {@link FileReadObservation} says what the model
+ * was actually shown. Sequential windows accumulate, so paging through a file
+ * from line 1 eventually covers it. A byte view is a complete content
+ * observation and an unobserved line-number state: writes may proceed,
+ * `replace_range` may not.
  *
- * Whole-content callers are authoritative about line numbering — read_file
- * shows it, create_file and write_file author it — so this resets any shift
- * recorded by {@link recordFileEdit}.
+ * Whole-file and windowed text callers are authoritative about line numbering
+ * — read_file shows it, create_file and write_file author it — so those reset
+ * any shift recorded by {@link recordFileEdit}. A byte view does not.
  */
 export function recordFileRead(
   chatId: string,
   resolvedPath: string,
   content: Uint8Array | string,
   observedMtimeMs: number,
-  observedRange?: ObservedLineRange
+  observation: FileReadObservation = { kind: 'wholeFile' }
 ): string {
   const sha256 = hashContent(content);
-  const coveredThroughLine = observedRange
-    ? extendCoverage(chatId, resolvedPath, sha256, observedRange)
-    : Number.MAX_SAFE_INTEGER;
+  const coveredThroughLine =
+    observation.kind === 'window'
+      ? extendCoverage(chatId, resolvedPath, sha256, observation.range)
+      : Number.MAX_SAFE_INTEGER;
   storeEntry(chatId, resolvedPath, {
     sha256,
     size: contentSize(content),
     mtimeMs: observedMtimeMs,
     coveredThroughLine,
-    complete: coveredThroughLine >= (observedRange?.totalLines ?? 0),
-    lineNumbersValidThroughLine: Number.MAX_SAFE_INTEGER,
+    complete:
+      observation.kind === 'window' ? coveredThroughLine >= observation.range.totalLines : true,
+    lineNumbers: observation.kind === 'byteView' ? LINES_UNOBSERVED : ALL_LINES_VALID,
   });
   return sha256;
 }
@@ -192,10 +240,15 @@ export function recordFileEdit(
     mtimeMs: observedMtimeMs,
     coveredThroughLine: Number.MAX_SAFE_INTEGER,
     complete: true,
-    lineNumbersValidThroughLine: Math.min(
-      previous?.lineNumbersValidThroughLine ?? Number.MAX_SAFE_INTEGER,
-      lineNumbersValidThroughLine
-    ),
+    lineNumbers: {
+      kind: 'validThrough',
+      throughLine: Math.min(
+        previous?.lineNumbers.kind === 'validThrough'
+          ? previous.lineNumbers.throughLine
+          : Number.MAX_SAFE_INTEGER,
+        lineNumbersValidThroughLine
+      ),
+    },
   });
   return sha256;
 }
@@ -295,7 +348,7 @@ export async function assertFresh(chatId: string, resolvedPath: string): Promise
     mtimeMs: current.mtimeMs,
     coveredThroughLine: entry.coveredThroughLine,
     complete: entry.complete,
-    lineNumbersValidThroughLine: entry.lineNumbersValidThroughLine,
+    lineNumbers: entry.lineNumbers,
   });
 }
 
@@ -312,9 +365,12 @@ export function assertLineNumbersCurrent(
   resolvedPath: string,
   endLine: number
 ): void {
+  const lineNumbers = entriesByChat.get(chatId)?.get(resolvedPath)?.lineNumbers;
+  if (lineNumbers?.kind === 'unobserved') {
+    throw new UnobservedLineNumbersError(resolvedPath);
+  }
   const validThroughLine =
-    entriesByChat.get(chatId)?.get(resolvedPath)?.lineNumbersValidThroughLine ??
-    Number.MAX_SAFE_INTEGER;
+    lineNumbers?.kind === 'validThrough' ? lineNumbers.throughLine : Number.MAX_SAFE_INTEGER;
   if (endLine > validThroughLine) {
     throw new StaleLineNumbersError(resolvedPath, validThroughLine);
   }

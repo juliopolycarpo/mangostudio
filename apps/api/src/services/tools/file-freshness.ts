@@ -4,4 +4,5 @@ export {
   FileNotReadError,
   StaleFileError,
   StaleLineNumbersError,
+  UnobservedLineNumbersError,
 } from '@mangostudio/runtime';

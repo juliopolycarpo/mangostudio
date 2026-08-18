@@ -39,6 +39,9 @@ export async function replaceRuntimeRange(
       throw error;
     }
     assertLineNumbersCurrent(params.chatId, params.resolvedPath, params.endLine);
+    // Line-number validity is decided before any splice. A byte-view-only read
+    // must fail here rather than after reconstructing the file, where
+    // `assertStillText` would only catch a NUL that happened to survive.
 
     const sourceLines = splitLines(observed.bytes);
     validateRange(params, sourceLines.length);

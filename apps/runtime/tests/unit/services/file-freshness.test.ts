@@ -9,6 +9,7 @@ import {
   clearFileFreshness,
   FileNotReadError,
   forgetFile,
+  type ObservedLineRange,
   PartialReadError,
   readFreshFile,
   recordFileEdit,
@@ -16,6 +17,7 @@ import {
   rekeyFile,
   StaleFileError,
   StaleLineNumbersError,
+  UnobservedLineNumbersError,
   withPathLocks,
 } from '../../../src/services/file-freshness';
 
@@ -33,6 +35,14 @@ afterEach(() => {
 
 function mtimeOf(filePath: string): number {
   return statSync(filePath).mtimeMs;
+}
+
+function windowed(
+  startLine: number,
+  endLine: number,
+  totalLines: number
+): { readonly kind: 'window'; readonly range: ObservedLineRange } {
+  return { kind: 'window', range: { startLine, endLine, totalLines } };
 }
 
 describe('file freshness ledger', () => {
@@ -84,11 +94,7 @@ describe('file freshness ledger', () => {
   it('rejects a write when the recorded read only observed part of the file', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'a\nb\nc');
-    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), {
-      startLine: 1,
-      endLine: 2,
-      totalLines: 3,
-    });
+    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), windowed(1, 2, 3));
 
     await expect(assertFresh('chat-1', filePath)).rejects.toBeInstanceOf(PartialReadError);
   });
@@ -96,13 +102,8 @@ describe('file freshness ledger', () => {
   it('accumulates sequential windows until they cover the file', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'a\nb\nc');
-    const range = { startLine: 1, endLine: 2, totalLines: 3 };
-    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), range);
-    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), {
-      ...range,
-      startLine: 3,
-      endLine: 3,
-    });
+    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), windowed(1, 2, 3));
+    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), windowed(3, 3, 3));
 
     await expect(assertFresh('chat-1', filePath)).resolves.toBeUndefined();
   });
@@ -110,20 +111,12 @@ describe('file freshness ledger', () => {
   it('drops accumulated coverage when the file changed between windows', async () => {
     const filePath = join(tempDir, 'file.txt');
     await Bun.write(filePath, 'a\nb\nc');
-    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), {
-      startLine: 1,
-      endLine: 2,
-      totalLines: 3,
-    });
+    recordFileRead('chat-1', filePath, 'a\nb\nc', mtimeOf(filePath), windowed(1, 2, 3));
 
     // The second window observed different bytes, so the first no longer
     // describes any part of the file the model is about to overwrite.
     await Bun.write(filePath, 'a\nb\nd');
-    recordFileRead('chat-1', filePath, 'a\nb\nd', mtimeOf(filePath), {
-      startLine: 3,
-      endLine: 3,
-      totalLines: 3,
-    });
+    recordFileRead('chat-1', filePath, 'a\nb\nd', mtimeOf(filePath), windowed(3, 3, 3));
 
     await expect(assertFresh('chat-1', filePath)).rejects.toBeInstanceOf(PartialReadError);
   });
@@ -204,6 +197,46 @@ describe('file freshness ledger', () => {
 
     recordFileRead('chat-1', filePath, 'a\nb1\nb2\nC\n', mtimeOf(filePath));
     expect(() => assertLineNumbersCurrent('chat-1', filePath, 4)).not.toThrow();
+  });
+
+  it('does not treat a byte view as assigning line numbers', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), { kind: 'byteView' });
+
+    await expect(assertFresh('chat-1', filePath)).resolves.toBeUndefined();
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 1)).toThrow(
+      UnobservedLineNumbersError
+    );
+  });
+
+  it('re-establishes line numbers when a text read follows a byte view', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), { kind: 'byteView' });
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath));
+
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 3)).not.toThrow();
+  });
+
+  it('does not let a byte-view state floor a later edit frontier', async () => {
+    const filePath = join(tempDir, 'file.txt');
+    await Bun.write(filePath, 'a\nb\nc\n');
+    recordFileRead('chat-1', filePath, 'a\nb\nc\n', mtimeOf(filePath), { kind: 'byteView' });
+    // If unobserved were stored as 0, Math.min would keep the frontier at 0
+    // even after a same-height splice claimed every number still held.
+    recordFileEdit('chat-1', filePath, 'A\nb\nc\n', mtimeOf(filePath), Number.MAX_SAFE_INTEGER);
+
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 3)).not.toThrow();
+  });
+
+  it('keeps an empty text window as numbered, not unobserved', async () => {
+    const filePath = join(tempDir, 'empty.txt');
+    await Bun.write(filePath, '');
+    recordFileRead('chat-1', filePath, '', mtimeOf(filePath), windowed(1, 0, 0));
+
+    await expect(assertFresh('chat-1', filePath)).resolves.toBeUndefined();
+    expect(() => assertLineNumbersCurrent('chat-1', filePath, 1)).not.toThrow();
   });
 
   it('forgets snapshots explicitly', async () => {

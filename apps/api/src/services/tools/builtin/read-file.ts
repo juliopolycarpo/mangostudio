@@ -75,7 +75,8 @@ const definition = {
     'startLine/maxLines to window large files instead of reading everything at once. Use ' +
     'this when the user asks to inspect, view, or read a file. A binary file cannot be read ' +
     'as text: pass view "hex" or "base64" to read its bytes, which also satisfies the ' +
-    'read-before-write guard so the file can then be overwritten.',
+    'read-before-write guard so the file can then be overwritten. A byte view does not ' +
+    'assign line numbers; replace_range still needs a text read first.',
   parameters: {
     type: 'object',
     properties: {
