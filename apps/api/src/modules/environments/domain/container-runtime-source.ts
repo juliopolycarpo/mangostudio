@@ -176,13 +176,13 @@ export async function resolveContainerRuntimeBinary(
     );
   }
 
-  // `cached` is the path the fetch caches to, so a hit above already left the
-  // verified bytes there and rewriting ~100 MB of them would change nothing.
-  // The one thing the fetch does not do is mark the file executable, which the
-  // mount needs. Written only when the fetch's own cache write did not land —
-  // it is best-effort — because a mount source that may or may not be there is
-  // not a source.
-  if (await deps.fileExists(cached)) {
+  // The loader already knows whether those bytes are on disk: `asset.cached`
+  // is the cache write it just attempted, not a later stat. A leftover file
+  // at this path after a failed write is the previous entry — the one the
+  // loader just refused — and mounting it would launch those bytes instead
+  // of the ones it verified. The fetch still does not mark the file
+  // executable, which the mount needs.
+  if (asset.cached) {
     await deps.markExecutable(cached);
   } else {
     await deps.writeBinary(cached, asset.bytes);
