@@ -42,6 +42,7 @@ export {
   MAX_SKILL_ENTRYPOINT_BYTES,
   type ReadLibraryInstance,
   type ReadLibraryInstancesOptions,
+  type ReadLocationInstancesResult,
   readLocationInstances,
   readResourceFile,
 } from './instance-reader';

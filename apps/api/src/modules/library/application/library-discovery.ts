@@ -9,6 +9,7 @@ import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
   type LibraryLocationId,
   type LibraryResource,
+  type LibraryScanResult,
   type ResourceKind,
   resourceKey,
 } from '@mangostudio/shared/library';
@@ -40,7 +41,7 @@ export async function discoverLibraryResources(
   db: Kysely<Database>,
   userId: string,
   options: LibraryDiscoveryOptions = {}
-): Promise<LibraryResource[]> {
+): Promise<LibraryScanResult> {
   const settings = options.settings ?? (await getAppSettings(db, userId));
   return discoverLibraryResourcesFromSettings(settings, options);
 }
@@ -53,7 +54,7 @@ export async function discoverLibraryResources(
 export function discoverLibraryResourcesFromSettings(
   settings: AppSettings,
   options: Omit<LibraryDiscoveryOptions, 'settings'> = {}
-): Promise<LibraryResource[]> {
+): Promise<LibraryScanResult> {
   const pathEnv = options.pathEnv ?? createLibraryPathEnv();
   const cache = options.cache ?? hubLibraryDiscoveryCache;
   const force = options.force ?? false;
@@ -70,17 +71,25 @@ export function discoverLibraryResourcesFromSettings(
     .sort()
     .join('\n')}`;
 
-  return cache.getOrComputeScan(signature, (options.now ?? Date.now)(), force, async () => {
-    const entries = await scanLibraryInstancesForPathEnv(locationSettings, pathEnv, {
-      force,
-      now: options.now,
-      cache,
-      kinds: options.kinds,
-      locationPathOverrides: options.locationPathOverrides,
-      cacheScan: false,
-    });
-    return groupResources(entries);
-  });
+  return cache.getOrComputeScan(
+    signature,
+    (options.now ?? Date.now)(),
+    force,
+    async (): Promise<LibraryScanResult> => {
+      const scanned = await scanLibraryInstancesForPathEnv(locationSettings, pathEnv, {
+        force,
+        now: options.now,
+        cache,
+        kinds: options.kinds,
+        locationPathOverrides: options.locationPathOverrides,
+        cacheScan: false,
+      });
+      return {
+        resources: groupResources(scanned.instances),
+        unreadableEntries: [...scanned.unreadableEntries],
+      };
+    }
+  );
 }
 
 function groupResources(scanned: readonly ReadLibraryInstance[]): LibraryResource[] {

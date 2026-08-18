@@ -57,6 +57,7 @@ describe('createEnvironmentLibraryService', () => {
                   },
                 },
               ],
+              unreadableEntries: [],
             });
           },
           read: () => Promise.resolve({ content: '', truncated: false, sizeBytes: 0 }),
@@ -92,9 +93,11 @@ describe('createEnvironmentLibraryService', () => {
       environmentId: LOCAL_ENVIRONMENT_ID,
     });
 
-    expect(local.map((resource) => resource.ref.slug)).toEqual([LOCAL_ENVIRONMENT_ID]);
-    expect(remote.map((resource) => resource.ref.slug)).toEqual(['remote-a']);
-    expect(localAgain.map((resource) => resource.ref.slug)).toEqual([LOCAL_ENVIRONMENT_ID]);
+    expect(local.resources.map((resource) => resource.ref.slug)).toEqual([LOCAL_ENVIRONMENT_ID]);
+    expect(remote.resources.map((resource) => resource.ref.slug)).toEqual(['remote-a']);
+    expect(localAgain.resources.map((resource) => resource.ref.slug)).toEqual([
+      LOCAL_ENVIRONMENT_ID,
+    ]);
     // Second local discover hit the cache; only one scan per environment.
     expect(scans).toEqual([LOCAL_ENVIRONMENT_ID, 'remote-a']);
   });
@@ -129,7 +132,7 @@ describe('createEnvironmentLibraryService', () => {
     const client = {
       manifest: makeManifest('remote-b'),
       library: {
-        scan: () => Promise.resolve({ entries: [] }),
+        scan: () => Promise.resolve({ entries: [], unreadableEntries: [] }),
         read: (params: { path: string; locationId: string }) => {
           readParams = params;
           return Promise.resolve({
@@ -190,7 +193,7 @@ describe('createEnvironmentLibraryService', () => {
     const client = {
       manifest: makeManifest('remote-c'),
       library: {
-        scan: () => Promise.resolve({ entries: [] }),
+        scan: () => Promise.resolve({ entries: [], unreadableEntries: [] }),
         read: () =>
           Promise.resolve({ content: '# Agents', truncated: false, sizeBytes: 8, denied: false }),
         locations: () => Promise.resolve({ locations: [] }),
@@ -208,7 +211,7 @@ describe('createEnvironmentLibraryService', () => {
     const client = {
       manifest: makeManifest('remote-d'),
       library: {
-        scan: () => Promise.resolve({ entries: [] }),
+        scan: () => Promise.resolve({ entries: [], unreadableEntries: [] }),
         read: () => Promise.resolve({ content: '', truncated: false, sizeBytes: 0 }),
         locations: () => Promise.reject(new Error('should not call the runtime directly')),
       },
@@ -261,7 +264,7 @@ describe('createEnvironmentLibraryService', () => {
     const client = {
       manifest: makeManifest('remote-f'),
       library: {
-        scan: () => Promise.resolve({ entries: [] }),
+        scan: () => Promise.resolve({ entries: [], unreadableEntries: [] }),
         read: () => Promise.resolve({ content: '', truncated: false, sizeBytes: 0 }),
       },
     } as unknown as RuntimeClient;

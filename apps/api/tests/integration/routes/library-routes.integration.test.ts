@@ -5,6 +5,7 @@ import type {
   LibraryResource,
   LibraryResourceContent,
   LibraryTargetDescriptor,
+  LibraryUnreadableEntry,
 } from '@mangostudio/shared/library';
 import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
 import { LibraryFeatureUnavailableError } from '../../../src/modules/library/domain/library-feature-error';
@@ -79,7 +80,10 @@ afterEach(() => {
   restoreAuth = null;
 });
 
-function createService(resources: LibraryResource[] = [skillResource]) {
+function createService(
+  resources: LibraryResource[] = [skillResource],
+  unreadableEntries: LibraryUnreadableEntry[] = []
+) {
   const forced: boolean[] = [];
   const environmentIds: (string | undefined)[] = [];
   const content: LibraryResourceContent = {
@@ -95,7 +99,7 @@ function createService(resources: LibraryResource[] = [skillResource]) {
       forced.push(force);
       workspaceRoots.push(workspaceRoot);
       environmentIds.push(environmentId);
-      return Promise.resolve(resources);
+      return Promise.resolve({ resources, unreadableEntries });
     },
     listLocations(_userId, workspaceRoot, environmentId) {
       workspaceRoots.push(workspaceRoot);
@@ -125,7 +129,26 @@ describe('library routes', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual([skillResource]);
+    expect(await response.json()).toEqual({ resources: [skillResource], unreadableEntries: [] });
+  });
+
+  it('reports an entry that fails the library-wide slug pattern without dropping it', async () => {
+    const unreadableEntry: LibraryUnreadableEntry = {
+      locationId: 'agents-skills',
+      name: 'my skill',
+      reason: 'invalid-name',
+    };
+    const { service } = createService([skillResource], [unreadableEntry]);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/library/resources'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      resources: [skillResource],
+      unreadableEntries: [unreadableEntry],
+    });
   });
 
   it('returns detail and bounded content by validated resource key and location', async () => {

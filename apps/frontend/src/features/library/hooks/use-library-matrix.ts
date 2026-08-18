@@ -12,6 +12,7 @@ import type {
   LibraryResource,
   LibraryTargetDescriptor,
   LibraryTargetId,
+  LibraryUnreadableEntry,
   ResourceKind,
 } from '@mangostudio/shared/library';
 import { useMutation, useQueries, useQueryClient } from '@tanstack/react-query';
@@ -35,6 +36,7 @@ import {
 
 export interface LibraryMatrixState {
   readonly resources: readonly LibraryResource[];
+  readonly unreadableEntries: readonly LibraryUnreadableEntry[];
   readonly visible: readonly LibraryResource[];
   readonly groups: readonly LocationGroup[];
   readonly targets: readonly LibraryTargetDescriptor[];
@@ -73,7 +75,11 @@ export function useLibraryMatrix(kind: ResourceKind, environmentId?: string): Li
     ],
   });
 
-  const resources = useMemo(() => resourcesQuery.data ?? [], [resourcesQuery.data]);
+  const resources = useMemo(() => resourcesQuery.data?.resources ?? [], [resourcesQuery.data]);
+  const unreadableEntries = useMemo(
+    () => resourcesQuery.data?.unreadableEntries ?? [],
+    [resourcesQuery.data]
+  );
   const targets = useMemo(() => targetsQuery.data ?? [], [targetsQuery.data]);
   const locations = useMemo(() => locationsQuery.data ?? [], [locationsQuery.data]);
 
@@ -126,6 +132,7 @@ export function useLibraryMatrix(kind: ResourceKind, environmentId?: string): Li
 
   return {
     resources,
+    unreadableEntries,
     visible,
     groups,
     targets,

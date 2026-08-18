@@ -132,7 +132,9 @@ function installOverviewScenario() {
     .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
     .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
     .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
-    .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+    .respondWithJson('GET', '/api/library/resources', {
+      body: { resources: RESOURCES, unreadableEntries: [] },
+    })
     .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
     .install();
 }
@@ -209,7 +211,9 @@ describe('OverviewPage', () => {
       .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
       .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
-      .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+      .respondWithJson('GET', '/api/library/resources', {
+        body: { resources: RESOURCES, unreadableEntries: [] },
+      })
       .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
       .install();
 
@@ -274,7 +278,9 @@ describe('OverviewPage', () => {
       .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
       .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
-      .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+      .respondWithJson('GET', '/api/library/resources', {
+        body: { resources: RESOURCES, unreadableEntries: [] },
+      })
       .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
       .install();
 
@@ -367,7 +373,9 @@ describe('OverviewPage', () => {
       .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
       .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
-      .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+      .respondWithJson('GET', '/api/library/resources', {
+        body: { resources: RESOURCES, unreadableEntries: [] },
+      })
       .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
       .install();
 
@@ -498,7 +506,9 @@ describe('OverviewPage', () => {
       .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
       .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
       .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
-      .respondWithJson('GET', '/api/library/resources', { body: RESOURCES })
+      .respondWithJson('GET', '/api/library/resources', {
+        body: { resources: RESOURCES, unreadableEntries: [] },
+      })
       .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
       .install();
 

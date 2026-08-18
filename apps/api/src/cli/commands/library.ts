@@ -122,11 +122,16 @@ export async function runLibrary(
 
 function resolveDeps(deps: Partial<LibraryDeps>): LibraryDeps {
   const getSettings = deps.getSettings ?? readCliAppSettings;
-  const defaultDiscover = (discoverOptions: { kinds?: readonly ResourceKind[]; force?: boolean }) =>
-    discoverLibraryResourcesFromSettings(getSettings(), {
+  const defaultDiscover = async (discoverOptions: {
+    kinds?: readonly ResourceKind[];
+    force?: boolean;
+  }) => {
+    const scan = await discoverLibraryResourcesFromSettings(getSettings(), {
       kinds: discoverOptions.kinds,
       force: discoverOptions.force,
     });
+    return scan.resources;
+  };
 
   return {
     getSettings,

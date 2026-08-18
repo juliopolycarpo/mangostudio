@@ -17,7 +17,7 @@ import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { throwIfAborted } from '../cancellation';
 import { type LibraryCache, libraryCache } from './cache';
-import { type ReadLibraryInstance, readLocationInstances } from './instance-reader';
+import { type ReadLocationInstancesResult, readLocationInstances } from './instance-reader';
 
 export interface LibraryScanOptions {
   readonly locationSettings: LibraryLocationSettings;
@@ -80,7 +80,7 @@ export function resolveLibraryScanTargets(
  */
 export function scanLibraryInstances(
   options: LibraryScanOptions
-): Promise<readonly ReadLibraryInstance[]> {
+): Promise<ReadLocationInstancesResult> {
   const targets = resolveLibraryScanTargets(options.locationSettings, options.pathEnv, {
     kinds: options.kinds,
     locationPathOverrides: options.locationPathOverrides,
@@ -100,13 +100,18 @@ export function scanLibraryInstances(
     LIBRARY_LOCATION_DEFINITIONS.map((location) => [location.id, location])
   );
 
-  const compute = async (signal?: AbortSignal): Promise<readonly ReadLibraryInstance[]> => {
+  const compute = async (signal?: AbortSignal): Promise<ReadLocationInstancesResult> => {
     throwIfAborted(signal);
     const scanned = await Promise.all(
       targets.map((target) => {
         throwIfAborted(signal);
         const location = locationById.get(target.locationId);
-        if (!location) return Promise.resolve([] as ReadLibraryInstance[]);
+        if (!location) {
+          return Promise.resolve<ReadLocationInstancesResult>({
+            instances: [],
+            unreadableEntries: [],
+          });
+        }
         return readLocationInstances(location, target.path, {
           cache,
           force,
@@ -114,7 +119,10 @@ export function scanLibraryInstances(
         });
       })
     );
-    return scanned.flat();
+    return {
+      instances: scanned.flatMap((result) => result.instances),
+      unreadableEntries: scanned.flatMap((result) => result.unreadableEntries),
+    };
   };
 
   // Cached scans are shared across callers. The walk must not close over one

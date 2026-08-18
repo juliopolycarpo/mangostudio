@@ -16,6 +16,7 @@ import type {
   LibraryLocationStatus,
   LibraryResource,
   LibraryResourceContent,
+  LibraryScanResult,
   LibraryTargetDescriptor,
   PropagationBackupUsage,
   ResourceKind,
@@ -69,7 +70,7 @@ export function libraryResourcesQueryOptions(kind?: ResourceKind, environmentId?
         },
       });
       if (error) throw new ApiError(error.value);
-      return data as LibraryResource[];
+      return data as LibraryScanResult;
     },
   });
 }

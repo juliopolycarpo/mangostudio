@@ -103,13 +103,15 @@ function previewRemoval(
     {
       snapshot: async (scanUserId, environmentId, kinds) => ({
         environmentId,
-        resources: await discoverLibraryResources(getDb(), scanUserId, {
-          force: true,
-          kinds,
-          cache,
-          pathEnv,
-          settings: skillLocationSettings(),
-        }),
+        resources: (
+          await discoverLibraryResources(getDb(), scanUserId, {
+            force: true,
+            kinds,
+            cache,
+            pathEnv,
+            settings: skillLocationSettings(),
+          })
+        ).resources,
         statuses: new Map(
           [...locationIds].map((id) => [id, describeLocation(id, pathEnv)] as const)
         ),
@@ -168,7 +170,7 @@ function removeEverything(
 }
 
 async function currentDivergence(): Promise<string | undefined> {
-  const resources = await discoverLibraryResources(getDb(), TEST_USER.id, {
+  const { resources } = await discoverLibraryResources(getDb(), TEST_USER.id, {
     force: true,
     kinds: ['skill'],
     cache: new LibraryCache(),

@@ -32,7 +32,7 @@ export function OverviewLibrarySnapshot() {
 
   const hasData = resources.data !== undefined && targets.data !== undefined;
   const summaries = summarizeCoverageByTarget(
-    resources.data ?? [],
+    resources.data?.resources ?? [],
     (targets.data ?? []).map((target) => target.id)
   );
 

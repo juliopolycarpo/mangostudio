@@ -41,8 +41,13 @@ function resolveDeps(overrides: Partial<DivergenceAckDeps>): DivergenceAckDeps {
     repository: overrides.repository ?? createDivergenceAckRepository(),
     discover:
       overrides.discover ??
-      ((userId, ref) =>
-        discoverLibraryResources(getDb(), userId, { force: true, kinds: [ref.kind] })),
+      (async (userId, ref) => {
+        const scan = await discoverLibraryResources(getDb(), userId, {
+          force: true,
+          kinds: [ref.kind],
+        });
+        return scan.resources;
+      }),
     now: overrides.now ?? Date.now,
   };
 }

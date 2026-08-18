@@ -182,7 +182,9 @@ describe('SkillsSettingsPage', () => {
   it('forces a library rescan from the visible refresh control', async () => {
     const user = userEvent.setup();
     fetchScenario.respondWithJson('GET', '/api/skills', { body: SKILLS_RESPONSE });
-    fetchScenario.respondWithJson('POST', '/api/library/rescan', { body: [] });
+    fetchScenario.respondWithJson('POST', '/api/library/rescan', {
+      body: { resources: [], unreadableEntries: [] },
+    });
 
     render(<SkillsSettingsPage />);
 

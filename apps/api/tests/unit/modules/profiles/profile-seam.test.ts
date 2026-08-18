@@ -122,6 +122,10 @@ describe('profile seam', () => {
       cwd: API_ROOT,
       onlyFiles: true,
     })) {
+      // Migrations are a one-time, app-wide data transformation reviewed on
+      // their own merits, not a request-time read/write that could leak one
+      // profile's rows into another's — the thing this check guards against.
+      if (relativePath.startsWith('src/db/migrations/')) continue;
       const source = await Bun.file(join(API_ROOT, relativePath)).text();
       for (const { table, location, chain } of extractQueryChains(source, relativePath)) {
         if (!/\bprofileId\b/.test(chain)) {

@@ -123,10 +123,12 @@ export async function readEnvironmentSnapshot(
   let resources: LibraryResource[];
   let locations: LibraryLocationStatus[];
   try {
-    [resources, locations] = await Promise.all([
+    const [scan, discoveredLocations] = await Promise.all([
       environmentLibraryService.discover(db, scope, { force: true, kinds }),
       environmentLibraryService.listLocations(db, scope),
     ]);
+    resources = scan.resources;
+    locations = discoveredLocations;
   } catch {
     return { environmentId, blockedReason: 'environment-offline', resources: [], statuses: empty };
   }

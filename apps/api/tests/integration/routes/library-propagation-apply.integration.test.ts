@@ -164,13 +164,15 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
   return previewLibraryPropagation(userId(), request, {
     snapshot: async (scanUserId, environmentId, kinds) => ({
       environmentId,
-      resources: await discoverLibraryResources(getDb(), scanUserId, {
-        force: true,
-        kinds,
-        cache,
-        pathEnv: env,
-        settings: enabled,
-      }),
+      resources: (
+        await discoverLibraryResources(getDb(), scanUserId, {
+          force: true,
+          kinds,
+          cache,
+          pathEnv: env,
+          settings: enabled,
+        })
+      ).resources,
       statuses: new Map(
         request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
       ),
@@ -799,13 +801,15 @@ describe('propagation apply — request validation', () => {
       {
         snapshot: async (scanUserId, environmentId, kinds) => ({
           environmentId,
-          resources: await discoverLibraryResources(getDb(), scanUserId, {
-            force: true,
-            kinds,
-            cache: new LibraryCache(),
-            pathEnv: env,
-            settings: settings([...INSTRUCTION_LOCATIONS]),
-          }),
+          resources: (
+            await discoverLibraryResources(getDb(), scanUserId, {
+              force: true,
+              kinds,
+              cache: new LibraryCache(),
+              pathEnv: env,
+              settings: settings([...INSTRUCTION_LOCATIONS]),
+            })
+          ).resources,
           statuses: new Map(
             INSTRUCTION_LOCATIONS.map((id) => [id, describeLocation(id, env)] as const)
           ),
@@ -1114,13 +1118,15 @@ describe('propagation apply — across machines', () => {
       {
         snapshot: async (scanUserId, environmentId, kinds) => ({
           environmentId,
-          resources: await discoverLibraryResources(getDb(), scanUserId, {
-            force: true,
-            kinds,
-            cache: new LibraryCache(),
-            pathEnv: envFor(environmentId),
-            settings: enabled,
-          }),
+          resources: (
+            await discoverLibraryResources(getDb(), scanUserId, {
+              force: true,
+              kinds,
+              cache: new LibraryCache(),
+              pathEnv: envFor(environmentId),
+              settings: enabled,
+            })
+          ).resources,
           statuses: new Map(
             SKILL_LOCATIONS.map((id) => [id, describeLocation(id, envFor(environmentId))] as const)
           ),
@@ -1366,13 +1372,15 @@ describe('propagation apply — across machines', () => {
       {
         snapshot: async (scanUserId, environmentId, kinds) => ({
           environmentId,
-          resources: await discoverLibraryResources(getDb(), scanUserId, {
-            force: true,
-            kinds,
-            cache: new LibraryCache(),
-            pathEnv: pathEnv(),
-            settings: enabled,
-          }),
+          resources: (
+            await discoverLibraryResources(getDb(), scanUserId, {
+              force: true,
+              kinds,
+              cache: new LibraryCache(),
+              pathEnv: pathEnv(),
+              settings: enabled,
+            })
+          ).resources,
           statuses: new Map(
             SKILL_LOCATIONS.map((id) => [id, describeLocation(id, pathEnv())] as const)
           ),

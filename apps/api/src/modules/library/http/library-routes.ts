@@ -14,17 +14,22 @@ import {
   type LibraryResource,
   type LibraryResourceContent,
   LibraryResourceContentSchema,
-  LibraryResourceListSchema,
   LibraryResourceSchema,
+  type LibraryScanResult,
+  LibraryScanResultSchema,
   type LibraryTargetDescriptor,
   LibraryTargetDescriptorListSchema,
   type LibraryTargetId,
   LibraryTargetIdSchema,
+  type LibraryUnreadableEntry,
   parseResourceKey,
   type ResourceKind,
   ResourceKindSchema,
 } from '@mangostudio/shared/library';
-import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
+import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  listLibraryTargetDescriptors,
+} from '@mangostudio/shared/library/host';
 import { Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -72,6 +77,34 @@ function filterLibraryResources(
     }
     return true;
   });
+}
+
+/** `discover` always scans every kind, so this channel needs the same `kind`/`location`
+ * narrowing the resource list gets. `target` and `state` describe resource coverage, which an
+ * entry that could not even be named as a resource never has, so they do not apply here. */
+const LOCATION_KIND_BY_ID = new Map(
+  LIBRARY_LOCATION_DEFINITIONS.map((location) => [location.id, location.kind])
+);
+
+function filterUnreadableEntries(
+  entries: readonly LibraryUnreadableEntry[],
+  filters: Pick<ResourceFilters, 'kind' | 'location'>
+): LibraryUnreadableEntry[] {
+  return entries.filter((entry) => {
+    if (filters.kind && LOCATION_KIND_BY_ID.get(entry.locationId) !== filters.kind) return false;
+    if (filters.location && entry.locationId !== filters.location) return false;
+    return true;
+  });
+}
+
+function filterLibraryScanResult(
+  scan: LibraryScanResult,
+  filters: ResourceFilters
+): LibraryScanResult {
+  return {
+    resources: filterLibraryResources(scan.resources, filters),
+    unreadableEntries: filterUnreadableEntries(scan.unreadableEntries, filters),
+  };
 }
 
 function invalidResourceKey(set: { status?: number | string }): ApiErrorResponse {
@@ -162,7 +195,7 @@ export interface LibraryRouteService {
     force: boolean,
     workspaceRoot?: string,
     environmentId?: string
-  ): Promise<LibraryResource[]>;
+  ): Promise<LibraryScanResult>;
   listLocations(
     userId: string,
     workspaceRoot?: string,
@@ -210,23 +243,23 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
         {
           query: resourceQuery,
           response: {
-            200: LibraryResourceListSchema,
+            200: LibraryScanResultSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
         },
-        async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
+        async ({ query, set, user }): Promise<LibraryScanResult | ApiErrorResponse> => {
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(
+            const scan = await service.discover(
               user?.id ?? '',
               false,
               workspace.root,
               query.environmentId
             );
-            return filterLibraryResources(resources, query);
+            return filterLibraryScanResult(scan, query);
           } catch (error) {
             return handleLibraryError(error, set);
           }
@@ -260,13 +293,13 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(
+            const scan = await service.discover(
               user?.id ?? '',
               false,
               workspace.root,
               query.environmentId
             );
-            const resource = resources.find((candidate) => candidate.key === params.key);
+            const resource = scan.resources.find((candidate) => candidate.key === params.key);
             if (!resource) return resourceNotFound(set);
             return (
               (await service.readContent(
@@ -304,14 +337,15 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
-            const resources = await service.discover(
+            const scan = await service.discover(
               user?.id ?? '',
               false,
               workspace.root,
               query.environmentId
             );
             return (
-              resources.find((candidate) => candidate.key === params.key) ?? resourceNotFound(set)
+              scan.resources.find((candidate) => candidate.key === params.key) ??
+              resourceNotFound(set)
             );
           } catch (error) {
             return handleLibraryError(error, set);
@@ -360,13 +394,13 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             environmentId: EnvironmentIdQuerySchema,
           }),
           response: {
-            200: LibraryResourceListSchema,
+            200: LibraryScanResultSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
         },
-        async ({ query, set, user }): Promise<LibraryResource[] | ApiErrorResponse> => {
+        async ({ query, set, user }): Promise<LibraryScanResult | ApiErrorResponse> => {
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
