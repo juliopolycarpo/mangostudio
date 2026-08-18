@@ -205,7 +205,11 @@ export function createEnvironmentLibraryService(
       );
       const scan: LibraryScanResult = {
         resources: groupLibraryScanEntries(result.entries as RuntimeLibraryScanEntry[]),
-        unreadableEntries: [...result.unreadableEntries],
+        // Additive protocol field. A runtime a release behind still connects —
+        // the handshake only pins major/minor — and answers without this key,
+        // so spreading it unguarded would turn "no unreadable entries" into a
+        // TypeError that takes the whole scan down.
+        unreadableEntries: [...(result.unreadableEntries ?? [])],
       };
       if (
         (scanGeneration.get(signature) ?? 0) === generationAtStart &&
