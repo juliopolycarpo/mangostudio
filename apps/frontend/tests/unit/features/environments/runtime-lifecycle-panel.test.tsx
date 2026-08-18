@@ -232,7 +232,10 @@ describe('RuntimeLifecyclePanel', () => {
       present: false,
     };
 
-    function viewWith(installed: string | null): RuntimeLifecycleView {
+    function viewWith(
+      installed: string | null,
+      options: { runtimeVersion?: string } = {}
+    ): RuntimeLifecycleView {
       if (installed === null) return { ...VIEW, stale: false, stagedRuntime: STAGED };
       return {
         ...VIEW,
@@ -242,7 +245,7 @@ describe('RuntimeLifecyclePanel', () => {
           schemaVersion: 1,
           slot: 'wsl',
           source: 'provisioned',
-          runtimeVersion: installed,
+          runtimeVersion: options.runtimeVersion ?? installed,
           version: installed,
           binaryPath: '/home/test/.mango/runtime/wsl/current/mangostudio-runtime',
           digest: `sha256:${'a'.repeat(64)}`,
@@ -290,25 +293,29 @@ describe('RuntimeLifecyclePanel', () => {
     });
 
     it.each([
-      ['a machine on a different build', '9.9.8', false],
-      ['a machine that has never reported one', null, false],
-      ['matching health that is stale', '9.9.9', true],
-    ])('keeps offering the install for %s', async (_case, installed, stale) => {
-      const environment: Environment = {
-        ...WSL,
-        id: `offer-${installed ?? 'none'}-${String(stale)}`,
-      };
-      scenario
-        .respondWithJson('GET', `/api/environments/${environment.id}/runtime`, {
-          body: { ...viewWith(installed), stale },
-        })
-        .install();
-      render(<RuntimeLifecyclePanel environment={environment} />);
+      ['a machine on a different build', '9.9.8', false, undefined],
+      ['a machine that has never reported one', null, false, undefined],
+      ['matching health that is stale', '9.9.9', true, undefined],
+      ['a slot that was updated while this process still needs a restart', '9.9.9', false, '9.9.8'],
+    ] as const)(
+      'keeps offering the install for %s',
+      async (_case, installed, stale, runtimeVersion) => {
+        const environment: Environment = {
+          ...WSL,
+          id: `offer-${installed ?? 'none'}-${String(stale)}`,
+        };
+        scenario
+          .respondWithJson('GET', `/api/environments/${environment.id}/runtime`, {
+            body: { ...viewWith(installed, { runtimeVersion }), stale },
+          })
+          .install();
+        render(<RuntimeLifecyclePanel environment={environment} />);
 
-      expect(await screen.findByTestId('runtime-offer')).toHaveTextContent(
-        formatMessage(labels.staged.offer, { version: '9.9.9', platform: 'linux-x64' })
-      );
-      expect(screen.queryByTestId('runtime-offer-matched')).not.toBeInTheDocument();
-    });
+        expect(await screen.findByTestId('runtime-offer')).toHaveTextContent(
+          formatMessage(labels.staged.offer, { version: '9.9.9', platform: 'linux-x64' })
+        );
+        expect(screen.queryByTestId('runtime-offer-matched')).not.toBeInTheDocument();
+      }
+    );
   });
 });

@@ -303,18 +303,19 @@ function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
     );
   }
 
-  // The slot's recorded version first, the running process's second — the same
-  // pair the health line prints. Version equality settles this on a rolling
-  // channel too: a canary build's version carries its own commit
-  // (`…-canary.<sha>`), and it is only the asset *filename* that is reused
-  // across builds. A machine that has never reported one has nothing to
-  // compare, which is the never-installed case and keeps the offer.
+  // The running process, not the slot config. A live update with a pending
+  // restart writes the new version into `health.version` while this process
+  // still reports the old `runtimeVersion`, and the confirming line is a claim
+  // about what is running now. Version equality still settles a rolling
+  // channel: a canary build's version carries its own commit (`…-canary.<sha>`),
+  // and it is only the asset *filename* that is reused across builds. A machine
+  // that has never reported a process version has nothing to compare, which is
+  // the never-installed case and keeps the offer.
   //
-  // Health is retained after disconnect, marked stale. The confirming line is a
-  // claim about what is running now, so a stale report falls through to the
-  // offer rather than saying a matching runtime is already there.
-  const installed = view.health ? (view.health.version ?? view.health.runtimeVersion) : null;
-  if (!view.stale && installed === staged.version) {
+  // Health is retained after disconnect, marked stale. A stale report falls
+  // through to the offer rather than saying a matching runtime is already there.
+  const running = view.health?.runtimeVersion ?? null;
+  if (!view.stale && running === staged.version) {
     return (
       <p className="text-[11px] text-on-surface-variant/80" data-testid="runtime-offer-matched">
         {formatMessage(labels.matched, { version: staged.version })}
