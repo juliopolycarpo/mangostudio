@@ -495,7 +495,8 @@ async function removeLegacyRuntime(deps: WslProvisionerDeps, distro: string): Pr
 
 /**
  * Prefers the raw runtime asset; falls back to the platform archive when the
- * raw asset is missing from SHA256SUMS or 404s (older releases).
+ * raw asset is missing from SHA256SUMS or 404s (older releases), and when the
+ * release cannot be reached at all but a verified archive is already cached.
  *
  * Names and tag both come from the channel resolver rather than the hub's own
  * version string. A canary hub calls itself `<root>-canary.<sha7>` while the
@@ -522,6 +523,7 @@ async function loadRelease(
   // `manifestRuntimeDigest`.
   const boundDigest = manifest ? manifestRuntimeDigest(manifest, platformId, rawName) : undefined;
 
+  let rawFailure: unknown;
   try {
     const raw = await loadAsset(deps, version, release, rawName, boundDigest);
     return {
@@ -532,7 +534,14 @@ async function loadRelease(
       ...provenance,
     };
   } catch (error) {
-    if (!(error instanceof WslAssetMissingError)) {
+    // Same split the shared loader makes: a 404 or unpublished raw asset is
+    // the older-release archive fallback, and an unreachable raw load is that
+    // fallback with the network gone. Anything else is a real failure of the
+    // asset this hub normally wants, and the hint still names it.
+    const tryArchive =
+      error instanceof WslAssetMissingError ||
+      (error instanceof WslDownloadError && error.unreachable);
+    if (!tryArchive) {
       if (error instanceof WslDownloadError) {
         throw new WslProvisioningError(
           `${error.message} ${manualInstallHint(deps, distro, version, release, rawName)}`
@@ -540,6 +549,7 @@ async function loadRelease(
       }
       throw error;
     }
+    rawFailure = error;
   }
 
   try {
@@ -552,6 +562,14 @@ async function loadRelease(
       ...provenance,
     };
   } catch (error) {
+    // Unreachable raw with no archive cache: keep the original hint, which
+    // names the asset this hub normally wants. A missing raw asset still
+    // reports the archive, because that is the only file the release had.
+    if (rawFailure instanceof WslDownloadError && rawFailure.unreachable) {
+      throw new WslProvisioningError(
+        `${rawFailure.message} ${manualInstallHint(deps, distro, version, release, rawName)}`
+      );
+    }
     if (error instanceof WslDownloadError || error instanceof WslAssetMissingError) {
       throw new WslProvisioningError(
         `${error.message} ${manualInstallHint(deps, distro, version, release, archiveName)}`

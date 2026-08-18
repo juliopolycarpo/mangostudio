@@ -473,6 +473,30 @@ describe('the runtime cache when the release cannot be reached', () => {
 
     await expect(loaded).rejects.toThrow();
   });
+
+  it('does not answer a bodyless checksums response from the cache', async () => {
+    const { loaded } = load(
+      { [CACHE_PATH]: BYTES, [runtimeDigestSidecarPath(CACHE_PATH)]: sidecar(DIGEST) },
+      (() => Promise.resolve(new Response(null, { status: 204 }))) as unknown as typeof fetch
+    );
+
+    await expect(loaded).rejects.toThrow();
+  });
+
+  it('launches from a cached archive when the raw asset was never stored', async () => {
+    const archivePath = `${CACHE_DIR}/mangostudio-1.2.3-linux-x64.tar.gz`;
+    const { loaded } = load(
+      { [archivePath]: BYTES, [runtimeDigestSidecarPath(archivePath)]: sidecar(DIGEST) },
+      offline
+    );
+
+    expect(await loaded).toMatchObject({
+      digest: `sha256:${DIGEST}`,
+      cached: true,
+      offlineCache: true,
+      fromArchive: true,
+    });
+  });
 });
 
 describe('the runtime cache while the release is reachable', () => {

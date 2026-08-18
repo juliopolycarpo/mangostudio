@@ -54,7 +54,7 @@ export type SafeFetchErrorKind =
   | 'network'
   /** The caller's own signal fired. Never a fault of the remote host. */
   | 'cancelled'
-  /** The server answered with a non-2xx status, carried in `status`. */
+  /** The server answered. Non-2xx, or a 2xx with no body. Status is in `status`. */
   | 'http'
   /** The body exceeded the caller's cap, declared or streamed. */
   | 'too-large';
@@ -294,7 +294,10 @@ async function readBounded(response: Response, maxBytes: number): Promise<Uint8A
     throw new SafeFetchError(`Response exceeds the ${maxBytes}-byte limit.`, 'too-large');
   }
   if (!response.body) {
-    throw new SafeFetchError('Response had no body.');
+    // The server completed the exchange. A 204, or a 200 whose body was
+    // stripped, is an unusable answer — not a failure to reach the host —
+    // so it must not inherit the constructor's `network` default.
+    throw new SafeFetchError('Response had no body.', 'http', response.status);
   }
 
   const reader = response.body.getReader();

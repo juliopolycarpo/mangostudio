@@ -222,6 +222,24 @@ describe('WslProvisioner', () => {
     expect(written.size).toBe(0);
   });
 
+  it('provisions from a cached archive when the raw asset was never stored', async () => {
+    let offlineReported = 0;
+    const { provisioner, calls, written } = harness({
+      offline: true,
+      cacheFiles: {
+        [`/cache/${VERSION}/${ASSET}`]: ARCHIVE,
+        [`/cache/${VERSION}/${ASSET}.sha256`]: new TextEncoder().encode(DIGEST),
+      },
+    });
+
+    await provisioner.ensure('Ubuntu', { onOfflineCache: () => (offlineReported += 1) });
+
+    const unpack = calls.find((call) => call.script.includes('tar -xzf -'));
+    expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
+    expect(offlineReported).toBe(1);
+    expect(written.size).toBe(0);
+  });
+
   it('refuses an unreachable release when nothing recorded what the cache holds', async () => {
     const { provisioner } = harness({
       offline: true,

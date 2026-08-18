@@ -185,7 +185,14 @@ export async function loadRuntimeReleaseBytes(
       ...provenance,
     };
   } catch (error) {
-    if (!(error instanceof RuntimeAssetMissingError)) throw error;
+    // A missing raw asset is the older-release case this fallback exists for.
+    // An unreachable one is the same case with the network gone: the raw cache
+    // lookup already ran inside loadAsset, so what remains is the archive
+    // cache, if this hub ever stored one.
+    const tryArchive =
+      error instanceof RuntimeAssetMissingError ||
+      (error instanceof RuntimeAssetLoadError && error.unreachable);
+    if (!tryArchive) throw error;
   }
 
   const archive = await loadAsset({

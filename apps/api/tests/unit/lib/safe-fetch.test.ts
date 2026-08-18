@@ -333,5 +333,23 @@ describe('safeFetchBytes', () => {
       expect(error.kind).toBe('cancelled');
       expect(isUnreachableFailure(error)).toBe(false);
     });
+
+    it.each([204, 200])(
+      'treats a %s response with no body as an answer, not a network miss',
+      async (status) => {
+        const stub = respondWith(new Response(null, { status }));
+
+        const error = await failureOf(() =>
+          safeFetchBytes('https://example.test/file', limits, {
+            fetch: stub.fetch,
+            resolveHostname: publicResolver,
+          })
+        );
+
+        expect(error.kind).toBe('http');
+        expect(error.status).toBe(status);
+        expect(isUnreachableFailure(error)).toBe(false);
+      }
+    );
   });
 });
