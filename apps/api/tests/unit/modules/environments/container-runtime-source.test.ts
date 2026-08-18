@@ -198,4 +198,54 @@ describe('resolveContainerRuntimeBinary from a release', () => {
 
     await expect(attempt).rejects.toThrow(/checksum mismatch/);
   });
+
+  it('forwards cancellation into the release fetch', async () => {
+    const controller = new AbortController();
+    let seen: AbortSignal | undefined;
+    await resolveContainerRuntimeBinary('linux-x64', {
+      ...deps({
+        loadBytes: (_platform, overrides) => {
+          seen = overrides?.signal;
+          return Promise.resolve({ ...LOADED });
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    expect(seen).toBe(controller.signal);
+  });
+
+  it('refuses to fetch when the attempt is already cancelled', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    let fetched = false;
+
+    const attempt = resolveContainerRuntimeBinary('linux-x64', {
+      ...deps({
+        loadBytes: () => {
+          fetched = true;
+          return Promise.resolve({ ...LOADED });
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    await expect(attempt).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetched).toBe(false);
+  });
+
+  it('keeps a cancelled download as cancellation, not a missing release', async () => {
+    const controller = new AbortController();
+    const attempt = resolveContainerRuntimeBinary('linux-x64', {
+      ...deps({
+        loadBytes: () => {
+          controller.abort();
+          return Promise.reject(new Error('Could not download: Request was cancelled.'));
+        },
+      }),
+      signal: controller.signal,
+    });
+
+    await expect(attempt).rejects.toMatchObject({ name: 'AbortError' });
+  });
 });

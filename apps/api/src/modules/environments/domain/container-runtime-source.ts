@@ -24,6 +24,7 @@ import { dirname, join } from 'node:path';
 import type { LinuxPlatformId } from '@mangostudio/shared/runtime-home';
 import { getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import { getRuntimeBaseDir } from '../../../lib/runtime-paths';
+import { throwIfAborted } from './cancellation';
 import { loadRuntimeReleaseBytes, RuntimeAssetLoadError } from './runtime-release-fetch';
 import { resolveRuntimeRelease } from './runtime-release-resolution';
 import { localRuntimeBuildCommand, localRuntimeBuildPath } from './wsl-runtime-release';
@@ -133,9 +134,11 @@ export interface ContainerRuntimeBinary {
  */
 export async function resolveContainerRuntimeBinary(
   platformId: LinuxPlatformId,
-  overrides: Partial<ContainerRuntimeSourceDeps> = {}
+  overrides: Partial<ContainerRuntimeSourceDeps> & { readonly signal?: AbortSignal } = {}
 ): Promise<ContainerRuntimeBinary> {
-  const deps = { ...defaultDeps, ...overrides };
+  const { signal, ...depOverrides } = overrides;
+  const deps = { ...defaultDeps, ...depOverrides };
+  throwIfAborted(signal, 'Runtime binary resolution was cancelled.');
 
   if (isDevelopmentVersion(deps.version)) {
     const built = localRuntimeBuildPath(deps.baseDir, platformId);
@@ -156,14 +159,18 @@ export async function resolveContainerRuntimeBinary(
 
   let asset: Awaited<ReturnType<typeof loadRuntimeReleaseBytes>>;
   try {
-    asset = await deps.loadBytes(platformId);
+    asset = await deps.loadBytes(platformId, { ...(signal ? { signal } : {}) });
   } catch (error) {
+    // The fetch wraps a cancelled download as a load error; the signal is what
+    // says this was a disconnect rather than a missing release.
+    throwIfAborted(signal, 'Runtime binary resolution was cancelled.');
     throw new ContainerRuntimeSourceError(
       error instanceof RuntimeAssetLoadError
         ? `Could not get a ${platformId} runtime for release ${deps.version}: ${error.message}`
         : String(error)
     );
   }
+  throwIfAborted(signal, 'Runtime binary resolution was cancelled.');
 
   // The archive fallback exists for releases published before raw assets did.
   // A hub only ever fetches its own version, so reaching it means this release

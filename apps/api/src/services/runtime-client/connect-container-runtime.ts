@@ -30,6 +30,7 @@ import {
 } from '@mangostudio/shared/environments';
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
+import { throwIfAborted } from '../../modules/environments/domain/cancellation';
 import {
   classifyContainerFailure,
   describeContainerFailure,
@@ -74,23 +75,43 @@ export interface ContainerRuntimeConnection {
  */
 export type ContainerConnectProgress = (phase: 'pulling' | 'offline-cache') => void;
 
+/**
+ * What the attempt gives this launch. Structurally the manager's connect
+ * context, kept local for the same reason {@link ContainerRuntimeDefinition}
+ * is: this module must not import the manager back — the repo's circular-
+ * dependency gate flags that pairing even when the import is type-only.
+ */
+export interface ContainerConnectContext {
+  readonly report?: ContainerConnectProgress;
+  /**
+   * Aborted when the attempt is released. The image pull and the matching
+   * runtime download can both outlive the click that started them; spawn is
+   * still bounded by its handshake timeout, so this is rechecked before it
+   * rather than threaded into it.
+   */
+  readonly signal?: AbortSignal;
+}
+
 export interface ConnectContainerRuntimeDeps {
   readonly engines: ContainerEngineService;
   readonly resolveRuntimeBinary: typeof resolveContainerRuntimeBinary;
+  readonly spawn: typeof spawnRuntimeChild;
 }
 
 const defaultDeps: ConnectContainerRuntimeDeps = {
   engines: containerEngineService,
   resolveRuntimeBinary: resolveContainerRuntimeBinary,
+  spawn: spawnRuntimeChild,
 };
 
 export async function connectContainerRuntime(
   definition: ContainerRuntimeDefinition,
   onUnavailable: () => void,
-  report?: ContainerConnectProgress,
+  context: ContainerConnectContext = {},
   overrides: Partial<ConnectContainerRuntimeDeps> = {}
 ): Promise<ContainerRuntimeConnection> {
   const deps = { ...defaultDeps, ...overrides };
+  const report = context.report;
   const config = environmentConfigFor('container', definition.config);
   const engine = containerEngineOf(config);
 
@@ -106,9 +127,15 @@ export async function connectContainerRuntime(
   }
 
   const platformId = await withFailureReason(() =>
-    deps.engines.prepare(config, { onPullStart: () => report?.('pulling') })
+    deps.engines.prepare(config, {
+      onPullStart: () => report?.('pulling'),
+      signal: context.signal,
+    })
   );
-  const runtime = await withFailureReason(() => deps.resolveRuntimeBinary(platformId));
+  throwIfAborted(context.signal, 'Container connection was cancelled.');
+  const runtime = await withFailureReason(() =>
+    deps.resolveRuntimeBinary(platformId, { signal: context.signal })
+  );
   // The release could not be reached and the cache answered for it. The launch
   // is as verified as the day those bytes were downloaded, which is worth
   // saying: an operator otherwise has no way to tell it happened.
@@ -120,10 +147,12 @@ export async function connectContainerRuntime(
   const name = containerName(definition.id, randomBytes(4).toString('hex'));
   const launch = containerLaunchCommand({ config, name, runtimeBinaryPath: runtime.path });
 
+  throwIfAborted(context.signal, 'Container connection was cancelled.');
+
   let failureReason: ContainerFailureReason = 'unknown';
   let connection: Awaited<ReturnType<typeof spawnRuntimeChild>>;
   try {
-    connection = await spawnRuntimeChild({
+    connection = await deps.spawn({
       environmentId: definition.id,
       launch,
       hubVersion: getVersion(),

@@ -87,6 +87,7 @@ function createTestApp(
   // without owning a WSL distribution.
   const service = createEnvironmentService(repository, manager, undefined, undefined, {
     hasActiveInstall: () => false,
+    cancelActiveRun: () => false,
     removeRuntimeBytes: async () => undefined,
     ...runtimeEffects,
   });
@@ -500,6 +501,44 @@ describe('environment entity routes', () => {
       code: 'CONFLICT',
       error: 'The stdio environment transport is not available yet.',
     });
+  });
+
+  // #792: a cold pull is bounded at half an hour. The request has to come back
+  // long before that, saying what it left running.
+  it('answers a connect that started an image pull without waiting for it', async () => {
+    let cancelled: AbortSignal | undefined;
+    const { app, repository, manager } = createTestApp({
+      container: (_definition, _onUnavailable, context) => {
+        context.report('pulling');
+        cancelled = context.signal;
+        // Never settles: the pull is still running when the route answers.
+        return new Promise<never>(() => undefined);
+      },
+    });
+    await repository.create({
+      id: 'cold-image',
+      userId: TEST_USER.id,
+      name: 'Cold image',
+      transportKind: 'container',
+      config: { image: 'node:22' },
+      enabled: true,
+    });
+
+    const response = await app.handle(
+      new Request('http://localhost/environments/cold-image/connect', jsonRequest('POST'))
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as Environment).toMatchObject({
+      status: { state: 'connecting', pullingImage: true },
+    });
+    expect(manager.getStatus(TEST_USER.id, 'cold-image').pullingImage).toBe(true);
+
+    // And the download is owned rather than abandoned: disconnecting stops it.
+    await app.handle(
+      new Request('http://localhost/environments/cold-image/disconnect', jsonRequest('POST'))
+    );
+    expect(cancelled?.aborted).toBe(true);
   });
 
   it('reports a connect against a vanished environment as missing, not conflicting', async () => {
@@ -1095,6 +1134,200 @@ describe('environment entity routes', () => {
       if (originalVersion === undefined) delete process.env.VERSION;
       else process.env.VERSION = originalVersion;
     }
+  });
+
+  // #798: a download registers a run so nothing else writes to the same log
+  // stream, which is not the same thing as the environment being mid-mutation.
+  // It used to be read as both, so pressing Download locked editing and
+  // deleting for the length of the download.
+  it('keeps a staged download from locking the environment out of editing', async () => {
+    const originalVersion = process.env.VERSION;
+    process.env.VERSION = '9.9.9-test';
+    try {
+      let sawSignal: AbortSignal | undefined;
+      const host = createProvisionedRuntimeHost(
+        { runtimeVersion: '0.0.1-old', slot: 'wsl' },
+        'linux-x64-musl'
+      );
+      let lifecycle: RuntimeLifecycleService | undefined;
+      const { app, repository, manager } = createTestApp(
+        {
+          wsl: async (_definition, onUnavailable) => {
+            const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+            return {
+              client: new RuntimeClient(connection.client, onUnavailable),
+              close: () => connection.close(),
+            };
+          },
+        },
+        undefined,
+        {
+          // The real answers, read through the lifecycle service this app
+          // builds below — the point of the test is which runs count.
+          hasActiveInstall: (userId, id) => lifecycle?.hasActiveInstall(userId, id) ?? false,
+          cancelActiveRun: (userId, id) => lifecycle?.cancelForEnvironment(userId, id) ?? false,
+        },
+        (runtimeManager) => {
+          lifecycle = createRuntimeLifecycleService({
+            manager: runtimeManager,
+            provisioner: {
+              ensure: async () => undefined,
+              removeSlotBytes: async () => undefined,
+              slotBytes: async () => null,
+            },
+            loadRuntimeAsset: (_platformId, options) => {
+              sawSignal = options?.signal;
+              return new Promise((_resolve, reject) => {
+                options?.signal?.addEventListener('abort', () => reject(new Error('cancelled')), {
+                  once: true,
+                });
+              });
+            },
+          });
+          return lifecycle;
+        }
+      );
+      await repository.create({
+        id: 'wsl-download-lock',
+        userId: TEST_USER.id,
+        name: 'WSL download lock',
+        transportKind: 'wsl',
+        config: { distro: 'Ubuntu' },
+        enabled: true,
+      });
+      await manager.connect(TEST_USER.id, 'wsl-download-lock');
+      await manager.refreshManifest(TEST_USER.id, 'wsl-download-lock');
+
+      const started = await app.handle(
+        new Request(
+          'http://localhost/environments/wsl-download-lock/runtime/install',
+          jsonRequest('POST', { action: 'download' })
+        )
+      );
+      expect(started.status).toBe(200);
+
+      // A second run of any kind is still refused: one run owns the stream.
+      const second = await app.handle(
+        new Request(
+          'http://localhost/environments/wsl-download-lock/runtime/install',
+          jsonRequest('POST', { action: 'install' })
+        )
+      );
+      expect(second.status).toBe(409);
+      expect(await second.json()).toMatchObject({
+        error: expect.stringContaining('download is already running'),
+      });
+
+      const renamed = await app.handle(
+        new Request(
+          'http://localhost/environments/wsl-download-lock',
+          jsonRequest('PUT', { name: 'Renamed mid-download' } satisfies UpdateEnvironmentBody)
+        )
+      );
+      expect(renamed.status).toBe(200);
+      expect((await renamed.json()) as Environment).toMatchObject({
+        name: 'Renamed mid-download',
+      });
+
+      const removed = await app.handle(
+        new Request('http://localhost/environments/wsl-download-lock', jsonRequest('DELETE'))
+      );
+      expect(removed.status).toBe(200);
+      // Deleted, and the run that was streaming about it stopped with it.
+      expect(sawSignal?.aborted).toBe(true);
+      expect(await repository.find(TEST_USER.id, 'wsl-download-lock')).toBeNull();
+      await manager.closeAll();
+    } finally {
+      if (originalVersion === undefined) delete process.env.VERSION;
+      else process.env.VERSION = originalVersion;
+    }
+  });
+
+  // The other half of #798: a real install still writes to that machine, so it
+  // still holds the environment against an edit or a delete.
+  it('keeps refusing an edit or a delete while a real install runs', async () => {
+    const host = createProvisionedRuntimeHost(
+      { runtimeVersion: '0.0.1-old', slot: 'wsl' },
+      'linux-x64-musl'
+    );
+    let lifecycle: RuntimeLifecycleService | undefined;
+    const { app, repository, manager } = createTestApp(
+      {
+        wsl: async (_definition, onUnavailable) => {
+          const connection = await connectInProcessRuntime(host, { hubVersion: 'dev' });
+          return {
+            client: new RuntimeClient(connection.client, onUnavailable),
+            close: () => connection.close(),
+          };
+        },
+      },
+      undefined,
+      {
+        hasActiveInstall: (userId, id) => lifecycle?.hasActiveInstall(userId, id) ?? false,
+        cancelActiveRun: (userId, id) => lifecycle?.cancelForEnvironment(userId, id) ?? false,
+      },
+      (runtimeManager) => {
+        lifecycle = createRuntimeLifecycleService({
+          manager: runtimeManager,
+          provisioner: {
+            // Still pushing bytes when the edit and the delete arrive.
+            ensure: (_distro, options) =>
+              new Promise((_resolve, reject) => {
+                options?.signal?.addEventListener('abort', () => reject(new Error('cancelled')), {
+                  once: true,
+                });
+              }),
+            removeSlotBytes: async () => undefined,
+            slotBytes: async () => null,
+          },
+        });
+        return lifecycle;
+      }
+    );
+    await repository.create({
+      id: 'wsl-install-lock',
+      userId: TEST_USER.id,
+      name: 'WSL install lock',
+      transportKind: 'wsl',
+      config: { distro: 'Ubuntu' },
+      enabled: true,
+    });
+    await manager.connect(TEST_USER.id, 'wsl-install-lock');
+    await manager.refreshManifest(TEST_USER.id, 'wsl-install-lock');
+
+    const started = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-install-lock/runtime/install',
+        jsonRequest('POST', { action: 'install' })
+      )
+    );
+    expect(started.status).toBe(200);
+    const { runId } = (await started.json()) as { runId: string };
+
+    const renamed = await app.handle(
+      new Request(
+        'http://localhost/environments/wsl-install-lock',
+        jsonRequest('PUT', { name: 'Renamed mid-install' } satisfies UpdateEnvironmentBody)
+      )
+    );
+    expect(renamed.status).toBe(409);
+    expect(await renamed.json()).toMatchObject({
+      error: expect.stringContaining('runtime install in progress'),
+    });
+
+    const removed = await app.handle(
+      new Request('http://localhost/environments/wsl-install-lock', jsonRequest('DELETE'))
+    );
+    expect(removed.status).toBe(409);
+    expect(await repository.find(TEST_USER.id, 'wsl-install-lock')).not.toBeNull();
+
+    await app.handle(
+      new Request(
+        `http://localhost/environments/wsl-install-lock/runtime/runs/${runId}/cancel`,
+        jsonRequest('POST')
+      )
+    );
+    await manager.closeAll();
   });
 
   it('updates a connected runtime over its existing protocol connection', async () => {

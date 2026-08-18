@@ -19,6 +19,7 @@ import {
   createLocalRuntimeConnector,
   getRuntimeClient,
   type ManagedRuntimeConnection,
+  type RuntimeConnectContext,
   RuntimeConnectionManager,
   type RuntimeEnvironmentConnector,
   setRuntimeConnectionManagerForTests,
@@ -61,6 +62,11 @@ const HEALTH_REPORT: RuntimeHealthReport = {
   lastError: null,
   audit: { enabled: false },
 };
+
+/** What the manager hands a connector, for the connectors tested directly. */
+function connectContext(): RuntimeConnectContext {
+  return { report: () => undefined, signal: new AbortController().signal };
+}
 
 function definition(transportKind: EnvironmentTransportKind = 'stdio', config: unknown = {}) {
   return {
@@ -179,7 +185,7 @@ describe('RuntimeConnectionManager', () => {
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
       connectors: {
-        stdio: (_definition, _onUnavailable, report) => {
+        stdio: (_definition, _onUnavailable, { report }) => {
           report('offline-cache');
           return Promise.resolve(fakeConnection(() => undefined));
         },
@@ -200,7 +206,7 @@ describe('RuntimeConnectionManager', () => {
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: () => Promise.resolve(definition()),
       connectors: {
-        stdio: (_definition, _onUnavailable, report) => {
+        stdio: (_definition, _onUnavailable, { report }) => {
           if (offline) report('offline-cache');
           return Promise.resolve(fakeConnection(() => undefined));
         },
@@ -213,6 +219,93 @@ describe('RuntimeConnectionManager', () => {
     await manager.connect('user-1', 'devbox', { force: true });
 
     expect(manager.getStatus('user-1', 'devbox').offlineRuntimeCache).toBeUndefined();
+  });
+
+  // #792: the pull is bounded at half an hour, which no proxy or browser holds
+  // an idle request through. The attempt keeps running; the request does not.
+  describe('connectInteractive', () => {
+    /** A connector stuck in a pull, plus the handles a test needs to steer it. */
+    function pullingConnector() {
+      const state = {
+        calls: 0,
+        signals: [] as AbortSignal[],
+        finish: (): void => undefined,
+      };
+      const connector: RuntimeEnvironmentConnector = (_definition, _onUnavailable, context) => {
+        state.calls += 1;
+        state.signals.push(context.signal);
+        context.report('pulling');
+        return new Promise<ManagedRuntimeConnection>((resolve) => {
+          state.finish = () => resolve(fakeConnection(() => undefined));
+        });
+      };
+      return { connector, state };
+    }
+
+    function pullingManager(connector: RuntimeEnvironmentConnector) {
+      return new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition('container', { image: 'node:22' })),
+        connectors: { container: connector },
+      });
+    }
+
+    it('answers once the pull starts, leaving the attempt running', async () => {
+      const { connector, state } = pullingConnector();
+      const manager = pullingManager(connector);
+
+      expect(await manager.connectInteractive('user-1', 'devbox')).toBe('pulling');
+      expect(manager.getStatus('user-1', 'devbox')).toEqual({
+        state: 'connecting',
+        pullingImage: true,
+      });
+
+      state.finish();
+      await flushMicrotasks();
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    });
+
+    it('joins the pull already in flight rather than starting a second one', async () => {
+      const { connector, state } = pullingConnector();
+      const manager = pullingManager(connector);
+
+      expect(await manager.connectInteractive('user-1', 'devbox')).toBe('pulling');
+      expect(await manager.connectInteractive('user-1', 'devbox')).toBe('pulling');
+
+      expect(state.calls).toBe(1);
+    });
+
+    it('cancels the pull when the environment is disconnected', async () => {
+      const { connector, state } = pullingConnector();
+      const manager = pullingManager(connector);
+
+      await manager.connectInteractive('user-1', 'devbox');
+      expect(state.signals[0]?.aborted).toBe(false);
+
+      manager.disconnect('user-1', 'devbox');
+
+      expect(state.signals[0]?.aborted).toBe(true);
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('disconnected');
+    });
+
+    it('still waits out an attempt that never reaches a pull', async () => {
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: { stdio: () => Promise.resolve(fakeConnection(() => undefined)) },
+      });
+
+      expect(await manager.connectInteractive('user-1', 'devbox')).toBe('connected');
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('connected');
+    });
+
+    it('reports a failure that happens before any pull', async () => {
+      const manager = new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: { stdio: () => Promise.reject(new Error('no engine')) },
+      });
+
+      await expect(manager.connectInteractive('user-1', 'devbox')).rejects.toThrow('no engine');
+      expect(manager.getStatus('user-1', 'devbox').state).toBe('error');
+    });
   });
 
   it('does not disconnect a replacement client on behalf of a stale caller', async () => {
@@ -721,7 +814,7 @@ describe('RuntimeConnectionManager', () => {
       connector(
         { ...localDefinition('user-0'), id: 'not-local' },
         () => undefined,
-        () => undefined
+        connectContext()
       )
     ).rejects.toMatchObject({
       code: 'RUNTIME_UNAVAILABLE',
@@ -730,31 +823,27 @@ describe('RuntimeConnectionManager', () => {
     const systemProbe = await connector(
       localDefinition('local'),
       () => undefined,
-      () => undefined
+      connectContext()
     );
     const first = await connector(
       localDefinition('user-1'),
       () => {
         firstUnavailable += 1;
       },
-      () => undefined
+      connectContext()
     );
     const sameOwner = await connector(
       localDefinition('user-1'),
       () => {
         sameOwnerUnavailable += 1;
       },
-      () => undefined
+      connectContext()
     );
-    const second = await connector(
-      localDefinition('user-2'),
-      () => undefined,
-      () => undefined
-    );
+    const second = await connector(localDefinition('user-2'), () => undefined, connectContext());
     const firstAfterTransition = await connector(
       localDefinition('user-1'),
       () => undefined,
-      () => undefined
+      connectContext()
     );
 
     try {
@@ -825,7 +914,7 @@ describe('RuntimeConnectionManager', () => {
     const connection = await connector(
       localDefinition(owner.id),
       () => undefined,
-      () => undefined
+      connectContext()
     );
 
     try {
@@ -867,17 +956,9 @@ describe('RuntimeConnectionManager', () => {
     });
 
     await expect(
-      connector(
-        localDefinition('user-1'),
-        () => undefined,
-        () => undefined
-      )
+      connector(localDefinition('user-1'), () => undefined, connectContext())
     ).rejects.toThrow('first handshake failed');
-    const second = await connector(
-      localDefinition('user-2'),
-      () => undefined,
-      () => undefined
-    );
+    const second = await connector(localDefinition('user-2'), () => undefined, connectContext());
 
     try {
       expect(identities).toHaveLength(2);

@@ -101,12 +101,15 @@ async function toEnvironment(
 export interface EnvironmentRuntimeEffects {
   /** Whether a runtime install is mid-flight for this environment. */
   hasActiveInstall(userId: string, id: string): boolean;
+  /** Stops any run this environment still owns; false when it owns none. */
+  cancelActiveRun(userId: string, id: string): boolean;
   /** Deletes the runtime bytes this environment installed; leaves consent alone. */
   removeRuntimeBytes(record: EnvironmentRecord): Promise<void>;
 }
 
 const defaultEnvironmentRuntimeEffects: EnvironmentRuntimeEffects = {
   hasActiveInstall: (userId, id) => runtimeLifecycleService.hasActiveInstall(userId, id),
+  cancelActiveRun: (userId, id) => runtimeLifecycleService.cancelForEnvironment(userId, id),
   async removeRuntimeBytes(record) {
     if (record.transportKind === 'wsl') {
       await wslProvisioner.removeSlotBytes(environmentConfigFor('wsl', record.config).distro);
@@ -319,6 +322,12 @@ export function createEnvironmentService(
       // the binary being deleted.
       manager.disconnect(userId, id);
 
+      // A staged download does not block this delete — its bytes land in the
+      // hub's version-keyed cache, where they are harmless and shared. What is
+      // not harmless is the run itself: it would keep streaming log lines about
+      // an environment that no longer exists, against a card nothing can open.
+      runtimeEffects.cancelActiveRun(userId, id);
+
       if (options.removeRuntime) {
         try {
           await runtimeEffects.removeRuntimeBytes(existing);
@@ -350,8 +359,12 @@ export function createEnvironmentService(
       await requireRecord(userId, id);
       try {
         // A deliberate connect clears any backoff: the user is telling us the
-        // cause was fixed, so waiting out a retry window would be theatre.
-        await manager.connect(userId, id, { force: true });
+        // cause was fixed, so waiting out a retry window would be theatre. The
+        // outcome is not read here because the environment this returns already
+        // carries it — a connect that left an image downloading answers with
+        // `connecting` plus `pullingImage`, which is what the card renders and
+        // what an unsubscribed client can poll.
+        await manager.connectInteractive(userId, id);
       } catch (error) {
         // The row can be removed between the guard above and the manager's own
         // lookup, which reports it as an unavailable runtime. That is a missing

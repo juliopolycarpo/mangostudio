@@ -276,6 +276,11 @@ function UnenforcedContainment({ view }: { view: RuntimeLifecycleView }) {
  * Only shown when there is an offer to describe at all: a card with neither a
  * push nor a download action has nothing this line could name, and the health
  * line already says what is there.
+ *
+ * A machine that already runs the offered build is told so instead. The push
+ * actions stay — a reinstall is still a thing to want — but "install the
+ * matching runtime on this machine" read as though one were missing on every
+ * healthy, up-to-date card.
  */
 function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
   const { t } = useI18n();
@@ -294,6 +299,26 @@ function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
           version: staged.version,
           platform: staged.platformId,
         })}
+      </p>
+    );
+  }
+
+  // The running process, not the slot config. A live update with a pending
+  // restart writes the new version into `health.version` while this process
+  // still reports the old `runtimeVersion`, and the confirming line is a claim
+  // about what is running now. Version equality still settles a rolling
+  // channel: a canary build's version carries its own commit (`…-canary.<sha>`),
+  // and it is only the asset *filename* that is reused across builds. A machine
+  // that has never reported a process version has nothing to compare, which is
+  // the never-installed case and keeps the offer.
+  //
+  // Health is retained after disconnect, marked stale. A stale report falls
+  // through to the offer rather than saying a matching runtime is already there.
+  const running = view.health?.runtimeVersion ?? null;
+  if (!view.stale && running === staged.version) {
+    return (
+      <p className="text-[11px] text-on-surface-variant/80" data-testid="runtime-offer-matched">
+        {formatMessage(labels.matched, { version: staged.version })}
       </p>
     );
   }

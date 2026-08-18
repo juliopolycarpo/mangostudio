@@ -9,6 +9,7 @@ import type {
   RuntimeUpdateCommitParams,
   RuntimeUpdateCommitResult,
 } from '@mangostudio/runtime';
+import { throwIfAborted } from './cancellation';
 
 const HUB_UPDATE_CHUNK_BYTES = 32 * 1024;
 const UPDATE_REQUEST_TIMEOUT_MS = 60_000;
@@ -33,6 +34,13 @@ export interface StreamRuntimeUpdateOptions {
   readonly client: RuntimeUpdateProtocol;
   readonly version: string;
   readonly digest: string;
+  /**
+   * Commit these bytes were built from, when the release said. Sent even when
+   * absent, as an explicit null: the peer's slot config is written by merge,
+   * and omitting the field is what leaves the previous build's commit next to
+   * the new binary.
+   */
+  readonly sourceSha?: string | undefined;
   readonly bytes: Uint8Array;
   readonly signal?: AbortSignal;
   /** Fires once the peer holds a staged session, which only closing can release. */
@@ -48,12 +56,13 @@ export interface StreamRuntimeUpdateOptions {
 export async function streamRuntimeUpdate(
   options: StreamRuntimeUpdateOptions
 ): Promise<RuntimeUpdateCommitResult> {
-  throwIfAborted(options.signal);
+  throwIfAborted(options.signal, 'Runtime update was cancelled.');
   const begun = await options.client.begin(
     {
       version: options.version,
       digest: options.digest,
       totalBytes: options.bytes.byteLength,
+      sourceSha: options.sourceSha ?? null,
     },
     { signal: options.signal, timeoutMs: UPDATE_REQUEST_TIMEOUT_MS }
   );
@@ -66,7 +75,7 @@ export async function streamRuntimeUpdate(
   let written = 0;
   let seq = 0;
   while (written < options.bytes.byteLength) {
-    throwIfAborted(options.signal);
+    throwIfAborted(options.signal, 'Runtime update was cancelled.');
     const end = Math.min(options.bytes.byteLength, written + chunkBytes);
     const chunk = options.bytes.subarray(written, end);
     await options.client.chunk(
@@ -82,15 +91,10 @@ export async function streamRuntimeUpdate(
     options.onProgress?.(written, options.bytes.byteLength);
   }
 
-  throwIfAborted(options.signal);
+  throwIfAborted(options.signal, 'Runtime update was cancelled.');
   options.beforeCommit?.();
   return await options.client.commit(
     { sessionId: begun.sessionId },
     { signal: options.signal, timeoutMs: UPDATE_COMMIT_TIMEOUT_MS }
   );
-}
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) return;
-  throw new DOMException('Runtime update was cancelled.', 'AbortError');
 }

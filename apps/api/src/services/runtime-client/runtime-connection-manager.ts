@@ -105,11 +105,37 @@ export type RuntimeEnvironmentResolver = (
  */
 export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
 
+/**
+ * What an attempt hands its connector besides the definition.
+ *
+ * `signal` is aborted when the attempt is released — a disconnect, a delete, or
+ * shutdown — and exists for the steps that can outlive the request that started
+ * them: an image pull and a WSL provision both move gigabytes. Only the pull is
+ * also the reason {@link RuntimeConnectionManager.connectInteractive} stops
+ * waiting — a WSL provision is not the phase that wakes it, so that connect
+ * still waits it out; see {@link connectWslRuntime}. A connector that only
+ * spawns a process can ignore `signal` entirely; the spawn is bounded by its
+ * own handshake timeout.
+ */
+export interface RuntimeConnectContext {
+  readonly report: (phase: RuntimeConnectPhase) => void;
+  readonly signal: AbortSignal;
+}
+
 export type RuntimeEnvironmentConnector = (
   definition: RuntimeEnvironmentDefinition,
   onUnavailable: () => void,
-  report: (phase: RuntimeConnectPhase) => void
+  context: RuntimeConnectContext
 ) => Promise<ManagedRuntimeConnection>;
+
+/**
+ * Where an interactive connect got to before it answered.
+ *
+ * `pulling` is not a failure and not a timeout: the attempt owns the download
+ * and keeps running, the card follows it over realtime, and a client that is
+ * not subscribed can poll the environment's status instead.
+ */
+export type RuntimeConnectOutcome = 'connected' | 'pulling';
 
 export interface RuntimeConnectionManagerOptions {
   readonly resolveEnvironment: RuntimeEnvironmentResolver;
@@ -157,6 +183,19 @@ interface RuntimeConnectionEntry {
   retryAfterMs: number;
   /** The next transport loss is an intentional binary handoff, not a crash. */
   expectedUpdateDisconnect?: boolean;
+  /**
+   * Cancels the current attempt's long steps. Replaced per attempt and aborted
+   * by `#release`, which is what a disconnect, a delete and shutdown all go
+   * through — so the one affordance that stops a download is the one already on
+   * the card.
+   */
+  abort?: AbortController;
+  /**
+   * Woken when an attempt on this entry enters the pull phase. Kept per entry
+   * rather than per attempt so a second connect that coalesced onto an
+   * in-flight one is told about the pull it joined instead of waiting it out.
+   */
+  pullWaiters?: Set<() => void>;
 }
 
 /**
@@ -365,6 +404,8 @@ export class RuntimeConnectionManager {
       throw unavailable(describeBackoff(environmentId, entry));
     }
     const revision = ++entry.revision;
+    const abort = new AbortController();
+    entry.abort = abort;
     entry.status = { state: 'connecting', ...this.#cachedPeer(entry) };
     this.#publish(userId);
 
@@ -379,8 +420,11 @@ export class RuntimeConnectionManager {
           () => {
             this.#markUnavailable(key, userId, revision);
           },
-          (phase) => {
-            this.#reportPhase(entry, userId, revision, phase);
+          {
+            report: (phase) => {
+              this.#reportPhase(entry, userId, revision, phase);
+            },
+            signal: abort.signal,
           }
         );
       })
@@ -437,6 +481,58 @@ export class RuntimeConnectionManager {
   }
 
   /**
+   * A person pressing Connect: opens the connection, but stops waiting once the
+   * attempt commits to a cold image pull.
+   *
+   * The pull is bounded at half an hour, and no reverse proxy, load balancer or
+   * browser holds an idle request that long — the socket is cut, the caller sees
+   * a network error, and the download carries on with nothing watching it. So
+   * this answers with where the attempt got to instead. The attempt itself is
+   * unchanged: it stays registered as the entry's in-flight connect, so a second
+   * Connect joins it rather than racing a second pull, a disconnect aborts it,
+   * and its own `catch` records the failure on the status either way.
+   *
+   * Always forced, because that is what this method means — a deliberate connect
+   * clears a backoff rather than being held by it.
+   */
+  async connectInteractive(userId: string, environmentId: string): Promise<RuntimeConnectOutcome> {
+    const attempt = this.connect(userId, environmentId, { force: true });
+    // `connect` installs the entry and repaints its status before its first
+    // await, so this reads the attempt this call just started — or, when it
+    // coalesced, the in-flight one whose phase is already on the status.
+    const entry = this.#entries.get(connectionKey(userId, environmentId));
+    if (!entry) return await attempt.then(() => 'connected' as const);
+    if (entry.status.pullingImage) {
+      this.#detach(attempt);
+      return 'pulling';
+    }
+
+    let wake = (): void => undefined;
+    const pulling = new Promise<'pulling'>((resolve) => {
+      wake = () => resolve('pulling');
+    });
+    entry.pullWaiters ??= new Set();
+    const waiters = entry.pullWaiters;
+    waiters.add(wake);
+    try {
+      const outcome = await Promise.race([attempt.then(() => 'connected' as const), pulling]);
+      if (outcome === 'pulling') this.#detach(attempt);
+      return outcome;
+    } finally {
+      waiters.delete(wake);
+    }
+  }
+
+  /**
+   * Lets an attempt this caller stopped waiting for finish on its own. Its
+   * rejection is already recorded on the entry's status by `connect`; without
+   * this it would also surface as an unhandled rejection.
+   */
+  #detach(attempt: Promise<RuntimeClient>): void {
+    void attempt.catch(() => undefined);
+  }
+
+  /**
    * Takes over a connection the hub did not open.
    *
    * `connect()` cannot express this: it resolves an environment, dials it, and
@@ -474,6 +570,10 @@ export class RuntimeConnectionManager {
     const revision = ++entry.revision;
     const superseded = entry.connection;
     entry.connection = undefined;
+    // The runtime is here; whatever the hub was still doing to reach it — a
+    // pull, a provision — is now work towards a connection nobody needs.
+    entry.abort?.abort();
+    entry.abort = undefined;
     entry.connecting = undefined;
     if (superseded) closeDetached(superseded, 'superseded');
     entry.status = { state: 'connecting', ...this.#cachedPeer(entry) };
@@ -568,6 +668,11 @@ export class RuntimeConnectionManager {
    */
   #release(entry: RuntimeConnectionEntry): void | Promise<void> {
     entry.revision += 1;
+    // Bumping the revision only stops a finished attempt from painting a status
+    // it no longer owns; the work itself keeps running until it is told to
+    // stop. An image pull or a WSL provision is minutes of it.
+    entry.abort?.abort();
+    entry.abort = undefined;
     const closed = entry.connection?.close('released');
     entry.connection = undefined;
     entry.connecting = undefined;
@@ -647,12 +752,15 @@ export class RuntimeConnectionManager {
     if (entry.status.pullingImage) return;
     entry.status = { ...entry.status, pullingImage: true };
     this.#publish(userId);
+    // Told after the status is set, so a waiter that reads it back sees the
+    // phase it was woken for.
+    for (const waiter of [...(entry.pullWaiters ?? [])]) waiter();
   }
 
   async #openConnection(
     definition: RuntimeEnvironmentDefinition,
     onUnavailable: () => void,
-    report: (phase: RuntimeConnectPhase) => void
+    context: RuntimeConnectContext
   ): Promise<ManagedRuntimeConnection> {
     if (!definition.enabled) {
       throw unavailable(`Environment "${definition.id}" is disabled.`);
@@ -672,7 +780,7 @@ export class RuntimeConnectionManager {
     // A runtime whose path style differs from the hub's is addressed on its own
     // terms: tools resolve `~` and relative input through the connection's
     // manifest, and the runtime re-checks the result against its own filesystem.
-    return await connector(definition, onUnavailable, report);
+    return await connector(definition, onUnavailable, context);
   }
 
   /**
@@ -1051,7 +1159,7 @@ async function connectStdioRuntime(
 export async function connectWslRuntime(
   definition: RuntimeEnvironmentDefinition,
   onUnavailable: () => void,
-  report?: (phase: RuntimeConnectPhase) => void
+  context?: Partial<RuntimeConnectContext>
 ): Promise<ManagedRuntimeConnection> {
   if (process.platform !== 'win32') {
     throw unavailable(
@@ -1059,7 +1167,14 @@ export async function connectWslRuntime(
     );
   }
   const { distro } = environmentConfigFor('wsl', definition.config);
-  await wslProvisioner.ensure(distro, { onOfflineCache: () => report?.('offline-cache') });
+  await wslProvisioner.ensure(distro, {
+    onOfflineCache: () => context?.report?.('offline-cache'),
+    // A first provision downloads a release and pushes it across a 9P share.
+    // It is not the phase `pullingImage` names, so a connect still waits for
+    // it — but a disconnect must not leave it running against a distribution
+    // nobody is connecting to any more.
+    signal: context?.signal,
+  });
 
   const wslExecutable = resolveWslExecutable();
   const connection = await spawnRuntimeChild({

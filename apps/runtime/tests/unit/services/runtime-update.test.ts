@@ -96,6 +96,106 @@ describe('runtime self-update', () => {
     }
   });
 
+  // #799: a rolling channel reuses one version string and one asset name across
+  // builds, so the commit is the only thing that says which build this is.
+  describe('source commit provenance', () => {
+    /** Runs one whole update, returning what the slot config ended up recording. */
+    async function update(
+      env: Record<string, string>,
+      service: ReturnType<typeof createRuntimeUpdateService>,
+      version: string,
+      params: { readonly sourceSha?: string | null }
+    ) {
+      const bytes = new TextEncoder().encode(`runtime-${version}`);
+      const begun = await service.begin({
+        version,
+        digest: digestOf(bytes),
+        totalBytes: bytes.byteLength,
+        ...params,
+      });
+      await service.chunk({
+        sessionId: begun.sessionId,
+        seq: 0,
+        bytesBase64: Buffer.from(bytes).toString('base64'),
+      });
+      await service.commit({ sessionId: begun.sessionId });
+      return await readRuntimeSlotConfig('remote', env);
+    }
+
+    it('records the commit a rolling build was built from', async () => {
+      const { env, service } = await fixture();
+      try {
+        const config = await update(env, service, '1.1.0', { sourceSha: 'abc1234' });
+        expect(config.sourceSha).toBe('abc1234');
+      } finally {
+        await service.close();
+      }
+    });
+
+    // The write merges, so an update that says nothing about the commit used to
+    // leave the *previous* build's next to the new binary. Stale provenance
+    // reads as confident and wrong; missing provenance only reads as missing.
+    it('clears a recorded commit when the new build has none', async () => {
+      const { env, service } = await fixture();
+      try {
+        expect((await update(env, service, '1.1.0', { sourceSha: 'abc1234' })).sourceSha).toBe(
+          'abc1234'
+        );
+        expect((await update(env, service, '1.2.0', {})).sourceSha).toBeNull();
+        expect((await update(env, service, '1.3.0', { sourceSha: 'def5678' })).sourceSha).toBe(
+          'def5678'
+        );
+        expect((await update(env, service, '1.4.0', { sourceSha: null })).sourceSha).toBeNull();
+      } finally {
+        await service.close();
+      }
+    });
+
+    // The slot schema bounds this field, and a config that fails validation is
+    // discarded whole — consent included. It is refused here, not written.
+    it('refuses a value that is not a commit sha, before staging anything', async () => {
+      const { env, service } = await fixture();
+      const bytes = new TextEncoder().encode('new-runtime');
+      try {
+        await expect(
+          service.begin({
+            version: '1.1.0',
+            digest: digestOf(bytes),
+            totalBytes: bytes.byteLength,
+            sourceSha: `${'0'.repeat(64)}-and-then-some`,
+          })
+        ).rejects.toMatchObject({ data: { reason: 'invalid_source_sha' } });
+        expect(service.active).toBe(false);
+        expect((await readRuntimeSlotConfig('remote', env)).version).toBe('1.0.0');
+      } finally {
+        await service.close();
+      }
+    });
+
+    // Request frames type `params` as unknown, and `RegExp.test` coerces a
+    // number to a string. `1234567` would otherwise pass the sha pattern and
+    // open a session; the slot schema would then reject a numeric field and
+    // discard the whole config, consent included.
+    it('refuses a numeric sourceSha, before staging anything', async () => {
+      const { env, service } = await fixture();
+      const bytes = new TextEncoder().encode('new-runtime');
+      try {
+        await expect(
+          service.begin({
+            version: '1.1.0',
+            digest: digestOf(bytes),
+            totalBytes: bytes.byteLength,
+            sourceSha: 1234567 as never,
+          })
+        ).rejects.toMatchObject({ data: { reason: 'invalid_source_sha' } });
+        expect(service.active).toBe(false);
+        expect((await readRuntimeSlotConfig('remote', env)).version).toBe('1.0.0');
+      } finally {
+        await service.close();
+      }
+    });
+  });
+
   it('reports a scheduled restart and notifies its supervisor after replying', async () => {
     const { env } = await fixture();
     let restarted = false;

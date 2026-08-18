@@ -2244,6 +2244,7 @@ export const messages = {
         },
         staged: {
           offer: 'Instalar o runtime correspondente ({version}, {platform}) nesta máquina.',
+          matched: 'Esta máquina está executando o runtime correspondente ({version}).',
           offerHint: 'Ou baixe-o para este hub e leve-o você mesmo.',
           downloadOffer: 'O runtime correspondente para esta máquina é {version} ({platform}).',
           title: 'Baixado para este hub',

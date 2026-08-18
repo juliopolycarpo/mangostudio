@@ -13,6 +13,8 @@
  * release that can say which commit a rolling name currently refers to.
  */
 
+import { SOURCE_SHA_PATTERN } from '@mangostudio/shared/runtime-home';
+
 export const CANARY_MANIFEST_ASSET = 'canary-manifest.json';
 
 /**
@@ -25,9 +27,6 @@ export const CANARY_MANIFEST_ASSET = 'canary-manifest.json';
  * cut before the manifest existed already takes.
  */
 const CANARY_MANIFEST_SCHEMA_VERSION = 1;
-
-/** A git commit as the release script writes it: `github.sha`, or a short form of it. */
-const SOURCE_SHA = /^[0-9a-f]{7,40}$/;
 
 interface CanaryManifestPair {
   readonly platform: string;
@@ -76,7 +75,9 @@ export function parseCanaryManifest(text: string): CanaryManifest | null {
   // `runtime.json`, where `RuntimeSlotConfigSchema` bounds it at 64
   // characters — and a config that fails that check is discarded whole,
   // consent included. An out-of-shape sha must never leave this parser.
-  if (typeof candidate.sourceSha !== 'string' || !SOURCE_SHA.test(candidate.sourceSha)) return null;
+  if (typeof candidate.sourceSha !== 'string' || !SOURCE_SHA_PATTERN.test(candidate.sourceSha)) {
+    return null;
+  }
   if (typeof candidate.builtAt !== 'string') return null;
   if (candidate.schemaVersion !== CANARY_MANIFEST_SCHEMA_VERSION) return null;
   if (!Array.isArray(candidate.pairs)) return null;

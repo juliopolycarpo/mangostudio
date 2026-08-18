@@ -197,6 +197,15 @@ export const RuntimeBinaryDigestSchema = Type.String({
 });
 
 /**
+ * A git commit as a release writes it: `github.sha`, or a short form of it.
+ *
+ * Shared so the hub (reading a canary release manifest) and a runtime
+ * (validating a `sourceSha` an update pushes) agree on one shape for the same
+ * wire value instead of each keeping its own copy.
+ */
+export const SOURCE_SHA_PATTERN = /^[0-9a-f]{7,40}$/;
+
+/**
  * `runtime.json` as it sits on disk.
  *
  * `schemaVersion` and `slot` are the only required fields, and a reader that

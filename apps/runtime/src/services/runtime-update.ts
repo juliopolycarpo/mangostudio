@@ -28,6 +28,7 @@ import {
   RUNTIME_BINARY_BASENAME,
   RUNTIME_CURRENT_LINK_NAME,
   type RuntimeSlot,
+  SOURCE_SHA_PATTERN,
 } from '@mangostudio/shared/runtime-home';
 import { RuntimeUpdateError } from '../errors';
 import type {
@@ -73,6 +74,8 @@ interface UpdateSession {
   readonly id: string;
   readonly version: string;
   readonly expectedDigest: string;
+  /** Undefined clears whatever the slot recorded; see the param's own note. */
+  readonly sourceSha: string | undefined;
   readonly totalBytes: number;
   readonly versionDir: string;
   readonly incomingPath: string;
@@ -180,6 +183,15 @@ export function createRuntimeUpdateService(
           });
         }
         if (
+          params.sourceSha !== undefined &&
+          params.sourceSha !== null &&
+          (typeof params.sourceSha !== 'string' || !SOURCE_SHA_PATTERN.test(params.sourceSha))
+        ) {
+          throw fail('Runtime update source commit is not a git commit sha.', {
+            reason: 'invalid_source_sha',
+          });
+        }
+        if (
           !Number.isSafeInteger(params.totalBytes) ||
           params.totalBytes <= 0 ||
           params.totalBytes > RUNTIME_UPDATE_MAX_BYTES
@@ -219,6 +231,7 @@ export function createRuntimeUpdateService(
           id,
           version: params.version,
           expectedDigest: params.digest,
+          sourceSha: params.sourceSha ?? undefined,
           totalBytes: params.totalBytes,
           versionDir,
           incomingPath,
@@ -345,6 +358,10 @@ export function createRuntimeUpdateService(
                 version: active.version,
                 binaryPath: active.livePath,
                 digest: active.expectedDigest,
+                // Always written, never omitted: the write merges, so leaving
+                // the key out keeps the commit of the build these bytes just
+                // replaced. `undefined` is how this file clears a field.
+                sourceSha: active.sourceSha,
               },
               options.env
             );

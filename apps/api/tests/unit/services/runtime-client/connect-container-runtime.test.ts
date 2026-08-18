@@ -161,7 +161,7 @@ describe('connectContainerRuntime progress', () => {
       connectContainerRuntime(
         definition({ image: 'node:22' }),
         noop,
-        (phase) => phases.push(phase),
+        { report: (phase) => phases.push(phase) },
         { engines: service, resolveRuntimeBinary: () => Promise.resolve(RUNTIME_BINARY) }
       )
     ).rejects.toThrow();
@@ -176,7 +176,7 @@ describe('connectContainerRuntime progress', () => {
       connectContainerRuntime(
         definition({ image: 'node:22' }),
         noop,
-        (phase) => phases.push(phase),
+        { report: (phase) => phases.push(phase) },
         {
           engines: engines({
             prepare: () => Promise.reject(new ContainerEngineError('unknown', 'later failure')),
@@ -190,7 +190,9 @@ describe('connectContainerRuntime progress', () => {
   });
 
   // #791: a launch that only worked because the release was unreachable and the
-  // cache answered for it has to be visible, not silent.
+  // cache answered for it has to be visible, not silent. Spawn is stubbed: the
+  // engine is not this test, and a missing `docker` waits out the handshake
+  // instead of failing closed.
   it('reports a runtime that came from the cache without the release confirming it', async () => {
     const phases: string[] = [];
 
@@ -198,14 +200,74 @@ describe('connectContainerRuntime progress', () => {
       connectContainerRuntime(
         definition({ image: 'node:22' }),
         noop,
-        (phase) => phases.push(phase),
+        { report: (phase) => phases.push(phase) },
         {
           engines: engines(),
           resolveRuntimeBinary: () => Promise.resolve({ ...RUNTIME_BINARY, offlineCache: true }),
+          spawn: () => Promise.reject(new Error('launch is not this test')),
         }
       )
-    ).rejects.toThrow();
+    ).rejects.toThrow(/launch is not this test/);
 
     expect(phases).toEqual(['offline-cache']);
+  });
+});
+
+describe('connectContainerRuntime cancellation', () => {
+  it('does not resolve the runtime binary when cancelled after the pull', async () => {
+    const controller = new AbortController();
+    let resolved = false;
+    let spawned = false;
+
+    const attempt = connectContainerRuntime(
+      definition({ image: 'node:22' }),
+      noop,
+      { signal: controller.signal },
+      {
+        engines: engines({
+          prepare: () => {
+            controller.abort();
+            return Promise.resolve('linux-x64' as const);
+          },
+        }),
+        resolveRuntimeBinary: () => {
+          resolved = true;
+          return Promise.resolve(RUNTIME_BINARY);
+        },
+        spawn: () => {
+          spawned = true;
+          return Promise.reject(new Error('launch is not this test'));
+        },
+      }
+    );
+
+    await expect(attempt).rejects.toMatchObject({ name: 'AbortError' });
+    expect(resolved).toBe(false);
+    expect(spawned).toBe(false);
+  });
+
+  it('does not spawn when cancelled while resolving the runtime binary', async () => {
+    const controller = new AbortController();
+    let spawned = false;
+
+    const attempt = connectContainerRuntime(
+      definition({ image: 'node:22' }),
+      noop,
+      { signal: controller.signal },
+      {
+        engines: engines(),
+        resolveRuntimeBinary: () => {
+          controller.abort();
+          return Promise.resolve(RUNTIME_BINARY);
+        },
+        spawn: () => {
+          spawned = true;
+          return Promise.reject(new Error('launch is not this test'));
+        },
+      }
+    );
+
+    await expect(attempt).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spawned).toBe(false);
   });
 });
