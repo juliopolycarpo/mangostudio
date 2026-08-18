@@ -1,11 +1,12 @@
 /**
- * NodeVersionTable: every LTS status maps to its badge, and `unknown` stays
- * neutral without offering an upgrade.
+ * NodeVersionTable: every LTS status maps to its badge, `unknown` stays neutral
+ * without offering an upgrade, and a machine without nvm is offered the chain
+ * that reaches a Node rather than an install the server would refuse.
  */
 
 import type { LtsStatus, ManagedVersion } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NodeVersionTable } from '../../../../src/features/environments/components/NodeVersionTable';
 import { render, screen } from '../../../support/harness/render';
 import { installRecipe, versionManagerStatus } from './fixtures';
@@ -27,6 +28,20 @@ const NODE_INSTALL_RECIPE = installRecipe({
   inputKind: 'node-version',
   requires: ['nvm'],
   copyCommand: 'nvm install --lts',
+});
+
+/** The same recipe as the catalog reports it on a machine that has no nvm. */
+const NODE_WITHOUT_NVM = installRecipe({
+  ...NODE_INSTALL_RECIPE,
+  missingRequirements: ['nvm'],
+});
+
+const NVM_INSTALL_RECIPE = installRecipe({
+  id: 'nvm.install',
+  runtimeId: 'nvm',
+  action: 'install',
+  writes: ['$NVM_DIR'],
+  copyCommand: 'curl -fsSL https://example.test/nvm | bash',
 });
 
 describe('NodeVersionTable', () => {
@@ -73,5 +88,54 @@ describe('NodeVersionTable', () => {
     render(<NodeVersionTable status={status} recipes={[NODE_INSTALL_RECIPE]} />);
 
     expect(screen.getByText(en.environments.versions.installLts)).toBeInTheDocument();
+  });
+
+  describe('without nvm', () => {
+    const status = versionManagerStatus({ installed: false });
+    const fetchMock = vi.fn();
+
+    beforeEach(() => {
+      // Only the identity registry is read here: the card has to derive its
+      // affordance from the recipes it was handed, not from a request.
+      fetchMock.mockImplementation(() =>
+        Promise.resolve(
+          new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+        )
+      );
+      vi.stubGlobal('fetch', fetchMock);
+    });
+
+    afterEach(() => {
+      fetchMock.mockReset();
+      vi.unstubAllGlobals();
+    });
+
+    it('offers the nvm to Node chain as one affordance', () => {
+      render(<NodeVersionTable status={status} recipes={[NVM_INSTALL_RECIPE, NODE_WITHOUT_NVM]} />);
+
+      expect(screen.getByRole('button', { name: 'Install nvm, then Node.js' })).toBeInTheDocument();
+      // Not two buttons the user has to sequence themselves.
+      expect(
+        screen.queryByRole('button', { name: en.environments.versions.installLts })
+      ).not.toBeInTheDocument();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/install'))).toHaveLength(
+        0
+      );
+    });
+
+    it('falls back to the bare manager install when no Node recipe is offered', () => {
+      render(<NodeVersionTable status={status} recipes={[NVM_INSTALL_RECIPE]} />);
+
+      expect(screen.getByRole('button', { name: 'Install nvm' })).toBeInTheDocument();
+    });
+
+    it('states the blocker when nothing here installs the manager', () => {
+      render(<NodeVersionTable status={status} recipes={[NODE_WITHOUT_NVM]} />);
+
+      expect(screen.getByTestId('install-unresolved').textContent).toContain(
+        'MangoStudio cannot install nvm on this machine'
+      );
+      expect(screen.queryByRole('button', { name: /Install/ })).not.toBeInTheDocument();
+    });
   });
 });

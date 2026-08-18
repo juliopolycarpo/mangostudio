@@ -4,14 +4,24 @@
  *
  * The same button serves all three outcomes, so a blocked install never leaves
  * the user staring at a control that simply does nothing.
+ *
+ * When the recipe needs something the machine does not have, the button offers
+ * the chain that gets there — "Install nvm, then Node" — rather than an install
+ * that would be refused for a requirement the catalog could have satisfied. A
+ * requirement nothing here installs is stated instead of offered: an affordance
+ * that cannot succeed is worse than a sentence saying so.
  */
 
 import type { InstallRecipePreview, RecipeInput } from '@mangostudio/shared/environments';
 import type { ReactNode } from 'react';
+import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
+import { formatMessage } from '@/lib/i18n-format';
 import { useInstallFlow } from '../hooks/use-install-flow';
 import { useInstallStream } from '../hooks/use-install-stream';
+import { useToolIdentities } from '../identity/use-tool-identities';
+import { resolveInstallChain } from '../install-chain';
 import { CopyCommandBlock } from './CopyCommandBlock';
 import { InstallConfirmDialog } from './InstallConfirmDialog';
 import { InstallConsole } from './InstallConsole';
@@ -20,6 +30,12 @@ interface InstallActionProps {
   recipe: InstallRecipePreview | undefined;
   input: RecipeInput;
   label: string;
+  /**
+   * Every recipe the server offers for this machine. Required, because a
+   * recipe's missing requirements can only be turned into a chain — or
+   * reported as unreachable — by looking at what else is on offer.
+   */
+  catalog: readonly InstallRecipePreview[];
   variant?: 'primary' | 'secondary' | 'ghost';
   size?: 'sm' | 'md';
   icon?: ReactNode;
@@ -31,29 +47,60 @@ export function InstallAction({
   recipe,
   input,
   label,
+  catalog,
   variant = 'secondary',
   size = 'sm',
   icon,
   environmentId,
 }: InstallActionProps) {
   const { t } = useI18n();
+  const s = t.environments.install;
+  const { resolve } = useToolIdentities();
   const flow = useInstallFlow(environmentId);
   // The console must survive the run that produced it: `finished` keeps the same
   // runId as `running`, so the stream hook is not torn down (and its buffer
   // reset to idle) the instant the exit event moves the flow forward.
-  const runId =
-    flow.state.step === 'running' || flow.state.step === 'finished' ? flow.state.runId : null;
+  const progress = 'chain' in flow.state ? flow.state.chain : null;
   const stream = useInstallStream({
-    runId,
-    onExit: () => void flow.complete(),
+    runId: progress?.runId ?? null,
+    onExit: (event) => void flow.complete(event),
   });
+
+  const chain = useMemo(
+    () => (recipe ? resolveInstallChain(catalog, recipe, input) : null),
+    [catalog, input, recipe]
+  );
 
   // A recipe the server never listed cannot be run or explained, so the whole
   // affordance stays out of the way instead of rendering a dead button.
-  if (!recipe) return null;
+  if (!recipe || !chain) return null;
 
+  const runtimeName = (id: InstallRecipePreview['runtimeId']) => resolve('runtime', id).name;
+
+  if (chain.kind === 'unresolved') {
+    return (
+      <p className="text-sm text-on-surface-variant/70" data-testid="install-unresolved">
+        {formatMessage(s.requirementUnavailable, {
+          target: runtimeName(recipe.runtimeId),
+          requirements: chain.missing.map(runtimeName).join(', '),
+        })}
+      </p>
+    );
+  }
+
+  const { steps } = chain;
+  const prerequisites = steps.slice(0, -1);
   const isBusy = flow.state.step === 'preparing' || flow.state.step === 'starting';
-  const showConsole = flow.state.step === 'running' || flow.state.step === 'finished';
+  const showConsole = progress?.runId != null;
+  const currentStep = progress ? progress.steps[progress.index] : undefined;
+  const stepLabel =
+    progress && progress.steps.length > 1 && currentStep
+      ? formatMessage(s.chainStep, {
+          index: String(progress.index + 1),
+          count: String(progress.steps.length),
+          name: runtimeName(currentStep.recipe.runtimeId),
+        })
+      : undefined;
 
   return (
     <div className="space-y-3">
@@ -62,10 +109,17 @@ export function InstallAction({
           variant={variant}
           size={size}
           loading={isBusy}
-          onClick={() => void flow.begin(recipe, input)}
+          onClick={() => void flow.begin(steps)}
         >
           {icon}
-          {label}
+          {prerequisites.length === 0
+            ? label
+            : formatMessage(s.chainLabel, {
+                prerequisites: prerequisites
+                  .map((step) => runtimeName(step.recipe.runtimeId))
+                  .join(', '),
+                target: runtimeName(recipe.runtimeId),
+              })}
         </Button>
       )}
 
@@ -80,8 +134,9 @@ export function InstallAction({
       {(flow.state.step === 'confirming' || flow.state.step === 'starting') && (
         <InstallConfirmDialog
           preparation={flow.state.preparation}
+          steps={flow.state.chain.steps}
           isStarting={flow.state.step === 'starting'}
-          onConfirm={() => void flow.confirm(input)}
+          onConfirm={() => void flow.confirm()}
           onCancel={flow.dismiss}
         />
       )}
@@ -89,9 +144,19 @@ export function InstallAction({
       {showConsole && (
         <InstallConsole
           stream={stream}
+          {...(stepLabel && { stepLabel })}
           onCancel={() => void flow.cancel()}
           onClose={flow.dismiss}
         />
+      )}
+
+      {flow.state.step === 'finished' && flow.state.stopped && currentStep && (
+        <p className="text-sm text-error" data-testid="install-chain-stopped">
+          {formatMessage(s.chainStopped, {
+            target: runtimeName(recipe.runtimeId),
+            prerequisite: runtimeName(currentStep.recipe.runtimeId),
+          })}
+        </p>
       )}
     </div>
   );

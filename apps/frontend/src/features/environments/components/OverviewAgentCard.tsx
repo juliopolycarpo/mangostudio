@@ -70,6 +70,7 @@ export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
           {!status.effective && installRecipe && (
             <InstallAction
               recipe={installRecipe}
+              catalog={recipes}
               input={{ kind: 'none' }}
               label={formatMessage(e.runtimes.install, { runtime: name })}
               variant="primary"

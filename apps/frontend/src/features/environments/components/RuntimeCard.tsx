@@ -74,6 +74,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
           ? installRecipe && (
               <InstallAction
                 recipe={installRecipe}
+                catalog={recipes}
                 input={{ kind: 'none' }}
                 label={formatMessage(e.runtimes.install, { runtime: name })}
                 variant="primary"
@@ -84,6 +85,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
           : updateRecipe && (
               <InstallAction
                 recipe={updateRecipe}
+                catalog={recipes}
                 input={{ kind: 'none' }}
                 label={formatMessage(e.runtimes.update, { runtime: name })}
                 environmentId={environmentId}
