@@ -75,7 +75,10 @@ config.toml
 .trae/
 .opencode/**
 .cursorrules
-.cursor/
+.cursor/**
+!.cursor/rules/
+.cursor/rules/*
+!.cursor/rules/cursor-cloud.mdc
 
 # ─── Local scratch space ─── #
 .local/

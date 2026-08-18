@@ -129,6 +129,7 @@
           - ".gitignore"
           # Repo-shipped coding-agent configuration (skills, hooks, settings).
           - ".claude/**"
+          - ".cursor/rules/**"
           - ".agents/skills/**"
 
 "area: db":
