@@ -544,13 +544,13 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         switch (target.kind) {
           case 'runtime':
             publish(
-              'runtime',
+              target.kind,
               await deps.probingService.getRuntimeStatus(scope, target.runtimeId, { force: true })
             );
             break;
           case 'version-manager':
             publish(
-              'version-manager',
+              target.kind,
               await deps.probingService.getVersionManagerStatus(scope, target.versionManagerId, {
                 force: true,
               })
@@ -558,7 +558,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
             break;
           case 'agent':
             publish(
-              'agent',
+              target.kind,
               await deps.probingService.getAgentCliStatus(scope, target.targetId, { force: true })
             );
             break;

@@ -1,6 +1,7 @@
 import type {
   InstallAction,
   InstallPlatform,
+  InstallProbeEvent,
   InstallRecipeId,
   RecipeInput,
   RuntimeId,
@@ -34,11 +35,22 @@ interface InstallRecipeBuildContext {
  * `getAgentCliStatus` takes a `LibraryTargetId`, and neither is a `RuntimeId`.
  * Carrying the id beside its kind is what lets the post-install probe dispatch
  * without a cast.
+ *
+ * `kind` is the wire event's own `target` rather than a second copy of the same
+ * three strings: a declared surface is published verbatim as an
+ * `InstallProbeEvent.target`, so one the wire stops carrying must stop being
+ * declarable here in the same change — `Extract` collapses it to `never` and
+ * every recipe declaring it fails to compile.
  */
+type ProbeTarget = InstallProbeEvent['target'];
+
 export type InstallRecipeProbe =
-  | { readonly kind: 'runtime'; readonly runtimeId: RuntimeId }
-  | { readonly kind: 'version-manager'; readonly versionManagerId: VersionManagerId }
-  | { readonly kind: 'agent'; readonly targetId: LibraryTargetId };
+  | { readonly kind: Extract<ProbeTarget, 'runtime'>; readonly runtimeId: RuntimeId }
+  | {
+      readonly kind: Extract<ProbeTarget, 'version-manager'>;
+      readonly versionManagerId: VersionManagerId;
+    }
+  | { readonly kind: Extract<ProbeTarget, 'agent'>; readonly targetId: LibraryTargetId };
 
 export interface InstallRecipe {
   readonly id: InstallRecipeId;
