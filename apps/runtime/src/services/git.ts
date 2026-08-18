@@ -10,6 +10,12 @@ import { HIDDEN_WINDOW } from './process-window';
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+/**
+ * How long a reader gets, after Git's own process has exited, to drain an
+ * already-buffered chunk before it is treated as blocked on a surviving
+ * helper. Negligible next to any real timeout; see the call site.
+ */
+const EXIT_DRAIN_GRACE_MS = 50;
 
 const GIT_ENV_KEYS = [
   'PATH',
@@ -121,10 +127,21 @@ export async function execGit(
   const abortHandler = () => kill('abort');
   signal?.addEventListener('abort', abortHandler, { once: true });
   if (signal?.aborted) abortHandler();
-  // Git may exit while a helper still holds these pipes. Stop the capture as
-  // soon as the direct process is gone, rather than waiting for the timeout
-  // to notice.
-  void proc.exited.then(() => terminated.abort());
+  // Git may exit while a helper still holds these pipes. Stop the capture
+  // once the direct process is gone, rather than waiting for the timeout to
+  // notice — but not in the same tick: cancelling the instant `exited`
+  // resolves races the reader's own pending `read()` against the abort, and
+  // an ordinary capture that was already fully written can lose that race
+  // and be cancelled before it drains, misreporting a complete answer as
+  // `stopped`. The grace window gives an already-closed pipe's last buffered
+  // chunk time to reach the reader first; a reader still blocked after it is
+  // one a surviving helper is genuinely holding open, so the abort still
+  // reaches it. A reader that already finished has already torn down its
+  // abort listener, so a late `abort()` here is a no-op for it.
+  void proc.exited.then(async () => {
+    await Bun.sleep(EXIT_DRAIN_GRACE_MS);
+    terminated.abort();
+  });
 
   try {
     const [stdout, stderr] = await Promise.all([
@@ -171,7 +188,17 @@ export async function execGit(
       );
     }
 
-    return { stdout: stdout.text, stderr: stderr.text, exitCode };
+    // Distinct from the `truncated` check above: a `stopped` reader was
+    // cancelled before it saw EOF, not cut off at the byte cap. Whatever text
+    // it collected may be short of what Git actually wrote, so the caller is
+    // told rather than handed a partial capture that looks like a complete one.
+    const incomplete = stdout.stopped || stderr.stopped;
+    return {
+      stdout: stdout.text,
+      stderr: stderr.text,
+      exitCode,
+      ...(incomplete ? { incomplete: true } : {}),
+    };
   } finally {
     clearTimeout(timeoutId);
     signal?.removeEventListener('abort', abortHandler);

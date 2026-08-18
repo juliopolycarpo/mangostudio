@@ -140,6 +140,13 @@ describe('git CLI boundary', () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout.trim()).toBe('done');
       expect(Date.now() - startedAt).toBeLessThan(10_000);
+      // The pipe stays open for as long as `sleep 60` holds its write end, so
+      // the reader genuinely never sees EOF here — `stopped` (and therefore
+      // `incomplete`) is the reliable outcome, not a race. A short read forced
+      // by Bun's own eager buffering of a *closed* pipe is a separate case this
+      // scenario cannot exercise; that one stays unverified until a future Bun
+      // makes it reachable.
+      expect(result.incomplete).toBe(true);
     },
     30_000
   );

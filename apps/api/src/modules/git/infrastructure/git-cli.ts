@@ -1,4 +1,5 @@
 import {
+  type RuntimeGitExecResult,
   RuntimeRemoteError,
   buildGitArgv as runtimeBuildGitArgv,
   buildGitEnvironment as runtimeBuildGitEnvironment,
@@ -64,14 +65,25 @@ export function buildGitEnvironment(
   return runtimeBuildGitEnvironment(source);
 }
 
-/** Runs Git via the runtime `git.exec` method and maps failures to GitCliError. */
+/**
+ * Runs Git via the runtime `git.exec` method and maps failures to GitCliError.
+ *
+ * Every hub-side Git call goes through here, and every one of them treats the
+ * output as authoritative repository state (status, diff, log, branch and ref
+ * listings) rather than an advisory log line. So a capture the runtime flagged
+ * `incomplete` — a surviving helper still held a pipe when it stopped reading —
+ * is rejected here rather than returned: a short `status --porcelain` reading
+ * as a clean tree, or a short `diff` reading as no changes, is a wrong answer
+ * wearing the shape of an ordinary one.
+ */
 export async function runGit(
   args: readonly string[],
   options: RunGitOptions
 ): Promise<GitCommandResult> {
+  let result: RuntimeGitExecResult;
   try {
     const runtime = await getRuntimeClient(options.userId, options.environmentId);
-    return await runtime.git.exec(
+    result = await runtime.git.exec(
       {
         args,
         cwd: options.cwd,
@@ -83,6 +95,16 @@ export async function runGit(
   } catch (error) {
     throw mapGitFailure(args, error);
   }
+  if (result.incomplete) {
+    throw new GitCliError(
+      args,
+      result.exitCode,
+      'Git exited, but a surviving helper process still held its output pipe; the capture is incomplete.',
+      false,
+      result.stdout
+    );
+  }
+  return result;
 }
 
 /**
