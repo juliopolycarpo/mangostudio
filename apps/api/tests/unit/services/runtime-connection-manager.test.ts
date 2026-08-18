@@ -172,6 +172,49 @@ describe('RuntimeConnectionManager', () => {
     expect(publishedStates).toEqual(['connecting', 'connected', 'disconnected']);
   });
 
+  // A phase normally lives only as long as the attempt that reported it, because
+  // every path out of connect() replaces the status wholesale. This one has to
+  // survive onto `connected`: it describes the runtime that is now running.
+  it('keeps an offline-cache launch on the connected status', async () => {
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: (_definition, _onUnavailable, report) => {
+          report('offline-cache');
+          return Promise.resolve(fakeConnection(() => undefined));
+        },
+      },
+    });
+
+    await manager.connect('user-1', 'devbox');
+
+    expect(manager.getStatus('user-1', 'devbox')).toEqual({
+      state: 'connected',
+      manifest: TEST_MANIFEST,
+      offlineRuntimeCache: true,
+    });
+  });
+
+  it('does not carry one attempt’s offline launch onto the next', async () => {
+    let offline = true;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: (_definition, _onUnavailable, report) => {
+          if (offline) report('offline-cache');
+          return Promise.resolve(fakeConnection(() => undefined));
+        },
+      },
+    });
+
+    await manager.connect('user-1', 'devbox');
+    manager.disconnect('user-1', 'devbox');
+    offline = false;
+    await manager.connect('user-1', 'devbox', { force: true });
+
+    expect(manager.getStatus('user-1', 'devbox').offlineRuntimeCache).toBeUndefined();
+  });
+
   it('does not disconnect a replacement client on behalf of a stale caller', async () => {
     const first = fakeConnection(() => undefined);
     const second = fakeConnection(() => undefined);

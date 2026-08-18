@@ -1039,6 +1039,17 @@ export async function pushRuntimeOverSsh(
 
   const asset = await loadRuntimeReleaseBytes(platformId, { signal });
   if (signal.aborted) return;
+  if (asset.offlineCache) {
+    // The release could not be reached and the hub's own cache answered for it.
+    // Said in the install log rather than only in a diagnostic one: this stream
+    // is what somebody is watching while the push happens.
+    stream.publish({
+      type: 'log',
+      stream: 'system',
+      line: `Could not reach the ${version} release; using the runtime already verified in this hub's cache.`,
+      done: false,
+    });
+  }
   const onProgress = transferProgressPublisher(stream);
   await pushRuntimeBinary({
     runner,

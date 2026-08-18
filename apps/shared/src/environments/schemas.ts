@@ -446,6 +446,16 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
      * `disconnected` is the expected, healthy answer.
      */
     updating: Type.Optional(Type.Boolean()),
+    /**
+     * Set when this launch used a runtime the hub had cached but could not
+     * confirm against the release, because the release could not be reached.
+     *
+     * The bytes were verified once, against a digest recorded at download time,
+     * so this is not an unverified runtime — it is one nothing re-checked this
+     * session. Reported because the alternative to reporting it is a hub that
+     * silently stops noticing it has been offline for weeks.
+     */
+    offlineRuntimeCache: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false }
 );

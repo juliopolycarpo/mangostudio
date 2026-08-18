@@ -559,6 +559,29 @@ reinstall, which remains the digest's job — and it is written only for a rolli
 and cleared rather than carried, so a sha from a previous canary cannot claim a slot holds
 a build it does not.
 
+### When the release cannot be reached
+
+Verification is what guarantees the bytes, so the fetch is authoritative whenever it
+completes: a checksum the hub can read is the one it checks against, and a cached file that
+disagrees with it is discarded and downloaded again.
+
+That left a hub with no network unable to start an environment whose exact verified binary
+was already in its own cache. So a checksum fetch that never reaches the release — DNS,
+connect, timeout, rate limit, `5xx` — falls back to the cache instead of failing, and only
+then. A release that answers has settled the question: a `404` for a version that publishes
+no such asset, or checksums it cannot parse, still fails.
+
+What may vouch for a cached file is a digest recorded when it was downloaded — the
+`<file>.sha256` sidecar, or the `SHA256SUMS` kept beside it from the same download — never
+one re-derived from the bytes being checked, since a file always agrees with its own hash.
+No record, or a record that disagrees, is a failure naming the version that could not be
+fetched. Rolling releases keep no checksums copy: the tag republishes `SHA256SUMS` under one
+filename, so a copy records what the tag used to hold.
+
+A launch that took this path says so — `offlineRuntimeCache` on the environment's connection
+status, a badge on the card, and a line in the install stream for an SSH push — because a hub
+that quietly stops noticing it has been offline for weeks is the failure mode this replaces.
+
 ### Staging a download without installing it
 
 The card can fetch and verify the matching runtime into `~/.mango/runtime-cache/<version>/`

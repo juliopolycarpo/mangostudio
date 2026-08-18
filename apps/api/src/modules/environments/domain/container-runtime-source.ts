@@ -111,6 +111,17 @@ const defaultDeps: ContainerRuntimeSourceDeps = {
   markExecutable,
 };
 
+/** Where the binary is, and whether reaching it needed the network. */
+export interface ContainerRuntimeBinary {
+  readonly path: string;
+  /**
+   * Whether the bytes came from the cache without the release confirming them
+   * this time — see `readVerifiedCacheEntry` in `runtime-release-fetch.ts`.
+   * Carried up to the connect so the environment can say it launched offline.
+   */
+  readonly offlineCache: boolean;
+}
+
 /**
  * Host path of a runtime binary that runs on `platformId`.
  *
@@ -123,7 +134,7 @@ const defaultDeps: ContainerRuntimeSourceDeps = {
 export async function resolveContainerRuntimeBinary(
   platformId: LinuxPlatformId,
   overrides: Partial<ContainerRuntimeSourceDeps> = {}
-): Promise<string> {
+): Promise<ContainerRuntimeBinary> {
   const deps = { ...defaultDeps, ...overrides };
 
   if (isDevelopmentVersion(deps.version)) {
@@ -133,7 +144,7 @@ export async function resolveContainerRuntimeBinary(
       // extracted tarball, a copy off a Windows share — can arrive without the
       // bit, and this path is otherwise the one place nothing sets it.
       await deps.markExecutable(built);
-      return built;
+      return { path: built, offlineCache: false };
     }
     throw new ContainerRuntimeSourceError(
       `This checkout has no ${platformId} runtime to mount into the container. Build one with: ${localRuntimeBuildCommand(platformId, built)}`
@@ -176,5 +187,5 @@ export async function resolveContainerRuntimeBinary(
   } else {
     await deps.writeBinary(cached, asset.bytes);
   }
-  return cached;
+  return { path: cached, offlineCache: asset.offlineCache };
 }

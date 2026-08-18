@@ -17,7 +17,10 @@ import {
 } from '../../../../src/modules/environments/infrastructure/container-engine';
 import { connectContainerRuntime } from '../../../../src/services/runtime-client/connect-container-runtime';
 
-const RUNTIME_BINARY = '/home/j/.mango/runtime-cache/0.1.1/mangostudio-runtime-0.1.1-linux-x64';
+const RUNTIME_BINARY = {
+  path: '/home/j/.mango/runtime-cache/0.1.1/mangostudio-runtime-0.1.1-linux-x64',
+  offlineCache: false,
+} as const;
 
 function engines(overrides: Partial<ContainerEngineService> = {}): ContainerEngineService & {
   readonly killed: string[];
@@ -184,5 +187,25 @@ describe('connectContainerRuntime progress', () => {
     ).rejects.toThrow();
 
     expect(phases).toEqual([]);
+  });
+
+  // #791: a launch that only worked because the release was unreachable and the
+  // cache answered for it has to be visible, not silent.
+  it('reports a runtime that came from the cache without the release confirming it', async () => {
+    const phases: string[] = [];
+
+    await expect(
+      connectContainerRuntime(
+        definition({ image: 'node:22' }),
+        noop,
+        (phase) => phases.push(phase),
+        {
+          engines: engines(),
+          resolveRuntimeBinary: () => Promise.resolve({ ...RUNTIME_BINARY, offlineCache: true }),
+        }
+      )
+    ).rejects.toThrow();
+
+    expect(phases).toEqual(['offline-cache']);
   });
 });

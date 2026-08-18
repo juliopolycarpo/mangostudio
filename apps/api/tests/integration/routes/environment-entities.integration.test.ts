@@ -784,6 +784,7 @@ describe('environment entity routes', () => {
                 digest: 'sha256:0',
                 fromArchive: false as const,
                 cached: true,
+                offlineCache: false,
               });
             },
           })
@@ -872,6 +873,7 @@ describe('environment entity routes', () => {
                 digest: `sha256:${hash}`,
                 fromArchive: true as const,
                 cached: true,
+                offlineCache: false,
               }),
           })
       );
@@ -970,6 +972,7 @@ describe('environment entity routes', () => {
                 digest: 'sha256:0',
                 fromArchive: false as const,
                 cached: false,
+                offlineCache: false,
               }),
           })
       );
@@ -1126,7 +1129,13 @@ describe('environment entity routes', () => {
           manager: runtimeManager,
           loadRuntimeAsset: (platformId) => {
             loadedPlatformId = platformId;
-            return Promise.resolve({ bytes, digest, fromArchive: false as const, cached: true });
+            return Promise.resolve({
+              bytes,
+              digest,
+              fromArchive: false as const,
+              cached: true,
+              offlineCache: false,
+            });
           },
         })
     );
@@ -1222,7 +1231,13 @@ describe('environment entity routes', () => {
         createRuntimeLifecycleService({
           manager: runtimeManager,
           loadRuntimeAsset: () =>
-            Promise.resolve({ bytes, digest, fromArchive: false as const, cached: true }),
+            Promise.resolve({
+              bytes,
+              digest,
+              fromArchive: false as const,
+              cached: true,
+              offlineCache: false,
+            }),
         })
     );
     await repository.create({
@@ -1311,6 +1326,7 @@ describe('environment entity routes', () => {
               digest: wrongDigest,
               fromArchive: false as const,
               cached: true,
+              offlineCache: false,
             }),
         })
     );
@@ -1401,7 +1417,13 @@ describe('environment entity routes', () => {
         createRuntimeLifecycleService({
           manager: runtimeManager,
           loadRuntimeAsset: () =>
-            Promise.resolve({ bytes, digest, fromArchive: false as const, cached: true }),
+            Promise.resolve({
+              bytes,
+              digest,
+              fromArchive: false as const,
+              cached: true,
+              offlineCache: false,
+            }),
         })
     );
     await repository.create({
@@ -1480,7 +1502,13 @@ describe('environment entity routes', () => {
         createRuntimeLifecycleService({
           manager: runtimeManager,
           loadRuntimeAsset: () =>
-            Promise.resolve({ bytes, digest, fromArchive: false as const, cached: true }),
+            Promise.resolve({
+              bytes,
+              digest,
+              fromArchive: false as const,
+              cached: true,
+              offlineCache: false,
+            }),
         })
     );
     await repository.create({

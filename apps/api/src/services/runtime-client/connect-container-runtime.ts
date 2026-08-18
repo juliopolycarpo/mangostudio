@@ -68,8 +68,11 @@ export interface ContainerRuntimeConnection {
   close(): void | Promise<void>;
 }
 
-/** Reports a long phase so the card can name what it is waiting on. */
-export type ContainerConnectProgress = (phase: 'pulling') => void;
+/**
+ * Reports something the card has to name: a long phase to wait through, or a
+ * launch that only worked because the hub fell back to its own cache.
+ */
+export type ContainerConnectProgress = (phase: 'pulling' | 'offline-cache') => void;
 
 export interface ConnectContainerRuntimeDeps {
   readonly engines: ContainerEngineService;
@@ -105,13 +108,17 @@ export async function connectContainerRuntime(
   const platformId = await withFailureReason(() =>
     deps.engines.prepare(config, { onPullStart: () => report?.('pulling') })
   );
-  const runtimeBinaryPath = await withFailureReason(() => deps.resolveRuntimeBinary(platformId));
+  const runtime = await withFailureReason(() => deps.resolveRuntimeBinary(platformId));
+  // The release could not be reached and the cache answered for it. The launch
+  // is as verified as the day those bytes were downloaded, which is worth
+  // saying: an operator otherwise has no way to tell it happened.
+  if (runtime.offlineCache) report?.('offline-cache');
 
   // A fresh name per launch: a relaunch must not collide with a container the
   // engine has not finished reaping, and the backstop below has to be certain
   // it is killing this connection's container and not another chat's.
   const name = containerName(definition.id, randomBytes(4).toString('hex'));
-  const launch = containerLaunchCommand({ config, name, runtimeBinaryPath });
+  const launch = containerLaunchCommand({ config, name, runtimeBinaryPath: runtime.path });
 
   let failureReason: ContainerFailureReason = 'unknown';
   let connection: Awaited<ReturnType<typeof spawnRuntimeChild>>;

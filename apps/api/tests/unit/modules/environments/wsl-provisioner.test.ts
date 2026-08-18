@@ -61,6 +61,10 @@ function harness(
     readonly cacheDirOverride?: (version: string) => string;
     /** Stands in for a full disk or an unwritable cache directory. */
     readonly writeCacheFails?: boolean;
+    /** Exact cache paths and their contents, for tests that need a sidecar too. */
+    readonly cacheFiles?: Record<string, Uint8Array>;
+    /** Stands in for a host with no route to the release. */
+    readonly offline?: boolean;
     /**
      * `canary-manifest.json` the rolling tag serves, or null for a release that
      * publishes none. Only consulted on a rolling version.
@@ -83,6 +87,9 @@ function harness(
     localBuildPath: (platformId) => `/repo/.mango/out/${platformId}/mangostudio-runtime`,
     readBytes: (path) => {
       read.push(path);
+      const exact = options.cacheFiles?.[path];
+      if (exact) return Promise.resolve(exact);
+      if (options.cacheFiles) return Promise.resolve(null);
       return Promise.resolve(
         path.startsWith('/repo/') ? (options.localBuild ?? null) : (options.cached ?? null)
       );
@@ -142,6 +149,7 @@ function harness(
     fetch: ((input: string | URL) => {
       const url = String(input);
       requested.push(url);
+      if (options.offline) throw new Error('getaddrinfo EAI_AGAIN github.com');
       if (url.endsWith('canary-manifest.json')) {
         return Promise.resolve(
           options.manifest
@@ -190,6 +198,45 @@ describe('WslProvisioner', () => {
     expect(calls[0]?.script.startsWith('printf')).toBe(true);
     const pushIndex = calls.findIndex((call) => call.script.includes('cat > '));
     expect(pushIndex).toBe(1);
+  });
+
+  // #791: the checksum fetch used to happen before anything consulted the
+  // cache, so a hub with no network could not provision a distribution even
+  // with the exact verified bytes already on disk.
+  it('provisions from a cache entry a recorded digest vouches for when the release is unreachable', async () => {
+    let offlineReported = 0;
+    const { provisioner, calls, written } = harness({
+      offline: true,
+      cacheFiles: {
+        [`/cache/${VERSION}/${RAW_ASSET}`]: ARCHIVE,
+        [`/cache/${VERSION}/${RAW_ASSET}.sha256`]: new TextEncoder().encode(DIGEST),
+      },
+    });
+
+    await provisioner.ensure('Ubuntu', { onOfflineCache: () => (offlineReported += 1) });
+
+    const unpack = calls.find((call) => call.script.includes('cat > '));
+    expect(unpack?.stdinBytes).toBe(ARCHIVE.byteLength);
+    expect(offlineReported).toBe(1);
+    // Nothing new was cached: there was nothing to cache.
+    expect(written.size).toBe(0);
+  });
+
+  it('refuses an unreachable release when nothing recorded what the cache holds', async () => {
+    const { provisioner } = harness({
+      offline: true,
+      cacheFiles: { [`/cache/${VERSION}/${RAW_ASSET}`]: ARCHIVE },
+    });
+
+    await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(WslProvisioningError);
+  });
+
+  it("keeps the release's checksums so a later offline provision has a record", async () => {
+    const { provisioner, written } = harness();
+
+    await provisioner.ensure('Ubuntu');
+
+    expect(new TextDecoder().decode(written.get(`/cache/${VERSION}/SHA256SUMS`))).toBe(CHECKSUMS);
   });
 
   it('falls back to the platform archive when the raw asset is unpublished', async () => {

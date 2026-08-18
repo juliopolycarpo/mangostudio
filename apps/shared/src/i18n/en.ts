@@ -2149,6 +2149,9 @@ export const messages: Messages = {
       description: 'Where chat tools, workspaces, and Git commands run.',
       virtual: 'Built in',
       disabled: 'Disabled',
+      offlineCache: 'Offline cache',
+      offlineCacheHint:
+        'The release could not be reached, so this started from a runtime the hub verified earlier.',
       status: {
         connected: 'Connected',
         connecting: 'Connecting',

@@ -23,7 +23,10 @@ function deps(overrides: Record<string, unknown> = {}) {
 
 describe('resolveContainerRuntimeBinary in a source checkout', () => {
   it('mounts the build the checkout made for that platform', async () => {
-    const path = await resolveContainerRuntimeBinary('linux-x64-musl', deps({ version: 'dev' }));
+    const { path } = await resolveContainerRuntimeBinary(
+      'linux-x64-musl',
+      deps({ version: 'dev' })
+    );
 
     expect(path).toBe('/repo/.mango/out/linux-x64-musl/mangostudio-runtime');
   });
@@ -46,7 +49,7 @@ describe('resolveContainerRuntimeBinary in a source checkout', () => {
 
   it('marks the checkout build executable, which nothing else on this path does', async () => {
     const marked: string[] = [];
-    const path = await resolveContainerRuntimeBinary(
+    const { path } = await resolveContainerRuntimeBinary(
       'linux-x64-musl',
       deps({
         version: 'dev',
@@ -74,7 +77,7 @@ describe('resolveContainerRuntimeBinary in a source checkout', () => {
 describe('resolveContainerRuntimeBinary from a release', () => {
   it('writes the verified bytes into the documented cache and returns that path', async () => {
     const written: { path?: string; bytes?: Uint8Array } = {};
-    const path = await resolveContainerRuntimeBinary(
+    const { path } = await resolveContainerRuntimeBinary(
       'linux-x64',
       deps({
         // The fetch's own cache write is best-effort; this is the run where it
@@ -96,7 +99,7 @@ describe('resolveContainerRuntimeBinary from a release', () => {
   it('marks a cached binary executable instead of rewriting it', async () => {
     let wrote = false;
     const marked: string[] = [];
-    const path = await resolveContainerRuntimeBinary(
+    const { path } = await resolveContainerRuntimeBinary(
       'linux-x64',
       deps({
         fileExists: () => Promise.resolve(true),
@@ -116,7 +119,7 @@ describe('resolveContainerRuntimeBinary from a release', () => {
   });
 
   it('resolves a canary hub onto the rolling asset name', async () => {
-    const path = await resolveContainerRuntimeBinary(
+    const { path } = await resolveContainerRuntimeBinary(
       'linux-x64',
       deps({ version: '0.1.1-canary.gabc1234' })
     );

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
+  CHECKSUMS_CACHE_NAME,
   loadRuntimeReleaseBytes,
   pinnedRuntimeDigest,
   runtimeDigestSidecarPath,
@@ -344,5 +345,225 @@ describe('pinnedRuntimeDigest', () => {
     ['a file far larger than any digest', 'a'.repeat(8192)],
   ])('reads %s as no sidecar', (_label, text) => {
     expect(pinnedRuntimeDigest(text)).toBeUndefined();
+  });
+});
+
+/**
+ * A hub that cannot reach its release, with whatever it has on disk.
+ *
+ * The release is stable here on purpose: a rolling tag's checksums are mutable,
+ * so nothing about them may be remembered, and the canary cases above already
+ * cover that channel.
+ */
+describe('the runtime cache when the release cannot be reached', () => {
+  const VERSION = '1.2.3';
+  const ASSET = 'mangostudio-runtime-1.2.3-linux-x64';
+  const CACHE_DIR = '/cache/1.2.3';
+  const BYTES = new TextEncoder().encode('a runtime this hub verified last week');
+  const DIGEST = createHash('sha256').update(BYTES).digest('hex');
+  const CACHE_PATH = `${CACHE_DIR}/${ASSET}`;
+
+  /** Every hop rejects the way a host with no route out does. */
+  const offline = (() => {
+    throw new Error('getaddrinfo EAI_AGAIN github.com');
+  }) as unknown as typeof fetch;
+
+  function answering(status: number) {
+    return (() => Promise.resolve(new Response('no', { status }))) as unknown as typeof fetch;
+  }
+
+  function load(cache: Record<string, Uint8Array>, fetchImpl: typeof fetch) {
+    const requested: string[] = [];
+    const loaded = loadRuntimeReleaseBytes('linux-x64', {
+      version: VERSION,
+      fetch: ((input: string | URL | Request) => {
+        requested.push(String(input));
+        return (fetchImpl as (url: string) => Promise<Response>)(String(input));
+      }) as unknown as typeof fetch,
+      resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+      cacheDir: () => CACHE_DIR,
+      readBytes: (path) => Promise.resolve(cache[path] ?? null),
+      writeCache: (path, bytes) => {
+        cache[path] = bytes;
+        return Promise.resolve();
+      },
+    });
+    return { loaded, requested };
+  }
+
+  const sidecar = (digest: string) => new TextEncoder().encode(`${digest}\n`);
+
+  it('launches from bytes a recorded digest vouches for, and says it did', async () => {
+    const { loaded, requested } = load(
+      { [CACHE_PATH]: BYTES, [runtimeDigestSidecarPath(CACHE_PATH)]: sidecar(DIGEST) },
+      offline
+    );
+
+    expect(await loaded).toMatchObject({
+      digest: `sha256:${DIGEST}`,
+      cached: true,
+      offlineCache: true,
+    });
+    // The asset itself is never requested: the checksums hop already proved
+    // there is nothing to reach.
+    expect(requested).toEqual([
+      'https://github.com/juliopolycarpo/mangostudio/releases/download/v1.2.3/SHA256SUMS',
+    ]);
+  });
+
+  it('recovers through the checksums it kept from the download that filled the cache', async () => {
+    const { loaded } = load(
+      {
+        [CACHE_PATH]: BYTES,
+        [`${CACHE_DIR}/${CHECKSUMS_CACHE_NAME}`]: new TextEncoder().encode(
+          `${'0'.repeat(64)}  some-other-asset\n${DIGEST}  ${ASSET}\n`
+        ),
+      },
+      offline
+    );
+
+    expect(await loaded).toMatchObject({ offlineCache: true });
+  });
+
+  it('falls back when the release answers with a rate limit rather than bytes', async () => {
+    const { loaded } = load(
+      { [CACHE_PATH]: BYTES, [runtimeDigestSidecarPath(CACHE_PATH)]: sidecar(DIGEST) },
+      answering(429)
+    );
+
+    expect(await loaded).toMatchObject({ offlineCache: true });
+  });
+
+  it('fails as before when there is nothing cached to fall back to', async () => {
+    const { loaded } = load({}, offline);
+
+    await expect(loaded).rejects.toThrow(/Could not download/);
+  });
+
+  // The whole point of a *recorded* digest: bytes hashed and compared against
+  // their own hash always agree, so a substituted cache entry would pass.
+  it('refuses a cache entry no recorded digest vouches for', async () => {
+    const { loaded } = load({ [CACHE_PATH]: BYTES }, offline);
+
+    await expect(loaded).rejects.toThrow(/Could not download/);
+  });
+
+  it('refuses a cache entry the recorded digest disagrees with', async () => {
+    const { loaded } = load(
+      {
+        [CACHE_PATH]: new TextEncoder().encode('not what this hub downloaded'),
+        [runtimeDigestSidecarPath(CACHE_PATH)]: sidecar(DIGEST),
+      },
+      offline
+    );
+
+    await expect(loaded).rejects.toThrow(/Could not download/);
+  });
+
+  // A release that answers has settled the question. Only never getting an
+  // answer is an offline condition.
+  it.each([
+    ['a refused request', 403],
+    ['a release that does not publish the asset', 404],
+  ])('does not answer %s from the cache', async (_label, status) => {
+    const { loaded } = load(
+      { [CACHE_PATH]: BYTES, [runtimeDigestSidecarPath(CACHE_PATH)]: sidecar(DIGEST) },
+      answering(status)
+    );
+
+    await expect(loaded).rejects.toThrow();
+  });
+});
+
+describe('the runtime cache while the release is reachable', () => {
+  const ASSET = 'mangostudio-runtime-1.2.3-linux-x64';
+  const CACHE_DIR = '/cache/1.2.3';
+
+  // Must not regress: the release stays authoritative online, so a cache entry
+  // that disagrees with the checksums it publishes is replaced, not trusted.
+  it('re-downloads a cache entry that disagrees with the published checksum', async () => {
+    const fresh = new TextEncoder().encode('the bytes this release publishes');
+    const hash = createHash('sha256').update(fresh).digest('hex');
+    const assetPath = `${CACHE_DIR}/${ASSET}`;
+    const cache: Record<string, Uint8Array> = {
+      [assetPath]: new TextEncoder().encode('a stale or tampered entry'),
+      [runtimeDigestSidecarPath(assetPath)]: new TextEncoder().encode('0'.repeat(64)),
+    };
+
+    const loaded = await loadRuntimeReleaseBytes('linux-x64', {
+      version: '1.2.3',
+      fetch: ((input: string | URL | Request) =>
+        Promise.resolve(
+          String(input).endsWith('/SHA256SUMS')
+            ? new Response(`${hash}  ${ASSET}\n`)
+            : new Response(fresh)
+        )) as unknown as typeof fetch,
+      resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+      cacheDir: () => CACHE_DIR,
+      readBytes: (path) => Promise.resolve(cache[path] ?? null),
+      writeCache: (path, bytes) => {
+        cache[path] = bytes;
+        return Promise.resolve();
+      },
+    });
+
+    expect(loaded).toMatchObject({ digest: `sha256:${hash}`, offlineCache: false });
+    expect(cache[assetPath]).toEqual(fresh);
+  });
+
+  it("keeps a stable release's checksums for the launch that cannot fetch them", async () => {
+    const bytes = new TextEncoder().encode('stable-runtime');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const written: string[] = [];
+
+    await loadRuntimeReleaseBytes('linux-x64', {
+      version: '1.2.3',
+      fetch: ((input: string | URL | Request) =>
+        Promise.resolve(
+          String(input).endsWith('/SHA256SUMS')
+            ? new Response(`${hash}  ${ASSET}\n`)
+            : new Response(bytes)
+        )) as unknown as typeof fetch,
+      resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+      cacheDir: () => CACHE_DIR,
+      readBytes: () => Promise.resolve(null),
+      writeCache: (path) => {
+        written.push(path);
+        return Promise.resolve();
+      },
+    });
+
+    expect(written).toContain(`${CACHE_DIR}/${CHECKSUMS_CACHE_NAME}`);
+  });
+
+  // A rolling tag republishes SHA256SUMS under one filename, so a copy of it
+  // records what the tag used to hold. Nothing may keep one.
+  it('keeps no checksums for a rolling release', async () => {
+    const asset = 'mangostudio-runtime-1.2.3-canary-linux-x64';
+    const bytes = new TextEncoder().encode('canary-runtime');
+    const hash = createHash('sha256').update(bytes).digest('hex');
+    const written: string[] = [];
+
+    await loadRuntimeReleaseBytes('linux-x64', {
+      version: '1.2.3-canary.abcdef0',
+      fetch: ((input: string | URL | Request) => {
+        const url = String(input);
+        if (url.endsWith('/canary-manifest.json')) {
+          return Promise.resolve(new Response('not found', { status: 404 }));
+        }
+        return Promise.resolve(
+          url.endsWith('/SHA256SUMS') ? new Response(`${hash}  ${asset}\n`) : new Response(bytes)
+        );
+      }) as unknown as typeof fetch,
+      resolveHostname: () => Promise.resolve([{ address: '140.82.112.4', family: 4 as const }]),
+      cacheDir: () => '/cache/canary',
+      readBytes: () => Promise.resolve(null),
+      writeCache: (path) => {
+        written.push(path);
+        return Promise.resolve();
+      },
+    });
+
+    expect(written.some((path) => path.endsWith(CHECKSUMS_CACHE_NAME))).toBe(false);
   });
 });
