@@ -68,9 +68,11 @@ export function buildGitEnvironment(
 /**
  * Runs Git via the runtime `git.exec` method and maps failures to GitCliError.
  *
- * Every hub-side Git call goes through here, and every one of them treats the
- * output as authoritative repository state (status, diff, log, branch and ref
- * listings) rather than an advisory log line. So a capture the runtime flagged
+ * Every Git call that reads repository state goes through here — status, diff,
+ * log, branch and ref listings — and every one of them treats the output as
+ * authoritative rather than as an advisory log line. (`lib/build-info.ts` runs
+ * git directly, but that is synchronous local git for build metadata, with no
+ * runtime pipe to be held open.) So a capture the runtime flagged
  * `incomplete` — a surviving helper still held a pipe when it stopped reading —
  * is rejected here rather than returned: a short `status --porcelain` reading
  * as a clean tree, or a short `diff` reading as no changes, is a wrong answer
