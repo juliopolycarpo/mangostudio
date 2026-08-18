@@ -193,15 +193,13 @@ export const LibraryResourceListSchema = Type.Array(LibraryResourceSchema);
 
 /**
  * Why an on-disk entry could not even be named as a {@link LibraryResourceRefSchema}: its name
- * fails `LIBRARY_RESOURCE_SLUG_PATTERN` outright, or the reader refuses it for some other reason
- * that has nothing to do with slug shape. Deliberately small and disjoint from
+ * fails `LIBRARY_RESOURCE_SLUG_PATTERN` outright. Deliberately small and disjoint from
  * `LibraryInvalidReasonSchema`, which says why a *nameable* resource is invalid — this union says
- * why an entry cannot be named at all.
+ * why an entry cannot be named at all. A union of one for now: every member has to be emitted by
+ * a reader and rendered with its own string, so a member is added when a reader needs it, not
+ * ahead of one.
  */
-export const LibraryUnreadableEntryReasonSchema = Type.Union([
-  Type.Literal('invalid-name'),
-  Type.Literal('unsupported-entry'),
-]);
+export const LibraryUnreadableEntryReasonSchema = Type.Union([Type.Literal('invalid-name')]);
 
 export const LibraryUnreadableEntrySchema = Type.Object({
   locationId: LibraryLocationIdSchema,

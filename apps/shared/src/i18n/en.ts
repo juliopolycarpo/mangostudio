@@ -1614,7 +1614,6 @@ export const messages: Messages = {
       rule: 'Names may only use letters, numbers, "_", "-", and ".", with no spaces or other characters.',
       reason: {
         'invalid-name': 'This name does not match the allowed pattern.',
-        'unsupported-entry': 'This entry type is not supported here.',
       },
     },
     format: {
