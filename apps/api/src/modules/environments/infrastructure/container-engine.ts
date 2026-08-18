@@ -103,25 +103,45 @@ interface EngineResult {
   readonly timedOut?: boolean;
 }
 
+export interface EngineRunOptions {
+  readonly timeoutMs: number;
+  readonly maxOutputBytes?: number;
+  /**
+   * Kills the CLI when the caller has stopped caring. Never passed to a
+   * teardown command: those run precisely because something was cancelled, and
+   * an already-aborted signal would stop the reaper before it spawned.
+   */
+  readonly signal?: AbortSignal;
+}
+
 export interface ContainerEngineDeps {
   readonly run: (
     command: string,
     args: readonly string[],
-    timeoutMs: number,
-    maxOutputBytes?: number
+    options: EngineRunOptions
   ) => Promise<EngineResult>;
+}
+
+export interface PrepareImageOptions {
+  /** Fires once, before a pull begins, and only when one is actually needed. */
+  readonly onPullStart?: () => void;
+  /**
+   * Stops the preparation where it stands. A pull is the step this exists for:
+   * it is bounded at {@link PULL_TIMEOUT_MS}, which is half an hour of a
+   * download nobody may still be waiting for.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface ContainerEngineService {
   detect(): Promise<ContainerDetection>;
   /**
    * Makes sure the image is on this machine and reports which runtime build it
-   * needs. `onPullStart` fires once, before a pull begins, and only when one is
-   * actually needed.
+   * needs.
    */
   prepare(
     config: ContainerEnvironmentConfig,
-    hooks?: { readonly onPullStart?: () => void }
+    options?: PrepareImageOptions
   ): Promise<LinuxPlatformId>;
   /** Best-effort teardown of a container this hub named. */
   kill(engine: ContainerEngine, name: string): Promise<void>;
@@ -130,14 +150,18 @@ export interface ContainerEngineService {
 function runWithExecFile(
   command: string,
   args: readonly string[],
-  timeoutMs: number,
-  maxOutputBytes = MAX_OUTPUT_BYTES
+  options: EngineRunOptions
 ): Promise<EngineResult> {
   return new Promise((resolve) => {
     execFile(
       command,
       [...args],
-      { timeout: timeoutMs, maxBuffer: maxOutputBytes, ...HIDDEN_WINDOW },
+      {
+        timeout: options.timeoutMs,
+        maxBuffer: options.maxOutputBytes ?? MAX_OUTPUT_BYTES,
+        ...(options.signal ? { signal: options.signal } : {}),
+        ...HIDDEN_WINDOW,
+      },
       (error, stdout, stderr) => {
         const err = error as (Error & { code?: unknown; killed?: boolean }) | null;
         const code = err?.code;
@@ -192,9 +216,8 @@ export function createContainerEngineService(
 
   const run = (
     command: { readonly command: string; readonly args: readonly string[] },
-    timeoutMs: number,
-    maxOutputBytes?: number
-  ): Promise<EngineResult> => deps.run(command.command, command.args, timeoutMs, maxOutputBytes);
+    options: EngineRunOptions
+  ): Promise<EngineResult> => deps.run(command.command, command.args, options);
 
   const refuse = (
     result: EngineResult,
@@ -211,9 +234,15 @@ export function createContainerEngineService(
     );
   };
 
-  const imageId = async (config: ContainerEnvironmentConfig): Promise<string | null> => {
+  const imageId = async (
+    config: ContainerEnvironmentConfig,
+    signal?: AbortSignal
+  ): Promise<string | null> => {
     const engine = containerEngineOf(config);
-    const result = await run(containerImageInspectCommand(config), INSPECT_TIMEOUT_MS);
+    const result = await run(containerImageInspectCommand(config), {
+      timeoutMs: INSPECT_TIMEOUT_MS,
+      ...(signal ? { signal } : {}),
+    });
     if (result.exitCode === 0) return result.stdout.trim() || null;
 
     // A missing image is the expected answer here, not a failure: it is what
@@ -226,7 +255,9 @@ export function createContainerEngineService(
   const runDetect = async (): Promise<ContainerDetection> => {
     const engines = await Promise.all(
       ENGINES.map(async (engine): Promise<ContainerEngineStatus> => {
-        const result = await run(containerEngineVersionCommand(engine), INSPECT_TIMEOUT_MS);
+        const result = await run(containerEngineVersionCommand(engine), {
+          timeoutMs: INSPECT_TIMEOUT_MS,
+        });
         if (result.exitCode === 0) {
           const version = result.stdout.trim();
           return { engine, available: true, ...(version ? { version } : {}) };
@@ -262,20 +293,27 @@ export function createContainerEngineService(
       return await detectInFlight;
     },
 
-    async prepare(config, hooks = {}): Promise<LinuxPlatformId> {
+    async prepare(config, options = {}): Promise<LinuxPlatformId> {
       const engine = containerEngineOf(config);
       const context = { engine, image: config.image };
+      const signal = options.signal;
+      const cancellable = signal ? { signal } : {};
 
-      let id = await imageId(config);
+      let id = await imageId(config, signal);
       if (!id) {
-        // The one long step, and the only one a user is asked to wait through.
-        hooks.onPullStart?.();
+        // The one long step, and the only one nobody is asked to wait through:
+        // the caller is told a pull started and stops holding its request open.
+        options.onPullStart?.();
         logger.info('image_pull_started', { engine, image: config.image });
-        const pull = await run(
-          containerPullCommand(config),
-          PULL_TIMEOUT_MS,
-          MAX_PULL_OUTPUT_BYTES
-        );
+        const pull = await run(containerPullCommand(config), {
+          timeoutMs: PULL_TIMEOUT_MS,
+          maxOutputBytes: MAX_PULL_OUTPUT_BYTES,
+          ...cancellable,
+        });
+        // A killed CLI reports as an ordinary non-zero exit with no stderr,
+        // which would be classified as a registry failure and painted on a card
+        // as one. Asked before the exit code so a cancellation says so.
+        signal?.throwIfAborted();
         if (pull.exitCode !== 0) {
           // A pull this chatty is not a spawn failure; classifying it as one
           // would report a rate limit or a slow registry as a missing engine.
@@ -287,7 +325,7 @@ export function createContainerEngineService(
           }
           throw refuse(pull, context);
         }
-        id = await imageId(config);
+        id = await imageId(config, signal);
         if (!id) {
           throw new ContainerEngineError(
             'image-missing',
@@ -307,15 +345,25 @@ export function createContainerEngineService(
         return cached;
       }
 
+      // Left inline deliberately: the probe is three lines of `uname` against an
+      // image that is already on disk, bounded at 60s, and cached per image
+      // identity — so a connect that reaches here has nothing left worth
+      // reporting a phase for.
       const probeName = `${CONTAINER_NAME_PREFIX}-probe-${randomUUID()}`;
-      const probe = await run(
-        containerProbeCommand(config, PLATFORM_PROBE_SCRIPT, probeName),
-        PROBE_TIMEOUT_MS
-      );
+      const probe = await run(containerProbeCommand(config, PLATFORM_PROBE_SCRIPT, probeName), {
+        timeoutMs: PROBE_TIMEOUT_MS,
+        ...cancellable,
+      });
       if (probe.exitCode !== 0) {
         // `execFile`'s timeout only kills the CLI; the container it started
-        // keeps running on the daemon until this backstop reaps it by name.
-        if (probe.timedOut) await run(containerKillCommand(engine, probeName), INSPECT_TIMEOUT_MS);
+        // keeps running on the daemon until this backstop reaps it by name. A
+        // cancel kills the same CLI the same way and leaves the same container,
+        // so it is reaped on that path too — with no signal of its own, or the
+        // reaper would be aborted before it spawned.
+        if (probe.timedOut || signal?.aborted) {
+          await run(containerKillCommand(engine, probeName), { timeoutMs: INSPECT_TIMEOUT_MS });
+        }
+        signal?.throwIfAborted();
         throw refuse(probe, context);
       }
 
@@ -344,7 +392,9 @@ export function createContainerEngineService(
       // on EOF is the ordinary teardown, and this only catches the case where
       // the client died without reaping it. So a failure here is the expected
       // outcome, not an error worth surfacing.
-      const result = await run(containerKillCommand(engine, name), INSPECT_TIMEOUT_MS);
+      const result = await run(containerKillCommand(engine, name), {
+        timeoutMs: INSPECT_TIMEOUT_MS,
+      });
       if (result.exitCode !== 0) {
         logger.debug('kill_backstop_noop', { engine, name, stderr: result.stderr.trim() });
       }

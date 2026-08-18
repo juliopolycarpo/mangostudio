@@ -74,6 +74,17 @@ export interface ContainerRuntimeConnection {
  */
 export type ContainerConnectProgress = (phase: 'pulling' | 'offline-cache') => void;
 
+/**
+ * What the attempt gives this launch. Structurally the manager's connect
+ * context, kept local for the same reason {@link ContainerRuntimeDefinition}
+ * is: this module must not import the manager back.
+ */
+export interface ContainerConnectContext {
+  readonly report?: ContainerConnectProgress;
+  /** Aborted when the attempt is released; only the pull can run long enough to care. */
+  readonly signal?: AbortSignal;
+}
+
 export interface ConnectContainerRuntimeDeps {
   readonly engines: ContainerEngineService;
   readonly resolveRuntimeBinary: typeof resolveContainerRuntimeBinary;
@@ -87,10 +98,11 @@ const defaultDeps: ConnectContainerRuntimeDeps = {
 export async function connectContainerRuntime(
   definition: ContainerRuntimeDefinition,
   onUnavailable: () => void,
-  report?: ContainerConnectProgress,
+  context: ContainerConnectContext = {},
   overrides: Partial<ConnectContainerRuntimeDeps> = {}
 ): Promise<ContainerRuntimeConnection> {
   const deps = { ...defaultDeps, ...overrides };
+  const report = context.report;
   const config = environmentConfigFor('container', definition.config);
   const engine = containerEngineOf(config);
 
@@ -106,7 +118,10 @@ export async function connectContainerRuntime(
   }
 
   const platformId = await withFailureReason(() =>
-    deps.engines.prepare(config, { onPullStart: () => report?.('pulling') })
+    deps.engines.prepare(config, {
+      onPullStart: () => report?.('pulling'),
+      ...(context.signal ? { signal: context.signal } : {}),
+    })
   );
   const runtime = await withFailureReason(() => deps.resolveRuntimeBinary(platformId));
   // The release could not be reached and the cache answered for it. The launch

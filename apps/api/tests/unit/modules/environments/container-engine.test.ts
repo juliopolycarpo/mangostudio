@@ -13,6 +13,7 @@ import {
 interface RecordedCall {
   readonly command: string;
   readonly args: readonly string[];
+  readonly signal?: AbortSignal | undefined;
 }
 
 interface StubReply {
@@ -36,8 +37,8 @@ function engineStub(replies: Record<string, StubReply | readonly StubReply[]>) {
     ])
   );
 
-  const run = (command: string, args: readonly string[]) => {
-    calls.push({ command, args: [...args] });
+  const run = (command: string, args: readonly string[], options?: { signal?: AbortSignal }) => {
+    calls.push({ command, args: [...args], signal: options?.signal });
     const key = args[0] === 'image' ? 'inspect' : (args[0] ?? '');
     const queue = remaining.get(key);
     const reply = (queue && queue.length > 1 ? queue.shift() : queue?.[0]) ?? {};
@@ -269,6 +270,61 @@ describe('container image preparation', () => {
 
     expect(probeName).toMatch(/^mango-rt-probe-/);
     expect(killCall?.args).toEqual(['kill', probeName as string]);
+  });
+
+  // #792: the request stops waiting on a cold pull, so the pull is what has to
+  // be stoppable instead — and a killed CLI must not be reported as a registry
+  // failure on a card nobody is looking at any more.
+  it('ends a cancelled pull as a cancellation, before the probe', async () => {
+    const cancel = new AbortController();
+    const subcommands: string[] = [];
+    const run = (_command: string, args: readonly string[]) => {
+      subcommands.push(args[0] ?? '');
+      if (args[0] === 'image') {
+        return Promise.resolve({
+          stdout: '',
+          stderr: 'Error response from daemon: No such image: node:22',
+          exitCode: 1,
+        });
+      }
+      // What the killed pull leaves behind: a non-zero exit and no account of
+      // itself, indistinguishable from a rate limit without the signal.
+      cancel.abort();
+      return Promise.resolve({ stdout: '', stderr: '', exitCode: null });
+    };
+
+    const attempt = createContainerEngineService({ run }).prepare(config, {
+      signal: cancel.signal,
+    });
+
+    await expect(attempt).rejects.toThrow();
+    const error = await attempt.catch((reason: unknown) => reason);
+    expect(error).not.toBeInstanceOf(ContainerEngineError);
+    expect((error as Error).name).toBe('AbortError');
+    expect(subcommands).toEqual(['image', 'pull']);
+  });
+
+  it('reaps the probe container of a cancelled probe, unsignalled', async () => {
+    const cancel = new AbortController();
+    const stub = engineStub({
+      inspect: { stdout: 'sha256:fff' },
+      run: { exitCode: null },
+    });
+    const run = (command: string, args: readonly string[], options?: { signal?: AbortSignal }) => {
+      if (args[0] === 'run') cancel.abort();
+      return stub.run(command, args, options);
+    };
+
+    const attempt = createContainerEngineService({ run }).prepare(config, {
+      signal: cancel.signal,
+    });
+    await expect(attempt).rejects.toThrow();
+
+    const kill = stub.calls.find((call) => call.args[0] === 'kill');
+    // Unsignalled on purpose: the signal it would inherit is already aborted,
+    // so the reaper would never spawn and the probe container would survive.
+    expect(kill?.signal).toBeUndefined();
+    expect(stub.calls.find((call) => call.args[0] === 'run')?.signal).toBe(cancel.signal);
   });
 
   it('reports a daemon that will not answer rather than a missing image', async () => {

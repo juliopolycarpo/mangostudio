@@ -502,6 +502,44 @@ describe('environment entity routes', () => {
     });
   });
 
+  // #792: a cold pull is bounded at half an hour. The request has to come back
+  // long before that, saying what it left running.
+  it('answers a connect that started an image pull without waiting for it', async () => {
+    let cancelled: AbortSignal | undefined;
+    const { app, repository, manager } = createTestApp({
+      container: (_definition, _onUnavailable, context) => {
+        context.report('pulling');
+        cancelled = context.signal;
+        // Never settles: the pull is still running when the route answers.
+        return new Promise<never>(() => undefined);
+      },
+    });
+    await repository.create({
+      id: 'cold-image',
+      userId: TEST_USER.id,
+      name: 'Cold image',
+      transportKind: 'container',
+      config: { image: 'node:22' },
+      enabled: true,
+    });
+
+    const response = await app.handle(
+      new Request('http://localhost/environments/cold-image/connect', jsonRequest('POST'))
+    );
+
+    expect(response.status).toBe(200);
+    expect((await response.json()) as Environment).toMatchObject({
+      status: { state: 'connecting', pullingImage: true },
+    });
+    expect(manager.getStatus(TEST_USER.id, 'cold-image').pullingImage).toBe(true);
+
+    // And the download is owned rather than abandoned: disconnecting stops it.
+    await app.handle(
+      new Request('http://localhost/environments/cold-image/disconnect', jsonRequest('POST'))
+    );
+    expect(cancelled?.aborted).toBe(true);
+  });
+
   it('reports a connect against a vanished environment as missing, not conflicting', async () => {
     const { app, repository } = createTestApp({
       stdio: async (definition) => {

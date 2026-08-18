@@ -161,7 +161,7 @@ describe('connectContainerRuntime progress', () => {
       connectContainerRuntime(
         definition({ image: 'node:22' }),
         noop,
-        (phase) => phases.push(phase),
+        { report: (phase) => phases.push(phase) },
         { engines: service, resolveRuntimeBinary: () => Promise.resolve(RUNTIME_BINARY) }
       )
     ).rejects.toThrow();
@@ -176,7 +176,7 @@ describe('connectContainerRuntime progress', () => {
       connectContainerRuntime(
         definition({ image: 'node:22' }),
         noop,
-        (phase) => phases.push(phase),
+        { report: (phase) => phases.push(phase) },
         {
           engines: engines({
             prepare: () => Promise.reject(new ContainerEngineError('unknown', 'later failure')),
@@ -198,7 +198,7 @@ describe('connectContainerRuntime progress', () => {
       connectContainerRuntime(
         definition({ image: 'node:22' }),
         noop,
-        (phase) => phases.push(phase),
+        { report: (phase) => phases.push(phase) },
         {
           engines: engines(),
           resolveRuntimeBinary: () => Promise.resolve({ ...RUNTIME_BINARY, offlineCache: true }),

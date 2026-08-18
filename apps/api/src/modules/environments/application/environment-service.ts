@@ -350,8 +350,12 @@ export function createEnvironmentService(
       await requireRecord(userId, id);
       try {
         // A deliberate connect clears any backoff: the user is telling us the
-        // cause was fixed, so waiting out a retry window would be theatre.
-        await manager.connect(userId, id, { force: true });
+        // cause was fixed, so waiting out a retry window would be theatre. The
+        // outcome is not read here because the environment this returns already
+        // carries it — a connect that left an image downloading answers with
+        // `connecting` plus `pullingImage`, which is what the card renders and
+        // what an unsubscribed client can poll.
+        await manager.connectInteractive(userId, id);
       } catch (error) {
         // The row can be removed between the guard above and the manager's own
         // lookup, which reports it as an unavailable runtime. That is a missing
