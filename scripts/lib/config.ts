@@ -70,6 +70,7 @@ export const ROOT_BIOME_PATHS: string[] = [
 
 export const ROOT_DPRINT_PATHS: string[] = [
   'AGENTS.md',
+  '.cursor/rules',
   'README.md',
   'Dockerfile',
   'Dockerfile.alpine',

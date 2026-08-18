@@ -6,7 +6,7 @@ pre-commit:
       run: bunx biome check --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     dprint:
-      glob: "*.{md,mdx,toml,yml,yaml}"
+      glob: "*.{md,mdc,mdx,toml,yml,yaml}"
       run: bunx dprint fmt --allow-no-files {staged_files}
       stage_fixed: true
     dprint-dockerfile:

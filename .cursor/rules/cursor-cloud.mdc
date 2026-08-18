@@ -1,0 +1,37 @@
+---
+description: Cursor Cloud VM environment facts and gotchas. Skip unless this session is a Cursor Cloud agent.
+alwaysApply: true
+---
+
+# Cursor Cloud
+
+These notes apply only in a Cursor Cloud VM. Skip them in local Cursor Desktop.
+
+Cursor already loads root and workspace `AGENTS.md`. Do not duplicate those rules here.
+Shared commands live in `README.md` and root `package.json`. Dependencies are already
+installed by the startup update script.
+
+- **Runtime:** `bun` is the package manager and runtime. Node is also on `PATH` at
+  `/exec-daemon/node`, which matters for the dev-server gotcha below.
+- **Required secret:** the API refuses to boot without `BETTER_AUTH_SECRET` (min 32 chars).
+  In this VM it lives in `~/.mango/.env`; regenerate with
+  `printf 'BETTER_AUTH_SECRET=%s\n' "$(openssl rand -hex 32)" > ~/.mango/.env` if missing.
+- **Running dev servers — important gotcha:** the plain `bun run dev` from `README.md`
+  fails here. Vite's `bin` has a Node shebang, so with `/exec-daemon/node` on `PATH` it runs
+  under Node, which cannot load `@mangostudio/shared`'s raw `.ts` config exports
+  (`ERR_UNKNOWN_FILE_EXTENSION`). Do NOT "fix" this by forcing Bun (`bun --bun`): Bun's HTTP
+  proxy lacks `socket.destroySoon`, which crashes Vite's `/api` dev proxy on the first request.
+  The working command keeps Vite on Node but enables TS stripping:
+  `CI=1 NODE_OPTIONS="--experimental-strip-types" bun run dev`
+  (`CI=1` switches Turbo to stream UI, which logs cleanly for non-interactive runs). To run a
+  single service: API `cd apps/api && bun run dev` (Bun, port 3001);
+  frontend `cd apps/frontend && NODE_OPTIONS="--experimental-strip-types" bun run dev` (port 5173,
+  proxies `/api`, `/uploads`, `/images`, `/api/ws` to the API).
+- **Database:** SQLite at `~/.mango/database.sqlite`; migrations run automatically on API boot.
+- **No AI providers by default:** without a connector the UI shows "No models available" and
+  chat/image generation produces no reply — this is expected, not a bug. Signup/login, chat
+  creation, and settings all work without keys. Add a provider key in Settings → Connectors
+  (or `~/.mango/.env`, e.g. `GEMINI_API_KEY=...`) to exercise real generation.
+- **`bun install` and git hooks:** the root `prepare` step (`lefthook install`) fails in the VM
+  because Cursor sets a custom `core.hooksPath`; dependencies still install correctly. Use
+  `bun install --ignore-scripts` (what the startup update script runs) to skip the failing hook.

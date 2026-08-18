@@ -25,7 +25,7 @@ limpeza de labels não gere novas cobranças.
 
 - `area: build` — `scripts/**`, `.mango/**`, `apps/api/src/lib/{config,runtime-paths}.ts`, `tsconfig*.json`, `turbo.jsonc`, `cliff.toml`, `Dockerfile*`, `.dockerignore`
 - `area: cli` — `apps/api/src/cli/**`, `apps/api/src/index.ts`, `apps/api/src/server/**`, `apps/api/src/lib/{server-state,mango-paths}.ts`, `packages/cargo-shim/**`
-- `area: tooling` — `biome.json`, `dprint.json`, `lefthook.yml`, `opencode.json`, `.editorconfig`, `.gitattributes`, `.gitmessage`, `.gitignore`, `.claude/**`, `.agents/skills/**`
+- `area: tooling` — `biome.json`, `dprint.json`, `lefthook.yml`, `opencode.json`, `.editorconfig`, `.gitattributes`, `.gitmessage`, `.gitignore`, `.claude/**`, `.cursor/rules/**`, `.agents/skills/**`
 - `area: db` — `apps/api/src/db/**`
 - `area: docs` — `docs/**`, `*.md` em qualquer app ou pacote, `LICENSE`, `.github/**/*.md`, templates de issue/PR
 - `area: frontend` — `apps/frontend/**`
