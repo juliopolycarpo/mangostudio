@@ -285,8 +285,10 @@ describe('createEnvironmentLibraryService', () => {
     const resetCalls: string[] = [];
     resetLibraryCachesForEnvironments(
       [{ environmentId: 'a' }, { environmentId: 'a' }, { environmentId: 'b' }],
-      (environmentId) => {
-        if (environmentId) resetCalls.push(environmentId);
+      {
+        resetCache: (environmentId) => {
+          if (environmentId) resetCalls.push(environmentId);
+        },
       }
     );
     expect(resetCalls).toEqual(['a', 'b']);

@@ -326,9 +326,15 @@ export const environmentLibraryService = createEnvironmentLibraryService();
  */
 export function resetLibraryCachesForEnvironments(
   rows: Iterable<{ readonly environmentId: string }>,
-  resetCache: EnvironmentLibraryService['resetCache'] = (environmentId) =>
-    environmentLibraryService.resetCache(environmentId)
+  // An overrides object rather than a positional default, matching the apply
+  // and removal modules that hold this function as a dependency: a bare second
+  // parameter is one `.forEach` away from being handed an index that
+  // type-checks as the reset it is standing in for.
+  overrides: { readonly resetCache?: EnvironmentLibraryService['resetCache'] } = {}
 ): void {
+  const resetCache =
+    overrides.resetCache ??
+    ((environmentId?: string) => environmentLibraryService.resetCache(environmentId));
   const seen = new Set<string>();
   for (const row of rows) {
     if (seen.has(row.environmentId)) continue;
