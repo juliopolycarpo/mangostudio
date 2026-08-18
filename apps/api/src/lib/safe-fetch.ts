@@ -29,17 +29,63 @@
  */
 
 import {
+  UnsafeBaseUrlError,
+  type UnsafeBaseUrlReason,
   type ValidateBaseUrlOptions,
   validateBaseUrl,
 } from '../services/providers/core/base-url-policy';
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
+/**
+ * What kind of thing went wrong, for callers that have to act differently.
+ *
+ * The distinction that earns this taxonomy is `network` versus everything
+ * else: "this host could not reach the server" is recoverable from a local
+ * cache, while "the server answered and said no" is not. Reading it back out
+ * of the message worked until a URL contained the digits of a status code.
+ */
+export type SafeFetchErrorKind =
+  /** Not a URL this module will fetch, or a redirect into one. */
+  | 'invalid-url'
+  /** The address policy refused the host — see {@link UnsafeBaseUrlReason}. */
+  | 'address-refused'
+  /** The exchange never completed: DNS, connect, timeout, or a truncated body. */
+  | 'network'
+  /** The caller's own signal fired. Never a fault of the remote host. */
+  | 'cancelled'
+  /** The server answered with a non-2xx status, carried in `status`. */
+  | 'http'
+  /** The body exceeded the caller's cap, declared or streamed. */
+  | 'too-large';
+
 export class SafeFetchError extends Error {
-  constructor(message: string) {
+  readonly kind: SafeFetchErrorKind;
+  /** The HTTP status, on `kind: 'http'` only. */
+  readonly status?: number;
+
+  constructor(message: string, kind: SafeFetchErrorKind = 'network', status?: number) {
     super(message);
     this.name = 'SafeFetchError';
+    this.kind = kind;
+    if (status !== undefined) this.status = status;
   }
+}
+
+/**
+ * Whether a failure means the release could not be reached, as opposed to
+ * reaching it and being told no.
+ *
+ * `429` and `5xx` are counted with the transport failures on purpose: a rate
+ * limit or a bad gateway is the origin declining to answer *this* request, not
+ * an answer about the resource. A `404` is an answer, and callers that fall
+ * back to a local copy must not treat one as an excuse to.
+ */
+export function isUnreachableFailure(error: unknown): boolean {
+  if (!(error instanceof SafeFetchError)) return false;
+  if (error.kind === 'network') return true;
+  if (error.kind !== 'http') return false;
+  return error.status === 408 || error.status === 429 || (error.status ?? 0) >= 500;
 }
 
 export interface SafeFetchDeps {
@@ -89,7 +135,11 @@ export async function safeFetchBytes(
 
   if (!response.ok) {
     await discardBody(response);
-    throw new SafeFetchError(`Request failed with HTTP ${response.status}.`);
+    throw new SafeFetchError(
+      `Request failed with HTTP ${response.status}.`,
+      'http',
+      response.status
+    );
   }
 
   return {
@@ -104,20 +154,20 @@ function parseHttpsUrl(rawUrl: string): URL {
   try {
     url = new URL(rawUrl);
   } catch {
-    throw new SafeFetchError('URL is invalid.');
+    throw new SafeFetchError('URL is invalid.', 'invalid-url');
   }
   if (url.protocol !== 'https:') {
-    throw new SafeFetchError('URL must use HTTPS.');
+    throw new SafeFetchError('URL must use HTTPS.', 'invalid-url');
   }
   return url;
 }
 
 function assertLimits(options: SafeFetchOptions): void {
   if (!Number.isSafeInteger(options.maxBytes) || options.maxBytes < 1) {
-    throw new SafeFetchError('Response size limit is invalid.');
+    throw new SafeFetchError('Response size limit is invalid.', 'invalid-url');
   }
   if (!Number.isSafeInteger(options.maxRedirects) || options.maxRedirects < 0) {
-    throw new SafeFetchError('Redirect limit is invalid.');
+    throw new SafeFetchError('Redirect limit is invalid.', 'invalid-url');
   }
 }
 
@@ -153,14 +203,14 @@ async function followRedirects(
       const resolvedUrl = response.url ? new URL(response.url) : currentUrl;
       if (resolvedUrl.protocol !== 'https:') {
         await discardBody(response);
-        throw new SafeFetchError('Resolved to a non-HTTPS URL.');
+        throw new SafeFetchError('Resolved to a non-HTTPS URL.', 'invalid-url');
       }
       return { response, resolvedUrl };
     }
 
     if (hop >= options.maxRedirects) {
       await discardBody(response);
-      throw new SafeFetchError('Exceeded the redirect limit.');
+      throw new SafeFetchError('Exceeded the redirect limit.', 'invalid-url');
     }
 
     currentUrl = nextRedirectTarget(response, currentUrl);
@@ -182,7 +232,7 @@ async function requestOnce(
   try {
     return await deps.fetch(url, { redirect: 'manual', ...(signal && { signal }) });
   } catch (error) {
-    if (options.signal?.aborted) throw new SafeFetchError('Request was cancelled.');
+    if (options.signal?.aborted) throw new SafeFetchError('Request was cancelled.', 'cancelled');
     if (signal?.aborted) throw new SafeFetchError('Request timed out.');
     const detail = error instanceof Error ? error.message : 'Unknown network error.';
     throw new SafeFetchError(`Request failed: ${detail}`);
@@ -197,25 +247,35 @@ async function assertAllowedAddress(deps: SafeFetchDeps, url: URL): Promise<void
     );
   } catch (error) {
     const detail = error instanceof Error ? error.message : 'Unknown address policy failure.';
-    throw new SafeFetchError(`Host was refused: ${detail}`);
+    // A name that will not resolve is not a refusal, whatever the wording: the
+    // policy never got as far as judging an address. Callers with a local
+    // fallback depend on that difference, which is why it is read from the
+    // error's own reason rather than from the sentence it produced.
+    throw new SafeFetchError(`Host was refused: ${detail}`, addressFailureKind(error));
   }
+}
+
+function addressFailureKind(error: unknown): SafeFetchErrorKind {
+  const reason: UnsafeBaseUrlReason | undefined =
+    error instanceof UnsafeBaseUrlError ? error.reason : undefined;
+  return reason === 'unresolvable' ? 'network' : 'address-refused';
 }
 
 function nextRedirectTarget(response: Response, currentUrl: URL): URL {
   const location = response.headers.get('location');
   if (!location) {
-    throw new SafeFetchError('Redirect did not include a location.');
+    throw new SafeFetchError('Redirect did not include a location.', 'invalid-url');
   }
 
   let nextUrl: URL;
   try {
     nextUrl = new URL(location, currentUrl);
   } catch {
-    throw new SafeFetchError('Redirected to an invalid URL.');
+    throw new SafeFetchError('Redirected to an invalid URL.', 'invalid-url');
   }
   // Checked before the hop is taken, so a downgrade is never requested at all.
   if (nextUrl.protocol !== 'https:') {
-    throw new SafeFetchError('Redirected to a non-HTTPS URL.');
+    throw new SafeFetchError('Redirected to a non-HTTPS URL.', 'invalid-url');
   }
   return nextUrl;
 }
@@ -231,7 +291,7 @@ async function readBounded(response: Response, maxBytes: number): Promise<Uint8A
   const declaredLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     await discardBody(response);
-    throw new SafeFetchError(`Response exceeds the ${maxBytes}-byte limit.`);
+    throw new SafeFetchError(`Response exceeds the ${maxBytes}-byte limit.`, 'too-large');
   }
   if (!response.body) {
     throw new SafeFetchError('Response had no body.');
@@ -248,7 +308,7 @@ async function readBounded(response: Response, maxBytes: number): Promise<Uint8A
       size += value.byteLength;
       if (size > maxBytes) {
         await reader.cancel();
-        throw new SafeFetchError(`Response exceeds the ${maxBytes}-byte limit.`);
+        throw new SafeFetchError(`Response exceeds the ${maxBytes}-byte limit.`, 'too-large');
       }
       chunks.push(value);
     }

@@ -682,7 +682,10 @@ async function download(
     return result.bytes;
   } catch (error) {
     if (error instanceof SafeFetchError) {
-      if (error.message.includes('404') || /\b404\b/.test(error.message)) {
+      // The status, not the sentence: a release URL can carry the digits of a
+      // status code in its own version, and a body-derived message can carry
+      // any of them.
+      if (error.status === 404) {
         throw new WslAssetMissingError(`Could not download ${url}: ${error.message}.`);
       }
       throw new WslDownloadError(`Could not download ${url}: ${error.message}.`);
