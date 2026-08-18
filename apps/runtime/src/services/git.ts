@@ -138,9 +138,13 @@ export async function execGit(
   // one a surviving helper is genuinely holding open, so the abort still
   // reaches it. A reader that already finished has already torn down its
   // abort listener, so a late `abort()` here is a no-op for it.
-  void proc.exited.then(async () => {
-    await Bun.sleep(EXIT_DRAIN_GRACE_MS);
-    terminated.abort();
+  //
+  // The grace timer is unref'd: it outlives the call it was armed for, and a
+  // 50ms handle that keeps the loop alive would delay process exit for any
+  // short-lived invocation whose last act is a git call.
+  void proc.exited.then(() => {
+    const graceId = setTimeout(() => terminated.abort(), EXIT_DRAIN_GRACE_MS);
+    graceId.unref?.();
   });
 
   try {
