@@ -99,4 +99,37 @@ describe('hub git CLI facade', () => {
     expect(resolutions).toEqual([{ userId: 'user-1', environmentId: 'devbox' }]);
     expect(executions).toEqual([{ args: ['status', '--short'], cwd: '/remote/repo' }]);
   });
+
+  it('rejects a capture the runtime flagged incomplete instead of returning it', async () => {
+    const client = {
+      manifest: TEST_MANIFEST,
+      git: {
+        exec: (_params: { args: readonly string[]; cwd: string }) =>
+          Promise.resolve({ stdout: '', stderr: '', exitCode: 0, incomplete: true as const }),
+      },
+    } as RuntimeClient;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: (userId, environmentId) =>
+        Promise.resolve({
+          id: environmentId,
+          userId,
+          name: 'Remote',
+          transportKind: 'stdio',
+          config: {},
+          enabled: true,
+        }),
+      connectors: {
+        stdio: () => Promise.resolve({ client, close: () => undefined }),
+      },
+    });
+    setRuntimeConnectionManagerForTests(manager);
+
+    const error = await runGit(['status', '--porcelain=v2'], { cwd: '/remote/repo' }).catch(
+      (cause: unknown) => cause
+    );
+
+    expect(error).toBeInstanceOf(GitCliError);
+    expect((error as GitCliError).aborted).toBe(false);
+    expect((error as GitCliError).message).toContain('incomplete');
+  });
 });

@@ -384,6 +384,14 @@ export interface RuntimeGitExecResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number;
+  /**
+   * Git exited, but a surviving helper (credential helper, backgrounded child)
+   * still held a pipe open when the capture stopped, so `stdout`/`stderr` may
+   * be short of what Git actually wrote. Omitted — not `false` — when the
+   * capture drained normally, so an older peer that has never heard of this
+   * field is read the same way as a complete capture.
+   */
+  readonly incomplete?: boolean;
 }
 
 export interface RuntimeSnapshotCaptureParams {
