@@ -41,6 +41,36 @@ describe('parseQaMetricsEnvelope', () => {
     expect(envelope.metrics.tests).toEqual(makeMetrics(HEAD_SHA).tests);
   });
 
+  it('accepts optional failure signals on the tests object and still accepts a green payload without them', () => {
+    const green = parse(makeEnvelope());
+    expect(green.metrics.tests).toEqual(makeMetrics(HEAD_SHA).tests);
+
+    const failingTests = {
+      exitCode: 1,
+      durationSeconds: 165,
+      passed: 1150,
+      root: 0,
+      frontend: 1150,
+      api: 0,
+      shared: 0,
+      runtime: 0,
+      failed: 0,
+      failedFiles: 0,
+      errors: 2,
+      headlines: [
+        {
+          message: 'ReferenceError: window is not defined',
+          originatedIn: 'tests/unit/features/library/backup-list.test.tsx',
+        },
+      ],
+      parseMiss: false,
+    };
+    const envelope = parse(
+      makeEnvelope({ metrics: makeMetrics(HEAD_SHA, { tests: failingTests }) })
+    );
+    expect(envelope.metrics.tests).toEqual(failingTests);
+  });
+
   it('accepts a baseline envelope with null pr number and base sha', () => {
     const baseline = makeEnvelope({
       prNumber: null,

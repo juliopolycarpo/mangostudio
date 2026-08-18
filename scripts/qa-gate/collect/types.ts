@@ -37,15 +37,33 @@ export interface DependencyStats {
   readonly lockedPackages: number;
 }
 
+/** One error headline parsed from a Vitest or Bun log, with its originated-in file when present. */
+export interface TestErrorHeadline {
+  readonly message: string;
+  readonly originatedIn: string | null;
+}
+
 /**
  * Outcome of the single authoritative test pass (`bun run test --coverage`),
  * which runs every workspace's full suite plus the root scripts tests.
+ *
+ * Failure fields are omitted on a green run so stored baselines and the
+ * rendered report stay unchanged. `parseMiss` is set when the process exited
+ * non-zero and no Vitest/Bun failure signal could be parsed, never as zeros.
  */
 export type TestSuiteStats = {
   readonly exitCode: number | null;
   readonly durationSeconds: number | null;
   readonly passed: number;
   readonly root: number;
+  /** Vitest `Tests N failed` plus Bun `N fail`. */
+  readonly failed?: number;
+  /** Vitest `Test Files N failed`. */
+  readonly failedFiles?: number;
+  /** Vitest `Errors N errors` plus Bun `N error(s)`. */
+  readonly errors?: number;
+  readonly headlines?: readonly TestErrorHeadline[];
+  readonly parseMiss?: boolean;
 } & Readonly<Record<WorkspaceName, number>>;
 
 export interface ToolingCheckStats {

@@ -10,6 +10,7 @@ import { renderDuplicationSection } from './duplication';
 import { inlineCode, isError, shortSha } from './format';
 import { renderLocSection } from './loc';
 import { renderSummary } from './summary';
+import { renderTestFailureLead } from './test-failures';
 import { renderTestsSection } from './tests';
 import { renderToolingSection } from './tooling';
 import { renderVerdict } from './verdict';
@@ -53,9 +54,11 @@ const collectErrorNotes = (base: Metrics | null, head: Metrics | null): string[]
 export const renderDocument = (base: Metrics | null, head: Metrics | null): string => {
   const generated = head?.generatedAt ?? base?.generatedAt ?? new Date().toISOString();
   const errorNotes = collectErrorNotes(base, head);
+  const failureLead = renderTestFailureLead(head?.tests).trimEnd();
 
   // Verdict and summary stay visible; the full tables collapse behind a
-  // single details block to keep the PR discussion scannable.
+  // single details block to keep the PR discussion scannable. A failed suite
+  // leads with parsed error headlines before those tables.
   const lines: string[] = [
     '## QA Gate — Coverage & Quality',
     '',
@@ -63,6 +66,7 @@ export const renderDocument = (base: Metrics | null, head: Metrics | null): stri
     '',
     renderVerdict(base, head),
     '',
+    ...(failureLead ? [failureLead, ''] : []),
     renderSummary(base, head),
     '',
     '<details>',

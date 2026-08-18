@@ -1,15 +1,15 @@
 // Emits the test-derived QA metrics fragment right after the authoritative
-// `bun run test --coverage` pass: per-workspace pass counts parsed from the
-// runner log, the pass exit code and duration, and the coverage summaries
-// from `.mango/artifacts/coverage/`. collect.ts merges this fragment so the
-// suite never runs twice for one report.
+// `bun run test --coverage` pass: per-workspace pass counts and failure
+// signals parsed from the runner log, the pass exit code and duration, and
+// the coverage summaries from `.mango/artifacts/coverage/`. collect.ts merges
+// this fragment so the suite never runs twice for one report.
 // Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <coverage-log> <exit-code> <duration-seconds>
 
 import { ALL_WORKSPACE_NAMES } from '../lib/config';
 import { safe } from './collect/support';
 import type { CoverageSummary, Failable, TestMetricsFragment } from './collect/types';
 import { readWorkspaceCoverageSummary } from './coverage-summary';
-import { parseTestPassCounts } from './test-pass-counts';
+import { buildTestSuiteStats } from './test-result-counts';
 
 const [, , logPath, exitCodeArg, durationArg] = process.argv;
 if (!logPath) {
@@ -25,15 +25,12 @@ const parseOptionalInt = (raw: string | undefined): number | null => {
   return Number.isInteger(parsed) ? parsed : null;
 };
 
-const collectSuiteStats = async () => {
-  const counts = parseTestPassCounts(await Bun.file(logPath).text());
-  return {
-    exitCode: parseOptionalInt(exitCodeArg),
-    durationSeconds: parseOptionalInt(durationArg),
-    passed: Object.values(counts).reduce((sum, count) => sum + count, 0),
-    ...counts,
-  };
-};
+const collectSuiteStats = async () =>
+  buildTestSuiteStats(
+    await Bun.file(logPath).text(),
+    parseOptionalInt(exitCodeArg),
+    parseOptionalInt(durationArg)
+  );
 
 const coverage: Record<string, Failable<CoverageSummary>> = {};
 for (const workspace of ALL_WORKSPACE_NAMES) {
