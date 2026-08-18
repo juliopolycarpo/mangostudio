@@ -957,6 +957,17 @@ export interface RuntimeUpdateBeginParams {
   readonly version: string;
   readonly digest: string;
   readonly totalBytes: number;
+  /**
+   * Source commit these bytes were built from, for a rolling channel; `null` or
+   * absent for a stable one, where the version already names the build.
+   *
+   * The absent case is not "leave what is recorded alone": the slot config is
+   * written by merge, so an update that omitted this left the *previous*
+   * commit next to the new binary. Stale provenance reads as confident and
+   * wrong, where missing provenance at least reads as missing — so a slot's
+   * recorded commit is replaced or cleared by every update, never inherited.
+   */
+  readonly sourceSha?: string | null;
 }
 
 export interface RuntimeUpdateBeginResult {

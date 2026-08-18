@@ -33,6 +33,13 @@ export interface StreamRuntimeUpdateOptions {
   readonly client: RuntimeUpdateProtocol;
   readonly version: string;
   readonly digest: string;
+  /**
+   * Commit these bytes were built from, when the release said. Sent even when
+   * absent, as an explicit null: the peer's slot config is written by merge,
+   * and omitting the field is what leaves the previous build's commit next to
+   * the new binary.
+   */
+  readonly sourceSha?: string | undefined;
   readonly bytes: Uint8Array;
   readonly signal?: AbortSignal;
   /** Fires once the peer holds a staged session, which only closing can release. */
@@ -54,6 +61,7 @@ export async function streamRuntimeUpdate(
       version: options.version,
       digest: options.digest,
       totalBytes: options.bytes.byteLength,
+      sourceSha: options.sourceSha ?? null,
     },
     { signal: options.signal, timeoutMs: UPDATE_REQUEST_TIMEOUT_MS }
   );

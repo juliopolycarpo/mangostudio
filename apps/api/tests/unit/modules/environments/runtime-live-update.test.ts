@@ -58,6 +58,61 @@ describe('streamRuntimeUpdate', () => {
     expect(result.restart).toBe('scheduled');
   });
 
+  // #799: the peer's slot config is written by merge, so a build with no commit
+  // has to say so rather than stay quiet — silence keeps the previous one.
+  it('sends the source commit, and an explicit null when there is none', async () => {
+    const begun: RuntimeUpdateBeginParams[] = [];
+    const client: RuntimeUpdateProtocol = {
+      begin(params: RuntimeUpdateBeginParams) {
+        begun.push(params);
+        return Promise.resolve({ sessionId: 'update-1', maxChunkBytes: 64 });
+      },
+      chunk: () => Promise.resolve({ acceptedBytes: 2, receivedBytes: 2 }),
+      commit: () =>
+        Promise.resolve({
+          version: '1.1.0',
+          digest: `sha256:${'a'.repeat(64)}`,
+          restart: 'manual' as const,
+        }),
+    };
+    const base = {
+      client,
+      version: '1.1.0',
+      digest: `sha256:${'a'.repeat(64)}`,
+      bytes: new TextEncoder().encode('ab'),
+    };
+
+    await streamRuntimeUpdate({ ...base, sourceSha: 'abc1234' });
+    await streamRuntimeUpdate(base);
+
+    expect(begun.map((params) => params.sourceSha)).toEqual(['abc1234', null]);
+  });
+
+  // A peer that predates the field ignores it; the update still completes,
+  // just without provenance.
+  it('completes against a peer that ignores the source commit', async () => {
+    const client: RuntimeUpdateProtocol = {
+      begin: () => Promise.resolve({ sessionId: 'update-1', maxChunkBytes: 64 }),
+      chunk: () => Promise.resolve({ acceptedBytes: 2, receivedBytes: 2 }),
+      commit: () =>
+        Promise.resolve({
+          version: '1.1.0',
+          digest: `sha256:${'a'.repeat(64)}`,
+          restart: 'manual' as const,
+        }),
+    };
+
+    const result = await streamRuntimeUpdate({
+      client,
+      version: '1.1.0',
+      digest: `sha256:${'a'.repeat(64)}`,
+      bytes: new TextEncoder().encode('ab'),
+      sourceSha: 'abc1234',
+    });
+
+    expect(result.version).toBe('1.1.0');
+  });
+
   it('stops before begin when already cancelled', async () => {
     const controller = new AbortController();
     controller.abort();

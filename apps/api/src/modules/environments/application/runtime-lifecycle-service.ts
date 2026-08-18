@@ -888,6 +888,11 @@ async function updateOverLiveConnection(input: LiveUpdateInput): Promise<void> {
       client: client.update,
       version,
       digest: asset.digest,
+      // Present only for a rolling build. It travels because a rolling name
+      // reused across builds makes the commit the only thing identifying which
+      // one is on that machine — and because the write it feeds clears a stale
+      // one rather than keeping it.
+      sourceSha: asset.sourceSha,
       bytes: asset.bytes,
       signal: input.signal,
       onProgress: progress,

@@ -50,6 +50,15 @@ export const RUNTIME_UPDATE_EXIT_CODE = 75;
 
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
+/**
+ * A git commit as a release writes it: `github.sha`, or a short form of it.
+ *
+ * Shape-checked rather than merely typed, for the reason the hub's own manifest
+ * parser gives: this value is written into `runtime.json`, where the slot schema
+ * bounds it at 64 characters — and a config that fails that check is discarded
+ * whole, consent included. An out-of-shape sha must never reach the file.
+ */
+const SOURCE_SHA_PATTERN = /^[0-9a-f]{7,40}$/;
 
 export interface RuntimeUpdateServiceOptions {
   readonly slot: RuntimeSlot;
@@ -73,6 +82,8 @@ interface UpdateSession {
   readonly id: string;
   readonly version: string;
   readonly expectedDigest: string;
+  /** Undefined clears whatever the slot recorded; see the param's own note. */
+  readonly sourceSha: string | undefined;
   readonly totalBytes: number;
   readonly versionDir: string;
   readonly incomingPath: string;
@@ -180,6 +191,15 @@ export function createRuntimeUpdateService(
           });
         }
         if (
+          params.sourceSha !== undefined &&
+          params.sourceSha !== null &&
+          !SOURCE_SHA_PATTERN.test(params.sourceSha)
+        ) {
+          throw fail('Runtime update source commit is not a git commit sha.', {
+            reason: 'invalid_source_sha',
+          });
+        }
+        if (
           !Number.isSafeInteger(params.totalBytes) ||
           params.totalBytes <= 0 ||
           params.totalBytes > RUNTIME_UPDATE_MAX_BYTES
@@ -219,6 +239,7 @@ export function createRuntimeUpdateService(
           id,
           version: params.version,
           expectedDigest: params.digest,
+          sourceSha: params.sourceSha ?? undefined,
           totalBytes: params.totalBytes,
           versionDir,
           incomingPath,
@@ -345,6 +366,10 @@ export function createRuntimeUpdateService(
                 version: active.version,
                 binaryPath: active.livePath,
                 digest: active.expectedDigest,
+                // Always written, never omitted: the write merges, so leaving
+                // the key out keeps the commit of the build these bytes just
+                // replaced. `undefined` is how this file clears a field.
+                sourceSha: active.sourceSha,
               },
               options.env
             );
