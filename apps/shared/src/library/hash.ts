@@ -113,7 +113,19 @@ async function sha256(domain: string, bytes: Uint8Array): Promise<string> {
 export function normalizeHashPath(path: string, pathStyle: LibraryHashPathStyle): string {
   const normalized = pathStyle === 'win32' ? path.replaceAll('\\', '/') : path;
   if (normalized === '/') return normalized;
-  return normalized.replace(/\/+$/, '');
+  return stripTrailingSlashes(normalized);
+}
+
+/**
+ * Strips trailing `/` in a single linear pass.
+ *
+ * Replaces a `/\/+$/` cleanup that backtracks on library-supplied paths with
+ * many repetitions of `/` (CodeQL js/polynomial-redos).
+ */
+function stripTrailingSlashes(path: string): string {
+  let end = path.length;
+  while (end > 0 && path[end - 1] === '/') end -= 1;
+  return path.slice(0, end);
 }
 
 function joinPath(rootPath: string, relativePath: string): string {

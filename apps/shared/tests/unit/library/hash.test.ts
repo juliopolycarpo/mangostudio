@@ -4,6 +4,7 @@ import {
   hashLibraryFile,
   type LibraryHashPathStyle,
   type LibraryHashReader,
+  normalizeHashPath,
 } from '../../../src/library';
 
 interface FakeFile {
@@ -293,5 +294,37 @@ describe('library hashing', () => {
       invalidReason: 'unsafe-name',
     });
     expect(targetRead).toBe(false);
+  });
+
+  it('strips trailing slashes without treating `/` as empty', () => {
+    expect(normalizeHashPath('/', 'posix')).toBe('/');
+    expect(normalizeHashPath('/library/', 'posix')).toBe('/library');
+    expect(normalizeHashPath('/library///', 'posix')).toBe('/library');
+    expect(normalizeHashPath('C:\\a\\b\\', 'win32')).toBe('C:/a/b');
+    expect(normalizeHashPath('\\\\server\\share\\a\\', 'win32')).toBe('//server/share/a');
+  });
+
+  it('strips a long run of trailing slashes in linear time', () => {
+    const hostile = `/library${'/'.repeat(50_000)}`;
+    const start = performance.now();
+    expect(normalizeHashPath(hostile, 'posix')).toBe('/library');
+    expect(performance.now() - start).toBeLessThan(100);
+  });
+
+  it('hashes the same tree when realPath returns a trailing slash', async () => {
+    const files = { 'SKILL.md': { bytes: '# Skill\n' } };
+    const withSlash: LibraryHashReader = {
+      pathStyle: 'posix',
+      listFiles: () => ['SKILL.md'],
+      realPath: (path) => (path === '/library' ? '/library/' : path),
+      readFile: (path) => {
+        if (path !== '/library/SKILL.md') throw new Error(`Unexpected read: ${path}`);
+        return new TextEncoder().encode('# Skill\n');
+      },
+    };
+
+    expect(await hashLibraryDirectory('/library', withSlash)).toEqual(
+      await hashLibraryDirectory('/library', fakeReader(files))
+    );
   });
 });
