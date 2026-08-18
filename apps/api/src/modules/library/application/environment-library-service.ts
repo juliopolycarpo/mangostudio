@@ -94,7 +94,7 @@ export interface EnvironmentLibraryServiceOptions {
   readonly cacheTtlMs?: number;
   readonly requestTimeoutMs?: number;
   readonly listLocationStatuses?: EnvironmentProbingService['listLocationStatuses'];
-  readonly resetLocationCache?: EnvironmentProbingService['resetCache'];
+  readonly resetLocationCache?: EnvironmentProbingService['resetLocationCache'];
 }
 
 /**
@@ -131,7 +131,7 @@ export function createEnvironmentLibraryService(
     options.listLocationStatuses ?? environmentProbingService.listLocationStatuses;
   const resetLocationCache =
     options.resetLocationCache ??
-    ((environmentId?: string) => environmentProbingService.resetCache(environmentId));
+    ((environmentId?: string) => environmentProbingService.resetLocationCache(environmentId));
   const cache = new Map<string, CacheEntry>();
   const inflight = new Map<string, Promise<LibraryResource[]>>();
   const scanGeneration = new Map<string, number>();
@@ -152,6 +152,13 @@ export function createEnvironmentLibraryService(
     scope: LibraryScope,
     discoverOptions: EnvironmentLibraryDiscoverOptions = {}
   ): Promise<LibraryResource[]> => {
+    const force = discoverOptions.force === true;
+    // Before the first await, so a caller that asks for both at once — the
+    // propagation preview does — cannot have its location read start against
+    // the pre-rescan cache. Locations share the probing TTL now, so without
+    // this the matrix redraws its columns from the state the rescan replaced.
+    if (force) resetLocationCache(scope.environmentId);
+
     const client = await resolveClient(scope);
     if (!client.manifest.features.library) {
       throw new LibraryFeatureUnavailableError(
@@ -161,7 +168,6 @@ export function createEnvironmentLibraryService(
 
     const settings = await getAppSettings(db, scope.userId);
     const locationSettings = libraryLocationsFor(settings);
-    const force = discoverOptions.force === true;
     const kindsKey = discoverOptions.kinds ? [...discoverOptions.kinds].sort().join(',') : '';
     const signature = [
       scopeKey(scope),

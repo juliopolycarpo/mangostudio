@@ -56,6 +56,7 @@ function createDetectionServices() {
     resetCache: (environmentId) => {
       if (environmentId) resetCacheCalls.push(environmentId);
     },
+    resetLocationCache: () => undefined,
   };
   return {
     probingService,

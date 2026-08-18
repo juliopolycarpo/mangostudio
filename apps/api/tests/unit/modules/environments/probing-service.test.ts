@@ -23,6 +23,14 @@ interface FakeClient {
   /** Leaves `probing.runtimes` pending so a second caller can race it. */
   holdRuntime: boolean;
   settleRuntime: () => void;
+  /** Same, for `probing.agentClis`, which also carries location statuses. */
+  holdAgent: boolean;
+  settleAgent: () => void;
+  /**
+   * Stamped onto every location status at the moment the runtime is asked, so
+   * a held answer stays distinguishable from one taken after it.
+   */
+  locationEntryCount: number;
 }
 
 /**
@@ -41,8 +49,12 @@ function fakeClient(version = 'v1'): FakeClient {
     pathEnvParams: null,
     holdRuntime: false,
     settleRuntime: () => undefined,
+    holdAgent: false,
+    settleAgent: () => undefined,
+    locationEntryCount: 0,
   };
   const pendingRuntime: Array<(value: unknown) => void> = [];
+  const pendingAgent: Array<(value: unknown) => void> = [];
 
   const client = {
     manifest: MANIFEST,
@@ -64,14 +76,12 @@ function fakeClient(version = 'v1'): FakeClient {
         state.agentCalls += 1;
         state.selfParams = params.self ?? null;
         state.pathEnvParams = params.pathEnv ?? null;
-        return Promise.resolve({
-          statuses: [
-            {
-              targetId: 'claude',
-              id: 'claude',
-              locations: locationStatuses(),
-            },
-          ],
+        // Snapshotted now, not at settle time: a held scan answers with what
+        // the machine looked like when it was asked.
+        agentStatuses = [{ targetId: 'claude', id: 'claude', locations: locationStatuses(state) }];
+        return new Promise((resolve) => {
+          pendingAgent.push(resolve);
+          if (!state.holdAgent) settleAgent();
         });
       },
     },
@@ -79,11 +89,17 @@ function fakeClient(version = 'v1'): FakeClient {
       locations: () => {
         state.locationCalls += 1;
         return Promise.resolve({
-          locations: locationStatuses(),
+          locations: locationStatuses(state),
         });
       },
     },
   } as unknown as RuntimeClient;
+
+  let agentStatuses: unknown[] = [];
+
+  function settleAgent() {
+    for (const resolve of pendingAgent.splice(0)) resolve({ statuses: agentStatuses });
+  }
 
   function settleRuntime() {
     const statuses = [
@@ -95,15 +111,17 @@ function fakeClient(version = 'v1'): FakeClient {
 
   state.client = client;
   state.settleRuntime = settleRuntime;
+  state.settleAgent = settleAgent;
   return state;
 }
 
-function locationStatuses() {
+function locationStatuses(state: Pick<FakeClient, 'locationEntryCount'>) {
   return LIBRARY_LOCATION_DEFINITIONS.map((definition) => ({
     id: definition.id,
     kind: definition.kind,
     scope: definition.scope,
     exists: true,
+    entryCount: state.locationEntryCount,
   }));
 }
 
@@ -427,6 +445,49 @@ describe('the shared location cache', () => {
 
     await service.listLocationStatuses(LOCAL, { force: true });
     expect(local.locationCalls).toBe(2);
+  });
+
+  it('drops only the location answers on a location-scoped reset', async () => {
+    const local = fakeClient();
+    const service = serviceFor(() => local);
+
+    await service.listRuntimeStatuses(LOCAL);
+    await service.listLocationStatuses(LOCAL);
+    expect(local.runtimeCalls).toBe(1);
+    expect(local.locationCalls).toBe(1);
+
+    service.resetLocationCache(LOCAL.environmentId);
+
+    await service.listLocationStatuses(LOCAL);
+    expect(local.locationCalls).toBe(2);
+    // A library write says nothing about which toolchains are installed.
+    await service.listRuntimeStatuses(LOCAL);
+    expect(local.runtimeCalls).toBe(1);
+  });
+
+  it('does not let a slow agent probe overwrite a newer location scan', async () => {
+    const local = fakeClient();
+    local.holdAgent = true;
+    local.locationEntryCount = 1;
+    const service = serviceFor(() => local);
+
+    // Agent scan starts first and hangs holding its own pre-change snapshot.
+    const agents = service.listAgentCliStatuses(LOCAL);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(local.agentCalls).toBe(1);
+
+    // A location scan started later is the newer answer and must win.
+    local.locationEntryCount = 2;
+    await service.listLocationStatuses(LOCAL);
+    expect(local.locationCalls).toBe(1);
+
+    local.settleAgent();
+    await agents;
+
+    const after = await service.listLocationStatuses(LOCAL);
+    expect(local.locationCalls).toBe(1);
+    expect(after.map((location) => location.entryCount)).toEqual(after.map(() => 2));
   });
 
   it('reuses agent location results instead of walking the filesystem again', async () => {

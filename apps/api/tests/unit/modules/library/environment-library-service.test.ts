@@ -281,6 +281,30 @@ describe('createEnvironmentLibraryService', () => {
     expect(resetCalls).toEqual(['remote-d', undefined]);
   });
 
+  it('drops the shared location cache when a rescan is forced', async () => {
+    const client = {
+      manifest: makeManifest('remote-f'),
+      library: {
+        scan: () => Promise.resolve({ entries: [] }),
+        read: () => Promise.resolve({ content: '', truncated: false, sizeBytes: 0 }),
+      },
+    } as unknown as RuntimeClient;
+    const resetCalls: Array<string | undefined> = [];
+    const service = createEnvironmentLibraryService({
+      resolveClient: () => Promise.resolve(client),
+      resetLocationCache: (environmentId) => {
+        resetCalls.push(environmentId);
+      },
+    });
+    const scope = { userId: 'library-force-rescan-user', environmentId: 'remote-f' };
+
+    await service.discover(getDb(), scope);
+    expect(resetCalls).toEqual([]);
+
+    await service.discover(getDb(), scope, { force: true });
+    expect(resetCalls).toEqual(['remote-f']);
+  });
+
   it('resetLibraryCachesForEnvironments drops each environment once', () => {
     const resetCalls: string[] = [];
     resetLibraryCachesForEnvironments(

@@ -53,6 +53,14 @@ const FORCED_PROBE_MIN_INTERVAL_MS = 1_000;
  */
 const PROBE_BUDGET = { probeTimeoutMs: 2_000, totalTimeoutMs: 5_000 } as const;
 const PROBE_REQUEST_TIMEOUT_MS = 15_000;
+/**
+ * A location walk stats and counts every registered directory, so it is bound
+ * by the machine's filesystem rather than by a spawn budget. This is the
+ * deadline `EnvironmentLibraryService` enforced before the two caches merged;
+ * dropping it to the spawn-shaped `PROBE_REQUEST_TIMEOUT_MS` would fail slow
+ * remote machines that used to answer.
+ */
+const LOCATION_REQUEST_TIMEOUT_MS = 60_000;
 
 const RUNTIME_IDS: readonly RuntimeId[] = ['bun', 'node'];
 const VERSION_MANAGER_IDS: readonly VersionManagerId[] = ['nvm'];
@@ -110,6 +118,13 @@ export interface EnvironmentProbingService {
   listLocationStatuses(scope: ProbeScope, options?: ProbeOptions): Promise<LibraryLocationStatus[]>;
   /** Drops cached answers; without an environment, for every one of them. */
   resetCache(environmentId?: string): void;
+  /**
+   * Drops only the location answers. A library write changes what the
+   * locations look like and nothing about which toolchains are installed, so
+   * it must not discard — nor cancel the write of — an in-flight runtime,
+   * version-manager or agent-CLI scan.
+   */
+  resetLocationCache(environmentId?: string): void;
 }
 
 type ProbeKind = 'runtime' | 'version-manager' | 'agent' | 'location';
@@ -196,10 +211,14 @@ export function createEnvironmentProbingService(
   const scopeKey = (scope: ProbeScope) => `${scope.userId}${SCOPE_SEP}${scope.environmentId}`;
   const entryKey = (scope: ProbeScope, kind: ProbeKind, id: string) =>
     `${scopeKey(scope)}${SCOPE_SEP}${kind}${SCOPE_SEP}${id}`;
+  // Every by-key map shares the `userId SEP environmentId SEP kind SEP …`
+  // layout, so field 1 is the environment and field 2 is the probe kind.
+  const environmentOf = (key: string) => key.split(SCOPE_SEP)[1];
+  const kindOf = (key: string) => key.split(SCOPE_SEP)[2];
   /** Drops every entry a `scopeKey`-prefixed map holds for one environment. */
   const dropScopedTo = <V>(entries: Map<string, V>, environmentId: string): void => {
     for (const key of [...entries.keys()]) {
-      if (key.split(SCOPE_SEP)[1] === environmentId) entries.delete(key);
+      if (environmentOf(key) === environmentId) entries.delete(key);
     }
   };
 
@@ -297,6 +316,14 @@ export function createEnvironmentProbingService(
   const locationProbeKey = (scope: ProbeScope) =>
     `${scopeKey(scope)}${SCOPE_SEP}location${SCOPE_SEP}${[...LIBRARY_LOCATION_IDS].sort().join(',')}`;
 
+  /**
+   * Only a scan covering every agent target can union the whole registry, so
+   * only that scan claims the location key. A single-target re-check reserves
+   * nothing, and so cannot cancel a location scan it could never have seeded.
+   */
+  const seedsLocations = (kind: ProbeKind, ids: readonly string[]): boolean =>
+    kind === 'agent' && AGENT_TARGET_IDS.every((targetId) => ids.includes(targetId));
+
   const seedLocationCache = (
     scope: ProbeScope,
     client: RuntimeClient,
@@ -360,7 +387,10 @@ export function createEnvironmentProbingService(
         return lastForced.statuses as T[];
       }
     } else {
-      const pending = inflight.get(forcedKey) ?? inflight.get(key);
+      // Each candidate is tested on its own: a forced scan left behind by a
+      // previous connection must not hide the lazy scan running on this one.
+      const running = inflight.get(forcedKey);
+      const pending = sameClient(running) ? running : inflight.get(key);
       if (pending && sameClient(pending)) return (await pending.promise) as T[];
     }
 
@@ -369,6 +399,13 @@ export function createEnvironmentProbingService(
     // may land in the cache. An older completion still answers its caller.
     const generation = (generations.get(key) ?? 0) + 1;
     generations.set(key, generation);
+    // An agent scan over every target seeds the location cache from its own
+    // answer, so it reserves the location key's generation here for exactly
+    // the same reason: a slow agent probe must not overwrite the locations a
+    // scan that started later already wrote.
+    const locationKey = seedsLocations(kind, ids) ? locationProbeKey(scope) : null;
+    const locationGeneration = locationKey ? (generations.get(locationKey) ?? 0) + 1 : 0;
+    if (locationKey) generations.set(locationKey, locationGeneration);
     const epochAtStart = {
       global: globalResetEpoch,
       env: envResetEpochs.get(scope.environmentId) ?? 0,
@@ -382,7 +419,9 @@ export function createEnvironmentProbingService(
         ) {
           writeStatuses(scope, kind, client, statuses, idOf);
           if (force) recordForcedCompletion(key, statuses, client);
-          if (kind === 'agent') seedLocationCache(scope, client, statuses, force);
+          if (locationKey && generations.get(locationKey) === locationGeneration) {
+            seedLocationCache(scope, client, statuses, force);
+          }
         }
         return statuses;
       })
@@ -494,7 +533,7 @@ export function createEnvironmentProbingService(
       async (client) => {
         const result = await client.library.locations(
           { ...pathEnvFor(scope.environmentId) },
-          { timeoutMs: PROBE_REQUEST_TIMEOUT_MS }
+          { timeoutMs: LOCATION_REQUEST_TIMEOUT_MS }
         );
         return result.locations;
       }
@@ -549,6 +588,28 @@ export function createEnvironmentProbingService(
       dropScopedTo(inflight, environmentId);
       dropScopedTo(generations, environmentId);
       dropScopedTo(forcedCompletions, environmentId);
+    },
+
+    resetLocationCache(environmentId) {
+      const matches = (key: string) =>
+        kindOf(key) === 'location' &&
+        (environmentId === undefined || environmentOf(key) === environmentId);
+      for (const key of [...cache.keys()]) {
+        if (matches(key)) cache.delete(key);
+      }
+      for (const key of [...inflight.keys()]) {
+        if (matches(key)) inflight.delete(key);
+      }
+      for (const key of [...forcedCompletions.keys()]) {
+        if (matches(key)) forcedCompletions.delete(key);
+      }
+      // Bumped rather than dropped, which is what the reset epochs exist for
+      // on the whole-environment path: an in-flight location scan — or an
+      // agent scan holding a reservation to seed from its own locations — must
+      // not write the pre-change answer after this returns.
+      for (const [key, generation] of generations) {
+        if (matches(key)) generations.set(key, generation + 1);
+      }
     },
   };
 }
