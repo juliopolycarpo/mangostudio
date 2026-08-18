@@ -54,6 +54,9 @@ Consulte [`AGENTS.md`](../../AGENTS.md) para o guia completo de estilo, convenç
 - Hooks que contêm JSX devem usar a extensão `.tsx`
 - Arquivos `CLAUDE.md` com `@imports`
 - Agentes de IA: use [`AGENTS.md`](../../AGENTS.md) como fonte de orientações agnósticas
+- Extras só do Cursor (incluindo notas da VM Cursor Cloud) ficam em
+  [`.cursor/rules/`](../../.cursor/rules/). Não duplique `AGENTS.md` lá; o Cursor já carrega
+  esse arquivo automaticamente.
 
 ## Executando os Testes
 

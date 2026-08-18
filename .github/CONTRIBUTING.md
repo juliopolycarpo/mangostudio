@@ -56,6 +56,9 @@ Refer to [`AGENTS.md`](../AGENTS.md) for the full coding style, naming conventio
 - Hooks that contain JSX must use `.tsx` extension
 - `CLAUDE.md` files with `@imports`
 - AI related Agents: Use [`AGENTS.md`](../AGENTS.md) as a source of agentic stuff
+- Cursor-only extras (including Cursor Cloud VM notes) live in
+  [`.cursor/rules/`](../.cursor/rules/). Do not duplicate `AGENTS.md` there; Cursor loads it
+  automatically.
 
 ### Module Architecture
 

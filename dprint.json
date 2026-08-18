@@ -15,7 +15,7 @@
   },
   "toml": {},
   "yaml": {},
-  "includes": ["**/*.{md,mdx,toml,yml,yaml}", "**/Dockerfile", "**/Dockerfile.*"],
+  "includes": ["**/*.{md,mdc,mdx,toml,yml,yaml}", "**/Dockerfile", "**/Dockerfile.*"],
   "excludes": [
     "**/node_modules",
     "**/dist",
