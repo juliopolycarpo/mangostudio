@@ -61,6 +61,7 @@ import type { AdaptInput, AdaptResult, AdaptSuccess } from './adapters/types';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
 import { acknowledgeDivergence } from './conflict-resolution';
+import { resetLibraryCachesForEnvironments } from './environment-library-service';
 import { previewLibraryPropagation } from './propagation-preview';
 
 /** Matches library reads: hub deadline sits above runtime write work. */
@@ -132,6 +133,12 @@ export interface PropagationApplyDeps {
       readonly createdAtMs: number;
     }
   ) => Promise<void>;
+  /**
+   * Drops cached location health for machines this write touched. Location
+   * listing shares the probing TTL, so a create would otherwise keep reporting
+   * the pre-write exists/entryCount until that window closes.
+   */
+  resetCaches(rows: Iterable<{ readonly environmentId: string }>): void;
 }
 
 interface DirectoryWrite {
@@ -169,6 +176,7 @@ function resolveDeps(overrides: Partial<PropagationApplyDeps>): PropagationApply
     writeEngine: overrides.writeEngine ?? 'runtime',
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     recordBackup: overrides.recordBackup ?? recordWrittenBackup,
+    resetCaches: overrides.resetCaches ?? resetLibraryCachesForEnvironments,
     ...(overrides.runtimeApply && { runtimeApply: overrides.runtimeApply }),
   };
 }
@@ -281,6 +289,7 @@ async function runApply(
     }
   }
 
+  deps.resetCaches([...writeResult.applied, ...writeResult.backups]);
   return writeResult;
 }
 
@@ -1040,6 +1049,11 @@ export interface PropagationUndoDeps {
    * nothing and reports the set as pruned by retention.
    */
   environmentId: string;
+  /**
+   * Drops cached location health for the machine this restore touched. See
+   * `PropagationApplyDeps.resetCaches`.
+   */
+  resetCaches(rows: Iterable<{ readonly environmentId: string }>): void;
 }
 
 /**
@@ -1072,6 +1086,7 @@ async function runUndo(
     backup: overrides.backup ?? defaultBackupStoreDeps,
     writeEngine: overrides.writeEngine ?? 'runtime',
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
+    resetCaches: overrides.resetCaches ?? resetLibraryCachesForEnvironments,
     ...(overrides.runtimeUndo && { runtimeUndo: overrides.runtimeUndo }),
   };
 
@@ -1079,10 +1094,11 @@ async function runUndo(
   // Stamped by the hub, not the machine: the environment id is the hub's own
   // name for the connection, and a store reachable from two hubs would answer
   // with two different ones.
-  const named = (result: LibraryUndoResult): PropagationUndo => ({
-    ...result,
-    environmentId: deps.environmentId,
-  });
+  const named = (result: LibraryUndoResult): PropagationUndo => {
+    const undone = { ...result, environmentId: deps.environmentId };
+    deps.resetCaches([undone]);
+    return undone;
+  };
 
   try {
     if (deps.writeEngine === 'in-process') {

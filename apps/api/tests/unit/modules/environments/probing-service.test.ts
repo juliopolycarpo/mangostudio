@@ -64,19 +64,22 @@ function fakeClient(version = 'v1'): FakeClient {
         state.agentCalls += 1;
         state.selfParams = params.self ?? null;
         state.pathEnvParams = params.pathEnv ?? null;
-        return Promise.resolve({ statuses: [{ targetId: 'claude', id: 'claude' }] });
+        return Promise.resolve({
+          statuses: [
+            {
+              targetId: 'claude',
+              id: 'claude',
+              locations: locationStatuses(),
+            },
+          ],
+        });
       },
     },
     library: {
       locations: () => {
         state.locationCalls += 1;
         return Promise.resolve({
-          locations: LIBRARY_LOCATION_DEFINITIONS.map((definition) => ({
-            id: definition.id,
-            kind: definition.kind,
-            scope: definition.scope,
-            exists: true,
-          })),
+          locations: locationStatuses(),
         });
       },
     },
@@ -93,6 +96,15 @@ function fakeClient(version = 'v1'): FakeClient {
   state.client = client;
   state.settleRuntime = settleRuntime;
   return state;
+}
+
+function locationStatuses() {
+  return LIBRARY_LOCATION_DEFINITIONS.map((definition) => ({
+    id: definition.id,
+    kind: definition.kind,
+    scope: definition.scope,
+    exists: true,
+  }));
 }
 
 function serviceFor(clientFor: (scope: ProbeScope) => FakeClient, now = () => 1_000) {
@@ -360,6 +372,47 @@ describe('forced-probe admission', () => {
     await service.listRuntimeStatuses(LOCAL, { force: true });
     expect(local.runtimeCalls).toBe(2);
   });
+
+  it('does not reuse a forced completion produced by a previous connection', async () => {
+    let current = fakeClient('v1');
+    let clock = 1_000;
+    const service = serviceFor(
+      () => current,
+      () => clock
+    );
+
+    await service.listRuntimeStatuses(LOCAL, { force: true });
+    expect(current.runtimeCalls).toBe(1);
+
+    current = fakeClient('v2');
+    clock += 200;
+    const afterReconnect = await service.listRuntimeStatuses(LOCAL, { force: true });
+
+    expect(afterReconnect[0]?.effective?.version).toBe('v2');
+    expect(current.runtimeCalls).toBe(1);
+  });
+
+  it('lets an in-flight probe for another environment land after a scoped reset', async () => {
+    const clients = new Map([
+      [LOCAL.environmentId, fakeClient()],
+      [WSL.environmentId, fakeClient()],
+    ]);
+    const wsl = clients.get(WSL.environmentId) as FakeClient;
+    wsl.holdRuntime = true;
+    const service = serviceFor((scope) => clients.get(scope.environmentId) as FakeClient);
+
+    const inflightWsl = service.listRuntimeStatuses(WSL);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(wsl.runtimeCalls).toBe(1);
+
+    service.resetCache(LOCAL.environmentId);
+    wsl.settleRuntime();
+    await inflightWsl;
+
+    await service.listRuntimeStatuses(WSL);
+    expect(wsl.runtimeCalls).toBe(1);
+  });
 });
 
 describe('the shared location cache', () => {
@@ -374,5 +427,26 @@ describe('the shared location cache', () => {
 
     await service.listLocationStatuses(LOCAL, { force: true });
     expect(local.locationCalls).toBe(2);
+  });
+
+  it('reuses agent location results instead of walking the filesystem again', async () => {
+    const local = fakeClient();
+    const service = serviceFor(() => local);
+
+    await service.listAgentCliStatuses(LOCAL);
+    expect(local.agentCalls).toBe(1);
+    expect(local.locationCalls).toBe(0);
+
+    const locations = await service.listLocationStatuses(LOCAL);
+    expect(local.locationCalls).toBe(0);
+    expect(locations.map((location) => location.id)).toEqual(
+      LIBRARY_LOCATION_DEFINITIONS.map((definition) => definition.id)
+    );
+
+    await service.listAgentCliStatuses(LOCAL, { force: true });
+    expect(local.agentCalls).toBe(2);
+    const refreshed = await service.listLocationStatuses(LOCAL);
+    expect(local.locationCalls).toBe(0);
+    expect(refreshed).toEqual(locations);
   });
 });

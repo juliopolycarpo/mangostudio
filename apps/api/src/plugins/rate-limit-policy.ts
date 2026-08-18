@@ -87,14 +87,23 @@ export function isRuntimeSocketPath(path: string): boolean {
 const PROBE_FORCE_PATH_RE =
   /^(?:\/api)?\/environments\/(?:runtimes|version-managers|agents)\/[^/]+\/probe$/;
 
+/** Elysia keeps a trailing slash on `ctx.path` when `strictPath` is false. */
+function withoutTrailingSlash(path: string): string {
+  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+}
+
 /** Matches `POST .../environments/{runtimes,version-managers,agents}/:id/probe`. */
 export function isProbeForcePath(path: string): boolean {
   // classifyRateLimit runs per request, and almost none of them are probes:
   // the cheap segment check keeps the regex off the general hot path.
-  if (!matchesSegment(path, '/environments') && !matchesSegment(path, '/api/environments')) {
+  const normalized = withoutTrailingSlash(path);
+  if (
+    !matchesSegment(normalized, '/environments') &&
+    !matchesSegment(normalized, '/api/environments')
+  ) {
     return false;
   }
-  return PROBE_FORCE_PATH_RE.test(path);
+  return PROBE_FORCE_PATH_RE.test(normalized);
 }
 
 function isPostMethod(method: string | undefined): boolean {

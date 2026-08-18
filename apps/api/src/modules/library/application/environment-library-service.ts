@@ -320,3 +320,22 @@ export class LibraryFeatureUnavailableError extends Error {
 }
 
 export const environmentLibraryService = createEnvironmentLibraryService();
+
+/**
+ * Drops scan and location-health caches for each distinct environment a write
+ * just touched. Location listing shares the probing TTL, so a create or delete
+ * would otherwise keep reporting the pre-write exists/entryCount until it
+ * expires.
+ */
+export function resetLibraryCachesForEnvironments(
+  rows: Iterable<{ readonly environmentId: string }>,
+  resetCache: EnvironmentLibraryService['resetCache'] = (environmentId) =>
+    environmentLibraryService.resetCache(environmentId)
+): void {
+  const seen = new Set<string>();
+  for (const row of rows) {
+    if (seen.has(row.environmentId)) continue;
+    seen.add(row.environmentId);
+    resetCache(row.environmentId);
+  }
+}

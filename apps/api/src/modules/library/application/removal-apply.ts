@@ -39,6 +39,7 @@ import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/lo
 import { nodeTreeRemovalFs, type TreeRemovalFs } from '../infrastructure/tree-removal';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
+import { resetLibraryCachesForEnvironments } from './environment-library-service';
 import { compareText } from './preview-state';
 import { previewLibraryRemoval } from './removal-preview';
 
@@ -69,6 +70,11 @@ export interface RemovalApplyDeps {
       readonly createdAtMs: number;
     }
   ) => Promise<void>;
+  /**
+   * Drops cached location health for machines this removal touched. See
+   * `PropagationApplyDeps.resetCaches`.
+   */
+  resetCaches(rows: Iterable<{ readonly environmentId: string }>): void;
 }
 
 function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
@@ -81,6 +87,7 @@ function resolveDeps(overrides: Partial<RemovalApplyDeps>): RemovalApplyDeps {
     writeEngine: overrides.writeEngine ?? 'runtime',
     environmentId: overrides.environmentId ?? LOCAL_ENVIRONMENT_ID,
     recordBackup: overrides.recordBackup ?? recordWrittenBackup,
+    resetCaches: overrides.resetCaches ?? resetLibraryCachesForEnvironments,
     ...(overrides.runtimeRemove && { runtimeRemove: overrides.runtimeRemove }),
   };
 }
@@ -161,7 +168,9 @@ async function runRemoval(
         console.error('[library] Could not index the backup set for this removal:', error);
       });
   }
-  return { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
+  const result = { ...removalResult, kept: [...plan.kept, ...removalResult.kept] };
+  deps.resetCaches([...result.removed, ...result.backups]);
+  return result;
 }
 
 /**

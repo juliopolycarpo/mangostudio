@@ -127,6 +127,13 @@ type AnyStatus = RuntimeStatus | VersionManagerStatus | AgentCliStatus | Library
 interface ForcedCompletion {
   readonly completedAt: number;
   readonly statuses: readonly AnyStatus[];
+  /** Same identity `readFresh` uses: a reconnect is a different machine. */
+  readonly client: RuntimeClient;
+}
+
+interface InflightScan {
+  readonly client: RuntimeClient;
+  readonly promise: Promise<readonly AnyStatus[]>;
 }
 
 export interface EnvironmentProbingServiceOptions {
@@ -171,14 +178,15 @@ export function createEnvironmentProbingService(
   const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const getSelfVersion = options.getSelfVersion ?? getVersion;
   const cache = new Map<string, CacheEntry<AnyStatus>>();
-  const inflight = new Map<string, Promise<readonly AnyStatus[]>>();
+  const inflight = new Map<string, InflightScan>();
   /** Newest generation per scoped probe may write cache; older ones must not. */
   const generations = new Map<string, number>();
   /** Last result a forced probe produced, keyed the same as `generations`. */
   const forcedCompletions = new Map<string, ForcedCompletion>();
-  // Bumped on every resetCache so an in-flight scan cannot write pre-reset
-  // results after its generation key was cleared (both sides matching at 1).
-  let resetEpoch = 0;
+  // A full reset bumps the global epoch; a per-environment reset bumps only
+  // that environment so an in-flight scan elsewhere can still land.
+  let globalResetEpoch = 0;
+  const envResetEpochs = new Map<string, number>();
 
   // Environments are per-user rows, so two users can own the same id. The user
   // is part of the key for the same reason the connection is: neither of them
@@ -248,14 +256,63 @@ export function createEnvironmentProbingService(
    * of keys forced within that window instead of one entry per (user,
    * environment, kind, ids) combination ever probed, for the life of the hub.
    */
-  const recordForcedCompletion = (key: string, statuses: readonly AnyStatus[]): void => {
+  const recordForcedCompletion = (
+    key: string,
+    statuses: readonly AnyStatus[],
+    client: RuntimeClient
+  ): void => {
     const completedAt = now();
     for (const [existing, entry] of forcedCompletions) {
       if (completedAt - entry.completedAt >= FORCED_PROBE_MIN_INTERVAL_MS) {
         forcedCompletions.delete(existing);
       }
     }
-    forcedCompletions.set(key, { completedAt, statuses });
+    forcedCompletions.set(key, { completedAt, statuses, client });
+  };
+
+  /**
+   * The Library matrix and the agent-CLI panel describe the same paths.
+   * Union every agent's locations and, when that covers the full registry,
+   * reuse it so `listLocationStatuses` does not walk the filesystem again.
+   */
+  const completeLocationsFrom = (
+    statuses: readonly AnyStatus[]
+  ): LibraryLocationStatus[] | null => {
+    const byId = new Map<string, LibraryLocationStatus>();
+    for (const status of statuses) {
+      if (!('locations' in status) || !Array.isArray(status.locations)) continue;
+      for (const location of status.locations) {
+        byId.set(location.id, location);
+      }
+    }
+    const locations: LibraryLocationStatus[] = [];
+    for (const id of LIBRARY_LOCATION_IDS) {
+      const location = byId.get(id);
+      if (!location) return null;
+      locations.push(location);
+    }
+    return locations;
+  };
+
+  const locationProbeKey = (scope: ProbeScope) =>
+    `${scopeKey(scope)}${SCOPE_SEP}location${SCOPE_SEP}${[...LIBRARY_LOCATION_IDS].sort().join(',')}`;
+
+  const seedLocationCache = (
+    scope: ProbeScope,
+    client: RuntimeClient,
+    statuses: readonly AnyStatus[],
+    force: boolean
+  ): void => {
+    const locations = completeLocationsFrom(statuses);
+    if (!locations) return;
+    writeStatuses(
+      scope,
+      'location',
+      client,
+      locations,
+      (status) => (status as LibraryLocationStatus).id
+    );
+    if (force) recordForcedCompletion(locationProbeKey(scope), locations, client);
   };
 
   const probe = async <T extends AnyStatus>(
@@ -280,24 +337,31 @@ export function createEnvironmentProbingService(
     // again — but a lazy caller happily rides the forced probe already running.
     const forcedKey = `${key}${SCOPE_SEP}force`;
 
+    const sameClient = (scan: InflightScan | undefined) => scan?.client === client;
+
     if (force) {
       // Join the scan already running for this key. A mutation that must not
       // be observed as pre-change state calls resetCache, which drops inflight
       // so the next force starts a new walk instead of riding the stale one.
       const running = inflight.get(forcedKey);
-      if (running) return (await running) as T[];
+      if (running && sameClient(running)) return (await running.promise) as T[];
 
       // No scan is running: the minimum interval decides whether this request
       // gets the last forced answer or a new one. Ordered after the join so a
       // caller that arrives while a scan is in flight rides that scan rather
-      // than a completed result from before it started.
+      // than a completed result from before it started. Reuse also requires
+      // the same connection `readFresh` would demand.
       const lastForced = forcedCompletions.get(key);
-      if (lastForced && requestArrivedAt - lastForced.completedAt < FORCED_PROBE_MIN_INTERVAL_MS) {
+      if (
+        lastForced &&
+        lastForced.client === client &&
+        requestArrivedAt - lastForced.completedAt < FORCED_PROBE_MIN_INTERVAL_MS
+      ) {
         return lastForced.statuses as T[];
       }
     } else {
       const pending = inflight.get(forcedKey) ?? inflight.get(key);
-      if (pending) return (await pending) as T[];
+      if (pending && sameClient(pending)) return (await pending.promise) as T[];
     }
 
     const inflightKey = force ? forcedKey : key;
@@ -305,19 +369,27 @@ export function createEnvironmentProbingService(
     // may land in the cache. An older completion still answers its caller.
     const generation = (generations.get(key) ?? 0) + 1;
     generations.set(key, generation);
-    const epochAtStart = resetEpoch;
+    const epochAtStart = {
+      global: globalResetEpoch,
+      env: envResetEpochs.get(scope.environmentId) ?? 0,
+    };
     const promise: Promise<readonly AnyStatus[]> = run(client)
       .then((statuses) => {
-        if (generations.get(key) === generation && resetEpoch === epochAtStart) {
+        if (
+          generations.get(key) === generation &&
+          globalResetEpoch === epochAtStart.global &&
+          (envResetEpochs.get(scope.environmentId) ?? 0) === epochAtStart.env
+        ) {
           writeStatuses(scope, kind, client, statuses, idOf);
-          if (force) recordForcedCompletion(key, statuses);
+          if (force) recordForcedCompletion(key, statuses, client);
+          if (kind === 'agent') seedLocationCache(scope, client, statuses, force);
         }
         return statuses;
       })
       .finally(() => {
-        if (inflight.get(inflightKey) === promise) inflight.delete(inflightKey);
+        if (inflight.get(inflightKey)?.promise === promise) inflight.delete(inflightKey);
       });
-    inflight.set(inflightKey, promise);
+    inflight.set(inflightKey, { client, promise });
     return (await promise) as T[];
   };
 
@@ -460,14 +532,16 @@ export function createEnvironmentProbingService(
       probeLocations(scope, probeOptions?.force === true),
 
     resetCache(environmentId) {
-      resetEpoch += 1;
       if (!environmentId) {
+        globalResetEpoch += 1;
+        envResetEpochs.clear();
         cache.clear();
         inflight.clear();
         generations.clear();
         forcedCompletions.clear();
         return;
       }
+      envResetEpochs.set(environmentId, (envResetEpochs.get(environmentId) ?? 0) + 1);
       for (const [key, entry] of [...cache.entries()]) {
         if (entry.environmentId === environmentId) cache.delete(key);
       }

@@ -8,6 +8,7 @@ import { getDb } from '../../../../src/db/database';
 import {
   createEnvironmentLibraryService,
   LibraryFeatureUnavailableError,
+  resetLibraryCachesForEnvironments,
 } from '../../../../src/modules/library/application/environment-library-service';
 import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
 
@@ -278,5 +279,16 @@ describe('createEnvironmentLibraryService', () => {
     service.resetCache();
 
     expect(resetCalls).toEqual(['remote-d', undefined]);
+  });
+
+  it('resetLibraryCachesForEnvironments drops each environment once', () => {
+    const resetCalls: string[] = [];
+    resetLibraryCachesForEnvironments(
+      [{ environmentId: 'a' }, { environmentId: 'a' }, { environmentId: 'b' }],
+      (environmentId) => {
+        if (environmentId) resetCalls.push(environmentId);
+      }
+    );
+    expect(resetCalls).toEqual(['a', 'b']);
   });
 });

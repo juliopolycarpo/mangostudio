@@ -1061,10 +1061,10 @@ describe('external-agent adapter registry and supervisor', () => {
   });
 
   it('stops extending the wait once the approval has expired', async () => {
-    // The idle budget is 5ms; the approval TTL only has to outlive fixture +
-    // open + the first event. `Date.now() + 20` at construction was already
-    // past under coverage, so the next wait used the idle path and emitted
-    // the idle error instead of the approval one.
+    // Stamp the TTL on first read, which is when the supervisor records the
+    // event. Constructing Date.now()+N before fixture/open left coverage
+    // already past the stamp, so the next wait used the 5ms idle path.
+    let expiresAtMs = 0;
     const adapter = new FakeExternalAgentAdapter({
       hangTurn: true,
       events: [
@@ -1075,7 +1075,10 @@ describe('external-agent adapter registry and supervisor', () => {
             kind: 'command',
             title: 'rm -rf build',
             options: [{ id: 'accept', isDestructive: false }],
-            expiresAtMs: Date.now() + 500,
+            get expiresAtMs() {
+              if (expiresAtMs === 0) expiresAtMs = Date.now() + 500;
+              return expiresAtMs;
+            },
           },
         },
       ],

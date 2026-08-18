@@ -87,6 +87,12 @@ describe('rate-limit policy classification', () => {
     expect(classifyRateLimit('/api/environments/agents/claude/probe', undefined, 'POST')).toBe(
       RATE_LIMIT_BUCKETS.probeForce
     );
+    expect(classifyRateLimit('/api/environments/runtimes/bun/probe/', undefined, 'POST')).toBe(
+      RATE_LIMIT_BUCKETS.probeForce
+    );
+    expect(classifyRateLimit('/environments/agents/claude/probe/', undefined, 'POST')).toBe(
+      RATE_LIMIT_BUCKETS.probeForce
+    );
   });
 
   it('does not count non-POST probe-path requests against the forced-probe bucket', () => {
@@ -105,6 +111,7 @@ describe('rate-limit policy classification', () => {
     expect(isProbeForcePath('/api/environments/runtimes')).toBe(false);
     expect(isProbeForcePath('/api/environments/runtimes/bun')).toBe(false);
     expect(isProbeForcePath('/api/environments/runtimes/bun/probe/extra')).toBe(false);
+    expect(isProbeForcePath('/api/environments/runtimes/bun/probe/extra/')).toBe(false);
     expect(classifyRateLimit('/api/environments/runtimes/bun')).toBe(RATE_LIMIT_BUCKETS.general);
   });
 
