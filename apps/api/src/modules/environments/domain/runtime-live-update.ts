@@ -9,6 +9,7 @@ import type {
   RuntimeUpdateCommitParams,
   RuntimeUpdateCommitResult,
 } from '@mangostudio/runtime';
+import { throwIfAborted } from './cancellation';
 
 const HUB_UPDATE_CHUNK_BYTES = 32 * 1024;
 const UPDATE_REQUEST_TIMEOUT_MS = 60_000;
@@ -55,7 +56,7 @@ export interface StreamRuntimeUpdateOptions {
 export async function streamRuntimeUpdate(
   options: StreamRuntimeUpdateOptions
 ): Promise<RuntimeUpdateCommitResult> {
-  throwIfAborted(options.signal);
+  throwIfAborted(options.signal, 'Runtime update was cancelled.');
   const begun = await options.client.begin(
     {
       version: options.version,
@@ -74,7 +75,7 @@ export async function streamRuntimeUpdate(
   let written = 0;
   let seq = 0;
   while (written < options.bytes.byteLength) {
-    throwIfAborted(options.signal);
+    throwIfAborted(options.signal, 'Runtime update was cancelled.');
     const end = Math.min(options.bytes.byteLength, written + chunkBytes);
     const chunk = options.bytes.subarray(written, end);
     await options.client.chunk(
@@ -90,15 +91,10 @@ export async function streamRuntimeUpdate(
     options.onProgress?.(written, options.bytes.byteLength);
   }
 
-  throwIfAborted(options.signal);
+  throwIfAborted(options.signal, 'Runtime update was cancelled.');
   options.beforeCommit?.();
   return await options.client.commit(
     { sessionId: begun.sessionId },
     { signal: options.signal, timeoutMs: UPDATE_COMMIT_TIMEOUT_MS }
   );
-}
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (!signal?.aborted) return;
-  throw new DOMException('Runtime update was cancelled.', 'AbortError');
 }

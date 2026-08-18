@@ -28,6 +28,7 @@ import {
   RUNTIME_BINARY_BASENAME,
   RUNTIME_CURRENT_LINK_NAME,
   type RuntimeSlot,
+  SOURCE_SHA_PATTERN,
 } from '@mangostudio/shared/runtime-home';
 import { RuntimeUpdateError } from '../errors';
 import type {
@@ -50,15 +51,6 @@ export const RUNTIME_UPDATE_EXIT_CODE = 75;
 
 const VERSION_PATTERN = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 const DIGEST_PATTERN = /^sha256:[a-f0-9]{64}$/;
-/**
- * A git commit as a release writes it: `github.sha`, or a short form of it.
- *
- * Shape-checked rather than merely typed, for the reason the hub's own manifest
- * parser gives: this value is written into `runtime.json`, where the slot schema
- * bounds it at 64 characters — and a config that fails that check is discarded
- * whole, consent included. An out-of-shape sha must never reach the file.
- */
-const SOURCE_SHA_PATTERN = /^[0-9a-f]{7,40}$/;
 
 export interface RuntimeUpdateServiceOptions {
   readonly slot: RuntimeSlot;

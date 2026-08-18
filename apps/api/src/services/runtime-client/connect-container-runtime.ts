@@ -77,7 +77,8 @@ export type ContainerConnectProgress = (phase: 'pulling' | 'offline-cache') => v
 /**
  * What the attempt gives this launch. Structurally the manager's connect
  * context, kept local for the same reason {@link ContainerRuntimeDefinition}
- * is: this module must not import the manager back.
+ * is: this module must not import the manager back — the repo's circular-
+ * dependency gate flags that pairing even when the import is type-only.
  */
 export interface ContainerConnectContext {
   readonly report?: ContainerConnectProgress;
@@ -122,7 +123,7 @@ export async function connectContainerRuntime(
   const platformId = await withFailureReason(() =>
     deps.engines.prepare(config, {
       onPullStart: () => report?.('pulling'),
-      ...(context.signal ? { signal: context.signal } : {}),
+      signal: context.signal,
     })
   );
   const runtime = await withFailureReason(() => deps.resolveRuntimeBinary(platformId));

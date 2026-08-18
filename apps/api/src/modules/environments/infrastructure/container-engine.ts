@@ -39,6 +39,7 @@ import {
   resolveRuntimePlatformId,
 } from '@mangostudio/shared/runtime-home';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { throwIfAborted } from '../domain/cancellation';
 import { classifyContainerFailure, describeContainerFailure } from '../domain/container-failure';
 
 /** Local metadata questions answer immediately or the engine is wedged. */
@@ -159,7 +160,7 @@ function runWithExecFile(
       {
         timeout: options.timeoutMs,
         maxBuffer: options.maxOutputBytes ?? MAX_OUTPUT_BYTES,
-        ...(options.signal ? { signal: options.signal } : {}),
+        signal: options.signal,
         ...HIDDEN_WINDOW,
       },
       (error, stdout, stderr) => {
@@ -241,7 +242,7 @@ export function createContainerEngineService(
     const engine = containerEngineOf(config);
     const result = await run(containerImageInspectCommand(config), {
       timeoutMs: INSPECT_TIMEOUT_MS,
-      ...(signal ? { signal } : {}),
+      signal,
     });
     if (result.exitCode === 0) return result.stdout.trim() || null;
 
@@ -249,7 +250,7 @@ export function createContainerEngineService(
     // be classified as an engine failure and painted on the card as one. Asked
     // before the classification so a cancelled inspect says so — the pull path
     // has the same rule.
-    signal?.throwIfAborted();
+    throwIfAborted(signal, 'Container preparation was cancelled.');
     // A missing image is the expected answer here, not a failure: it is what
     // says a pull is needed. Anything else — no engine, no daemon — is real.
     const error = refuse(result, { engine, image: config.image });
@@ -302,7 +303,6 @@ export function createContainerEngineService(
       const engine = containerEngineOf(config);
       const context = { engine, image: config.image };
       const signal = options.signal;
-      const cancellable = signal ? { signal } : {};
 
       let id = await imageId(config, signal);
       if (!id) {
@@ -313,12 +313,12 @@ export function createContainerEngineService(
         const pull = await run(containerPullCommand(config), {
           timeoutMs: PULL_TIMEOUT_MS,
           maxOutputBytes: MAX_PULL_OUTPUT_BYTES,
-          ...cancellable,
+          signal,
         });
         // A killed CLI reports as an ordinary non-zero exit with no stderr,
         // which would be classified as a registry failure and painted on a card
         // as one. Asked before the exit code so a cancellation says so.
-        signal?.throwIfAborted();
+        throwIfAborted(signal, 'Container preparation was cancelled.');
         if (pull.exitCode !== 0) {
           // A pull this chatty is not a spawn failure; classifying it as one
           // would report a rate limit or a slow registry as a missing engine.
@@ -357,7 +357,7 @@ export function createContainerEngineService(
       const probeName = `${CONTAINER_NAME_PREFIX}-probe-${randomUUID()}`;
       const probe = await run(containerProbeCommand(config, PLATFORM_PROBE_SCRIPT, probeName), {
         timeoutMs: PROBE_TIMEOUT_MS,
-        ...cancellable,
+        signal,
       });
       if (probe.exitCode !== 0) {
         // `execFile`'s timeout only kills the CLI; the container it started
@@ -368,7 +368,7 @@ export function createContainerEngineService(
         if (probe.timedOut || signal?.aborted) {
           await run(containerKillCommand(engine, probeName), { timeoutMs: INSPECT_TIMEOUT_MS });
         }
-        signal?.throwIfAborted();
+        throwIfAborted(signal, 'Container preparation was cancelled.');
         throw refuse(probe, context);
       }
 

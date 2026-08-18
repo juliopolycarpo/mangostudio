@@ -110,10 +110,12 @@ export type RuntimeConnectPhase = 'pulling' | 'offline-cache';
  *
  * `signal` is aborted when the attempt is released — a disconnect, a delete, or
  * shutdown — and exists for the steps that can outlive the request that started
- * them: an image pull and a WSL provision both move gigabytes and are the
- * reason {@link RuntimeConnectionManager.connectInteractive} stops waiting. A
- * connector that only spawns a process can ignore it; the spawn is bounded by
- * its own handshake timeout.
+ * them: an image pull and a WSL provision both move gigabytes. Only the pull is
+ * also the reason {@link RuntimeConnectionManager.connectInteractive} stops
+ * waiting — a WSL provision is not the phase that wakes it, so that connect
+ * still waits it out; see {@link connectWslRuntime}. A connector that only
+ * spawns a process can ignore `signal` entirely; the spawn is bounded by its
+ * own handshake timeout.
  */
 export interface RuntimeConnectContext {
   readonly report: (phase: RuntimeConnectPhase) => void;
@@ -1171,7 +1173,7 @@ export async function connectWslRuntime(
     // It is not the phase `pullingImage` names, so a connect still waits for
     // it — but a disconnect must not leave it running against a distribution
     // nobody is connecting to any more.
-    ...(context?.signal ? { signal: context.signal } : {}),
+    signal: context?.signal,
   });
 
   const wslExecutable = resolveWslExecutable();
