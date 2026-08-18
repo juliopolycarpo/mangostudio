@@ -14,6 +14,17 @@
  *
  * A worker keeps the full JavaScript regular-expression dialect the grep tool
  * already promises, which swapping in a non-backtracking engine would not.
+ *
+ * The pool of workers is module-scoped and shared across every `fs.grep` call
+ * in the process, rather than one worker per call: starting a thread costs far
+ * more than most greps do, and narrow — the shape most calls have — is exactly
+ * where that startup cost dominates instead of amortising. A bounded pool with
+ * a request queue in front, rather than one shared worker, is the deliberate
+ * choice here: a worker terminated for an expired budget still takes down only
+ * the one request it was running, the same isolation a fresh worker per call
+ * gave for free. The cost that trades for is the pool's own lifecycle — idle
+ * workers `unref`d so they never keep the process alive, `ref`d again for as
+ * long as a request is actually in flight on them.
  */
 
 import { Worker } from 'node:worker_threads';
@@ -55,12 +66,14 @@ const UNFINISHED: GrepScanOutcome = { matches: [], moreMatches: false, incomplet
  * worker entrypoint is a file path that has to survive bundling, and a path that
  * silently fails to resolve there would take grep down in the binary while every
  * check, test and build stayed green. A string in the bundle cannot go missing.
+ *
+ * The pattern travels in each request message rather than `workerData`, since
+ * one worker now serves every pattern the pool sends it, not just the one it
+ * was started for.
  */
 const WORKER_SOURCE = `
-const { parentPort, workerData } = require('node:worker_threads');
+const { parentPort } = require('node:worker_threads');
 const { readFileSync } = require('node:fs');
-
-const regex = new RegExp(workerData.source, workerData.flags);
 
 parentPort.on('message', (request) => {
   let content;
@@ -72,6 +85,7 @@ parentPort.on('message', (request) => {
     return;
   }
 
+  const regex = new RegExp(request.source, request.flags);
   const lines = content.split('\\n');
   const matches = [];
   let moreMatches = false;
@@ -88,90 +102,175 @@ parentPort.on('message', (request) => {
 });
 `;
 
+/** Bounds how many grep scans can run off-thread at once. */
+const GREP_POOL_SIZE = 4;
+
+interface PoolWorker {
+  readonly worker: Worker;
+  busy: boolean;
+}
+
+let pool: PoolWorker[] = [];
+/** FIFO of scans waiting for a worker, once the pool is full and all busy. */
+const waiters: Array<(entry: PoolWorker) => void> = [];
+
+function spawnPoolWorker(): PoolWorker {
+  const worker = new Worker(WORKER_SOURCE, { eval: true });
+  const entry: PoolWorker = { worker, busy: false };
+  // Idle until handed to a scan, so it must not keep the process alive by
+  // itself; `acquire` refs it back for as long as a request is outstanding.
+  worker.unref();
+  // A worker can die with no scan waiting on it, and then nothing else would
+  // notice: an unhandled 'error' on a Worker is fatal to the whole process,
+  // and a dead one left in the pool would take the next scan's whole budget
+  // to be found out. Only handled here when idle — a worker that dies with a
+  // scan in flight is already settled and discarded by that scan's own
+  // listeners in `runOnWorker`, and handling it twice would double-discard.
+  worker.on('error', () => {
+    if (!entry.busy) discard(entry);
+  });
+  worker.on('exit', () => {
+    if (!entry.busy) discard(entry);
+  });
+  return entry;
+}
+
+/** Removes a worker from the pool and hands a fresh one to whoever is waiting next. */
+function discard(entry: PoolWorker): void {
+  pool = pool.filter((item) => item !== entry);
+  void entry.worker.terminate().catch(() => undefined);
+  const waiter = waiters.shift();
+  if (waiter) {
+    const created = spawnPoolWorker();
+    created.busy = true;
+    created.worker.ref();
+    pool.push(created);
+    waiter(created);
+  }
+}
+
+/** Hands back an idle worker, spawning one if the pool has room, or queues the request. */
+function acquire(): Promise<PoolWorker> {
+  const idle = pool.find((entry) => !entry.busy);
+  if (idle) {
+    idle.busy = true;
+    idle.worker.ref();
+    return Promise.resolve(idle);
+  }
+  if (pool.length < GREP_POOL_SIZE) {
+    const created = spawnPoolWorker();
+    created.busy = true;
+    created.worker.ref();
+    pool.push(created);
+    return Promise.resolve(created);
+  }
+  return new Promise((resolve) => {
+    waiters.push(resolve);
+  });
+}
+
+/** Returns a worker to the pool: straight to the next waiter, or idle and unref'd. */
+function release(entry: PoolWorker): void {
+  const waiter = waiters.shift();
+  if (waiter) {
+    // Stays busy and ref'd — handed directly to the next queued scan rather
+    // than going idle in between.
+    waiter(entry);
+    return;
+  }
+  entry.busy = false;
+  entry.worker.unref();
+}
+
+interface ScanMessage {
+  readonly path: string;
+  readonly maxMatches: number;
+  readonly source: string;
+  readonly flags: string;
+}
+
 /**
- * Creates a scanner for one compiled pattern. The worker starts on the first
- * file and is replaced whenever a budget expires, so the cost is paid once per
- * grep call rather than once per file.
+ * Runs one scan on an already-acquired worker. Each pool worker serves at most
+ * one request at a time — `acquire` guarantees that — so the `once` listeners
+ * here cannot cross-talk with another scan's reply.
+ */
+function runOnWorker(
+  entry: PoolWorker,
+  message: ScanMessage,
+  budgetMs: number
+): Promise<GrepScanOutcome> {
+  const { worker } = entry;
+  return new Promise<GrepScanOutcome>((resolve) => {
+    const settle = (outcome: GrepScanOutcome) => {
+      clearTimeout(timer);
+      worker.off('message', onMessage);
+      worker.off('error', onError);
+      worker.off('exit', onExit);
+      resolve(outcome);
+    };
+    const onMessage = (reply: { matches: GrepScanOutcome['matches']; moreMatches: boolean }) => {
+      settle({ ...reply, incomplete: false });
+      release(entry);
+    };
+    const onError = () => {
+      // A worker that threw cannot be reused, and one file failing to scan
+      // is not a reason to fail the whole search — but it is also not proof
+      // that the file holds nothing, so the caller is told the scan is short.
+      settle(UNFINISHED);
+      discard(entry);
+    };
+    // A worker that exits with a scan outstanding answers nothing at all.
+    // Without this the file would sit out its whole budget and then be
+    // reported as a timeout it never reached.
+    const onExit = () => {
+      settle(UNFINISHED);
+      discard(entry);
+    };
+    const timer = setTimeout(() => {
+      // Terminating is the only way to stop a synchronous match; the worker
+      // is past the point where it could answer a message.
+      settle(UNFINISHED);
+      discard(entry);
+    }, budgetMs);
+
+    worker.once('message', onMessage);
+    worker.once('error', onError);
+    worker.once('exit', onExit);
+    worker.postMessage(message);
+  });
+}
+
+/**
+ * Creates a scanner for one compiled pattern, drawing from the shared pool for
+ * every file it scans. Closing this scanner only stops it from starting new
+ * scans of its own — the pool it drew from keeps serving every other grep call
+ * already in flight.
  *
  * // Usage: const scanner = createGrepScanner(regex); try { … } finally { await scanner.close(); }
  */
 export function createGrepScanner(regex: RegExp): GrepScanner {
-  let worker: Worker | undefined;
   let closed = false;
-
-  const start = (): Worker => {
-    const started = new Worker(WORKER_SOURCE, {
-      eval: true,
-      workerData: { source: regex.source, flags: regex.flags },
-    });
-    // A worker can die with no scan waiting on it, and then nothing else would
-    // notice: an unhandled 'error' on a Worker is fatal to the whole process,
-    // and a dead one left in `worker` would take the next file's whole budget
-    // to be found out. Both events retire it so the next scan starts a new one.
-    started.on('error', () => retire(started));
-    started.on('exit', () => retire(started));
-    return started;
-  };
-
-  const retire = (target: Worker): void => {
-    if (worker === target) worker = undefined;
-  };
-
-  const discard = (target: Worker): void => {
-    retire(target);
-    void target.terminate().catch(() => undefined);
-  };
 
   return {
     async scan(path, maxMatches, budgetMs) {
       if (closed) return UNFINISHED;
-      worker ??= start();
-      const active = worker;
-
-      return await new Promise<GrepScanOutcome>((resolve) => {
-        const settle = (outcome: GrepScanOutcome) => {
-          clearTimeout(timer);
-          active.off('message', onMessage);
-          active.off('error', onError);
-          active.off('exit', onExit);
-          resolve(outcome);
-        };
-        const onMessage = (message: {
-          matches: GrepScanOutcome['matches'];
-          moreMatches: boolean;
-        }) => settle({ ...message, incomplete: false });
-        const onError = () => {
-          // A worker that threw cannot be reused, and one file failing to scan
-          // is not a reason to fail the whole search — but it is also not proof
-          // that the file holds nothing, so the caller is told the scan is short.
-          settle(UNFINISHED);
-          discard(active);
-        };
-        // A worker that exits with a scan outstanding answers nothing at all.
-        // Without this the file would sit out its whole budget and then be
-        // reported as a timeout it never reached.
-        const onExit = () => {
-          settle(UNFINISHED);
-          retire(active);
-        };
-        const timer = setTimeout(() => {
-          // Terminating is the only way to stop a synchronous match; the worker
-          // is past the point where it could answer a message.
-          settle(UNFINISHED);
-          discard(active);
-        }, budgetMs);
-
-        active.once('message', onMessage);
-        active.once('error', onError);
-        active.once('exit', onExit);
-        active.postMessage({ path, maxMatches });
-      });
+      const entry = await acquire();
+      if (closed) {
+        // Closed while queued for a worker: the caller has abandoned this
+        // scan, but the worker itself is fine and belongs back in the shared
+        // pool for the next one.
+        release(entry);
+        return UNFINISHED;
+      }
+      return runOnWorker(
+        entry,
+        { path, maxMatches, source: regex.source, flags: regex.flags },
+        budgetMs
+      );
     },
-    async close() {
+    close() {
       closed = true;
-      const active = worker;
-      worker = undefined;
-      if (active) await active.terminate().catch(() => undefined);
+      return Promise.resolve();
     },
   };
 }
