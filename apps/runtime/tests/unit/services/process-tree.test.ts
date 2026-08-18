@@ -6,6 +6,7 @@ import {
   killProcessTree,
   linuxTreeTargets,
   OWN_PROCESS_GROUP,
+  type ProcWalkDependencies,
   startWindowsTaskkillTree,
   windowsTaskkillArguments,
 } from '../../../src/services/process-tree';
@@ -89,44 +90,43 @@ describe('killProcessTree', () => {
 /** A leader no fake row ever matches, so a sweep finds zero targets and never calls `process.kill`. */
 const UNMATCHED_LEADER_PID = 999_999;
 
-function fakeProcTable(entryCount: number, perEntryDelayMs: number) {
+function fakeProcTable(entryCount: number, perEntryDelayMs: number): ProcWalkDependencies {
   const names = Array.from({ length: entryCount }, (_, index) => String(index + 1));
-  const readdirFn = async () => names;
-  const readFileFn = async (path: string) => {
-    await Bun.sleep(perEntryDelayMs);
-    const pid = path.split('/')[2];
-    // `pid (comm) state ppid pgrp ...` — ppid/pgrp both set to the row's own
-    // pid, so it never matches UNMATCHED_LEADER_PID as parent or group leader.
-    return `${pid} (fake) S 1 ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 0 20 0 1 0 0`;
+  return {
+    readdir: async () => names,
+    readFile: async (path: string) => {
+      await Bun.sleep(perEntryDelayMs);
+      const pid = path.split('/')[2];
+      // `pid (comm) state ppid pgrp ...` — ppid/pgrp both set to the row's own
+      // pid, so it never matches UNMATCHED_LEADER_PID as parent or group leader.
+      return `${pid} (fake) S 1 ${pid} ${pid} 0 -1 0 0 0 0 0 0 0 0 0 0 20 0 1 0 0`;
+    },
   };
-  return { readdirFn, readFileFn };
 }
 
 describe('killLinuxProcessTree', () => {
   it.skipIf(process.platform !== 'linux')(
     'yields to the event loop while walking a large fake /proc',
     async () => {
-      const { readdirFn, readFileFn } = fakeProcTable(30, 3);
+      // Many batches' worth of entries (the walk reads them
+      // PROC_READ_CONCURRENCY at a time), so the loop has to be free between
+      // batches throughout the walk, not merely before and after it.
+      const deps = fakeProcTable(1280, 5);
 
       const ticks: number[] = [];
       const heartbeat = setInterval(() => ticks.push(Date.now()), 5);
       let handled: boolean;
       try {
-        handled = await killLinuxProcessTree(
-          UNMATCHED_LEADER_PID,
-          () => undefined,
-          readdirFn,
-          readFileFn
-        );
+        handled = await killLinuxProcessTree(UNMATCHED_LEADER_PID, () => undefined, deps);
       } finally {
         clearInterval(heartbeat);
       }
 
       expect(handled).toBe(true);
-      // 30 entries * 3ms of fake I/O run entirely on the event loop. A
-      // synchronous walk of the same shape would starve the 5ms heartbeat the
-      // way `readdirSync`/`readFileSync` used to — this is the same
-      // discriminator the grep-budget event-loop test uses.
+      // The fake I/O runs entirely on the event loop. A synchronous walk of the
+      // same shape would starve the 5ms heartbeat the way `readdirSync`/
+      // `readFileSync` used to — the same discriminator the grep-budget
+      // event-loop test uses.
       expect(ticks.length).toBeGreaterThan(5);
     },
     20_000
@@ -142,18 +142,20 @@ describe('killLinuxProcessTree', () => {
       const leaderPid = 42;
       const entryCount = 300;
       const names = Array.from({ length: entryCount }, (_, index) => String(index + 1));
-      const readdirFn = async () => names;
-      const readFileFn = async (path: string) => {
-        await Bun.sleep(1);
-        const pid = Number(path.split('/')[2]);
-        // Every row but the last is its own group; the last is the one PID
-        // that actually belongs to the leader's group, and it is also the
-        // last entry the walk reads.
-        const pgid = pid === entryCount ? leaderPid : pid;
-        return `${pid} (fake) S 1 ${pgid} 0 -1 0 0 0 0 0 0 0 0 0 0 20 0 1 0 0`;
+      const deps: ProcWalkDependencies = {
+        readdir: async () => names,
+        readFile: async (path: string) => {
+          await Bun.sleep(1);
+          const pid = Number(path.split('/')[2]);
+          // Every row but the last is its own group; the last is the one PID
+          // that actually belongs to the leader's group, and it is also the
+          // last entry the walk reads.
+          const pgid = pid === entryCount ? leaderPid : pid;
+          return `${pid} (fake) S 1 ${pgid} 0 -1 0 0 0 0 0 0 0 0 0 0 20 0 1 0 0`;
+        },
       };
 
-      const targets = await linuxTreeTargets(leaderPid, readdirFn, readFileFn);
+      const targets = await linuxTreeTargets(leaderPid, deps);
 
       expect(targets).toEqual([entryCount]);
     },
