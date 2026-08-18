@@ -107,6 +107,16 @@ describe('rate-limit policy classification', () => {
     );
   });
 
+  it('keeps key-authenticated forced probes on the api-key bucket', () => {
+    // The api-key bucket exists so a script cannot starve a browser session on
+    // the same IP. `probe-force` is IP-keyed too, so classifying it first would
+    // hand that lever straight back.
+    const headers = new Headers({ 'x-api-key': 'mango_key_value' });
+    expect(classifyRateLimit('/api/environments/runtimes/bun/probe', headers, 'POST')).toBe(
+      RATE_LIMIT_BUCKETS.apiKey
+    );
+  });
+
   it('does not misclassify neighboring environments routes as forced probes', () => {
     expect(isProbeForcePath('/api/environments/runtimes')).toBe(false);
     expect(isProbeForcePath('/api/environments/runtimes/bun')).toBe(false);

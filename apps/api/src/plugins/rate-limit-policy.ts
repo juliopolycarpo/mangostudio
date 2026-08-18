@@ -94,16 +94,9 @@ function withoutTrailingSlash(path: string): string {
 
 /** Matches `POST .../environments/{runtimes,version-managers,agents}/:id/probe`. */
 export function isProbeForcePath(path: string): boolean {
-  // classifyRateLimit runs per request, and almost none of them are probes:
-  // the cheap segment check keeps the regex off the general hot path.
-  const normalized = withoutTrailingSlash(path);
-  if (
-    !matchesSegment(normalized, '/environments') &&
-    !matchesSegment(normalized, '/api/environments')
-  ) {
-    return false;
-  }
-  return PROBE_FORCE_PATH_RE.test(normalized);
+  // The pattern is anchored on a literal prefix, so a non-probe path fails on
+  // its first characters — a hand-rolled segment pre-check buys nothing here.
+  return PROBE_FORCE_PATH_RE.test(withoutTrailingSlash(path));
 }
 
 function isPostMethod(method: string | undefined): boolean {
@@ -143,7 +136,6 @@ export function classifyRateLimit(
 ): RateLimitBucket | null {
   if (isHealthPath(path)) return RATE_LIMIT_BUCKETS.health;
   if (isAuthPath(path)) return RATE_LIMIT_BUCKETS.auth;
-  if (isProbeForcePath(path) && isPostMethod(method)) return RATE_LIMIT_BUCKETS.probeForce;
   // Exempt here and enforced in the route, on the same bucket. A dialing
   // runtime has no response body to read: an HTTP 429 before the upgrade is a
   // refusal it can only see as a socket that failed to open, so it would back
@@ -151,6 +143,11 @@ export function classifyRateLimit(
   // Refusing after the upgrade costs one socket and buys a close code the peer
   // can act on.
   if (isRuntimeSocketPath(path)) return null;
+  // Ahead of the forced-probe bucket, not behind it: the api-key bucket exists
+  // so a noisy script cannot starve a browser session sharing its IP, and
+  // routing key-authenticated probes into the IP-keyed `probe-force` counter
+  // would hand automation exactly that lever back.
   if (trimmedApiKeyHeader(headers)) return RATE_LIMIT_BUCKETS.apiKey;
+  if (isProbeForcePath(path) && isPostMethod(method)) return RATE_LIMIT_BUCKETS.probeForce;
   return RATE_LIMIT_BUCKETS.general;
 }
