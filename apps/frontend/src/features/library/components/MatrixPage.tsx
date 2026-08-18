@@ -21,6 +21,7 @@ import { CoverageMatrix, MatrixLegend } from './CoverageMatrix';
 import { LibraryPageState } from './LibraryPageState';
 import { MatrixFilters } from './MatrixFilters';
 import { PropagationWizard } from './PropagationWizard';
+import { UnrecognisedEntries } from './UnrecognisedEntries';
 
 export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
   const { t } = useI18n();
@@ -161,6 +162,8 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
           onRetry={matrix.clearFilters}
         />
       ) : null}
+
+      <UnrecognisedEntries entries={matrix.unreadableEntries} locations={matrix.locations} />
 
       {wizardKeys && wizardKeys.length > 0 && (
         <PropagationWizard

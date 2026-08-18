@@ -10,7 +10,7 @@
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
-  LibraryResource,
+  LibraryScanResult,
   PropagationApply,
   PropagationApplyRequest,
   PropagationPreview,
@@ -48,7 +48,7 @@ interface EdenErrorLike {
 export async function rescanLibrary(
   force: boolean,
   environmentId?: string
-): Promise<LibraryResource[]> {
+): Promise<LibraryScanResult> {
   const { data, error } = await client.api.library.rescan.post(undefined, {
     query: {
       force: force ? 'true' : 'false',
@@ -56,7 +56,7 @@ export async function rescanLibrary(
     },
   });
   if (error) throw new ApiError(error.value);
-  return data as LibraryResource[];
+  return data as LibraryScanResult;
 }
 
 export async function previewPropagation(

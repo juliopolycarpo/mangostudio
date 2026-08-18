@@ -1605,6 +1605,17 @@ export const messages: Messages = {
       unreadable: 'The content could not be read.',
       'too-large': 'The content exceeds the read limit.',
       'invalid-metadata': 'The metadata could not be parsed.',
+      'unsafe-name': 'One of its internal file names cannot be safely represented.',
+    },
+    // Entries that could not even be named as a resource (#705) — a name has to
+    // pass this pattern before it can be anything more specific.
+    unreadable: {
+      heading: 'Unrecognised entries',
+      rule: 'Names may only use letters, numbers, "_", "-", and ".", with no spaces or other characters.',
+      reason: {
+        'invalid-name': 'This name does not match the allowed pattern.',
+        'unsupported-entry': 'This entry type is not supported here.',
+      },
     },
     format: {
       'markdown-plain': 'Markdown',

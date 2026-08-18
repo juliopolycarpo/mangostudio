@@ -1628,6 +1628,15 @@ export const messages = {
       unreadable: 'O conteúdo não pôde ser lido.',
       'too-large': 'O conteúdo excede o limite de leitura.',
       'invalid-metadata': 'Os metadados não puderam ser interpretados.',
+      'unsafe-name': 'O nome de um dos arquivos internos não pode ser representado com segurança.',
+    },
+    unreadable: {
+      heading: 'Entradas não reconhecidas',
+      rule: 'Os nomes só podem usar letras, números, "_", "-" e ".", sem espaços ou outros caracteres.',
+      reason: {
+        'invalid-name': 'Este nome não corresponde ao padrão permitido.',
+        'unsupported-entry': 'Este tipo de entrada não é suportado aqui.',
+      },
     },
     format: {
       'markdown-plain': 'Markdown',
