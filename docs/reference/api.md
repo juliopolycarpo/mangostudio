@@ -183,10 +183,13 @@ Every field in a `/api/library/settings` snapshot carries a `presentation`:
 | `redacted`   | A leaf whose key or value looked credential-shaped                                        |
 | `omitted`    | The **root** of a subtree the snapshot never walks — session state, caches, telemetry ids |
 
-An `omitted` marker carries no value, hash, or child count, and there is exactly
-one per omitted root regardless of the subtree's size. A setting that is simply
-not configured produces no field at all, which is why the marker exists: "no such
-setting" and "hidden on purpose" are different answers.
+An `omitted` marker carries no value, hash, or child count, and the walk stops at
+the root it marks — one marker per omitted key, at whatever depth or array index
+that key occurs, regardless of how large the subtree beneath it is. A document
+that repeats an omitted key across many entries therefore yields many markers,
+but never more than it has keys. A setting that is simply not configured produces
+no field at all, which is why the marker exists: "no such setting" and "hidden on
+purpose" are different answers.
 
 ## Upload Endpoints
 

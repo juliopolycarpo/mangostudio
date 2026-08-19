@@ -43,6 +43,44 @@ describe('settings redaction', () => {
     expect(fields).toEqual([{ path: 'authInfo', presentation: 'omitted' }]);
   });
 
+  // The bound is the document's own key count, not one marker per document: a
+  // `~/.claude.json`-shaped file repeats the same omitted keys once per project,
+  // and collapsing those into a single marker would name the wrong project.
+  it('emits one marker per occurrence of an omitted key, not one per document', () => {
+    const fields = redactSettingsDocument(
+      {
+        projects: {
+          '/home/ada/projects/mango': { sessionState: { id: 'a' }, allowedTools: ['Read'] },
+          '/srv/checkouts/other': { sessionState: { id: 'b' } },
+        },
+      },
+      { homeDir: '/home/ada' }
+    );
+
+    expect(fields).toEqual([
+      { path: 'projects.~/projects/mango.sessionState', presentation: 'omitted' },
+      {
+        path: 'projects.~/projects/mango.allowedTools[0]',
+        presentation: 'value',
+        value: 'Read',
+      },
+      { path: 'projects./srv/checkouts/other.sessionState', presentation: 'omitted' },
+    ]);
+  });
+
+  it('marks an omitted key inside an array element, once per element', () => {
+    expect(
+      redactSettingsDocument(
+        { hooks: [{ command: 'lint', sessionState: { id: 'a' } }, { sessionState: { id: 'b' } }] },
+        { homeDir: '/home/ada' }
+      )
+    ).toEqual([
+      { path: 'hooks[0].command', presentation: 'value', value: 'lint' },
+      { path: 'hooks[0].sessionState', presentation: 'omitted' },
+      { path: 'hooks[1].sessionState', presentation: 'omitted' },
+    ]);
+  });
+
   it('relativizes the home directory in an omitted marker path', () => {
     expect(
       redactSettingsDocument(

@@ -273,11 +273,12 @@ export const SettingsFieldSchema = Type.Union([
     presentation: Type.Literal('redacted'),
   }),
   /**
-   * A marker at the **root** of an omitted subtree — one per root, never one per
-   * leaf beneath it, so the payload stays bounded no matter how large the hidden
-   * document is. It carries nothing derived from the hidden content: no value,
-   * no hash, no child count. The marker says only that something is there and is
-   * deliberately not shown.
+   * A marker at the **root** of an omitted subtree — one per occurrence of an
+   * omitted key, at whatever depth or array index it appears, and never one per
+   * leaf beneath it, so the payload stays bounded by the document's own key
+   * count no matter how large the hidden subtrees are. It carries nothing
+   * derived from the hidden content: no value, no hash, no child count. The
+   * marker says only that something is there and is deliberately not shown.
    */
   Type.Object({
     path: Type.String({ minLength: 1 }),
