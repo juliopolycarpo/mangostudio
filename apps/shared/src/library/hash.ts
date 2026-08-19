@@ -32,6 +32,15 @@ export const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir/v2\0';
  */
 export const DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION = 2;
 
+/**
+ * Largest version the capability manifest and the lifecycle view accept, and
+ * the bound this module enforces when deriving one. Both are the same limit on
+ * purpose: a domain the runtime can hash with but not advertise would fail
+ * schema validation on hello, taking the whole handshake down over a hash
+ * bump. Failing here instead turns that into a test failure in this repo.
+ */
+export const MAX_DIRECTORY_HASH_DOMAIN_VERSION = 255;
+
 const DIRECTORY_HASH_DOMAIN_VERSION_PATTERN = /\/v(\d+)\0$/;
 
 /**
@@ -44,6 +53,11 @@ export function directoryHashDomainVersion(domain: string = DIRECTORY_HASH_DOMAI
   if (!Number.isSafeInteger(version) || version < 1) {
     throw new Error(
       `Directory hash domain must end in /v<n>\\0 so the runtime can advertise it (got ${JSON.stringify(domain)}).`
+    );
+  }
+  if (version > MAX_DIRECTORY_HASH_DOMAIN_VERSION) {
+    throw new Error(
+      `Directory hash domain version ${version} exceeds the ${MAX_DIRECTORY_HASH_DOMAIN_VERSION} the runtime can advertise; widen the capability schema in the same change.`
     );
   }
   return version;

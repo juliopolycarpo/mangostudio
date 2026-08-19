@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '@mangostudio/shared/library';
 import {
   assertRuntimeProtocolCompatible,
   decodeRuntimeFrameLine,
@@ -132,6 +133,20 @@ describe('runtime protocol compatibility', () => {
     expect(Value.Check(RuntimeCapabilityManifestSchema, { ...base, directoryHashDomain: 0 })).toBe(
       false
     );
+    // The bound the runtime enforces when deriving a version has to be the one
+    // the wire accepts, or a hash bump produces a manifest no peer can parse.
+    expect(
+      Value.Check(RuntimeCapabilityManifestSchema, {
+        ...base,
+        directoryHashDomain: MAX_DIRECTORY_HASH_DOMAIN_VERSION,
+      })
+    ).toBe(true);
+    expect(
+      Value.Check(RuntimeCapabilityManifestSchema, {
+        ...base,
+        directoryHashDomain: MAX_DIRECTORY_HASH_DOMAIN_VERSION + 1,
+      })
+    ).toBe(false);
   });
 
   it('accepts the optional external-agent capability and isolation attestation', () => {

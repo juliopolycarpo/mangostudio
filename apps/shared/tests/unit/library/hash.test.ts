@@ -6,6 +6,7 @@ import {
   hashLibraryFile,
   type LibraryHashPathStyle,
   type LibraryHashReader,
+  MAX_DIRECTORY_HASH_DOMAIN_VERSION,
   normalizeHashPath,
 } from '../../../src/library';
 
@@ -346,6 +347,18 @@ describe('directory hash domain version', () => {
   it('refuses a domain string that does not carry a version', () => {
     expect(() => directoryHashDomainVersion('mangostudio/library/dir\0')).toThrow(
       /must end in \/v<n>/
+    );
+  });
+
+  // A version the runtime hashes with but cannot advertise fails capability
+  // validation on hello, so a hash bump would take the handshake down rather
+  // than degrade one comparison. Fail on the bump instead.
+  it('refuses a version the capability manifest could not carry', () => {
+    expect(directoryHashDomainVersion(`mangostudio/library/dir/v255\0`)).toBe(
+      MAX_DIRECTORY_HASH_DOMAIN_VERSION
+    );
+    expect(() => directoryHashDomainVersion('mangostudio/library/dir/v256\0')).toThrow(
+      /exceeds the 255 the runtime can advertise/
     );
   });
 });

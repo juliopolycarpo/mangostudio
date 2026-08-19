@@ -523,6 +523,13 @@ export function assertLibraryRegistryConsistency(): void {
   if (targetById.size !== LIBRARY_TARGET_DEFINITIONS.length) {
     throw new Error('Library registry contains duplicate target ids.');
   }
+  // Every mixed-domain check reads this set, and an empty one answers "no
+  // directory-hashed kinds" rather than failing. Renaming the layout would then
+  // turn each of those guards into a silent no-op that still compares hashes
+  // across a domain boundary.
+  if (DIRECTORY_HASHED_RESOURCE_KINDS.size === 0) {
+    throw new Error('Library registry defines no directory-hashed kinds.');
+  }
 
   for (const target of LIBRARY_TARGET_DEFINITIONS) {
     for (const [kind, ids] of Object.entries(target.reads) as [

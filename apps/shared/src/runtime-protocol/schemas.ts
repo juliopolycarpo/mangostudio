@@ -3,6 +3,7 @@ import {
   ExternalAgentTargetIdSchema,
   ExternalIdentityIsolationSchema,
 } from '../external-agents/schemas';
+import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '../library/hash';
 import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
 
@@ -179,7 +180,9 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * already computes it. Unlike `enforcesPathPolicy`, silence is not the
    * pre-fix default.
    */
-  directoryHashDomain: Type.Optional(Type.Integer({ minimum: 1, maximum: 255 })),
+  directoryHashDomain: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: MAX_DIRECTORY_HASH_DOMAIN_VERSION })
+  ),
   /** Consent profile that produced `features`; absent on older peers. */
   profile: Type.Optional(
     Type.Union([
