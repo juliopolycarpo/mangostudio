@@ -31,6 +31,7 @@ import {
   TEST_MANAGED_CONFIG_PATH,
 } from '../../../src/lib/config';
 import { setLibraryLocationDefaultsForTest } from '../../../src/modules/app-settings/application/app-settings-service';
+import { setChatGptLoopbackPortForTest } from '../../../src/modules/connectors/infrastructure/chatgpt/loopback-server';
 import { setProviderSecretSyncTtlForTest } from '../../../src/services/providers/core/secret-service';
 import { registerApplicationServices } from '../../../src/services/register-application-services';
 
@@ -43,6 +44,11 @@ let setupPromise: Promise<void> | null = null;
 function installBaseTestConfig(): void {
   setLibraryLocationDefaultsForTest(DEFAULT_LIBRARY_LOCATION_SETTINGS);
   setProviderSecretSyncTtlForTest(0);
+  // OpenAI's registered loopback port is a single machine-wide resource. Every
+  // test that drives the ChatGPT sign-in flow takes an OS-assigned port instead,
+  // so files running in different worker processes cannot evict each other — and
+  // so a suite run never collides with a real `codex login`.
+  setChatGptLoopbackPortForTest(0);
   loadConfigForTest({
     auth: {
       secret: 'test-secret-at-least-32-characters-long',

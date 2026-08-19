@@ -26,6 +26,7 @@ import {
   chatGptOAuthProfile,
   exchangeAuthorizationCode,
 } from '../infrastructure/chatgpt/oauth-client';
+import { chatGptRedirectUri } from '../infrastructure/chatgpt/oauth-constants';
 import { getChatGptTokenService } from '../infrastructure/chatgpt/token-service';
 import { getSecretMetadataById } from '../infrastructure/connector-repository';
 import { createOAuthState, createPkcePair } from '../infrastructure/oauth/pkce';
@@ -149,6 +150,7 @@ export async function startChatGptOAuth(
             code,
             codeVerifier: verifier,
             authBaseUrl: getConfig().chatgpt.authBaseUrl,
+            redirectUri: chatGptRedirectUri(session.loopback.port),
             fetchImpl: deps.fetchImpl,
           });
           await completeSession(session, bundle, now);
@@ -168,12 +170,12 @@ export async function startChatGptOAuth(
 
   return {
     sessionId,
-    authorizeUrl: buildAuthorizeUrl(
-      chatGptOAuthProfile,
-      getConfig().chatgpt.authBaseUrl,
+    authorizeUrl: buildAuthorizeUrl(chatGptOAuthProfile, {
+      authBaseUrl: getConfig().chatgpt.authBaseUrl,
       state,
-      challenge
-    ),
+      challenge,
+      redirectUri: chatGptRedirectUri(session.loopback.port),
+    }),
     expiresAt,
   };
 }

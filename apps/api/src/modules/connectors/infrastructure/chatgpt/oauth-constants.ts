@@ -15,8 +15,18 @@ export const CHATGPT_OAUTH_CALLBACK_PORT = 1455;
 
 export const CHATGPT_OAUTH_CALLBACK_PATH = '/auth/callback';
 
+/**
+ * Redirect URI for a loopback server listening on `port`. The authorize request
+ * and the token exchange must carry the same one, and OpenAI accepts only the
+ * registered port — so in production this is always `CHATGPT_OAUTH_REDIRECT_URI`.
+ * // Usage: chatGptRedirectUri(loopback.port)
+ */
+export function chatGptRedirectUri(port: number): string {
+  return `http://localhost:${port}${CHATGPT_OAUTH_CALLBACK_PATH}`;
+}
+
 /** Redirect URI registered for the client — must match exactly, including scheme and port. */
-export const CHATGPT_OAUTH_REDIRECT_URI = `http://localhost:${CHATGPT_OAUTH_CALLBACK_PORT}${CHATGPT_OAUTH_CALLBACK_PATH}`;
+export const CHATGPT_OAUTH_REDIRECT_URI = chatGptRedirectUri(CHATGPT_OAUTH_CALLBACK_PORT);
 
 export const CHATGPT_OAUTH_SCOPES = 'openid profile email offline_access';
 

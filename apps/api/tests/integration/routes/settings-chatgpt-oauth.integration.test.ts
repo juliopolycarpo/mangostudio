@@ -12,7 +12,7 @@ import {
   resetChatGptOAuthSessions,
   startChatGptOAuth,
 } from '../../../src/modules/connectors/application/chatgpt-oauth';
-import { CHATGPT_OAUTH_CALLBACK_PORT } from '../../../src/modules/connectors/infrastructure/chatgpt/oauth-constants';
+import { setChatGptLoopbackPortForTest } from '../../../src/modules/connectors/infrastructure/chatgpt/loopback-server';
 import {
   createChatGptTokenService,
   setChatGptTokenServiceForTests,
@@ -29,7 +29,20 @@ const TEST_USER = {
   email: 'test-chatgpt-oauth@mangostudio.test',
 };
 
-const CALLBACK_BASE = `http://127.0.0.1:${CHATGPT_OAUTH_CALLBACK_PORT}`;
+/**
+ * The loopback callback the session advertised. The test environment pins the
+ * loopback port to 0, so the port is OS-assigned per process and has to be read
+ * back off the authorize URL rather than assumed.
+ */
+function callbackUrl(started: { authorizeUrl: string }, query: string): string {
+  const redirectUri = new URL(started.authorizeUrl).searchParams.get('redirect_uri');
+  expect(redirectUri).toBeTruthy();
+  const url = new URL(redirectUri as string);
+  // The loopback server binds IPv4 only; `localhost` may resolve to ::1 first.
+  url.hostname = '127.0.0.1';
+  url.search = query;
+  return url.toString();
+}
 
 /** Behavior toggle for the fake auth server's token endpoint. */
 let tokenEndpointBehavior: 'ok' | 'server-error' = 'ok';
@@ -158,7 +171,7 @@ describe('chatgpt oauth routes', () => {
 
     // Simulate the browser redirect back to the loopback server.
     const callbackResponse = await fetch(
-      `${CALLBACK_BASE}/auth/callback?code=fake-auth-code&state=${state}`
+      callbackUrl(started, `code=fake-auth-code&state=${state}`)
     );
     expect(callbackResponse.status).toBe(200);
 
@@ -207,7 +220,7 @@ describe('chatgpt oauth routes', () => {
     const first = await startOAuthSession(app);
     const firstUrl = new URL(first.authorizeUrl);
     await fetch(
-      `${CALLBACK_BASE}/auth/callback?code=fake-auth-code&state=${firstUrl.searchParams.get('state')}`
+      callbackUrl(first, `code=fake-auth-code&state=${firstUrl.searchParams.get('state')}`)
     );
     const firstStatus = await fetchStatus(app, first.sessionId);
     expect(firstStatus.connectorId).toBeTruthy();
@@ -225,7 +238,7 @@ describe('chatgpt oauth routes', () => {
     const second = await startOAuthSession(app, { name: 'my-chatgpt', connectorId });
     const secondUrl = new URL(second.authorizeUrl);
     await fetch(
-      `${CALLBACK_BASE}/auth/callback?code=second-code&state=${secondUrl.searchParams.get('state')}`
+      callbackUrl(second, `code=second-code&state=${secondUrl.searchParams.get('state')}`)
     );
     const secondStatus = await fetchStatus(app, second.sessionId);
     expect(secondStatus.connectorId).toBe(connectorId);
@@ -251,7 +264,7 @@ describe('chatgpt oauth routes', () => {
     const started = await startOAuthSession(app);
     const authorizeUrl = new URL(started.authorizeUrl);
     await fetch(
-      `${CALLBACK_BASE}/auth/callback?code=fake-auth-code&state=${authorizeUrl.searchParams.get('state')}`
+      callbackUrl(started, `code=fake-auth-code&state=${authorizeUrl.searchParams.get('state')}`)
     );
     const status = await fetchStatus(app, started.sessionId);
     expect(status.connectorId).toBeTruthy();
@@ -279,7 +292,7 @@ describe('chatgpt oauth routes', () => {
     restoreAuth = restore;
 
     const started = await startOAuthSession(app);
-    await fetch(`${CALLBACK_BASE}/auth/callback?code=fake-auth-code&state=wrong-state`);
+    await fetch(callbackUrl(started, 'code=fake-auth-code&state=wrong-state'));
 
     const status = await fetchStatus(app, started.sessionId);
     expect(status.status).toBe('failed');
@@ -294,7 +307,7 @@ describe('chatgpt oauth routes', () => {
     const started = await startOAuthSession(app);
     const authorizeUrl = new URL(started.authorizeUrl);
     await fetch(
-      `${CALLBACK_BASE}/auth/callback?code=bad-code&state=${authorizeUrl.searchParams.get('state')}`
+      callbackUrl(started, `code=bad-code&state=${authorizeUrl.searchParams.get('state')}`)
     );
 
     const status = await fetchStatus(app, started.sessionId);
@@ -302,11 +315,16 @@ describe('chatgpt oauth routes', () => {
   });
 
   it('returns 503 when the loopback port is already bound', async () => {
+    // Hold an OS-assigned port first, then point the loopback at it. Binding a
+    // well-known port here would race every other file that drives this flow.
     const blocker = Bun.serve({
       hostname: '127.0.0.1',
-      port: CHATGPT_OAUTH_CALLBACK_PORT,
+      port: 0,
       fetch: () => new Response('busy'),
     });
+    const blockedPort = blocker.port ?? 0;
+    expect(blockedPort).toBeGreaterThan(0);
+    setChatGptLoopbackPortForTest(blockedPort);
 
     try {
       const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, settingsRoutes);
@@ -323,8 +341,9 @@ describe('chatgpt oauth routes', () => {
       expect(response.status).toBe(503);
       const payload = (await response.json()) as ErrorPayload;
       expect(payload.code).toBe(ERROR_CODES.PROVIDER_ERROR);
-      expect(payload.error).toContain('1455');
+      expect(payload.error).toContain(String(blockedPort));
     } finally {
+      setChatGptLoopbackPortForTest(0);
       blocker.stop(true);
     }
   });

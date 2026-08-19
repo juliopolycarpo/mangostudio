@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import {
   type ChatGptLoopbackServer,
   ChatGptOAuthPortBusyError,
+  setChatGptLoopbackPortForTest,
   startChatGptLoopbackServer,
 } from '../../../../src/modules/connectors/infrastructure/chatgpt/loopback-server';
-import { CHATGPT_OAUTH_CALLBACK_PORT } from '../../../../src/modules/connectors/infrastructure/chatgpt/oauth-constants';
 
-const CALLBACK_BASE = `http://127.0.0.1:${CHATGPT_OAUTH_CALLBACK_PORT}`;
+// The test environment already pins the loopback port to 0, so every server
+// here takes an OS-assigned port and the callback base follows the bound one.
+const callbackBase = (server: ChatGptLoopbackServer): string => `http://127.0.0.1:${server.port}`;
 
 let activeServer: ChatGptLoopbackServer | null = null;
 
@@ -36,14 +38,15 @@ function startServer(overrides: Partial<Parameters<typeof startChatGptLoopbackSe
 afterEach(() => {
   activeServer?.stop();
   activeServer = null;
+  setChatGptLoopbackPortForTest(0);
 });
 
 describe('chatgpt loopback server', () => {
   it('accepts the callback when the state matches', async () => {
-    const { codes, failures } = startServer();
+    const { server, codes, failures } = startServer();
 
     const response = await fetch(
-      `${CALLBACK_BASE}/auth/callback?code=auth-code-1&state=expected-state`
+      `${callbackBase(server)}/auth/callback?code=auth-code-1&state=expected-state`
     );
 
     expect(response.status).toBe(200);
@@ -53,10 +56,10 @@ describe('chatgpt loopback server', () => {
   });
 
   it('rejects a state mismatch without invoking the code handler', async () => {
-    const { codes, failures } = startServer();
+    const { server, codes, failures } = startServer();
 
     const response = await fetch(
-      `${CALLBACK_BASE}/auth/callback?code=auth-code-1&state=attacker-state`
+      `${callbackBase(server)}/auth/callback?code=auth-code-1&state=attacker-state`
     );
 
     expect(response.status).toBe(200);
@@ -66,24 +69,40 @@ describe('chatgpt loopback server', () => {
   });
 
   it('propagates OAuth errors from the issuer redirect', async () => {
-    const { codes, failures } = startServer();
+    const { server, codes, failures } = startServer();
 
-    await fetch(`${CALLBACK_BASE}/auth/callback?error=access_denied`);
+    await fetch(`${callbackBase(server)}/auth/callback?error=access_denied`);
 
     expect(codes).toEqual([]);
     expect(failures[0]).toContain('access_denied');
   });
 
   it('returns 404 for anything but the callback path', async () => {
-    startServer();
+    const { server } = startServer();
 
-    const response = await fetch(`${CALLBACK_BASE}/some/other/path`);
+    const response = await fetch(`${callbackBase(server)}/some/other/path`);
 
     expect(response.status).toBe(404);
   });
 
+  it('binds a distinct port per server rather than one shared port', () => {
+    const first = startServer();
+    const second = startServer();
+
+    try {
+      expect(first.server.port).toBeGreaterThan(0);
+      expect(second.server.port).not.toBe(first.server.port);
+    } finally {
+      first.server.stop();
+    }
+  });
+
   it('throws ChatGptOAuthPortBusyError when the port is already bound', () => {
-    startServer();
+    const { server } = startServer();
+
+    // Pin the override to a port this test already holds, so the collision is
+    // arranged rather than raced against whatever else is on the machine.
+    setChatGptLoopbackPortForTest(server.port);
 
     expect(() => startServer()).toThrow(ChatGptOAuthPortBusyError);
   });

@@ -8,6 +8,12 @@
  */
 
 export interface OAuthLoopbackServer {
+  /**
+   * The port the server actually bound. Equal to the registered port in
+   * production; tests bind port 0 and read the OS-assigned one back, so the
+   * redirect URI they send must be built from this rather than the constant.
+   */
+  readonly port: number;
   stop(): void;
 }
 
@@ -118,5 +124,7 @@ export function startOAuthLoopbackServer(options: LoopbackServerOptions): OAuthL
     setTimeout(() => server.stop(true), 1_000).unref?.();
   }
 
-  return { stop };
+  // `Bun.serve` types the port as optional because unix-socket servers have
+  // none; a TCP listener always reports one.
+  return { port: server.port ?? options.port, stop };
 }

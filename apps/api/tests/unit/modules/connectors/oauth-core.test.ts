@@ -102,7 +102,13 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 describe('oauth core with a second provider profile', () => {
   it('builds the authorize URL from the profile', () => {
-    const url = new URL(buildAuthorizeUrl(acmeProfile, AUTH_BASE_URL, 'state-1', 'challenge-1'));
+    const url = new URL(
+      buildAuthorizeUrl(acmeProfile, {
+        authBaseUrl: AUTH_BASE_URL,
+        state: 'state-1',
+        challenge: 'challenge-1',
+      })
+    );
 
     expect(url.origin).toBe(AUTH_BASE_URL);
     expect(url.pathname).toBe('/oauth/authorize');
@@ -110,6 +116,19 @@ describe('oauth core with a second provider profile', () => {
     expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:14559/acme/done');
     expect(url.searchParams.get('scope')).toBe('openid acme.workspaces');
     expect(url.searchParams.get('code_challenge_method')).toBe('S256');
+  });
+
+  it('sends the overriding redirect URI when the loopback bound another port', () => {
+    const url = new URL(
+      buildAuthorizeUrl(acmeProfile, {
+        authBaseUrl: AUTH_BASE_URL,
+        state: 'state-1',
+        challenge: 'challenge-1',
+        redirectUri: 'http://localhost:45123/acme/done',
+      })
+    );
+
+    expect(url.searchParams.get('redirect_uri')).toBe('http://localhost:45123/acme/done');
   });
 
   it('exchanges a code using the profile client id, redirect, and claims', async () => {
@@ -286,17 +305,18 @@ describe('oauth token service with a second provider profile', () => {
 });
 
 describe('oauth loopback server with a second provider profile', () => {
-  const PORT = 14559;
   const CALLBACK_PATH = '/acme/done';
 
   let activeServer: OAuthLoopbackServer | null = null;
 
+  // Port 0 lets the OS assign one per server: a fixed port here is a single
+  // machine-wide resource that files in other worker processes race for.
   function startServer(overrides: Partial<LoopbackServerOptions> = {}) {
     const codes: string[] = [];
     const failures: string[] = [];
     const server = startOAuthLoopbackServer({
       providerLabel: 'Acme',
-      port: PORT,
+      port: 0,
       callbackPath: CALLBACK_PATH,
       expectedState: 'expected-state',
       ttlMs: 30_000,
@@ -320,10 +340,10 @@ describe('oauth loopback server with a second provider profile', () => {
   });
 
   it('serves the profile callback path and injects the provider label', async () => {
-    const { codes } = startServer();
+    const { server, codes } = startServer();
 
     const response = await fetch(
-      `http://127.0.0.1:${PORT}${CALLBACK_PATH}?code=code-1&state=expected-state`
+      `http://127.0.0.1:${server.port}${CALLBACK_PATH}?code=code-1&state=expected-state`
     );
 
     expect(response.status).toBe(200);
@@ -332,17 +352,17 @@ describe('oauth loopback server with a second provider profile', () => {
   });
 
   it('labels failure messages with the provider', async () => {
-    const { failures } = startServer();
+    const { server, failures } = startServer();
 
-    await fetch(`http://127.0.0.1:${PORT}${CALLBACK_PATH}?error=access_denied`);
+    await fetch(`http://127.0.0.1:${server.port}${CALLBACK_PATH}?error=access_denied`);
 
     expect(failures[0]).toBe('Acme sign-in was not completed: access_denied');
   });
 
   it('throws the injected port-busy error when the port is bound', () => {
-    startServer();
+    const { server } = startServer();
 
-    expect(() => startServer()).toThrow('acme port busy');
+    expect(() => startServer({ port: server.port })).toThrow('acme port busy');
   });
 });
 
@@ -362,7 +382,7 @@ describe('oauth session store', () => {
       connectorName: 'acme',
       status: 'pending',
       expiresAt: 1_000,
-      loopback: { stop: () => stops.push(1) },
+      loopback: { port: 0, stop: () => stops.push(1) },
       ...overrides,
     };
     return { session, stops };
