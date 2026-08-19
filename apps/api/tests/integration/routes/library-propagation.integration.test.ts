@@ -13,7 +13,7 @@ import type {
   PropagationPreview,
   PropagationPreviewEntry,
 } from '@mangostudio/shared/library';
-import { enabledLibraryLocations } from '@mangostudio/shared/library';
+import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudio/shared/library';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../src/db/database';
 import {
@@ -112,6 +112,7 @@ function previewSkills(
         statuses: new Map(
           [...targetLocationIds].map((id) => [id, describeLocation(id, pathEnv)] as const)
         ),
+        directoryHashDomain: directoryHashDomainVersion(),
       }),
       enabledLocationIds: async () =>
         enabledLibraryLocations(libraryLocationsFor(skillLocationSettings()), 'home'),

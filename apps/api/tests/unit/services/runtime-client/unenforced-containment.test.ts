@@ -59,6 +59,13 @@ function withoutDeclaration(manifest: RuntimeCapabilityManifest): RuntimeCapabil
   return rest;
 }
 
+function withoutDirectoryHashDomain(
+  manifest: RuntimeCapabilityManifest
+): RuntimeCapabilityManifest {
+  const { directoryHashDomain: _dropped, ...rest } = manifest;
+  return rest;
+}
+
 function readRestricted(client: RuntimeClient, name: string): Promise<unknown> {
   return client.fs.readFile({
     chatId: 'c1',
@@ -137,6 +144,21 @@ describe('a peer that declares containment enforcement', () => {
     await readRestricted(client, 'file.txt');
 
     expect(client.enforcesPathPolicy).toBe(true);
+    expect(client.directoryHashDomain).toBeGreaterThanOrEqual(2);
     expect(warnings()).toHaveLength(0);
+  });
+});
+
+describe('a peer that omits the directory-hash domain', () => {
+  it('is treated as v1', async () => {
+    const client = await connect(withoutDirectoryHashDomain);
+    expect(client.directoryHashDomain).toBe(1);
+  });
+});
+
+describe('a peer that omits the directory-hash domain', () => {
+  it('is treated as v1', async () => {
+    const client = await connect(withoutDirectoryHashDomain);
+    expect(client.directoryHashDomain).toBe(1);
   });
 });

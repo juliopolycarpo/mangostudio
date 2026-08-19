@@ -13,7 +13,7 @@ import type {
   RemovalPreview,
   RemovalPreviewEntry,
 } from '@mangostudio/shared/library';
-import { enabledLibraryLocations } from '@mangostudio/shared/library';
+import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudio/shared/library';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../src/db/database';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
@@ -115,6 +115,7 @@ function previewRemoval(
         statuses: new Map(
           [...locationIds].map((id) => [id, describeLocation(id, pathEnv)] as const)
         ),
+        directoryHashDomain: directoryHashDomainVersion(),
       }),
       enabledLocationIds: () =>
         Promise.resolve(

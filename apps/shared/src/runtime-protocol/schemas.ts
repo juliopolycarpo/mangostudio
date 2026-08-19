@@ -168,6 +168,17 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * has not answered it in the affirmative.
    */
   enforcesPathPolicy: Type.Optional(Type.Boolean()),
+  /**
+   * Which directory-hash domain this runtime computes. A version, not a boolean:
+   * the domain is monotonic and will move again, and a v3 must not need a new
+   * field.
+   *
+   * Directory hashes are not comparable across a domain boundary. File-backed
+   * resources are unaffected — only the directory domain moved. Absent means
+   * **v1** (an older peer), like `enforcesPathPolicy` and unlike the `features`
+   * keys.
+   */
+  directoryHashDomain: Type.Optional(Type.Integer({ minimum: 1, maximum: 255 })),
   /** Consent profile that produced `features`; absent on older peers. */
   profile: Type.Optional(
     Type.Union([

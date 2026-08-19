@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type {
-  AdapterStrategy,
-  LibraryInstance,
-  LibraryLocationId,
-  LibraryLocationStatus,
-  LibraryResource,
-  PropagationBlockedReason,
-  PropagationDestination,
-  PropagationPreviewEntry,
-  ResourceFormat,
-  ResourceKind,
+import {
+  type AdapterStrategy,
+  directoryHashDomainVersion,
+  type LibraryInstance,
+  type LibraryLocationId,
+  type LibraryLocationStatus,
+  type LibraryResource,
+  type PropagationBlockedReason,
+  type PropagationDestination,
+  type PropagationPreviewEntry,
+  type ResourceFormat,
+  type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import {
@@ -89,9 +90,12 @@ interface PreviewHarness {
       readonly resources?: LibraryResource[];
       readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
       readonly blockedReason?: PropagationBlockedReason;
+      readonly directoryHashDomain?: number;
     }
   >;
   readonly environmentIds?: string[];
+  /** Directory-hash domain of the Local snapshot. Defaults to this build's domain. */
+  readonly directoryHashDomain?: number;
 }
 
 function snapshotFor(
@@ -101,7 +105,12 @@ function snapshotFor(
 ): EnvironmentSnapshot {
   const machine =
     environmentId === LOCAL_ENVIRONMENT_ID
-      ? { resources: harness.resources, statuses: harness.statuses, blockedReason: undefined }
+      ? {
+          resources: harness.resources,
+          statuses: harness.statuses,
+          blockedReason: undefined,
+          directoryHashDomain: harness.directoryHashDomain,
+        }
       : (harness.environments?.[environmentId] ?? {});
   return {
     environmentId,
@@ -110,6 +119,7 @@ function snapshotFor(
     statuses: new Map(
       targetLocationIds.map((id) => [id, machine.statuses?.[id] ?? status(id)] as const)
     ),
+    directoryHashDomain: machine.directoryHashDomain ?? directoryHashDomainVersion(),
   };
 }
 
@@ -637,5 +647,90 @@ describe('previewLibraryPropagation across machines', () => {
     // from the narrower preview must not authorise the wider one.
     expect(twoMachines.previewToken).not.toBe(oneMachine.previewToken);
     expect(twoMachines.stateHash).not.toBe(oneMachine.stateHash);
+  });
+
+  it('reports a shared directory resource as incomparable across v1 and v2 runtimes, not divergent', async () => {
+    const result = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      directoryHashDomain: 2,
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': { resources: [ghOnRemote], directoryHashDomain: 1 },
+      },
+    });
+
+    const entry = result.entries[0];
+    expect(entry.divergence).toBe('incomparable');
+    expect(entry.requiresWinnerSelection).toBe(false);
+    const remote = entry.destinations.find(
+      (destination) => destination.environmentId === 'wsl-ubuntu'
+    );
+    const local = entry.destinations.find((destination) => destination.environmentId === 'local');
+    expect(remote?.blockedReason).toBe('hash-domain-mismatch');
+    expect(local?.blockedReason).toBe('hash-domain-mismatch');
+    expect(remote?.outcomes).toEqual([]);
+  });
+
+  it('compares directory hashes normally once both runtimes report the same domain', async () => {
+    const matchingRemote = resource('skill:gh', 'skill', 'gh', [
+      instance('mango-skills', 'hash-local'),
+    ]);
+    const result = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      directoryHashDomain: 2,
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': { resources: [matchingRemote], directoryHashDomain: 2 },
+      },
+    });
+
+    const entry = result.entries[0];
+    expect(entry.divergence).toBe('uniform');
+    expect(entry.requiresWinnerSelection).toBe(false);
+    expect(entry.destinations.every((destination) => destination.blockedReason === undefined)).toBe(
+      true
+    );
+  });
+
+  it('treats an omitted directory-hash domain as v1 when resolved to 1', async () => {
+    const result = await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      directoryHashDomain: 2,
+      environmentIds: ['local', 'legacy-box'],
+      environments: {
+        'legacy-box': { resources: [ghOnRemote], directoryHashDomain: 1 },
+      },
+    });
+
+    expect(result.entries[0].divergence).toBe('incomparable');
+    expect(
+      result.entries[0].destinations.find(
+        (destination) => destination.environmentId === 'legacy-box'
+      )?.blockedReason
+    ).toBe('hash-domain-mismatch');
+  });
+
+  it('still compares file-backed resources across mixed directory-hash domains', async () => {
+    const localInstruction = resource('instruction:global', 'instruction', 'global', [
+      instance('mango-instructions', 'file-hash-a'),
+    ]);
+    const remoteInstruction = resource('instruction:global', 'instruction', 'global', [
+      instance('mango-instructions', 'file-hash-b'),
+    ]);
+    const result = await preview(['instruction:global'], ['mango-instructions'], {
+      resources: [localInstruction],
+      directoryHashDomain: 2,
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': { resources: [remoteInstruction], directoryHashDomain: 1 },
+      },
+    });
+
+    const entry = result.entries[0];
+    expect(entry.divergence).toBe('divergent');
+    expect(entry.requiresWinnerSelection).toBe(true);
+    expect(entry.destinations.every((destination) => destination.blockedReason === undefined)).toBe(
+      true
+    );
   });
 });

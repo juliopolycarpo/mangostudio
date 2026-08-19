@@ -9,6 +9,7 @@ import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import {
   assertLibraryRegistryConsistency,
   COMPARABLE_RESOURCE_KINDS,
+  DIRECTORY_HASHED_RESOURCE_KINDS,
   getLibraryLocation,
   getLibraryTarget,
   LIBRARY_LOCATION_DEFINITIONS,
@@ -96,6 +97,10 @@ describe('library target registry', () => {
 
   it('treats only kinds with a writable location as comparable', () => {
     expect([...COMPARABLE_RESOURCE_KINDS].sort()).toEqual(['instruction', 'skill', 'subagent']);
+  });
+
+  it('hashes only directory-of-dirs kinds with the directory domain', () => {
+    expect([...DIRECTORY_HASHED_RESOURCE_KINDS]).toEqual(['skill']);
   });
 
   it('reproduces MangoStudio skill precedence exactly', () => {

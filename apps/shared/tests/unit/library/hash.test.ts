@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  directoryHashDomainOf,
+  directoryHashDomainVersion,
   hashLibraryDirectory,
   hashLibraryFile,
   type LibraryHashPathStyle,
@@ -325,6 +327,24 @@ describe('library hashing', () => {
 
     expect(await hashLibraryDirectory('/library', withSlash)).toEqual(
       await hashLibraryDirectory('/library', fakeReader(files))
+    );
+  });
+});
+
+describe('directory hash domain version', () => {
+  it('derives the advertised version from DIRECTORY_HASH_DOMAIN', () => {
+    expect(directoryHashDomainVersion()).toBe(2);
+    expect(directoryHashDomainVersion('mangostudio/library/dir/v3\0')).toBe(3);
+  });
+
+  it('treats an omitted advertised domain as v1', () => {
+    expect(directoryHashDomainOf(undefined)).toBe(1);
+    expect(directoryHashDomainOf(2)).toBe(2);
+  });
+
+  it('refuses a domain string that does not carry a version', () => {
+    expect(() => directoryHashDomainVersion('mangostudio/library/dir\0')).toThrow(
+      /must end in \/v<n>/
     );
   });
 });

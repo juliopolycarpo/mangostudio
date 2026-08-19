@@ -1580,6 +1580,7 @@ export const messages: Messages = {
       uniform: 'Copies identical',
       divergent: 'Copies differ',
       'not-comparable': 'Not comparable',
+      incomparable: 'Hash versions differ',
     },
     // One label per matrix glyph. Nothing here calls an absence "missing": a
     // resource Cursor does not have is usually absent on purpose.
@@ -1589,6 +1590,7 @@ export const messages: Messages = {
       shadowed: 'Shadowed, identical',
       divergent: 'Differs from the other copies',
       'only-here': 'Only here',
+      incomparable: 'Cannot compare',
     },
     cellHint: {
       present: 'This agent reads one copy of this resource.',
@@ -1596,6 +1598,8 @@ export const messages: Messages = {
       shadowed: 'Two copies in different locations, holding the same content.',
       divergent: 'The content here is not the same as the other copies.',
       'only-here': 'This is the only agent that reads the resource.',
+      incomparable:
+        'These copies were hashed by different runtime versions, so the hashes cannot be compared.',
     },
     invalidReason: {
       'path-escape': 'The path points outside the location.',
@@ -1700,6 +1704,8 @@ export const messages: Messages = {
         'The SKILL.md files are identical, so the difference is in another file in the directory.',
       notComparable:
         'This kind is read-only everywhere and each agent stores its own format, so comparing the copies says nothing actionable.',
+      incomparable:
+        'These copies were hashed by different runtime versions, so the hashes cannot be compared. The files may still match. Update every connected runtime to the same release, then scan again.',
       recentApply: 'A recent propagation wrote this resource.',
     },
     diff: {
@@ -1825,6 +1831,8 @@ export const messages: Messages = {
       'environment-offline': 'This machine is not connected right now.',
       'environment-unsupported': 'This machine does not offer library access.',
       'environment-readonly': "This machine's owner has not allowed writing to files here.",
+      'hash-domain-mismatch':
+        'This machine hashes directories with a different version than the source, so a write here cannot be verified.',
       // Removal shares this catalog; only the reason below is unique to it.
       'invalid-instance':
         'This copy could not be read end to end, so it cannot be backed up faithfully. Remove it yourself.',

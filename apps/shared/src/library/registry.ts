@@ -503,6 +503,18 @@ export const COMPARABLE_RESOURCE_KINDS: ReadonlySet<ResourceKind> = new Set(
   )
 );
 
+/**
+ * Kinds hashed with the directory content-hash domain. File-backed kinds are
+ * unaffected — only the directory domain moved — so a mixed-version pair of
+ * runtimes must not withhold a file comparison the way it withholds a directory
+ * one.
+ */
+export const DIRECTORY_HASHED_RESOURCE_KINDS: ReadonlySet<ResourceKind> = new Set(
+  LIBRARY_LOCATION_DEFINITIONS.filter((location) => location.layout === 'directory-of-dirs').map(
+    (location) => location.kind
+  )
+);
+
 /** Fails fast if a code-defined id, kind, or reverse target edge drifts. */
 export function assertLibraryRegistryConsistency(): void {
   if (locationById.size !== LIBRARY_LOCATION_DEFINITIONS.length) {

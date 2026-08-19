@@ -108,6 +108,32 @@ describe('runtime protocol compatibility', () => {
     ).toBe(true);
   });
 
+  it('accepts an advertised directory-hash domain and treats its absence as valid', () => {
+    const base = {
+      platform: 'linux',
+      arch: 'x64',
+      pathStyle: 'posix' as const,
+      homeDir: '/home/peer',
+      shells: ['bash'],
+      git: { available: true },
+      features: {
+        tools: true,
+        git: true,
+        probing: true,
+        mcp: true,
+        library: true,
+        checkpoints: true,
+      },
+    };
+    expect(Value.Check(RuntimeCapabilityManifestSchema, base)).toBe(true);
+    expect(Value.Check(RuntimeCapabilityManifestSchema, { ...base, directoryHashDomain: 2 })).toBe(
+      true
+    );
+    expect(Value.Check(RuntimeCapabilityManifestSchema, { ...base, directoryHashDomain: 0 })).toBe(
+      false
+    );
+  });
+
   it('accepts the optional external-agent capability and isolation attestation', () => {
     expect(
       Value.Check(RuntimeCapabilityManifestSchema, {

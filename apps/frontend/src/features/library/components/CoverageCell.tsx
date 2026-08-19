@@ -18,6 +18,7 @@ const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
   shadowed: 'text-tertiary',
   divergent: 'text-error',
   'only-here': 'text-tertiary',
+  incomparable: 'text-warning',
 };
 
 interface CoverageCellProps {

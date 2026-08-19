@@ -21,6 +21,7 @@ import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
   type AdapterStrategy,
+  DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION,
   enabledLibraryLocations,
   type LibraryInstance,
   type LibraryLocationId,
@@ -39,7 +40,11 @@ import {
   type ResourceKind,
   type ValidLibraryInstance,
 } from '@mangostudio/shared/library';
-import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
+import {
+  DIRECTORY_HASHED_RESOURCE_KINDS,
+  getLibraryLocation,
+  type LocationDefinition,
+} from '@mangostudio/shared/library/host';
 import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getRuntimeClient } from '../../../services/runtime-client';
@@ -68,6 +73,12 @@ export interface EnvironmentSnapshot {
   /** Empty when the machine could not be scanned at all. */
   readonly resources: readonly LibraryResource[];
   readonly statuses: ReadonlyMap<LibraryLocationId, LibraryLocationStatus>;
+  /**
+   * Directory-hash domain this machine's runtime computes. Absent-on-the-wire
+   * peers resolve to 1. File-backed resources ignore it — only the directory
+   * domain moved.
+   */
+  readonly directoryHashDomain: number;
 }
 
 export interface PropagationPreviewDeps {
@@ -107,7 +118,13 @@ export async function readEnvironmentSnapshot(
   try {
     client = await getRuntimeClient(userId, environmentId);
   } catch {
-    return { environmentId, blockedReason: 'environment-offline', resources: [], statuses: empty };
+    return {
+      environmentId,
+      blockedReason: 'environment-offline',
+      resources: [],
+      statuses: empty,
+      directoryHashDomain: DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION,
+    };
   }
   if (!client.manifest.features.library) {
     return {
@@ -115,6 +132,7 @@ export async function readEnvironmentSnapshot(
       blockedReason: 'environment-unsupported',
       resources: [],
       statuses: empty,
+      directoryHashDomain: client.directoryHashDomain,
     };
   }
 
@@ -130,7 +148,13 @@ export async function readEnvironmentSnapshot(
     resources = scan.resources;
     locations = discoveredLocations;
   } catch {
-    return { environmentId, blockedReason: 'environment-offline', resources: [], statuses: empty };
+    return {
+      environmentId,
+      blockedReason: 'environment-offline',
+      resources: [],
+      statuses: empty,
+      directoryHashDomain: client.directoryHashDomain,
+    };
   }
 
   return {
@@ -144,6 +168,7 @@ export async function readEnvironmentSnapshot(
     }),
     resources,
     statuses: new Map(locations.map((status) => [status.id, status])),
+    directoryHashDomain: client.directoryHashDomain,
   };
 }
 
@@ -313,17 +338,22 @@ function buildPreviewEntry(
       }))
     )
   );
+  const usesDirectoryHash = DIRECTORY_HASHED_RESOURCE_KINDS.has(ref.kind);
+  const sourceDomains = directoryHashDomainsFor(perEnvironment, usesDirectoryHash);
+  const mixedDirectoryHashDomains = usesDirectoryHash && sourceDomains.size > 1;
 
   return {
     resourceKey,
     ref,
-    divergence: describeDivergence(sourceGroups),
+    divergence: describeDivergence(sourceGroups, mixedDirectoryHashDomains),
     sourceGroups,
     // Divergence is a user decision with no system-side tiebreaker (D5): more
     // than one readable version means an apply has to name the winner. Across
     // machines this is the common case rather than the exception — that is what
-    // propagating between machines is for.
-    requiresWinnerSelection: sourceGroups.length > 1,
+    // propagating between machines is for. Mixed directory-hash domains are not
+    // a version choice: the hashes are not comparable, so there is no winner to
+    // pick.
+    requiresWinnerSelection: sourceGroups.length > 1 && !mixedDirectoryHashDomains,
     acknowledgedDivergence,
     destinations: perEnvironment.flatMap(({ snapshot, resource }) => {
       const instanceByLocation = new Map(
@@ -343,7 +373,9 @@ function buildPreviewEntry(
               snapshot.statuses.get(location.id),
               instanceByLocation.get(location.id),
               adapters,
-              agentAvailable
+              agentAvailable,
+              sourceDomains,
+              usesDirectoryHash
             )
           )
       );
@@ -360,11 +392,30 @@ function buildPreviewEntry(
  * different bytes.
  */
 function describeDivergence(
-  sourceGroups: readonly PropagationSourceGroup[]
+  sourceGroups: readonly PropagationSourceGroup[],
+  mixedDirectoryHashDomains: boolean
 ): PropagationPreviewEntry['divergence'] {
+  if (mixedDirectoryHashDomains) return 'incomparable';
   if (sourceGroups.length > 1) return 'divergent';
   if (sourceGroups.length === 0) return 'single';
   return sourceGroups[0].instanceCount > 1 ? 'uniform' : 'single';
+}
+
+function directoryHashDomainsFor(
+  perEnvironment: readonly {
+    readonly snapshot: EnvironmentSnapshot;
+    readonly resource: LibraryResource | undefined;
+  }[],
+  usesDirectoryHash: boolean
+): Set<number> {
+  const domains = new Set<number>();
+  if (!usesDirectoryHash) return domains;
+  for (const { snapshot, resource } of perEnvironment) {
+    if (resource?.instances.some((instance) => instance.valid)) {
+      domains.add(snapshot.directoryHashDomain);
+    }
+  }
+  return domains;
 }
 
 interface PlacedInstance {
@@ -429,7 +480,9 @@ function buildDestination(
   status: LibraryLocationStatus | undefined,
   current: LibraryInstance | undefined,
   adapters: AdapterCatalog,
-  agentAvailable: boolean
+  agentAvailable: boolean,
+  sourceDomains: ReadonlySet<number>,
+  usesDirectoryHash: boolean
 ): PropagationDestination {
   const currentContentHash = current?.valid ? current.contentHash : undefined;
   const base = {
@@ -446,7 +499,16 @@ function buildDestination(
   // problem there would send the user to fix the wrong thing.
   const blockedReason =
     snapshot.blockedReason ??
-    destinationBlockedReason(ref, location, status, current, sourceGroups);
+    destinationBlockedReason(
+      ref,
+      location,
+      status,
+      current,
+      sourceGroups,
+      snapshot,
+      sourceDomains,
+      usesDirectoryHash
+    );
   if (blockedReason) return { ...base, blockedReason, outcomes: [] };
 
   return {
@@ -467,7 +529,10 @@ function destinationBlockedReason(
   location: LocationDefinition,
   status: LibraryLocationStatus | undefined,
   current: LibraryInstance | undefined,
-  sourceGroups: readonly PropagationSourceGroup[]
+  sourceGroups: readonly PropagationSourceGroup[],
+  snapshot: EnvironmentSnapshot,
+  sourceDomains: ReadonlySet<number>,
+  usesDirectoryHash: boolean
 ): PropagationBlockedReason | undefined {
   if (!status || status.path === null) return 'unsupported-location';
   if (location.access !== 'read-write') return 'read-only-location';
@@ -479,6 +544,13 @@ function destinationBlockedReason(
   if (!status.writable) return 'location-unwritable';
   if (current && !current.valid) return 'invalid-destination';
   if (sourceGroups.length === 0) return 'no-source-content';
+  if (
+    usesDirectoryHash &&
+    sourceDomains.size > 0 &&
+    (sourceDomains.size > 1 || !sourceDomains.has(snapshot.directoryHashDomain))
+  ) {
+    return 'hash-domain-mismatch';
+  }
   return undefined;
 }
 

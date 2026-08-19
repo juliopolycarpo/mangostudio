@@ -3,6 +3,7 @@ import type {
   ExternalAgentTargetId,
   ExternalIdentityIsolation,
 } from '@mangostudio/shared/external-agents';
+import { directoryHashDomainVersion } from '@mangostudio/shared/library';
 import {
   profileForAllow,
   RUNTIME_CONSENT_PRESETS,
@@ -76,6 +77,10 @@ export function createLocalRuntimeManifest(
     // inferred from the version, because the hub's alternative is to assume —
     // and assuming enforcement is the failure this field exists to prevent.
     enforcesPathPolicy: true,
+    // Derived from the domain string this build actually hashes with, so a
+    // later v3 cannot advertise v2 while computing v3. File hashes are
+    // unversioned; only the directory domain moved.
+    directoryHashDomain: directoryHashDomainVersion(),
     // Sent beside the intersection so a reader can tell the two apart: `git`
     // false in `features` with `allow.git` true is a machine without git, not
     // an owner who refused it.

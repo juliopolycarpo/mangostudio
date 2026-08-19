@@ -82,10 +82,12 @@ describe('capabilityManifestFromHealth', () => {
       ...capabilityManifestFromHealth(report),
       acceptsHubIdentity: true,
       enforcesPathPolicy: true,
+      directoryHashDomain: 2,
     });
 
     expect(refreshed.acceptsHubIdentity).toBe(true);
     expect(refreshed.enforcesPathPolicy).toBe(true);
+    expect(refreshed.directoryHashDomain).toBe(2);
   });
 
   it('does not invent build facts a handshake never claimed', () => {
@@ -99,6 +101,7 @@ describe('capabilityManifestFromHealth', () => {
 
     expect(refreshed.acceptsHubIdentity).toBeUndefined();
     expect(refreshed.enforcesPathPolicy).toBeUndefined();
+    expect(refreshed.directoryHashDomain).toBeUndefined();
   });
 
   it('does not infer adapter support or isolation from an older health report', () => {

@@ -14,8 +14,39 @@ const FILE_HASH_DOMAIN = 'mangostudio/library/file\0';
  * silently colliding with the pre-fix encoding: a length-prefixed manifest and a
  * `\0`/`\n`-delimited one can never be mistaken for each other once they hash into disjoint
  * domains.
+ *
+ * Advertised on the runtime capability manifest. File-backed resources are
+ * unaffected — only this directory domain moved.
  */
-const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir/v2\0';
+export const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir/v2\0';
+
+/**
+ * Older peers omit `directoryHashDomain` on hello; they hash directories under
+ * the pre-length-prefix domain. Treat silence as v1 rather than guessing v2.
+ */
+export const DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION = 1;
+
+const DIRECTORY_HASH_DOMAIN_VERSION_PATTERN = /\/v(\d+)\0$/;
+
+/**
+ * The integer the runtime advertises for {@link DIRECTORY_HASH_DOMAIN}. Derived
+ * from the domain string so a v3 bump cannot forget to update the capability.
+ */
+export function directoryHashDomainVersion(domain: string = DIRECTORY_HASH_DOMAIN): number {
+  const match = DIRECTORY_HASH_DOMAIN_VERSION_PATTERN.exec(domain);
+  const version = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isSafeInteger(version) || version < 1) {
+    throw new Error(
+      `Directory hash domain must end in /v<n>\\0 so the runtime can advertise it (got ${JSON.stringify(domain)}).`
+    );
+  }
+  return version;
+}
+
+/** Absent on the wire means v1 — the older-peer path. */
+export function directoryHashDomainOf(advertised: number | undefined): number {
+  return advertised ?? DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION;
+}
 
 /**
  * Which platform's path semantics apply to the paths a {@link LibraryHashReader} returns.

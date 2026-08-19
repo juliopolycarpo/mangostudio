@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type {
-  LibraryInstance,
-  LibraryLocationId,
-  LibraryLocationStatus,
-  LibraryResource,
-  PropagationBlockedReason,
-  RemovalLocation,
-  RemovalPreviewEntry,
-  ResourceKind,
+import {
+  directoryHashDomainVersion,
+  type LibraryInstance,
+  type LibraryLocationId,
+  type LibraryLocationStatus,
+  type LibraryResource,
+  type PropagationBlockedReason,
+  type RemovalLocation,
+  type RemovalPreviewEntry,
+  type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import { previewLibraryRemoval } from '../../../../src/modules/library/application/removal-preview';
@@ -75,9 +76,11 @@ interface PreviewHarness {
       readonly resources?: LibraryResource[];
       readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
       readonly blockedReason?: PropagationBlockedReason;
+      readonly directoryHashDomain?: number;
     }
   >;
   readonly environmentIds?: string[];
+  readonly directoryHashDomain?: number;
 }
 
 function preview(
@@ -96,7 +99,12 @@ function preview(
       snapshot: (_userId, environmentId) => {
         const machine =
           environmentId === LOCAL_ENVIRONMENT_ID
-            ? { resources: harness.resources, statuses: harness.statuses, blockedReason: undefined }
+            ? {
+                resources: harness.resources,
+                statuses: harness.statuses,
+                blockedReason: undefined,
+                directoryHashDomain: harness.directoryHashDomain,
+              }
             : (harness.environments?.[environmentId] ?? {});
         return Promise.resolve({
           environmentId,
@@ -105,6 +113,7 @@ function preview(
           statuses: new Map(
             locationIds.map((id) => [id, machine.statuses?.[id] ?? status(id)] as const)
           ),
+          directoryHashDomain: machine.directoryHashDomain ?? directoryHashDomainVersion(),
         });
       },
       enabledLocationIds: () => Promise.resolve(new Set(harness.enabledLocationIds ?? locationIds)),
@@ -398,6 +407,22 @@ describe('previewLibraryRemoval across machines', () => {
     // Neither copy is the last of its own version's group once both are marked,
     // and each row says which of the two the user is doing.
     expect(firstEntry(result).locations.every((row) => row.eliminatesContentGroup)).toBe(true);
+  });
+
+  it('does not report mixed directory-hash domains as divergent', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      directoryHashDomain: 2,
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': {
+          resources: [resource([instance('claude-skills', 'hash-b')])],
+          directoryHashDomain: 1,
+        },
+      },
+    });
+
+    expect(firstEntry(result).divergence).toBe('incomparable');
   });
 
   it('names the machine a stale staged directory was left on', async () => {

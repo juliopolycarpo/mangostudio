@@ -186,6 +186,11 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
           {l.detail.notComparable}
         </p>
       )}
+      {resource.divergence === 'incomparable' && (
+        <p className="text-on-surface-variant text-xs" data-testid="incomparable">
+          {l.detail.incomparable}
+        </p>
+      )}
 
       <section className="space-y-2">
         <h3 className="font-label font-semibold text-[10px] text-on-surface-variant/70 uppercase tracking-widest">
@@ -209,7 +214,7 @@ export function ResourceDetail({ resourceKey }: { readonly resourceKey: string }
           />
         )}
 
-        {groups.length >= 2 && (
+        {groups.length >= 2 && resource.divergence !== 'incomparable' && (
           <div className="space-y-2">
             <Button variant="secondary" size="sm" onClick={() => setComparing((open) => !open)}>
               {comparing

@@ -33,7 +33,11 @@ import {
   type RemovalPreviewRequest,
   type ResourceKind,
 } from '@mangostudio/shared/library';
-import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
+import {
+  DIRECTORY_HASHED_RESOURCE_KINDS,
+  getLibraryLocation,
+  type LocationDefinition,
+} from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
@@ -214,6 +218,7 @@ interface ClassifiedRemoval {
 interface PlacedInstance {
   readonly environmentId: string;
   readonly instance: LibraryInstance;
+  readonly directoryHashDomain: number;
 }
 
 function placementKey(environmentId: string, locationId: LibraryLocationId): string {
@@ -231,6 +236,7 @@ function buildRemovalEntry(
     return (resource?.instances ?? []).map((instance) => ({
       environmentId: snapshot.environmentId,
       instance,
+      directoryHashDomain: snapshot.directoryHashDomain,
     }));
   });
 
@@ -271,7 +277,7 @@ function buildRemovalEntry(
   return {
     resourceKey,
     ref,
-    divergence: placed.length > 1 ? describeDivergence(placed) : 'single',
+    divergence: placed.length > 1 ? describeDivergence(placed, ref.kind) : 'single',
     locations: classified.map((row) => describeRemovalLocation(row, removing, placed)),
     instancePlacements: placed
       .map((candidate) => ({
@@ -312,7 +318,18 @@ function environmentBlockedReason(
  * a machine, and reporting it would call a resource uniform while two boxes hold
  * different bytes.
  */
-function describeDivergence(placed: readonly PlacedInstance[]): RemovalPreviewEntry['divergence'] {
+function describeDivergence(
+  placed: readonly PlacedInstance[],
+  kind: ResourceKind
+): RemovalPreviewEntry['divergence'] {
+  if (DIRECTORY_HASHED_RESOURCE_KINDS.has(kind)) {
+    const domains = new Set(
+      placed.flatMap((candidate) =>
+        candidate.instance.valid ? [candidate.directoryHashDomain] : []
+      )
+    );
+    if (domains.size > 1) return 'incomparable';
+  }
   const hashes = new Set(
     placed.flatMap((candidate) =>
       candidate.instance.valid ? [candidate.instance.contentHash] : []

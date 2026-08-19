@@ -517,7 +517,10 @@ export function createRuntimeLifecycleService(
         managedPush,
         stagedRuntime: await resolveStagedRuntime(transportKind, cached?.health ?? null),
         ...(status.state === 'connected'
-          ? { enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true }
+          ? {
+              enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true,
+              directoryHashDomain: status.manifest?.directoryHashDomain ?? 1,
+            }
           : {}),
       });
     },

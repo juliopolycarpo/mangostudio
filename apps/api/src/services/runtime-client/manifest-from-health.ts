@@ -78,6 +78,9 @@ export function capabilityManifestFromHealth(
     ...(handshake?.enforcesPathPolicy === undefined
       ? {}
       : { enforcesPathPolicy: handshake.enforcesPathPolicy }),
+    ...(handshake?.directoryHashDomain === undefined
+      ? {}
+      : { directoryHashDomain: handshake.directoryHashDomain }),
     profile: report.profile,
     allow,
   };
