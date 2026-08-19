@@ -52,6 +52,13 @@ interface EnvironmentLibraryDiscoverOptions {
   readonly force?: boolean;
   readonly workspaceRoot?: string;
   readonly kinds?: readonly ResourceKind[];
+  /**
+   * Scan through this connection rather than resolving a new one. Preview
+   * already holds the client whose `directoryHashDomain` it will record; a
+   * second resolve can land on a reconnected peer that hashed under a
+   * different domain.
+   */
+  readonly client?: RuntimeClient;
 }
 
 export interface EnvironmentLibraryService {
@@ -161,7 +168,7 @@ export function createEnvironmentLibraryService(
     // this the matrix redraws its columns from the state the rescan replaced.
     if (force) resetLocationCache(scope.environmentId);
 
-    const client = await resolveClient(scope);
+    const client = discoverOptions.client ?? (await resolveClient(scope));
     if (!client.manifest.features.library) {
       throw new LibraryFeatureUnavailableError(
         `Environment "${scope.environmentId}" does not advertise library discovery.`

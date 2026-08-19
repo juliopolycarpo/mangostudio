@@ -75,8 +75,8 @@ export interface EnvironmentSnapshot {
   readonly statuses: ReadonlyMap<LibraryLocationId, LibraryLocationStatus>;
   /**
    * Directory-hash domain this machine's runtime computes. Absent-on-the-wire
-   * peers resolve to 1. File-backed resources ignore it — only the directory
-   * domain moved.
+   * peers resolve to 2 — the domain that shipped before the advertisement.
+   * File-backed resources ignore it — only the directory domain moved.
    */
   readonly directoryHashDomain: number;
 }
@@ -142,7 +142,10 @@ export async function readEnvironmentSnapshot(
   let locations: LibraryLocationStatus[];
   try {
     const [scan, discoveredLocations] = await Promise.all([
-      environmentLibraryService.discover(db, scope, { force: true, kinds }),
+      // Same connection that supplied `directoryHashDomain` below. Discovering
+      // through a second resolve can hash on a reconnected peer while this
+      // snapshot still records the previous domain.
+      environmentLibraryService.discover(db, scope, { force: true, kinds, client }),
       environmentLibraryService.listLocations(db, scope),
     ]);
     resources = scan.resources;
