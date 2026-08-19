@@ -18,6 +18,28 @@ import { createGrepScanner, type GrepScanner } from './grep-scanner';
  */
 const GREP_FILE_BUDGET_MS = 2000;
 
+let fileBudgetMsOverride: number | null = null;
+
+/**
+ * Sets the per-file wall-clock budget. Passing null restores the production
+ * allowance.
+ *
+ * Exists so a test can prove the cut-off without buying it from the regular
+ * expression engine. Reaching two seconds of real backtracking needs a fixture
+ * sized against JavaScriptCore's own bound, which is undocumented, per-`test()`
+ * call and moves between builds — a test calibrated on it fails when an upstream
+ * commit lowers it, saying nothing about the budget it exists to check. A small
+ * budget makes any catastrophic pattern overrun on any engine.
+ *
+ * // Usage: setGrepFileBudgetForTest(50)
+ */
+export function setGrepFileBudgetForTest(budgetMs: number | null): void {
+  if (budgetMs !== null && (!Number.isFinite(budgetMs) || budgetMs <= 0)) {
+    throw new RangeError('Grep file budget must be a positive finite number of milliseconds.');
+  }
+  fileBudgetMsOverride = budgetMs;
+}
+
 /**
  * Longest pattern accepted. Length is not a soundness check — a nine-character
  * pattern backtracks catastrophically, and {@link GREP_FILE_BUDGET_MS} is what
@@ -146,7 +168,11 @@ async function searchFile(input: SearchFileInput): Promise<boolean> {
   if (file.size === 0 || file.size > params.maxFileSizeBytes) return false;
   if (await looksBinary(file)) return false;
 
-  const outcome = await scanner.scan(absolute, allowance, GREP_FILE_BUDGET_MS);
+  const outcome = await scanner.scan(
+    absolute,
+    allowance,
+    fileBudgetMsOverride ?? GREP_FILE_BUDGET_MS
+  );
   for (const match of outcome.matches) {
     matches.push({ file: display, line: match.line, text: match.text });
   }

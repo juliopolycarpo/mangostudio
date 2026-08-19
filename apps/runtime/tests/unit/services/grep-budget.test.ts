@@ -10,25 +10,36 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runtimeFsService } from '../../../src/services/fs';
-import { GrepPatternError } from '../../../src/services/fs/grep';
+import { GrepPatternError, setGrepFileBudgetForTest } from '../../../src/services/fs/grep';
 
 const CATASTROPHIC_PATTERN = '^(([a-z])+.)+[A-Z]([a-z])+$';
 const CATASTROPHIC_LINE = 'a'.repeat(40);
 
 /**
- * JavaScriptCore bounds its own backtracking, and that bound is **per `test()`
- * call**, not per file: this pattern against one 40-character line costs a flat
- * ~700ms on Bun 1.4.0-canary.1 no matter how much longer the line gets. So a
- * one-line file can no longer reach the 2s budget, and sizing the fixture by
- * line length cannot get it there either.
+ * Budget the overrun tests run under, in place of the production two seconds.
  *
- * Twelve lines can: the cost is linear in the line count, so the file is ~8.4s
- * of work against a 2s budget — the shape the budget actually exists for, since
- * a model's pattern meets a whole file rather than one line. Re-measure this
- * count if a future JSC lowers the per-call bound far enough that twelve lines
- * stop exceeding the budget.
+ * Exhausting a real 2s budget means sizing the fixture against JavaScriptCore's
+ * own backtracking bound, which is undocumented, enforced per `test()` call and
+ * different between Bun builds — so a fixture calibrated on it goes red when an
+ * upstream commit moves it, saying nothing about the budget under test. Setting
+ * the budget instead inverts that dependency.
+ *
+ * Not smaller, because worker startup happens inside the budget: this has to
+ * clear a cold thread booting under CI load, and everything past that is margin.
  */
-const CATASTROPHIC_LINES = 12;
+const TEST_FILE_BUDGET_MS = 750;
+
+/**
+ * Lines in the pathological fixture — far more work than the budget can pay for,
+ * rather than a measured minimum.
+ *
+ * The budget terminates the scan, so lines past the cut-off cost no wall-clock
+ * time and buy margin against an engine quicker than the one this was written
+ * on. At ~700ms per line on Bun 1.4.0-canary.1 this file is minutes of work
+ * against a 750ms budget; the fixture would only stop overrunning on an engine
+ * some two hundred times faster.
+ */
+const CATASTROPHIC_LINES = 256;
 
 async function writeCatastrophicFile(path: string): Promise<void> {
   await Bun.write(path, `${CATASTROPHIC_LINE}\n`.repeat(CATASTROPHIC_LINES));
@@ -41,6 +52,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  setGrepFileBudgetForTest(null);
   rmSync(tempDir, { recursive: true, force: true });
 });
 
@@ -59,26 +71,31 @@ function grepParams(overrides: { pattern: string; path?: string }) {
 
 describe('grep pattern budget', () => {
   it('returns from a catastrophic pattern and reports the file as truncated', async () => {
+    setGrepFileBudgetForTest(TEST_FILE_BUDGET_MS);
     await writeCatastrophicFile(join(tempDir, 'victim.txt'));
 
     const startedAt = Date.now();
     const result = await runtimeFsService.grep(grepParams({ pattern: CATASTROPHIC_PATTERN }));
 
-    // The budget is 2s per file and the file holds ~8.4s of work, so the two
-    // outcomes are far apart in wall clock: cut off lands near 2s, run to
-    // completion near 8.4s. 6s separates them without being flaky under load.
-    expect(Date.now() - startedAt).toBeLessThan(6_000);
+    // Returning at all is the claim: the file holds minutes of backtracking, so
+    // a scan that was not cut off does not finish inside this test's timeout.
+    // The bound is loose on purpose — it separates "cut off" from "ran to
+    // completion", and is not a performance assertion on the budget itself.
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
     expect(result.truncated).toBe(true);
     expect(result.matches).toEqual([]);
   }, 20_000);
 
   it('leaves the event loop free while a catastrophic pattern is evaluated', async () => {
+    setGrepFileBudgetForTest(TEST_FILE_BUDGET_MS);
     await writeCatastrophicFile(join(tempDir, 'victim.txt'));
     const other = mkdtempSync(join(tmpdir(), 'runtime-grep-concurrent-'));
     await Bun.write(join(other, 'plain.txt'), 'needle\n');
 
+    // 25ms against a 750ms budget: ~30 ticks while the thread is free, against
+    // the single catch-up tick a blocking scan would leave.
     const ticks: number[] = [];
-    const heartbeat = setInterval(() => ticks.push(Date.now()), 50);
+    const heartbeat = setInterval(() => ticks.push(Date.now()), 25);
     try {
       const blocked = runtimeFsService.grep(grepParams({ pattern: CATASTROPHIC_PATTERN }));
       // Issued while the first search is inside its regular expression. On the
@@ -97,7 +114,7 @@ describe('grep pattern budget', () => {
     // The assertion that proves it. A blocking `test` starves timers as well as
     // calls, and a timer that misses its window fires once on catching up
     // rather than once per period — so a synchronous scan holding the thread
-    // for the whole budget leaves a handful of ticks, not one every 50ms.
+    // for the whole budget leaves a handful of ticks, not one every 25ms.
     expect(ticks.length).toBeGreaterThan(10);
   }, 20_000);
 
@@ -108,6 +125,7 @@ describe('grep pattern budget', () => {
     // lines have nothing to match and backtrack until the budget cuts them off.
     // Alphabetical order is not guaranteed by the walk, so the readable file is
     // asserted on its own terms: it is found whether it is scanned first or last.
+    setGrepFileBudgetForTest(TEST_FILE_BUDGET_MS);
     await Bun.write(join(tempDir, 'a-fast.txt'), 'aaaAaa\n');
     await writeCatastrophicFile(join(tempDir, 'b-slow.txt'));
 
