@@ -169,8 +169,9 @@ builds its redirect URI from the bound port rather than from the registered
 constant so tests can take an OS-assigned one
 (`setChatGptLoopbackPortForTest`). Before that, `apps/api/tests/integration` at
 four workers failed 5 runs in 24 with a spurious 503 from whichever file lost
-the race for `127.0.0.1:1455`; after, 22 runs in 22 were clean. A test that
-needs a *busy* port should bind one itself and point the code under test at it.
+the race for `127.0.0.1:1455`; after, 22 runs in 22 were clean locally and 12 of
+12 on a CI runner. A test that needs a *busy* port should bind one itself and
+point the code under test at it.
 
 The same rule covers paths: `mkdtemp` rather than a static name under
 `tmpdir()`, and the managed test config directory is scoped by pid and
@@ -180,19 +181,18 @@ run under the Bun test runner).
 #### Known upstream blocker on the unit lane
 
 `tests/unit` aborts whole files intermittently under worker parallelism, losing
-every remaining case in the file it hits. Pinned to 4 cores on a WSL2 host
-(`6.18.33.2-microsoft-standard-WSL2`):
+every remaining case in the file it hits. It is not a property of one machine —
+it reproduces on GitHub's runners:
 
-| Invocation                  | Runs affected |
-| --------------------------- | ------------- |
-| `--parallel=4` (CI-shaped)  | 4 of 10       |
-| `--parallel=8`, to a file   | 4 of 12       |
-| `--parallel=8`, into a pipe | 2 of 8        |
+| Host                                  | Invocation                  | Runs affected |
+| ------------------------------------- | --------------------------- | ------------- |
+| `ubuntu-latest`, 4-core, Azure kernel | `--parallel=4`              | 2 of 36       |
+| WSL2, pinned to 4 cores               | `--parallel=4`              | 4 of 10       |
+| WSL2, pinned to 4 cores               | `--parallel=8`, to a file   | 4 of 12       |
+| WSL2, pinned to 4 cores               | `--parallel=8`, into a pipe | 2 of 8        |
 
-**Not yet observed on a CI runner** — every measurement above is from that one
-host, and `epoll_ctl` is kernel surface, so a stock runner kernel may not
-reproduce it at all. Confirm there before treating it as a property of the lane
-rather than of this machine.
+A runner run takes ~58s at four workers against 232–248s at one, so the prize is
+real and this is what stands in front of it.
 
 The error is always
 
@@ -214,9 +214,10 @@ lazily removes those frames and the aborts continue — measured, not assumed. I
 is the messenger.
 
 Redirecting the run to a file makes it likelier but is not the cause; it happens
-through a pipe too, which is what CI gives it. Until it is measured on a runner,
-treat the unit lane's readiness for worker parallelism as unknown rather than
-settled either way.
+through a pipe too, which is what CI gives it.
+
+So the unit lane cannot take worker parallelism yet. The integration lane can:
+12 of 12 clean at four workers on a runner, 50.6s against 71–75s unflagged.
 
 ### Code Health
 
