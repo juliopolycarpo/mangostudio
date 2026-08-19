@@ -186,4 +186,64 @@ describe('executePropagationWrites', () => {
     ).rejects.toThrow(/outside location "claude-skills"/);
     expect(existsSync(outsider)).toBe(true);
   });
+
+  it('refuses a write whose on-disk hash is not the one the preview described', async () => {
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+
+    const result = await executePropagationWrites({
+      backupRoot,
+      pathEnv: env,
+      operations: [
+        {
+          resourceKey: 'skill:gh',
+          locationId: 'claude-skills',
+          slug: 'gh',
+          operation: 'create',
+          kind: 'directory',
+          expectedContentHash: 'not-the-hash-the-preview-described',
+          destinationRoot: join(home, '.claude', 'skills'),
+          sourceDir,
+        },
+      ],
+    });
+
+    expect(result.failed[0]).toMatchObject({ reason: 'verification-failed' });
+    expect(result.applied).toEqual([]);
+    expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
+  });
+
+  it('fails verification with unsafe-name when a written directory contains a newline filename', async () => {
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    writeFileSync(join(sourceDir, 'a\nb.md'), 'leaf');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+
+    const result = await executePropagationWrites({
+      backupRoot,
+      pathEnv: env,
+      operations: [
+        {
+          resourceKey: 'skill:gh',
+          locationId: 'claude-skills',
+          slug: 'gh',
+          operation: 'create',
+          kind: 'directory',
+          expectedContentHash: 'unused-because-hashing-fails',
+          destinationRoot: join(home, '.claude', 'skills'),
+          sourceDir,
+        },
+      ],
+    });
+
+    expect(result.failed[0]).toMatchObject({
+      reason: 'verification-failed',
+      message: expect.stringContaining('unsafe-name'),
+    });
+    expect(result.applied).toEqual([]);
+    expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
+  });
 });

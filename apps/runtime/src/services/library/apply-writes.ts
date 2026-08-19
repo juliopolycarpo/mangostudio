@@ -30,7 +30,7 @@ import {
   writeBackupManifest,
 } from './backup-store';
 import { assertNotCancelled } from './cancellation';
-import { hashResourceAt } from './instance-reader';
+import { hashResourceAt, LibraryHashInvalidError } from './instance-reader';
 import {
   createResourceWriterDeps,
   type ResourceWriteResult,
@@ -215,43 +215,77 @@ async function executeOperation(
 ): Promise<{ entry: BackupEntry; applied: PropagationApplied }> {
   assertPreviewedRoot(operation, env);
   const result = await performWrite(operation, env, backupId, deps);
-  const writtenContentHash = await deps.hashAt(result.resolvedDestinationPath, operation.kind);
+  try {
+    const writtenContentHash = await hashWrittenContent(result, operation, deps);
+    return {
+      entry: backupEntryFrom(operation, result, writtenContentHash),
+      applied: {
+        resourceKey: operation.resourceKey,
+        environmentId,
+        locationId: operation.locationId,
+        operation: operation.operation,
+        destinationPath: result.destinationPath,
+        contentHash: writtenContentHash,
+        ...(operation.adaptation && {
+          adaptation: {
+            strategy: operation.adaptation.strategy,
+            lossy: operation.adaptation.lossy,
+            requiresReview: operation.adaptation.requiresReview,
+            notes: [...operation.adaptation.notes],
+            ...(operation.adaptation.provenance && {
+              provenance: operation.adaptation.provenance,
+            }),
+          },
+        }),
+      },
+    };
+  } catch (error) {
+    // The bytes are already on disk. Without this, a verification miss leaves
+    // the write in place because the outer loop only rolls back operations that
+    // returned an entry.
+    await rollback([backupEntryFrom(operation, result, '')], deps);
+    throw error;
+  }
+}
+
+async function hashWrittenContent(
+  result: ResourceWriteResult,
+  operation: PreparedPropagationOperation,
+  deps: PropagationWriteEngineDeps
+): Promise<string> {
+  let writtenContentHash: string;
+  try {
+    writtenContentHash = await deps.hashAt(result.resolvedDestinationPath, operation.kind);
+  } catch (error) {
+    if (error instanceof LibraryHashInvalidError) {
+      throw new VerificationError(
+        `Wrote "${result.destinationPath}" but hashing it failed (${error.invalidReason}).`
+      );
+    }
+    throw error;
+  }
   if (writtenContentHash !== operation.expectedContentHash) {
     throw new VerificationError(
       `Wrote "${result.destinationPath}" but its content hashed to ${writtenContentHash}, not ${operation.expectedContentHash}.`
     );
   }
+  return writtenContentHash;
+}
 
+function backupEntryFrom(
+  operation: PreparedPropagationOperation,
+  result: ResourceWriteResult,
+  writtenContentHash: string
+): BackupEntry {
   return {
-    entry: {
-      locationId: operation.locationId,
-      slug: operation.slug,
-      kind: operation.kind,
-      destinationPath: result.destinationPath,
-      resolvedPath: result.resolvedDestinationPath,
-      writtenContentHash,
-      resourceKey: operation.resourceKey,
-      ...(result.backupPath && { backupPath: result.backupPath }),
-    },
-    applied: {
-      resourceKey: operation.resourceKey,
-      environmentId,
-      locationId: operation.locationId,
-      operation: operation.operation,
-      destinationPath: result.destinationPath,
-      contentHash: writtenContentHash,
-      ...(operation.adaptation && {
-        adaptation: {
-          strategy: operation.adaptation.strategy,
-          lossy: operation.adaptation.lossy,
-          requiresReview: operation.adaptation.requiresReview,
-          notes: [...operation.adaptation.notes],
-          ...(operation.adaptation.provenance && {
-            provenance: operation.adaptation.provenance,
-          }),
-        },
-      }),
-    },
+    locationId: operation.locationId,
+    slug: operation.slug,
+    kind: operation.kind,
+    destinationPath: result.destinationPath,
+    resolvedPath: result.resolvedDestinationPath,
+    writtenContentHash,
+    resourceKey: operation.resourceKey,
+    ...(result.backupPath && { backupPath: result.backupPath }),
   };
 }
 
