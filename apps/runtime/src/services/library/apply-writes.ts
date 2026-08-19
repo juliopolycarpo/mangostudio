@@ -122,7 +122,8 @@ export async function executePropagationWrites(
       written.push(result.entry);
       applied.push(result.applied);
     } catch (error) {
-      failed.push(describeFailure(operation, environmentId, error));
+      if (error instanceof UncompensatedWriteError) written.push(error.entry);
+      failed.push(describeFailure(operation, environmentId, failureCause(error)));
       break;
     }
   }
@@ -242,9 +243,12 @@ async function executeOperation(
   } catch (error) {
     // The bytes are already on disk. Without this, a verification miss leaves
     // the write in place because the outer loop only rolls back operations that
-    // returned an entry.
-    await rollback([backupEntryFrom(operation, result, '')], deps);
-    throw error;
+    // returned an entry. If compensation itself fails, keep the entry so the
+    // outer path reports a partial apply and retains the backup set instead of
+    // discarding the only copy of what was just overwritten.
+    const entry = backupEntryFrom(operation, result, '');
+    const rolledBack = await rollback([entry], deps);
+    throw rolledBack ? error : new UncompensatedWriteError(entry, error);
   }
 }
 
@@ -373,6 +377,25 @@ function assertPreviewedRoot(operation: PreparedPropagationOperation, env: PathE
 
 class VerificationError extends Error {}
 class GuardError extends Error {}
+
+/**
+ * Verification (or hashing) failed, the destination still holds the unverified
+ * write, and rolling that write back failed too. The entry has to travel with
+ * the error so the outer loop can keep the backup set.
+ */
+class UncompensatedWriteError extends Error {
+  readonly name = 'UncompensatedWriteError';
+  constructor(
+    readonly entry: BackupEntry,
+    readonly cause: unknown
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+function failureCause(error: unknown): unknown {
+  return error instanceof UncompensatedWriteError ? error.cause : error;
+}
 
 function describeFailure(
   operation: PreparedPropagationOperation,

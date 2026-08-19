@@ -246,4 +246,111 @@ describe('executePropagationWrites', () => {
     expect(result.applied).toEqual([]);
     expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
   });
+
+  it('keeps the backup set when an overwrite cannot be rolled back after verification fails', async () => {
+    const destination = join(home, '.claude', 'skills', 'gh');
+    mkdirSync(destination);
+    writeFileSync(join(destination, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nold\n');
+
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nnew\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const deps = createPropagationWriteEngineDeps({ backupRoot });
+
+    const result = await executePropagationWrites(
+      {
+        backupRoot,
+        pathEnv: env,
+        operations: [
+          {
+            resourceKey: 'skill:gh',
+            locationId: 'claude-skills',
+            slug: 'gh',
+            operation: 'overwrite',
+            kind: 'directory',
+            expectedContentHash: 'not-the-hash-the-preview-described',
+            destinationRoot: join(home, '.claude', 'skills'),
+            sourceDir,
+          },
+        ],
+      },
+      {
+        ...deps,
+        backup: {
+          ...deps.backup,
+          fs: {
+            ...deps.backup.fs,
+            copyTree(source, destinationPath) {
+              // The writer backs up through its own fs. Restore copies from the
+              // backup set; failing that is the compensation miss this test is for.
+              if (source.startsWith(backupRoot)) {
+                return Promise.reject(new Error('ENOSPC: could not restore backup'));
+              }
+              return deps.backup.fs.copyTree(source, destinationPath);
+            },
+          },
+        },
+      }
+    );
+
+    expect(result.partial).toBe(true);
+    expect(result.backupId).toBeString();
+    expect(result.failed[0]).toMatchObject({ reason: 'verification-failed' });
+    expect(result.applied).toEqual([]);
+    expect(readFileSync(join(destination, 'SKILL.md'), 'utf8')).toContain('new');
+    expect(existsSync(join(backupRoot, result.backupId ?? ''))).toBe(true);
+    expect(
+      readFileSync(join(backupRoot, result.backupId ?? '', 'claude-skills', 'gh', 'SKILL.md'), 'utf8')
+    ).toContain('old');
+  });
+
+  it('keeps a created destination when verification rollback cannot remove it', async () => {
+    const destination = join(home, '.claude', 'skills', 'gh');
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const deps = createPropagationWriteEngineDeps({ backupRoot });
+
+    const result = await executePropagationWrites(
+      {
+        backupRoot,
+        pathEnv: env,
+        operations: [
+          {
+            resourceKey: 'skill:gh',
+            locationId: 'claude-skills',
+            slug: 'gh',
+            operation: 'create',
+            kind: 'directory',
+            expectedContentHash: 'not-the-hash-the-preview-described',
+            destinationRoot: join(home, '.claude', 'skills'),
+            sourceDir,
+          },
+        ],
+      },
+      {
+        ...deps,
+        backup: {
+          ...deps.backup,
+          fs: {
+            ...deps.backup.fs,
+            remove(path) {
+              if (path === destination) {
+                return Promise.reject(new Error('EACCES: could not remove unverified write'));
+              }
+              return deps.backup.fs.remove(path);
+            },
+          },
+        },
+      }
+    );
+
+    expect(result.partial).toBe(true);
+    expect(result.backupId).toBeString();
+    expect(result.failed[0]).toMatchObject({ reason: 'verification-failed' });
+    expect(existsSync(destination)).toBe(true);
+    expect(existsSync(join(backupRoot, result.backupId ?? '', 'manifest.json'))).toBe(true);
+  });
 });
