@@ -51,7 +51,7 @@ export interface NodeEnvReadViolation {
  * scan silently reinstates the escape bypass this predicate exists to close,
  * and the guard passes while the violation stays in the tree.
  */
-export function mayHoldNodeEnvToken(content: string): boolean {
+function mayHoldNodeEnvToken(content: string): boolean {
   return content.includes('NODE_ENV') || content.includes('\\');
 }
 
