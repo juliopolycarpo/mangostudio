@@ -264,6 +264,7 @@ const LEGEND_ORDER: readonly CoverageCellState[] = [
   'absent',
   'shadowed',
   'divergent',
+  'incomparable',
   'only-here',
 ];
 

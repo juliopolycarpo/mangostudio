@@ -115,6 +115,16 @@ describe('buildRuntimeLifecycleView', () => {
     });
     expect(declared.enforcesPathPolicy).toBe(true);
 
+    const withDomain = buildRuntimeLifecycleView({
+      transportKind: 'ssh',
+      health: health({ slot: 'remote' }),
+      readAtMs: 10_000,
+      connected: true,
+      nowMs: 11_000,
+      directoryHashDomain: 2,
+    });
+    expect(withDomain.directoryHashDomain).toBe(2);
+
     const legacy = buildRuntimeLifecycleView({
       transportKind: 'ssh',
       health: health({ slot: 'remote' }),
@@ -133,6 +143,7 @@ describe('buildRuntimeLifecycleView', () => {
       nowMs: 11_000,
     });
     expect(disconnected.enforcesPathPolicy).toBeUndefined();
+    expect(disconnected.directoryHashDomain).toBeUndefined();
   });
 
   it('attaches manualCommands for websocket and http only', () => {

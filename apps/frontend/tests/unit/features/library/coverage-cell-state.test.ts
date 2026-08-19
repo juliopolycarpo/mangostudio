@@ -124,6 +124,23 @@ describe('coverageCell', () => {
       expected: 'present',
     },
     {
+      name: 'mixed directory-hash domains, which must not look like divergence',
+      build: () =>
+        resource({
+          instances: [
+            instance({ locationId: 'agents-skills', contentHash: 'v2-hash' }),
+            instance({ locationId: 'claude-skills', contentHash: 'v1-hash' }),
+          ],
+          coverage: fullCoverage({
+            mangostudio: { state: 'present', effectiveLocationId: 'agents-skills' },
+            claude: { state: 'present', effectiveLocationId: 'claude-skills' },
+          }),
+          divergence: 'incomparable',
+        }),
+      targetIndex: 0,
+      expected: 'incomparable',
+    },
+    {
       name: 'an unreadable copy, which cannot be judged divergent',
       build: () =>
         resource({

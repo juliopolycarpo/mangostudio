@@ -30,7 +30,7 @@ import {
   writeBackupManifest,
 } from './backup-store';
 import { assertNotCancelled } from './cancellation';
-import { hashResourceAt } from './instance-reader';
+import { hashResourceAt, LibraryHashInvalidError } from './instance-reader';
 import {
   createResourceWriterDeps,
   type ResourceWriteResult,
@@ -122,7 +122,8 @@ export async function executePropagationWrites(
       written.push(result.entry);
       applied.push(result.applied);
     } catch (error) {
-      failed.push(describeFailure(operation, environmentId, error));
+      if (error instanceof UncompensatedWriteError) written.push(error.entry);
+      failed.push(describeFailure(operation, environmentId, failureCause(error)));
       break;
     }
   }
@@ -215,43 +216,85 @@ async function executeOperation(
 ): Promise<{ entry: BackupEntry; applied: PropagationApplied }> {
   assertPreviewedRoot(operation, env);
   const result = await performWrite(operation, env, backupId, deps);
-  const writtenContentHash = await deps.hashAt(result.resolvedDestinationPath, operation.kind);
+  try {
+    const writtenContentHash = await hashWrittenContent(result, operation, deps);
+    return {
+      entry: backupEntryFrom(operation, result, writtenContentHash),
+      applied: {
+        resourceKey: operation.resourceKey,
+        environmentId,
+        locationId: operation.locationId,
+        operation: operation.operation,
+        destinationPath: result.destinationPath,
+        contentHash: writtenContentHash,
+        ...(operation.adaptation && {
+          adaptation: {
+            strategy: operation.adaptation.strategy,
+            lossy: operation.adaptation.lossy,
+            requiresReview: operation.adaptation.requiresReview,
+            notes: [...operation.adaptation.notes],
+            ...(operation.adaptation.provenance && {
+              provenance: operation.adaptation.provenance,
+            }),
+          },
+        }),
+      },
+    };
+  } catch (error) {
+    // The bytes are already on disk. Without this, a verification miss leaves
+    // the write in place because the outer loop only rolls back operations that
+    // returned an entry. If compensation itself fails, keep the entry so the
+    // outer path reports a partial apply and retains the backup set instead of
+    // discarding the only copy of what was just overwritten.
+    const entry = backupEntryFrom(
+      operation,
+      result,
+      await observedContentHash(error, result, operation, deps)
+    );
+    const rolledBack = await rollback([entry], deps);
+    throw rolledBack ? error : new UncompensatedWriteError(entry, error);
+  }
+}
+
+async function hashWrittenContent(
+  result: ResourceWriteResult,
+  operation: PreparedPropagationOperation,
+  deps: PropagationWriteEngineDeps
+): Promise<string> {
+  let writtenContentHash: string;
+  try {
+    writtenContentHash = await deps.hashAt(result.resolvedDestinationPath, operation.kind);
+  } catch (error) {
+    if (error instanceof LibraryHashInvalidError) {
+      throw new VerificationError(
+        `Wrote "${result.destinationPath}" but hashing it failed (${error.invalidReason}).`
+      );
+    }
+    throw error;
+  }
   if (writtenContentHash !== operation.expectedContentHash) {
     throw new VerificationError(
-      `Wrote "${result.destinationPath}" but its content hashed to ${writtenContentHash}, not ${operation.expectedContentHash}.`
+      `Wrote "${result.destinationPath}" but its content hashed to ${writtenContentHash}, not ${operation.expectedContentHash}.`,
+      writtenContentHash
     );
   }
+  return writtenContentHash;
+}
 
+function backupEntryFrom(
+  operation: PreparedPropagationOperation,
+  result: ResourceWriteResult,
+  writtenContentHash: string
+): BackupEntry {
   return {
-    entry: {
-      locationId: operation.locationId,
-      slug: operation.slug,
-      kind: operation.kind,
-      destinationPath: result.destinationPath,
-      resolvedPath: result.resolvedDestinationPath,
-      writtenContentHash,
-      resourceKey: operation.resourceKey,
-      ...(result.backupPath && { backupPath: result.backupPath }),
-    },
-    applied: {
-      resourceKey: operation.resourceKey,
-      environmentId,
-      locationId: operation.locationId,
-      operation: operation.operation,
-      destinationPath: result.destinationPath,
-      contentHash: writtenContentHash,
-      ...(operation.adaptation && {
-        adaptation: {
-          strategy: operation.adaptation.strategy,
-          lossy: operation.adaptation.lossy,
-          requiresReview: operation.adaptation.requiresReview,
-          notes: [...operation.adaptation.notes],
-          ...(operation.adaptation.provenance && {
-            provenance: operation.adaptation.provenance,
-          }),
-        },
-      }),
-    },
+    locationId: operation.locationId,
+    slug: operation.slug,
+    kind: operation.kind,
+    destinationPath: result.destinationPath,
+    resolvedPath: result.resolvedDestinationPath,
+    writtenContentHash,
+    resourceKey: operation.resourceKey,
+    ...(result.backupPath && { backupPath: result.backupPath }),
   };
 }
 
@@ -337,8 +380,59 @@ function assertPreviewedRoot(operation: PreparedPropagationOperation, env: PathE
   );
 }
 
-class VerificationError extends Error {}
+class VerificationError extends Error {
+  constructor(
+    message: string,
+    readonly observedContentHash = ''
+  ) {
+    super(message);
+  }
+}
 class GuardError extends Error {}
+
+/**
+ * Verification (or hashing) failed, the destination still holds the unverified
+ * write, and rolling that write back failed too. The entry has to travel with
+ * the error so the outer loop can keep the backup set.
+ */
+class UncompensatedWriteError extends Error {
+  readonly name = 'UncompensatedWriteError';
+  constructor(
+    readonly entry: BackupEntry,
+    readonly cause: unknown
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+  }
+}
+
+function failureCause(error: unknown): unknown {
+  return error instanceof UncompensatedWriteError ? error.cause : error;
+}
+
+/**
+ * The digest to record for a write that failed verification. Undo compares the
+ * surviving destination against this value and skips the restore as
+ * `changed-since-apply` when the two differ, so recording an empty placeholder
+ * for a destination that hashes fine strands the unverified write on disk with
+ * no automatic undo.
+ *
+ * A hash mismatch already carries the digest it observed. Anything else — a
+ * transient read error from the hash, say — carries none, so re-read the
+ * destination once. Only a second failure falls back to the placeholder, and
+ * there undo's own hash of the same path fails too, which bypasses the
+ * comparison rather than skipping the entry.
+ */
+async function observedContentHash(
+  error: unknown,
+  result: ResourceWriteResult,
+  operation: PreparedPropagationOperation,
+  deps: PropagationWriteEngineDeps
+): Promise<string> {
+  if (error instanceof VerificationError && error.observedContentHash !== '') {
+    return error.observedContentHash;
+  }
+  return await deps.hashAt(result.resolvedDestinationPath, operation.kind).catch(() => '');
+}
 
 function describeFailure(
   operation: PreparedPropagationOperation,

@@ -33,7 +33,11 @@ import {
   type RemovalPreviewRequest,
   type ResourceKind,
 } from '@mangostudio/shared/library';
-import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
+import {
+  DIRECTORY_HASHED_RESOURCE_KINDS,
+  getLibraryLocation,
+  type LocationDefinition,
+} from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import { getDb } from '../../../db/database';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
@@ -214,6 +218,7 @@ interface ClassifiedRemoval {
 interface PlacedInstance {
   readonly environmentId: string;
   readonly instance: LibraryInstance;
+  readonly directoryHashDomain: number;
 }
 
 function placementKey(environmentId: string, locationId: LibraryLocationId): string {
@@ -231,6 +236,7 @@ function buildRemovalEntry(
     return (resource?.instances ?? []).map((instance) => ({
       environmentId: snapshot.environmentId,
       instance,
+      directoryHashDomain: snapshot.directoryHashDomain,
     }));
   });
 
@@ -267,12 +273,13 @@ function buildRemovalEntry(
     (candidate) =>
       !removing.has(placementKey(candidate.environmentId, candidate.instance.locationId))
   );
+  const divergence = placed.length > 1 ? describeDivergence(placed, ref.kind) : 'single';
 
   return {
     resourceKey,
     ref,
-    divergence: placed.length > 1 ? describeDivergence(placed) : 'single',
-    locations: classified.map((row) => describeRemovalLocation(row, removing, placed)),
+    divergence,
+    locations: classified.map((row) => describeRemovalLocation(row, removing, placed, divergence)),
     instancePlacements: placed
       .map((candidate) => ({
         environmentId: candidate.environmentId,
@@ -312,7 +319,18 @@ function environmentBlockedReason(
  * a machine, and reporting it would call a resource uniform while two boxes hold
  * different bytes.
  */
-function describeDivergence(placed: readonly PlacedInstance[]): RemovalPreviewEntry['divergence'] {
+function describeDivergence(
+  placed: readonly PlacedInstance[],
+  kind: ResourceKind
+): RemovalPreviewEntry['divergence'] {
+  if (DIRECTORY_HASHED_RESOURCE_KINDS.has(kind)) {
+    const domains = new Set(
+      placed.flatMap((candidate) =>
+        candidate.instance.valid ? [candidate.directoryHashDomain] : []
+      )
+    );
+    if (domains.size > 1) return 'incomparable';
+  }
   const hashes = new Set(
     placed.flatMap((candidate) =>
       candidate.instance.valid ? [candidate.instance.contentHash] : []
@@ -325,7 +343,8 @@ function describeDivergence(placed: readonly PlacedInstance[]): RemovalPreviewEn
 function describeRemovalLocation(
   row: ClassifiedRemoval,
   removing: ReadonlySet<string>,
-  placed: readonly PlacedInstance[]
+  placed: readonly PlacedInstance[],
+  divergence: RemovalPreviewEntry['divergence']
 ): RemovalLocation {
   const { location, instance, blockedReason } = row;
   const base = {
@@ -347,7 +366,11 @@ function describeRemovalLocation(
   return {
     ...base,
     operation: 'remove',
-    eliminatesContentGroup: eliminatesContentGroup(instance, removing, placed),
+    // Mixed directory-hash domains produce different hashes for the same bytes,
+    // so a hash-keyed group would call each copy a unique version. Withhold the
+    // claim until the hashes are comparable again.
+    eliminatesContentGroup:
+      divergence === 'incomparable' ? false : eliminatesContentGroup(instance, removing, placed),
   };
 }
 

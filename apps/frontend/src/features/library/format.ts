@@ -29,7 +29,13 @@ import type {
  * two of a target's locations are fine, two different copies are the thing to
  * look at, and merging them into one warning would hide the difference.
  */
-export type CoverageCellState = 'present' | 'absent' | 'shadowed' | 'divergent' | 'only-here';
+export type CoverageCellState =
+  | 'present'
+  | 'absent'
+  | 'shadowed'
+  | 'divergent'
+  | 'only-here'
+  | 'incomparable';
 
 /** Characters carrying each state. Never the only signal — every cell is also labelled. */
 export const CELL_GLYPHS: Readonly<Record<CoverageCellState, string>> = {
@@ -38,6 +44,7 @@ export const CELL_GLYPHS: Readonly<Record<CoverageCellState, string>> = {
   shadowed: '⧉',
   divergent: '⚠',
   'only-here': '★',
+  incomparable: '?',
 };
 
 export interface CoverageCell {
@@ -102,6 +109,10 @@ export function coverageCell(resource: LibraryResource, coverage: LibraryCoverag
   };
 
   if (coverage.state === 'absent') return { ...base, state: 'absent' };
+
+  if (resource.divergence === 'incomparable') {
+    return { ...base, state: 'incomparable' };
+  }
 
   const localHashes = new Set(
     [coverage.effectiveLocationId, ...coverage.shadowedLocationIds]
@@ -275,9 +286,10 @@ export function filterResources(
 /** Divergent first, then shadowed, then everything settled — worst news at the top. */
 const DIVERGENCE_RANK: Readonly<Record<LibraryResource['divergence'], number>> = {
   divergent: 0,
-  uniform: 1,
-  single: 2,
-  'not-comparable': 3,
+  incomparable: 1,
+  uniform: 2,
+  single: 3,
+  'not-comparable': 4,
 };
 
 export function sortResources(

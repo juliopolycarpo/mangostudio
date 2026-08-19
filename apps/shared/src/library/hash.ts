@@ -14,8 +14,59 @@ const FILE_HASH_DOMAIN = 'mangostudio/library/file\0';
  * silently colliding with the pre-fix encoding: a length-prefixed manifest and a
  * `\0`/`\n`-delimited one can never be mistaken for each other once they hash into disjoint
  * domains.
+ *
+ * Advertised on the runtime capability manifest. File-backed resources are
+ * unaffected — only this directory domain moved.
  */
-const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir/v2\0';
+export const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir/v2\0';
+
+/**
+ * Peers that omit `directoryHashDomain` on hello. Directory hashing moved to
+ * v2 (`mangostudio/library/dir/v2`) before this field existed, so silence is
+ * that already-shipped domain rather than the pre-length-prefix v1 encoding.
+ *
+ * Keep this pinned at 2 when the live domain becomes v3: omitted still means
+ * "built after v2 hashing and before the advertisement", not "whatever this
+ * binary computes today". Pre-v2 binaries sit behind that breaking hash change
+ * and cannot be distinguished on hello.
+ */
+export const DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION = 2;
+
+/**
+ * Largest version the capability manifest and the lifecycle view accept, and
+ * the bound this module enforces when deriving one. Both are the same limit on
+ * purpose: a domain the runtime can hash with but not advertise would fail
+ * schema validation on hello, taking the whole handshake down over a hash
+ * bump. Failing here instead turns that into a test failure in this repo.
+ */
+export const MAX_DIRECTORY_HASH_DOMAIN_VERSION = 255;
+
+const DIRECTORY_HASH_DOMAIN_VERSION_PATTERN = /\/v(\d+)\0$/;
+
+/**
+ * The integer the runtime advertises for {@link DIRECTORY_HASH_DOMAIN}. Derived
+ * from the domain string so a v3 bump cannot forget to update the capability.
+ */
+export function directoryHashDomainVersion(domain: string = DIRECTORY_HASH_DOMAIN): number {
+  const match = DIRECTORY_HASH_DOMAIN_VERSION_PATTERN.exec(domain);
+  const version = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isSafeInteger(version) || version < 1) {
+    throw new Error(
+      `Directory hash domain must end in /v<n>\\0 so the runtime can advertise it (got ${JSON.stringify(domain)}).`
+    );
+  }
+  if (version > MAX_DIRECTORY_HASH_DOMAIN_VERSION) {
+    throw new Error(
+      `Directory hash domain version ${version} exceeds the ${MAX_DIRECTORY_HASH_DOMAIN_VERSION} the runtime can advertise; widen the capability schema in the same change.`
+    );
+  }
+  return version;
+}
+
+/** Absent on the wire means v2 — the domain that shipped before this field. */
+export function directoryHashDomainOf(advertised: number | undefined): number {
+  return advertised ?? DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION;
+}
 
 /**
  * Which platform's path semantics apply to the paths a {@link LibraryHashReader} returns.

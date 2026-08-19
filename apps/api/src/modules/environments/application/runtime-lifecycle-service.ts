@@ -25,6 +25,7 @@ import {
   LOCAL_ENVIRONMENT_ID,
   sshRuntimePath,
 } from '@mangostudio/shared/environments';
+import { directoryHashDomainOf } from '@mangostudio/shared/library';
 import {
   PLATFORM_PROBE_SCRIPT,
   parsePlatformProbe,
@@ -517,7 +518,10 @@ export function createRuntimeLifecycleService(
         managedPush,
         stagedRuntime: await resolveStagedRuntime(transportKind, cached?.health ?? null),
         ...(status.state === 'connected'
-          ? { enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true }
+          ? {
+              enforcesPathPolicy: status.manifest?.enforcesPathPolicy === true,
+              directoryHashDomain: directoryHashDomainOf(status.manifest?.directoryHashDomain),
+            }
           : {}),
       });
     },

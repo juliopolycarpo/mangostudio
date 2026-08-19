@@ -46,6 +46,11 @@ export interface BuildRuntimeLifecycleViewInput {
    * nothing is connected — see the field's note on the view schema.
    */
   readonly enforcesPathPolicy?: boolean | undefined;
+  /**
+   * Directory-hash domain the connected peer advertised. Undefined when nothing
+   * is connected; an older connected peer that omits the field is v2.
+   */
+  readonly directoryHashDomain?: number | undefined;
 }
 
 export function buildRuntimeLifecycleView(
@@ -77,6 +82,9 @@ export function buildRuntimeLifecycleView(
     ...(input.enforcesPathPolicy === undefined
       ? {}
       : { enforcesPathPolicy: input.enforcesPathPolicy }),
+    ...(input.directoryHashDomain === undefined
+      ? {}
+      : { directoryHashDomain: input.directoryHashDomain }),
   };
 }
 

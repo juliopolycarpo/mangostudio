@@ -125,6 +125,7 @@ import {
   UnobservedLineNumbersError,
 } from '@mangostudio/runtime';
 import { ExternalAgentEventEnvelopeSchema } from '@mangostudio/shared/external-agents';
+import { directoryHashDomainOf } from '@mangostudio/shared/library';
 import type {
   RuntimeEventFrame,
   RuntimePathPolicyParams,
@@ -552,6 +553,15 @@ export class RuntimeClient {
    */
   get enforcesPathPolicy(): boolean {
     return this.protocol.manifest.enforcesPathPolicy === true;
+  }
+
+  /**
+   * Directory-hash domain this peer computes. Older runtimes omit the field
+   * and already hash under v2; silence is v2, never inferred from the protocol
+   * version.
+   */
+  get directoryHashDomain(): number {
+    return directoryHashDomainOf(this.protocol.manifest.directoryHashDomain);
   }
 
   /** One health truth: same payload as `mangostudio-runtime health --json`. */

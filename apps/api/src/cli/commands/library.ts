@@ -54,7 +54,12 @@ function filterResources(resources: LibraryResource[], options: LibraryArgs): Li
 
 function printResourceLine(resource: LibraryResource, log: (line: string) => void): void {
   const targets = resource.coverage.map((entry) => `${entry.targetId}:${entry.state}`).join(' ');
-  const divergence = resource.divergence === 'divergent' ? '  divergent' : '';
+  const divergence =
+    resource.divergence === 'divergent'
+      ? '  divergent'
+      : resource.divergence === 'incomparable'
+        ? '  incomparable'
+        : '';
   log(`  ${resource.ref.kind}/${resource.ref.slug}  ${targets}${divergence}`);
 }
 

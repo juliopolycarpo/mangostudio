@@ -186,4 +186,272 @@ describe('executePropagationWrites', () => {
     ).rejects.toThrow(/outside location "claude-skills"/);
     expect(existsSync(outsider)).toBe(true);
   });
+
+  it('refuses a write whose on-disk hash is not the one the preview described', async () => {
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+
+    const result = await executePropagationWrites({
+      backupRoot,
+      pathEnv: env,
+      operations: [
+        {
+          resourceKey: 'skill:gh',
+          locationId: 'claude-skills',
+          slug: 'gh',
+          operation: 'create',
+          kind: 'directory',
+          expectedContentHash: 'not-the-hash-the-preview-described',
+          destinationRoot: join(home, '.claude', 'skills'),
+          sourceDir,
+        },
+      ],
+    });
+
+    expect(result.failed[0]).toMatchObject({ reason: 'verification-failed' });
+    expect(result.applied).toEqual([]);
+    expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
+  });
+
+  it('fails verification with unsafe-name when a written directory contains a newline filename', async () => {
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    writeFileSync(join(sourceDir, 'a\nb.md'), 'leaf');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+
+    const result = await executePropagationWrites({
+      backupRoot,
+      pathEnv: env,
+      operations: [
+        {
+          resourceKey: 'skill:gh',
+          locationId: 'claude-skills',
+          slug: 'gh',
+          operation: 'create',
+          kind: 'directory',
+          expectedContentHash: 'unused-because-hashing-fails',
+          destinationRoot: join(home, '.claude', 'skills'),
+          sourceDir,
+        },
+      ],
+    });
+
+    expect(result.failed[0]).toMatchObject({
+      reason: 'verification-failed',
+      message: expect.stringContaining('unsafe-name'),
+    });
+    expect(result.applied).toEqual([]);
+    expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(false);
+  });
+
+  it('keeps the backup set when an overwrite cannot be rolled back after verification fails', async () => {
+    const destination = join(home, '.claude', 'skills', 'gh');
+    mkdirSync(destination);
+    writeFileSync(join(destination, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nold\n');
+
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nnew\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const deps = createPropagationWriteEngineDeps({ backupRoot });
+
+    const result = await executePropagationWrites(
+      {
+        backupRoot,
+        pathEnv: env,
+        operations: [
+          {
+            resourceKey: 'skill:gh',
+            locationId: 'claude-skills',
+            slug: 'gh',
+            operation: 'overwrite',
+            kind: 'directory',
+            expectedContentHash: 'not-the-hash-the-preview-described',
+            destinationRoot: join(home, '.claude', 'skills'),
+            sourceDir,
+          },
+        ],
+      },
+      {
+        ...deps,
+        backup: {
+          ...deps.backup,
+          fs: {
+            ...deps.backup.fs,
+            copyTree(source, destinationPath) {
+              // The writer backs up through its own fs. Restore copies from the
+              // backup set; failing that is the compensation miss this test is for.
+              if (source.startsWith(backupRoot)) {
+                return Promise.reject(new Error('ENOSPC: could not restore backup'));
+              }
+              return deps.backup.fs.copyTree(source, destinationPath);
+            },
+          },
+        },
+      }
+    );
+
+    expect(result.partial).toBe(true);
+    expect(result.backupId).toBeString();
+    expect(result.failed[0]).toMatchObject({ reason: 'verification-failed' });
+    expect(result.applied).toEqual([]);
+    expect(readFileSync(join(destination, 'SKILL.md'), 'utf8')).toContain('new');
+    expect(existsSync(join(backupRoot, result.backupId ?? ''))).toBe(true);
+    expect(
+      readFileSync(
+        join(backupRoot, result.backupId ?? '', 'claude-skills', 'gh', 'SKILL.md'),
+        'utf8'
+      )
+    ).toContain('old');
+
+    const manifest = JSON.parse(
+      readFileSync(join(backupRoot, result.backupId ?? '', 'manifest.json'), 'utf8')
+    ) as { entries: Array<{ writtenContentHash: string }> };
+    expect(manifest.entries[0]?.writtenContentHash).toBe(
+      await hashResourceAt(destination, 'directory')
+    );
+
+    const undone = await executeLibraryUndo({
+      backupRoot,
+      backupId: result.backupId ?? '',
+      pathEnv: env,
+    });
+    expect(undone.restored).toHaveLength(1);
+    expect(readFileSync(join(destination, 'SKILL.md'), 'utf8')).toContain('old');
+  });
+
+  // A hash mismatch reports the digest it saw, but a transient read failure
+  // reports nothing. Recording the empty placeholder for a destination that
+  // hashes fine on the next read is what makes undo skip it as
+  // `changed-since-apply`, leaving the unverified write with no way back.
+  it('records the destination hash when verification failed for a reason that saw none', async () => {
+    const destination = join(home, '.claude', 'skills', 'gh');
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const deps = createPropagationWriteEngineDeps({ backupRoot });
+    let hashCalls = 0;
+
+    const result = await executePropagationWrites(
+      {
+        backupRoot,
+        pathEnv: env,
+        operations: [
+          {
+            resourceKey: 'skill:gh',
+            locationId: 'claude-skills',
+            slug: 'gh',
+            operation: 'create',
+            kind: 'directory',
+            expectedContentHash: await hashResourceAt(sourceDir, 'directory'),
+            destinationRoot: join(home, '.claude', 'skills'),
+            sourceDir,
+          },
+        ],
+      },
+      {
+        ...deps,
+        // Fails the verification read only. A transient I/O error carries no
+        // observed digest, and the destination reads back fine afterwards.
+        hashAt: (path, kind) => {
+          hashCalls += 1;
+          if (hashCalls === 1) return Promise.reject(new Error('EIO: could not read destination'));
+          return hashResourceAt(path, kind);
+        },
+        backup: {
+          ...deps.backup,
+          fs: {
+            ...deps.backup.fs,
+            remove(path) {
+              if (path === destination) {
+                return Promise.reject(new Error('EACCES: could not remove unverified write'));
+              }
+              return deps.backup.fs.remove(path);
+            },
+          },
+        },
+      }
+    );
+
+    expect(result.partial).toBe(true);
+    expect(result.failed[0]).toMatchObject({ reason: 'write-failed' });
+    expect(existsSync(destination)).toBe(true);
+
+    const manifest = JSON.parse(
+      readFileSync(join(backupRoot, result.backupId ?? '', 'manifest.json'), 'utf8')
+    ) as { entries: Array<{ writtenContentHash: string }> };
+    expect(manifest.entries[0]?.writtenContentHash).toBe(
+      await hashResourceAt(destination, 'directory')
+    );
+
+    const undone = await executeLibraryUndo({
+      backupRoot,
+      backupId: result.backupId ?? '',
+      pathEnv: env,
+    });
+    expect(undone.skipped).toEqual([]);
+    expect(undone.removed).toHaveLength(1);
+    expect(existsSync(destination)).toBe(false);
+  });
+
+  it('keeps a created destination when verification rollback cannot remove it', async () => {
+    const destination = join(home, '.claude', 'skills', 'gh');
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const deps = createPropagationWriteEngineDeps({ backupRoot });
+
+    const result = await executePropagationWrites(
+      {
+        backupRoot,
+        pathEnv: env,
+        operations: [
+          {
+            resourceKey: 'skill:gh',
+            locationId: 'claude-skills',
+            slug: 'gh',
+            operation: 'create',
+            kind: 'directory',
+            expectedContentHash: 'not-the-hash-the-preview-described',
+            destinationRoot: join(home, '.claude', 'skills'),
+            sourceDir,
+          },
+        ],
+      },
+      {
+        ...deps,
+        backup: {
+          ...deps.backup,
+          fs: {
+            ...deps.backup.fs,
+            remove(path) {
+              if (path === destination) {
+                return Promise.reject(new Error('EACCES: could not remove unverified write'));
+              }
+              return deps.backup.fs.remove(path);
+            },
+          },
+        },
+      }
+    );
+
+    expect(result.partial).toBe(true);
+    expect(result.backupId).toBeString();
+    expect(result.failed[0]).toMatchObject({ reason: 'verification-failed' });
+    expect(existsSync(destination)).toBe(true);
+    expect(existsSync(join(backupRoot, result.backupId ?? '', 'manifest.json'))).toBe(true);
+
+    const undone = await executeLibraryUndo({
+      backupRoot,
+      backupId: result.backupId ?? '',
+      pathEnv: env,
+    });
+    expect(undone.removed).toHaveLength(1);
+    expect(existsSync(destination)).toBe(false);
+  });
 });

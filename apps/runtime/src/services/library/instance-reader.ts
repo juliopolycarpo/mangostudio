@@ -218,7 +218,7 @@ export async function hashResourceAt(
     readFile: fs.readFile,
     pathStyle: NODE_HASH_PATH_STYLE,
   });
-  if (!result.valid) throw new PathEscapeError();
+  if (!result.valid) throw new LibraryHashInvalidError(result.invalidReason);
   return result.contentHash;
 }
 
@@ -654,8 +654,9 @@ export class InstanceTooLargeError extends Error {}
  * survive the throw/catch back to `readOneEntry` instead of collapsing to a
  * generic escape.
  */
-class LibraryHashInvalidError extends Error {
+export class LibraryHashInvalidError extends Error {
   constructor(readonly invalidReason: LibraryInvalidReason) {
     super(`Library directory hash invalid: ${invalidReason}`);
+    this.name = 'LibraryHashInvalidError';
   }
 }

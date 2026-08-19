@@ -284,6 +284,38 @@ describe('createEnvironmentLibraryService', () => {
     expect(resetCalls).toEqual(['remote-f']);
   });
 
+  it('scans through a caller-supplied client instead of resolving a new one', async () => {
+    const scans: string[] = [];
+    const makeClient = (label: string): RuntimeClient =>
+      ({
+        manifest: makeManifest('remote-g'),
+        library: {
+          scan: () => {
+            scans.push(label);
+            return Promise.resolve({ entries: [], unreadableEntries: [] });
+          },
+        },
+      }) as unknown as RuntimeClient;
+    const resolved = makeClient('resolved');
+    const supplied = makeClient('supplied');
+    const resolveCalls: string[] = [];
+    const service = createEnvironmentLibraryService({
+      resolveClient: () => {
+        resolveCalls.push('resolved');
+        return Promise.resolve(resolved);
+      },
+    });
+
+    await service.discover(
+      getDb(),
+      { userId: 'library-supplied-client-user', environmentId: 'remote-g' },
+      { force: true, client: supplied }
+    );
+
+    expect(scans).toEqual(['supplied']);
+    expect(resolveCalls).toEqual([]);
+  });
+
   it('resetLibraryCachesForEnvironments drops each environment once', () => {
     const resetCalls: string[] = [];
     resetLibraryCachesForEnvironments(

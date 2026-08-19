@@ -1,6 +1,10 @@
 import Type, { type Static } from 'typebox';
 import { ApiErrorResponseSchema, SSEErrorEventSchema } from '../errors';
-import { LibraryLocationStatusSchema, LibraryTargetIdSchema } from '../library';
+import {
+  LibraryLocationStatusSchema,
+  LibraryTargetIdSchema,
+  MAX_DIRECTORY_HASH_DOMAIN_VERSION,
+} from '../library';
 import { ProfileIdSchema } from '../profiles';
 import { RuntimeCapabilityAllowSchema, RuntimeHealthReportSchema } from '../runtime-home/schemas';
 import {
@@ -1042,6 +1046,16 @@ export const RuntimeLifecycleViewSchema = Type.Object({
    * accuse a machine that has said nothing.
    */
   enforcesPathPolicy: Type.Optional(Type.Boolean()),
+  /**
+   * Directory-hash domain the connected runtime computes. Handshake-only, same
+   * as `enforcesPathPolicy`: health cannot reconstruct it, and a refresh that
+   * dropped it would silently invent a default. Absent while disconnected.
+   * Absent on an older connected peer means v2 — the domain that shipped
+   * before this field.
+   */
+  directoryHashDomain: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: MAX_DIRECTORY_HASH_DOMAIN_VERSION })
+  ),
 });
 export type RuntimeLifecycleView = Static<typeof RuntimeLifecycleViewSchema>;
 

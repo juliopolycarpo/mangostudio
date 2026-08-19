@@ -168,6 +168,13 @@ export const LibraryDivergenceSchema = Type.Union([
    * content groups are still reported; only the verdict is withheld.
    */
   Type.Literal('not-comparable'),
+  /**
+   * Directory instances were hashed under different directory-hash domains, so
+   * the hashes are not comparable. Not the same as `divergent` (the bytes may
+   * well match) and not the same as `not-comparable` (vendor formats). File-
+   * backed resources never take this state — only the directory domain moved.
+   */
+  Type.Literal('incomparable'),
 ]);
 
 export const LibraryContentGroupSchema = Type.Object({
@@ -423,6 +430,13 @@ export const PropagationBlockedReasonSchema = Type.Union([
    * change from here should never look like a failure they caused.
    */
   Type.Literal('environment-readonly'),
+  /**
+   * The destination runtime hashes directories under a different domain than
+   * the source. Comparing those hashes would report phantom divergence, and an
+   * apply would fail the `expectedContentHash` check. Blocked rather than
+   * described: the preview must not offer a write it cannot verify.
+   */
+  Type.Literal('hash-domain-mismatch'),
 ]);
 
 export const PropagationAdaptationSchema = Type.Object({

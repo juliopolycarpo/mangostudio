@@ -25,7 +25,7 @@ import type {
   PropagationPreviewEntry,
   PropagationPreviewRequest,
 } from '@mangostudio/shared/library';
-import { enabledLibraryLocations } from '@mangostudio/shared/library';
+import { directoryHashDomainVersion, enabledLibraryLocations } from '@mangostudio/shared/library';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../src/db/database';
 import { listDivergenceAcks } from '../../../src/modules/library/application/conflict-resolution';
@@ -176,6 +176,7 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
       statuses: new Map(
         request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
       ),
+      directoryHashDomain: directoryHashDomainVersion(),
     }),
     enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
   });
@@ -813,6 +814,7 @@ describe('propagation apply — request validation', () => {
           statuses: new Map(
             INSTRUCTION_LOCATIONS.map((id) => [id, describeLocation(id, env)] as const)
           ),
+          directoryHashDomain: directoryHashDomainVersion(),
         }),
         enabledLocationIds: async () =>
           enabledLibraryLocations(libraryLocationsFor(settings(['claude-instructions'])), 'home'),
@@ -1130,6 +1132,7 @@ describe('propagation apply — across machines', () => {
           statuses: new Map(
             SKILL_LOCATIONS.map((id) => [id, describeLocation(id, envFor(environmentId))] as const)
           ),
+          directoryHashDomain: directoryHashDomainVersion(),
         }),
         enabledLocationIds: async () =>
           enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
@@ -1384,6 +1387,7 @@ describe('propagation apply — across machines', () => {
           statuses: new Map(
             SKILL_LOCATIONS.map((id) => [id, describeLocation(id, pathEnv())] as const)
           ),
+          directoryHashDomain: directoryHashDomainVersion(),
         }),
         enabledLocationIds: async () =>
           enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),

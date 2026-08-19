@@ -3,6 +3,7 @@ import {
   ExternalAgentTargetIdSchema,
   ExternalIdentityIsolationSchema,
 } from '../external-agents/schemas';
+import { MAX_DIRECTORY_HASH_DOMAIN_VERSION } from '../library/hash';
 import { RuntimeCapabilityAllowSchema } from '../runtime-home/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
 
@@ -168,6 +169,20 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * has not answered it in the affirmative.
    */
   enforcesPathPolicy: Type.Optional(Type.Boolean()),
+  /**
+   * Which directory-hash domain this runtime computes. A version, not a boolean:
+   * the domain is monotonic and will move again, and a v3 must not need a new
+   * field.
+   *
+   * Directory hashes are not comparable across a domain boundary. File-backed
+   * resources are unaffected — only the directory domain moved. Absent means
+   * **v2**: that domain shipped before this field, so a parent-revision peer
+   * already computes it. Unlike `enforcesPathPolicy`, silence is not the
+   * pre-fix default.
+   */
+  directoryHashDomain: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: MAX_DIRECTORY_HASH_DOMAIN_VERSION })
+  ),
   /** Consent profile that produced `features`; absent on older peers. */
   profile: Type.Optional(
     Type.Union([

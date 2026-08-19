@@ -1603,6 +1603,7 @@ export const messages = {
       uniform: 'Cópias idênticas',
       divergent: 'Cópias diferentes',
       'not-comparable': 'Não comparável',
+      incomparable: 'Versões de hash diferentes',
     },
     // Um rótulo por glifo da matriz. Nada aqui chama uma ausência de "faltando":
     // um recurso que o Cursor não tem costuma estar ausente de propósito.
@@ -1612,6 +1613,7 @@ export const messages = {
       shadowed: 'Duplicado, idêntico',
       divergent: 'Difere das outras cópias',
       'only-here': 'Só aqui',
+      incomparable: 'Não dá para comparar',
     },
     cellHint: {
       present: 'Este agente lê uma cópia deste recurso.',
@@ -1619,6 +1621,8 @@ export const messages = {
       shadowed: 'Duas cópias em locais diferentes, com o mesmo conteúdo.',
       divergent: 'O conteúdo aqui não é o mesmo das demais cópias.',
       'only-here': 'Este é o único agente que lê o recurso.',
+      incomparable:
+        'Os hashes destas cópias vieram de versões diferentes do runtime, então não dá para compará-los.',
     },
     invalidReason: {
       'path-escape': 'O caminho aponta para fora do local.',
@@ -1722,6 +1726,8 @@ export const messages = {
         'Os SKILL.md são idênticos, então a diferença está em outro arquivo do diretório.',
       notComparable:
         'Este tipo é somente leitura e cada agente guarda em um formato próprio, então comparar as cópias não diz nada acionável.',
+      incomparable:
+        'Os hashes destas cópias vieram de versões diferentes do runtime, então não dá para compará-los. Os arquivos ainda podem ser iguais. Atualize todos os runtimes conectados para a mesma versão e faça o scan de novo.',
       recentApply: 'Uma propagação recente escreveu este recurso.',
     },
     diff: {
@@ -1843,6 +1849,8 @@ export const messages = {
       'environment-offline': 'Esta máquina não está conectada no momento.',
       'environment-unsupported': 'Esta máquina não oferece acesso à biblioteca.',
       'environment-readonly': 'O dono desta máquina não permitiu escrever arquivos aqui.',
+      'hash-domain-mismatch':
+        'Esta máquina calcula hashes de diretório com uma versão diferente da origem, então uma escrita aqui não pode ser verificada.',
       // A remoção usa este mesmo catálogo; só o motivo abaixo é exclusivo dela.
       'invalid-instance':
         'Esta cópia não pôde ser lida por inteiro, então não dá para guardar um backup fiel dela. Remova você mesmo.',

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  directoryHashDomainOf,
+  directoryHashDomainVersion,
   hashLibraryDirectory,
   hashLibraryFile,
   type LibraryHashPathStyle,
   type LibraryHashReader,
+  MAX_DIRECTORY_HASH_DOMAIN_VERSION,
   normalizeHashPath,
 } from '../../../src/library';
 
@@ -325,6 +328,37 @@ describe('library hashing', () => {
 
     expect(await hashLibraryDirectory('/library', withSlash)).toEqual(
       await hashLibraryDirectory('/library', fakeReader(files))
+    );
+  });
+});
+
+describe('directory hash domain version', () => {
+  it('derives the advertised version from DIRECTORY_HASH_DOMAIN', () => {
+    expect(directoryHashDomainVersion()).toBe(2);
+    expect(directoryHashDomainVersion('mangostudio/library/dir/v3\0')).toBe(3);
+  });
+
+  it('treats an omitted advertised domain as v2', () => {
+    expect(directoryHashDomainOf(undefined)).toBe(2);
+    expect(directoryHashDomainOf(2)).toBe(2);
+    expect(directoryHashDomainOf(1)).toBe(1);
+  });
+
+  it('refuses a domain string that does not carry a version', () => {
+    expect(() => directoryHashDomainVersion('mangostudio/library/dir\0')).toThrow(
+      /must end in \/v<n>/
+    );
+  });
+
+  // A version the runtime hashes with but cannot advertise fails capability
+  // validation on hello, so a hash bump would take the handshake down rather
+  // than degrade one comparison. Fail on the bump instead.
+  it('refuses a version the capability manifest could not carry', () => {
+    expect(directoryHashDomainVersion(`mangostudio/library/dir/v255\0`)).toBe(
+      MAX_DIRECTORY_HASH_DOMAIN_VERSION
+    );
+    expect(() => directoryHashDomainVersion('mangostudio/library/dir/v256\0')).toThrow(
+      /exceeds the 255 the runtime can advertise/
     );
   });
 });

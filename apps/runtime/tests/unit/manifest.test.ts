@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { directoryHashDomainVersion } from '@mangostudio/shared/library';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 import { createLocalRuntimeManifest } from '../../src/manifest';
 
@@ -11,6 +12,8 @@ describe('createLocalRuntimeManifest', () => {
     expect(manifest.features.shell).toBe(true);
     expect(manifest.features.update).toBe(true);
     expect(manifest.features.tools).toBe(true);
+    expect(manifest.enforcesPathPolicy).toBe(true);
+    expect(manifest.directoryHashDomain).toBe(directoryHashDomainVersion());
   });
 
   it('advertises readonly without shell or write', () => {

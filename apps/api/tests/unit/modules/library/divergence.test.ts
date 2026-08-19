@@ -88,4 +88,51 @@ describe('describeDivergence', () => {
     expect(result.divergence).toBe('divergent');
     expect(result.whitespaceOnlyDivergence).toBe(true);
   });
+
+  it('withholds a verdict when directory hashes come from mixed domains', () => {
+    const result = describeDivergence('skill', [
+      { ...compared('mango-skills', 'v2-hash'), directoryHashDomain: 2 },
+      { ...compared('claude-skills', 'v1-hash'), directoryHashDomain: 1 },
+    ]);
+
+    expect(result.divergence).toBe('incomparable');
+    expect(result.whitespaceOnlyDivergence).toBe(false);
+    expect(result.contentGroups).toHaveLength(2);
+  });
+
+  it('treats an omitted directory-hash domain as v2', () => {
+    const result = describeDivergence('skill', [
+      { ...compared('mango-skills', 'same'), directoryHashDomain: 2 },
+      compared('claude-skills', 'same'),
+    ]);
+
+    expect(result.divergence).toBe('uniform');
+  });
+
+  it('compares directory hashes once both sides share a domain', () => {
+    const result = describeDivergence('skill', [
+      { ...compared('mango-skills', 'same'), directoryHashDomain: 2 },
+      { ...compared('claude-skills', 'same'), directoryHashDomain: 2 },
+    ]);
+
+    expect(result.divergence).toBe('uniform');
+  });
+
+  it('still compares file-backed kinds across mixed directory-hash domains', () => {
+    const result = describeDivergence('instruction', [
+      { ...compared('mango-instructions', 'a'), directoryHashDomain: 2 },
+      { ...compared('claude-instructions', 'b'), directoryHashDomain: 1 },
+    ]);
+
+    expect(result.divergence).toBe('divergent');
+  });
+
+  it('still compares directory-of-files subagents across mixed directory-hash domains', () => {
+    const result = describeDivergence('subagent', [
+      { ...compared('mango-agents', 'a'), directoryHashDomain: 2 },
+      { ...compared('claude-agents', 'b'), directoryHashDomain: 1 },
+    ]);
+
+    expect(result.divergence).toBe('divergent');
+  });
 });
