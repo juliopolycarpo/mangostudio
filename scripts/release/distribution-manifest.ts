@@ -124,6 +124,7 @@ async function main(): Promise<void> {
     packageVersion,
     channel,
     bunVersion: Bun.version,
+    bunRevision: Bun.revision,
   });
   writeFileSync(args.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 

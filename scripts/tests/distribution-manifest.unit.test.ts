@@ -52,7 +52,8 @@ function fixture(): {
       dirty: false,
       packageVersion: '1.2.3',
       channel: 'test',
-      bunVersion: '1.3.14',
+      bunVersion: '1.4.0',
+      bunRevision: '32e87032b98b46d9c3c1d082c58cb390abf35e33',
     }),
   };
 }
@@ -131,6 +132,15 @@ describe('distribution manifest', () => {
     );
     expect(() => parseDistributionManifest(JSON.stringify(duplicateFile))).toThrow(
       /Duplicate distribution file identity/
+    );
+  });
+
+  test('rejects a manifest without the Bun revision that built it', () => {
+    const { manifest } = fixture();
+    const { bunRevision: _bunRevision, ...withoutRevision } = manifest;
+
+    expect(() => parseDistributionManifest(JSON.stringify(withoutRevision))).toThrow(
+      /field bunRevision must be a non-empty string/
     );
   });
 

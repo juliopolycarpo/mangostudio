@@ -10,7 +10,8 @@ import {
   releaseArchiveFileName,
 } from './release-targets';
 
-const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 1;
+/** Version 2 added bunRevision; manifests never outlive the workflow run that wrote them. */
+const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 2;
 export const DISTRIBUTION_MANIFEST_FILE = 'distribution-manifest.json';
 
 interface DistributionFile {
@@ -35,6 +36,8 @@ export interface DistributionManifest {
   readonly packageVersion: string;
   readonly channel: string;
   readonly bunVersion: string;
+  /** Bun.revision, because Bun.version reports a plain "1.4.0" on canary builds. */
+  readonly bunRevision: string;
   readonly targets: readonly DistributionTarget[];
   readonly files: readonly DistributionFile[];
 }
@@ -46,6 +49,7 @@ export interface CreateDistributionManifestOptions {
   readonly packageVersion: string;
   readonly channel: string;
   readonly bunVersion: string;
+  readonly bunRevision: string;
 }
 
 export interface ValidateDistributionManifestOptions {
@@ -107,6 +111,7 @@ export function createDistributionManifest(
     packageVersion: options.packageVersion,
     channel: options.channel,
     bunVersion: options.bunVersion,
+    bunRevision: options.bunRevision,
     targets,
     files,
   };
@@ -124,7 +129,13 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
   if (value.schemaVersion !== DISTRIBUTION_MANIFEST_SCHEMA_VERSION) {
     throw new Error(`Unsupported distribution manifest schema: ${String(value.schemaVersion)}`);
   }
-  for (const key of ['sourceSha', 'packageVersion', 'channel', 'bunVersion'] as const) {
+  for (const key of [
+    'sourceSha',
+    'packageVersion',
+    'channel',
+    'bunVersion',
+    'bunRevision',
+  ] as const) {
     if (typeof value[key] !== 'string' || value[key].length === 0) {
       throw new Error(`Distribution manifest field ${key} must be a non-empty string.`);
     }
@@ -154,6 +165,7 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
     packageVersion: value.packageVersion as string,
     channel: value.channel as string,
     bunVersion: value.bunVersion as string,
+    bunRevision: value.bunRevision as string,
     targets,
     files,
   };
