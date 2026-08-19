@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 import { RuntimeRemoteError } from '@mangostudio/runtime';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
   LibraryResource,
   LibraryResourceContent,
+  LibraryScanResult,
   LibraryTargetDescriptor,
   LibraryUnreadableEntry,
 } from '@mangostudio/shared/library';
@@ -13,6 +15,7 @@ import {
   createLibraryRoutes,
   type LibraryRouteService,
   MAX_LIBRARY_CONTENT_BYTES,
+  STATE_REQUIRES_TARGET_MESSAGE,
 } from '../../../src/modules/library/http/library-routes';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
@@ -132,6 +135,52 @@ describe('library routes', () => {
     expect(await response.json()).toEqual({ resources: [skillResource], unreadableEntries: [] });
   });
 
+  it('narrows coverage against the named target rather than any target', async () => {
+    const { service } = createService();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    // `claude` is absent from this resource and `codex` has it. Before the
+    // filter required a target, `state=absent` matched on `claude`'s coverage
+    // and returned the row for every question anyone asked.
+    const claude = await app.handle(
+      new Request('http://localhost/library/resources?target=claude&state=absent')
+    );
+    const codex = await app.handle(
+      new Request('http://localhost/library/resources?target=codex&state=absent')
+    );
+
+    expect(await claude.json()).toEqual({ resources: [skillResource], unreadableEntries: [] });
+    expect(await codex.json()).toEqual({ resources: [], unreadableEntries: [] });
+  });
+
+  it('rejects state without target with a 400 naming the fix', async () => {
+    const { service } = createService();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/library/resources?state=absent')
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: STATE_REQUIRES_TARGET_MESSAGE,
+      code: ERROR_CODES.VALIDATION,
+    });
+  });
+
+  it('leaves the whole scan unfiltered when no coverage filter is given', async () => {
+    const { service } = createService();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/library/resources'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ resources: [skillResource], unreadableEntries: [] });
+  });
+
   it('reports an entry that fails the library-wide slug pattern without dropping it', async () => {
     const unreadableEntry: LibraryUnreadableEntry = {
       locationId: 'agents-skills',
@@ -149,6 +198,38 @@ describe('library routes', () => {
       resources: [skillResource],
       unreadableEntries: [unreadableEntry],
     });
+  });
+
+  it('keeps unreadable entries out of the coverage filters and inside the scan filters', async () => {
+    const unreadableEntry: LibraryUnreadableEntry = {
+      locationId: 'agents-skills',
+      name: 'my skill',
+      reason: 'invalid-name',
+    };
+    const { service } = createService([skillResource], [unreadableEntry]);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    // An entry that could not be named as a resource has no coverage, so no
+    // target has a state for it. Dropping it under a coverage filter would hide
+    // the very names this channel exists to report.
+    const absentTarget = await app.handle(
+      new Request('http://localhost/library/resources?target=claude&state=absent')
+    );
+    const presentTarget = await app.handle(
+      new Request('http://localhost/library/resources?target=codex')
+    );
+    // `kind` and `location` describe where a scan looked, so they do apply.
+    const otherLocation = await app.handle(
+      new Request('http://localhost/library/resources?location=claude-skills')
+    );
+
+    const entriesOf = async (response: Response) =>
+      ((await response.json()) as LibraryScanResult).unreadableEntries;
+
+    expect(await entriesOf(absentTarget)).toEqual([unreadableEntry]);
+    expect(await entriesOf(presentTarget)).toEqual([unreadableEntry]);
+    expect(await entriesOf(otherLocation)).toEqual([]);
   });
 
   it('returns detail and bounded content by validated resource key and location', async () => {

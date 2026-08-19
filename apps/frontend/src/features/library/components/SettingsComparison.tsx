@@ -13,7 +13,7 @@ import type {
   SettingsField,
 } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
-import { EyeOff } from 'lucide-react';
+import { Ban, EyeOff } from 'lucide-react';
 import { EnvironmentScopeHeader } from '@/features/environments/components/EnvironmentScopeHeader';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
@@ -123,15 +123,27 @@ function ConceptEntry({ entry }: { readonly entry: ConceptComparisonEntry }) {
         {l.settings.conceptState[entry.state]}
       </p>
       {entry.fields.map((field) => (
-        <FieldValue key={field.path} field={field} />
+        <SettingsFieldValue key={field.path} field={field} />
       ))}
     </div>
   );
 }
 
-function FieldValue({ field }: { readonly field: SettingsField }) {
+/**
+ * One field row, in the presentation the API chose for it.
+ *
+ * The three cases have to stay visibly apart, and none of them is "missing". A
+ * setting nobody configured never reaches this component at all — it is simply
+ * not in the list. `redacted` is a value that exists and looked
+ * credential-shaped; `omitted` is a whole subtree the snapshot never walks. A
+ * reader auditing why a tool behaves the way it does needs to tell those two
+ * from each other and from silence, so each gets its own glyph as well as its
+ * own sentence.
+ */
+export function SettingsFieldValue({ field }: { readonly field: SettingsField }) {
   const { t } = useI18n();
   const l = t.library;
+  const Glyph = field.presentation === 'omitted' ? Ban : EyeOff;
 
   return (
     <div className="min-w-0" data-testid="settings-field" data-presentation={field.presentation}>
@@ -140,7 +152,7 @@ function FieldValue({ field }: { readonly field: SettingsField }) {
         <p className="break-all font-mono text-[11px] text-on-surface">{field.value}</p>
       ) : (
         <p className="flex items-center gap-1 text-[11px] text-on-surface-variant/70 italic">
-          <EyeOff size={10} className="shrink-0" />
+          <Glyph size={10} className="shrink-0" />
           {field.presentation === 'redacted'
             ? l.settings.presentation.redacted
             : l.settings.presentation.omitted}

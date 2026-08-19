@@ -31,6 +31,7 @@ import {
   listLibraryTargetDescriptors,
 } from '@mangostudio/shared/library/host';
 import { Elysia, t } from 'elysia';
+import type { Static } from 'typebox';
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -46,12 +47,28 @@ import { handleLibraryError } from './library-error';
 
 export { MAX_LIBRARY_CONTENT_BYTES } from '@mangostudio/runtime';
 
-interface ResourceFilters {
+/** Narrowing that applies to anything a scan found, resource or not. */
+interface ScanFilters {
   readonly kind?: ResourceKind;
-  readonly target?: LibraryTargetId;
   readonly location?: LibraryLocationId;
-  readonly state?: LibraryCoverageState;
 }
+
+/**
+ * A filter set that is already self-consistent: `state` only ever appears next
+ * to the `target` whose coverage it describes.
+ *
+ * The union is the guard. `state` alone used to mean "some target has this
+ * state", which matches nearly the whole library — most targets read none of a
+ * given location, so almost every resource is `absent` for at least one of them,
+ * and `shadowed` answered "shadowed somewhere", a question the matrix never
+ * asks. No value of this type can express that reading, so no filtering pass can
+ * quietly bring it back.
+ */
+type ResourceFilters = ScanFilters &
+  (
+    | { readonly target?: undefined; readonly state?: undefined }
+    | { readonly target: LibraryTargetId; readonly state?: LibraryCoverageState }
+  );
 
 function filterLibraryResources(
   resources: readonly LibraryResource[],
@@ -71,24 +88,23 @@ function filterLibraryResources(
       if (!coverage) return false;
       return filters.state ? coverage.state === filters.state : coverage.state !== 'absent';
     }
-
-    if (filters.state && !resource.coverage.some((coverage) => coverage.state === filters.state)) {
-      return false;
-    }
     return true;
   });
 }
 
-/** `discover` always scans every kind, so this channel needs the same `kind`/`location`
- * narrowing the resource list gets. `target` and `state` describe resource coverage, which an
- * entry that could not even be named as a resource never has, so they do not apply here. */
 const LOCATION_KIND_BY_ID = new Map(
   LIBRARY_LOCATION_DEFINITIONS.map((location) => [location.id, location.kind])
 );
 
+/**
+ * `discover` always scans every kind, so this channel needs the same
+ * `kind`/`location` narrowing the resource list gets — and nothing more. It
+ * takes {@link ScanFilters} rather than {@link ResourceFilters} so the coverage
+ * filters are not merely ignored here but unavailable.
+ */
 function filterUnreadableEntries(
   entries: readonly LibraryUnreadableEntry[],
-  filters: Pick<ResourceFilters, 'kind' | 'location'>
+  filters: ScanFilters
 ): LibraryUnreadableEntry[] {
   return entries.filter((entry) => {
     if (filters.kind && LOCATION_KIND_BY_ID.get(entry.locationId) !== filters.kind) return false;
@@ -140,6 +156,20 @@ function resourceNotFound(set: { status?: number | string }): ApiErrorResponse {
 const WorkspaceRootSchema = t.Optional(t.String({ minLength: 1, maxLength: 4096 }));
 const EnvironmentIdQuerySchema = t.Optional(EnvironmentIdSchema);
 
+/**
+ * Filters over one scan.
+ *
+ * `kind` and `location` narrow both lists in the response. `target` and `state`
+ * describe a resource's coverage, so they narrow `resources` alone and leave
+ * `unreadableEntries` untouched: an entry that could not even be named as a
+ * resource has no coverage to have a state in, and silently dropping it from a
+ * target-filtered view would hide the very names the channel exists to report.
+ *
+ * `state` requires `target`. The dependency is checked in the handler rather
+ * than declared in the schema because TypeBox carries no cross-property
+ * requirement Elysia would enforce, and a schema rejection would surface as a
+ * bare 422 instead of the 400 that names the fix.
+ */
 const resourceQuery = t.Object({
   kind: t.Optional(ResourceKindSchema),
   target: t.Optional(LibraryTargetIdSchema),
@@ -149,6 +179,34 @@ const resourceQuery = t.Object({
   environmentId: EnvironmentIdQuerySchema,
 });
 const resourceParams = t.Object({ key: t.String() });
+
+/** Names the fix, not just the rule — the caller has to know what to add. */
+export const STATE_REQUIRES_TARGET_MESSAGE =
+  "`state` filters a target's coverage, so it requires `target`.";
+
+/**
+ * Resolves the coverage filters, or the 400 body explaining why they contradict
+ * each other. Returns the narrowed {@link ResourceFilters} so the filter pass
+ * receives a combination that has already been proven answerable.
+ */
+function parseResourceFilters(
+  query: Pick<Static<typeof resourceQuery>, 'kind' | 'target' | 'location' | 'state'>,
+  set: { status?: number | string }
+): { ok: true; filters: ResourceFilters } | { ok: false; body: ApiErrorResponse } {
+  if (query.state && !query.target) {
+    set.status = 400;
+    return {
+      ok: false,
+      body: { error: STATE_REQUIRES_TARGET_MESSAGE, code: ERROR_CODES.VALIDATION },
+    };
+  }
+
+  const scope: ScanFilters = { kind: query.kind, location: query.location };
+  return {
+    ok: true,
+    filters: query.target ? { ...scope, target: query.target, state: query.state } : scope,
+  };
+}
 
 function rejectWorkspaceRoot(
   set: { status?: number | string },
@@ -244,12 +302,17 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           query: resourceQuery,
           response: {
             200: LibraryScanResultSchema,
+            400: ApiErrorResponseSchema,
             422: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
         },
         async ({ query, set, user }): Promise<LibraryScanResult | ApiErrorResponse> => {
+          // Before the scan: a filter combination with no answer should not cost
+          // a filesystem walk to reject.
+          const filters = parseResourceFilters(query, set);
+          if (!filters.ok) return filters.body;
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
@@ -259,7 +322,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
               workspace.root,
               query.environmentId
             );
-            return filterLibraryScanResult(scan, query);
+            return filterLibraryScanResult(scan, filters.filters);
           } catch (error) {
             return handleLibraryError(error, set);
           }

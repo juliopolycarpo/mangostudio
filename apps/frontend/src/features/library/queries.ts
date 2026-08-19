@@ -57,6 +57,15 @@ export const libraryKeys = {
   backups: () => [...libraryKeys.all, 'backups'] as const,
 };
 
+/**
+ * One kind's whole scan, filtered on the client from there.
+ *
+ * `kind` is the only narrowing sent to the server. The matrix needs every row to
+ * keep its target columns honest while the user flips between "only divergent"
+ * and "any target", and refetching per filter change would trade that for
+ * nothing. It also means the UI cannot reach the server's one rejected
+ * combination — `state` without `target`, a 400 — because it never sends either.
+ */
 export function libraryResourcesQueryOptions(kind?: ResourceKind, environmentId?: string) {
   const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
