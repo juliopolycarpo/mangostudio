@@ -206,6 +206,14 @@ isolate on a descriptor the process-wide epoll set still holds from the previous
 one. The victim is whichever file is loading at the time, so it is never a defect
 in the test that reports it, and it is not fixable from this repository.
 
+It is [oven-sh/bun#37968](https://github.com/oven-sh/bun/issues/37968), reproduced
+and root-caused upstream — a leaked epoll registration on a reused stdio
+descriptor at the isolate global swap — with a fix open at
+[oven-sh/bun#38008](https://github.com/oven-sh/bun/pull/38008). Check whether that
+has shipped before re-investigating any of this. Note that the issue recommends
+redirecting to regular files as a workaround; that made it *worse* here, not
+better, so measure before adopting it.
+
 Do not read the stack frames below `new WriteStream` as the cause. They usually
 point at `google-logging-utils` inside `google-auth-library`'s module init
 (reached from `@google/genai`), because that package copies the `process` module
