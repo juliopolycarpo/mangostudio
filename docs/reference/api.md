@@ -134,6 +134,63 @@ SSE with `Content-Type: text/event-stream`. See [../architecture/streaming.md](.
 | `GET`  | `/api/settings/rules`         | Yes  | List rule files           |
 | `GET`  | `/api/settings/rules/preview` | Yes  | Preview rule file content |
 
+## Library Endpoints
+
+The read surface of the coverage matrix. Propagation, removal, and backups have
+their own routes under `/api/library/`; the contracts in
+`@mangostudio/shared/library` are the source of truth for all of them.
+
+| Method | Path                                  | Auth | Purpose                          |
+| ------ | ------------------------------------- | ---- | -------------------------------- |
+| `GET`  | `/api/library/resources`              | Yes  | Scan result, filtered            |
+| `GET`  | `/api/library/resources/:key`         | Yes  | One resource                     |
+| `GET`  | `/api/library/resources/:key/content` | Yes  | One copy's text, size-bounded    |
+| `GET`  | `/api/library/locations`              | Yes  | Location status per scanned root |
+| `GET`  | `/api/library/targets`                | Yes  | Target registry (matrix columns) |
+| `POST` | `/api/library/rescan`                 | Yes  | Rescan, optionally forced        |
+| `GET`  | `/api/library/settings`               | Yes  | Settings snapshot per target     |
+| `GET`  | `/api/library/settings/compare`       | Yes  | Rough concept comparison         |
+
+### Resource Filters
+
+`GET /api/library/resources` returns `{ resources, unreadableEntries }` and
+accepts four filters, which fall into two groups:
+
+| Query      | Narrows                          | Notes                              |
+| ---------- | -------------------------------- | ---------------------------------- |
+| `kind`     | `resources`, `unreadableEntries` | Where the scan looked              |
+| `location` | `resources`, `unreadableEntries` | Where the scan looked              |
+| `target`   | `resources`                      | Coverage of one target             |
+| `state`    | `resources`                      | Coverage state **within** `target` |
+
+`unreadableEntries` holds on-disk names that fail the library slug pattern, so
+they were never resolved into resources. They have no coverage, and `target` and
+`state` therefore leave them untouched — filtering them out would hide the very
+names the channel exists to report.
+
+**`state` requires `target`** and returns `400 VALIDATION` without it. On its own
+`state` meant "some target has this state", which matches nearly the whole
+library: most targets read none of a given location, so almost every resource is
+`absent` for at least one of them.
+
+### Settings Field Presentations
+
+Every field in a `/api/library/settings` snapshot carries a `presentation`:
+
+| Presentation | Meaning                                                                                   |
+| ------------ | ----------------------------------------------------------------------------------------- |
+| `value`      | The value, with the home directory relativized to `~`                                     |
+| `redacted`   | A leaf whose key or value looked credential-shaped                                        |
+| `omitted`    | The **root** of a subtree the snapshot never walks — session state, caches, telemetry ids |
+
+An `omitted` marker carries no value, hash, or child count, and the walk stops at
+the root it marks — one marker per omitted key, at whatever depth or array index
+that key occurs, regardless of how large the subtree beneath it is. A document
+that repeats an omitted key across many entries therefore yields many markers,
+but never more than it has keys. A setting that is simply not configured produces
+no field at all, which is why the marker exists: "no such setting" and "hidden on
+purpose" are different answers.
+
 ## Upload Endpoints
 
 | Method | Path          | Auth | Purpose                |

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { redactSettingsDocument } from '../../../../src/modules/library/domain/settings-redaction';
 
 describe('settings redaction', () => {
-  it('omits the entire authInfo subtree', () => {
+  it('marks the authInfo subtree as omitted instead of dropping it', () => {
     expect(
       redactSettingsDocument(
         {
@@ -18,11 +18,76 @@ describe('settings redaction', () => {
       )
     ).toEqual([
       {
+        path: 'authInfo',
+        presentation: 'omitted',
+      },
+      {
         path: 'permissions.allow[0]',
         presentation: 'value',
         value: 'Read',
       },
     ]);
+  });
+
+  it('emits exactly one marker at the subtree root, however deep the subtree is', () => {
+    const fields = redactSettingsDocument(
+      {
+        authInfo: {
+          account: { email: 'ada@example.com', organizations: [{ id: 'org-1' }, { id: 'org-2' }] },
+          tokens: { refresh: 'refresh-secret', access: 'access-secret' },
+        },
+      },
+      { homeDir: '/home/ada' }
+    );
+
+    expect(fields).toEqual([{ path: 'authInfo', presentation: 'omitted' }]);
+  });
+
+  // The bound is the document's own key count, not one marker per document: a
+  // `~/.claude.json`-shaped file repeats the same omitted keys once per project,
+  // and collapsing those into a single marker would name the wrong project.
+  it('emits one marker per occurrence of an omitted key, not one per document', () => {
+    const fields = redactSettingsDocument(
+      {
+        projects: {
+          '/home/ada/projects/mango': { sessionState: { id: 'a' }, allowedTools: ['Read'] },
+          '/srv/checkouts/other': { sessionState: { id: 'b' } },
+        },
+      },
+      { homeDir: '/home/ada' }
+    );
+
+    expect(fields).toEqual([
+      { path: 'projects.~/projects/mango.sessionState', presentation: 'omitted' },
+      {
+        path: 'projects.~/projects/mango.allowedTools[0]',
+        presentation: 'value',
+        value: 'Read',
+      },
+      { path: 'projects./srv/checkouts/other.sessionState', presentation: 'omitted' },
+    ]);
+  });
+
+  it('marks an omitted key inside an array element, once per element', () => {
+    expect(
+      redactSettingsDocument(
+        { hooks: [{ command: 'lint', sessionState: { id: 'a' } }, { sessionState: { id: 'b' } }] },
+        { homeDir: '/home/ada' }
+      )
+    ).toEqual([
+      { path: 'hooks[0].command', presentation: 'value', value: 'lint' },
+      { path: 'hooks[0].sessionState', presentation: 'omitted' },
+      { path: 'hooks[1].sessionState', presentation: 'omitted' },
+    ]);
+  });
+
+  it('relativizes the home directory in an omitted marker path', () => {
+    expect(
+      redactSettingsDocument(
+        { '/home/ada/projects/mango': { sessionState: { id: 'session-id' } } },
+        { homeDir: '/home/ada' }
+      )
+    ).toEqual([{ path: '~/projects/mango.sessionState', presentation: 'omitted' }]);
   });
 
   it('redacts every credential-shaped key without retaining its value', () => {
@@ -74,7 +139,7 @@ describe('settings redaction', () => {
     ]);
   });
 
-  it('omits cache, session, installation, statsig, and credentials subtrees', () => {
+  it('marks cache, session, installation, statsig, and credentials subtrees as omitted', () => {
     const fields = redactSettingsDocument(
       {
         autoReviewAvailabilityCache: { token: 'cache-secret' },
@@ -94,12 +159,38 @@ describe('settings redaction', () => {
     );
 
     expect(fields).toEqual([
+      { path: 'autoReviewAvailabilityCache', presentation: 'omitted' },
+      { path: 'privacyCache', presentation: 'omitted' },
+      { path: 'statsigAssignments', presentation: 'omitted' },
+      { path: 'installation_id', presentation: 'omitted' },
+      { path: 'sessionState', presentation: 'omitted' },
+      { path: 'nested.credentials', presentation: 'omitted' },
       {
         path: 'nested.visible',
         presentation: 'value',
         value: 'true',
       },
     ]);
+  });
+
+  it('never lets the content behind a marker reach the serialized snapshot', () => {
+    for (let index = 0; index < 96; index += 1) {
+      const secret = `omitted-secret-${index}-${(index * 15_485_863).toString(36)}`;
+      const documents = [
+        { authInfo: { email: secret } },
+        { sessionState: { transcript: [secret, { nested: secret }] } },
+        { privacyCache: { entries: { [secret]: secret } } },
+        { statsigStable: secret },
+        { installation_id: secret },
+        { nested: { credentials: { account: secret } } },
+      ];
+
+      for (const document of documents) {
+        const fields = redactSettingsDocument(document, { homeDir: '/home/ada' });
+        expect(fields.every((field) => field.presentation === 'omitted')).toBe(true);
+        expect(JSON.stringify(fields)).not.toContain(secret);
+      }
+    }
   });
 
   it('relativizes the home directory in field paths and values', () => {

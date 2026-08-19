@@ -2001,7 +2001,7 @@ export const messages = {
       },
       presentation: {
         redacted: 'Valor omitido por segurança',
-        omitted: 'Valor grande demais para exibir',
+        omitted: 'Existe, mas nunca é exibido',
       },
       sourceHeading: 'Arquivos lidos',
       sourceAbsent: 'Não existe',

@@ -245,6 +245,17 @@ export const LibraryLocationStatusSchema = Type.Object({
 
 export const LibraryLocationStatusListSchema = Type.Array(LibraryLocationStatusSchema);
 
+/**
+ * How one settings field is presented, and why a reader can trust the
+ * difference.
+ *
+ * `redacted` is a leaf whose value looked credential-shaped. `omitted` is a
+ * whole subtree the snapshot never walks — session state, caches, telemetry
+ * ids. The two are not interchangeable, and neither is the same as a field
+ * simply not being in the file: "this target has no such setting" and "this
+ * target has it and we deliberately did not show it" are different answers to
+ * the question someone is auditing.
+ */
 export const SettingsFieldPresentationSchema = Type.Union([
   Type.Literal('value'),
   Type.Literal('redacted'),
@@ -261,6 +272,14 @@ export const SettingsFieldSchema = Type.Union([
     path: Type.String({ minLength: 1 }),
     presentation: Type.Literal('redacted'),
   }),
+  /**
+   * A marker at the **root** of an omitted subtree — one per occurrence of an
+   * omitted key, at whatever depth or array index it appears, and never one per
+   * leaf beneath it, so the payload stays bounded by the document's own key
+   * count no matter how large the hidden subtrees are. It carries nothing
+   * derived from the hidden content: no value, no hash, no child count. The
+   * marker says only that something is there and is deliberately not shown.
+   */
   Type.Object({
     path: Type.String({ minLength: 1 }),
     presentation: Type.Literal('omitted'),

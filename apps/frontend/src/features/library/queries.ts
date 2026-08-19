@@ -20,6 +20,7 @@ import type {
   LibraryTargetDescriptor,
   PropagationBackupUsage,
   ResourceKind,
+  SettingsSnapshot,
 } from '@mangostudio/shared/library';
 import { queryOptions } from '@tanstack/react-query';
 import { client } from '@/lib/api-client';
@@ -54,9 +55,20 @@ export const libraryKeys = {
   targets: () => [...libraryKeys.all, 'targets'] as const,
   settingsComparison: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
     [...libraryKeys.all, 'settings', 'compare', environmentId] as const,
+  settingsSnapshots: (environmentId: string = LOCAL_ENVIRONMENT_ID) =>
+    [...libraryKeys.all, 'settings', 'snapshots', environmentId] as const,
   backups: () => [...libraryKeys.all, 'backups'] as const,
 };
 
+/**
+ * One kind's whole scan, filtered on the client from there.
+ *
+ * `kind` is the only narrowing sent to the server. The matrix needs every row to
+ * keep its target columns honest while the user flips between "only divergent"
+ * and "any target", and refetching per filter change would trade that for
+ * nothing. It also means the UI cannot reach the server's one rejected
+ * combination — `state` without `target`, a 400 — because it never sends either.
+ */
 export function libraryResourcesQueryOptions(kind?: ResourceKind, environmentId?: string) {
   const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
   return queryOptions({
@@ -159,6 +171,32 @@ export function settingsComparisonQueryOptions(environmentId?: string) {
       });
       if (error) throw new ApiError(error.value);
       return data as ConceptComparison[];
+    },
+  });
+}
+
+/**
+ * The unfiltered per-target snapshot, which the concept comparison is a
+ * projection of.
+ *
+ * Worth a second request rather than reading it off `/compare`: the comparison
+ * keeps only the handful of paths its concepts name, so every `omitted` marker —
+ * the record that a subtree exists and was deliberately not walked — is dropped
+ * before it reaches the client. Auditing why an agent behaves the way it does
+ * needs the files that were read, not just the five settings that map onto a
+ * concept.
+ */
+export function settingsSnapshotsQueryOptions(environmentId?: string) {
+  const envId = environmentId ?? LOCAL_ENVIRONMENT_ID;
+  return queryOptions({
+    queryKey: libraryKeys.settingsSnapshots(envId),
+    staleTime: STALE_TIME_MS,
+    queryFn: async () => {
+      const { data, error } = await client.api.library.settings.get({
+        query: libraryEnvironmentSearch(envId),
+      });
+      if (error) throw new ApiError(error.value);
+      return data as SettingsSnapshot[];
     },
   });
 }

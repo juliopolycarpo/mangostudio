@@ -1996,7 +1996,10 @@ export const messages: Messages = {
       },
       presentation: {
         redacted: 'Value withheld for safety',
-        omitted: 'Value too large to display',
+        // Says "present" on purpose. A setting nobody configured is not listed
+        // at all, so the only thing this row adds over silence is that there
+        // *is* something here and it is deliberately not shown.
+        omitted: 'Present, but never shown',
       },
       sourceHeading: 'Files read',
       sourceAbsent: 'Does not exist',
