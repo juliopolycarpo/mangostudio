@@ -12,9 +12,27 @@ import { join } from 'node:path';
 import { runtimeFsService } from '../../../src/services/fs';
 import { GrepPatternError } from '../../../src/services/fs/grep';
 
-/** Long enough that JavaScriptCore's own backtracking bound is nowhere near it. */
 const CATASTROPHIC_PATTERN = '^(([a-z])+.)+[A-Z]([a-z])+$';
 const CATASTROPHIC_LINE = 'a'.repeat(40);
+
+/**
+ * JavaScriptCore bounds its own backtracking, and that bound is **per `test()`
+ * call**, not per file: this pattern against one 40-character line costs a flat
+ * ~700ms on Bun 1.4.0-canary.1 no matter how much longer the line gets. So a
+ * one-line file can no longer reach the 2s budget, and sizing the fixture by
+ * line length cannot get it there either.
+ *
+ * Twelve lines can: the cost is linear in the line count, so the file is ~8.4s
+ * of work against a 2s budget — the shape the budget actually exists for, since
+ * a model's pattern meets a whole file rather than one line. Re-measure this
+ * count if a future JSC lowers the per-call bound far enough that twelve lines
+ * stop exceeding the budget.
+ */
+const CATASTROPHIC_LINES = 12;
+
+async function writeCatastrophicFile(path: string): Promise<void> {
+  await Bun.write(path, `${CATASTROPHIC_LINE}\n`.repeat(CATASTROPHIC_LINES));
+}
 
 let tempDir: string;
 
@@ -41,20 +59,21 @@ function grepParams(overrides: { pattern: string; path?: string }) {
 
 describe('grep pattern budget', () => {
   it('returns from a catastrophic pattern and reports the file as truncated', async () => {
-    await Bun.write(join(tempDir, 'victim.txt'), `${CATASTROPHIC_LINE}\n`);
+    await writeCatastrophicFile(join(tempDir, 'victim.txt'));
 
     const startedAt = Date.now();
     const result = await runtimeFsService.grep(grepParams({ pattern: CATASTROPHIC_PATTERN }));
 
-    // The budget is 2s per file; anything under a small multiple of that proves
-    // the scan was cut off rather than run to completion.
-    expect(Date.now() - startedAt).toBeLessThan(10_000);
+    // The budget is 2s per file and the file holds ~8.4s of work, so the two
+    // outcomes are far apart in wall clock: cut off lands near 2s, run to
+    // completion near 8.4s. 6s separates them without being flaky under load.
+    expect(Date.now() - startedAt).toBeLessThan(6_000);
     expect(result.truncated).toBe(true);
     expect(result.matches).toEqual([]);
   }, 20_000);
 
   it('leaves the event loop free while a catastrophic pattern is evaluated', async () => {
-    await Bun.write(join(tempDir, 'victim.txt'), `${CATASTROPHIC_LINE}\n`);
+    await writeCatastrophicFile(join(tempDir, 'victim.txt'));
     const other = mkdtempSync(join(tmpdir(), 'runtime-grep-concurrent-'));
     await Bun.write(join(other, 'plain.txt'), 'needle\n');
 
@@ -83,15 +102,20 @@ describe('grep pattern budget', () => {
   }, 20_000);
 
   it('keeps the matches from files scanned before the one that ran over', async () => {
+    // One pattern across both files, so the file that overruns and the file that
+    // matches are the same search. `aaaAaa` satisfies the pattern immediately —
+    // the uppercase letter gives it somewhere to stop — while the all-lowercase
+    // lines have nothing to match and backtrack until the budget cuts them off.
     // Alphabetical order is not guaranteed by the walk, so the readable file is
     // asserted on its own terms: it is found whether it is scanned first or last.
-    await Bun.write(join(tempDir, 'a-fast.txt'), 'aaaa\n');
-    await Bun.write(join(tempDir, 'b-slow.txt'), `${CATASTROPHIC_LINE}\n`);
+    await Bun.write(join(tempDir, 'a-fast.txt'), 'aaaAaa\n');
+    await writeCatastrophicFile(join(tempDir, 'b-slow.txt'));
 
-    const result = await runtimeFsService.grep(grepParams({ pattern: '^a{1,4}$' }));
+    const result = await runtimeFsService.grep(grepParams({ pattern: CATASTROPHIC_PATTERN }));
 
-    expect(result.matches).toEqual([{ file: 'a-fast.txt', line: 1, text: 'aaaa' }]);
+    expect(result.matches).toEqual([{ file: 'a-fast.txt', line: 1, text: 'aaaAaa' }]);
     expect(result.filesScanned).toBe(2);
+    expect(result.truncated).toBe(true);
   }, 20_000);
 
   it('still finds ordinary matches through the worker', async () => {
