@@ -8,9 +8,6 @@
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { Kysely, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
 import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
@@ -22,7 +19,6 @@ const TARGET = '044_chat_runner';
 // biome-ignore lint/suspicious/noExplicitAny: the pre-044 schema is not the shape `Database` describes.
 type AnyDb = Kysely<any>;
 
-let dir: string;
 let sqlite: SQLiteDatabase;
 let db: AnyDb;
 
@@ -59,8 +55,7 @@ async function readChat(id: string): Promise<{ runnerKind: string; runnerAgentId
 }
 
 beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'mango-migration-'));
-  sqlite = new SQLiteDatabase(join(dir, 'test.db'));
+  sqlite = new SQLiteDatabase(':memory:');
   sqlite.exec('PRAGMA foreign_keys = ON;');
   db = new Kysely({ dialect: new BunSqliteDialect({ database: sqlite }) });
   await migrateTo(BEFORE);
@@ -69,7 +64,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await db.destroy();
-  rmSync(dir, { recursive: true, force: true });
 });
 
 describe('044_chat_runner chat rows', () => {
