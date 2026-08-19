@@ -45,15 +45,21 @@ export function findDisallowedNodeEnvReads(
   const violations: NodeEnvReadViolation[] = [];
 
   for (const source of sources) {
-    // Full TypeScript AST parsing is expensive across ~1900 production files;
-    // a plain substring check first skips it for the ~99.8% that can't match.
-    if (!source.content.includes('NODE_ENV')) continue;
+    // Parsing every production file's AST is the expensive part of this guard,
+    // so skip the files that cannot hold a `NODE_ENV` token. The token can also
+    // be spelled with escapes that the parser decodes but a substring search
+    // misses — `process.env.NODE_EN\u0056` and `process.env['NODE_EN\x56']`
+    // both resolve to the token — so a file holding a backslash is still
+    // parsed rather than trusted to the substring check.
+    if (!source.content.includes('NODE_ENV') && !source.content.includes('\\')) continue;
 
+    // Parent pointers stay off: the only position lookup passes `sourceFile` to
+    // `getStart`, which then never has to walk up the tree to find it.
     const sourceFile = ts.createSourceFile(
       source.path,
       source.content,
       ts.ScriptTarget.Latest,
-      true
+      false
     );
     const allowlistedLines = new Set(
       NODE_ENV_READ_ALLOWLIST.filter(({ path }) => path === source.path).map(({ line }) => line)
