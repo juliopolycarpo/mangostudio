@@ -245,8 +245,11 @@ async function executeOperation(
     // the write in place because the outer loop only rolls back operations that
     // returned an entry. If compensation itself fails, keep the entry so the
     // outer path reports a partial apply and retains the backup set instead of
-    // discarding the only copy of what was just overwritten.
-    const entry = backupEntryFrom(operation, result, '');
+    // discarding the only copy of what was just overwritten. Record the digest
+    // that hashing actually observed: undo compares the surviving destination
+    // against this value, and an empty placeholder would skip the restore as
+    // changed-since-apply.
+    const entry = backupEntryFrom(operation, result, observedContentHash(error));
     const rolledBack = await rollback([entry], deps);
     throw rolledBack ? error : new UncompensatedWriteError(entry, error);
   }
@@ -270,7 +273,8 @@ async function hashWrittenContent(
   }
   if (writtenContentHash !== operation.expectedContentHash) {
     throw new VerificationError(
-      `Wrote "${result.destinationPath}" but its content hashed to ${writtenContentHash}, not ${operation.expectedContentHash}.`
+      `Wrote "${result.destinationPath}" but its content hashed to ${writtenContentHash}, not ${operation.expectedContentHash}.`,
+      writtenContentHash
     );
   }
   return writtenContentHash;
@@ -375,7 +379,14 @@ function assertPreviewedRoot(operation: PreparedPropagationOperation, env: PathE
   );
 }
 
-class VerificationError extends Error {}
+class VerificationError extends Error {
+  constructor(
+    message: string,
+    readonly observedContentHash = ''
+  ) {
+    super(message);
+  }
+}
 class GuardError extends Error {}
 
 /**
@@ -395,6 +406,10 @@ class UncompensatedWriteError extends Error {
 
 function failureCause(error: unknown): unknown {
   return error instanceof UncompensatedWriteError ? error.cause : error;
+}
+
+function observedContentHash(error: unknown): string {
+  return error instanceof VerificationError ? error.observedContentHash : '';
 }
 
 function describeFailure(

@@ -306,6 +306,21 @@ describe('executePropagationWrites', () => {
         'utf8'
       )
     ).toContain('old');
+
+    const manifest = JSON.parse(
+      readFileSync(join(backupRoot, result.backupId ?? '', 'manifest.json'), 'utf8')
+    ) as { entries: Array<{ writtenContentHash: string }> };
+    expect(manifest.entries[0]?.writtenContentHash).toBe(
+      await hashResourceAt(destination, 'directory')
+    );
+
+    const undone = await executeLibraryUndo({
+      backupRoot,
+      backupId: result.backupId ?? '',
+      pathEnv: env,
+    });
+    expect(undone.restored).toHaveLength(1);
+    expect(readFileSync(join(destination, 'SKILL.md'), 'utf8')).toContain('old');
   });
 
   it('keeps a created destination when verification rollback cannot remove it', async () => {
@@ -355,5 +370,13 @@ describe('executePropagationWrites', () => {
     expect(result.failed[0]).toMatchObject({ reason: 'verification-failed' });
     expect(existsSync(destination)).toBe(true);
     expect(existsSync(join(backupRoot, result.backupId ?? '', 'manifest.json'))).toBe(true);
+
+    const undone = await executeLibraryUndo({
+      backupRoot,
+      backupId: result.backupId ?? '',
+      pathEnv: env,
+    });
+    expect(undone.removed).toHaveLength(1);
+    expect(existsSync(destination)).toBe(false);
   });
 });
