@@ -7,6 +7,7 @@ import { getConfig, loadConfigForTest } from '../../../../src/lib/config';
 import {
   createProviderSecretService,
   isPlaceholderConfigSecretValue,
+  setProviderSecretSyncTtlForTest,
 } from '../../../../src/services/providers/core/secret-service';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
@@ -132,6 +133,53 @@ describe('createProviderSecretService config path resolution', () => {
 });
 
 describe('createProviderSecretService syncConfigFileConnectors', () => {
+  it('syncs a changed secret immediately with an injected TTL', async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    delete process.env.NODE_ENV;
+    setProviderSecretSyncTtlForTest(0);
+
+    try {
+      const tomlPath = writeTempToml('[openai_api_keys]\ndefault = "sk-live-first-value-1111"\n');
+      const metadata = createMetadataHarness();
+      const service = createProviderSecretService(
+        {
+          provider: 'openai',
+          tomlSection: 'openai_api_keys',
+          envVarPrefix: 'OPENAI_API_KEY',
+          validateFn: () => Promise.resolve(),
+        },
+        {
+          secretStore: new InMemorySecretStore(),
+          tomlFilePath: tomlPath,
+          listMetadata: metadata.listMetadata,
+          getMetadataById: metadata.getMetadataById,
+          upsertMetadata: metadata.upsertMetadata,
+          deleteMetadata: metadata.deleteMetadata,
+        }
+      );
+
+      await service.syncConfigFileConnectors('test-user');
+      const firstRow = metadata.getRows()[0];
+      if (!firstRow) throw new Error('Expected the first config connector to be synced.');
+      expect(await service.resolveSecretValue(firstRow)).toBe('sk-live-first-value-1111');
+
+      writeFileSync(tomlPath, '[openai_api_keys]\ndefault = "sk-live-second-value-2222"\n');
+      await service.syncConfigFileConnectors('test-user');
+
+      const secondRow = metadata.getRows()[0];
+      if (!secondRow) throw new Error('Expected the refreshed config connector to remain.');
+      expect(secondRow.maskedSuffix).toBe(service.maskSecret('sk-live-second-value-2222') ?? null);
+      expect(await service.resolveSecretValue(secondRow)).toBe('sk-live-second-value-2222');
+    } finally {
+      setProviderSecretSyncTtlForTest(0);
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+    }
+  });
+
   it('removes placeholder config entries instead of syncing them into metadata', async () => {
     const metadata = createMetadataHarness([
       makeRow({

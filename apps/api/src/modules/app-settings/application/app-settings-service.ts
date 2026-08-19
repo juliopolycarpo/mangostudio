@@ -32,8 +32,23 @@ let detectedDefaults: { readonly computedAtMs: number; readonly value: LibraryLo
   value: DEFAULT_LIBRARY_LOCATION_SETTINGS,
 };
 
+let libraryLocationDefaultsOverride: LibraryLocationSettings | null = null;
+
+/**
+ * Which library locations default to enabled is derived from what is installed
+ * on the machine. Tests set this so a suite does not depend on which agent
+ * CLIs the developer happens to have. Pass null to restore real detection.
+ */
+export function setLibraryLocationDefaultsForTest(defaults: LibraryLocationSettings | null): void {
+  libraryLocationDefaultsOverride = defaults;
+  detectedDefaults = {
+    computedAtMs: Number.NEGATIVE_INFINITY,
+    value: DEFAULT_LIBRARY_LOCATION_SETTINGS,
+  };
+}
+
 async function libraryLocationDefaults(): Promise<LibraryLocationSettings> {
-  if (process.env.NODE_ENV === 'test') return DEFAULT_LIBRARY_LOCATION_SETTINGS;
+  if (libraryLocationDefaultsOverride !== null) return libraryLocationDefaultsOverride;
 
   const nowMs = Date.now();
   if (nowMs - detectedDefaults.computedAtMs < DETECTED_DEFAULTS_TTL_MS) {
