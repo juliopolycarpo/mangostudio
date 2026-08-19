@@ -142,6 +142,91 @@ already using 7 of its 10 minutes. Isolation is the better default and the wrong
 trade here; prefer substituting through production's own seams over `mock.module`
 in that lane, so nothing needs a fresh global to stay correct.
 
+#### Reproducing a cross-worker race
+
+Raising the worker count is the only way these failures appear, and two things
+decide whether you find one or watch eight clean runs go by:
+
+- **Match CI's core count.** CI runners are 4-core; a 28-core dev machine
+  schedules a different race population entirely. Pin the run —
+  `taskset -c 0-3 bun test --parallel=4 tests/integration` reproduced on its
+  first attempt where unpinned loops on the same machine had gone clean eight
+  times in a row.
+- **Capture whole logs.** A file that aborts under worker parallelism reports
+  through its worker rather than the reporter, so grepping the live output for
+  `(fail)` misses it. Redirect to a file per run and read the failures after.
+
+Run the whole lane, never one file: by construction these failures land in files
+other than the one at fault, and the signature is a handful of failures plus a
+block of tests that never ran.
+
+#### Never bind a well-known port in a test
+
+A fixed port is one machine-wide resource, so two files that want it cannot both
+run. Ask for port 0 and read the bound port back — `createManagedProcessFixture`
+and `startOAuthLoopbackServer` both report theirs, and the ChatGPT sign-in flow
+builds its redirect URI from the bound port rather than from the registered
+constant so tests can take an OS-assigned one
+(`setChatGptLoopbackPortForTest`). Before that, `apps/api/tests/integration` at
+four workers failed 5 runs in 24 with a spurious 503 from whichever file lost
+the race for `127.0.0.1:1455`; after, 22 runs in 22 were clean locally and 12 of
+12 on a CI runner. A test that needs a *busy* port should bind one itself and
+point the code under test at it.
+
+The same rule covers paths: `mkdtemp` rather than a static name under
+`tmpdir()`, and the managed test config directory is scoped by pid and
+`BUN_TEST_WORKER_ID` and removed in `afterAll` (`process.on('exit')` does not
+run under the Bun test runner).
+
+#### Known upstream blocker on the unit lane
+
+`tests/unit` aborts whole files intermittently under worker parallelism, losing
+every remaining case in the file it hits. It is not a property of one machine —
+it reproduces on GitHub's runners:
+
+| Host                                  | Invocation                  | Runs affected |
+| ------------------------------------- | --------------------------- | ------------- |
+| `ubuntu-latest`, 4-core, Azure kernel | `--parallel=4`              | 2 of 36       |
+| WSL2, pinned to 4 cores               | `--parallel=4`              | 4 of 10       |
+| WSL2, pinned to 4 cores               | `--parallel=8`, to a file   | 4 of 12       |
+| WSL2, pinned to 4 cores               | `--parallel=8`, into a pipe | 2 of 8        |
+
+A runner run takes ~58s at four workers against 232–248s at one, so the prize is
+real and this is what stands in front of it.
+
+The error is always
+
+```
+error: EEXIST: file already exists, epoll_ctl
+      at new WriteStream (internal:fs/streams:244:58)
+```
+
+— Bun building a `process.stdout`/`process.stderr` `WriteStream` for a fresh
+isolate on a descriptor the process-wide epoll set still holds from the previous
+one. The victim is whichever file is loading at the time, so it is never a defect
+in the test that reports it, and it is not fixable from this repository.
+
+It is [oven-sh/bun#37968](https://github.com/oven-sh/bun/issues/37968), reproduced
+and root-caused upstream — a leaked epoll registration on a reused stdio
+descriptor at the isolate global swap — with a fix open at
+[oven-sh/bun#38008](https://github.com/oven-sh/bun/pull/38008). Check whether that
+has shipped before re-investigating any of this. Note that the issue recommends
+redirecting to regular files as a workaround; that made it *worse* here, not
+better, so measure before adopting it.
+
+Do not read the stack frames below `new WriteStream` as the cause. They usually
+point at `google-logging-utils` inside `google-auth-library`'s module init
+(reached from `@google/genai`), because that package copies the `process` module
+namespace and so materializes both streams eagerly. Loading `@google/genai`
+lazily removes those frames and the aborts continue — measured, not assumed. It
+is the messenger.
+
+Redirecting the run to a file makes it likelier but is not the cause; it happens
+through a pipe too, which is what CI gives it.
+
+So the unit lane cannot take worker parallelism yet. The integration lane can:
+12 of 12 clean at four workers on a runner, 50.6s against 71–75s unflagged.
+
 ### Code Health
 
 `bun run check` includes a repository-wide Knip scan. Change-scoped checks run it

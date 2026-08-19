@@ -83,19 +83,26 @@ export function decodeJwtPayload(token: string): Record<string, unknown> | null 
 /** Builds the issuer authorize URL for a PKCE authorization-code flow. */
 export function buildAuthorizeUrl(
   profile: OAuthProviderProfile<object>,
-  authBaseUrl: string,
-  state: string,
-  challenge: string
+  options: {
+    authBaseUrl: string;
+    state: string;
+    challenge: string;
+    /**
+     * Overrides the profile's registered redirect URI. The token exchange must
+     * repeat whichever one is sent here.
+     */
+    redirectUri?: string;
+  }
 ): string {
-  const url = new URL('/oauth/authorize', authBaseUrl);
+  const url = new URL('/oauth/authorize', options.authBaseUrl);
   url.search = new URLSearchParams({
     response_type: 'code',
     client_id: profile.clientId,
-    redirect_uri: profile.redirectUri,
+    redirect_uri: options.redirectUri ?? profile.redirectUri,
     scope: profile.scopes,
-    code_challenge: challenge,
+    code_challenge: options.challenge,
     code_challenge_method: 'S256',
-    state,
+    state: options.state,
   }).toString();
   return url.toString();
 }
@@ -197,6 +204,8 @@ export async function exchangeAuthorizationCode<TIdentity extends object>(
     code: string;
     codeVerifier: string;
     authBaseUrl: string;
+    /** Must repeat the redirect URI the authorize request carried. */
+    redirectUri?: string;
     fetchImpl?: FetchLike;
   }
 ): Promise<OAuthTokenBundle<TIdentity>> {
@@ -206,7 +215,7 @@ export async function exchangeAuthorizationCode<TIdentity extends object>(
     {
       grant_type: 'authorization_code',
       code: options.code,
-      redirect_uri: profile.redirectUri,
+      redirect_uri: options.redirectUri ?? profile.redirectUri,
       code_verifier: options.codeVerifier,
     },
     options.fetchImpl ?? fetch

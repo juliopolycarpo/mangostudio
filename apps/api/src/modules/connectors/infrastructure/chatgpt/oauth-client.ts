@@ -102,6 +102,8 @@ export function exchangeAuthorizationCode(options: {
   code: string;
   codeVerifier: string;
   authBaseUrl: string;
+  /** Must repeat the redirect URI the authorize request carried. */
+  redirectUri?: string;
   fetchImpl?: FetchLike;
 }): Promise<ChatGptTokenBundle> {
   return coreExchangeAuthorizationCode(chatGptOAuthProfile, options);
