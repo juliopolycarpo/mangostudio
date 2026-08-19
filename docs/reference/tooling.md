@@ -41,6 +41,13 @@ commit red with no change in this repo. Two consequences are already handled —
 - **The distribution manifest records `bunRevision` alongside `bunVersion`.** The
   JS `Bun.version` drops the channel suffix entirely and reports a bare `1.4.0`,
   which does not identify the build that produced a binary. `Bun.revision` does.
+- **Cross-compilation supplies its own Bun.** `bun build --compile` downloads a
+  prebuilt Bun for the target platform and resolves it from `Bun.version`, so on
+  canary it asks for the unreleased tag `bun-v1.4.0` and every non-host target
+  fails. `scripts/lib/bun-cross-runtime.ts` fetches the channel asset per target,
+  caches it under `.mango/artifacts/bun-cross/<channel>-<host revision>/`, and
+  passes it to `--compile-executable-path`. Pinning `.bun-version` to a released
+  version turns this off and restores Bun's own download path.
 
 To bisect a suspected canary regression, pin `.bun-version` to a released tag
 (`1.3.14`) on a scratch branch; that is the only knob, and it is one line.

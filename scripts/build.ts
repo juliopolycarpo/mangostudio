@@ -4,6 +4,11 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
+import {
+  bunCompileRuntimeRevision,
+  bunCrossCompileChannel,
+  ensureBunCrossRuntime,
+} from './lib/bun-cross-runtime';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
 import { writeEmbedModules } from './lib/embed-frontend';
 import {
@@ -90,7 +95,7 @@ async function compileBinary(
   target: BinaryTarget,
   outfile: string,
   options: BinaryBuildOptions,
-  context: { buildTime: string; buildInfo: BuildStamp }
+  context: { buildTime: string; buildInfo: BuildStamp; crossRuntimePath?: string }
 ): Promise<boolean> {
   const args = [
     'build',
@@ -121,6 +126,12 @@ async function compileBinary(
     args.push('--minify');
   }
 
+  // Supplying the target's Bun keeps `--compile` from resolving a download by
+  // version, which no channel build can satisfy.
+  if (context.crossRuntimePath) {
+    args.push('--compile-executable-path', context.crossRuntimePath);
+  }
+
   const { stdout, stderr, exitCode } = await captureCommand(['bun', ...args], { cwd: ROOT_DIR });
 
   if (exitCode !== 0) {
@@ -142,6 +153,7 @@ async function buildStandaloneTarget(
     buildTime: string;
     buildInfo: BuildStamp;
     outDir: string;
+    crossRuntimeChannel: string | null;
   }
 ): Promise<boolean> {
   const platformOutDir = join(context.outDir, target.arch);
@@ -160,10 +172,32 @@ async function buildStandaloneTarget(
     return true;
   }
 
+  let crossRuntimePath: string | undefined;
+  if (context.crossRuntimeChannel) {
+    try {
+      crossRuntimePath = await ensureBunCrossRuntime(target, {
+        channel: context.crossRuntimeChannel,
+      });
+      console.log(
+        `   🥟 ${context.crossRuntimeChannel} Bun for ${target.arch}: ${crossRuntimePath}`
+      );
+    } catch (caught) {
+      console.error(
+        `❌ Failed to resolve a ${context.crossRuntimeChannel} Bun runtime for ${target.arch}: ${
+          caught instanceof Error ? caught.message : String(caught)
+        }`
+      );
+      return false;
+    }
+  }
+
   try {
     const compiled = await Promise.all([
-      compileBinary(context.apiSource, target, binaryPath, options, context),
-      compileBinary(RUNTIME_ENTRY, target, runtimePath, options, context),
+      compileBinary(context.apiSource, target, binaryPath, options, {
+        ...context,
+        crossRuntimePath,
+      }),
+      compileBinary(RUNTIME_ENTRY, target, runtimePath, options, { ...context, crossRuntimePath }),
     ]);
     if (compiled.some((succeeded) => !succeeded)) {
       return false;
@@ -416,6 +450,29 @@ REM The binary is a CLI; bare invocation prints help, so start the server explic
   console.log(`🚀 Windows runner script created: ${join(outDir, 'run.bat')}`);
 }
 
+/**
+ * Says so when the channel tag moved between the host Bun being installed and
+ * its runtimes being fetched, which leaves the binaries carrying a different
+ * Bun than the one the suite ran against.
+ *
+ * Reports and returns — never fails the build. The tag advancing mid-run is a
+ * race with an upstream merge, not a defect in the change under test, and there
+ * is nothing an author could do about a red build here. A pinned revision would
+ * remove the race outright, but Bun publishes no per-commit artifact to pin to.
+ */
+async function reportCrossRuntimeDrift(channel: string | null): Promise<void> {
+  if (!channel) return;
+
+  const compiled = await bunCompileRuntimeRevision(channel);
+  if (!compiled || compiled === Bun.revision) return;
+
+  console.warn(`⚠️  Bun revision drift while building against the "${channel}" channel:`);
+  console.warn(`     host (ran the tests): ${Bun.revision}`);
+  console.warn(`     compiled into binaries: ${compiled}`);
+  console.warn('     The channel tag advanced mid-build. Not an error; recorded so an artifact');
+  console.warn('     that misbehaves can be traced to the Bun actually inside it.');
+}
+
 async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void> {
   header('Build (binary)');
 
@@ -459,6 +516,15 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
     console.log(`📦 Embedding frontend into binary (${embed.fileCount} asset file(s))`);
   }
 
+  // Resolved for every target, host included, so the shipped binaries are not a
+  // function of which machine ran the build.
+  const crossRuntimeChannel = options.dryRun ? null : await bunCrossCompileChannel();
+  if (crossRuntimeChannel) {
+    console.log(
+      `🥟 Bun channel "${crossRuntimeChannel}" has no version-resolvable download; fetching a runtime per target`
+    );
+  }
+
   console.log(`🎯 Building executables for ${targets.length} platform(s)`);
 
   const results = await Promise.all(
@@ -468,6 +534,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
         buildTime,
         buildInfo,
         outDir,
+        crossRuntimeChannel,
       })
     )
   );
@@ -476,6 +543,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
   const failedCount = results.length - successCount;
 
   console.log('---');
+  await reportCrossRuntimeDrift(crossRuntimeChannel);
   console.log('📊 Build summary:');
   console.log(`✅ ${successCount} platform(s) built successfully`);
 
