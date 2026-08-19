@@ -116,12 +116,31 @@ and reach for a real filesystem only when the test is about the filesystem.
 
 ### Parallelism
 
-`test:unit` and `test:coverage` in `apps/api` pass `--parallel=1`, and it is
-load-bearing rather than conservative: those suites share one SQLite database
-through `getDb()`, so running files concurrently puts them in lock contention and
-several turn-recovery and checkpoint tests hit the timeout instead of failing on
-an assertion. Removing the flag trades a green suite for timeouts that read as
-unrelated flakes.
+`test:unit` and `test:coverage` in `apps/api` pass `--parallel=1`. Read that as
+"one worker, isolated" rather than "no parallelism": Bun's `--parallel=N` runs
+files in N worker processes and **implies `--isolate`**, which gives each file a
+fresh global object. Isolation is the load-bearing half. Bun's default — no
+`--parallel` at all — runs every file in one process off a single module graph,
+where the in-memory database from `setupTestEnvironment()` and any `mock.module`
+registration outlive the file that made them.
+
+Measured on `apps/api/tests/unit` (3421 tests, 301 files):
+
+| Invocation                          | Result                                    |
+| ----------------------------------- | ----------------------------------------- |
+| `--parallel=1` (what the lane runs) | 3421 pass                                 |
+| `--isolate` alone                   | 3421 pass — isolation alone is sufficient |
+| neither                             | 7 fail, each at exactly 5000ms            |
+
+The seven are turn-recovery and checkpoint tests, and they hit the timeout rather
+than failing an assertion, so dropping the flag buys a suite whose failures read
+as unrelated flakes.
+
+`test:integration` deliberately does **not** take the flag. The lane passes with
+`--isolate` (779 pass), but it costs 268s against 75s without — 3.5x, on a CI job
+already using 7 of its 10 minutes. Isolation is the better default and the wrong
+trade here; prefer substituting through production's own seams over `mock.module`
+in that lane, so nothing needs a fresh global to stay correct.
 
 ### Code Health
 
