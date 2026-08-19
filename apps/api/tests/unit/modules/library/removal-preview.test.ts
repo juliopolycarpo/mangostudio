@@ -423,6 +423,24 @@ describe('previewLibraryRemoval across machines', () => {
     });
 
     expect(firstEntry(result).divergence).toBe('incomparable');
+    expect(firstEntry(result).locations.every((row) => row.eliminatesContentGroup)).toBe(false);
+  });
+
+  it('still compares file-backed kinds across mixed directory-hash domains', async () => {
+    const result = await preview(['instruction:gh'], ['claude-instructions'], {
+      resources: [resource([instance('claude-instructions', 'hash-a')], 'instruction')],
+      directoryHashDomain: 2,
+      environmentIds: ['local', 'wsl-ubuntu'],
+      environments: {
+        'wsl-ubuntu': {
+          resources: [resource([instance('claude-instructions', 'hash-b')], 'instruction')],
+          directoryHashDomain: 1,
+        },
+      },
+    });
+
+    expect(firstEntry(result).divergence).toBe('divergent');
+    expect(firstEntry(result).locations.every((row) => row.eliminatesContentGroup)).toBe(true);
   });
 
   it('names the machine a stale staged directory was left on', async () => {

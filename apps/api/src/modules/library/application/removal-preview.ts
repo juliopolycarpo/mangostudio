@@ -273,12 +273,15 @@ function buildRemovalEntry(
     (candidate) =>
       !removing.has(placementKey(candidate.environmentId, candidate.instance.locationId))
   );
+  const divergence = placed.length > 1 ? describeDivergence(placed, ref.kind) : 'single';
 
   return {
     resourceKey,
     ref,
-    divergence: placed.length > 1 ? describeDivergence(placed, ref.kind) : 'single',
-    locations: classified.map((row) => describeRemovalLocation(row, removing, placed)),
+    divergence,
+    locations: classified.map((row) =>
+      describeRemovalLocation(row, removing, placed, divergence)
+    ),
     instancePlacements: placed
       .map((candidate) => ({
         environmentId: candidate.environmentId,
@@ -342,7 +345,8 @@ function describeDivergence(
 function describeRemovalLocation(
   row: ClassifiedRemoval,
   removing: ReadonlySet<string>,
-  placed: readonly PlacedInstance[]
+  placed: readonly PlacedInstance[],
+  divergence: RemovalPreviewEntry['divergence']
 ): RemovalLocation {
   const { location, instance, blockedReason } = row;
   const base = {
@@ -364,7 +368,13 @@ function describeRemovalLocation(
   return {
     ...base,
     operation: 'remove',
-    eliminatesContentGroup: eliminatesContentGroup(instance, removing, placed),
+    // Mixed directory-hash domains produce different hashes for the same bytes,
+    // so a hash-keyed group would call each copy a unique version. Withhold the
+    // claim until the hashes are comparable again.
+    eliminatesContentGroup:
+      divergence === 'incomparable'
+        ? false
+        : eliminatesContentGroup(instance, removing, placed),
   };
 }
 
