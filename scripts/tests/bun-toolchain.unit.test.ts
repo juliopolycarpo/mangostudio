@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import {
   BUN_RUNTIME_ASSETS,
-  bunCompileRuntimeRevision,
+  bunCompiledRuntimes,
   bunCrossCompileChannel,
   hostReleasePlatform,
 } from '../lib/bun-cross-runtime';
@@ -153,34 +153,45 @@ describe('Bun cross-compile runtime', () => {
     expect(ALL_BINARY_TARGETS.map((target) => target.arch)).toContain(host);
   });
 
-  test('the compile revision is the host revision on a released Bun', async () => {
-    // `--compile` downloads the build matching `Bun.version`, so there is
-    // nothing to drift against.
-    expect(await bunCompileRuntimeRevision(null)).toBe(Bun.revision);
+  test('every target carries the host runtime on a released Bun', async () => {
+    // `--compile` downloads the build matching `Bun.version`, so nothing is
+    // fetched per target and there is nothing to drift against.
+    const runtimes = await bunCompiledRuntimes(null);
+
+    expect(Object.keys(runtimes).sort()).toEqual(ALL_BINARY_TARGETS.map((t) => t.arch).sort());
+    for (const [id, runtime] of Object.entries(runtimes)) {
+      expect(runtime, id).toEqual({
+        source: 'host',
+        revision: Bun.revision,
+        sha256: null,
+        tagAdvanced: false,
+      });
+    }
   });
 
-  test('the compile revision is comparable to Bun.revision', async () => {
-    // The drift check compares this against `Bun.revision`, so it has to be the
-    // same spelling. `bun --revision` prints `1.4.0-canary.1+32e87032b` while
-    // the API returns the full sha — reading the flag made the warning fire on
-    // every build, against a runtime that had not drifted at all.
+  test('the host revision is the spelling the provenance records', async () => {
+    // `bun --revision` prints `1.4.0-canary.1+32e87032b` while the API returns
+    // the full sha. Recording the flag's spelling made the old drift warning
+    // fire on every build, against a runtime that had not drifted at all.
     expect(Bun.revision).toMatch(/^[0-9a-f]{40}$/);
 
-    const compiled = await bunCompileRuntimeRevision(await bunCrossCompileChannel());
-    if (compiled === null) return; // cold cache; nothing fetched to ask
+    const runtimes = await bunCompiledRuntimes(await bunCrossCompileChannel());
+    const host = hostReleasePlatform();
+    if (host === null) return; // unidentifiable host; nothing claims to be it
 
-    expect(compiled).toMatch(/^[0-9a-f]{40}$/);
+    expect(runtimes[host]?.revision).toBe(Bun.revision);
   });
 
-  test('an unresolvable compile revision reports nothing rather than throwing', async () => {
-    // The drift check runs at the end of a successful build. It must never be
-    // the reason a build fails, so a cold cache answers null and the caller
-    // skips the comparison.
-    const revision = await bunCompileRuntimeRevision('canary', {
+  test('targets with nothing fetched are absent rather than invented', async () => {
+    // This runs at the end of a successful build and must never be the reason
+    // one fails, so a cold cache answers with the host's target alone: every
+    // foreign runtime is unknown, and saying so is the point.
+    const runtimes = await bunCompiledRuntimes('canary', {
       cacheDir: join(tmpdir(), 'bun-cross-absent'),
       cacheKey: 'nothing-installed-here',
     });
 
-    expect(revision).toBeNull();
+    const host = hostReleasePlatform();
+    expect(Object.keys(runtimes)).toEqual(host === null ? [] : [host]);
   });
 });

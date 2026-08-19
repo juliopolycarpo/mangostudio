@@ -54,7 +54,20 @@ function fixture(): {
       channel: 'test',
       bunVersion: '1.4.0',
       bunRevision: '32e87032b98b46d9c3c1d082c58cb390abf35e33',
-      bunCompileRevision: '32e87032b98b46d9c3c1d082c58cb390abf35e33',
+      bunRuntimes: {
+        'linux-x64': {
+          source: 'host',
+          revision: '32e87032b98b46d9c3c1d082c58cb390abf35e33',
+          sha256: null,
+          tagAdvanced: false,
+        },
+        'darwin-arm64': {
+          source: 'channel',
+          revision: null,
+          sha256: 'a'.repeat(64),
+          tagAdvanced: true,
+        },
+      },
     }),
   };
 }
@@ -136,16 +149,51 @@ describe('distribution manifest', () => {
     );
   });
 
-  test('rejects a manifest missing either Bun revision', () => {
-    // Both are required: one names the Bun that ran the suite, the other the Bun
-    // compiled into the binaries, and on a floating channel they can differ.
-    for (const field of ['bunRevision', 'bunCompileRevision'] as const) {
-      const { manifest } = fixture();
-      const { [field]: _omitted, ...withoutField } = manifest;
+  test('rejects a manifest missing the Bun revision that ran the build', () => {
+    const { manifest } = fixture();
+    const { bunRevision: _omitted, ...withoutField } = manifest;
 
-      expect(() => parseDistributionManifest(JSON.stringify(withoutField)), field).toThrow(
-        new RegExp(`field ${field} must be a non-empty string`)
+    expect(() => parseDistributionManifest(JSON.stringify(withoutField))).toThrow(
+      /field bunRevision must be a non-empty string/
+    );
+  });
+
+  test('records what each target was compiled against, and nothing for the rest', () => {
+    // One field cannot describe eight independently fetched runtimes, and a
+    // foreign one cannot be executed here to be asked its revision — so each
+    // source is recorded by the only identity it can prove.
+    const { manifest } = fixture();
+    const byId = new Map(manifest.targets.map((target) => [target.id, target.bunRuntime]));
+
+    expect(byId.get('linux-x64')?.revision).toBe('32e87032b98b46d9c3c1d082c58cb390abf35e33');
+    expect(byId.get('darwin-arm64')).toEqual({
+      source: 'channel',
+      revision: null,
+      sha256: 'a'.repeat(64),
+      tagAdvanced: true,
+    });
+    // Not built by this run: absent, rather than credited to the host's Bun.
+    expect(byId.get('windows-x64')).toBeNull();
+  });
+
+  test('rejects a half-written runtime record', () => {
+    // Worse than an absent one: it reads as present while putting the target's
+    // provenance beyond reconstruction.
+    for (const bunRuntime of [
+      { source: 'channel', revision: null, sha256: null, tagAdvanced: false },
+      { source: 'host', revision: null, sha256: null, tagAdvanced: false },
+      { source: 'elsewhere', revision: null, sha256: 'a'.repeat(64), tagAdvanced: false },
+      { source: 'channel', revision: null, sha256: 'a'.repeat(64) },
+    ]) {
+      const { manifest } = fixture();
+      const targets = manifest.targets.map((target, index) =>
+        index === 0 ? { ...target, bunRuntime } : target
       );
+
+      expect(
+        () => parseDistributionManifest(JSON.stringify({ ...manifest, targets })),
+        JSON.stringify(bunRuntime)
+      ).toThrow(/bunRuntime is invalid/);
     }
   });
 

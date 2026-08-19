@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 
+import type { BunRuntimeProvenance } from './bun-cross-runtime';
 import { NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import {
   ALL_BINARY_TARGETS,
@@ -10,8 +11,13 @@ import {
   releaseArchiveFileName,
 } from './release-targets';
 
-/** Version 2 added bunRevision and bunCompileRevision; manifests never outlive the workflow run that wrote them. */
-const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 2;
+/**
+ * Version 2 added bunRevision and bunCompileRevision; version 3 replaced the
+ * latter with per-target provenance, because one field cannot describe eight
+ * independently fetched runtimes. Manifests never outlive the workflow run that
+ * wrote them, so no reader has to understand an older shape.
+ */
+const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 3;
 export const DISTRIBUTION_MANIFEST_FILE = 'distribution-manifest.json';
 
 interface DistributionFile {
@@ -27,6 +33,12 @@ interface DistributionTarget {
   readonly archive: string;
   readonly archiveMembers: readonly string[];
   readonly npmPackage: { readonly name: string; readonly directory: string } | null;
+  /**
+   * The Bun compiled into this target's binaries, or null when this build did
+   * not produce them — every `--platform`-limited build leaves most targets
+   * unbuilt, and claiming a runtime for one of those would be an invention.
+   */
+  readonly bunRuntime: BunRuntimeProvenance | null;
 }
 
 export interface DistributionManifest {
@@ -38,14 +50,6 @@ export interface DistributionManifest {
   readonly bunVersion: string;
   /** Bun.revision, because Bun.version reports a plain "1.4.0" on canary builds. */
   readonly bunRevision: string;
-  /**
-   * Revision of the Bun compiled *into* the binaries. Equal to bunRevision on a
-   * released Bun, and usually on a channel too — they differ only when the
-   * channel tag advanced between the host install and the runtime fetch. Reads
-   * `unknown` when the build fetched no runtime the host could execute, which is
-   * every `--platform`-limited build of a foreign target.
-   */
-  readonly bunCompileRevision: string;
   readonly targets: readonly DistributionTarget[];
   readonly files: readonly DistributionFile[];
 }
@@ -58,7 +62,8 @@ export interface CreateDistributionManifestOptions {
   readonly channel: string;
   readonly bunVersion: string;
   readonly bunRevision: string;
-  readonly bunCompileRevision: string;
+  /** Provenance per target, for whichever targets this build resolved a runtime for. */
+  readonly bunRuntimes: Partial<Record<ReleasePlatformId, BunRuntimeProvenance>>;
 }
 
 export interface ValidateDistributionManifestOptions {
@@ -97,6 +102,7 @@ export function createDistributionManifest(
             directory: `dist-npm/${npmPlatform.os}-${npmPlatform.cpu}`,
           }
         : null,
+      bunRuntime: options.bunRuntimes[target.arch] ?? null,
     } satisfies DistributionTarget;
   });
 
@@ -121,7 +127,6 @@ export function createDistributionManifest(
     channel: options.channel,
     bunVersion: options.bunVersion,
     bunRevision: options.bunRevision,
-    bunCompileRevision: options.bunCompileRevision,
     targets,
     files,
   };
@@ -145,7 +150,6 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
     'channel',
     'bunVersion',
     'bunRevision',
-    'bunCompileRevision',
   ] as const) {
     if (typeof value[key] !== 'string' || value[key].length === 0) {
       throw new Error(`Distribution manifest field ${key} must be a non-empty string.`);
@@ -177,7 +181,6 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
     channel: value.channel as string,
     bunVersion: value.bunVersion as string,
     bunRevision: value.bunRevision as string,
-    bunCompileRevision: value.bunCompileRevision as string,
     targets,
     files,
   };
@@ -366,7 +369,31 @@ function parseTarget(value: unknown, index: number): DistributionTarget {
   ) {
     throw new Error(`Distribution target ${index}.npmPackage is invalid.`);
   }
+  assertBunRuntime(value.bunRuntime, index);
   return value as unknown as DistributionTarget;
+}
+
+/**
+ * A runtime record has to be complete or absent. A half-written one would put a
+ * target's provenance beyond reconstruction while still reading as present,
+ * which is worse than the null that says the build never resolved one.
+ */
+function assertBunRuntime(value: unknown, index: number): void {
+  if (value === null || value === undefined) return;
+  const invalid = (): never => {
+    throw new Error(`Distribution target ${index}.bunRuntime is invalid.`);
+  };
+  if (!isRecord(value)) invalid();
+  const runtime = value as Record<string, unknown>;
+  if (runtime.source !== 'host' && runtime.source !== 'channel') invalid();
+  if (typeof runtime.tagAdvanced !== 'boolean') invalid();
+  for (const key of ['revision', 'sha256'] as const) {
+    if (runtime[key] !== null && typeof runtime[key] !== 'string') invalid();
+  }
+  // Each source is identified by the one thing it can prove: the running Bun by
+  // its revision, a fetched asset by the digest that was verified before use.
+  if (runtime.source === 'host' && typeof runtime.revision !== 'string') invalid();
+  if (runtime.source === 'channel' && typeof runtime.sha256 !== 'string') invalid();
 }
 
 function parseFile(value: unknown, index: number): DistributionFile {

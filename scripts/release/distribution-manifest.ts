@@ -3,7 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { bunCompileRuntimeRevision, bunCrossCompileChannel } from '../lib/bun-cross-runtime';
+import { bunCompiledRuntimes, bunCrossCompileChannel } from '../lib/bun-cross-runtime';
 import { ROOT_DIR } from '../lib/config';
 import {
   createDistributionManifest,
@@ -126,14 +126,11 @@ async function main(): Promise<void> {
     channel,
     bunVersion: Bun.version,
     bunRevision: Bun.revision,
-    // Reads the runtime the build already fetched. On a released `.bun-version`
-    // that resolves to the host, because `--compile` downloads the build
-    // matching it. On a channel it can be unresolvable — a `--platform`-limited
-    // build never fetches the host's own runtime — and the honest answer there
-    // is that nobody knows, not the host revision, which is the one value the
-    // field is documented not to be.
-    bunCompileRevision:
-      (await bunCompileRuntimeRevision(await bunCrossCompileChannel())) ?? 'unknown',
+    // Reads what the build already resolved, per target, and records nothing for
+    // a target it did not build — a `--platform`-limited run leaves most of them
+    // unbuilt, and the honest answer for those is that this build produced no
+    // runtime for them at all.
+    bunRuntimes: await bunCompiledRuntimes(await bunCrossCompileChannel()),
   });
   writeFileSync(args.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 

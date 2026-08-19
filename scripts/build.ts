@@ -5,7 +5,7 @@ import { basename, join } from 'node:path';
 
 import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import {
-  bunCompileRuntimeRevision,
+  bunCompiledRuntimes,
   bunCrossCompileChannel,
   ensureBunCrossRuntime,
 } from './lib/bun-cross-runtime';
@@ -451,9 +451,14 @@ REM The binary is a CLI; bare invocation prints help, so start the server explic
 }
 
 /**
- * Says so when the channel tag moved between the host Bun being installed and
- * its runtimes being fetched, which leaves the binaries carrying a different
- * Bun than the one the suite ran against.
+ * Says so when the channel tag moved while the per-target runtimes were being
+ * fetched, which leaves binaries from one build carrying different Bun commits.
+ *
+ * The signal is the digest, not a revision: a runtime built for another platform
+ * cannot be executed here to be asked what it is, so what the build can observe
+ * is that the digest published when it read the listing was not the digest that
+ * arrived. That covers all eight targets, where executing the host's own asset
+ * only ever covered one — and the host no longer fetches an asset at all.
  *
  * Reports and returns — never fails the build. The tag advancing mid-run is a
  * race with an upstream merge, not a defect in the change under test, and there
@@ -463,14 +468,17 @@ REM The binary is a CLI; bare invocation prints help, so start the server explic
 async function reportCrossRuntimeDrift(channel: string | null): Promise<void> {
   if (!channel) return;
 
-  const compiled = await bunCompileRuntimeRevision(channel);
-  if (!compiled || compiled === Bun.revision) return;
+  const runtimes = await bunCompiledRuntimes(channel);
+  const advanced = Object.entries(runtimes).filter(([, runtime]) => runtime?.tagAdvanced);
+  if (advanced.length === 0) return;
 
-  console.warn(`⚠️  Bun revision drift while building against the "${channel}" channel:`);
+  console.warn(`⚠️  The "${channel}" tag advanced while this build fetched its runtimes:`);
   console.warn(`     host (ran the tests): ${Bun.revision}`);
-  console.warn(`     compiled into binaries: ${compiled}`);
-  console.warn('     The channel tag advanced mid-build. Not an error; recorded so an artifact');
-  console.warn('     that misbehaves can be traced to the Bun actually inside it.');
+  for (const [id, runtime] of advanced) {
+    console.warn(`     ${id}: compiled against sha256 ${runtime?.sha256}`);
+  }
+  console.warn('     Not an error; recorded so an artifact that misbehaves can be traced to');
+  console.warn('     the Bun actually inside it.');
 }
 
 async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void> {

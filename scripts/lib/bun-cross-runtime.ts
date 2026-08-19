@@ -10,7 +10,7 @@
 // On a released Bun this module stays out of the way: `bunCrossCompileChannel`
 // returns null and the build keeps using Bun's own download path.
 
-import type { Dirent } from 'node:fs';
+import { type Dirent, existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
@@ -81,13 +81,55 @@ export async function bunCrossCompileChannel(
 }
 
 /**
- * Release platform this build is running on, or null when the host is not one
- * of the release targets.
+ * ELF interpreters that identify a Linux host's C library, by `process.arch`.
  *
- * There is no musl id here, because `process.platform` cannot tell the two
- * libcs apart. The only caller *executes* what this selects, so on an Alpine
- * host the glibc runtime it names will not run and the revision comes back null
- * rather than wrong — the degradation the callers already handle.
+ * The path is fixed per libc and architecture, so finding one is a positive
+ * identification rather than an inference from something correlated with it.
+ */
+const LIBC_LOADERS = {
+  x64: {
+    musl: ['/lib/ld-musl-x86_64.so.1'],
+    glibc: ['/lib64/ld-linux-x86-64.so.2', '/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2'],
+  },
+  arm64: {
+    musl: ['/lib/ld-musl-aarch64.so.1'],
+    glibc: ['/lib/ld-linux-aarch64.so.1', '/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1'],
+  },
+} as const satisfies Record<string, { musl: readonly string[]; glibc: readonly string[] }>;
+
+/**
+ * Which C library this Linux host runs, or null when neither can be positively
+ * identified.
+ *
+ * `process.platform` reports `linux` for both, and the difference decides which
+ * Bun asset can execute here. Null is a real answer rather than a failure: the
+ * caller uses this to decide whether the running Bun may stand in for a target's
+ * runtime, and being wrong there ships a musl binary as the glibc artifact.
+ * Downloading is always correct, so an unidentifiable host takes that path.
+ *
+ * Loader paths are checked before Bun's own report, and the musl loader before
+ * the glibc one: `glibcVersionRuntime` is a useful third signal for a layout the
+ * two lists do not cover, but a Bun that stopped populating it would otherwise
+ * make every glibc host look unidentifiable.
+ */
+function hostLibc(arch: 'x64' | 'arm64'): 'glibc' | 'musl' | null {
+  const loaders = LIBC_LOADERS[arch];
+  if (loaders.musl.some((path) => existsSync(path))) return 'musl';
+  if (loaders.glibc.some((path) => existsSync(path))) return 'glibc';
+
+  const report: unknown = process.report?.getReport();
+  const header = isRecord(report) ? report.header : undefined;
+  const glibcVersion = isRecord(header) ? header.glibcVersionRuntime : undefined;
+  return typeof glibcVersion === 'string' && glibcVersion.length > 0 ? 'glibc' : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+/**
+ * Release platform this build is running on, or null when the host is not one
+ * of the release targets — or is a Linux whose libc could not be identified.
  * // Usage: hostReleasePlatform() // → 'linux-x64' on a CI runner
  */
 export function hostReleasePlatform(): ReleasePlatformId | null {
@@ -95,8 +137,11 @@ export function hostReleasePlatform(): ReleasePlatformId | null {
   if (!arch) return null;
 
   switch (process.platform) {
-    case 'linux':
-      return `linux-${arch}`;
+    case 'linux': {
+      const libc = hostLibc(arch);
+      if (!libc) return null;
+      return libc === 'musl' ? `linux-${arch}-musl` : `linux-${arch}`;
+    }
     case 'darwin':
       return `darwin-${arch}`;
     case 'win32':
@@ -107,36 +152,93 @@ export function hostReleasePlatform(): ReleasePlatformId | null {
 }
 
 /**
- * Revision of the Bun that ends up inside the compiled binaries.
+ * Which Bun ended up inside one target's binaries.
  *
- * On a released Bun that is the host's own, because `--compile` downloads the
- * build matching `Bun.version`. On a channel it is whatever the tag pointed at
- * when {@link ensureBunCrossRuntime} fetched it, which can differ from the host
- * — see the mutable-tag note below. Reads an already-installed runtime only and
- * never downloads, so a caller that has not built yet gets null rather than a
- * surprise 50 MB fetch.
- * // Usage: await bunCompileRuntimeRevision('canary') // → '1.4.0-canary.1+…'
+ * A foreign runtime cannot be executed here to ask its revision, so the two
+ * sources answer with what each can actually prove: the host's own target is
+ * compiled against the running Bun and reports its revision exactly, while a
+ * fetched one is identified by the digest that was verified before it was used.
  */
-export async function bunCompileRuntimeRevision(
+export interface BunRuntimeProvenance {
+  readonly source: 'host' | 'channel';
+  /** Full 40-character revision. Known only for the running Bun. */
+  readonly revision: string | null;
+  /** SHA-256 of the verified channel asset. Null for the host's own runtime. */
+  readonly sha256: string | null;
+  /**
+   * The channel tag moved while this asset was downloading: the digest published
+   * when the listing was read did not match the bytes that arrived, and a fresh
+   * listing did. Harmless on its own, and the reason binaries from one build can
+   * carry different Bun commits.
+   */
+  readonly tagAdvanced: boolean;
+}
+
+/** Provenance recorded beside a cached runtime, so a cache hit answers too. */
+const PROVENANCE_FILE = '.bun-runtime.json';
+
+/**
+ * Provenance of every runtime this build has already resolved, keyed by target.
+ *
+ * Reads the cache and never downloads, so a caller that has not built yet gets
+ * an empty map rather than a surprise 500 MB of fetches. A `--platform`-limited
+ * build reports only the targets it actually built.
+ * // Usage: await bunCompiledRuntimes('canary') // → { 'linux-x64': { … } }
+ */
+export async function bunCompiledRuntimes(
   channel: string | null,
   options: Omit<CrossRuntimeOptions, 'channel'> = {}
-): Promise<string | null> {
-  if (!channel) return Bun.revision;
+): Promise<Partial<Record<ReleasePlatformId, BunRuntimeProvenance>>> {
+  const host = hostReleasePlatform();
+  // Without a channel `--compile` downloads the build matching `Bun.version`,
+  // so every target carries the host's own Bun and there is nothing to look up.
+  if (!channel) {
+    return Object.fromEntries(
+      Object.keys(BUN_RUNTIME_ASSETS).map((id) => [id, hostProvenance()])
+    ) as Record<ReleasePlatformId, BunRuntimeProvenance>;
+  }
 
-  const arch = hostReleasePlatform();
-  if (!arch) return null;
-
-  const asset = BUN_RUNTIME_ASSETS[arch];
   const cacheKey = options.cacheKey ?? defaultCacheKey(channel);
-  const installed = await findBunExecutable(join(options.cacheDir ?? CACHE_DIR, cacheKey, asset));
-  if (!installed) return null;
+  const cacheDir = options.cacheDir ?? CACHE_DIR;
+  const resolved: Partial<Record<ReleasePlatformId, BunRuntimeProvenance>> = {};
 
+  for (const [id, asset] of Object.entries(BUN_RUNTIME_ASSETS) as Array<
+    [ReleasePlatformId, string]
+  >) {
+    if (id === host) {
+      resolved[id] = hostProvenance();
+      continue;
+    }
+    const recorded = await readProvenance(join(cacheDir, cacheKey, asset));
+    if (recorded) resolved[id] = recorded;
+  }
+  return resolved;
+}
+
+function hostProvenance(): BunRuntimeProvenance {
   // `Bun.revision`, not `--revision`: the flag prints `1.4.0-canary.1+32e87032b`
-  // while the API returns the full 40-character sha. Comparing the two spellings
-  // of the same build would report drift on every run.
-  const { stdout, exitCode } = await captureCommand([installed, '-e', 'console.log(Bun.revision)']);
-  if (exitCode !== 0) return null;
-  return stdout.trim() || null;
+  // while the API returns the full 40-character sha, and the two spellings of one
+  // build do not compare equal.
+  return { source: 'host', revision: Bun.revision, sha256: null, tagAdvanced: false };
+}
+
+async function readProvenance(installDir: string): Promise<BunRuntimeProvenance | null> {
+  const file = Bun.file(join(installDir, PROVENANCE_FILE));
+  if (!(await file.exists())) return null;
+  try {
+    const recorded: unknown = await file.json();
+    if (!isRecord(recorded) || typeof recorded.sha256 !== 'string') return null;
+    return {
+      source: 'channel',
+      revision: null,
+      sha256: recorded.sha256,
+      tagAdvanced: recorded.tagAdvanced === true,
+    };
+  } catch {
+    // A truncated record describes a runtime nobody can identify, which is what
+    // an absent one means too.
+    return null;
+  }
 }
 
 const inflight = new Map<string, Promise<string>>();
@@ -151,6 +253,15 @@ export function ensureBunCrossRuntime(
   target: BinaryTarget,
   options: CrossRuntimeOptions
 ): Promise<string> {
+  // The host's own target needs nothing fetched: `process.execPath` is the exact
+  // build running this script. That saves a download per build, and closes the
+  // one window in which the host's binary could carry a different channel commit
+  // than the Bun that ran the suite. Only taken when the host platform is
+  // positively identified, libc included — see hostLibc.
+  if (target.arch === hostReleasePlatform()) {
+    return Promise.resolve(process.execPath);
+  }
+
   const asset = BUN_RUNTIME_ASSETS[target.arch];
   const cacheKey = options.cacheKey ?? defaultCacheKey(options.channel);
   const installDir = join(options.cacheDir ?? CACHE_DIR, cacheKey, asset);
@@ -194,7 +305,7 @@ async function installCrossRuntime(
   let renameError: unknown;
   try {
     const archivePath = join(stagingDir, `${asset}.zip`);
-    await downloadVerifiedAsset(asset, channel, archivePath);
+    const verified = await downloadVerifiedAsset(asset, channel, archivePath);
 
     const extractDir = join(stagingDir, 'extracted');
     await mkdir(extractDir, { recursive: true });
@@ -205,6 +316,11 @@ async function installCrossRuntime(
       throw new Error(`Archive ${asset}.zip contained no Bun executable`);
     }
     await chmod(extracted, 0o755);
+
+    // Written before the rename so it lands atomically with the runtime it
+    // describes: a cache hit skips everything above, and the digest is the only
+    // identity a runtime that cannot be executed here will ever have.
+    await Bun.write(join(extractDir, PROVENANCE_FILE), `${JSON.stringify(verified)}\n`);
 
     try {
       await rename(extractDir, installDir);
@@ -233,23 +349,32 @@ async function installCrossRuntime(
  *
  * The repo's other installer verifies every byte it executes
  * (`actions-lint/bootstrap.ts`), and this one has at least that reach: the
- * runtime is executed to read its revision and copied into every shipped
- * binary. A mutable tag bounds what a digest from the same tag can prove, but a
- * truncated or corrupted download failing here rather than inside a release
- * artifact is the point.
+ * runtime is copied into every shipped binary. A mutable tag bounds what a
+ * digest from the same tag can prove, but a truncated or corrupted download
+ * failing here rather than inside a release artifact is the point.
  *
  * The tag can also advance between the two fetches, which is indistinguishable
  * from corruption at this layer. The listing is re-read once before failing: a
- * genuine mismatch survives a fresh listing, a tag that moved does not.
+ * genuine mismatch survives a fresh listing, a tag that moved does not. That
+ * second case is reported rather than merely tolerated — it is the one moment a
+ * build can observe the channel moving underneath it.
+ *
+ * `downloadBase` is a parameter rather than a constant so the verification can
+ * be tested against a local server: every branch worth having — a corrupted
+ * body, a tag that advanced mid-download, a listing that omits the asset — is
+ * unreachable through the real one.
+ *
+ * // Usage: await downloadVerifiedAsset('bun-linux-x64', 'canary', '/tmp/bun.zip')
  */
-async function downloadVerifiedAsset(
+export async function downloadVerifiedAsset(
   asset: string,
   channel: string,
-  archivePath: string
-): Promise<void> {
-  const expected = await fetchAssetChecksum(asset, channel);
+  archivePath: string,
+  downloadBase: string = RELEASE_DOWNLOAD_BASE
+): Promise<{ sha256: string; tagAdvanced: boolean }> {
+  const expected = await fetchAssetChecksum(asset, channel, downloadBase);
 
-  const url = `${RELEASE_DOWNLOAD_BASE}/${channel}/${asset}.zip`;
+  const url = `${downloadBase}/${channel}/${asset}.zip`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Download failed (${response.status} ${response.statusText}): ${url}`);
@@ -259,18 +384,22 @@ async function downloadVerifiedAsset(
   await Bun.write(archivePath, response);
 
   const actual = await sha256File(archivePath);
-  if (actual === expected) return;
+  if (actual === expected) return { sha256: actual, tagAdvanced: false };
 
-  const reread = await fetchAssetChecksum(asset, channel);
-  if (actual === reread) return;
+  const reread = await fetchAssetChecksum(asset, channel, downloadBase);
+  if (actual === reread) return { sha256: actual, tagAdvanced: true };
 
   throw new Error(
     `SHA-256 mismatch for ${asset}.zip on the "${channel}" channel: expected ${reread}, got ${actual}`
   );
 }
 
-async function fetchAssetChecksum(asset: string, channel: string): Promise<string> {
-  const url = `${RELEASE_DOWNLOAD_BASE}/${channel}/${CHECKSUM_FILE}`;
+async function fetchAssetChecksum(
+  asset: string,
+  channel: string,
+  downloadBase: string
+): Promise<string> {
+  const url = `${downloadBase}/${channel}/${CHECKSUM_FILE}`;
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Checksum download failed (${response.status} ${response.statusText}): ${url}`);
