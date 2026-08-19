@@ -8,8 +8,11 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 ## Prerequisites
 
-- [Bun](https://bun.sh/) v1.3.14 or later
+- [Bun](https://bun.sh/) canary — `bun upgrade --canary`, or
+  `curl -fsSL https://bun.sh/install | bash -s -- canary` for a first install
 - Git with GPG signing configured (see [Commit Guidelines](#commit-guidelines))
+
+Bun 1.4.0 is unreleased, and canary is the only channel carrying the post-rewrite runtime this repo builds and tests against. `.bun-version` is what CI installs; [`docs/reference/tooling.md`](../docs/reference/tooling.md#bun) explains why `packageManager` names a different string.
 
 ## Environment Setup
 

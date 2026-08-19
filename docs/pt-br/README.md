@@ -67,7 +67,8 @@ Para deploy em container, veja [`docs/operations/deployment.md`](../operations/d
 
 ## Pré-requisitos (desenvolvimento)
 
-- [Bun](https://bun.sh/) (v1.3.14+)
+- [Bun](https://bun.sh/) canary (`bun upgrade --canary` ou
+  `curl -fsSL https://bun.sh/install | bash -s -- canary` na primeira instalação)
 - Uma ou mais chaves de API ou contas com login para provedores suportados
   (Gemini, compatíveis com OpenAI, Anthropic, DeepSeek, ChatGPT)
 

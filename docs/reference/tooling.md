@@ -1,5 +1,50 @@
 # Tooling
 
+## Bun
+
+The repo tracks Bun's **`canary`** channel. 1.3.14 is the last stable release,
+three months old at the time of writing; everything since — including the Rust
+rewrite of the runtime — is only reachable on canary, and that is the build this
+repo compiles, tests, and ships binaries against.
+
+Install it with `bun upgrade --canary`, or
+`curl -fsSL https://bun.sh/install | bash -s -- canary` from cold.
+
+### Two fields name the same toolchain, for two different consumers
+
+| File                            | Value                | Read by                                                    |
+| ------------------------------- | -------------------- | ---------------------------------------------------------- |
+| `.bun-version`                  | `canary`             | `oven-sh/setup-bun` — the build CI actually installs       |
+| `package.json` `packageManager` | `bun@1.4.0-canary.1` | Turborepo only — a floor marker, never what gets installed |
+
+They disagree because their requirements are mutually exclusive, not by
+oversight:
+
+- **setup-bun resolves release tags**, and Bun publishes exactly one canary tag —
+  the literal `canary`, rebuilt per commit on main. There is no `bun-v1.4.0-canary.1`
+  tag to point at, so the installed build can only be named `canary`.
+- **Turborepo parses `packageManager` as semver or a URL** and refuses to resolve
+  the workspace at all against `bun@canary`. It needs a version-shaped string.
+
+So `.bun-version` is the single source of truth for *which Bun*, and
+`packageManager` records the version that channel currently reports.
+
+### The cost of a floating channel
+
+CI is no longer reproducible across time: a canary regression can turn a green
+commit red with no change in this repo. Two consequences are already handled —
+
+- **Install-cache keys use `bun --revision`, not `bun --version`.** Every canary
+  build reports the same `1.4.0-canary.1` from `--version`; only `--revision`
+  appends the commit (`1.4.0-canary.1+32e87032b`). A key on `--version` would
+  hand one Bun build's extracted packages to a different one.
+- **The distribution manifest records `bunRevision` alongside `bunVersion`.** The
+  JS `Bun.version` drops the channel suffix entirely and reports a bare `1.4.0`,
+  which does not identify the build that produced a binary. `Bun.revision` does.
+
+To bisect a suspected canary regression, pin `.bun-version` to a released tag
+(`1.3.14`) on a scratch branch; that is the only knob, and it is one line.
+
 ## TypeScript 7
 
 The monorepo type-checks with [TypeScript 7](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/),
@@ -39,7 +84,7 @@ be removed.
 ## Turborepo
 
 This monorepo uses [Turborepo](https://turborepo.dev) **2.x** (currently
-`2.9.16`) as its shared build-system layer. Turborepo orchestrates task
+`2.10.8`) as its shared build-system layer. Turborepo orchestrates task
 execution across workspaces and provides a content-addressable cache so that
 unchanged work is never rebuilt.
 

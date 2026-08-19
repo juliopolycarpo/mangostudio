@@ -91,7 +91,10 @@ describe('CI cache policy', () => {
     const bun = byFamily('bun');
     expect(bun).toHaveLength(1);
     expect(bun[0].inputs.validity).toContain("hashFiles('bun.lock')");
-    expect(readText('.github/actions/setup-mango/action.yml')).toContain('bun --version');
+    // The revision, not the version: every canary build reports the same
+    // `1.4.0-canary.1` from `bun --version`, so a key built on that would share
+    // one Bun build's extracted packages with a different one.
+    expect(readText('.github/actions/setup-mango/action.yml')).toContain('bun --revision');
 
     const turbo = byFamily('turbo');
     expect(turbo.length).toBeGreaterThan(0);
