@@ -649,15 +649,16 @@ function isTestRuntime(): boolean {
  * The single managed config location for the Bun test runner. Every test that
  * does not provide its own config file shares this path, and the test
  * environment deletes the file between tests — so config-file connector writes
- * from one test cannot leak into another test's reads. Scoped by pid (and Bun
- * worker id) to stay isolated across processes. Lives under the user's home
- * dir (not the OS temp dir) so CodeQL does not flag the read path as an
- * "insecure temporary file" — the test environment owns its lifecycle.
+ * from one test cannot leak into another test's reads. Scoped by pid and Bun
+ * worker id to stay isolated across worker processes. Lives under the user's
+ * home dir (not the OS temp dir) so CodeQL does not flag the read path as an
+ * "insecure temporary file" — the test environment owns its lifecycle and
+ * removes the directory in `afterAll`.
  * // Usage: loadConfigForTest({ configFilePath: TEST_MANAGED_CONFIG_PATH })
  */
 export const TEST_MANAGED_CONFIG_DIR = join(
   homedir(),
-  `.mangostudio-test-${process.pid}-${process.env.BUN_WORKER_ID ?? '0'}`
+  `.mangostudio-test-${process.pid}-${process.env.BUN_TEST_WORKER_ID ?? '0'}`
 );
 export const TEST_MANAGED_CONFIG_PATH = join(TEST_MANAGED_CONFIG_DIR, 'config.toml');
 

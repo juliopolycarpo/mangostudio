@@ -19,7 +19,7 @@
  * which is after the preload promise resolves.
  */
 
-import { afterEach, beforeEach } from 'bun:test';
+import { afterAll, afterEach, beforeEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
 import { Migrator } from 'kysely/migration';
@@ -69,6 +69,17 @@ function resetManagedConfigFile(): void {
   mkdirSync(TEST_MANAGED_CONFIG_DIR, { recursive: true });
 }
 
+/**
+ * Removes the managed directory for good. The path is scoped by pid, so without
+ * this every test process leaves one behind in the user's home directory —
+ * `process.on('exit')` does not run under the Bun test runner, but an `afterAll`
+ * registered here does, once per isolate under `--isolate` and once per process
+ * without it.
+ */
+function removeManagedConfigDir(): void {
+  rmSync(TEST_MANAGED_CONFIG_DIR, { recursive: true, force: true });
+}
+
 /** Runs every migration against the in-memory test database. */
 async function migrateTestDatabase(): Promise<void> {
   const migrator = new Migrator({
@@ -103,6 +114,7 @@ export function setupTestEnvironment(): Promise<void> {
   // config still overrides it in its own beforeEach (which runs after this one).
   beforeEach(installBaseTestConfig);
   afterEach(resetManagedConfigFile);
+  afterAll(removeManagedConfigDir);
 
   setupPromise = migrateTestDatabase();
   return setupPromise;
