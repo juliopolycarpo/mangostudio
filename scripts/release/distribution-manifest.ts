@@ -126,10 +126,14 @@ async function main(): Promise<void> {
     channel,
     bunVersion: Bun.version,
     bunRevision: Bun.revision,
-    // Reads the runtime the build already fetched; falls back to the host when
-    // `.bun-version` pins a release, where `--compile` downloads that same build.
+    // Reads the runtime the build already fetched. On a released `.bun-version`
+    // that resolves to the host, because `--compile` downloads the build
+    // matching it. On a channel it can be unresolvable — a `--platform`-limited
+    // build never fetches the host's own runtime — and the honest answer there
+    // is that nobody knows, not the host revision, which is the one value the
+    // field is documented not to be.
     bunCompileRevision:
-      (await bunCompileRuntimeRevision(await bunCrossCompileChannel())) ?? Bun.revision,
+      (await bunCompileRuntimeRevision(await bunCrossCompileChannel())) ?? 'unknown',
   });
   writeFileSync(args.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 

@@ -41,7 +41,9 @@ export interface DistributionManifest {
   /**
    * Revision of the Bun compiled *into* the binaries. Equal to bunRevision on a
    * released Bun, and usually on a channel too — they differ only when the
-   * channel tag advanced between the host install and the runtime fetch.
+   * channel tag advanced between the host install and the runtime fetch. Reads
+   * `unknown` when the build fetched no runtime the host could execute, which is
+   * every `--platform`-limited build of a foreign target.
    */
   readonly bunCompileRevision: string;
   readonly targets: readonly DistributionTarget[];
