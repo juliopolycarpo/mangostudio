@@ -279,9 +279,7 @@ function buildRemovalEntry(
     resourceKey,
     ref,
     divergence,
-    locations: classified.map((row) =>
-      describeRemovalLocation(row, removing, placed, divergence)
-    ),
+    locations: classified.map((row) => describeRemovalLocation(row, removing, placed, divergence)),
     instancePlacements: placed
       .map((candidate) => ({
         environmentId: candidate.environmentId,
@@ -372,9 +370,7 @@ function describeRemovalLocation(
     // so a hash-keyed group would call each copy a unique version. Withhold the
     // claim until the hashes are comparable again.
     eliminatesContentGroup:
-      divergence === 'incomparable'
-        ? false
-        : eliminatesContentGroup(instance, removing, placed),
+      divergence === 'incomparable' ? false : eliminatesContentGroup(instance, removing, placed),
   };
 }
 

@@ -301,7 +301,10 @@ describe('executePropagationWrites', () => {
     expect(readFileSync(join(destination, 'SKILL.md'), 'utf8')).toContain('new');
     expect(existsSync(join(backupRoot, result.backupId ?? ''))).toBe(true);
     expect(
-      readFileSync(join(backupRoot, result.backupId ?? '', 'claude-skills', 'gh', 'SKILL.md'), 'utf8')
+      readFileSync(
+        join(backupRoot, result.backupId ?? '', 'claude-skills', 'gh', 'SKILL.md'),
+        'utf8'
+      )
     ).toContain('old');
   });
 
