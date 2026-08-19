@@ -45,6 +45,10 @@ export function findDisallowedNodeEnvReads(
   const violations: NodeEnvReadViolation[] = [];
 
   for (const source of sources) {
+    // Full TypeScript AST parsing is expensive across ~1900 production files;
+    // a plain substring check first skips it for the ~99.8% that can't match.
+    if (!source.content.includes('NODE_ENV')) continue;
+
     const sourceFile = ts.createSourceFile(
       source.path,
       source.content,
