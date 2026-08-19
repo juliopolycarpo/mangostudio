@@ -25,14 +25,14 @@ describe('hashResourceAt', () => {
     writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: newline-skill\ndescription: d\n---\n');
     writeFileSync(join(skillDir, 'a\nb.md'), 'content');
 
-    try {
-      await hashResourceAt(skillDir, 'directory');
-      throw new Error('Expected hashing to fail');
-    } catch (error) {
-      expect(error).toBeInstanceOf(LibraryHashInvalidError);
-      expect(error).not.toBeInstanceOf(PathEscapeError);
-      expect((error as LibraryHashInvalidError).invalidReason).toBe('unsafe-name');
-    }
+    // Captured rather than matched, because the claim is about which error this
+    // is: `unsafe-name` and specifically not the path escape it used to raise.
+    // A resolved hash lands here too and fails the first assertion.
+    const error = await hashResourceAt(skillDir, 'directory').catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(LibraryHashInvalidError);
+    expect(error).not.toBeInstanceOf(PathEscapeError);
+    expect((error as LibraryHashInvalidError).invalidReason).toBe('unsafe-name');
   });
 
   it('still throws PathEscapeError when a directory symlink leaves the tree', async () => {
