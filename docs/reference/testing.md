@@ -92,6 +92,56 @@ bun run verify              # full local CI gate: check → test --coverage → 
 Turbo skips packages that do not define a given task, so passing all workspace
 filters is safe — no per-workspace metadata is needed to gate lane participation.
 
+### Timeouts
+
+Every lane sets a **15s floor** — `--timeout 15000` on the `bun test` lanes,
+`testTimeout` / `hookTimeout` in `apps/frontend/vitest.config.ts`. Both runners
+otherwise default to 5s, and a loaded CI runner is 4–14x slower than a dev
+machine on subprocess-heavy tests, so the default leaves tests that pass in
+milliseconds locally one bad runner away from failing on wall clock alone.
+
+A per-test or per-hook timeout still wins in **both** directions: a test
+declaring `20_000` keeps it, and one deliberately declaring a short budget stays
+held to it. Declare an explicit timeout only where the number is part of what the
+test asserts; otherwise take the floor.
+
+> **Do not set this in `bunfig.toml`.** Bun has no `[test] timeout` key and
+> ignores one **silently** rather than erroring — a 6s test still fails under
+> `timeout = 20000`. `BUN_TEST_TIMEOUT` is ignored too. The `--timeout` CLI flag
+> is the only mechanism that works (verified on Bun 1.3.14).
+
+Raising the floor is not a substitute for fixing a slow test. Prefer removing the
+cost — replay migrations against `:memory:` rather than a temp-dir SQLite file,
+and reach for a real filesystem only when the test is about the filesystem.
+
+### Parallelism
+
+`test:unit` and `test:coverage` in `apps/api` pass `--parallel=1`. Read that as
+"one worker, isolated" rather than "no parallelism": Bun's `--parallel=N` runs
+files in N worker processes and **implies `--isolate`**, which gives each file a
+fresh global object. Isolation is the load-bearing half. Bun's default — no
+`--parallel` at all — runs every file in one process off a single module graph,
+where the in-memory database from `setupTestEnvironment()` and any `mock.module`
+registration outlive the file that made them.
+
+Measured on `apps/api/tests/unit` (3421 tests, 301 files):
+
+| Invocation                          | Result                                    |
+| ----------------------------------- | ----------------------------------------- |
+| `--parallel=1` (what the lane runs) | 3421 pass                                 |
+| `--isolate` alone                   | 3421 pass — isolation alone is sufficient |
+| neither                             | 7 fail, each at exactly 5000ms            |
+
+The seven are turn-recovery and checkpoint tests, and they hit the timeout rather
+than failing an assertion, so dropping the flag buys a suite whose failures read
+as unrelated flakes.
+
+`test:integration` deliberately does **not** take the flag. The lane passes with
+`--isolate` (779 pass), but it costs 268s against 75s without — 3.5x, on a CI job
+already using 7 of its 10 minutes. Isolation is the better default and the wrong
+trade here; prefer substituting through production's own seams over `mock.module`
+in that lane, so nothing needs a fresh global to stay correct.
+
 ### Code Health
 
 `bun run check` includes a repository-wide Knip scan. Change-scoped checks run it

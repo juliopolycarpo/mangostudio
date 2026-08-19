@@ -15,8 +15,8 @@
     "circular": "madge --circular --extensions ts,tsx .",
     "fix": "biome check --write src tests",
     "test": "bun run test:unit",
-    "test:unit": "bun test tests/unit",
-    "test:coverage": "bun test --coverage"
+    "test:unit": "bun test --timeout 15000 tests/unit",
+    "test:coverage": "bun test --coverage --timeout 15000"
   },
   "dependencies": {
     "@mangostudio/shared": "workspace:*",

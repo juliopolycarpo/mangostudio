@@ -190,7 +190,14 @@ describe('executeWriteFile', () => {
     expect(await readBack(filePath)).toBe('second');
   });
 
-  it('serializes parallel writes to one path in call order', async () => {
+  it('serializes parallel writes to one path without a spurious staleness error', async () => {
+    // The lock is exclusive, not FIFO: nothing orders the two calls' arrival at
+    // it, so which one lands last is a real race rather than call order. Pin the
+    // post-state instead. The loser's freshness check runs inside the lock,
+    // against the snapshot the winner just recorded, so neither write rejects;
+    // the commit is one whole content rather than a torn mix; and the snapshot
+    // left behind still describes the file on disk, which is what the trailing
+    // write proves by not failing as stale.
     const filePath = join(tempDir, 'parallel.txt');
     await seedFile(filePath, 'initial');
     await executeReadFile({ path: filePath }, makeContext());
@@ -200,7 +207,11 @@ describe('executeWriteFile', () => {
       executeWriteFile({ path: filePath, content: 'second' }, makeContext()),
     ]);
 
-    expect(await readBack(filePath)).toBe('second');
+    expect(['first', 'second']).toContain(await readBack(filePath));
+
+    const result = await executeWriteFile({ path: filePath, content: 'third' }, makeContext());
+    expect(result.created).toBe(false);
+    expect(await readBack(filePath)).toBe('third');
   });
 
   it("does not let another chat use the first chat's read", async () => {

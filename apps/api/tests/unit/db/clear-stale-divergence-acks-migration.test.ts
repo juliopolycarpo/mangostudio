@@ -1,15 +1,13 @@
 /**
  * Migration 052 clears `library_divergence_acks` because the manifest-injectivity fix (#704)
  * bumped `DIRECTORY_HASH_DOMAIN`: every stored directory content hash changes, so an ack row's
- * `contentHashesJson` can never match a freshly computed hash again. Pinned against a real SQLite
- * file so a future migration cannot quietly narrow the delete and leave stale rows behind.
+ * `contentHashesJson` can never match a freshly computed hash again. Replayed against a real
+ * (in-memory) SQLite engine so a future migration cannot quietly narrow the delete and leave
+ * stale rows behind.
  */
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { Kysely, sql } from 'kysely';
 import { Migrator } from 'kysely/migration';
 import { BunSqliteDialect } from 'kysely-bun-sqlite/dist/index.js';
@@ -20,7 +18,6 @@ const TARGET = '052_clear_stale_divergence_acks';
 // biome-ignore lint/suspicious/noExplicitAny: migrating incrementally through schemas `Database` does not describe.
 type AnyDb = Kysely<any>;
 
-let dir: string;
 let sqlite: SQLiteDatabase;
 let db: AnyDb;
 
@@ -34,14 +31,12 @@ async function migrateTo(name: string): Promise<void> {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'mango-divergence-ack-migration-'));
-  sqlite = new SQLiteDatabase(join(dir, 'test.sqlite'));
+  sqlite = new SQLiteDatabase(':memory:');
   db = new Kysely({ dialect: new BunSqliteDialect({ database: sqlite }) });
 });
 
 afterEach(() => {
   sqlite.close();
-  rmSync(dir, { recursive: true, force: true });
 });
 
 describe('052_clear_stale_divergence_acks', () => {
