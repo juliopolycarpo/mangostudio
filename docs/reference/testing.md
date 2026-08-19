@@ -180,13 +180,19 @@ run under the Bun test runner).
 #### Known upstream blocker on the unit lane
 
 `tests/unit` aborts whole files intermittently under worker parallelism, losing
-every remaining case in the file it hits. Pinned to 4 cores:
+every remaining case in the file it hits. Pinned to 4 cores on a WSL2 host
+(`6.18.33.2-microsoft-standard-WSL2`):
 
 | Invocation                  | Runs affected |
 | --------------------------- | ------------- |
 | `--parallel=4` (CI-shaped)  | 4 of 10       |
 | `--parallel=8`, to a file   | 4 of 12       |
 | `--parallel=8`, into a pipe | 2 of 8        |
+
+**Not yet observed on a CI runner** — every measurement above is from that one
+host, and `epoll_ctl` is kernel surface, so a stock runner kernel may not
+reproduce it at all. Confirm there before treating it as a property of the lane
+rather than of this machine.
 
 The error is always
 
@@ -207,9 +213,10 @@ namespace and so materializes both streams eagerly. Loading `@google/genai`
 lazily removes those frames and the aborts continue — measured, not assumed. It
 is the messenger.
 
-So the unit lane cannot take worker parallelism yet, whatever the integration
-lane does. Redirecting the run to a file makes it likelier but is not the cause;
-it happens through a pipe too, which is what CI gives it.
+Redirecting the run to a file makes it likelier but is not the cause; it happens
+through a pipe too, which is what CI gives it. Until it is measured on a runner,
+treat the unit lane's readiness for worker parallelism as unknown rather than
+settled either way.
 
 ### Code Health
 
