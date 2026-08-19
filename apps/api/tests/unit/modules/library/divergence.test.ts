@@ -100,13 +100,13 @@ describe('describeDivergence', () => {
     expect(result.contentGroups).toHaveLength(2);
   });
 
-  it('treats an omitted directory-hash domain as v1', () => {
+  it('treats an omitted directory-hash domain as v2', () => {
     const result = describeDivergence('skill', [
-      { ...compared('mango-skills', 'v2-hash'), directoryHashDomain: 2 },
-      compared('claude-skills', 'v1-hash'),
+      { ...compared('mango-skills', 'same'), directoryHashDomain: 2 },
+      compared('claude-skills', 'same'),
     ]);
 
-    expect(result.divergence).toBe('incomparable');
+    expect(result.divergence).toBe('uniform');
   });
 
   it('compares directory hashes once both sides share a domain', () => {

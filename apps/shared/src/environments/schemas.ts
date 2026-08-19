@@ -1045,8 +1045,9 @@ export const RuntimeLifecycleViewSchema = Type.Object({
   /**
    * Directory-hash domain the connected runtime computes. Handshake-only, same
    * as `enforcesPathPolicy`: health cannot reconstruct it, and a refresh that
-   * dropped it would silently downgrade a v2 peer to v1. Absent while
-   * disconnected. Absent on an older connected peer means v1.
+   * dropped it would silently invent a default. Absent while disconnected.
+   * Absent on an older connected peer means v2 — the domain that shipped
+   * before this field.
    */
   directoryHashDomain: Type.Optional(Type.Integer({ minimum: 1, maximum: 255 })),
 });

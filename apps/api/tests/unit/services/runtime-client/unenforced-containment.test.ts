@@ -150,15 +150,8 @@ describe('a peer that declares containment enforcement', () => {
 });
 
 describe('a peer that omits the directory-hash domain', () => {
-  it('is treated as v1', async () => {
+  it('is treated as v2 — the domain that shipped before the field', async () => {
     const client = await connect(withoutDirectoryHashDomain);
-    expect(client.directoryHashDomain).toBe(1);
-  });
-});
-
-describe('a peer that omits the directory-hash domain', () => {
-  it('is treated as v1', async () => {
-    const client = await connect(withoutDirectoryHashDomain);
-    expect(client.directoryHashDomain).toBe(1);
+    expect(client.directoryHashDomain).toBe(2);
   });
 });

@@ -21,10 +21,16 @@ const FILE_HASH_DOMAIN = 'mangostudio/library/file\0';
 export const DIRECTORY_HASH_DOMAIN = 'mangostudio/library/dir/v2\0';
 
 /**
- * Older peers omit `directoryHashDomain` on hello; they hash directories under
- * the pre-length-prefix domain. Treat silence as v1 rather than guessing v2.
+ * Peers that omit `directoryHashDomain` on hello. Directory hashing moved to
+ * v2 (`mangostudio/library/dir/v2`) before this field existed, so silence is
+ * that already-shipped domain rather than the pre-length-prefix v1 encoding.
+ *
+ * Keep this pinned at 2 when the live domain becomes v3: omitted still means
+ * "built after v2 hashing and before the advertisement", not "whatever this
+ * binary computes today". Pre-v2 binaries sit behind that breaking hash change
+ * and cannot be distinguished on hello.
  */
-export const DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION = 1;
+export const DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION = 2;
 
 const DIRECTORY_HASH_DOMAIN_VERSION_PATTERN = /\/v(\d+)\0$/;
 
@@ -43,7 +49,7 @@ export function directoryHashDomainVersion(domain: string = DIRECTORY_HASH_DOMAI
   return version;
 }
 
-/** Absent on the wire means v1 — the older-peer path. */
+/** Absent on the wire means v2 — the domain that shipped before this field. */
 export function directoryHashDomainOf(advertised: number | undefined): number {
   return advertised ?? DEFAULT_DIRECTORY_HASH_DOMAIN_VERSION;
 }

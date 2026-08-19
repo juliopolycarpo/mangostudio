@@ -48,7 +48,7 @@ export interface BuildRuntimeLifecycleViewInput {
   readonly enforcesPathPolicy?: boolean | undefined;
   /**
    * Directory-hash domain the connected peer advertised. Undefined when nothing
-   * is connected; an older connected peer that omits the field is v1.
+   * is connected; an older connected peer that omits the field is v2.
    */
   readonly directoryHashDomain?: number | undefined;
 }

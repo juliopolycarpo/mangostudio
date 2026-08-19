@@ -14,8 +14,9 @@ export interface InstanceComparison {
   readonly instance: LibraryInstance;
   readonly whitespaceHash?: string;
   /**
-   * Directory-hash domain this instance was hashed under. Absent means v1.
-   * Ignored for file-backed kinds — only the directory domain moved.
+   * Directory-hash domain this instance was hashed under. Absent means v2 —
+   * the domain that shipped before the advertisement field. Ignored for
+   * file-backed kinds — only the directory domain moved.
    */
   readonly directoryHashDomain?: number;
 }

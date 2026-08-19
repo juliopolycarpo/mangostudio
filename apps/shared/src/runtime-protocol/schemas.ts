@@ -175,8 +175,9 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    *
    * Directory hashes are not comparable across a domain boundary. File-backed
    * resources are unaffected — only the directory domain moved. Absent means
-   * **v1** (an older peer), like `enforcesPathPolicy` and unlike the `features`
-   * keys.
+   * **v2**: that domain shipped before this field, so a parent-revision peer
+   * already computes it. Unlike `enforcesPathPolicy`, silence is not the
+   * pre-fix default.
    */
   directoryHashDomain: Type.Optional(Type.Integer({ minimum: 1, maximum: 255 })),
   /** Consent profile that produced `features`; absent on older peers. */

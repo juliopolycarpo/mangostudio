@@ -557,7 +557,8 @@ export class RuntimeClient {
 
   /**
    * Directory-hash domain this peer computes. Older runtimes omit the field
-   * and hash under v1; silence is v1, never inferred from the protocol version.
+   * and already hash under v2; silence is v2, never inferred from the protocol
+   * version.
    */
   get directoryHashDomain(): number {
     return directoryHashDomainOf(this.protocol.manifest.directoryHashDomain);

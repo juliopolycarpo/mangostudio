@@ -692,7 +692,7 @@ describe('previewLibraryPropagation across machines', () => {
     );
   });
 
-  it('treats an omitted directory-hash domain as v1 when resolved to 1', async () => {
+  it('blocks a destination that still hashes under a different directory-hash domain', async () => {
     const result = await preview(['skill:gh'], ['mango-skills'], {
       resources: [ghOnLocal],
       directoryHashDomain: 2,

@@ -337,9 +337,10 @@ describe('directory hash domain version', () => {
     expect(directoryHashDomainVersion('mangostudio/library/dir/v3\0')).toBe(3);
   });
 
-  it('treats an omitted advertised domain as v1', () => {
-    expect(directoryHashDomainOf(undefined)).toBe(1);
+  it('treats an omitted advertised domain as v2', () => {
+    expect(directoryHashDomainOf(undefined)).toBe(2);
     expect(directoryHashDomainOf(2)).toBe(2);
+    expect(directoryHashDomainOf(1)).toBe(1);
   });
 
   it('refuses a domain string that does not carry a version', () => {
