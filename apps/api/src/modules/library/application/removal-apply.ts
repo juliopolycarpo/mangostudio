@@ -27,7 +27,7 @@ import type {
   RemovalPreviewRequest,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import type { LibraryPathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
@@ -35,7 +35,7 @@ import { LibraryRequestError } from '../domain/library-request-error';
 import { backupPolicyFor } from '../infrastructure/backup-roots';
 import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
 import { hashResourceAt } from '../infrastructure/instance-reader';
-import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
+import { createLibraryPathEnv, hubLibraryPathEnvParams } from '../infrastructure/location-probe';
 import { nodeTreeRemovalFs, type TreeRemovalFs } from '../infrastructure/tree-removal';
 import { serializeLibraryWrite } from './apply-queue';
 import { recordWrittenBackup } from './backup-inventory';
@@ -49,7 +49,7 @@ const LIBRARY_WRITE_TIMEOUT_MS = 60_000;
 export interface RemovalApplyDeps {
   preview(userId: string, request: RemovalPreviewRequest): Promise<RemovalPreview>;
   /** Layout of one machine; see `PropagationApplyDeps.pathEnv`. */
-  pathEnv(environmentId: string): PathEnv;
+  pathEnv(environmentId: string): LibraryPathEnv;
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   backup: BackupStoreDeps;
   treeFs: TreeRemovalFs;
@@ -253,7 +253,7 @@ function runWriteEngine(
   userId: string,
   operations: readonly PreparedRemovalOperation[],
   plan: RemovalPlan,
-  env: PathEnv,
+  env: LibraryPathEnv,
   deps: RemovalApplyDeps
 ): Promise<RemovalApply> {
   if (deps.writeEngine === 'in-process') {
@@ -302,7 +302,7 @@ async function runtimeRemove(
 function toRuntimeRemoveParams(
   operations: readonly PreparedRemovalOperation[],
   plan: RemovalPlan,
-  env: PathEnv,
+  env: LibraryPathEnv,
   deps: RemovalApplyDeps
 ): RuntimeLibraryRemoveParams {
   const backup = deps.backup;
@@ -311,14 +311,7 @@ function toRuntimeRemoveParams(
     retentionCount: backup.retentionCount(),
     retentionBytes: backup.retentionBytes(),
     environmentId: deps.environmentId,
-    pathEnv: {
-      // Only the MangoStudio directories travel, matching `pathEnvParams` in
-      // `environment-library-service.ts`; the runtime merges its own
-      // `process.env` underneath, so forwarding the hub's would only put its
-      // secrets in the frame.
-      env: configuredLibraryEnv(),
-      ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
-    },
+    pathEnv: hubLibraryPathEnvParams(deps.environmentId, env),
     operations,
     lastCopyResourceKeys: [...plan.lastCopyResourceKeys],
   };

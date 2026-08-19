@@ -42,7 +42,7 @@ import {
   type ResourceKind,
 } from '@mangostudio/shared/library';
 import { getLibraryLocation, type LocationDefinition } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import type { LibraryPathEnv } from '@mangostudio/shared/runtime-env';
 import { assertRequestedProfileId, ProfileMismatchError } from '../../../lib/profile-context';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { constantTimeEquals } from '../../../utils/hash';
@@ -50,7 +50,7 @@ import { LibraryRequestError } from '../domain/library-request-error';
 import { backupPolicyFor } from '../infrastructure/backup-roots';
 import { type BackupStoreDeps, defaultBackupStoreDeps } from '../infrastructure/backup-store';
 import { hashResourceAt, readResourceFile } from '../infrastructure/instance-reader';
-import { configuredLibraryEnv, createLibraryPathEnv } from '../infrastructure/location-probe';
+import { createLibraryPathEnv, hubLibraryPathEnvParams } from '../infrastructure/location-probe';
 import {
   type ResourceWriteResult,
   writeDirectoryResource,
@@ -78,7 +78,7 @@ export interface PropagationApplyDeps {
    * two homes; production answers with the hub's own env for every id, because
    * the hub cannot know another machine's.
    */
-  pathEnv(environmentId: string): PathEnv;
+  pathEnv(environmentId: string): LibraryPathEnv;
   readSourceFile(path: string): Promise<Uint8Array>;
   /**
    * Reads a resource off the machine that holds it, as bytes.
@@ -145,7 +145,7 @@ interface DirectoryWrite {
   readonly locationId: string;
   readonly slug: string;
   readonly sourceDir: string;
-  readonly env: PathEnv;
+  readonly env: LibraryPathEnv;
   readonly backupId: string;
 }
 
@@ -153,7 +153,7 @@ interface FileWrite {
   readonly locationId: string;
   readonly slug: string;
   readonly contents: string | Uint8Array;
-  readonly env: PathEnv;
+  readonly env: LibraryPathEnv;
   readonly backupId: string;
 }
 
@@ -191,7 +191,7 @@ async function readRemoteLibrarySource(
     {
       path: input.path,
       locationId: input.locationId,
-      pathEnv: { env: configuredLibraryEnv() },
+      pathEnv: hubLibraryPathEnvParams(environmentId),
     },
     { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }
   );
@@ -384,7 +384,7 @@ async function runWriteEngineAcrossEnvironments(
 function runWriteEngine(
   userId: string,
   prepared: readonly PreparedPropagationOperation[],
-  env: PathEnv,
+  env: LibraryPathEnv,
   deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
   if (deps.writeEngine === 'in-process') {
@@ -416,7 +416,7 @@ function runWriteEngine(
 async function runtimeApply(
   userId: string,
   prepared: readonly PreparedPropagationOperation[],
-  env: PathEnv,
+  env: LibraryPathEnv,
   deps: PropagationApplyDeps
 ): Promise<PropagationApply> {
   const client = await getRuntimeClient(userId, deps.environmentId);
@@ -462,7 +462,7 @@ const LIBRARY_APPLY_MAX_CONTENT_BYTES = 8 * 1024 * 1024;
 
 function toRuntimeApplyParams(
   prepared: readonly PreparedPropagationOperation[],
-  env: PathEnv,
+  env: LibraryPathEnv,
   deps: PropagationApplyDeps,
   envelope: { backupRoot: string; retentionCount: number; retentionBytes: number }
 ): RuntimeLibraryApplyParams {
@@ -502,7 +502,8 @@ function toRuntimeApplyParams(
   return {
     ...envelope,
     environmentId: deps.environmentId,
-    pathEnv: writePathEnvParams(env),
+    // Hub directories travel through the same gate as probes and scans.
+    pathEnv: hubLibraryPathEnvParams(deps.environmentId, env),
     operations: prepared.map(({ contents: _bytes, files, ...operation }) => ({
       ...operation,
       ...(operation.kind === 'file' && { contentRef: operation.expectedContentHash }),
@@ -526,20 +527,6 @@ function toRuntimeApplyParams(
  */
 function treeFileKey(contentHash: string, relativePath: string): string {
   return `${contentHash}:${relativePath}`;
-}
-
-/**
- * Only the MangoStudio directories travel, exactly as `pathEnvParams` in
- * `environment-library-service.ts` sends them: they are hub configuration
- * rather than a fact about the host, and the runtime already merges its own
- * `process.env` underneath. Forwarding the hub's whole environment would put
- * its secrets in every write frame for no added resolution.
- */
-function writePathEnvParams(env: PathEnv): RuntimeLibraryApplyParams['pathEnv'] {
-  return {
-    env: configuredLibraryEnv(),
-    ...(env.workspaceRoot !== undefined && { workspaceRoot: env.workspaceRoot }),
-  };
 }
 
 function narrowAppliedOperation(
@@ -1050,7 +1037,7 @@ async function prepareOperation(
 export interface PropagationUndoDeps {
   hashAt(path: string, kind: 'file' | 'directory'): Promise<string>;
   /** Layout of the machine holding the set; see `PropagationApplyDeps.pathEnv`. */
-  pathEnv(environmentId: string): PathEnv;
+  pathEnv(environmentId: string): LibraryPathEnv;
   backup: BackupStoreDeps;
   /** Which process performs the restore; see `PropagationApplyDeps.writeEngine`. */
   writeEngine: 'runtime' | 'in-process';
@@ -1127,7 +1114,7 @@ async function runUndo(
         await deps.runtimeUndo({
           backupRoot: deps.backup.backupDir(),
           backupId,
-          pathEnv: writePathEnvParams(env),
+          pathEnv: hubLibraryPathEnvParams(deps.environmentId, env),
         })
       );
     }
@@ -1146,7 +1133,7 @@ async function runUndo(
     const params = {
       backupRoot: policy.backupRoot,
       backupId,
-      pathEnv: writePathEnvParams(env),
+      pathEnv: hubLibraryPathEnvParams(deps.environmentId, env),
     };
     return named(await client.library.undo(params, { timeoutMs: LIBRARY_WRITE_TIMEOUT_MS }));
   } catch (error) {

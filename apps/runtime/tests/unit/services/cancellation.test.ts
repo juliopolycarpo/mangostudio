@@ -10,6 +10,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_APP_SETTINGS, libraryLocationsFor } from '@mangostudio/shared/app-settings';
+import { createPathEnv } from '@mangostudio/shared/runtime-env';
 import { clearFileFreshness } from '../../../src';
 import { withPathLocks } from '../../../src/services/file-freshness';
 import { runtimeFsService } from '../../../src/services/fs';
@@ -322,7 +323,7 @@ describe('a cancelled runtime call refuses before it mutates', () => {
     expect(scanned).toBe(false);
 
     const library = createLibraryService({
-      createPathEnv: () => ({ platform: process.platform, homeDir: tempDir, env: {} }),
+      createPathEnv: () => createPathEnv({ platform: process.platform, homeDir: tempDir, env: {} }),
       describeLocations: () => [],
       now: () => 0,
     });
@@ -341,7 +342,7 @@ describe('a cancelled runtime call refuses before it mutates', () => {
     const path = await seedReadFile('contended.txt');
     const controller = new AbortController();
 
-    let releaseHold = () => undefined as void;
+    let releaseHold: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
       releaseHold = () => resolve();
     });

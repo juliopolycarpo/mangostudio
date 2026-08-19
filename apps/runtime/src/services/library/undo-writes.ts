@@ -9,7 +9,7 @@
 import { resolve as resolvePath } from 'node:path';
 import type { LibraryUndoResult } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import type { LibraryPathEnv, PathEnv } from '@mangostudio/shared/runtime-env';
 import { isPathPrefix, resolvePathThroughExistingAncestor } from '../path-containment';
 import {
   type BackupEntry,
@@ -31,7 +31,7 @@ export interface ExecuteLibraryUndoParams {
   readonly backupRoot: string;
   readonly backupId: string;
   /** Resolves the registry roots every touched path has to sit inside. */
-  readonly pathEnv: PathEnv;
+  readonly pathEnv: LibraryPathEnv;
   /**
    * Aborts between entries. An undo that keeps restoring after the hub gave up
    * on it leaves the user looking at a failure while the tree changes under

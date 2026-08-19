@@ -1,5 +1,10 @@
 import { posix, win32 } from 'node:path';
-import type { PathEnv } from '../runtime-env';
+import {
+  AGENTS_DIR_ENV,
+  MANGO_CONFIG_HOME_ENV,
+  type PathEnv,
+  SKILLS_DIR_ENV,
+} from '../runtime-env';
 import type {
   LibraryLocationId,
   LibraryScope,
@@ -84,18 +89,30 @@ function homePath(...parts: string[]): (env: PathEnv) => string | null {
   return (env) => (supportsHomeLocations(env) ? pathApi(env).join(env.homeDir, ...parts) : null);
 }
 
-function mangoSkillsPath(env: PathEnv): string | null {
+function mangoConfigHome(env: PathEnv): string {
+  return configuredDir(env, MANGO_CONFIG_HOME_ENV, ['.mango']);
+}
+
+function mangoHomePath(...parts: string[]): (env: PathEnv) => string | null {
+  return (env) => {
+    if (!supportsHomeLocations(env)) return null;
+    return pathApi(env).join(mangoConfigHome(env), ...parts);
+  };
+}
+
+function mangoConfiguredDir(env: PathEnv, variable: string, fallbackName: string): string | null {
   if (!supportsHomeLocations(env)) return null;
-  return configuredDir(env, 'SKILLS_DIR', ['.mango', 'skills']);
+  const configured = env.env[variable]?.trim();
+  if (configured) return resolveEnvPath(env, configured);
+  return pathApi(env).join(mangoConfigHome(env), fallbackName);
+}
+
+function mangoSkillsPath(env: PathEnv): string | null {
+  return mangoConfiguredDir(env, SKILLS_DIR_ENV, 'skills');
 }
 
 function mangoAgentsPath(env: PathEnv): string | null {
-  if (!supportsHomeLocations(env)) return null;
-  return configuredDir(env, 'AGENTS_DIR', ['.mango', 'agents']);
-}
-
-function mangoConfigHome(env: PathEnv): string {
-  return pathApi(env).join(env.homeDir, '.mango');
+  return mangoConfiguredDir(env, AGENTS_DIR_ENV, 'agents');
 }
 
 function claudeConfigHome(env: PathEnv): string {
@@ -260,7 +277,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     id: 'mango-instructions',
     kind: 'instruction',
     scope: 'home',
-    resolvePath: homePath('.mango', 'AGENTS.md'),
+    resolvePath: mangoHomePath('AGENTS.md'),
     access: 'read-write',
     layout: 'single-file',
     resourceSlug: 'global',
@@ -338,7 +355,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     id: 'mango-settings',
     kind: 'setting',
     scope: 'home',
-    resolvePath: homePath('.mango', 'config.toml'),
+    resolvePath: mangoHomePath('config.toml'),
     access: 'read-only',
     layout: 'single-file',
     resourceSlug: 'settings',

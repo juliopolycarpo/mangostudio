@@ -572,14 +572,18 @@ function computeDerived(cfg: MangoConfig, tomlPath: string): void {
     cfg.toolImages.dir = resolveUserPath(cfg.toolImages.dir);
   }
 
+  // Agents and skills follow the config file. A relocated config.toml that
+  // still defaulted these to ~/.mango independently would advertise one home
+  // and write another.
+  const configHome = dirname(tomlPath);
   if (!cfg.agents.dir) {
-    cfg.agents.dir = join(getHomeMangoDir(), 'agents');
+    cfg.agents.dir = join(configHome, 'agents');
   } else {
     cfg.agents.dir = resolveUserPath(cfg.agents.dir);
   }
 
   if (!cfg.skills.dir) {
-    cfg.skills.dir = join(getHomeMangoDir(), 'skills');
+    cfg.skills.dir = join(configHome, 'skills');
   } else {
     cfg.skills.dir = resolveUserPath(cfg.skills.dir);
   }

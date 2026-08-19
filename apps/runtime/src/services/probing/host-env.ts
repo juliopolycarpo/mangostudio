@@ -31,7 +31,7 @@ import type {
   RuntimeDefinition,
 } from '@mangostudio/shared/environments/detection';
 import type { LocationFsProbe } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import { createPathEnv, type LibraryPathEnv, type PathEnv } from '@mangostudio/shared/runtime-env';
 import { throwIfAborted } from '../cancellation';
 import { HIDDEN_WINDOW } from '../process-window';
 
@@ -52,13 +52,13 @@ export function createRuntimePathEnv(
     readonly env?: Readonly<Record<string, string>>;
     readonly workspaceRoot?: string;
   } = {}
-): PathEnv {
-  return {
+): LibraryPathEnv {
+  return createPathEnv({
     platform: process.platform,
     homeDir: homedir(),
     env: withCanonicalPathKey({ ...process.env, ...overrides.env }),
     ...(overrides.workspaceRoot !== undefined && { workspaceRoot: overrides.workspaceRoot }),
-  };
+  });
 }
 
 /**

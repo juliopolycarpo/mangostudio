@@ -9,6 +9,7 @@
 
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
   LibraryLocationId,
@@ -20,7 +21,15 @@ import {
   describeLocation as describeLocationWith,
   describeTargetLocations as describeTargetLocationsWith,
 } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import {
+  AGENTS_DIR_ENV,
+  createPathEnv,
+  type LibraryPathEnv,
+  libraryPathEnvOverrides,
+  MANGO_CONFIG_HOME_ENV,
+  type PathEnv,
+  SKILLS_DIR_ENV,
+} from '@mangostudio/shared/runtime-env';
 import { getConfig } from '../../../lib/config';
 
 const nodeLocationFsProbe: LocationFsProbe = {
@@ -57,20 +66,19 @@ const nodeLocationFsProbe: LocationFsProbe = {
  * directories are injected through the same env-shaped seam used by all
  * resolvers, which is also how they reach a runtime probing on the hub's behalf.
  */
-export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv {
-  const env = {
-    ...process.env,
-    ...configuredLibraryEnv(),
-    ...overrides.env,
-  };
-  return {
+export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): LibraryPathEnv {
+  return createPathEnv({
     platform: overrides.platform ?? process.platform,
     homeDir: overrides.homeDir ?? homedir(),
-    env,
+    env: {
+      ...process.env,
+      ...configuredLibraryEnv(),
+      ...overrides.env,
+    },
     // Omitted rather than defaulted: there is no sensible stand-in for a
     // repository root, and a wrong one scans a tree the user never named.
     ...(overrides.workspaceRoot !== undefined && { workspaceRoot: overrides.workspaceRoot }),
-  };
+  });
 }
 
 /**
@@ -81,7 +89,11 @@ export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv 
  */
 export function configuredLibraryEnv(): Record<string, string> {
   const config = getConfig();
-  return { AGENTS_DIR: config.agents.dir, SKILLS_DIR: config.skills.dir };
+  return {
+    [AGENTS_DIR_ENV]: config.agents.dir,
+    [SKILLS_DIR_ENV]: config.skills.dir,
+    [MANGO_CONFIG_HOME_ENV]: dirname(config.configFilePath),
+  };
 }
 
 /**
@@ -92,6 +104,28 @@ export function configuredLibraryEnv(): Record<string, string> {
  */
 export function hubLibraryEnvFor(environmentId: string): Record<string, string> | undefined {
   return environmentId === LOCAL_ENVIRONMENT_ID ? configuredLibraryEnv() : undefined;
+}
+
+/**
+ * Wire `pathEnv` for one machine. Local receives the hub's configured
+ * directories, with any pins already on a `PathEnv` winning so a test that
+ * injected `SKILLS_DIR` does not lose it on the runtime engine. Anywhere else
+ * the hub's paths name nothing, so they are omitted.
+ */
+export function hubLibraryPathEnvParams(
+  environmentId: string,
+  pins?: Pick<PathEnv, 'workspaceRoot'> & { env?: PathEnv['env'] }
+): { env?: Record<string, string>; workspaceRoot?: string } | undefined {
+  const configured = hubLibraryEnvFor(environmentId);
+  const workspaceRoot = pins?.workspaceRoot;
+  if (!configured) {
+    return workspaceRoot === undefined ? undefined : { workspaceRoot };
+  }
+  const picked = pins?.env ? libraryPathEnvOverrides(pins.env) : {};
+  return {
+    env: { ...configured, ...picked },
+    ...(workspaceRoot !== undefined && { workspaceRoot }),
+  };
 }
 
 export function describeTargetLocations(

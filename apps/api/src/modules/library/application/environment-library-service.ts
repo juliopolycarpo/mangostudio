@@ -33,7 +33,7 @@ import {
   environmentProbingService,
 } from '../../environments/application/probing-service';
 import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
-import { hubLibraryEnvFor } from '../infrastructure/location-probe';
+import { hubLibraryPathEnvParams } from '../infrastructure/location-probe';
 import { groupLibraryScanEntries } from './library-discovery';
 import type { SettingsSourcePayload } from './settings-inspection';
 
@@ -141,13 +141,10 @@ export function createEnvironmentLibraryService(
   let resetEpoch = 0;
 
   const scopeKey = (scope: LibraryScope) => `${scope.userId}${SCOPE_SEP}${scope.environmentId}`;
-  const pathEnvParams = (scope: LibraryScope, workspaceRoot?: string) => {
-    const env = hubLibraryEnvFor(scope.environmentId);
-    return {
-      ...(env && { env }),
+  const pathEnvParams = (scope: LibraryScope, workspaceRoot?: string) =>
+    hubLibraryPathEnvParams(scope.environmentId, {
       ...(workspaceRoot !== undefined && { workspaceRoot }),
-    };
-  };
+    }) ?? {};
 
   const discover = async (
     db: Kysely<Database>,

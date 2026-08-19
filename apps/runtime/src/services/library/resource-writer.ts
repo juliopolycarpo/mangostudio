@@ -7,7 +7,7 @@ import {
   type LocationDefinition,
   resourceEntryName,
 } from '@mangostudio/shared/library/host';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import type { LibraryPathEnv, PathEnv } from '@mangostudio/shared/runtime-env';
 import { resolvePathThroughExistingAncestor } from '../path-containment';
 import { writeLibraryFileAtomic } from './atomic-write';
 import {
@@ -27,7 +27,7 @@ import {
 interface ResourceWriteInputBase {
   readonly locationId: LibraryLocationId;
   readonly slug: string;
-  readonly env: PathEnv;
+  readonly env: LibraryPathEnv;
   /** Shared by all resources in one apply; generated when omitted. */
   readonly backupId?: string;
 }

@@ -8,7 +8,7 @@ import type {
   RemovalPreview,
   RemovalPreviewEntry,
 } from '@mangostudio/shared/library';
-import type { PathEnv } from '@mangostudio/shared/runtime-env';
+import { createPathEnv } from '@mangostudio/shared/runtime-env';
 import { undoLibraryPropagation } from '../../../../src/modules/library/application/propagation-apply';
 import { applyLibraryRemoval } from '../../../../src/modules/library/application/removal-apply';
 import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
@@ -35,8 +35,8 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-function env(): PathEnv {
-  return { homeDir: home, platform: 'linux', env: {} };
+function env() {
+  return createPathEnv({ homeDir: home, platform: 'linux', env: {} });
 }
 
 function backupDeps(overrides: Partial<BackupStoreDeps> = {}): BackupStoreDeps {
@@ -573,7 +573,7 @@ describe('applyLibraryRemoval across machines', () => {
   const homeOf = (environmentId: string) => (environmentId === 'local' ? home : remoteHome);
 
   function envFor(environmentId: string) {
-    return { homeDir: homeOf(environmentId), platform: 'linux' as const, env: {} };
+    return createPathEnv({ homeDir: homeOf(environmentId), platform: 'linux', env: {} });
   }
 
   function seedOn(environmentId: string, locationId: SkillLocationId, body: string): string {
@@ -802,7 +802,7 @@ describe('applyLibraryRemoval across machines', () => {
           preview: () => Promise.resolve(preview),
           pathEnv: (environmentId) => {
             currentEnvironmentId = environmentId;
-            return { homeDir: homes[environmentId], platform: 'linux', env: {} };
+            return createPathEnv({ homeDir: homes[environmentId], platform: 'linux', env: {} });
           },
           writeEngine: 'in-process',
           backup: {
