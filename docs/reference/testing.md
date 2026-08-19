@@ -92,6 +92,37 @@ bun run verify              # full local CI gate: check → test --coverage → 
 Turbo skips packages that do not define a given task, so passing all workspace
 filters is safe — no per-workspace metadata is needed to gate lane participation.
 
+### Timeouts
+
+Every lane sets a **15s floor** — `--timeout 15000` on the `bun test` lanes,
+`testTimeout` / `hookTimeout` in `apps/frontend/vitest.config.ts`. Both runners
+otherwise default to 5s, and a loaded CI runner is 4–14x slower than a dev
+machine on subprocess-heavy tests, so the default leaves tests that pass in
+milliseconds locally one bad runner away from failing on wall clock alone.
+
+A per-test or per-hook timeout still wins in **both** directions: a test
+declaring `20_000` keeps it, and one deliberately declaring a short budget stays
+held to it. Declare an explicit timeout only where the number is part of what the
+test asserts; otherwise take the floor.
+
+> **Do not set this in `bunfig.toml`.** Bun has no `[test] timeout` key and
+> ignores one **silently** rather than erroring — a 6s test still fails under
+> `timeout = 20000`. `BUN_TEST_TIMEOUT` is ignored too. The `--timeout` CLI flag
+> is the only mechanism that works (verified on Bun 1.3.14).
+
+Raising the floor is not a substitute for fixing a slow test. Prefer removing the
+cost — replay migrations against `:memory:` rather than a temp-dir SQLite file,
+and reach for a real filesystem only when the test is about the filesystem.
+
+### Parallelism
+
+`test:unit` and `test:coverage` in `apps/api` pass `--parallel=1`, and it is
+load-bearing rather than conservative: those suites share one SQLite database
+through `getDb()`, so running files concurrently puts them in lock contention and
+several turn-recovery and checkpoint tests hit the timeout instead of failing on
+an assertion. Removing the flag trades a green suite for timeouts that read as
+unrelated flakes.
+
 ### Code Health
 
 `bun run check` includes a repository-wide Knip scan. Change-scoped checks run it

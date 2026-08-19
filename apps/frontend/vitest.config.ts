@@ -28,6 +28,11 @@ export default defineConfig({
       '**/*.config.*',
     ],
     reporters: process.env.GITHUB_ACTIONS === 'true' ? ['default', 'github-actions'] : ['default'],
+    // Same 15s floor the Bun lanes take via `--timeout`, for the same reason:
+    // a runner under load is several times slower than a dev machine, and both
+    // runners otherwise default to 5s. Per-test and per-hook overrides still win.
+    testTimeout: 15_000,
+    hookTimeout: 15_000,
     coverage: {
       // istanbul instruments source through the Vite transform pipeline, so it
       // works under Bun (which runs vitest via the `node` shim). The v8 provider
