@@ -21,6 +21,7 @@
 
 import { afterEach, beforeEach } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
+import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
 import { Migrator } from 'kysely/migration';
 import { getDb } from '../../../src/db/database';
 import { allMigrations } from '../../../src/db/migrations';
@@ -29,6 +30,8 @@ import {
   TEST_MANAGED_CONFIG_DIR,
   TEST_MANAGED_CONFIG_PATH,
 } from '../../../src/lib/config';
+import { setLibraryLocationDefaultsForTest } from '../../../src/modules/app-settings/application/app-settings-service';
+import { setProviderSecretSyncTtlForTest } from '../../../src/services/providers/core/secret-service';
 import { registerApplicationServices } from '../../../src/services/register-application-services';
 
 /** Set synchronously once config + services are in place (DB migrations follow). */
@@ -38,6 +41,8 @@ let setupPromise: Promise<void> | null = null;
 
 /** Installs the canonical isolated test config singleton. Synchronous + idempotent. */
 function installBaseTestConfig(): void {
+  setLibraryLocationDefaultsForTest(DEFAULT_LIBRARY_LOCATION_SETTINGS);
+  setProviderSecretSyncTtlForTest(0);
   loadConfigForTest({
     auth: {
       secret: 'test-secret-at-least-32-characters-long',

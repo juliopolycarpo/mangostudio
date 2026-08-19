@@ -20,6 +20,20 @@ import {
 import { bunSecretStore, type SecretStore } from '../../secret-store/store';
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
+const DEFAULT_SYNC_TTL_MS = 30_000;
+
+let syncTtlMsOverride: number | null = null;
+
+/**
+ * Sets the config-file sync debounce used by provider secret services.
+ * Passing null restores the production debounce.
+ */
+export function setProviderSecretSyncTtlForTest(ttlMs: number | null): void {
+  if (ttlMs !== null && (!Number.isFinite(ttlMs) || ttlMs < 0)) {
+    throw new RangeError('Provider secret sync TTL must be a non-negative finite number or null.');
+  }
+  syncTtlMsOverride = ttlMs;
+}
 
 /** Configuration required to create a provider secret service instance. */
 export interface ProviderSecretServiceConfig {
@@ -142,10 +156,6 @@ export function createProviderSecretService(
   // and eliminates redundant disk I/O and DB queries on hot paths like
   // /respond/stream.
   //
-  // The debounce is disabled under the test runner: a process-global cache keyed
-  // by userId would otherwise make whether a sync runs depend on what a *prior*
-  // test did within the window, turning the integration suite order-dependent.
-  const SYNC_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 30_000;
   const lastSyncByUser = new Map<string, number>();
 
   const resolveSecretValue = async (connector: SecretMetadataRow): Promise<string | null> => {
@@ -188,7 +198,8 @@ export function createProviderSecretService(
 
   const syncConfigFileConnectors = async (userId: string): Promise<void> => {
     const lastSync = lastSyncByUser.get(userId);
-    if (lastSync && now() - lastSync < SYNC_TTL_MS) return;
+    const syncTtlMs = syncTtlMsOverride ?? DEFAULT_SYNC_TTL_MS;
+    if (lastSync && now() - lastSync < syncTtlMs) return;
     try {
       const tomlFilePath = resolveTomlFilePath();
       if (!existsSync(tomlFilePath)) return;

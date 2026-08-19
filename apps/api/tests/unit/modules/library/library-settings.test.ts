@@ -1,15 +1,70 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
+import {
+  DEFAULT_LIBRARY_LOCATION_SETTINGS,
+  type LibraryLocationSettings,
+} from '@mangostudio/shared/app-settings';
 import type { AgentCliStatus } from '@mangostudio/shared/environments';
+import { getDb } from '../../../../src/db/database';
 import { migrateLibraryLocationSettings } from '../../../../src/db/migrations/030_library_location_settings';
 import { migrateProfileScopedAppSettings } from '../../../../src/db/migrations/033_profile_scoped_app_settings';
 import { migrateScopedLibraryLocationSettings } from '../../../../src/db/migrations/034_scoped_library_location_settings';
-import { defaultsForDetectedAgents } from '../../../../src/modules/app-settings/application/app-settings-service';
+import {
+  defaultsForDetectedAgents,
+  getAppSettings,
+  setLibraryLocationDefaultsForTest,
+} from '../../../../src/modules/app-settings/application/app-settings-service';
+import { environmentProbingService } from '../../../../src/modules/environments/application/probing-service';
 
 function detected(targetId: AgentCliStatus['targetId']): AgentCliStatus {
   return { targetId, effective: { path: '/bin/tool' } } as AgentCliStatus;
 }
 
+const originalNodeEnv = process.env.NODE_ENV;
+const originalListAgentCliStatuses = environmentProbingService.listAgentCliStatuses;
+
+afterEach(() => {
+  setLibraryLocationDefaultsForTest(DEFAULT_LIBRARY_LOCATION_SETTINGS);
+  environmentProbingService.listAgentCliStatuses = originalListAgentCliStatuses;
+  if (originalNodeEnv === undefined) {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = originalNodeEnv;
+  }
+});
+
 describe('library location settings', () => {
+  it('uses deterministic defaults regardless of NODE_ENV', async () => {
+    environmentProbingService.listAgentCliStatuses = () => Promise.resolve([detected('codex')]);
+
+    const defaults: LibraryLocationSettings[] = [];
+    for (const nodeEnv of ['test', 'development', undefined]) {
+      if (nodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = nodeEnv;
+      }
+      const settings = await getAppSettings(getDb(), `node-env-${nodeEnv ?? 'unset'}`);
+      defaults.push(settings.profileSettings.default.libraryLocations);
+    }
+
+    expect(defaults).toEqual([
+      DEFAULT_LIBRARY_LOCATION_SETTINGS,
+      DEFAULT_LIBRARY_LOCATION_SETTINGS,
+      DEFAULT_LIBRARY_LOCATION_SETTINGS,
+    ]);
+  });
+
+  it('can opt into detection-derived defaults through the test seam', async () => {
+    const detectedDefaults = defaultsForDetectedAgents([detected('codex')]);
+    environmentProbingService.listAgentCliStatuses = () => Promise.resolve([detected('codex')]);
+    setLibraryLocationDefaultsForTest(null);
+    delete process.env.NODE_ENV;
+
+    const settings = await getAppSettings(getDb(), 'detection-derived-defaults');
+
+    expect(settings.profileSettings.default.libraryLocations).toEqual(detectedDefaults);
+  });
+
   it('defaults vendor locations from detected CLIs and keeps MangoStudio native locations on', () => {
     const defaults = defaultsForDetectedAgents([detected('codex')]);
 

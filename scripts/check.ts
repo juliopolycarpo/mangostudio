@@ -12,6 +12,7 @@ import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
 } from './lib/dependency-policy';
+import { assertNoProductionNodeEnvBranches } from './lib/no-node-env-branches';
 import { assertVersionsInLockstep } from './lib/release-version';
 import {
   assertNoUnexpectedArguments,
@@ -82,6 +83,7 @@ function hasWorkspaceDprintPaths(workspace: WorkspaceName): boolean {
 
 function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
   const tasks: Array<() => Promise<RunResult>> = [
+    () => runTask('root:node-env-branches', () => assertNoProductionNodeEnvBranches()),
     () =>
       runTask('root:versions', () => {
         assertVersionsInLockstep();
