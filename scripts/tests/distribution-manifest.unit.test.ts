@@ -54,6 +54,7 @@ function fixture(): {
       channel: 'test',
       bunVersion: '1.4.0',
       bunRevision: '32e87032b98b46d9c3c1d082c58cb390abf35e33',
+      bunCompileRevision: '32e87032b98b46d9c3c1d082c58cb390abf35e33',
     }),
   };
 }
@@ -135,13 +136,17 @@ describe('distribution manifest', () => {
     );
   });
 
-  test('rejects a manifest without the Bun revision that built it', () => {
-    const { manifest } = fixture();
-    const { bunRevision: _bunRevision, ...withoutRevision } = manifest;
+  test('rejects a manifest missing either Bun revision', () => {
+    // Both are required: one names the Bun that ran the suite, the other the Bun
+    // compiled into the binaries, and on a floating channel they can differ.
+    for (const field of ['bunRevision', 'bunCompileRevision'] as const) {
+      const { manifest } = fixture();
+      const { [field]: _omitted, ...withoutField } = manifest;
 
-    expect(() => parseDistributionManifest(JSON.stringify(withoutRevision))).toThrow(
-      /field bunRevision must be a non-empty string/
-    );
+      expect(() => parseDistributionManifest(JSON.stringify(withoutField)), field).toThrow(
+        new RegExp(`field ${field} must be a non-empty string`)
+      );
+    }
   });
 
   test('rejects SHA, version, missing target, missing file, and checksum mismatches', () => {

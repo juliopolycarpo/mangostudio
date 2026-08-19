@@ -10,7 +10,7 @@ import {
   releaseArchiveFileName,
 } from './release-targets';
 
-/** Version 2 added bunRevision; manifests never outlive the workflow run that wrote them. */
+/** Version 2 added bunRevision and bunCompileRevision; manifests never outlive the workflow run that wrote them. */
 const DISTRIBUTION_MANIFEST_SCHEMA_VERSION = 2;
 export const DISTRIBUTION_MANIFEST_FILE = 'distribution-manifest.json';
 
@@ -38,6 +38,12 @@ export interface DistributionManifest {
   readonly bunVersion: string;
   /** Bun.revision, because Bun.version reports a plain "1.4.0" on canary builds. */
   readonly bunRevision: string;
+  /**
+   * Revision of the Bun compiled *into* the binaries. Equal to bunRevision on a
+   * released Bun, and usually on a channel too — they differ only when the
+   * channel tag advanced between the host install and the runtime fetch.
+   */
+  readonly bunCompileRevision: string;
   readonly targets: readonly DistributionTarget[];
   readonly files: readonly DistributionFile[];
 }
@@ -50,6 +56,7 @@ export interface CreateDistributionManifestOptions {
   readonly channel: string;
   readonly bunVersion: string;
   readonly bunRevision: string;
+  readonly bunCompileRevision: string;
 }
 
 export interface ValidateDistributionManifestOptions {
@@ -112,6 +119,7 @@ export function createDistributionManifest(
     channel: options.channel,
     bunVersion: options.bunVersion,
     bunRevision: options.bunRevision,
+    bunCompileRevision: options.bunCompileRevision,
     targets,
     files,
   };
@@ -135,6 +143,7 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
     'channel',
     'bunVersion',
     'bunRevision',
+    'bunCompileRevision',
   ] as const) {
     if (typeof value[key] !== 'string' || value[key].length === 0) {
       throw new Error(`Distribution manifest field ${key} must be a non-empty string.`);
@@ -166,6 +175,7 @@ export function parseDistributionManifest(raw: string): DistributionManifest {
     channel: value.channel as string,
     bunVersion: value.bunVersion as string,
     bunRevision: value.bunRevision as string,
+    bunCompileRevision: value.bunCompileRevision as string,
     targets,
     files,
   };

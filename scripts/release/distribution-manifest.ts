@@ -3,6 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { bunCompileRuntimeRevision, bunCrossCompileChannel } from '../lib/bun-cross-runtime';
 import { ROOT_DIR } from '../lib/config';
 import {
   createDistributionManifest,
@@ -125,6 +126,10 @@ async function main(): Promise<void> {
     channel,
     bunVersion: Bun.version,
     bunRevision: Bun.revision,
+    // Reads the runtime the build already fetched; falls back to the host when
+    // `.bun-version` pins a release, where `--compile` downloads that same build.
+    bunCompileRevision:
+      (await bunCompileRuntimeRevision(await bunCrossCompileChannel())) ?? Bun.revision,
   });
   writeFileSync(args.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 
