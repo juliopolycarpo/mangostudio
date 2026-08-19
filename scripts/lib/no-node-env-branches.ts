@@ -39,19 +39,29 @@ export interface NodeEnvReadViolation {
   readonly column: number;
 }
 
+/**
+ * Whether a file is worth parsing. Parsing every production file's AST is the
+ * expensive part of this guard, so files that cannot hold a `NODE_ENV` token
+ * skip it. The token can also be spelled with escapes that the parser decodes
+ * but a substring search misses — `process.env.NODE_EN\u0056` and
+ * `process.env['NODE_EN\x56']` both resolve to it — so a file holding a
+ * backslash is still parsed rather than trusted to the substring check.
+ *
+ * Every caller has to ask this exact question. A cheaper filter in front of the
+ * scan silently reinstates the escape bypass this predicate exists to close,
+ * and the guard passes while the violation stays in the tree.
+ */
+export function mayHoldNodeEnvToken(content: string): boolean {
+  return content.includes('NODE_ENV') || content.includes('\\');
+}
+
 export function findDisallowedNodeEnvReads(
   sources: readonly ProductionSourceFile[]
 ): NodeEnvReadViolation[] {
   const violations: NodeEnvReadViolation[] = [];
 
   for (const source of sources) {
-    // Parsing every production file's AST is the expensive part of this guard,
-    // so skip the files that cannot hold a `NODE_ENV` token. The token can also
-    // be spelled with escapes that the parser decodes but a substring search
-    // misses — `process.env.NODE_EN\u0056` and `process.env['NODE_EN\x56']`
-    // both resolve to the token — so a file holding a backslash is still
-    // parsed rather than trusted to the substring check.
-    if (!source.content.includes('NODE_ENV') && !source.content.includes('\\')) continue;
+    if (!mayHoldNodeEnvToken(source.content)) continue;
 
     // Parent pointers stay off: the only position lookup passes `sourceFile` to
     // `getStart`, which then never has to walk up the tree to find it.
@@ -96,9 +106,9 @@ export function assertNoProductionNodeEnvBranches(rootDir: string = ROOT_DIR): v
   const glob = new Bun.Glob('apps/*/src/**/*.{js,jsx,ts,tsx,mjs,cjs}');
   const sources = [...glob.scanSync({ cwd: rootDir, onlyFiles: true })].flatMap((path) => {
     const content = readFileSync(`${rootDir}/${path}`, 'utf8');
-    // The AST walk is the expensive part. A file with no NODE_ENV token cannot
-    // produce a hit, so skip parsing it.
-    if (!content.includes('NODE_ENV')) return [];
+    // Filtered here as well as inside the scan so the whole tree's contents are
+    // never resident at once.
+    if (!mayHoldNodeEnvToken(content)) return [];
     return [{ path, content }];
   });
   const violations = findDisallowedNodeEnvReads(sources);
