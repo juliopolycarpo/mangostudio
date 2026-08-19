@@ -2,8 +2,10 @@
  * Migration 044 is the only repair for rows written while `chat` was still a
  * mode and an agent id. Once it has run, `'chat'` is unrepresentable in
  * `BuiltInAgentIdSchema`, so anything it leaves behind fails validation for
- * the life of the database — which makes these cases worth pinning against a
- * real SQLite file rather than a mocked query builder.
+ * the life of the database — which makes these cases worth replaying against a
+ * real SQLite engine rather than a mocked query builder. In-memory, because
+ * nothing here needs the database to outlive the test and the file I/O is what
+ * pushed this file's hooks past the runner's default timeout under CI load.
  */
 
 import { Database as SQLiteDatabase } from 'bun:sqlite';
