@@ -12,11 +12,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  BUN_RUNTIME_ASSETS,
   bunCompileRuntimeRevision,
   bunCrossCompileChannel,
   hostReleasePlatform,
 } from '../lib/bun-cross-runtime';
-import { ALL_BINARY_TARGETS, type ReleasePlatformId } from '../lib/release-targets';
+import { ROOT_DIR } from '../lib/config';
+import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 import { readText } from './support/read-text';
 
 /**
@@ -64,23 +66,31 @@ describe('Bun toolchain pins', () => {
     // package.json's `packageManager` is a Turborepo floor marker and does not
     // name an installable build; a call site left pointing at it would ask for a
     // release tag that has never existed.
-    const sites = [
-      '.github/actions/setup-mango/action.yml',
-      '.github/workflows/ci.yml',
-      '.github/workflows/smoke-binary.yml',
-      '.github/workflows/release-dry-run.yml',
-      '.github/workflows/cargo-shim.yml',
-    ];
+    //
+    // Every workflow and composite action is scanned rather than a listed few:
+    // the regression this guards against is a *new* call site copying the old
+    // `bun-version-file: package.json`, which a hardcoded list cannot see.
+    const files = [
+      ...new Bun.Glob('**/*.{yml,yaml}').scanSync({ cwd: join(ROOT_DIR, '.github') }),
+    ].sort();
 
     let seen = 0;
-    for (const file of sites) {
-      const text = readText(file);
-      for (const match of text.matchAll(/bun-version-file:\s*(\S+)/g)) {
+    for (const file of files) {
+      for (const match of readText(join('.github', file)).matchAll(/bun-version-file:\s*(\S+)/g)) {
         seen++;
         expect(match[1], file).toBe('.bun-version');
       }
     }
-    expect(seen).toBeGreaterThanOrEqual(sites.length);
+    // Every `oven-sh/setup-bun` step must name the file; a step that stops
+    // doing so would otherwise leave this test scanning nothing and passing.
+    const callSites = files.reduce(
+      (total, file) =>
+        total +
+        [...readText(join('.github', file)).matchAll(/uses:\s*oven-sh\/setup-bun@/g)].length,
+      0
+    );
+    expect(callSites).toBeGreaterThan(0);
+    expect(seen).toBe(callSites);
   });
 
   test('the install cache is keyed on the revision, not the version', () => {
@@ -116,30 +126,24 @@ describe('Bun cross-compile runtime', () => {
   });
 
   test('every release target has a Bun asset to download', () => {
-    // The asset map is the thing a new release platform silently misses. Bun
-    // spells arm64 `aarch64`, so it cannot be derived from the platform id, and
-    // a missing entry only shows up as a failed cross-compile on a runner.
-    const source = readText('scripts/lib/bun-cross-runtime.ts');
-    const mapped = new Set(
-      [...source.matchAll(/^ {2}'([a-z0-9-]+)':\s*'(bun-[a-z0-9-]+)',$/gm)].map(
-        (match) => match[1] as ReleasePlatformId
-      )
-    );
-
+    // The map's `Record<ReleasePlatformId, string>` type already makes a missing
+    // key a compile error, so what is left to check is the value: a wrong asset
+    // name is a 404 on a runner, not a type error.
     for (const target of ALL_BINARY_TARGETS) {
-      expect(mapped.has(target.arch), `no Bun asset mapped for ${target.arch}`).toBe(true);
+      expect(BUN_RUNTIME_ASSETS[target.arch], target.arch).toMatch(/^bun-[a-z0-9-]+$/);
     }
-    expect(mapped.size).toBe(ALL_BINARY_TARGETS.length);
+    expect(Object.keys(BUN_RUNTIME_ASSETS).sort()).toEqual(
+      ALL_BINARY_TARGETS.map((target) => target.arch).sort()
+    );
   });
 
   test('arm64 targets map to Bun aarch64 assets', () => {
     // The one substitution that is easy to get wrong and produces a 404 rather
     // than a type error.
-    const source = readText('scripts/lib/bun-cross-runtime.ts');
-
-    expect(source).toContain("'linux-arm64': 'bun-linux-aarch64'");
-    expect(source).toContain("'darwin-arm64': 'bun-darwin-aarch64'");
-    expect(source).toContain("'windows-arm64': 'bun-windows-aarch64'");
+    expect(BUN_RUNTIME_ASSETS['linux-arm64']).toBe('bun-linux-aarch64');
+    expect(BUN_RUNTIME_ASSETS['linux-arm64-musl']).toBe('bun-linux-aarch64-musl');
+    expect(BUN_RUNTIME_ASSETS['darwin-arm64']).toBe('bun-darwin-aarch64');
+    expect(BUN_RUNTIME_ASSETS['windows-arm64']).toBe('bun-windows-aarch64');
   });
 
   test('the host resolves to a release platform or to nothing', () => {
