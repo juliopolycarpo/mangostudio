@@ -245,11 +245,12 @@ async function executeOperation(
     // the write in place because the outer loop only rolls back operations that
     // returned an entry. If compensation itself fails, keep the entry so the
     // outer path reports a partial apply and retains the backup set instead of
-    // discarding the only copy of what was just overwritten. Record the digest
-    // that hashing actually observed: undo compares the surviving destination
-    // against this value, and an empty placeholder would skip the restore as
-    // changed-since-apply.
-    const entry = backupEntryFrom(operation, result, observedContentHash(error));
+    // discarding the only copy of what was just overwritten.
+    const entry = backupEntryFrom(
+      operation,
+      result,
+      await observedContentHash(error, result, operation, deps)
+    );
     const rolledBack = await rollback([entry], deps);
     throw rolledBack ? error : new UncompensatedWriteError(entry, error);
   }
@@ -408,8 +409,29 @@ function failureCause(error: unknown): unknown {
   return error instanceof UncompensatedWriteError ? error.cause : error;
 }
 
-function observedContentHash(error: unknown): string {
-  return error instanceof VerificationError ? error.observedContentHash : '';
+/**
+ * The digest to record for a write that failed verification. Undo compares the
+ * surviving destination against this value and skips the restore as
+ * `changed-since-apply` when the two differ, so recording an empty placeholder
+ * for a destination that hashes fine strands the unverified write on disk with
+ * no automatic undo.
+ *
+ * A hash mismatch already carries the digest it observed. Anything else — a
+ * transient read error from the hash, say — carries none, so re-read the
+ * destination once. Only a second failure falls back to the placeholder, and
+ * there undo's own hash of the same path fails too, which bypasses the
+ * comparison rather than skipping the entry.
+ */
+async function observedContentHash(
+  error: unknown,
+  result: ResourceWriteResult,
+  operation: PreparedPropagationOperation,
+  deps: PropagationWriteEngineDeps
+): Promise<string> {
+  if (error instanceof VerificationError && error.observedContentHash !== '') {
+    return error.observedContentHash;
+  }
+  return await deps.hashAt(result.resolvedDestinationPath, operation.kind).catch(() => '');
 }
 
 function describeFailure(

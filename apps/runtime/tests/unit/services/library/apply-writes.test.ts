@@ -323,6 +323,81 @@ describe('executePropagationWrites', () => {
     expect(readFileSync(join(destination, 'SKILL.md'), 'utf8')).toContain('old');
   });
 
+  // A hash mismatch reports the digest it saw, but a transient read failure
+  // reports nothing. Recording the empty placeholder for a destination that
+  // hashes fine on the next read is what makes undo skip it as
+  // `changed-since-apply`, leaving the unverified write with no way back.
+  it('records the destination hash when verification failed for a reason that saw none', async () => {
+    const destination = join(home, '.claude', 'skills', 'gh');
+    const sourceDir = join(home, 'source');
+    mkdirSync(sourceDir);
+    writeFileSync(join(sourceDir, 'SKILL.md'), '---\nname: gh\ndescription: d\n---\nbody\n');
+    const env = { platform: 'linux' as const, homeDir: home, env: {} };
+    const deps = createPropagationWriteEngineDeps({ backupRoot });
+    let hashCalls = 0;
+
+    const result = await executePropagationWrites(
+      {
+        backupRoot,
+        pathEnv: env,
+        operations: [
+          {
+            resourceKey: 'skill:gh',
+            locationId: 'claude-skills',
+            slug: 'gh',
+            operation: 'create',
+            kind: 'directory',
+            expectedContentHash: await hashResourceAt(sourceDir, 'directory'),
+            destinationRoot: join(home, '.claude', 'skills'),
+            sourceDir,
+          },
+        ],
+      },
+      {
+        ...deps,
+        // Fails the verification read only. A transient I/O error carries no
+        // observed digest, and the destination reads back fine afterwards.
+        hashAt: (path, kind) => {
+          hashCalls += 1;
+          if (hashCalls === 1) return Promise.reject(new Error('EIO: could not read destination'));
+          return hashResourceAt(path, kind);
+        },
+        backup: {
+          ...deps.backup,
+          fs: {
+            ...deps.backup.fs,
+            remove(path) {
+              if (path === destination) {
+                return Promise.reject(new Error('EACCES: could not remove unverified write'));
+              }
+              return deps.backup.fs.remove(path);
+            },
+          },
+        },
+      }
+    );
+
+    expect(result.partial).toBe(true);
+    expect(result.failed[0]).toMatchObject({ reason: 'write-failed' });
+    expect(existsSync(destination)).toBe(true);
+
+    const manifest = JSON.parse(
+      readFileSync(join(backupRoot, result.backupId ?? '', 'manifest.json'), 'utf8')
+    ) as { entries: Array<{ writtenContentHash: string }> };
+    expect(manifest.entries[0]?.writtenContentHash).toBe(
+      await hashResourceAt(destination, 'directory')
+    );
+
+    const undone = await executeLibraryUndo({
+      backupRoot,
+      backupId: result.backupId ?? '',
+      pathEnv: env,
+    });
+    expect(undone.skipped).toEqual([]);
+    expect(undone.removed).toHaveLength(1);
+    expect(existsSync(destination)).toBe(false);
+  });
+
   it('keeps a created destination when verification rollback cannot remove it', async () => {
     const destination = join(home, '.claude', 'skills', 'gh');
     const sourceDir = join(home, 'source');
