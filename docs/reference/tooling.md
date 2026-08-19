@@ -27,7 +27,9 @@ oversight:
   the workspace at all against `bun@canary`. It needs a version-shaped string.
 
 So `.bun-version` is the single source of truth for *which Bun*, and
-`packageManager` records the version that channel currently reports.
+`packageManager` records a version the channel reported at some point. Nothing
+checks that it still does, and nothing should: canary's `bun --version` moves on
+its own, and the field only has to stay version-shaped for Turborepo to parse it.
 
 ### The cost of a floating channel
 
@@ -50,7 +52,10 @@ commit red with no change in this repo. Two consequences are already handled —
   version turns this off and restores Bun's own download path.
 
 To bisect a suspected canary regression, pin `.bun-version` to a released tag
-(`1.3.14`) on a scratch branch; that is the only knob, and it is one line.
+(`1.3.14`) on a scratch branch. Everything else follows from that one line, with
+one exception: `scripts/tests/bun-toolchain.unit.test.ts` asserts the repo is on
+a channel, deliberately, so it fails on the pinned branch. Flip that assertion
+too — it is the tripwire that says the pin is still in place.
 
 ## TypeScript 7
 
