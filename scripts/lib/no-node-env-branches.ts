@@ -94,10 +94,13 @@ export function findDisallowedNodeEnvReads(
 
 export function assertNoProductionNodeEnvBranches(rootDir: string = ROOT_DIR): void {
   const glob = new Bun.Glob('apps/*/src/**/*.{js,jsx,ts,tsx,mjs,cjs}');
-  const sources = [...glob.scanSync({ cwd: rootDir, onlyFiles: true })].map((path) => ({
-    path,
-    content: readFileSync(`${rootDir}/${path}`, 'utf8'),
-  }));
+  const sources = [...glob.scanSync({ cwd: rootDir, onlyFiles: true })].flatMap((path) => {
+    const content = readFileSync(`${rootDir}/${path}`, 'utf8');
+    // The AST walk is the expensive part. A file with no NODE_ENV token cannot
+    // produce a hit, so skip parsing it.
+    if (!content.includes('NODE_ENV')) return [];
+    return [{ path, content }];
+  });
   const violations = findDisallowedNodeEnvReads(sources);
 
   if (violations.length === 0) return;

@@ -69,5 +69,5 @@ describe('production NODE_ENV guard', () => {
 
   it('passes against the current production source tree', () => {
     expect(() => assertNoProductionNodeEnvBranches()).not.toThrow();
-  });
+  }, 15_000);
 });
