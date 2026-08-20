@@ -3,12 +3,18 @@
 // Resolves the Bun runtime for every release target from an empty cache, the
 // way a cold release build does — concurrently, against the real release host.
 //
+// Run by hand, not by CI. `.bun-version` pins a released Bun, so the fetcher it
+// exercises is dormant and this exits immediately saying so; the two lanes that
+// used to run it nightly and per-PR were verifying nothing. It is the check to
+// run — and the lanes to restore — if `.bun-version` ever names a channel again.
+//
 // This is the only thing that exercises `scripts/lib/bun-cross-runtime.ts` end
 // to end. A local server cannot stand in: the concurrent-download deadlock this
 // guards against needs TLS, the github.com → objects.githubusercontent.com
 // redirect, or real socket backpressure, and does not reproduce over loopback.
-// So the lane really fetches ~222 MB and finishes in seconds; a stall is what
-// failure looks like, which is why its job carries a tight timeout.
+// So a live run really fetches ~222 MB and finishes in seconds; a stall is what
+// failure looks like, which is why the lanes that ran it carried a tight
+// timeout, and why a restored one must carry it too.
 //
 // Compiling nothing is the point. The `distribution` job proves the same thing
 // by building sixteen binaries, and only runs when a distribution-relevant path

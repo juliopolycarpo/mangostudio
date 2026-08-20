@@ -2,70 +2,75 @@
 
 ## Bun
 
-The repo tracks Bun's **`canary`** channel. 1.3.14 is the last stable release,
-three months old at the time of writing; everything since — including the Rust
-rewrite of the runtime — is only reachable on canary, and that is the build this
-repo compiles, tests, and ships binaries against.
+The repo pins Bun **1.4.0**, the release that made the Rust runtime rewrite
+generally available. It tracked the `canary` channel for the three months 1.3.14
+spent as the newest stable; that is over, and nothing here floats any more.
 
-Install it with `bun upgrade --canary`, or
-`curl -fsSL https://bun.sh/install | bash -s -- canary` from cold.
+Install it with `bun upgrade`, or `curl -fsSL https://bun.sh/install | bash` from
+cold.
 
 ### Two fields name the same toolchain, for two different consumers
 
-| File                            | Value                | Read by                                                    |
-| ------------------------------- | -------------------- | ---------------------------------------------------------- |
-| `.bun-version`                  | `canary`             | `oven-sh/setup-bun` — the build CI actually installs       |
-| `package.json` `packageManager` | `bun@1.4.0-canary.1` | Turborepo only — a floor marker, never what gets installed |
+| File                            | Value       | Read by                                                    |
+| ------------------------------- | ----------- | ---------------------------------------------------------- |
+| `.bun-version`                  | `1.4.0`     | `oven-sh/setup-bun` — the build CI actually installs       |
+| `package.json` `packageManager` | `bun@1.4.0` | Turborepo only — a floor marker, never what gets installed |
 
-They disagree because their requirements are mutually exclusive, not by
-oversight:
+Two consumers, one answer, and they must now agree —
+`scripts/tests/bun-toolchain.unit.test.ts` fails if one is bumped without the
+other. They were allowed to disagree under `canary` because their requirements
+were mutually exclusive there:
 
-- **setup-bun resolves release tags**, and Bun publishes exactly one canary tag —
-  the literal `canary`, rebuilt per commit on main. There is no `bun-v1.4.0-canary.1`
-  tag to point at, so the installed build can only be named `canary`.
+- **setup-bun resolves release tags**, and Bun published exactly one canary tag —
+  the literal `canary`, rebuilt per commit on main. There was no
+  `bun-v1.4.0-canary.1` tag to point at, so the installed build could only be
+  named `canary`.
 - **Turborepo parses `packageManager` as semver or a URL** and refuses to resolve
   the workspace at all against `bun@canary`. It needs a version-shaped string.
 
-So `.bun-version` is the single source of truth for *which Bun*, and
-`packageManager` records a version the channel reported at some point. Nothing
-checks that it still does, and nothing should: canary's `bun --version` moves on
-its own, and the field only has to stay version-shaped for Turborepo to parse it.
+`.bun-version` remains the single source of truth for *which Bun*. Only it is
+ever installed; `packageManager` is a floor Turborepo reads and nothing else.
 
-### The cost of a floating channel
+### What the canary period left behind
 
-CI is no longer reproducible across time: a canary regression can turn a green
-commit red with no change in this repo. Two consequences are already handled —
+Two habits are worth keeping, because they cost nothing and a released pin is not
+guaranteed to be permanent:
 
-- **Install-cache keys use `bun --revision`, not `bun --version`.** Every canary
-  build reports the same `1.4.0-canary.1` from `--version`; only `--revision`
-  appends the commit (`1.4.0-canary.1+32e87032b`). A key on `--version` would
-  hand one Bun build's extracted packages to a different one.
-- **The distribution manifest records `bunRevision` alongside `bunVersion`.** The
-  JS `Bun.version` drops the channel suffix entirely and reports a bare `1.4.0`,
-  which does not identify the build that produced a binary. `Bun.revision` does.
-- **Cross-compilation supplies its own Bun.** `bun build --compile` downloads a
-  prebuilt Bun for the target platform and resolves it from `Bun.version`, so on
-  canary it asks for the unreleased tag `bun-v1.4.0` and every non-host target
-  fails. `scripts/lib/bun-cross-runtime.ts` fetches the channel asset per target,
-  caches it under `.mango/artifacts/bun-cross/<channel>-<host revision>/`, and
-  passes it to `--compile-executable-path`. Pinning `.bun-version` to a released
-  version turns this off and restores Bun's own download path.
+- **Install-cache keys use `bun --revision`, not `bun --version`.** `--version`
+  is unique per release and would work today; `--revision` appends the commit
+  (`1.4.0+34cbb9a40`) and stays correct for a rebuilt tag or a channel too. A key
+  on `--version` was what handed one canary build's extracted packages to a
+  different one.
+- **The distribution manifest records `bunRevision` alongside `bunVersion`.**
+  `Bun.version` reports `1.4.0`; `Bun.revision` names the commit that built it.
+  Note the two spellings differ — `bun --revision` prints `1.4.0+34cbb9a40` while
+  the JS `Bun.revision` returns the full 40-character sha, and they do not
+  compare equal.
 
-That cache is keyed by the host Bun's revision and survives across branches, so
-a machine that has built once never fetches again — which is how a broken
-download path can leave every local build green. `bun run build --binary
---refresh-runtimes` discards the resolved key first and really downloads. Two CI
-lanes do the same without compiling anything: `cross-runtimes` in `ci.yml`, on
-changes to `.bun-version` or the fetcher, and `cross-runtime-nightly.yml`,
-because the channel moves daily whether or not this repo does. Both run
-`scripts/ci/verify-cross-runtimes.ts` under a five-minute bound — the failure
-mode is a stall, so the bound is what turns it into a report.
+One mechanism is now **dormant, not deleted**:
+`scripts/lib/bun-cross-runtime.ts`. `bun build --compile` builds a
+foreign-platform binary by downloading a prebuilt Bun and resolving it from
+`Bun.version`; on canary that asked for the unreleased tag `bun-v1.4.0` and every
+non-host target failed. The module fetched the channel asset per target and
+passed it to `--compile-executable-path`. Against a released pin
+`bunCrossCompileChannel()` returns null, `--compile` resolves
+`bun-v1.4.0` itself, and none of that runs. Moving `.bun-version` back to a
+channel is the whole switch.
 
-To bisect a suspected canary regression, pin `.bun-version` to a released tag
-(`1.3.14`) on a scratch branch. Everything else follows from that one line, with
-one exception: `scripts/tests/bun-toolchain.unit.test.ts` asserts the repo is on
-a channel, deliberately, so it fails on the pinned branch. Flip that assertion
-too — it is the tripwire that says the pin is still in place.
+Because it is dormant, the two lanes that verified it are gone — `cross-runtimes`
+in `ci.yml` and `cross-runtime-nightly.yml` both existed to catch a stalled
+download from a channel that moved daily, and against a pin they spend a runner
+to assert nothing. `scripts/ci/verify-cross-runtimes.ts` is kept and still runs
+by hand; restoring the lanes, with their five-minute bound, is part of moving
+back to a channel rather than a separate change. The bound is the feature there:
+the failure mode is a stall, not an assertion.
+
+To bisect a suspected Bun regression, move `.bun-version` and `packageManager`
+together to another released tag (`1.3.14`) on a scratch branch — that is all it
+takes, and no assertion has to be flipped. Going back to a **channel** does need
+two flips in `scripts/tests/bun-toolchain.unit.test.ts`: the two-fields-agree
+test, and the one asserting `bunCrossCompileChannel()` is null. They are the
+tripwires that say the pin is still in place.
 
 ## TypeScript 7
 
@@ -244,10 +249,12 @@ or `zip`. The split is not a staged migration: creation cannot convert until
 
 ### The blocker
 
-`Bun.Archive` writes every entry `0644` and offers no way to say otherwise — on
-`1.4.0-canary.1+32e87032b` the option parser accepts `compress` and `level` and
-nothing else. A natively created platform archive therefore ships a hub binary
-that will not run:
+`Bun.Archive` writes every entry `0644` and offers no way to say otherwise.
+Re-verified on the pinned `1.4.0`: a `mode` passed in the options object or
+per-entry is accepted and ignored, and unknown options are accepted silently, so
+there is no error to notice. (Per-entry, `{ data, mode }` is worse than ignored —
+the object itself gets serialized instead of the blob.) A natively created
+platform archive therefore ships a hub binary that will not run:
 
 - `scripts/test-build.ts` fails the build on it directly, asserting `mode & 0o111`
   on both binaries in the extracted archive.
@@ -278,7 +285,7 @@ table until upstream stores modes.
 
 ### Other limits found while probing
 
-All verified against the canary the repository pins, not inherited from docs:
+All verified against the Bun the repository pins, not inherited from docs:
 
 - **gzip and stored tar, both directions.** `.tar.xz` and `.tar.bz2` throw
   `Unrecognized archive format` where GNU tar auto-detects them. Zip is not

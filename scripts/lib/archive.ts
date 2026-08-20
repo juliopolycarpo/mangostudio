@@ -7,8 +7,8 @@
 // Reading only. Archive *creation* stays on `tar` and `zip` — see
 // `docs/reference/tooling.md` for the measurements and the reason.
 //
-// Two limits of the native reader, both verified against
-// `1.4.0-canary.1+32e87032b`:
+// Two limits of the native reader, first found on `1.4.0-canary.1+32e87032b`
+// and unchanged on the pinned `1.4.0+34cbb9a40`:
 //
 // - **gzip or stored only.** A plain `.tar` and a `.tar.gz` are both detected
 //   from the bytes, but `.tar.xz` and `.tar.bz2` throw `Unrecognized archive
