@@ -83,6 +83,10 @@ describe('actions-lint manifest', () => {
         expect(asset.sha256).toMatch(/^[a-f0-9]{64}$/);
         expect(asset.assetName).not.toContain('/');
         expect(toolAssetUrl(entry, 'linux-x64')).toStartWith('https://');
+        // Bootstrap reads archives with Bun.Archive, which handles gzipped tar
+        // only. Pinning an .xz or .zip asset would fail at extraction time with
+        // an opaque "Unrecognized archive format".
+        expect(asset.assetName).toEndWith('.tar.gz');
       }
     }
   });

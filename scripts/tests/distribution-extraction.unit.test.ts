@@ -1,19 +1,21 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 
 import { captureCommand } from '../lib/exec';
-import { distributionTarArgs } from '../release/extract-distribution';
-import { extractTargetArchive, targetArchiveCommands } from '../release/extract-target';
+import { extractTargetArchive, zipArchiveCommands } from '../release/extract-target';
 
 let tempDirs: string[] = [];
 
@@ -30,7 +32,7 @@ function makeTempDir(): string {
 
 function stageTarget(sourceDir: string, binary: string): void {
   mkdirSync(sourceDir, { recursive: true });
-  writeFileSync(join(sourceDir, binary), 'binary');
+  writeFileSync(join(sourceDir, binary), 'binary', { mode: 0o755 });
   writeFileSync(join(sourceDir, 'README.md'), 'readme');
 }
 
@@ -53,23 +55,6 @@ async function runOrThrow(command: string[], cwd?: string): Promise<void> {
 }
 
 describe('distribution extraction', () => {
-  test('forces local forward-slash Windows paths and leaves POSIX tar arguments unchanged', () => {
-    expect(distributionTarArgs('list', 'D:\\tmp\\bundle.tar.gz', undefined, 'win32')).toEqual([
-      '--force-local',
-      '-tzf',
-      'D:/tmp/bundle.tar.gz',
-    ]);
-    expect(
-      distributionTarArgs('extract', 'D:\\tmp\\bundle.tar.gz', 'D:\\a\\mangostudio', 'win32')
-    ).toEqual(['--force-local', '-xzf', 'D:/tmp/bundle.tar.gz', '-C', 'D:/a/mangostudio']);
-    expect(distributionTarArgs('extract', '/tmp/bundle.tar.gz', '/workspace', 'linux')).toEqual([
-      '-xzf',
-      '/tmp/bundle.tar.gz',
-      '-C',
-      '/workspace',
-    ]);
-  });
-
   test('materializes tar.gz and zip archives into the same target layout', async () => {
     const rootDir = makeTempDir();
     const expectedMembers = ['README.md', 'mangostudio'];
@@ -102,21 +87,75 @@ describe('distribution extraction', () => {
     expect(fileSnapshot(zipDestination)).toEqual(fileSnapshot(sourceDir));
   });
 
-  test('rejects unsafe target entries before writing to the output tree', async () => {
+  // The whole release lane rests on this: a hub binary that arrives without its
+  // executable bit is a broken install, and native extraction is what restores
+  // the mode GNU tar used to. POSIX-only: Windows has no executable bit, and
+  // Bun.Archive skips every symlink there regardless of privilege.
+  test.skipIf(process.platform === 'win32')(
+    'preserves the executable bit and symlinks through native tar.gz extraction',
+    async () => {
+      const rootDir = makeTempDir();
+      const sourceDir = join(rootDir, 'source');
+      stageTarget(sourceDir, 'mangostudio');
+      symlinkSync('mangostudio', join(sourceDir, 'mangostudio-link'));
+
+      const archivePath = join(rootDir, 'target.tar.gz');
+      await runOrThrow(['tar', '-czf', archivePath, '-C', sourceDir, '.']);
+
+      const destination = join(rootDir, '.mango', 'out', 'linux-x64');
+      await extractTargetArchive({
+        archivePath,
+        archiveFormat: 'tar.gz',
+        destination,
+        expectedMembers: ['README.md', 'mangostudio', 'mangostudio-link'],
+        rootDir,
+      });
+
+      expect(statSync(join(destination, 'mangostudio')).mode & 0o111).not.toBe(0);
+      expect(statSync(join(destination, 'README.md')).mode & 0o111).toBe(0);
+      expect(lstatSync(join(destination, 'mangostudio-link')).isSymbolicLink()).toBe(true);
+    }
+  );
+
+  test('rejects unsafe tar.gz entries before writing to the output tree', async () => {
     const rootDir = makeTempDir();
-    const destination = join(rootDir, '.mango', 'out', 'linux-x64');
+    const archivePath = join(rootDir, 'target.tar.gz');
+    await Bun.Archive.write(
+      archivePath,
+      { '../outside': 'escaped', mangostudio: 'binary' },
+      { compress: 'gzip', level: 1 }
+    );
+
+    await expect(
+      extractTargetArchive({
+        archivePath,
+        archiveFormat: 'tar.gz',
+        destination: join(rootDir, '.mango', 'out', 'linux-x64'),
+        expectedMembers: ['mangostudio'],
+        rootDir,
+      })
+    ).rejects.toThrow(/Unsafe distribution archive entry/);
+
+    expect(existsSync(join(rootDir, '.mango'))).toBe(false);
+    expect(existsSync(join(rootDir, 'outside'))).toBe(false);
+  });
+
+  test('rejects unsafe zip entries before writing to the output tree', async () => {
+    const rootDir = makeTempDir();
+    const destination = join(rootDir, '.mango', 'out', 'windows-x64');
     let commandCount = 0;
 
     await expect(
       extractTargetArchive(
         {
-          archivePath: join(rootDir, 'target.tar.gz'),
-          archiveFormat: 'tar.gz',
+          archivePath: join(rootDir, 'target.zip'),
+          archiveFormat: 'zip',
           destination,
-          expectedMembers: ['mangostudio'],
+          expectedMembers: ['mangostudio.exe'],
           rootDir,
         },
         {
+          unzipCommand: 'unzip',
           runCommand: () => {
             commandCount += 1;
             return Promise.resolve({ stdout: '../outside\n', stderr: '', exitCode: 0 });
@@ -129,12 +168,27 @@ describe('distribution extraction', () => {
     expect(existsSync(join(rootDir, '.mango'))).toBe(false);
   });
 
+  test('reports the archive path when a tar.gz cannot be read', async () => {
+    const rootDir = makeTempDir();
+    const archivePath = join(rootDir, 'target.tar.gz');
+    writeFileSync(archivePath, 'not an archive');
+
+    await expect(
+      extractTargetArchive({
+        archivePath,
+        archiveFormat: 'tar.gz',
+        destination: join(rootDir, '.mango', 'out', 'linux-x64'),
+        expectedMembers: ['mangostudio'],
+        rootDir,
+      })
+    ).rejects.toThrow(/Failed to read archive .*target\.tar\.gz/);
+  });
+
   test('uses unzip when available and PowerShell when it is absent on Windows', () => {
     expect(
-      targetArchiveCommands(
+      zipArchiveCommands(
         'D:\\tmp\\target.zip',
         'D:\\a\\mangostudio',
-        'zip',
         'C:\\tools\\unzip.exe',
         'win32'
       )
@@ -143,10 +197,9 @@ describe('distribution extraction', () => {
       extract: ['C:\\tools\\unzip.exe', '-q', 'D:/tmp/target.zip', '-d', 'D:/a/mangostudio'],
     });
 
-    const fallback = targetArchiveCommands(
+    const fallback = zipArchiveCommands(
       "D:\\tmp\\target's.zip",
       'D:\\a\\mangostudio',
-      'zip',
       null,
       'win32'
     );

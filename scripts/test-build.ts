@@ -23,6 +23,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startFakeChatGptServer } from '../apps/api/tests/support/chatgpt/fake-server';
+import { extractTarArchive } from './lib/archive';
 import {
   DISTRIBUTION_MANIFEST_FILE,
   readDistributionManifest,
@@ -216,7 +217,7 @@ async function validateReleaseArchive(): Promise<void> {
   const extractDir = makeTempDir();
 
   try {
-    await run(['tar', '-xzf', ARCHIVE_PATH, '-C', extractDir]);
+    await extractTarArchive(ARCHIVE_PATH, extractDir);
     validateExtractedArchive(extractDir);
   } finally {
     removeTempDir(extractDir);
