@@ -363,6 +363,26 @@ first rather than assuming the XML grew an `errors` count.
 > `.mango/artifacts/junit/` before any lane starts — and clears it, so a lane
 > that did not run this time cannot contribute last run's counts.
 
+### Randomized order
+
+`randomized-order-nightly.yml` runs `apps/api`, `apps/shared` and
+`apps/runtime` under `--randomize --seed=<run number>` every night. It exists
+for the one class the merge gate cannot see: a test that passes only because of
+what the file before it left behind, which is a live hazard here while
+`bun test` shares one module graph across a lane's files.
+
+`--randomize` shuffles **file order** as well as the tests inside each file —
+verified, not assumed: three probe files run as `c, b, a` under seed 3 where
+seeds 1 and 2 keep `a, b, c`. File order is the half that matters for leaked
+`mock.module` registrations.
+
+It is deliberately not merge-gating. A suite that fails weekly on a different
+seed is a bug report; making it block merges teaches everyone to re-run CI, and
+that habit outlasts the fix. A failure logs its seed and uploads the run log,
+because the order **is** the finding — reproduce with
+`bun test --randomize --seed=<n>` in the named workspace, and read what ran
+before the failing file rather than the failing file itself.
+
 ### Code Health
 
 `bun run check` includes a repository-wide Knip scan. Change-scoped checks run it
