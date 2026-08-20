@@ -2,14 +2,14 @@
 // Reports how much of the repository's Actions cache budget is in use, and
 // which families hold it, into the gate job's step summary.
 //
-// Tracking Bun's canary channel puts a value that moves several times a day
-// (`bun --revision`) into four cache families' primary keys, so every canary
-// bump mints new entries instead of refreshing existing ones. That is the
-// intended behaviour — a task result produced by one Bun must not be replayed
-// as green for another — but it spends the 10 GB budget faster, and GitHub
-// evicts least-recently-used entries silently. The families that cannot fall
-// back to a loose prefix (playwright, lint-tools) are the ones that hurt when
-// evicted, so the pressure is worth seeing rather than inferring from a slow job.
+// Four cache families carry `bun --revision` in their primary keys, so a
+// toolchain bump mints new entries instead of refreshing existing ones. That is
+// the intended behaviour — a task result produced by one Bun must not be
+// replayed as green for another — but it spends the 10 GB budget in one step,
+// and GitHub evicts least-recently-used entries silently. The families that
+// cannot fall back to a loose prefix (playwright, lint-tools) are the ones that
+// hurt when evicted, so the pressure is worth seeing rather than inferring from
+// a slow job.
 //
 // Advisory only: never fails the gate. A missing token or a rate-limited API is
 // not a reason to reject a green build.

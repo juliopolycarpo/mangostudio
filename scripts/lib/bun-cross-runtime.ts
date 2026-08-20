@@ -1,14 +1,17 @@
 // Cross-compilation runtime resolver for `bun build --compile`.
 //
 // `--compile` builds a foreign-platform binary by downloading a prebuilt Bun for
-// that platform, and it resolves the download from `Bun.version`. On the canary
-// channel `Bun.version` reports a bare `1.4.0` — the channel suffix is dropped —
-// so the lookup asks for the release tag `bun-v1.4.0`, which does not exist, and
-// every target except the host fails. Fetching the channel's asset here and
-// handing the path to `--compile-executable-path` skips that lookup entirely.
+// that platform, and it resolves the download from `Bun.version`. That works
+// whenever `Bun.version` names a real release tag — which is the case today, and
+// so this module is dormant: `bunCrossCompileChannel` returns null against the
+// released version in `.bun-version` and the build keeps Bun's own download path.
 //
-// On a released Bun this module stays out of the way: `bunCrossCompileChannel`
-// returns null and the build keeps using Bun's own download path.
+// It exists for the case that pin does not hold. While the repo tracked `canary`,
+// `Bun.version` reported a bare `1.4.0` — the channel suffix dropped — so the
+// lookup asked for the release tag `bun-v1.4.0`, which did not exist, and every
+// target except the host failed. Fetching the channel's asset here and handing
+// the path to `--compile-executable-path` skips that lookup entirely, and one
+// line in `.bun-version` is all it takes to switch back on.
 
 import { type Dirent, existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
@@ -262,8 +265,8 @@ export async function bunCompiledRuntimes(
 }
 
 function hostProvenance(): BunRuntimeProvenance {
-  // `Bun.revision`, not `--revision`: the flag prints `1.4.0-canary.1+32e87032b`
-  // while the API returns the full 40-character sha, and the two spellings of one
+  // `Bun.revision`, not `--revision`: the flag prints `1.4.0+34cbb9a40` while
+  // the API returns the full 40-character sha, and the two spellings of one
   // build do not compare equal.
   return { source: 'host', revision: Bun.revision, sha256: null, tagAdvanced: false };
 }
@@ -452,7 +455,7 @@ export async function downloadVerifiedAsset(
   const url = `${downloadBase}/${channel}/${asset}.zip`;
   // Buffered, not `Bun.write(archivePath, response)`. Streaming the response
   // straight to disk is the obvious way to keep a whole Bun per target out of
-  // memory, and it **deadlocks** on Bun 1.4.0-canary.1: with the seven foreign
+  // memory, and it **deadlocked** on Bun 1.4.0-canary.1: with the seven foreign
   // targets downloading at once, a few complete and the rest never write a byte
   // — measured in CI (4 of 8 targets, then 25 minutes of silence to the job
   // timeout) and reproduced locally in isolation, where the same seven finish in

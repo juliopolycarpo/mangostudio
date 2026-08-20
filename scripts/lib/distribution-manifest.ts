@@ -48,7 +48,7 @@ export interface DistributionManifest {
   readonly packageVersion: string;
   readonly channel: string;
   readonly bunVersion: string;
-  /** Bun.revision, because Bun.version reports a plain "1.4.0" on canary builds. */
+  /** Bun.revision: the commit, which Bun.version's plain "1.4.0" cannot name. */
   readonly bunRevision: string;
   readonly targets: readonly DistributionTarget[];
   readonly files: readonly DistributionFile[];

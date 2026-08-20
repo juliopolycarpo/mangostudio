@@ -1,10 +1,13 @@
-// Guards the assumptions the floating `canary` channel rests on.
+// Guards the two fields that name the Bun toolchain, and the resolver that
+// decides who downloads a cross-compile runtime.
 //
-// Every one of these has already broken once. `packageManager: "bun@canary"`
-// stopped Turborepo resolving the workspace at all; `Bun.version` reporting a
-// bare `1.4.0` sent `--compile` looking for a release tag that does not exist.
-// Those failures surfaced on a runner, minutes into a distribution build. These
-// tests move them to `bun run check`, where the feedback costs seconds.
+// Every one of these broke once, on the `canary` channel the repo tracked until
+// Bun 1.4.0 shipped: `packageManager: "bun@canary"` stopped Turborepo resolving
+// the workspace at all, and `Bun.version` reporting a bare `1.4.0` sent
+// `--compile` looking for a release tag that did not exist. Those failures
+// surfaced on a runner, minutes into a distribution build. These tests move them
+// to `bun run check`, where the feedback costs seconds — and they stay after the
+// pin, because the pin is exactly what they now assert.
 
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -50,8 +53,8 @@ describe('Bun toolchain pins', () => {
     };
 
     expect(packageManager).toBeDefined();
-    // `bun@canary` matches neither branch, which is why the channel lives in
-    // `.bun-version` instead. Keep this field version-shaped.
+    // `bun@canary` matches neither branch, which is why a channel can only ever
+    // live in `.bun-version`. Keep this field version-shaped.
     expect(packageManager).toMatch(TURBO_PACKAGE_MANAGER);
   });
 
@@ -60,6 +63,19 @@ describe('Bun toolchain pins', () => {
 
     expect(raw.trim()).not.toBe('');
     expect(raw.trim().split(/\s+/)).toHaveLength(1);
+  });
+
+  test('both fields name the same Bun while the pin is a released version', () => {
+    // They were allowed to disagree on `canary`, because they had to: setup-bun
+    // could only be given the literal channel tag and Turborepo refuses to parse
+    // it. A released pin removes that excuse, and one field bumped without the
+    // other is now a plain mistake — CI installing a Bun the workspace floor
+    // does not describe, with nothing else in the repo to notice.
+    const { packageManager } = JSON.parse(readText('package.json')) as {
+      packageManager?: string;
+    };
+
+    expect(packageManager).toBe(`bun@${readText('.bun-version').trim()}`);
   });
 
   test('every setup-bun call site reads .bun-version, never package.json', () => {
@@ -94,7 +110,9 @@ describe('Bun toolchain pins', () => {
   });
 
   test('the install cache is keyed on the revision, not the version', () => {
-    // Every canary build reports the same `1.4.0-canary.1` from `--version`.
+    // `--version` is unique per release and would work today. `--revision`
+    // stays correct for a rebuilt tag or a channel too, which is the state this
+    // repo spent three months in, and costs nothing to keep.
     const action = readText('.github/actions/setup-mango/action.yml');
 
     expect(action).toContain('bun --revision');
@@ -118,11 +136,13 @@ describe('Bun cross-compile runtime', () => {
     expect(await withVersionFile(null, bunCrossCompileChannel)).toBeNull();
   });
 
-  test('the repository currently tracks a channel', async () => {
+  test('the repository pins a released Bun, so nothing fetches a runtime', async () => {
     // Not a preference — a statement of the state the rest of this file guards.
-    // When a release carrying the fixes lands and `.bun-version` becomes a
-    // version, this flips and the cross-runtime download stops being reachable.
-    expect(await bunCrossCompileChannel()).toBe('canary');
+    // Null here is what makes the fetcher below dormant: `--compile` resolves
+    // `bun-v<Bun.version>` on its own and no target downloads anything. Naming a
+    // channel in `.bun-version` again flips this, and the download path it
+    // re-enables has no CI lane left to cover it.
+    expect(await bunCrossCompileChannel()).toBeNull();
   });
 
   test('every release target has a Bun asset to download', () => {
@@ -170,9 +190,9 @@ describe('Bun cross-compile runtime', () => {
   });
 
   test('the host revision is the spelling the provenance records', async () => {
-    // `bun --revision` prints `1.4.0-canary.1+32e87032b` while the API returns
-    // the full sha. Recording the flag's spelling made the old drift warning
-    // fire on every build, against a runtime that had not drifted at all.
+    // `bun --revision` prints `1.4.0+34cbb9a40` while the API returns the full
+    // sha. Recording the flag's spelling made the old drift warning fire on
+    // every build, against a runtime that had not drifted at all.
     expect(Bun.revision).toMatch(/^[0-9a-f]{40}$/);
 
     const runtimes = await bunCompiledRuntimes(await bunCrossCompileChannel());
