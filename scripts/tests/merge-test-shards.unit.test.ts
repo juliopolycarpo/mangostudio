@@ -183,3 +183,42 @@ describe('mergeTestShards', () => {
     expect(mergeTestShards(shards, await makeTemp())).rejects.toThrow(/No shard directories/);
   });
 });
+
+describe('collect-test-metrics degradation', () => {
+  const script = join(import.meta.dir, '..', 'qa-gate', 'collect-test-metrics.ts');
+
+  const collect = async (summaryPath: string, shardsRoot?: string) => {
+    const proc = Bun.spawn({
+      cmd: ['bun', script, summaryPath, ...(shardsRoot ? [shardsRoot] : [])],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [stdout, exitCode] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return { stdout, exitCode };
+  };
+
+  // This step runs under `if: !cancelled()` so a broken merge still produces a
+  // fragment for the QA report. A truncated summary is exactly what a merge
+  // that died mid-write leaves behind, and throwing here would defeat that.
+  it.each([
+    ['empty', ''],
+    ['truncated', '{"shards": 8, "exit'],
+    ['not an object', '[]'],
+  ])('reports a failing suite rather than throwing on a %s summary', async (_label, contents) => {
+    const dir = await makeTemp();
+    const summaryPath = join(dir, 'shard-summary.json');
+    await Bun.write(summaryPath, contents);
+
+    const { stdout, exitCode } = await collect(summaryPath);
+    expect(exitCode).toBe(0);
+    const fragment = JSON.parse(stdout) as { tests: { exitCode: number } };
+    expect(fragment.tests.exitCode).toBe(1);
+  });
+
+  it('reports a failing suite when the summary was never written', async () => {
+    const dir = await makeTemp();
+    const { stdout, exitCode } = await collect(join(dir, 'missing.json'), join(dir, 'no-shards'));
+    expect(exitCode).toBe(0);
+    expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(1);
+  });
+});

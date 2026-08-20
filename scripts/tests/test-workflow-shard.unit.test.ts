@@ -56,6 +56,13 @@ describe('Test workflow shard matrix', () => {
     expect(block).toContain('vitest-errors.json');
   });
 
+  test('the upload keeps dot-directories', () => {
+    // Observed on a real run: at the default, `.vitest-reports` is dropped from
+    // the artifact and the upload still reports success, so the failure only
+    // appears in the merge job.
+    expect(extractJobBlock(workflow, 'shard')).toContain('include-hidden-files: true');
+  });
+
   test('only the first shard writes the shared caches', () => {
     // All eight resolve the same primary key; letting each save turns seven
     // post-job steps into "cache already exists" warnings that read as a fault.

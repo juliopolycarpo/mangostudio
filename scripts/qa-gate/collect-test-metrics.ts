@@ -27,12 +27,53 @@ if (!summaryPath) {
   process.exit(1);
 }
 
-const summaryFile = Bun.file(summaryPath);
-const summary: ShardSummary = (await summaryFile.exists())
-  ? ((await summaryFile.json()) as ShardSummary)
-  : { shards: 0, exitCode: 1, durationSeconds: 0, vitestErrors: { errors: 0, headlines: [] } };
+// A shard summary that is missing, empty, or truncated means the merge step
+// failed before writing it — which is exactly when the QA report most needs to
+// render. Degrade to a failing exit code rather than throwing: this step runs
+// under `if: !cancelled()` precisely so a broken merge still produces a
+// fragment, and an unhandled parse error here would defeat that.
+const FAILED_SUMMARY: ShardSummary = {
+  shards: 0,
+  exitCode: 1,
+  durationSeconds: 0,
+  vitestErrors: { errors: 0, headlines: [] },
+};
 
-const junitDirs = [ROOT_DIR, ...(shardsRoot ? await listShardDirs(shardsRoot) : [])];
+// Parsing is not enough: `[]` is valid JSON and would hand an undefined exit
+// code straight into the fragment, which renders as a suite with no outcome
+// rather than a failed one.
+const isShardSummary = (value: unknown): value is ShardSummary =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  typeof (value as ShardSummary).exitCode === 'number';
+
+const readShardSummary = async (path: string): Promise<ShardSummary> => {
+  const file = Bun.file(path);
+  if (!(await file.exists())) return FAILED_SUMMARY;
+  try {
+    const parsed: unknown = await file.json();
+    if (!isShardSummary(parsed)) return FAILED_SUMMARY;
+    return {
+      ...parsed,
+      vitestErrors: parsed.vitestErrors ?? FAILED_SUMMARY.vitestErrors,
+    };
+  } catch {
+    return FAILED_SUMMARY;
+  }
+};
+
+const summary = await readShardSummary(summaryPath);
+
+const listShards = async (root: string): Promise<readonly string[]> => {
+  try {
+    return await listShardDirs(root);
+  } catch {
+    return [];
+  }
+};
+
+const junitDirs = [ROOT_DIR, ...(shardsRoot ? await listShards(shardsRoot) : [])];
 
 const collectSuiteStats = async () =>
   buildTestSuiteStats(

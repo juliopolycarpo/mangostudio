@@ -114,7 +114,10 @@ export const mergeTestShards = async (
   }
   if (blobs === 0) {
     throw new Error(
-      `No Vitest blob reports under ${shardsRoot}; the frontend lane produced no coverage to merge.`
+      `No Vitest blob reports under ${shardsRoot}/*/${VITEST_BLOB_DIR}; the frontend lane ` +
+        'produced no coverage to merge. If the shards themselves were green, check that the ' +
+        'upload step sets include-hidden-files: true — .vitest-reports is a dot-directory, and ' +
+        'the default drops it from the artifact without failing the upload.'
     );
   }
 

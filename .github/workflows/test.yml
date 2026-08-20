@@ -111,11 +111,17 @@ jobs:
 
       # Uploaded even when the shard fails so the merge job can report the
       # failing exit code instead of a missing-metrics placeholder.
+      #
+      # `include-hidden-files` is required, not tidy-up: both `.mango` and
+      # `.vitest-reports` are dot-directories, and at the default the Vitest
+      # blob reports are dropped from the artifact silently — the upload still
+      # reports success, and the merge job is where it surfaces.
       - name: Upload shard results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-shard-${{ matrix.shard }}
+          include-hidden-files: true
           path: |
             .mango/artifacts/junit/
             .mango/artifacts/coverage/
