@@ -8,8 +8,8 @@ import { createHash } from 'node:crypto';
 import { chmod, mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
 import { dirname, isAbsolute, join } from 'node:path';
 
+import { extractTarArchive, openTarArchive } from '../archive';
 import { ROOT_DIR } from '../config';
-import { captureCommand } from '../exec';
 import {
   type PlatformKey,
   resolvePlatformKey,
@@ -21,7 +21,13 @@ import {
 
 const TOOL_CACHE_DIR = join(ROOT_DIR, '.mango', 'artifacts', 'tools');
 
-/** Injectable I/O surface so unit tests never touch the network or tar. */
+/**
+ * Injectable I/O surface so unit tests never touch the network or the
+ * filesystem. The default implementation reads archives with `Bun.Archive`,
+ * which handles **gzipped tar only** — a manifest entry pinning a `.tar.xz` or a
+ * `.zip` asset would fail with `Unrecognized archive format` where GNU tar used
+ * to auto-detect it. `actions-lint.unit.test.ts` holds the manifest to `.tar.gz`.
+ */
 export interface BootstrapIo {
   download(url: string): Promise<Uint8Array>;
   listArchiveEntries(archivePath: string): Promise<string[]>;
@@ -37,17 +43,10 @@ const defaultBootstrapIo: BootstrapIo = {
     return new Uint8Array(await response.arrayBuffer());
   },
   async listArchiveEntries(archivePath) {
-    const { stdout, stderr, exitCode } = await captureCommand(['tar', '-tzf', archivePath]);
-    if (exitCode !== 0) {
-      throw new Error(`Failed to list archive ${archivePath}: ${stderr.trim()}`);
-    }
-    return stdout.split('\n').filter(Boolean);
+    return [...(await openTarArchive(archivePath)).entries];
   },
   async extractArchive(archivePath, destDir) {
-    const { stderr, exitCode } = await captureCommand(['tar', '-xzf', archivePath, '-C', destDir]);
-    if (exitCode !== 0) {
-      throw new Error(`Failed to extract archive ${archivePath}: ${stderr.trim()}`);
-    }
+    await extractTarArchive(archivePath, destDir);
   },
 };
 

@@ -224,3 +224,68 @@ objection. Three findings are worth keeping:
 Revisit if Elysia's own startup share grows, if migrations and bundle
 evaluation stop dominating, or if a target appears (workerd) where runtime JIT
 is unavailable rather than merely slower.
+
+## `Bun.Archive` — adopted for reading, rejected for writing
+
+Every archive this repository *reads* is read in-process by `Bun.Archive`
+(`scripts/lib/archive.ts`). Every archive it *writes* still shells out to `tar`
+or `zip`. The split is not a staged migration: creation cannot convert until
+`Bun.Archive` can store a file mode.
+
+### The blocker
+
+`Bun.Archive` writes every entry `0644` and offers no way to say otherwise — on
+`1.4.0-canary.1+32e87032b` the option parser accepts `compress` and `level` and
+nothing else. A natively created platform archive therefore ships a hub binary
+that will not run:
+
+- `scripts/test-build.ts` fails the build on it directly, asserting `mode & 0o111`
+  on both binaries in the extracted archive.
+- The Homebrew formula does `libexec.install Dir["*"]` with no chmod, so the
+  mode in the tarball is the mode users get. Its own `test do` block would fail.
+- `tar -xzf mangostudio-*.tar.gz && ./mangostudio` is a documented install path.
+- The npm platform packages are published from an extracted distribution bundle,
+  so a `0644` binary inside that bundle reaches the registry.
+
+`scripts/install/install.sh`, `stage-docker-ctx.ts` and `bun-cross-runtime.ts`
+all chmod after extracting and would not have noticed.
+
+### What the conversion is worth
+
+Measured 2026-08-20 on this machine against a two-binary, 160 MB payload — the
+shape of a real platform archive:
+
+| Operation      |           GNU tar |                                       Bun.Archive |
+| -------------- | ----------------: | ------------------------------------------------: |
+| create, gzip 6 | 9755 ms → 73.3 MB | 3634 ms → 72.8 MB — *faster and smaller, blocked* |
+| create, gzip 1 |                 — |                                 2313 ms → 77.3 MB |
+| extract        |   1352 ms–1419 ms |                                     617 ms–993 ms |
+| list           |           1299 ms |                                           1203 ms |
+
+So the adopted half is worth roughly 1.8× on extraction, and the rejected half —
+the larger prize, 2.7× on creation *with* a smaller artifact — stays on the
+table until upstream stores modes.
+
+### Other limits found while probing
+
+All verified against the canary the repository pins, not inherited from docs:
+
+- **gzip only, both directions.** `.tar.xz` and `.tar.bz2` throw
+  `Unrecognized archive format` where GNU tar auto-detects them. Zip is not
+  readable at all, so the Windows targets and the Bun cross-runtime download keep
+  their `unzip`/PowerShell/bsdtar subprocesses.
+- `files()` is an async method returning `Promise<Map<string, File>>`, and it
+  **omits symlink and directory entries**. Anything guarding on that listing sees
+  fewer entries than `tar -tzf` reports.
+- `extract()` does preserve modes and symlinks, silently strips leading `..`
+  segments, and drops symlinks pointing outside the destination. Safety guards
+  still run first, because silent sanitization in a release lane is worse than a
+  named error.
+- Passing a lazy `Bun.file()` handle as an entry value writes a **0-byte entry**
+  with no error, and passing one to the constructor throws
+  `Unrecognized archive format`. Read the bytes first.
+- The extension is ignored: `Bun.Archive.write('x.tar.gz', files)` with no
+  `compress` option writes an uncompressed tar named `.tar.gz`.
+
+Revisit when `Bun.Archive` gains a mode option; `archive-assets.ts` and
+`bundle-distribution.ts` carry the pointer at their creation functions.

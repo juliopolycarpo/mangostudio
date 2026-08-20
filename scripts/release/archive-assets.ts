@@ -68,6 +68,15 @@ function prepareAssetsDir(assetsDir: string): void {
   mkdirSync(assetsDir, { recursive: true });
 }
 
+/**
+ * Both branches shell out, for the same reason: `Bun.Archive` writes every entry
+ * `0644` and exposes no mode option, so a natively created archive would ship
+ * non-executable binaries. `test-build.ts` asserts the executable bit, the
+ * Homebrew formula installs the archive contents without a chmod, and anyone
+ * who untars a release by hand expects to run what falls out. It writes tar
+ * only in any case, so the zip half could never convert.
+ * Reading is native — see `scripts/lib/archive.ts` and `docs/reference/tooling.md`.
+ */
 async function archivePlatform(plan: PlatformArchivePlan, assetsDir: string): Promise<void> {
   assertPlatformInputs(plan);
 

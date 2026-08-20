@@ -3,6 +3,7 @@
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { extractTarArchive } from '../lib/archive';
 import { ROOT_DIR } from '../lib/config';
 import {
   createDockerStagePlan,
@@ -14,14 +15,7 @@ import {
 } from '../lib/docker-stage';
 import { assertFile, assertSafeToDelete } from '../lib/fs-assert';
 import { resolveReleaseVersion } from '../lib/release-version';
-import {
-  assertNoUnexpectedArguments,
-  captureCommand,
-  error,
-  header,
-  parseArgs,
-  success,
-} from '../lib/runner';
+import { assertNoUnexpectedArguments, error, header, parseArgs, success } from '../lib/runner';
 
 interface StageOptions {
   readonly releaseAssetsDir?: string;
@@ -91,7 +85,7 @@ async function stageFromReleaseAsset(
     join(tmpdir(), `mangostudio-docker-${target.dockerVariant}-${target.dockerArch}-`)
   );
   try {
-    await runCommand(['tar', '-xzf', archivePath, '-C', extractDir]);
+    await extractTarArchive(archivePath, extractDir);
     copyTarget(
       target,
       join(extractDir, target.platform.name),
@@ -116,13 +110,6 @@ function copyTarget(
   chmodSync(target.stagedBinaryPath, 0o755);
   cpSync(runtimeBinaryPath, target.stagedRuntimeBinaryPath);
   chmodSync(target.stagedRuntimeBinaryPath, 0o755);
-}
-
-async function runCommand(cmd: string[]): Promise<void> {
-  const { stdout, stderr, exitCode } = await captureCommand(cmd);
-  if (exitCode !== 0) {
-    throw new Error(`Command failed (${exitCode}): ${cmd.join(' ')}\n${stderr || stdout}`);
-  }
 }
 
 async function main(): Promise<void> {

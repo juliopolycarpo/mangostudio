@@ -22,6 +22,12 @@ const BUNDLE_SCOPES = {
   npm: [DISTRIBUTION_MANIFEST_FILE, 'dist-npm'],
 } as const;
 
+/**
+ * Stays on `tar`: bundles carry the raw hub and runtime binaries and the npm
+ * platform packages, and `Bun.Archive` cannot store an executable bit. The npm
+ * bundle is published from its extracted copy, so a `0644` binary there would
+ * reach users. See the comment in `archive-assets.ts`.
+ */
 async function createBundle(path: string, members: readonly string[]): Promise<void> {
   const result = await captureCommand(['tar', '-czf', path, ...members], { cwd: ROOT_DIR });
   if (result.exitCode !== 0) {
