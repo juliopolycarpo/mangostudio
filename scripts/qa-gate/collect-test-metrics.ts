@@ -92,6 +92,7 @@ const summary = await readShardSummary(summaryPath);
 // not report success.
 const gateExitCode = ((): number => {
   if (gateExitCodeArg === undefined) return 0;
+  if (gateExitCodeArg.trim() === '') return 1;
   const parsed = Number(gateExitCodeArg);
   return Number.isInteger(parsed) ? parsed : 1;
 })();
