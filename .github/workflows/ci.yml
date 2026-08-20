@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       distribution: ${{ steps.changed.outputs.distribution }}
+      cross_runtime: ${{ steps.changed.outputs.cross_runtime }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,9 +48,15 @@ jobs:
         # cannot reach a binary. Anything unrecognised triggers the lane.
         # `--no-renames` lists both sides of a rename, so moving a source file
         # under an irrelevant path cannot hide the source-side deletion.
+        #
+        # `cross_runtime` is the opposite shape — a denylist would put a real
+        # network fetch on every PR — so it names the few files that decide what
+        # the release download path does. Upstream drift moves underneath all of
+        # them, which is what cross-runtime-nightly.yml is for.
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "distribution=true" >> "$GITHUB_OUTPUT"
+            echo "cross_runtime=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -68,6 +75,13 @@ jobs:
             echo "distribution=true" >> "$GITHUB_OUTPUT"
           else
             echo "distribution=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          cross_runtime='^(\.bun-version|scripts/lib/bun-cross-runtime\.ts|scripts/ci/verify-cross-runtimes\.ts|\.github/workflows/(ci|cross-runtime-nightly)\.yml)$'
+          if grep -Eq "$cross_runtime" "$RUNNER_TEMP/changed-files"; then
+            echo "cross_runtime=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cross_runtime=false" >> "$GITHUB_OUTPUT"
           fi
 
   distribution-identity:
@@ -114,6 +128,35 @@ jobs:
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
       channel: ${{ needs.distribution-identity.outputs.channel }}
       retention_days: 7
+
+  cross-runtimes:
+    # The cheap half of what `distribution` proves: fetch, verify and extract
+    # the Bun that gets compiled into all eight release binaries, without
+    # compiling anything. `distribution` is the only other exercise of this
+    # path, it builds sixteen binaries to get there, and it is skipped whenever
+    # no distribution-relevant path changed.
+    #
+    # The five-minute bound is the feature. The failure this guards against is a
+    # stall, not an assertion — eight concurrent downloads that never complete —
+    # so an unbounded lane reports it as silence until the outer timeout, which
+    # is exactly how it reached main once already.
+    name: Cross-runtime download
+    needs: [changes]
+    if: ${{ needs.changes.outputs.cross_runtime == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Resolve every target runtime from a cold cache
+        # Dependency-free script; runs without `bun install`.
+        run: bun ./scripts/ci/verify-cross-runtimes.ts
 
   check:
     name: Check
@@ -179,12 +222,14 @@ jobs:
     # derive that set dynamically so a new mandatory lane cannot bypass it.
     # qa-metrics only runs for PRs and main pushes, so its skip is accepted
     # solely on workflow_dispatch; distribution and smoke skips are accepted
-    # only when the changes job proved no distribution-relevant path changed.
+    # only when the changes job proved no distribution-relevant path changed,
+    # and cross-runtimes the same way against its own narrower path set.
     name: Gate
     needs: [
       distribution-identity,
       changes,
       distribution,
+      cross-runtimes,
       check,
       test,
       build,
@@ -222,11 +267,12 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3}',
+          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4}',
             github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',
             needs.changes.outputs.distribution == 'false' && 'distribution' || '',
             needs.changes.outputs.distribution == 'false' && 'smoke' || '',
-            needs.changes.outputs.distribution == 'false' && 'smoke-container' || '') }}
+            needs.changes.outputs.distribution == 'false' && 'smoke-container' || '',
+            needs.changes.outputs.cross_runtime == 'false' && 'cross-runtimes' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
 

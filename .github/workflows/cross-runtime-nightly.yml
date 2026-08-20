@@ -1,0 +1,43 @@
+name: Cross Runtime Nightly
+
+# The release download path against a channel that moves without this repo.
+#
+# `.bun-version` names `canary`, rebuilt for every commit on Bun's main, so the
+# bytes `scripts/lib/bun-cross-runtime.ts` fetches change daily while nothing
+# here does. CI's own cross-runtimes lane is path-filtered and therefore blind
+# to that: a canary that breaks fetching would first surface in whichever
+# release build happened to need it.
+#
+# Same script, same five-minute bound as the PR lane — see the `cross-runtimes`
+# job in ci.yml. Failures rely on the standard failed-scheduled-run
+# notification.
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-runtime-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  cold-fetch:
+    name: Cold cross-runtime fetch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Resolve every target runtime from a cold cache
+        # Dependency-free script; runs without `bun install`.
+        run: bun ./scripts/ci/verify-cross-runtimes.ts
