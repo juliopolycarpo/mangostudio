@@ -89,29 +89,33 @@ describe('distribution extraction', () => {
 
   // The whole release lane rests on this: a hub binary that arrives without its
   // executable bit is a broken install, and native extraction is what restores
-  // the mode GNU tar used to.
-  test('preserves the executable bit and symlinks through native tar.gz extraction', async () => {
-    const rootDir = makeTempDir();
-    const sourceDir = join(rootDir, 'source');
-    stageTarget(sourceDir, 'mangostudio');
-    symlinkSync('mangostudio', join(sourceDir, 'mangostudio-link'));
+  // the mode GNU tar used to. POSIX-only: Windows has no executable bit, and
+  // Bun.Archive skips every symlink there regardless of privilege.
+  test.skipIf(process.platform === 'win32')(
+    'preserves the executable bit and symlinks through native tar.gz extraction',
+    async () => {
+      const rootDir = makeTempDir();
+      const sourceDir = join(rootDir, 'source');
+      stageTarget(sourceDir, 'mangostudio');
+      symlinkSync('mangostudio', join(sourceDir, 'mangostudio-link'));
 
-    const archivePath = join(rootDir, 'target.tar.gz');
-    await runOrThrow(['tar', '-czf', archivePath, '-C', sourceDir, '.']);
+      const archivePath = join(rootDir, 'target.tar.gz');
+      await runOrThrow(['tar', '-czf', archivePath, '-C', sourceDir, '.']);
 
-    const destination = join(rootDir, '.mango', 'out', 'linux-x64');
-    await extractTargetArchive({
-      archivePath,
-      archiveFormat: 'tar.gz',
-      destination,
-      expectedMembers: ['README.md', 'mangostudio', 'mangostudio-link'],
-      rootDir,
-    });
+      const destination = join(rootDir, '.mango', 'out', 'linux-x64');
+      await extractTargetArchive({
+        archivePath,
+        archiveFormat: 'tar.gz',
+        destination,
+        expectedMembers: ['README.md', 'mangostudio', 'mangostudio-link'],
+        rootDir,
+      });
 
-    expect(statSync(join(destination, 'mangostudio')).mode & 0o111).not.toBe(0);
-    expect(statSync(join(destination, 'README.md')).mode & 0o111).toBe(0);
-    expect(lstatSync(join(destination, 'mangostudio-link')).isSymbolicLink()).toBe(true);
-  });
+      expect(statSync(join(destination, 'mangostudio')).mode & 0o111).not.toBe(0);
+      expect(statSync(join(destination, 'README.md')).mode & 0o111).toBe(0);
+      expect(lstatSync(join(destination, 'mangostudio-link')).isSymbolicLink()).toBe(true);
+    }
+  );
 
   test('rejects unsafe tar.gz entries before writing to the output tree', async () => {
     const rootDir = makeTempDir();

@@ -277,10 +277,11 @@ All verified against the canary the repository pins, not inherited from docs:
 - `files()` is an async method returning `Promise<Map<string, File>>`, and it
   **omits symlink and directory entries**. Anything guarding on that listing sees
   fewer entries than `tar -tzf` reports.
-- `extract()` does preserve modes and symlinks, silently strips leading `..`
-  segments, and drops symlinks pointing outside the destination. Safety guards
-  still run first, because silent sanitization in a release lane is worse than a
-  named error.
+- `extract()` does preserve modes and, on POSIX, in-tree symlinks. It silently
+  strips leading `..` segments and drops symlinks pointing outside the
+  destination. On Windows it skips every symlink regardless of privilege
+  (upstream's documented extract contract). Safety guards still run first,
+  because silent sanitization in a release lane is worse than a named error.
 - Passing a lazy `Bun.file()` handle as an entry value writes a **0-byte entry**
   with no error, and passing one to the constructor throws
   `Unrecognized archive format`. Read the bytes first.
