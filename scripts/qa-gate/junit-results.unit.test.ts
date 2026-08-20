@@ -165,7 +165,7 @@ describe('buildTestSuiteStats', () => {
   it('reports zero for a lane that produced no report at all', () => {
     const stats = buildTestSuiteStats([], { errors: 0, headlines: [] }, 0, 0);
     expect(stats.passed).toBe(0);
-    for (const lane of TEST_LANES) expect(stats[lane.workspace as 'api']).toBe(0);
+    for (const lane of TEST_LANES) expect(stats[lane.workspace]).toBe(0);
   });
 
   it('sets parseMiss when a configured lane wrote no JUnit report on a green exit', () => {
