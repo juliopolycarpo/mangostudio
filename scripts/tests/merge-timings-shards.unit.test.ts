@@ -143,6 +143,28 @@ describe('mergeTimingsShards', () => {
     expect(result.lanes[0]).toMatchObject({ shards: 1, files: 1 });
   });
 
+  // Arrays are objects, and `Object.values([]).every(...)` is vacuously true,
+  // so an array-shaped `files` would otherwise pass validation and merge
+  // numeric indices in as if they were file paths.
+  it('rejects an array-shaped files field as malformed', async () => {
+    const { root, out } = await stageShards([
+      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
+    ]);
+    const bad = join(root, 'test-shard-2', TIMINGS_DIR);
+    await mkdir(bad, { recursive: true });
+    await writeFile(join(bad, 'api.json'), '{"version":1,"files":[]}');
+    const badJunit = join(root, 'test-shard-2', JUNIT_DIR);
+    await mkdir(badJunit, { recursive: true });
+    await writeFile(join(badJunit, 'api.xml'), '<testsuite/>');
+
+    const result = await mergeTimingsShards(root, out);
+
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]).toMatchObject({ lane: 'api', kind: 'malformed' });
+    expect(result.problems[0]?.files).toEqual([join(bad, 'api.json')]);
+    expect(result.lanes[0]).toMatchObject({ shards: 1, files: 1 });
+  });
+
   // PR #903's own CI: shard 4/8 restored the full 398-entry `api` baseline,
   // then `runtime` failed first in the same turbo invocation and turbo never
   // scheduled `api` at all — the restored file sat on disk untouched and

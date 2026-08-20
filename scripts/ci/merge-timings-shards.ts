@@ -66,7 +66,13 @@ const isTimingsFile = (value: unknown): value is TimingsFile => {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as { version?: unknown; files?: unknown };
   if (candidate.version !== 1) return false;
-  if (typeof candidate.files !== 'object' || candidate.files === null) return false;
+  if (
+    typeof candidate.files !== 'object' ||
+    candidate.files === null ||
+    Array.isArray(candidate.files)
+  ) {
+    return false;
+  }
   return Object.values(candidate.files as Record<string, unknown>).every(
     (ms) => typeof ms === 'number' && Number.isFinite(ms)
   );
