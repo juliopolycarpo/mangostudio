@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -51,6 +59,27 @@ describe('native archive reading', () => {
     const destination = join(rootDir, 'out');
     await extractTarArchive(archivePath, destination);
     expect(existsSync(join(destination, 'nested', 'README.md'))).toBe(true);
+  });
+
+  // The shape target distribution bundles ship in: stored, not gzipped, because
+  // their one large member is an already-compressed platform archive.
+  test('reads a stored tar and keeps the executable bit', async () => {
+    const rootDir = makeTempDir();
+    const sourceDir = join(rootDir, 'source');
+    mkdirSync(sourceDir, { recursive: true });
+    writeFileSync(join(sourceDir, 'mangostudio'), 'binary', { mode: 0o755 });
+
+    // Named `.tar`, and detected from the bytes rather than from that name.
+    const archivePath = join(rootDir, 'bundle.tar');
+    const result = await captureCommand(['tar', '-cf', archivePath, '-C', sourceDir, '.']);
+    if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout);
+
+    const archive = await openTarArchive(archivePath);
+    expect(archive.entries).toEqual(['./mangostudio']);
+
+    const destination = join(rootDir, 'out');
+    await archive.extract(destination);
+    expect(statSync(join(destination, 'mangostudio')).mode & 0o111).toBeGreaterThan(0);
   });
 
   test('names the archive in read and extract failures', async () => {

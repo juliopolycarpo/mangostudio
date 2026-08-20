@@ -23,13 +23,59 @@ const BUNDLE_SCOPES = {
 } as const;
 
 /**
- * Stays on `tar`: bundles carry the raw hub and runtime binaries and the npm
- * platform packages, and `Bun.Archive` cannot store an executable bit. The npm
- * bundle is published from its extracted copy, so a `0644` binary there would
- * reach users. See the comment in `archive-assets.ts`.
+ * How a bundle's payload responds to gzip. Not uniform, because the payloads are
+ * not alike — see `createBundle` for the measurements behind each choice.
  */
-async function createBundle(path: string, members: readonly string[]): Promise<void> {
-  const result = await captureCommand(['tar', '-czf', path, ...members], { cwd: ROOT_DIR });
+export type BundleCompression = 'store' | 'gzip';
+
+/** Raw hub and runtime binaries, npm platform packages, or plain text. */
+export const SCOPED_BUNDLE_COMPRESSION: BundleCompression = 'gzip';
+
+/** One already-compressed platform archive plus two small text files. */
+export const TARGET_BUNDLE_COMPRESSION: BundleCompression = 'store';
+
+/**
+ * Name a bundle after the bytes it actually holds. A stored tar under a
+ * `.tar.gz` name would defeat `tar -xzf` for anyone reaching for one by hand.
+ * // Usage: bundleFileName('linux-x64', TARGET_BUNDLE_COMPRESSION) === 'linux-x64.tar'
+ */
+export function bundleFileName(name: string, compression: BundleCompression): string {
+  return compression === 'store' ? `${name}.tar` : `${name}.tar.gz`;
+}
+
+/**
+ * Compression is chosen per bundle because the payloads differ, measured on a
+ * real linux-x64 asset set:
+ *
+ * - A **target** bundle is the manifest, `SHA256SUMS`, and one platform archive
+ *   that is already `.tar.gz` (or `.zip`). Gzip has nothing left to find in the
+ *   member holding 99% of the bytes: on CI the stored bundle is 78.8 MB against
+ *   78.6 MB gzipped, so level 6 bought 0.3% for a full pass over 79 MB. Stored.
+ * - A **scoped** bundle carries uncompressed hub and runtime binaries
+ *   (`assets`), the npm platform packages (`npm`), or plain text (`checksums`),
+ *   so gzip does real work — but not at level 6. Level 1 halves the CPU for
+ *   3.8% more bytes (12.87 s → 6.62 s, 159.17 MB → 165.24 MB per target's
+ *   worth), and artifact upload measured at ~117 MB/s makes those bytes far
+ *   cheaper than the seconds.
+ *
+ * Every upload runs at `compression-level: 0`, so this is the only compression
+ * in the path either way; storing moves no work into the artifact zip.
+ *
+ * Stays on `tar` rather than `Bun.Archive` in both cases: bundles carry the raw
+ * binaries and the npm bundle is published from its extracted copy, so the
+ * `0644` entries `Bun.Archive` writes would reach users. See the comment in
+ * `archive-assets.ts`.
+ */
+async function createBundle(
+  path: string,
+  members: readonly string[],
+  compression: BundleCompression
+): Promise<void> {
+  // GNU tar; this script has exactly one call site, on ubuntu-latest.
+  const compressionArgs = compression === 'store' ? [] : ['--use-compress-program', 'gzip -1'];
+  const result = await captureCommand(['tar', ...compressionArgs, '-cf', path, ...members], {
+    cwd: ROOT_DIR,
+  });
   if (result.exitCode !== 0) {
     throw new Error(`Failed to create ${path}: ${result.stderr || result.stdout}`);
   }
@@ -61,8 +107,8 @@ async function main(): Promise<void> {
     Object.entries(BUNDLE_SCOPES),
     archiveConcurrency(),
     async ([scope, members]) => {
-      const bundlePath = join(BUNDLE_DIR, `${scope}.tar.gz`);
-      await createBundle(bundlePath, members);
+      const bundlePath = join(BUNDLE_DIR, bundleFileName(scope, SCOPED_BUNDLE_COMPRESSION));
+      await createBundle(bundlePath, members, SCOPED_BUNDLE_COMPRESSION);
       return [
         scope,
         distributionArtifactName(
@@ -83,8 +129,8 @@ async function main(): Promise<void> {
     manifest.targets,
     archiveConcurrency(),
     async (target) => {
-      const bundlePath = join(BUNDLE_DIR, `${target.id}.tar.gz`);
-      await createBundle(bundlePath, targetBundleMembers(target));
+      const bundlePath = join(BUNDLE_DIR, bundleFileName(target.id, TARGET_BUNDLE_COMPRESSION));
+      await createBundle(bundlePath, targetBundleMembers(target), TARGET_BUNDLE_COMPRESSION);
       return [
         target.id,
         distributionArtifactName(

@@ -268,6 +268,74 @@ cancels superseded in-flight runs so the rolling pre-release and npm dist-tag
 always track the newest green commit; per-commit npm versions are unique, so a
 cancelled run never leaves a conflicting half-publish.
 
+### Distribution bundle compression
+
+Distribution bundles never leave the workflow run: they are `upload-artifact`
+payloads a later job in the same run consumes. Nothing published depends on how
+they are compressed — `SHA256SUMS` is computed over the release archives, not
+over bundles — so the only question is what buys the most wall clock.
+
+The answer is not uniform, because the payloads are not alike. Measured against
+a real `linux-x64` asset set (`bun scripts/test-build.ts`):
+
+| Bundle                        | `tar -czf` (gzip 6) |                 gzip 1 |                stored |
+| ----------------------------- | ------------------: | ---------------------: | --------------------: |
+| target (manifest + 1 archive) |   3.06 s → 79.41 MB |      2.68 s → 79.51 MB | **0.15 s → 82.78 MB** |
+| `assets` (one target's worth) | 12.87 s → 159.17 MB | **6.62 s → 165.24 MB** |    0.45 s → 259.41 MB |
+
+A **target** bundle is the manifest, `SHA256SUMS`, and one platform archive that
+is already `.tar.gz` (or `.zip`). Gzip has nothing to find in the member holding
+99% of the bytes, so it is stored — 20× faster for 4% more bytes. A **scoped**
+bundle (`assets`, `npm`, `checksums`) carries uncompressed hub and runtime
+binaries, npm platform packages, or plain text, so gzip does real work, but not
+at level 6: level 1 nearly halves the CPU for 3.8% more bytes.
+
+Those bytes are cheap. The `assets` artifact measured 1173.8 MB uploaded in 10 s
+(~117 MB/s) on a real run, so trading size for CPU wins at this ratio.
+
+Measured on the lane itself, `main` @ `dffc218e` against the change:
+
+|                                                           |    before |     run 1 |    run 2 |
+| --------------------------------------------------------- | --------: | --------: | -------: |
+| `Create content-addressed bundles`                        |      83 s |      40 s | **39 s** |
+| upload steps, summed                                      |      44 s |      83 s |     46 s |
+| `Distribution / Build immutable distribution` (whole job) |     197 s |     185 s |    149 s |
+| `assets` artifact                                         | 1173.8 MB | 1218.2 MB |        — |
+| `npm` artifact                                            |  439.9 MB |  473.6 MB |        — |
+| one target artifact (`linux-x64`)                         |   78.6 MB |   78.8 MB |        — |
+
+Bundling halves, and uploads are unchanged — the extra bytes cost about 2 s.
+
+**Two runs, because one would have lied.** On run 1 the summed upload steps looked
+like a 39 s regression that would have cancelled the win. It was runner noise: two
+target uploads took 15 s and 19 s where the other six took 3 s, for payloads that
+differ from each other by less than a megabyte. Run 2 put every target back at
+2–3 s. Upload timings at this size need several runs before one is attributed to
+a change; the bundling step, at 83 s twice and ~39 s twice, does not.
+
+The target bundles grow **0.3%**, not the 4% a local run suggests. Local numbers
+overstate it because a development tree's `distribution-manifest.json` carries a
+`files` listing of whatever is lying around — 18,425 entries and 3.3 MB in one
+local case, against ~0.25 MB in CI — and that manifest, not the archive, is
+where target-bundle gzip found its bytes. The time saving is unaffected: it comes
+from not re-gzipping the 79 MB archive member.
+
+Two consequences worth keeping straight:
+
+- **The name states the compression.** Target bundles are `<target>.tar`, scoped
+  bundles are `<scope>.tar.gz`. The attestation `subject-path` and the
+  `download-distribution` glob each name both shapes; `*.tar` does not match
+  `*.tar.gz`, so neither is counted twice.
+- **Every upload stays at `compression-level: 0`.** `bundle-distribution.ts`
+  already made the one compression decision. Letting the artifact zip Deflate on
+  top costs a full single-threaded pass, and on a stored target bundle it would
+  simply relocate the gzip that storing it removed.
+
+Bundle creation stays on `tar` rather than `Bun.Archive` because bundles carry
+raw executables — see [`tooling.md`](./tooling.md) for that rejection. Extraction
+is native either way, and preserves the executable bit through both bundle
+shapes; `scripts/tests/archive.unit.test.ts` pins that for a stored tar.
+
 ### Distribution artifact trust
 
 `distribution-build.yml` attests bundles on every build except pull requests

@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   const [bundleArg, destinationArg, ...extra] = process.argv.slice(2);
   if (!bundleArg || !destinationArg || extra.length > 0) {
     throw new Error(
-      'Usage: bun ./scripts/release/extract-distribution.ts <bundle.tar.gz> <destination>'
+      'Usage: bun ./scripts/release/extract-distribution.ts <bundle.tar[.gz]> <destination>'
     );
   }
 
