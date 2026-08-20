@@ -39,10 +39,22 @@ function listingFor(digest: string, name = `${ASSET}.zip`, marker = ''): string 
   return `${'0'.repeat(64)}  bun-darwin-aarch64.zip\n${digest}  ${marker}${name}\n`;
 }
 
-/** A response body, or a status code to fail the request with. */
-type Reply = string | number;
+/**
+ * A request that is accepted and then never answered — the shape a stalled
+ * release host takes, and the only thing the two timeouts exist to bound.
+ */
+const STALL = Symbol('stall');
 
-function reply(value: Reply): Response {
+/** A response body, a status code to fail the request with, or a stall. */
+type Reply = string | number | typeof STALL;
+
+function reply(value: Reply): Response | Promise<Response> {
+  if (value === STALL) {
+    // Never resolved: the connection is accepted and the reply never comes.
+    return new Promise<Response>(() => {
+      // no settle
+    });
+  }
   return typeof value === 'number'
     ? new Response('not found', { status: value })
     : new Response(value);
@@ -189,6 +201,30 @@ describe('downloadVerifiedAsset', () => {
     });
 
     expect(resolved).toBe(process.execPath);
+  });
+
+  // Both ceilings are otherwise unexercised, and the failure they bound reads
+  // as nothing at all: the connection is accepted, so a stall is
+  // indistinguishable from a slow build until an outer timeout kills the job.
+  // The assertions are on which request is named, because a bare "timed out"
+  // repeats the silence it replaced.
+  test('a stalled listing fails by name instead of hanging', async () => {
+    const server = serve({ listing: () => STALL, body: () => 'never-reached' });
+
+    await expect(
+      downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base, { checksumMs: 50 })
+    ).rejects.toThrow(/Timed out after 50ms reading SHASUMS256\.txt for the "canary" channel/);
+    expect(await Bun.file(archivePath).exists()).toBe(false);
+  });
+
+  test('a stalled asset download fails by name instead of hanging', async () => {
+    const server = serve({ listing: () => listingFor(sha256('anything')), body: () => STALL });
+
+    await expect(
+      downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base, { assetMs: 50 })
+    ).rejects.toThrow(
+      /Timed out after 50ms downloading bun-linux-x64\.zip from the "canary" channel/
+    );
   });
 
   test('reads a digest whose name is marked for binary mode', async () => {
