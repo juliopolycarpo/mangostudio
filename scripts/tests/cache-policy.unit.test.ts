@@ -22,7 +22,7 @@ describe('CI cache policy', () => {
     const manifest = readText('.github/actions/cache-scoped/action.yml');
     const cacheUses =
       manifest.match(/uses: actions\/cache(?:\/(?:restore|save))?@[a-f0-9]{40} # v[^\n]+/g) ?? [];
-    expect(cacheUses).toHaveLength(3);
+    expect(cacheUses).toHaveLength(4);
     for (const use of cacheUses) {
       expect(use).toContain(`@${CACHE_ACTION_SHA} # v6.1.0`);
     }

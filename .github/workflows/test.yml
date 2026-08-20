@@ -21,6 +21,40 @@ env:
   SHARD_COUNT: 8
 
 jobs:
+  resolve-timings:
+    # A restore inside the matrix asks each of the eight shard jobs to resolve
+    # "the most recent cache matching this prefix" independently. That is fine
+    # while the prefix only ever resolves to one immutable, long-lived entry,
+    # but it stops being fine the moment saves rotate every run (see "Save
+    # test timings" below): a save from a *different*, concurrent run can land
+    # in the minute-wide window while this run's eight shards are each
+    # resolving it, and shards that ask before versus after see different
+    # bytes — which is exactly the disagreement `merge-timings-shards.ts`
+    # exists to catch. Resolving the key once here and having every shard
+    # restore that literal key instead of a live prefix query removes the
+    # window entirely: whatever this job resolves is what all eight get,
+    # regardless of what any other run saves in the meantime.
+    #
+    # `lookup-only` makes this a metadata call, not a download — the shard
+    # jobs still fetch the actual bytes themselves once they have the key.
+    name: Resolve test timings baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      key: ${{ steps.timings.outputs.matched-key }}
+    steps:
+      - id: timings
+        name: Resolve test timings cache key
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: timings
+          path: .mango/artifacts/timings
+          validity: test-shard-${{ env.SHARD_COUNT }}
+          restore-prefix: test-
+          mode: restore
+          lookup-only: "true"
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
   shard:
     # Sharding is what gets the suite off `--parallel=1` without waiting for
     # oven-sh/bun#38008. That bug is a collision between concurrent isolates
@@ -29,6 +63,7 @@ jobs:
     # composes with this the day the fix ships — see
     # docs/reference/testing.md.
     name: Tests (shard ${{ matrix.shard }}/8)
+    needs: [resolve-timings]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -88,21 +123,28 @@ jobs:
       # time instead of by file order. Measured on this repo: the critical
       # shard goes 69.6s -> 58.6s and the spread across shards halves.
       #
-      # `mode: restore` for all eight — only the merge job writes, and it writes
-      # once, after every shard has read. That ordering is what keeps the eight
-      # shards reading the same bytes, which is a correctness requirement and
-      # not just a tidiness one: see scripts/ci/merge-timings-shards.ts.
+      # Restores the exact key `resolve-timings` resolved rather than asking
+      # `cache-scoped` to resolve its own "most recent matching prefix" here —
+      # eight independent live resolutions can each pick a different entry if
+      # a save from a concurrent run lands mid-fan-out. One key, resolved
+      # once, is what keeps all eight shards reading the same bytes, which is
+      # a correctness requirement and not just a tidiness one: see
+      # scripts/ci/merge-timings-shards.ts. Only the merge job saves, and only
+      # after every shard has read, so nothing this run writes can be what a
+      # shard of this same run reads back.
       #
-      # A miss is safe. Bun falls back to the round-robin split when the file is
-      # absent, which is exactly the behaviour this workflow had before.
+      # A miss (empty key, or nothing at the resolved key by the time this
+      # runs) is safe. Bun falls back to the round-robin split when the file
+      # is absent, which is exactly the behaviour this workflow had before.
       - name: Restore test timings
+        if: needs.resolve-timings.outputs.key != ''
         uses: ./.github/actions/cache-scoped
         with:
           family: timings
           path: .mango/artifacts/timings
           validity: test-shard-${{ env.SHARD_COUNT }}
-          restore-prefix: test-
-          mode: restore
+          mode: restore-exact
+          exact-key: ${{ needs.resolve-timings.outputs.key }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Run database migrations

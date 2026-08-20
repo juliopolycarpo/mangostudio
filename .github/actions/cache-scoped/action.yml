@@ -30,9 +30,29 @@ inputs:
     required: false
     default: "false"
   mode:
-    description: restore-save (default), restore, or save.
+    description: restore-save (default), restore, restore-exact, or save.
     required: false
     default: restore-save
+  exact-key:
+    description: >
+      Required when `mode: restore-exact`: the literal cache key to restore,
+      with no restore-keys fallback. For pinning several jobs to the exact
+      bytes a single earlier `mode: restore` resolved, rather than each job
+      resolving "most recent matching prefix" independently and risking a
+      save from a concurrent run landing mid-fan-out and changing what
+      "most recent" means between them.
+    required: false
+    default: ""
+  lookup-only:
+    description: >
+      When 'true' with `mode: restore`, check whether a cache exists without
+      downloading it. For resolving which exact key a later, separate restore
+      should ask for — a set of fan-out jobs that all restore independently by
+      prefix can each match a different "most recent" entry if a save lands
+      mid-fan-out; resolving the key once up front and having every job
+      restore that literal key removes the ambiguity.
+    required: false
+    default: "false"
   cache-epoch:
     description: Repository-wide cache epoch used for emergency invalidation.
     required: true
@@ -56,6 +76,14 @@ outputs:
       for normal families, or the version-exact main key for exact-restore
       families (which never consider the loose prefix).
     value: ${{ steps.keys.outputs.restore-prefix }}
+  matched-key:
+    description: >
+      The literal key that satisfied a `mode: restore` restore (primary, exact
+      main, or whichever loose-prefix entry was most recent) or a `mode:
+      restore-exact` hit (the given exact-key) — empty on a miss, and empty
+      for restore-save/save. Feed this back into a later exact-key restore to
+      pin every reader of it to the same bytes.
+    value: ${{ steps.outcome.outputs.matched-key }}
 runs:
   using: composite
   steps:
@@ -64,6 +92,7 @@ runs:
       shell: bash
       env:
         CACHE_EPOCH: ${{ inputs.cache-epoch }}
+        EXACT_KEY: ${{ inputs.exact-key }}
         EXACT_RESTORE: ${{ inputs.exact-restore }}
         FAMILY: ${{ inputs.family }}
         MODE: ${{ inputs.mode }}
@@ -81,8 +110,14 @@ runs:
 
         case "${MODE}" in
           restore-save|restore|save) ;;
+          restore-exact)
+            if [ -z "${EXACT_KEY}" ]; then
+              echo "::error::cache-scoped mode restore-exact requires a non-empty exact-key"
+              exit 1
+            fi
+            ;;
           *)
-            echo "::error::cache-scoped mode must be restore-save, restore, or save (got '${MODE}')"
+            echo "::error::cache-scoped mode must be restore-save, restore, restore-exact, or save (got '${MODE}')"
             exit 1
             ;;
         esac
@@ -152,6 +187,15 @@ runs:
         # hit as restored would skip the install that populates the right
         # binary (Playwright browsers, checksum-pinned lint tools).
         restore-keys: ${{ steps.keys.outputs.restore-keys }}
+        lookup-only: ${{ inputs.lookup-only }}
+
+    - id: restore-exact
+      name: Restore exact-key cache
+      if: inputs.mode == 'restore-exact'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ inputs.path }}
+        key: ${{ inputs.exact-key }}
 
     - name: Save scoped cache
       if: inputs.mode == 'save'
@@ -166,10 +210,12 @@ runs:
       shell: bash
       env:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        EXACT_KEY: ${{ inputs.exact-key }}
         EXACT_RESTORE: ${{ inputs.exact-restore }}
         FAMILY: ${{ inputs.family }}
         MODE: ${{ inputs.mode }}
         PRIMARY_KEY: ${{ steps.keys.outputs.primary-key }}
+        RESTORE_EXACT_HIT: ${{ steps.restore-exact.outputs.cache-hit }}
         RESTORE_HIT: ${{ steps.restore.outputs.cache-hit }}
         RESTORE_MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
         RESTORE_PREFIX: ${{ steps.keys.outputs.restore-prefix }}
@@ -179,6 +225,10 @@ runs:
         if [ "${MODE}" = "restore" ]; then
           hit="${RESTORE_HIT:-false}"
           matched="${RESTORE_MATCHED:-}"
+        elif [ "${MODE}" = "restore-exact" ]; then
+          hit="${RESTORE_EXACT_HIT:-false}"
+          matched=""
+          [ "${hit}" = "true" ] && matched="${EXACT_KEY}"
         else
           hit="${CACHE_HIT:-false}"
           matched=""
@@ -192,7 +242,10 @@ runs:
         {
           echo "cache-hit=${hit}"
           echo "cache-restored=${restored}"
+          echo "matched-key=${matched}"
         } >> "$GITHUB_OUTPUT"
 
-        echo "- ${FAMILY}: hit=\`${hit}\`, key=\`${PRIMARY_KEY}\`, restore-prefix=\`${RESTORE_PREFIX}\`" \
+        summary_key="${PRIMARY_KEY}"
+        [ "${MODE}" = "restore-exact" ] && summary_key="${EXACT_KEY}"
+        echo "- ${FAMILY}: hit=\`${hit}\`, key=\`${summary_key}\`, restore-prefix=\`${RESTORE_PREFIX}\`" \
           >> "$GITHUB_STEP_SUMMARY"

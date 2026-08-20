@@ -123,8 +123,12 @@ describe('Test workflow merge job', () => {
 });
 
 describe('Test workflow shape', () => {
-  test('declares exactly the shard and merge jobs', () => {
-    expect(extractJobBlocks(workflow).map(({ job }) => job)).toEqual(['shard', 'merge']);
+  test('declares exactly the resolve-timings, shard, and merge jobs', () => {
+    expect(extractJobBlocks(workflow).map(({ job }) => job)).toEqual([
+      'resolve-timings',
+      'shard',
+      'merge',
+    ]);
   });
 
   // ci.yml calls this as one `test` job, so the aggregate gate's `needs` list

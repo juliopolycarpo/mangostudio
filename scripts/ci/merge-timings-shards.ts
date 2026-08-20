@@ -18,8 +18,18 @@
 // counts total files, so this is where that has to be caught.
 //
 // Each shard writes only its own files under `--shard` (verified: shard 1/8 of
-// `apps/shared` writes 6 entries, shard 2/8 writes 7, of 54 total), so the union
-// of the slices is exactly the lane's file set when the run was healthy.
+// `apps/shared` writes 6 entries, shard 2/8 writes 7, of 54 total) — but only
+// if it runs that lane at all. A shard whose turbo invocation aborts on an
+// earlier lane's failure (fail-fast, no `--continue`) never touches the
+// `--timings` file it restored, so what lands on disk is the *previous* run's
+// full baseline, not this shard's slice — and looks exactly like a legitimate
+// one until it collides with whichever shard actually owns those files. A
+// lane's JUnit report is the tell: a lane that ran always writes one, even
+// over zero files, so a shard missing it never ran the lane and its restored
+// `--timings` file is discarded rather than merged as a claim (measured: PR
+// #903's own CI, shard 4/8 restored a 398-entry `api` baseline unchanged
+// after `runtime` failed first in the same job, and would have duplicate-
+// claimed 370 files against the shards that actually ran them).
 //
 // Usage: bun ./scripts/ci/merge-timings-shards.ts <shards-dir> <out-dir>
 
@@ -100,9 +110,19 @@ type SliceRead =
 // indistinguishable from "missing" to the union below unless kept separate,
 // which turns a corrupt shard into a silently smaller partition instead of
 // the hard error the `TimingsFile` contract promises.
-const readSlice = async (path: string): Promise<SliceRead> => {
-  const file = Bun.file(path);
+//
+// A third case looks like "ok" but is not: a shard whose lane never ran at
+// all (an earlier lane in the same turbo invocation failed and turbo stopped
+// scheduling the rest) never touches its restored `--timings` file, so the
+// untouched cache-restored baseline — every file the *previous* run's shards
+// covered between them — sits on disk exactly as if this shard had covered
+// it too. Nothing distinguishes that file from a genuine full-coverage
+// contribution except that this shard's JUnit report for the same lane is
+// missing: a lane that ran, even over zero files, always writes one.
+const readSlice = async (junitPath: string, timingsPath: string): Promise<SliceRead> => {
+  const file = Bun.file(timingsPath);
   if (!(await file.exists())) return { status: 'missing' };
+  if (!(await Bun.file(junitPath).exists())) return { status: 'missing' };
   let parsed: unknown;
   try {
     parsed = await file.json();
@@ -133,7 +153,10 @@ export const mergeTimingsShards = async (
     const slices: TimingsFile[] = [];
     const malformed: string[] = [];
     for (const shardDir of shardDirs) {
-      const result = await readSlice(join(shardDir, lane.timingsPath));
+      const result = await readSlice(
+        join(shardDir, lane.junitPath),
+        join(shardDir, lane.timingsPath)
+      );
       if (result.status === 'ok') slices.push(result.data);
       else if (result.status === 'malformed') malformed.push(join(shardDir, lane.timingsPath));
     }

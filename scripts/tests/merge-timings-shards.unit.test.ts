@@ -4,19 +4,33 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { mergeLaneSlices, mergeTimingsShards, type TimingsFile } from '../ci/merge-timings-shards';
-import { TIMINGS_DIR } from '../lib/test-lanes';
+import { JUNIT_DIR, TIMINGS_DIR } from '../lib/test-lanes';
 
 const slice = (files: Record<string, number>): TimingsFile => ({ version: 1, files });
 
+interface StagedShard {
+  readonly name: string;
+  readonly lane: string;
+  readonly files: Record<string, number>;
+  /** Set false to model a shard that restored a baseline but never ran the lane. */
+  readonly junit?: boolean;
+}
+
 const stageShards = async (
-  shards: readonly { name: string; lane: string; files: Record<string, number> }[]
+  shards: readonly StagedShard[]
 ): Promise<{ root: string; out: string }> => {
   const root = await mkdtemp(join(tmpdir(), 'timings-shards-'));
   const out = join(root, 'merged');
   for (const shard of shards) {
-    const dir = join(root, 'shards', shard.name, TIMINGS_DIR);
-    await mkdir(dir, { recursive: true });
-    await writeFile(join(dir, `${shard.lane}.json`), JSON.stringify(slice(shard.files)));
+    const shardRoot = join(root, 'shards', shard.name);
+    const timingsDir = join(shardRoot, TIMINGS_DIR);
+    await mkdir(timingsDir, { recursive: true });
+    await writeFile(join(timingsDir, `${shard.lane}.json`), JSON.stringify(slice(shard.files)));
+    if (shard.junit !== false) {
+      const junitDir = join(shardRoot, JUNIT_DIR);
+      await mkdir(junitDir, { recursive: true });
+      await writeFile(join(junitDir, `${shard.lane}.xml`), '<testsuite/>');
+    }
   }
   return { root: join(root, 'shards'), out };
 };
@@ -115,6 +129,9 @@ describe('mergeTimingsShards', () => {
     const bad = join(root, 'test-shard-2', TIMINGS_DIR);
     await mkdir(bad, { recursive: true });
     await writeFile(join(bad, 'api.json'), '{"version":2,"files":{}}');
+    const badJunit = join(root, 'test-shard-2', JUNIT_DIR);
+    await mkdir(badJunit, { recursive: true });
+    await writeFile(join(badJunit, 'api.xml'), '<testsuite/>');
 
     const result = await mergeTimingsShards(root, out);
 
@@ -124,5 +141,29 @@ describe('mergeTimingsShards', () => {
     // The remaining valid shard still merges so the file is available for
     // debugging; `problems` is what fails the CI step, not a missing output.
     expect(result.lanes[0]).toMatchObject({ shards: 1, files: 1 });
+  });
+
+  // PR #903's own CI: shard 4/8 restored the full 398-entry `api` baseline,
+  // then `runtime` failed first in the same turbo invocation and turbo never
+  // scheduled `api` at all — the restored file sat on disk untouched and
+  // would have duplicate-claimed every file the shards that actually ran
+  // `api` already covered. No JUnit report for the lane is the only signal
+  // that distinguishes this from a genuine full-coverage contribution.
+  it('discards a restored baseline the shard never touched', async () => {
+    const { root, out } = await stageShards([
+      { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
+      { name: 'test-shard-2', lane: 'api', files: { 'tests/unit/b.test.ts': 20 } },
+      {
+        name: 'test-shard-3',
+        lane: 'api',
+        files: { 'tests/unit/a.test.ts': 10, 'tests/unit/b.test.ts': 20 },
+        junit: false,
+      },
+    ]);
+
+    const result = await mergeTimingsShards(root, out);
+
+    expect(result.problems).toEqual([]);
+    expect(result.lanes[0]).toMatchObject({ lane: 'api', shards: 2, files: 2 });
   });
 });
