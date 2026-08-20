@@ -7,6 +7,7 @@ import { createTurboBuildCommand, selectBuildWorkspaces } from './lib/build';
 import {
   bunCompiledRuntimes,
   bunCrossCompileChannel,
+  clearBunCrossRuntimeCache,
   ensureBunCrossRuntime,
 } from './lib/bun-cross-runtime';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
@@ -35,6 +36,8 @@ interface BinaryBuildOptions {
   buildType: 'production' | 'development';
   dryRun: boolean;
   onlyPlatform?: string;
+  /** Discard the cached channel runtimes first, forcing a real download. */
+  refreshRuntimes: boolean;
   version: string;
 }
 
@@ -59,12 +62,13 @@ Workspace flags:
   --all        Build every build-capable workspace
 
 Binary flags:
-  --binary         Build standalone binaries into .mango/out
-  --platform <id>  Limit binary output to one target (example: linux-x64)
-  --production     Use production binary settings (default)
-  --development    Use development binary settings
-  --dry-run        Preview the build without writing artifacts
-  --help           Show this help message`);
+  --binary            Build standalone binaries into .mango/out
+  --platform <id>     Limit binary output to one target (example: linux-x64)
+  --production        Use production binary settings (default)
+  --development       Use development binary settings
+  --dry-run           Preview the build without writing artifacts
+  --refresh-runtimes  Re-download the channel Bun runtimes instead of reusing the cache
+  --help              Show this help message`);
   process.exit(0);
 }
 
@@ -531,6 +535,14 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
     console.log(
       `🥟 Bun channel "${crossRuntimeChannel}" has no version-resolvable download; fetching a runtime per target`
     );
+    if (options.refreshRuntimes) {
+      const cleared = await clearBunCrossRuntimeCache(crossRuntimeChannel);
+      console.log(`🧹 Cleared cached ${crossRuntimeChannel} runtimes: ${cleared}`);
+    }
+  } else if (options.refreshRuntimes) {
+    warn(
+      '`--refresh-runtimes` had nothing to clear: `.bun-version` pins a released version, so `--compile` resolves its own downloads.'
+    );
   }
 
   console.log(`🎯 Building executables for ${targets.length} platform(s)`);
@@ -570,7 +582,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
 }
 
 const { workspaces, flags, values, positional, usedDefaultSelection } = parseArgs({
-  booleanFlags: ['--binary', '--production', '--development', '--dry-run'],
+  booleanFlags: ['--binary', '--production', '--development', '--dry-run', '--refresh-runtimes'],
   valueFlags: ['--platform'],
 });
 
@@ -583,14 +595,20 @@ assertNoUnexpectedArguments(positional);
 const isBinaryBuild = flags['--binary'] ?? false;
 const isProductionBuild = flags['--production'] ?? false;
 const isDevelopmentBuild = flags['--development'] ?? false;
+const refreshRuntimes = flags['--refresh-runtimes'] ?? false;
 const defaultBuildWorkspaces: WorkspaceName[] = ['frontend'];
 
 if (isProductionBuild && isDevelopmentBuild) {
   fatal('Choose either `--production` or `--development`, not both.');
 }
 
-if (!isBinaryBuild && (isProductionBuild || isDevelopmentBuild || values['--platform'])) {
-  fatal('`--platform`, `--production`, and `--development` require `--binary`.');
+if (
+  !isBinaryBuild &&
+  (isProductionBuild || isDevelopmentBuild || refreshRuntimes || values['--platform'])
+) {
+  fatal(
+    '`--platform`, `--production`, `--development`, and `--refresh-runtimes` require `--binary`.'
+  );
 }
 
 if (isBinaryBuild) {
@@ -605,6 +623,7 @@ if (isBinaryBuild) {
     buildType: isDevelopmentBuild ? 'development' : 'production',
     dryRun: flags['--dry-run'] ?? process.env.DRY_RUN === '1',
     onlyPlatform: values['--platform'] ?? process.env.ONLY_PLATFORM,
+    refreshRuntimes,
     version,
   });
   process.exit(0);

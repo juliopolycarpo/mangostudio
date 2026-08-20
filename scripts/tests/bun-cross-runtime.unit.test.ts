@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  clearBunCrossRuntimeCache,
   downloadVerifiedAsset,
   ensureBunCrossRuntime,
   hostReleasePlatform,
@@ -237,5 +238,22 @@ describe('downloadVerifiedAsset', () => {
     await downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base);
 
     expect(await Bun.file(archivePath).text()).toBe(body);
+  });
+});
+
+describe('clearBunCrossRuntimeCache', () => {
+  test('removes the directory the same channel and host would resolve to', async () => {
+    const cacheDir = join(tempDir, 'bun-cross');
+    const options = { cacheDir, cacheKey: 'canary-abc' };
+    const installed = join(cacheDir, 'canary-abc', ASSET, 'bun');
+    await Bun.write(installed, 'pretend-bun');
+
+    const cleared = await clearBunCrossRuntimeCache(CHANNEL, options);
+
+    expect(cleared).toBe(join(cacheDir, 'canary-abc'));
+    expect(await Bun.file(installed).exists()).toBe(false);
+    // The cold path has to be reachable on demand, not only by knowing which
+    // directory to delete — and an absent cache is already the desired state.
+    expect(await clearBunCrossRuntimeCache(CHANNEL, options)).toBe(cleared);
   });
 });

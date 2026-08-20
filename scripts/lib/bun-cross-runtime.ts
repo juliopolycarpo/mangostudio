@@ -330,6 +330,33 @@ function defaultCacheKey(channel: string): string {
   return `${channel}-${Bun.revision}`.replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
+/**
+ * Discards what this host has cached for `channel`, so the next resolve really
+ * fetches. Returns the directory it removed.
+ *
+ * The cache is keyed by the host Bun's revision and survives across branches, so
+ * a build that has run once on this machine never touches the network again —
+ * which is how a download path can break and every local build stay green. This
+ * is the deliberate way back to the cold path.
+ *
+ * It clears the resolved key rather than moving the build to a throwaway one:
+ * provenance is read back later from the same directory, by the drift report
+ * here and by `scripts/release/distribution-manifest.ts` in its own process, and
+ * a key only this build knows would leave both reporting no runtimes at all.
+ * // Usage: await clearBunCrossRuntimeCache('canary')
+ */
+export async function clearBunCrossRuntimeCache(
+  channel: string,
+  options: Omit<CrossRuntimeOptions, 'channel'> = {}
+): Promise<string> {
+  const directory = join(
+    options.cacheDir ?? CACHE_DIR,
+    options.cacheKey ?? defaultCacheKey(channel)
+  );
+  await rm(directory, { recursive: true, force: true });
+  return directory;
+}
+
 async function installCrossRuntime(
   asset: string,
   installDir: string,
