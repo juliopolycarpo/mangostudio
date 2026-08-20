@@ -37,6 +37,40 @@ const CHECKSUM_FILE = 'SHASUMS256.txt';
 const CHECKSUM_TIMEOUT_MS = 30_000;
 const ASSET_TIMEOUT_MS = 120_000;
 
+/** Per-request ceilings, overridable so a test can stall a request cheaply. */
+interface AssetTimeouts {
+  readonly checksumMs?: number;
+  readonly assetMs?: number;
+}
+
+/**
+ * Runs one release-host request under a deadline and, when the deadline is what
+ * ended it, reports which request stalled.
+ *
+ * The deadline covers reading the body, not just the response headers: the
+ * failure this bounds is a download that is accepted and then never delivers a
+ * byte, which a headers-only timeout would let through.
+ *
+ * `signal.aborted` decides, rather than the rejection's name — a body read that
+ * is cut short surfaces as several different errors across runtimes, and only
+ * one thing here can abort the signal.
+ */
+async function underDeadline<T>(
+  what: string,
+  timeoutMs: number,
+  run: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    return await run(signal);
+  } catch (caught) {
+    if (signal.aborted) {
+      throw new Error(`Timed out after ${timeoutMs}ms ${what}`);
+    }
+    throw caught;
+  }
+}
+
 /**
  * A released Bun, e.g. `1.3.14` or `1.4.0-canary.1` — anything else is a channel.
  *
@@ -296,6 +330,33 @@ function defaultCacheKey(channel: string): string {
   return `${channel}-${Bun.revision}`.replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
+/**
+ * Discards what this host has cached for `channel`, so the next resolve really
+ * fetches. Returns the directory it removed.
+ *
+ * The cache is keyed by the host Bun's revision and survives across branches, so
+ * a build that has run once on this machine never touches the network again —
+ * which is how a download path can break and every local build stay green. This
+ * is the deliberate way back to the cold path.
+ *
+ * It clears the resolved key rather than moving the build to a throwaway one:
+ * provenance is read back later from the same directory, by the drift report
+ * here and by `scripts/release/distribution-manifest.ts` in its own process, and
+ * a key only this build knows would leave both reporting no runtimes at all.
+ * // Usage: await clearBunCrossRuntimeCache('canary')
+ */
+export async function clearBunCrossRuntimeCache(
+  channel: string,
+  options: Omit<CrossRuntimeOptions, 'channel'> = {}
+): Promise<string> {
+  const directory = join(
+    options.cacheDir ?? CACHE_DIR,
+    options.cacheKey ?? defaultCacheKey(channel)
+  );
+  await rm(directory, { recursive: true, force: true });
+  return directory;
+}
+
 async function installCrossRuntime(
   asset: string,
   installDir: string,
@@ -374,7 +435,8 @@ async function installCrossRuntime(
  * `downloadBase` is a parameter rather than a constant so the verification can
  * be tested against a local server: every branch worth having — a corrupted
  * body, a tag that advanced mid-download, a listing that omits the asset — is
- * unreachable through the real one.
+ * unreachable through the real one. `timeouts` follows the same seam, because a
+ * ceiling nothing exercises is a ceiling nobody knows still fires.
  *
  * // Usage: await downloadVerifiedAsset('bun-linux-x64', 'canary', '/tmp/bun.zip')
  */
@@ -382,15 +444,12 @@ export async function downloadVerifiedAsset(
   asset: string,
   channel: string,
   archivePath: string,
-  downloadBase: string = RELEASE_DOWNLOAD_BASE
+  downloadBase: string = RELEASE_DOWNLOAD_BASE,
+  timeouts: AssetTimeouts = {}
 ): Promise<{ sha256: string; tagAdvanced: boolean }> {
-  const expected = await fetchAssetChecksum(asset, channel, downloadBase);
+  const expected = await fetchAssetChecksum(asset, channel, downloadBase, timeouts);
 
   const url = `${downloadBase}/${channel}/${asset}.zip`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(ASSET_TIMEOUT_MS) });
-  if (!response.ok) {
-    throw new Error(`Download failed (${response.status} ${response.statusText}): ${url}`);
-  }
   // Buffered, not `Bun.write(archivePath, response)`. Streaming the response
   // straight to disk is the obvious way to keep a whole Bun per target out of
   // memory, and it **deadlocks** on Bun 1.4.0-canary.1: with the seven foreign
@@ -400,13 +459,28 @@ export async function downloadVerifiedAsset(
   // 4.7s buffered. One streamed download alone is fine, which is what makes it
   // easy to reintroduce. The peak this costs is ~222 MB across all seven; the
   // assets are 24–38 MB each, not the 60 MB the size of a Bun install suggests.
-  const bytes = new Uint8Array(await response.arrayBuffer());
+  //
+  // The deadline below is not a substitute: an abort does not unblock a stalled
+  // `Bun.write(path, response)`. Measured against the release host — the ceiling
+  // came and went and the process was still hung when killed externally, which
+  // is why the CI lane that exercises this carries a job timeout of its own.
+  const bytes = await underDeadline(
+    `downloading ${asset}.zip from the "${channel}" channel: ${url}`,
+    timeouts.assetMs ?? ASSET_TIMEOUT_MS,
+    async (signal) => {
+      const response = await fetch(url, { signal });
+      if (!response.ok) {
+        throw new Error(`Download failed (${response.status} ${response.statusText}): ${url}`);
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    }
+  );
   await Bun.write(archivePath, bytes);
 
   const actual = await sha256File(archivePath);
   if (actual === expected) return { sha256: actual, tagAdvanced: false };
 
-  const reread = await fetchAssetChecksum(asset, channel, downloadBase);
+  const reread = await fetchAssetChecksum(asset, channel, downloadBase, timeouts);
   if (actual === reread) return { sha256: actual, tagAdvanced: true };
 
   throw new Error(
@@ -417,16 +491,26 @@ export async function downloadVerifiedAsset(
 async function fetchAssetChecksum(
   asset: string,
   channel: string,
-  downloadBase: string
+  downloadBase: string,
+  timeouts: AssetTimeouts
 ): Promise<string> {
   const url = `${downloadBase}/${channel}/${CHECKSUM_FILE}`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(CHECKSUM_TIMEOUT_MS) });
-  if (!response.ok) {
-    throw new Error(`Checksum download failed (${response.status} ${response.statusText}): ${url}`);
-  }
+  const listing = await underDeadline(
+    `reading ${CHECKSUM_FILE} for the "${channel}" channel: ${url}`,
+    timeouts.checksumMs ?? CHECKSUM_TIMEOUT_MS,
+    async (signal) => {
+      const response = await fetch(url, { signal });
+      if (!response.ok) {
+        throw new Error(
+          `Checksum download failed (${response.status} ${response.statusText}): ${url}`
+        );
+      }
+      return await response.text();
+    }
+  );
 
   const wanted = `${asset}.zip`;
-  for (const line of (await response.text()).split('\n')) {
+  for (const line of listing.split('\n')) {
     // `<digest>  <name>`, with the name optionally marked `*` for binary mode.
     const [digest, ...rest] = line.trim().split(/\s+/);
     if (rest.join(' ').replace(/^\*/, '') !== wanted) continue;

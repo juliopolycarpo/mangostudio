@@ -123,14 +123,17 @@ describe('CI / Gate aggregate', () => {
 
   test('gate accepts qa-metrics on workflow_dispatch and distribution skips when irrelevant', () => {
     // The placeholder count is pinned deliberately: `format` drops arguments it
-    // has no slot for, so a fifth skip added without widening this would be
+    // has no slot for, so a sixth skip added without widening this would be
     // accepted silently and never allow the skip it was written for.
-    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3}',`);
+    expect(gateBlock).toContain(`ALLOWED_SKIPS: ${EXPR} format('{0} {1} {2} {3} {4}',`);
     expect(gateBlock).toContain("github.event_name == 'workflow_dispatch' && 'qa-metrics'");
     expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'distribution'");
     expect(gateBlock).toContain("needs.changes.outputs.distribution == 'false' && 'smoke'");
     expect(gateBlock).toContain(
       "needs.changes.outputs.distribution == 'false' && 'smoke-container'"
+    );
+    expect(gateBlock).toContain(
+      "needs.changes.outputs.cross_runtime == 'false' && 'cross-runtimes'"
     );
   });
 
@@ -138,6 +141,35 @@ describe('CI / Gate aggregate', () => {
     const relevanceIf = `if: ${EXPR} needs.changes.outputs.distribution == 'true' }}`;
     for (const job of ['distribution', 'smoke', 'smoke-container']) {
       expect(extractJobBlock(workflow, job), job).toContain(relevanceIf);
+    }
+  });
+
+  test('the cross-runtime lane keys off its own path filter and stays bounded', () => {
+    const laneBlock = extractJobBlock(workflow, 'cross-runtimes');
+
+    expect(parseNeedsList(laneBlock)).toEqual(['changes']);
+    expect(laneBlock).toContain(`if: ${EXPR} needs.changes.outputs.cross_runtime == 'true' }}`);
+    // A stall is the failure shape this lane exists to catch, so an unbounded
+    // job would report it the way the original outage did: as silence.
+    expect(laneBlock).toContain('timeout-minutes: 5');
+    expect(laneBlock).toContain('run: bun ./scripts/ci/verify-cross-runtimes.ts');
+  });
+
+  test('the cross-runtime filter names every file that decides what it fetches', () => {
+    const changesBlock = extractJobBlock(workflow, 'changes');
+
+    expect(changesBlock).toContain(`cross_runtime: ${EXPR} steps.changed.outputs.cross_runtime }}`);
+    // Non-PR events (main pushes, manual dispatch) treat the lane as relevant.
+    expect(changesBlock).toContain('echo "cross_runtime=true" >> "$GITHUB_OUTPUT"');
+    for (const path of [
+      String.raw`\.bun-version`,
+      String.raw`scripts/lib/bun-cross-runtime\.ts`,
+      // The lane fetches one runtime per release target, so the target list
+      // decides what it downloads as much as the downloader does.
+      String.raw`scripts/lib/release-targets\.ts`,
+      String.raw`scripts/ci/verify-cross-runtimes\.ts`,
+    ]) {
+      expect(changesBlock, path).toContain(path);
     }
   });
 
@@ -158,6 +190,23 @@ describe('CI / Gate aggregate', () => {
     // producer dies of SIGPIPE on a large diff and the non-zero pipeline
     // status reads as "no relevant paths changed".
     expect(workflow).toContain('if grep -Eqv "$irrelevant" "$RUNNER_TEMP/changed-files"; then');
+  });
+});
+
+describe('cross-runtime-nightly.yml scheduled cold fetch', () => {
+  // The CI lane is path-filtered, so "nothing in this repo changed" is exactly
+  // the case where the canary channel it fetches from breaks underneath it.
+  const workflow = readText('.github/workflows/cross-runtime-nightly.yml');
+
+  test('runs on a schedule and on demand, never on a pull request', () => {
+    expect(sectionKeys(extractOnBlock(workflow))).toEqual(['schedule', 'workflow_dispatch']);
+  });
+
+  test('runs the same bounded verification as the CI lane', () => {
+    const jobBlock = extractJobBlock(workflow, 'cold-fetch');
+
+    expect(jobBlock).toContain('timeout-minutes: 5');
+    expect(jobBlock).toContain('run: bun ./scripts/ci/verify-cross-runtimes.ts');
   });
 });
 

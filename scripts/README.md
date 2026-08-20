@@ -20,6 +20,7 @@ scripts/
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── bench/            Hermetic performance measurement (startup.ts)
+├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
 ├── install/          Archive-install smoke fixture for the release dry-run (install.sh, not shipped; canonical installers live at mangostudio.dev)

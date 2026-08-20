@@ -51,6 +51,16 @@ commit red with no change in this repo. Two consequences are already handled —
   passes it to `--compile-executable-path`. Pinning `.bun-version` to a released
   version turns this off and restores Bun's own download path.
 
+That cache is keyed by the host Bun's revision and survives across branches, so
+a machine that has built once never fetches again — which is how a broken
+download path can leave every local build green. `bun run build --binary
+--refresh-runtimes` discards the resolved key first and really downloads. Two CI
+lanes do the same without compiling anything: `cross-runtimes` in `ci.yml`, on
+changes to `.bun-version` or the fetcher, and `cross-runtime-nightly.yml`,
+because the channel moves daily whether or not this repo does. Both run
+`scripts/ci/verify-cross-runtimes.ts` under a five-minute bound — the failure
+mode is a stall, so the bound is what turns it into a report.
+
 To bisect a suspected canary regression, pin `.bun-version` to a released tag
 (`1.3.14`) on a scratch branch. Everything else follows from that one line, with
 one exception: `scripts/tests/bun-toolchain.unit.test.ts` asserts the repo is on
