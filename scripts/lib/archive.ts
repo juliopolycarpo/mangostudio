@@ -10,9 +10,10 @@
 // Two limits of the native reader, both verified against
 // `1.4.0-canary.1+32e87032b`:
 //
-// - **gzip only.** `.tar.xz` and `.tar.bz2` throw `Unrecognized archive format`,
-//   where GNU tar would have auto-detected them. Callers that ingest third-party
-//   assets have to pin gzipped tarballs.
+// - **gzip or stored only.** A plain `.tar` and a `.tar.gz` are both detected
+//   from the bytes, but `.tar.xz` and `.tar.bz2` throw `Unrecognized archive
+//   format` where GNU tar would have auto-detected them. Callers that ingest
+//   third-party assets have to pin gzipped or uncompressed tarballs.
 // - **zip is not readable at all**, so the zip halves of the release lane keep
 //   their `unzip`/PowerShell subprocesses.
 //
@@ -31,7 +32,9 @@ export interface ArchiveReader {
 }
 
 /**
- * Open a gzipped tar for listing and extraction, reading the file once.
+ * Open a gzipped or stored tar for listing and extraction, reading the file
+ * once. Compression is detected from the bytes, not the name, so a stored
+ * distribution bundle and a gzipped one open the same way.
  * Use this when entries must be judged before anything is written to disk.
  * // Usage: const archive = await openTarArchive(bundle)
  */

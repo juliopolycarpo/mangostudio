@@ -50,7 +50,9 @@ runs:
         # "found 0" diagnostic below ever prints.
         set -eo pipefail
         shopt -s nullglob
-        bundles=("$DOWNLOAD_DIR"/*.tar.gz)
+        # Both shapes: target bundles are stored tars, scoped bundles are
+        # gzipped. `*.tar` does not match `*.tar.gz`, so neither is counted twice.
+        bundles=("$DOWNLOAD_DIR"/*.tar "$DOWNLOAD_DIR"/*.tar.gz)
         if [ "${#bundles[@]}" -ne 1 ]; then
           echo "Expected exactly one distribution bundle, found ${#bundles[@]}." >&2
           exit 1

@@ -299,4 +299,13 @@ All verified against the canary the repository pins, not inherited from docs:
   `compress` option writes an uncompressed tar named `.tar.gz`.
 
 Revisit when `Bun.Archive` gains a mode option; `archive-assets.ts` and
-`bundle-distribution.ts` carry the pointer at their creation functions.
+`bundle-distribution.ts` carry the pointer at their creation functions. Upstream
+tracks it as [oven-sh/bun#33212](https://github.com/oven-sh/bun/issues/33212),
+with an unmerged PR at
+[#33213](https://github.com/oven-sh/bun/pull/33213) — check whether that landed
+before re-probing the option parser.
+
+Reading has one limit fewer than first recorded: a **stored** (uncompressed) tar
+reads fine, detected from the bytes rather than the name, which is what lets the
+target distribution bundles ship stored. See
+[`releasing.md`](./releasing.md#distribution-bundle-compression).

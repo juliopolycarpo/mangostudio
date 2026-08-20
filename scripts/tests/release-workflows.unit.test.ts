@@ -3,7 +3,13 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { targetBundleMembers } from '../release/bundle-distribution';
+import { ALL_BINARY_TARGETS } from '../lib/release-targets';
+import {
+  bundleFileName,
+  SCOPED_BUNDLE_COMPRESSION,
+  TARGET_BUNDLE_COMPRESSION,
+  targetBundleMembers,
+} from '../release/bundle-distribution';
 import {
   RELEASE_SCRIPT_ENV_CONTRACTS,
   type ReleaseScriptPath,
@@ -23,7 +29,11 @@ import {
   workflowFiles,
 } from './support/workflow-files';
 
-const COMPRESSED_PAYLOAD = /\.(?:tar\.gz|tgz|zip|tar\.xz|tar\.zst)\b/;
+// An archive payload whose compression was already decided when it was built.
+// `.tar` is in the set deliberately: a stored distribution bundle holds an
+// already-gzipped platform archive, so letting the artifact zip Deflate it
+// would relocate the gzip that storing it removed, not avoid it.
+const ARCHIVE_PAYLOAD = /\.(?:tar(?:\.(?:gz|xz|zst))?|tgz|zip)\b/;
 
 // Jobs that publish a public channel. The tag-restricted `release` environment
 // (deployment rule, reviewers, secrets) is GitHub state and is not asserted
@@ -360,26 +370,55 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('bun ./scripts/release/bundle-distribution.ts');
     expect(workflow.match(/overwrite: false/g)).toHaveLength(11);
     expect(workflow).toContain('actions/attest-build-provenance@');
-    expect(workflow).toContain('subject-path: .distribution-bundles/*.tar.gz');
+    expect(workflow).toMatch(
+      /subject-path: \|\n\s+\.distribution-bundles\/\*\.tar\n\s+\.distribution-bundles\/\*\.tar\.gz/
+    );
   });
 
-  test('already-compressed upload payloads skip artifact re-compression', () => {
+  test('archive upload payloads skip artifact re-compression', () => {
     const uploads = workflowFiles().flatMap((path) =>
       uploadArtifactSteps(readText(path)).map((step) => ({
         path,
         step,
-        compressed: uploadPaths(step).some((payload) => COMPRESSED_PAYLOAD.test(payload)),
+        archive: uploadPaths(step).some((payload) => ARCHIVE_PAYLOAD.test(payload)),
       }))
     );
 
     // Eleven distribution bundles today; a twelfth must make the same decision
-    // deliberately instead of quietly re-Deflating gzip.
-    expect(uploads.filter((upload) => upload.compressed)).toHaveLength(11);
-    for (const { path, step, compressed } of uploads) {
+    // deliberately, instead of quietly re-Deflating a payload whose compression
+    // `bundle-distribution.ts` already chose — or already chose to skip.
+    expect(uploads.filter((upload) => upload.archive)).toHaveLength(11);
+    for (const { path, step, archive } of uploads) {
       // Anchored so a commented-out key can neither satisfy nor trip the policy.
-      if (compressed) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
+      if (archive) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
       else expect(step, path).not.toMatch(/^\s*compression-level:/m);
     }
+  });
+
+  test('bundle names state whether the payload is compressed', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+
+    // The name is the contract the download action globs on and the only
+    // signal a human untarring one by hand gets.
+    expect(bundleFileName('assets', SCOPED_BUNDLE_COMPRESSION)).toBe('assets.tar.gz');
+    expect(bundleFileName('linux-x64', TARGET_BUNDLE_COMPRESSION)).toBe('linux-x64.tar');
+
+    for (const scope of ['checksums', 'assets', 'npm']) {
+      expect(workflow, scope).toContain(
+        `path: .distribution-bundles/${bundleFileName(scope, SCOPED_BUNDLE_COMPRESSION)}`
+      );
+    }
+    for (const target of ALL_BINARY_TARGETS) {
+      expect(workflow, target.arch).toContain(
+        `path: .distribution-bundles/${bundleFileName(target.arch, TARGET_BUNDLE_COMPRESSION)}`
+      );
+    }
+
+    // The consumer resolves exactly one bundle, so its glob has to cover both
+    // shapes; attestation coverage is asserted with the rest of that workflow.
+    expect(readText('.github/actions/download-distribution/action.yml')).toContain(
+      'bundles=("$DOWNLOAD_DIR"/*.tar "$DOWNLOAD_DIR"/*.tar.gz)'
+    );
   });
 
   test('binary and Docker smoke consume target artifacts without rebuilding by default', () => {

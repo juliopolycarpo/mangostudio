@@ -116,9 +116,13 @@ jobs:
           path: .distribution-bundles/checksums.tar.gz
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
-          # Payload is already gzip: the artifact zip re-Deflates it for ~0% gain
-          # at a full single-threaded CPU pass, measured at 57s across the nine
-          # uploads of the pre-split layout. Every upload below is level 0 for
+          # bundle-distribution.ts already made this payload's one compression
+          # decision: gzip 1 for the scoped bundles, stored for the target
+          # bundles whose archive member is gzip already. Letting the artifact
+          # zip Deflate on top re-spends a full single-threaded CPU pass —
+          # measured at 57s across the nine uploads of the pre-split layout —
+          # and for a stored target bundle it would simply relocate the gzip
+          # that step was removed to avoid. Every upload below is level 0 for
           # the same reason.
           compression-level: 0
 
@@ -144,7 +148,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-x64'] }}
-          path: .distribution-bundles/linux-x64.tar.gz
+          path: .distribution-bundles/linux-x64.tar
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           compression-level: 0
@@ -153,7 +157,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-arm64'] }}
-          path: .distribution-bundles/linux-arm64.tar.gz
+          path: .distribution-bundles/linux-arm64.tar
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           compression-level: 0
@@ -162,7 +166,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-x64-musl'] }}
-          path: .distribution-bundles/linux-x64-musl.tar.gz
+          path: .distribution-bundles/linux-x64-musl.tar
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           compression-level: 0
@@ -171,7 +175,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-arm64-musl'] }}
-          path: .distribution-bundles/linux-arm64-musl.tar.gz
+          path: .distribution-bundles/linux-arm64-musl.tar
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           compression-level: 0
@@ -180,7 +184,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['darwin-x64'] }}
-          path: .distribution-bundles/darwin-x64.tar.gz
+          path: .distribution-bundles/darwin-x64.tar
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           compression-level: 0
@@ -189,7 +193,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['darwin-arm64'] }}
-          path: .distribution-bundles/darwin-arm64.tar.gz
+          path: .distribution-bundles/darwin-arm64.tar
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           compression-level: 0
@@ -198,7 +202,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['windows-x64'] }}
-          path: .distribution-bundles/windows-x64.tar.gz
+          path: .distribution-bundles/windows-x64.tar
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           compression-level: 0
@@ -207,7 +211,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['windows-arm64'] }}
-          path: .distribution-bundles/windows-arm64.tar.gz
+          path: .distribution-bundles/windows-arm64.tar
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
           compression-level: 0
@@ -216,4 +220,8 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: .distribution-bundles/*.tar.gz
+          # Target bundles are stored tars and scoped bundles are gzipped, so
+          # both shapes have to be named or half the set would ship unattested.
+          subject-path: |
+            .distribution-bundles/*.tar
+            .distribution-bundles/*.tar.gz
