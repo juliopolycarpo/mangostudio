@@ -36,7 +36,7 @@ interface ShardFiles {
   readonly lcovLines?: ReadonlyArray<[number, number]>;
   readonly blob?: string;
   readonly meta?: { shard: number; exitCode: number; durationSeconds: number };
-  readonly vitestErrors?: { errors: number; headlines: [] };
+  readonly unhandledErrors?: { errors: number; headlines: [] };
 }
 
 const writeShards = async (root: string, shards: readonly ShardFiles[]): Promise<void> => {
@@ -49,8 +49,8 @@ const writeShards = async (root: string, shards: readonly ShardFiles[]): Promise
     }
     if (shard.blob) await Bun.write(join(dir, VITEST_BLOB_DIR, shard.blob), '{}');
     if (shard.meta) await Bun.write(join(dir, 'shard-meta.json'), JSON.stringify(shard.meta));
-    if (shard.vitestErrors) {
-      await Bun.write(join(dir, 'vitest-errors.json'), JSON.stringify(shard.vitestErrors));
+    if (shard.unhandledErrors) {
+      await Bun.write(join(dir, 'unhandled-errors.json'), JSON.stringify(shard.unhandledErrors));
     }
   }
 };
@@ -119,7 +119,7 @@ describe('mergeTestShards', () => {
         ],
         blob: 'blob-1.json',
         meta: { shard: 1, exitCode: 0, durationSeconds: 61 },
-        vitestErrors: { errors: 0, headlines: [] },
+        unhandledErrors: { errors: 0, headlines: [] },
       },
       {
         name: 'test-shard-2',
@@ -129,7 +129,7 @@ describe('mergeTestShards', () => {
         ],
         blob: 'blob-2.json',
         meta: { shard: 2, exitCode: 0, durationSeconds: 66 },
-        vitestErrors: { errors: 0, headlines: [] },
+        unhandledErrors: { errors: 0, headlines: [] },
       },
     ]);
 
@@ -197,9 +197,15 @@ describe('mergeTestShards', () => {
 describe('collect-test-metrics degradation', () => {
   const script = join(import.meta.dir, '..', 'qa-gate', 'collect-test-metrics.ts');
 
-  const collect = async (summaryPath: string, shardsRoot?: string) => {
+  const collect = async (summaryPath: string, shardsRoot?: string, gateExitCode?: string) => {
     const proc = Bun.spawn({
-      cmd: ['bun', script, summaryPath, ...(shardsRoot ? [shardsRoot] : [])],
+      cmd: [
+        'bun',
+        script,
+        summaryPath,
+        ...(shardsRoot ? [shardsRoot] : []),
+        ...(gateExitCode === undefined ? [] : [gateExitCode]),
+      ],
       stdout: 'pipe',
       stderr: 'pipe',
     });
@@ -216,8 +222,8 @@ describe('collect-test-metrics degradation', () => {
     ['not an object', '[]'],
     ['exitCode only', '{"exitCode":0}'],
     [
-      'malformed vitestErrors',
-      '{"shards":8,"exitCode":0,"durationSeconds":1,"vitestErrors":{"errors":"nope"}}',
+      'malformed unhandledErrors',
+      '{"shards":8,"exitCode":0,"durationSeconds":1,"unhandledErrors":{"errors":"nope"}}',
     ],
   ])('reports a failing suite rather than throwing on a %s summary', async (_label, contents) => {
     const dir = await makeTemp();
@@ -246,12 +252,33 @@ describe('collect-test-metrics degradation', () => {
         shards: 8,
         exitCode: 0,
         durationSeconds: 12,
-        vitestErrors: { errors: 0, headlines: [] },
+        unhandledErrors: { errors: 0, headlines: [] },
       })
     );
 
     const { stdout, exitCode } = await collect(summaryPath);
     expect(exitCode).toBe(0);
     expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(0);
+  });
+
+  // The frontend coverage thresholds moved out of the sharded run and into the
+  // merge job, so the shard summary can be all-green while the run is red. If
+  // the gate's outcome did not reach the fragment, verdict.ts — which keys
+  // entirely on `tests.exitCode` — would render a passing suite on a red CI run.
+  it('reports the merge job coverage gate failure on an all-green shard summary', async () => {
+    const dir = await makeTemp();
+    const summaryPath = join(dir, 'shard-summary.json');
+    await Bun.write(
+      summaryPath,
+      JSON.stringify({
+        shards: 8,
+        exitCode: 0,
+        durationSeconds: 12,
+        unhandledErrors: { errors: 0, headlines: [] },
+      })
+    );
+
+    const { stdout } = await collect(summaryPath, join(dir, 'no-shards'), '1');
+    expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(1);
   });
 });

@@ -11,7 +11,9 @@ permissions:
 # ideal split well past N=12), each job pays ~21s of fixed setup, and the merge
 # job adds a fixed ~30s. Measured per-shard test time falls 70s -> 35s -> 23s
 # at N=4 -> 8 -> 12, so doubling again buys ~15s of wall clock for four more
-# jobs. Raising it is a two-line change: this value and the matrix list.
+# jobs. Raising it is a three-line change: this value, the matrix list, and the
+# shard job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
+# so that last one cannot interpolate this value.
 env:
   SHARD_COUNT: 8
 
@@ -100,14 +102,15 @@ jobs:
             "${SHARD}" "${status}" "$(( $(date +%s) - start ))" > shard-meta.json
           exit "${status}"
 
-      # Vitest's JUnit reporter never receives the run's unhandled errors and
-      # writes errors="0" unconditionally, so the "green counts plus Errors N
-      # plus exit 1" class documented in docs/reference/testing.md only exists
-      # in the log. Extract it here, while the log is still local to the shard
-      # that produced it.
-      - name: Extract Vitest unhandled errors
+      # Neither runner's unhandled errors reach its JUnit report: Vitest's
+      # reporter writes errors="0" unconditionally, and Bun's "# Unhandled error
+      # between tests" block leaves failures="0" with no failing case while the
+      # run exits 1. Both classes are documented in docs/reference/testing.md and
+      # exist only in the log, so extract them here, while the log is still local
+      # to the shard that produced it.
+      - name: Extract unhandled errors
         if: ${{ !cancelled() }}
-        run: bun ./scripts/qa-gate/vitest-unhandled-errors.ts coverage-run.log > vitest-errors.json
+        run: bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json
 
       # Uploaded even when the shard fails so the merge job can report the
       # failing exit code instead of a missing-metrics placeholder.
@@ -127,7 +130,7 @@ jobs:
             .mango/artifacts/coverage/
             apps/frontend/.vitest-reports/
             shard-meta.json
-            vitest-errors.json
+            unhandled-errors.json
           retention-days: 1
 
       - name: Upload shard log
@@ -172,6 +175,7 @@ jobs:
       # shards merged reproduce the unsharded run's numbers exactly
       # (76.08/68.06/72.81/78.76), so a drop here is a real drop.
       - name: Merge Vitest reports and enforce coverage thresholds
+        id: thresholds
         run: |
           set -euo pipefail
           mkdir -p .mango/artifacts/junit
@@ -179,9 +183,21 @@ jobs:
 
       # Emitted even when a shard or the threshold gate failed, so the QA
       # report can show the failing exit code rather than a placeholder.
+      #
+      # The gate's outcome is passed explicitly: `shard-summary.json` only knows
+      # how the shards ended, and coverage thresholds now run after them. Without
+      # it a coverage-only regression renders as a green suite in the QA report
+      # while CI is red. A skipped step (the shard merge died first) counts as a
+      # failed gate, which is what it is.
       - name: Collect test metrics fragment
         if: ${{ !cancelled() }}
-        run: bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards > test-metrics.json
+        env:
+          GATE_OUTCOME: ${{ steps.thresholds.outcome }}
+        run: |
+          set -euo pipefail
+          gate=0
+          [ "${GATE_OUTCOME}" = "success" ] || gate=1
+          bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards "${gate}" > test-metrics.json
 
       # Handoff to the qa-metrics job in the same run; nothing consumes it
       # afterwards, so the shortest retention GitHub allows is enough.
@@ -195,11 +211,17 @@ jobs:
 
       # Merged coverage output is a failure-diagnostics artifact: green runs are
       # summarized in the step summary and the qa-metrics envelope instead.
+      #
+      # `include-hidden-files` for the same reason the shard upload needs it:
+      # `.mango` is a dot-directory, and at the default the whole tree is dropped
+      # while the upload still reports success — an empty artifact exactly when
+      # someone is trying to diagnose a red run.
       - name: Upload coverage
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage
+          include-hidden-files: true
           path: |
             .mango/artifacts/coverage/
           retention-days: 7

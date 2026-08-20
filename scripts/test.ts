@@ -81,10 +81,11 @@ if (shard && !runCoverage) {
   fatal('--shard requires --coverage; no other lane has a merge step to reassemble it.');
 }
 
-// Bun refuses to create the parent directory for `--reporter-outfile` and
-// fails the run when it is missing, so create it here rather than in each of
-// the six lane scripts. Clearing it first keeps a lane that did not run this
-// time from contributing last run's counts to the merged totals.
+// Bun refuses to create the parent directory for `--reporter-outfile` and, on
+// the pinned canary, prints `JUnitReportFailed` and still exits 0 when it is
+// missing — the lane's counts silently go to zero. Create it here rather than in
+// each of the six lane scripts. Clearing it first keeps a lane that did not run
+// this time from contributing last run's counts to the merged totals.
 const junitDir = join(ROOT_DIR, JUNIT_DIR);
 await rm(junitDir, { recursive: true, force: true });
 await mkdir(junitDir, { recursive: true });

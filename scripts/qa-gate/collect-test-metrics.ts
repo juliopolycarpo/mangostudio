@@ -1,7 +1,7 @@
 // Emits the test-derived QA metrics fragment after the sharded
 // `bun run test --coverage` fan-out has been merged: per-workspace pass counts
-// from each lane's JUnit report, the run's exit code and wall clock, Vitest's
-// unhandled-error headlines, and the coverage summaries from
+// from each lane's JUnit report, the run's exit code and wall clock, the
+// unhandled-error headlines JUnit cannot carry, and the coverage summaries from
 // `.mango/artifacts/coverage/`. collect.ts merges this fragment so the suite
 // never runs twice for one report.
 //
@@ -10,7 +10,12 @@
 // frontend Vitest report only exists after `vitest --mergeReports` replays the
 // blobs here in the merge job.
 //
-// Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir]
+// The optional third argument is the merge job's coverage-threshold gate exit
+// code. The shard summary only knows how the shards themselves ended, and the
+// frontend thresholds now run after them; without this a coverage-only failure
+// would report `exitCode: 0` and render a passing verdict on a red run.
+//
+// Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir] [gate-exit-code]
 
 import { listShardDirs, type ShardSummary } from '../ci/merge-test-shards';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR } from '../lib/config';
@@ -18,12 +23,12 @@ import { safe } from './collect/support';
 import type { CoverageSummary, Failable, TestMetricsFragment } from './collect/types';
 import { readWorkspaceCoverageSummary } from './coverage-summary';
 import { buildTestSuiteStats, readLaneResults } from './junit-results';
-import type { VitestUnhandledErrors } from './vitest-unhandled-errors';
+import type { UnhandledErrors } from './unhandled-errors';
 
-const [, , summaryPath, shardsRoot] = process.argv;
+const [, , summaryPath, shardsRoot, gateExitCodeArg] = process.argv;
 if (!summaryPath) {
   process.stderr.write(
-    'Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir]\n'
+    'Usage: bun ./scripts/qa-gate/collect-test-metrics.ts <shard-summary.json> [shards-dir] [gate-exit-code]\n'
   );
   process.exit(1);
 }
@@ -37,7 +42,7 @@ const FAILED_SUMMARY: ShardSummary = {
   shards: 0,
   exitCode: 1,
   durationSeconds: 0,
-  vitestErrors: { errors: 0, headlines: [] },
+  unhandledErrors: { errors: 0, headlines: [] },
 };
 
 // Parsing is not enough: `[]` is valid JSON and would hand an undefined exit
@@ -47,12 +52,12 @@ const FAILED_SUMMARY: ShardSummary = {
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value);
 
-const isVitestUnhandledErrors = (value: unknown): value is VitestUnhandledErrors =>
+const isUnhandledErrors = (value: unknown): value is UnhandledErrors =>
   typeof value === 'object' &&
   value !== null &&
   !Array.isArray(value) &&
-  isFiniteNumber((value as VitestUnhandledErrors).errors) &&
-  Array.isArray((value as VitestUnhandledErrors).headlines);
+  isFiniteNumber((value as UnhandledErrors).errors) &&
+  Array.isArray((value as UnhandledErrors).headlines);
 
 const isShardSummary = (value: unknown): value is ShardSummary => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -61,7 +66,7 @@ const isShardSummary = (value: unknown): value is ShardSummary => {
     isFiniteNumber(summary.shards) &&
     isFiniteNumber(summary.exitCode) &&
     isFiniteNumber(summary.durationSeconds) &&
-    (summary.vitestErrors === undefined || isVitestUnhandledErrors(summary.vitestErrors))
+    (summary.unhandledErrors === undefined || isUnhandledErrors(summary.unhandledErrors))
   );
 };
 
@@ -73,7 +78,7 @@ const readShardSummary = async (path: string): Promise<ShardSummary> => {
     if (!isShardSummary(parsed)) return FAILED_SUMMARY;
     return {
       ...parsed,
-      vitestErrors: parsed.vitestErrors ?? FAILED_SUMMARY.vitestErrors,
+      unhandledErrors: parsed.unhandledErrors ?? FAILED_SUMMARY.unhandledErrors,
     };
   } catch {
     return FAILED_SUMMARY;
@@ -81,6 +86,16 @@ const readShardSummary = async (path: string): Promise<ShardSummary> => {
 };
 
 const summary = await readShardSummary(summaryPath);
+
+// A missing or unparseable value is treated as a failed gate: this argument
+// only ever comes from a step outcome, and "unknown" there means the step did
+// not report success.
+const gateExitCode = ((): number => {
+  if (gateExitCodeArg === undefined) return 0;
+  const parsed = Number(gateExitCodeArg);
+  return Number.isInteger(parsed) ? parsed : 1;
+})();
+const exitCode = summary.exitCode !== 0 ? summary.exitCode : gateExitCode;
 
 const listShards = async (root: string): Promise<readonly string[]> => {
   try {
@@ -95,8 +110,8 @@ const junitDirs = [ROOT_DIR, ...(shardsRoot ? await listShards(shardsRoot) : [])
 const collectSuiteStats = async () =>
   buildTestSuiteStats(
     await readLaneResults(junitDirs),
-    summary.vitestErrors,
-    summary.exitCode,
+    summary.unhandledErrors,
+    exitCode,
     summary.durationSeconds
   );
 

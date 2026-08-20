@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
-import { mergeVitestUnhandledErrors, parseVitestUnhandledErrors } from './vitest-unhandled-errors';
+import { mergeUnhandledErrors, parseUnhandledErrors } from './unhandled-errors';
 
-// Captured Vitest output from the two known instances in
-// docs/reference/testing.md ("Unhandled Errors With Green Test Counts").
+// Captured runner output: the two Vitest instances in docs/reference/testing.md
+// ("Unhandled Errors With Green Test Counts") and the Bun block, whose JUnit
+// report reads failures="0" while the run exits 1.
 const fixture = (name: string): Promise<string> =>
   Bun.file(join(import.meta.dir, 'testing/fixtures', `${name}.txt`)).text();
 
-describe('parseVitestUnhandledErrors', () => {
+describe('parseUnhandledErrors', () => {
   it('parses the nanostores log: green counts plus Errors 2', async () => {
-    const parsed = parseVitestUnhandledErrors(await fixture('vitest-unhandled-nanostores'));
+    const parsed = parseUnhandledErrors(await fixture('vitest-unhandled-nanostores'));
     expect(parsed.errors).toBe(2);
     // Both errors report the same message and the same originating file, so
     // they collapse to one headline rather than repeating.
@@ -23,7 +24,7 @@ describe('parseVitestUnhandledErrors', () => {
   });
 
   it('parses the toast auto-dismiss log: green counts plus Errors 1', async () => {
-    const parsed = parseVitestUnhandledErrors(await fixture('vitest-unhandled-toast'));
+    const parsed = parseUnhandledErrors(await fixture('vitest-unhandled-toast'));
     expect(parsed.errors).toBe(1);
     expect(parsed.headlines).toEqual([
       {
@@ -33,8 +34,36 @@ describe('parseVitestUnhandledErrors', () => {
     ]);
   });
 
+  // Bun's JUnit report for this run is green — no failing <testcase>, and
+  // failures="0" — so without the log the QA fragment would report parseMiss
+  // and lose the message naming the leak.
+  it('parses a Bun unhandled-error-between-tests block', async () => {
+    const parsed = parseUnhandledErrors(await fixture('bun-unhandled-between-tests'));
+    expect(parsed.errors).toBe(1);
+    expect(parsed.headlines).toEqual([
+      { message: 'error: boom between tests', originatedIn: null },
+    ]);
+  });
+
+  it('keeps a Bun headline when another lane emits a pass line in between', () => {
+    const parsed = parseUnhandledErrors(
+      [
+        '@mangostudio/api:test:coverage: # Unhandled error between tests',
+        '@mangostudio/shared:test:coverage: (pass) unrelated',
+        '@mangostudio/shared:test:coverage:  1 pass',
+        '@mangostudio/api:test:coverage: error: boom between tests',
+        '@mangostudio/api:test:coverage:  2 pass',
+        '@mangostudio/api:test:coverage:  1 error',
+      ].join('\n')
+    );
+    expect(parsed.errors).toBe(1);
+    expect(parsed.headlines).toEqual([
+      { message: 'error: boom between tests', originatedIn: null },
+    ]);
+  });
+
   it('reads Turbo-prefixed lines, which is the shape a shard job produces', () => {
-    const parsed = parseVitestUnhandledErrors(
+    const parsed = parseUnhandledErrors(
       [
         '@mangostudio/frontend:test:coverage: TypeError: fetch failed',
         '@mangostudio/frontend:test:coverage: This error originated in "tests/unit/a.test.tsx" test file.',
@@ -48,18 +77,22 @@ describe('parseVitestUnhandledErrors', () => {
   });
 
   it('finds nothing in a green log', () => {
-    const parsed = parseVitestUnhandledErrors(
+    const parsed = parseUnhandledErrors(
       ' Test Files  144 passed (144)\n      Tests  1150 passed (1150)\n   Duration  164.54s\n'
     );
     expect(parsed).toEqual({ errors: 0, headlines: [] });
   });
 
+  it('does not read a Bun pass or fail summary line as an error count', () => {
+    expect(parseUnhandledErrors(' 812 pass\n 0 fail\n 2 expect() calls\n').errors).toBe(0);
+  });
+
   it('ignores GitHub Actions workflow-command lines', () => {
-    expect(parseVitestUnhandledErrors('##[error]Errors  9 errors\n').errors).toBe(0);
+    expect(parseUnhandledErrors('##[error]Errors  9 errors\n').errors).toBe(0);
   });
 
   it('keeps two errors that share a message but not a file', () => {
-    const parsed = parseVitestUnhandledErrors(
+    const parsed = parseUnhandledErrors(
       [
         'ReferenceError: window is not defined',
         'This error originated in "tests/unit/a.test.tsx" test file.',
@@ -71,9 +104,9 @@ describe('parseVitestUnhandledErrors', () => {
   });
 });
 
-describe('mergeVitestUnhandledErrors', () => {
+describe('mergeUnhandledErrors', () => {
   it('sums counts and unions headlines across shards', () => {
-    const merged = mergeVitestUnhandledErrors([
+    const merged = mergeUnhandledErrors([
       { errors: 2, headlines: [{ message: 'Error: a', originatedIn: 'a.tsx' }] },
       { errors: 1, headlines: [{ message: 'Error: b', originatedIn: 'b.tsx' }] },
     ]);
@@ -89,6 +122,6 @@ describe('mergeVitestUnhandledErrors', () => {
         { message: `Error: ${index}b`, originatedIn: `${index}b.tsx` },
       ],
     }));
-    expect(mergeVitestUnhandledErrors(parts).headlines).toHaveLength(5);
+    expect(mergeUnhandledErrors(parts).headlines).toHaveLength(5);
   });
 });

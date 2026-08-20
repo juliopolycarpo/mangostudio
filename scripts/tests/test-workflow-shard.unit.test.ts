@@ -53,7 +53,7 @@ describe('Test workflow shard matrix', () => {
     expect(block).toContain('.mango/artifacts/coverage/');
     expect(block).toContain('apps/frontend/.vitest-reports/');
     expect(block).toContain('shard-meta.json');
-    expect(block).toContain('vitest-errors.json');
+    expect(block).toContain('unhandled-errors.json');
   });
 
   test('the upload keeps dot-directories', () => {
@@ -89,6 +89,24 @@ describe('Test workflow merge job', () => {
     const stepIndex = merge.indexOf('test:coverage:merge');
     expect(stepIndex).toBeGreaterThan(-1);
     expect(merge.slice(0, stepIndex)).not.toContain('continue-on-error');
+  });
+
+  test('the coverage gate failure reaches the QA fragment', () => {
+    // Thresholds run here, after the shards, so shard-summary.json can be
+    // all-green on a red run. verdict.ts keys entirely on `tests.exitCode`;
+    // without the gate's outcome a coverage-only regression renders a passing
+    // verdict while CI is red.
+    expect(merge).toContain('id: thresholds');
+    expect(merge).toContain('steps.thresholds.outcome');
+  });
+
+  test('the coverage diagnostics upload keeps dot-directories', () => {
+    // `.mango` is a dot-directory too, so this hits the same trap as the shard
+    // upload: an empty artifact that reports success, exactly when someone is
+    // trying to diagnose the red run that produced it.
+    const at = merge.indexOf('name: coverage');
+    expect(at).toBeGreaterThan(-1);
+    expect(merge.slice(at)).toContain('include-hidden-files: true');
   });
 
   test('reporting steps survive a failing gate so the QA report still renders', () => {

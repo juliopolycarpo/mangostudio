@@ -19,16 +19,13 @@
 //
 // Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> > shard-summary.json
 
-import { mkdir, readdir } from 'node:fs/promises';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { SHARDED_LCOV_PATHS, VITEST_BLOB_DIR } from '../lib/test-lanes';
 import { mergeLcovFiles } from '../qa-gate/merge-lcov-shards';
-import {
-  mergeVitestUnhandledErrors,
-  type VitestUnhandledErrors,
-} from '../qa-gate/vitest-unhandled-errors';
+import { mergeUnhandledErrors, type UnhandledErrors } from '../qa-gate/unhandled-errors';
 
 export interface ShardMeta {
   readonly shard: number;
@@ -42,7 +39,7 @@ export interface ShardSummary {
   readonly exitCode: number;
   /** Wall clock of the slowest shard, which is the lane's critical path. */
   readonly durationSeconds: number;
-  readonly vitestErrors: VitestUnhandledErrors;
+  readonly unhandledErrors: UnhandledErrors;
 }
 
 /** Fold per-shard run metadata into the single pair the QA fragment reports. */
@@ -102,7 +99,12 @@ export const mergeTestShards = async (
   // an index-derived name would pair the wrong file with the wrong shard at ten
   // or more. Names are reassigned sequentially here; `--mergeReports` reads the
   // directory, not the file names.
+  // Cleared first: a blob left behind by an earlier run in this checkout would
+  // be replayed by `--mergeReports` and land in the coverage the threshold gate
+  // reads. `.vitest-reports` is gitignored, so a local re-run is exactly where
+  // that stale file survives.
   const blobDir = join(outputRoot, VITEST_BLOB_DIR);
+  await rm(blobDir, { recursive: true, force: true });
   await mkdir(blobDir, { recursive: true });
   let blobs = 0;
   for (const dir of shardDirs) {
@@ -131,10 +133,10 @@ export const mergeTestShards = async (
       })
     )
   );
-  const vitestErrors = mergeVitestUnhandledErrors(
+  const unhandledErrors = mergeUnhandledErrors(
     await Promise.all(
       shardDirs.map((dir) =>
-        readJson<VitestUnhandledErrors>(join(dir, 'vitest-errors.json'), {
+        readJson<UnhandledErrors>(join(dir, 'unhandled-errors.json'), {
           errors: 0,
           headlines: [],
         })
@@ -142,7 +144,7 @@ export const mergeTestShards = async (
     )
   );
 
-  return { shards: shardDirs.length, ...summarizeShardMeta(metas), vitestErrors };
+  return { shards: shardDirs.length, ...summarizeShardMeta(metas), unhandledErrors };
 };
 
 if (import.meta.main) {

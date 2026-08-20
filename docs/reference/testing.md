@@ -347,21 +347,27 @@ header because the runners disagree on the header — Bun emits
 `errors` and puts `skipped` only on the nested `<testsuite>`, which Bun also
 nests once per `describe`.
 
-Vitest's unhandled errors are the exception. Its JUnit reporter is
-`onTestRunEnd(testModules)` — it never receives the run's `unhandledErrors` and
-writes `errors="0"` unconditionally, and its JSON reporter takes the same
-argument. So the failure class in
+Unhandled errors are the exception, in **both** runners. Vitest's JUnit reporter
+is `onTestRunEnd(testModules)` — it never receives the run's `unhandledErrors`
+and writes `errors="0"` unconditionally, and its JSON reporter takes the same
+argument. Bun is the same shape from the other direction: an error raised between
+tests prints a `# Unhandled error between tests` block and a `N error` summary
+line and exits 1, while its JUnit report reads `failures="0"` with no failing
+`<testcase>` (measured on 1.4.0-canary.1). So the failure class in
 [Unhandled Errors With Green Test Counts](#unhandled-errors-with-green-test-counts)
-exists only in the log, and each shard extracts it with
-`scripts/qa-gate/vitest-unhandled-errors.ts` before the log leaves the job. If
-you ever replace that with a structured source, check the reporter's signature
-first rather than assuming the XML grew an `errors` count.
+exists only in the log for either runner, and each shard extracts it with
+`scripts/qa-gate/unhandled-errors.ts` before the log leaves the job. If you ever
+replace that with a structured source, check the reporter first rather than
+assuming the XML grew an `errors` count.
 
-> Bun does not create the parent directory for `--reporter-outfile`. It fails
-> the run with `JUnitReportFailed` rather than skipping the report, which is the
-> good outcome, but it is why `scripts/test.ts` creates
-> `.mango/artifacts/junit/` before any lane starts — and clears it, so a lane
-> that did not run this time cannot contribute last run's counts.
+> Bun does not create the parent directory for `--reporter-outfile`, and it does
+> **not** fail the run when it is missing: it prints `JUnitReportFailed` and
+> still exits 0 (measured on 1.4.0-canary.1), so the lane's counts go silently to
+> zero. That is why `scripts/test.ts` creates `.mango/artifacts/junit/` before
+> any lane starts — and clears it, so a lane that did not run this time cannot
+> contribute last run's counts. Invoking a workspace `test:coverage` script
+> directly on a fresh checkout skips that step; create the directory first if you
+> care about the report.
 
 ### Randomized order
 

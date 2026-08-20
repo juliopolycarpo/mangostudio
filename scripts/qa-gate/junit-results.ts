@@ -8,14 +8,16 @@
 // `<testsuite>` — which Bun also nests, once per `describe`, so summing those
 // double-counts. A `<testcase>` is a leaf in both.
 //
-// What JUnit cannot carry is Vitest's unhandled errors: its reporter's
-// `onTestRunEnd(testModules)` never receives them, and hardcodes `errors="0"`.
-// Those headlines come from ./vitest-unhandled-errors.ts instead.
+// What JUnit cannot carry is either runner's unhandled errors: Vitest's
+// reporter's `onTestRunEnd(testModules)` never receives them and hardcodes
+// `errors="0"`, and Bun's `# Unhandled error between tests` block leaves the
+// report at `failures="0"` with no failing case while the run exits 1. Those
+// counts and headlines come from ./unhandled-errors.ts instead.
 
-import type { WorkspaceName } from '../lib/config';
+import { ALL_WORKSPACE_NAMES, type WorkspaceName } from '../lib/config';
 import { TEST_LANES, type TestLane } from '../lib/test-lanes';
 import type { TestErrorHeadline, TestSuiteStats } from './collect/types';
-import type { VitestUnhandledErrors } from './vitest-unhandled-errors';
+import type { UnhandledErrors } from './unhandled-errors';
 
 const MAX_HEADLINES = 5;
 const MAX_HEADLINE_CHARS = 400;
@@ -197,7 +199,11 @@ export const readLaneResults = async (
 const passCountsByWorkspace = (
   results: readonly LaneResult[]
 ): Readonly<Record<WorkspaceName | 'root', number>> => {
-  const counts: Record<string, number> = { root: 0, frontend: 0, api: 0, shared: 0, runtime: 0 };
+  // Derived, never hand-listed: a workspace missing from this seed would make
+  // `counts[lane.workspace] += n` produce NaN and serialize the total as null.
+  const counts: Record<string, number> = Object.fromEntries(
+    ['root', ...ALL_WORKSPACE_NAMES].map((workspace) => [workspace, 0])
+  );
   for (const { lane, counts: laneCounts } of results) {
     counts[lane.workspace] += laneCounts.passed;
   }
@@ -205,8 +211,8 @@ const passCountsByWorkspace = (
 };
 
 /**
- * Build the QA fragment's tests entry from the lane reports plus Vitest's
- * unhandled errors, which JUnit cannot carry.
+ * Build the QA fragment's tests entry from the lane reports plus the
+ * unhandled errors JUnit cannot carry.
  *
  * Failure fields stay omitted on a green run so stored baselines and the
  * rendered report are unchanged by this switch. `parseMiss` keeps its meaning:
@@ -217,7 +223,7 @@ const passCountsByWorkspace = (
  */
 export const buildTestSuiteStats = (
   results: readonly LaneResult[],
-  vitestErrors: VitestUnhandledErrors,
+  unhandledErrors: UnhandledErrors,
   exitCode: number | null,
   durationSeconds: number | null
 ): TestSuiteStats => {
@@ -226,7 +232,7 @@ export const buildTestSuiteStats = (
   const failedFiles = new Set(results.flatMap((result) => result.counts.failedFiles));
   const headlines = [
     ...results.flatMap((result) => result.counts.headlines),
-    ...vitestErrors.headlines,
+    ...unhandledErrors.headlines,
   ].slice(0, MAX_HEADLINES);
 
   const stats: TestSuiteStats = {
@@ -237,14 +243,14 @@ export const buildTestSuiteStats = (
   };
 
   const hasFailureSignal =
-    failed > 0 || failedFiles.size > 0 || vitestErrors.errors > 0 || headlines.length > 0;
+    failed > 0 || failedFiles.size > 0 || unhandledErrors.errors > 0 || headlines.length > 0;
 
   if (hasFailureSignal) {
     return {
       ...stats,
       failed,
       failedFiles: failedFiles.size,
-      errors: vitestErrors.errors,
+      errors: unhandledErrors.errors,
       ...(headlines.length > 0 ? { headlines } : {}),
     };
   }

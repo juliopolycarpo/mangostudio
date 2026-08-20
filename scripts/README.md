@@ -93,9 +93,10 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
   merge job, from the JUnit reports and coverage the eight shards produced.
 - `junit-results.ts` — count `<testcase>` outcomes per lane out of the shard
   directories. Replaced 269 lines of runner-log regex.
-- `vitest-unhandled-errors.ts` — the one signal JUnit cannot carry: Vitest's
-  reporter never receives the run's unhandled errors, so each shard extracts
-  them from its own log.
+- `unhandled-errors.ts` — the one signal JUnit cannot carry, for either runner:
+  Vitest's reporter never receives the run's unhandled errors, and Bun's
+  between-tests block never reaches its report either. Each shard extracts both
+  from its own log.
 - `merge-lcov-shards.ts` — merge per-shard Bun LCOV. Not a concatenation and not
   a union; see `docs/reference/testing.md` for why the naive merge reports a
   coverage regression that did not happen.
