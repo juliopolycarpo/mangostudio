@@ -36,7 +36,7 @@ export interface TimingsFile {
 
 export interface PartitionProblem {
   readonly lane: string;
-  readonly kind: 'duplicate';
+  readonly kind: 'duplicate' | 'malformed';
   readonly files: readonly string[];
 }
 
@@ -89,16 +89,27 @@ export const mergeLaneSlices = (
   };
 };
 
-const readSlice = async (path: string): Promise<TimingsFile | null> => {
+type SliceRead =
+  | { readonly status: 'missing' }
+  | { readonly status: 'malformed' }
+  | { readonly status: 'ok'; readonly data: TimingsFile };
+
+// Missing is the ordinary case for a shard that legitimately contributed
+// nothing to this lane. Malformed — a truncated write from a run that landed
+// mid-fan-out, or a shape `--timings` never produces — is not: it is
+// indistinguishable from "missing" to the union below unless kept separate,
+// which turns a corrupt shard into a silently smaller partition instead of
+// the hard error the `TimingsFile` contract promises.
+const readSlice = async (path: string): Promise<SliceRead> => {
   const file = Bun.file(path);
-  if (!(await file.exists())) return null;
+  if (!(await file.exists())) return { status: 'missing' };
   let parsed: unknown;
   try {
     parsed = await file.json();
   } catch {
-    return null;
+    return { status: 'malformed' };
   }
-  return isTimingsFile(parsed) ? parsed : null;
+  return isTimingsFile(parsed) ? { status: 'ok', data: parsed } : { status: 'malformed' };
 };
 
 /** // Usage: await mergeTimingsShards('shards', '.mango/artifacts/timings'); */
@@ -120,9 +131,14 @@ export const mergeTimingsShards = async (
     if (!lane.timingsPath) continue;
     const basename = lane.timingsPath.slice(`${TIMINGS_DIR}/`.length);
     const slices: TimingsFile[] = [];
+    const malformed: string[] = [];
     for (const shardDir of shardDirs) {
-      const slice = await readSlice(join(shardDir, lane.timingsPath));
-      if (slice) slices.push(slice);
+      const result = await readSlice(join(shardDir, lane.timingsPath));
+      if (result.status === 'ok') slices.push(result.data);
+      else if (result.status === 'malformed') malformed.push(join(shardDir, lane.timingsPath));
+    }
+    if (malformed.length > 0) {
+      problems.push({ lane: lane.id, kind: 'malformed', files: malformed.sort() });
     }
     // A lane with no slices at all is not an error here: `frontend-bun` runs two
     // files across eight shards, so most shards legitimately contribute nothing,
@@ -162,10 +178,15 @@ if (import.meta.main) {
 
   if (problems.length > 0) {
     for (const problem of problems) {
+      const message =
+        problem.kind === 'duplicate'
+          ? `${problem.files.length} file(s) ran on more than one shard — ` +
+            `the shards disagreed about the split, so the suite covered less than it reports`
+          : `${problem.files.length} shard timings file(s) were malformed and dropped from the ` +
+            `merge — the remaining shards are treated as the whole lane, so the suite covered ` +
+            `less than it reports`;
       process.stderr.write(
-        `::error::${problem.lane}: ${problem.files.length} file(s) ran on more than one shard — ` +
-          `the shards disagreed about the split, so the suite covered less than it reports: ` +
-          `${problem.files.slice(0, 5).join(', ')}\n`
+        `::error::${problem.lane}: ${message}: ${problem.files.slice(0, 5).join(', ')}\n`
       );
     }
     process.exit(1);

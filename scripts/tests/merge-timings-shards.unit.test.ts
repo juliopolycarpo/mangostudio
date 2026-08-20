@@ -105,7 +105,10 @@ describe('mergeTimingsShards', () => {
     expect(await Bun.file(join(out, 'runtime.json')).exists()).toBe(false);
   });
 
-  it('ignores a slice that is not a valid timings file', async () => {
+  // A malformed shard file is not the same as a missing one: it is evidence a
+  // write landed corrupt or mid-fan-out, and merging around it would silently
+  // shrink the partition rather than fail the run that produced it.
+  it('reports a malformed slice as a problem instead of silently dropping it', async () => {
     const { root, out } = await stageShards([
       { name: 'test-shard-1', lane: 'api', files: { 'tests/unit/a.test.ts': 10 } },
     ]);
@@ -115,7 +118,11 @@ describe('mergeTimingsShards', () => {
 
     const result = await mergeTimingsShards(root, out);
 
-    expect(result.problems).toEqual([]);
+    expect(result.problems).toHaveLength(1);
+    expect(result.problems[0]).toMatchObject({ lane: 'api', kind: 'malformed' });
+    expect(result.problems[0]?.files).toEqual([join(bad, 'api.json')]);
+    // The remaining valid shard still merges so the file is available for
+    // debugging; `problems` is what fails the CI step, not a missing output.
     expect(result.lanes[0]).toMatchObject({ shards: 1, files: 1 });
   });
 });
