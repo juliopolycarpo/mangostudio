@@ -164,6 +164,9 @@ describe('CI / Gate aggregate', () => {
     for (const path of [
       String.raw`\.bun-version`,
       String.raw`scripts/lib/bun-cross-runtime\.ts`,
+      // The lane fetches one runtime per release target, so the target list
+      // decides what it downloads as much as the downloader does.
+      String.raw`scripts/lib/release-targets\.ts`,
       String.raw`scripts/ci/verify-cross-runtimes\.ts`,
     ]) {
       expect(changesBlock, path).toContain(path);

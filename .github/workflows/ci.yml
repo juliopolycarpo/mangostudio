@@ -77,7 +77,7 @@ jobs:
             echo "distribution=false" >> "$GITHUB_OUTPUT"
           fi
 
-          cross_runtime='^(\.bun-version|scripts/lib/bun-cross-runtime\.ts|scripts/ci/verify-cross-runtimes\.ts|\.github/workflows/(ci|cross-runtime-nightly)\.yml)$'
+          cross_runtime='^(\.bun-version|scripts/lib/bun-cross-runtime\.ts|scripts/lib/release-targets\.ts|scripts/ci/verify-cross-runtimes\.ts|\.github/workflows/(ci|cross-runtime-nightly)\.yml)$'
           if grep -Eq "$cross_runtime" "$RUNNER_TEMP/changed-files"; then
             echo "cross_runtime=true" >> "$GITHUB_OUTPUT"
           else

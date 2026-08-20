@@ -541,7 +541,9 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
     }
   } else if (options.refreshRuntimes) {
     warn(
-      '`--refresh-runtimes` had nothing to clear: `.bun-version` pins a released version, so `--compile` resolves its own downloads.'
+      options.dryRun
+        ? '`--refresh-runtimes` is ignored under `--dry-run`: no runtime is resolved, so there is no cache to clear.'
+        : '`--refresh-runtimes` had nothing to clear: `.bun-version` pins a released version, so `--compile` resolves its own downloads.'
     );
   }
 
