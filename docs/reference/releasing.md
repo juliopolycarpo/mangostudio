@@ -295,13 +295,23 @@ Those bytes are cheap. The `assets` artifact measured 1173.8 MB uploaded in 10 s
 
 Measured on the lane itself, `main` @ `dffc218e` against the change:
 
-|                                                           |    before |     after |
-| --------------------------------------------------------- | --------: | --------: |
-| `Create content-addressed bundles`                        |      83 s |  **40 s** |
-| `Distribution / Build immutable distribution` (whole job) |     197 s |     185 s |
-| `assets` artifact                                         | 1173.8 MB | 1218.2 MB |
-| `npm` artifact                                            |  439.9 MB |  473.6 MB |
-| one target artifact (`linux-x64`)                         |   78.6 MB |   78.8 MB |
+|                                                           |    before |     run 1 |    run 2 |
+| --------------------------------------------------------- | --------: | --------: | -------: |
+| `Create content-addressed bundles`                        |      83 s |      40 s | **39 s** |
+| upload steps, summed                                      |      44 s |      83 s |     46 s |
+| `Distribution / Build immutable distribution` (whole job) |     197 s |     185 s |    149 s |
+| `assets` artifact                                         | 1173.8 MB | 1218.2 MB |        — |
+| `npm` artifact                                            |  439.9 MB |  473.6 MB |        — |
+| one target artifact (`linux-x64`)                         |   78.6 MB |   78.8 MB |        — |
+
+Bundling halves, and uploads are unchanged — the extra bytes cost about 2 s.
+
+**Two runs, because one would have lied.** On run 1 the summed upload steps looked
+like a 39 s regression that would have cancelled the win. It was runner noise: two
+target uploads took 15 s and 19 s where the other six took 3 s, for payloads that
+differ from each other by less than a megabyte. Run 2 put every target back at
+2–3 s. Upload timings at this size need several runs before one is attributed to
+a change; the bundling step, at 83 s twice and ~39 s twice, does not.
 
 The target bundles grow **0.3%**, not the 4% a local run suggests. Local numbers
 overstate it because a development tree's `distribution-manifest.json` carries a
@@ -309,10 +319,6 @@ overstate it because a development tree's `distribution-manifest.json` carries a
 local case, against ~0.25 MB in CI — and that manifest, not the archive, is
 where target-bundle gzip found its bytes. The time saving is unaffected: it comes
 from not re-gzipping the 79 MB archive member.
-
-The upload steps are noisy at this size. On the run above two target uploads took
-15 s and 19 s where the other six took 3 s, for payloads that differ by 0.3 MB,
-so read upload timings across several runs before attributing one to a change.
 
 Two consequences worth keeping straight:
 
