@@ -310,8 +310,11 @@ lines against the unsharded 14,740, reporting **94.26% where the truth is
 97.86%**, a coverage regression that never happened.
 
 So `scripts/qa-gate/merge-lcov-shards.ts` takes each file's coverable-line shape
-from the shard record that covered the most of it, and marks a line covered if
-any shard hit it. Same corpus: **97.86% lines against 97.86%**.
+from the shard record that covered the most of it, marks a line covered if any
+shard hit it, and keeps a positive-hit line that only exists on a non-shape
+record (a lazily parsed region another shard exercised). Zero-hit padding from
+those other records stays out so the denominator does not inflate. Same corpus:
+**97.86% lines against 97.86%**.
 
 What the merge cannot make exact is **function** coverage. Bun emits only the
 `FNF:`/`FNH:` totals, never per-function `FN:`/`FNDA:` records, so the union of
@@ -365,9 +368,14 @@ assuming the XML grew an `errors` count.
 > still exits 0 (measured on 1.4.0-canary.1), so the lane's counts go silently to
 > zero. That is why `scripts/test.ts` creates `.mango/artifacts/junit/` before
 > any lane starts — and clears it, so a lane that did not run this time cannot
-> contribute last run's counts. Invoking a workspace `test:coverage` script
-> directly on a fresh checkout skips that step; create the directory first if you
-> care about the report.
+> contribute last run's counts. The QA collector also treats a configured lane
+> with no JUnit file across the shard set as `parseMiss`, so a missing report
+> cannot become a green suite of zero tests. Bun's `file` attribute is
+> workspace-relative; failed-file counts are namespaced by lane so
+> `apps/shared` and `apps/runtime` files with the same relative path stay
+> distinct. Invoking a workspace `test:coverage` script directly on a fresh
+> checkout skips the directory step; create it first if you care about the
+> report.
 
 ### Randomized order
 

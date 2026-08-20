@@ -216,9 +216,9 @@ const passCountsByWorkspace = (
  *
  * Failure fields stay omitted on a green run so stored baselines and the
  * rendered report are unchanged by this switch. `parseMiss` keeps its meaning:
- * the run exited non-zero and nothing structured explains why — now most likely
- * a lane that crashed before writing its report rather than a log line the
- * regexes missed.
+ * nothing structured explains the outcome — a non-zero exit with no JUnit
+ * failures, or a configured lane that wrote no report at all (Bun can fail to
+ * write JUnit and still exit 0).
  * // Usage: buildTestSuiteStats(await readLaneResults(dirs), errors, 0, 91);
  */
 export const buildTestSuiteStats = (
@@ -229,7 +229,13 @@ export const buildTestSuiteStats = (
 ): TestSuiteStats => {
   const passedByWorkspace = passCountsByWorkspace(results);
   const failed = results.reduce((sum, result) => sum + result.counts.failed, 0);
-  const failedFiles = new Set(results.flatMap((result) => result.counts.failedFiles));
+  // Bun's `file` attribute is workspace-relative, so the same path in two
+  // lanes is two files. Namespace before counting so they do not collapse.
+  const failedFiles = new Set(
+    results.flatMap((result) =>
+      result.counts.failedFiles.map((file) => `${result.lane.id}:${file}`)
+    )
+  );
   const headlines = [
     ...results.flatMap((result) => result.counts.headlines),
     ...unhandledErrors.headlines,
@@ -244,6 +250,11 @@ export const buildTestSuiteStats = (
 
   const hasFailureSignal =
     failed > 0 || failedFiles.size > 0 || unhandledErrors.errors > 0 || headlines.length > 0;
+  // A lane with `reports === 0` is not an empty shard slice: every configured
+  // lane is expected to write at least one file across the shard set. Bun can
+  // print `JUnitReportFailed` and still exit 0, which would otherwise tally as
+  // a green suite of zero tests.
+  const missingLaneReports = results.some((result) => result.reports === 0);
 
   if (hasFailureSignal) {
     return {
@@ -252,10 +263,11 @@ export const buildTestSuiteStats = (
       failedFiles: failedFiles.size,
       errors: unhandledErrors.errors,
       ...(headlines.length > 0 ? { headlines } : {}),
+      ...(missingLaneReports ? { parseMiss: true } : {}),
     };
   }
 
-  if (exitCode !== 0 && exitCode !== null) {
+  if (missingLaneReports || (exitCode !== 0 && exitCode !== null)) {
     return { ...stats, parseMiss: true };
   }
 

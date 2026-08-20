@@ -13,11 +13,12 @@ const fixture = (name: string): Promise<string> =>
 
 const laneResult = (
   id: Parameters<typeof laneById>[0],
-  counts: LaneResult['counts']
+  counts: LaneResult['counts'],
+  reports = 1
 ): LaneResult => ({
   lane: laneById(id),
   counts,
-  reports: 1,
+  reports,
 });
 
 const counts = (overrides: Partial<LaneResult['counts']> = {}): LaneResult['counts'] => ({
@@ -165,5 +166,47 @@ describe('buildTestSuiteStats', () => {
     const stats = buildTestSuiteStats([], { errors: 0, headlines: [] }, 0, 0);
     expect(stats.passed).toBe(0);
     for (const lane of TEST_LANES) expect(stats[lane.workspace as 'api']).toBe(0);
+  });
+
+  it('sets parseMiss when a configured lane wrote no JUnit report on a green exit', () => {
+    const stats = buildTestSuiteStats(
+      [
+        laneResult('api', counts({ tests: 0, passed: 0 }), 0),
+        laneResult('root', counts({ tests: 4, passed: 4 })),
+      ],
+      { errors: 0, headlines: [] },
+      0,
+      91
+    );
+    expect(stats.parseMiss).toBe(true);
+    expect(stats.passed).toBe(4);
+    expect(stats.failed).toBeUndefined();
+  });
+
+  it('counts the same relative path as two failed files when two lanes own it', () => {
+    const stats = buildTestSuiteStats(
+      [
+        laneResult(
+          'shared',
+          counts({
+            tests: 1,
+            failed: 1,
+            failedFiles: ['tests/unit/runtime-home.test.ts'],
+          })
+        ),
+        laneResult(
+          'runtime',
+          counts({
+            tests: 1,
+            failed: 1,
+            failedFiles: ['tests/unit/runtime-home.test.ts'],
+          })
+        ),
+      ],
+      { errors: 0, headlines: [] },
+      1,
+      91
+    );
+    expect(stats).toMatchObject({ failed: 2, failedFiles: 2 });
   });
 });

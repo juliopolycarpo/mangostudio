@@ -127,6 +127,37 @@ describe('mergeLcovRecords', () => {
     expect(merged.lineHits.get(3)).toBe(0);
   });
 
+  it('keeps a hit line that only exists on a non-shape record', () => {
+    // Two lazy-parse regions of the same file: the shape shard ran the most
+    // lines, the other shard hit a region the shape never loaded. Dropping
+    // that line underreports coverage; keeping the other record's zeros
+    // would inflate the denominator.
+    const shapeShard = record(
+      'src/a.ts',
+      [2, 1],
+      [
+        [1, 4],
+        [2, 0],
+        [3, 2],
+      ]
+    );
+    const otherRegion = record(
+      'src/a.ts',
+      [2, 1],
+      [
+        [10, 1],
+        [11, 0],
+        [12, 0],
+      ]
+    );
+    const [merged] = mergeLcovRecords([parseLcovRecords(shapeShard), parseLcovRecords(otherRegion)]);
+    expect(merged.lineHits.get(1)).toBe(4);
+    expect(merged.lineHits.get(3)).toBe(2);
+    expect(merged.lineHits.get(10)).toBe(1);
+    expect(merged.lineHits.has(11)).toBe(false);
+    expect(merged.lineHits.has(12)).toBe(false);
+  });
+
   it('never reports more functions hit than found', () => {
     // Different lazy-parse states disagree on the function total, so the best
     // shard's hit count can exceed another's total. Uncapped, that renders as

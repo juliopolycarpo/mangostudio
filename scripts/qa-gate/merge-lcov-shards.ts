@@ -88,7 +88,9 @@ export const parseLcovRecords = (text: string): readonly LcovRecord[] => {
 /**
  * Merge one source file's records from several shards. The record that covered
  * the most lines supplies the coverable-line set and the function total; hits
- * are summed across every shard that touched the file.
+ * are summed across every shard that touched the file. Positive-hit lines that
+ * only exist on a non-shape record are kept; other records' zero-hit padding
+ * is not.
  */
 const mergeRecordGroup = (group: readonly LcovRecord[]): LcovRecord => {
   const shape = group.reduce((best, candidate) =>
@@ -104,6 +106,12 @@ const mergeRecordGroup = (group: readonly LcovRecord[]): LcovRecord => {
 
   const lineHits = new Map<number, number>();
   for (const line of shape.lineHits.keys()) lineHits.set(line, summedHits.get(line) ?? 0);
+  // A shard that exercised a lazily parsed region the shape record never loaded
+  // still owns those hits. Keep the positive-hit lines; drop the other
+  // records' zero-hit padding so the denominator does not inflate.
+  for (const [line, hits] of summedHits) {
+    if (hits > 0 && !lineHits.has(line)) lineHits.set(line, hits);
+  }
 
   // Bun reports only the FNF/FNH totals, never per-function `FN:`/`FNDA:`
   // records, so the union of hit functions is not recoverable. The best shard
