@@ -6,11 +6,32 @@ on:
 permissions:
   contents: read
 
+# Shard count. Eight is where the curve flattens: the suite splits evenly at
+# any N (the slowest single file is 20.2s of 348s, so bin-packing hits the
+# ideal split well past N=12), each job pays ~21s of fixed setup, and the merge
+# job adds a fixed ~30s. Measured per-shard test time falls 70s -> 35s -> 23s
+# at N=4 -> 8 -> 12, so doubling again buys ~15s of wall clock for four more
+# jobs. Raising it is a two-line change: this value and the matrix list.
+env:
+  SHARD_COUNT: 8
+
 jobs:
-  test:
-    name: Unit & Integration Tests
+  shard:
+    # Sharding is what gets the suite off `--parallel=1` without waiting for
+    # oven-sh/bun#38008. That bug is a collision between concurrent isolates
+    # inside one Bun process; `--shard=i/N` splits files across processes that
+    # never share one, so the precondition never exists. In-job `--parallel`
+    # composes with this the day the fix ships — see
+    # docs/reference/testing.md.
+    name: Tests (shard ${{ matrix.shard }}/8)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      # Every shard reports, so one red shard still leaves seven sets of counts
+      # for the QA report instead of a run that stopped mid-fan-out.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
     steps:
@@ -36,12 +57,16 @@ jobs:
           fi
           echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
 
+      # Only the first shard saves. All eight resolve the same primary key, so
+      # letting each one save turns seven post-job steps into "cache already
+      # exists" warnings that read like a cache fault and are not one.
       - uses: ./.github/actions/cache-scoped
         with:
           family: turbo
           path: .turbo/cache
           validity: test-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'package.json', 'apps/*/package.json', 'packages/*/package.json') }}
           restore-prefix: test-
+          mode: ${{ matrix.shard == 1 && 'restore-save' || 'restore' }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Restore Vite optimizer cache
@@ -51,39 +76,106 @@ jobs:
           path: apps/frontend/node_modules/.vite
           validity: test-${{ hashFiles('bun.lock', 'apps/frontend/package.json', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts', 'apps/frontend/tsconfig*.json') }}
           restore-prefix: test-
+          mode: ${{ matrix.shard == 1 && 'restore-save' || 'restore' }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
 
-      # `--coverage` is self-contained: it runs root scripts unit tests plus
-      # every workspace's full suite with instrumentation. Running a separate
-      # `--unit --integration` pass before this was duplicate work. The tee'd
-      # log plus exit code and duration feed the qa-metrics fragment below, so
-      # this single pass is the authoritative test signal for the QA report.
+      # This shard's slice of every lane. Bun lanes take `--shard` directly;
+      # the frontend Vitest lane writes a blob report for the merge job to
+      # replay, and stands its coverage thresholds down — a shard covers a
+      # fraction of the sources, so it would fail them every time. The merge
+      # job is unsharded and is where those thresholds are decided.
       - name: Run tests with coverage
         id: coverage
+        env:
+          SHARD: ${{ matrix.shard }}
         run: |
           set -o pipefail
           start="$(date +%s)"
           status=0
-          bun run test --coverage 2>&1 | tee coverage-run.log || status=$?
-          {
-            echo "exit-code=${status}"
-            echo "duration-seconds=$(( $(date +%s) - start ))"
-          } >> "$GITHUB_OUTPUT"
+          bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}" 2>&1 | tee coverage-run.log || status=$?
+          printf '{"shard":%s,"exitCode":%s,"durationSeconds":%s}\n' \
+            "${SHARD}" "${status}" "$(( $(date +%s) - start ))" > shard-meta.json
           exit "${status}"
 
-      # Emitted even when the suite fails so the QA report can show the
+      # Vitest's JUnit reporter never receives the run's unhandled errors and
+      # writes errors="0" unconditionally, so the "green counts plus Errors N
+      # plus exit 1" class documented in docs/reference/testing.md only exists
+      # in the log. Extract it here, while the log is still local to the shard
+      # that produced it.
+      - name: Extract Vitest unhandled errors
+        if: ${{ !cancelled() }}
+        run: bun ./scripts/qa-gate/vitest-unhandled-errors.ts coverage-run.log > vitest-errors.json
+
+      # Uploaded even when the shard fails so the merge job can report the
       # failing exit code instead of a missing-metrics placeholder.
+      - name: Upload shard results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-shard-${{ matrix.shard }}
+          path: |
+            .mango/artifacts/junit/
+            .mango/artifacts/coverage/
+            apps/frontend/.vitest-reports/
+            shard-meta.json
+            vitest-errors.json
+          retention-days: 1
+
+      - name: Upload shard log
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-shard-${{ matrix.shard }}-log
+          path: coverage-run.log
+          retention-days: 7
+
+  merge:
+    # Reassembles what the fan-out split. LCOV needs a real merge (Bun's
+    # per-file line totals are run-dependent — see
+    # scripts/qa-gate/merge-lcov-shards.ts), Vitest merges its own blobs, and
+    # JUnit is read straight out of the shard directories.
+    name: Merge shard results
+    needs: [shard]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Download shard results
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: test-shard-*
+          path: shards
+
+      - name: Merge shard coverage and run metadata
+        id: merge
+        run: bun ./scripts/ci/merge-test-shards.ts shards > shard-summary.json
+
+      # Hard gate: this is where the frontend coverage thresholds apply, the
+      # same way `vitest run --coverage` applied them before sharding. Four
+      # shards merged reproduce the unsharded run's numbers exactly
+      # (76.08/68.06/72.81/78.76), so a drop here is a real drop.
+      - name: Merge Vitest reports and enforce coverage thresholds
+        run: |
+          set -euo pipefail
+          mkdir -p .mango/artifacts/junit
+          bun run --filter @mangostudio/frontend test:coverage:merge
+
+      # Emitted even when a shard or the threshold gate failed, so the QA
+      # report can show the failing exit code rather than a placeholder.
       - name: Collect test metrics fragment
         if: ${{ !cancelled() }}
-        env:
-          EXIT_CODE: ${{ steps.coverage.outputs.exit-code }}
-          DURATION_SECONDS: ${{ steps.coverage.outputs.duration-seconds }}
-        run: >
-          bun ./scripts/qa-gate/collect-test-metrics.ts coverage-run.log
-          "$EXIT_CODE" "$DURATION_SECONDS" > test-metrics.json
+        run: bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards > test-metrics.json
 
       # Handoff to the qa-metrics job in the same run; nothing consumes it
       # afterwards, so the shortest retention GitHub allows is enough.
@@ -95,7 +187,7 @@ jobs:
           path: test-metrics.json
           retention-days: 1
 
-      # Raw coverage output is a failure-diagnostics artifact: green runs are
+      # Merged coverage output is a failure-diagnostics artifact: green runs are
       # summarized in the step summary and the qa-metrics envelope instead.
       - name: Upload coverage
         if: failure()

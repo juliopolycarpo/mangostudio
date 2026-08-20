@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="bun test" tests="3" assertions="2" failures="1" skipped="1" time="0.014884702">
+  <testsuite name="fail.test.ts" file="fail.test.ts" tests="3" assertions="2" failures="1" skipped="1" time="0.0026182" hostname="mr9a">
+    <testcase name="passes" classname="" time="0.000082" file="fail.test.ts" line="2" assertions="1" />
+    <testcase name="fails" classname="" time="0.000506" file="fail.test.ts" line="3" assertions="1">
+      <failure type="AssertionError" message="expect(received).toBe(expected)&#10;&#10;Expected: 2&#10;Received: 1&#10;">AssertionError: expect(received).toBe(expected)&#10;&#10;Expected: 2&#10;Received: 1&#10;&#10;      at fail.test.ts:3:33&#10;</failure>
+    </testcase>
+    <testcase name="skipped" classname="" time="0" file="fail.test.ts" line="4" assertions="0">
+      <skipped />
+    </testcase>
+  </testsuite>
+</testsuites>

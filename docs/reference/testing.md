@@ -244,6 +244,125 @@ through a pipe too, which is what CI gives it.
 So the unit lane cannot take worker parallelism yet. The integration lane can:
 12 of 12 clean at four workers on a runner, 50.6s against 71–75s unflagged.
 
+### Sharding
+
+`--parallel=N` is blocked; `--shard=i/N` is not, and it reaches the same prize
+from the other side. Workers put concurrent isolates inside **one** Bun process,
+which is the precondition for the abort above. A shard is a subset of files run
+by a process that never shares itself with another shard, so that precondition
+never exists. The two compose: in-job `--parallel` still applies the day
+oven-sh/bun#38008 ships.
+
+`bun run test --coverage --shard=i/N` splits every lane at once. Each Bun lane
+takes the flag through `MANGOSTUDIO_BUN_TEST_ARGS`; the frontend Vitest lane
+takes `MANGOSTUDIO_VITEST_ARGS` and switches to a **blob report** for the merge
+step to replay. `--shard` requires `--coverage`: it is the only lane with a
+merge step behind it, and a shard of any other lane would run a fraction of the
+files and exit 0.
+
+> **`--reporter=blob` does not switch the coverage thresholds off.** A sharded
+> Vitest run still evaluates them, against a fraction of the sources, and so
+> fails on *every* shard — measured, and the reason `vitest.config.ts` drops
+> `coverage.thresholds` when `MANGOSTUDIO_TEST_SHARD` is set. The merge
+> invocation is unsharded, so it is what enforces them.
+
+CI runs eight shards plus one merge job (`.github/workflows/test.yml`). Where
+the run's time actually goes, measured on run 32331139863 (four-core runner,
+Turbo running the lanes concurrently):
+
+| Lane                                          | Files | Duration |
+| --------------------------------------------- | ----- | -------- |
+| `apps/api` `bun test --coverage --parallel=1` | 398   | 278.3s   |
+| `apps/frontend` `vitest run --coverage`       | 165   | 189.4s   |
+| `apps/runtime`                                | 63    | 26.4s    |
+| root `test:scripts`                           | 81    | 16.3s    |
+| `apps/shared`                                 | 54    | 1.8s     |
+| `apps/frontend` Bun files                     | 2     | 0.1s     |
+
+Two long poles, not one, which is why the shard boundary is a slice of *every*
+lane rather than one job per workspace: a per-workspace split leaves `apps/api`
+alone at 278s.
+
+Eight is where the curve flattens. The suite bin-packs to the ideal split at any
+N — the slowest single file is 20.2s of 348s, so balance does not bite until
+about N=17, and **no committed timings file is needed**; `--timings` would buy
+under 1%. What does bite is the ~21s of fixed setup each job pays and the merge
+job's fixed cost, so measured per-shard test time of 70s → 35s → 23s at N=4 → 8
+→ 12 turns into diminishing wall clock. Raising it is a two-line change:
+`SHARD_COUNT` and the matrix list.
+
+#### Merging is not concatenation
+
+**Vitest merges exactly.** `--reporter=blob` per shard, then
+`vitest --mergeReports --coverage` (`test:coverage:merge`) replays them. Four
+shards merged reproduce the unsharded run's numbers to the digit —
+`76.08 / 68.06 / 72.81 / 78.76` statements/branches/functions/lines — and that
+merge is where the coverage thresholds apply, so a drop there is a real drop.
+It costs about four seconds.
+
+**Bun's LCOV does not.** Its per-file `LF:`/`FNF:` are *run-dependent*: a source
+file a shard loaded but never exercised reports every line as coverable, while
+the same file under a shard that ran its code reports the collapsed set lazy
+parsing leaves behind. On `apps/shared` at `--shard=i/3`,
+`src/errors/negotiation.ts` is `LF:208 LH:0` in two shards and `LF:98 LH:92` in
+the third. Union the `DA:` lines and the denominator inflates — 15,303 coverable
+lines against the unsharded 14,740, reporting **94.26% where the truth is
+97.86%**, a coverage regression that never happened.
+
+So `scripts/qa-gate/merge-lcov-shards.ts` takes each file's coverable-line shape
+from the shard record that covered the most of it, and marks a line covered if
+any shard hit it. Same corpus: **97.86% lines against 97.86%**.
+
+What the merge cannot make exact is **function** coverage. Bun emits only the
+`FNF:`/`FNH:` totals, never per-function `FN:`/`FNDA:` records, so the union of
+hit functions across shards is not recoverable; the merge reports the best
+shard's count, clamped to the total, which is a lower bound. Measured on
+`apps/runtime` against its own unsharded run:
+
+| Shards | Lines   | Functions |
+| ------ | ------- | --------- |
+| 2      | −0.47pp | −1.60pp   |
+| 4      | −0.55pp | −2.00pp   |
+| 8      | −0.54pp | −2.52pp   |
+
+Line drift is bounded and effectively flat past two shards. Function drift grows
+with N, because the more shards a file spreads across, the further the best
+single shard sits from the union. Only line coverage reaches the QA verdict
+(`scripts/qa-gate/render/verdict.ts`, 0.1pp epsilon), so the function number is
+a table entry rather than a signal.
+
+> **One transitional report.** The PR QA report compares a head against a
+> `main` baseline. The first PRs after sharding landed compare a sharded head
+> against a pre-shard baseline and show a one-time `line coverage −0.54pp`.
+> Once `main` has a sharded baseline, both sides are sharded and the delta is
+> real signal again. A drop after that is a drop.
+
+#### JUnit, and the one thing it cannot carry
+
+Every lane writes JUnit to `.mango/artifacts/junit/<lane>.xml`, and
+`scripts/qa-gate/junit-results.ts` counts `<testcase>` elements out of the shard
+directories. Counts come from the elements rather than the `<testsuites>`
+header because the runners disagree on the header — Bun emits
+`tests`/`assertions`/`failures`/`skipped`, Vitest emits `tests`/`failures`/
+`errors` and puts `skipped` only on the nested `<testsuite>`, which Bun also
+nests once per `describe`.
+
+Vitest's unhandled errors are the exception. Its JUnit reporter is
+`onTestRunEnd(testModules)` — it never receives the run's `unhandledErrors` and
+writes `errors="0"` unconditionally, and its JSON reporter takes the same
+argument. So the failure class in
+[Unhandled Errors With Green Test Counts](#unhandled-errors-with-green-test-counts)
+exists only in the log, and each shard extracts it with
+`scripts/qa-gate/vitest-unhandled-errors.ts` before the log leaves the job. If
+you ever replace that with a structured source, check the reporter's signature
+first rather than assuming the XML grew an `errors` count.
+
+> Bun does not create the parent directory for `--reporter-outfile`. It fails
+> the run with `JUnitReportFailed` rather than skipping the report, which is the
+> good outcome, but it is why `scripts/test.ts` creates
+> `.mango/artifacts/junit/` before any lane starts — and clears it, so a lane
+> that did not run this time cannot contribute last run's counts.
+
 ### Code Health
 
 `bun run check` includes a repository-wide Knip scan. Change-scoped checks run it
@@ -617,12 +736,12 @@ the suite failed, and link here.
 
 CI artifacts fall into four retention classes; keep new uploads aligned with them:
 
-| Class               | Examples                                               | Policy                                                 |
-| ------------------- | ------------------------------------------------------ | ------------------------------------------------------ |
-| Job-to-job handoff  | `qa-test-metrics` fragment (test → qa-metrics)         | 1 day — consumed within the same run                   |
-| Failure diagnostics | raw coverage output, Playwright traces and HTML report | 7–14 days, uploaded only `if: failure()`               |
-| Release assets      | staged binaries and packages in the release pipeline   | 30 days                                                |
-| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs       | 90 days — exact-SHA baselines for future PR QA reports |
+| Class               | Examples                                                                | Policy                                                 |
+| ------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------ |
+| Job-to-job handoff  | `test-shard-<n>` (shard → merge), `qa-test-metrics` (test → qa-metrics) | 1 day — consumed within the same run                   |
+| Failure diagnostics | `test-shard-<n>-log`, merged coverage, Playwright traces and report     | 7–14 days, uploaded only `if: failure()`               |
+| Release assets      | staged binaries and packages in the release pipeline                    | 30 days                                                |
+| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs                        | 90 days — exact-SHA baselines for future PR QA reports |
 
 Green runs summarize their outcome in the step summary (`$GITHUB_STEP_SUMMARY`)
 instead of uploading success-only artifacts. The browser-smoke workflow keeps a

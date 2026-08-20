@@ -66,13 +66,25 @@
       "cache": false,
       "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
     },
+    // The JUnit reports these lanes write are deliberately not declared as
+    // outputs. The task is uncached, so there is nothing to restore, and every
+    // workspace writes into one shared directory — the same overlapping-glob
+    // shape the typecheck comment above warns about, which would cross-
+    // contaminate if anyone ever turned caching on here.
     "test:coverage": {
       "cache": false,
       "outputs": ["$TURBO_ROOT$/.mango/artifacts/coverage/**"],
       "env": ["DATABASE_PATH", "CI", "MANGOSTUDIO_*"]
     },
+    // This one is cached, so both keys below are load-bearing.
+    // `MANGOSTUDIO_BUN_TEST_ARGS` carries `--shard`: without it in the key,
+    // shard 2 restores shard 1's entry and runs nothing. And its own JUnit
+    // report — one file, no overlap with any other task — has to be restored
+    // on a hit, or the shard contributes zero root tests and still looks green.
     "//#test:scripts": {
-      "inputs": ["scripts/**"]
+      "inputs": ["scripts/**"],
+      "outputs": ["$TURBO_ROOT$/.mango/artifacts/junit/root.xml"],
+      "env": ["CI", "MANGOSTUDIO_*"]
     }
   }
 }

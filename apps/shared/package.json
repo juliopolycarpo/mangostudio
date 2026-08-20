@@ -12,7 +12,7 @@
     "fix": "biome check --write src tests",
     "test": "bun run test:unit",
     "test:unit": "bun test --timeout 15000 tests/unit",
-    "test:coverage": "bun test --coverage --timeout 15000"
+    "test:coverage": "bun test --coverage --timeout 15000 --reporter=junit --reporter-outfile=../../.mango/artifacts/junit/shared.xml $MANGOSTUDIO_BUN_TEST_ARGS"
   },
   "exports": {
     ".": "./src/index.ts",

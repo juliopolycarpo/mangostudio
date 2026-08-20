@@ -83,7 +83,7 @@ export const renderTestFailureLead = (
       `This is not a flake. Do not re-run it. See [Unhandled errors with green test counts](${TESTING_DOC_UNHANDLED_ERRORS_URL}).`
     );
   } else {
-    lines.push('See the coverage-run log for the failing assertions.');
+    lines.push('See the `test-shard-<n>-log` artifact for the failing assertions.');
   }
   lines.push('');
   return `${lines.join('\n')}`;

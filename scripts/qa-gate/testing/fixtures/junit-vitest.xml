@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<testsuites name="vitest tests" tests="3" failures="1" errors="0" time="0.016859199">
+    <testsuite name="apps/frontend/tests/unit/zz-fixture/sample.test.ts" timestamp="2026-08-20T06:42:34.156Z" hostname="mr9a" tests="3" failures="1" errors="0" skipped="1" time="0.016859199">
+        <testcase classname="apps/frontend/tests/unit/zz-fixture/sample.test.ts" name="sample group &gt; passes" time="0.0032316">
+        </testcase>
+        <testcase classname="apps/frontend/tests/unit/zz-fixture/sample.test.ts" name="sample group &gt; fails" time="0.010436899">
+            <failure message="expected 1 to be 2 // Object.is equality" type="AssertionError">
+AssertionError: expected 1 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ 1
+
+ ❯ apps/frontend/tests/unit/zz-fixture/sample.test.ts:4:35
+            </failure>
+        </testcase>
+        <testcase classname="apps/frontend/tests/unit/zz-fixture/sample.test.ts" name="sample group &gt; is skipped" time="0">
+            <skipped/>
+        </testcase>
+    </testsuite>
+</testsuites>

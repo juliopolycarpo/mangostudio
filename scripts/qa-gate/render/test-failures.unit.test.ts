@@ -80,7 +80,7 @@ describe('renderTestFailureLead', () => {
     });
 
     expect(markdown).toContain('2 failed tests');
-    expect(markdown).toContain('See the coverage-run log for the failing assertions.');
+    expect(markdown).toContain('See the `test-shard-<n>-log` artifact for the failing assertions.');
     expect(markdown).not.toContain('Do not re-run');
     expect(markdown).not.toContain(TESTING_DOC_UNHANDLED_ERRORS_URL);
     expect(markdown).not.toContain('leaking timer');

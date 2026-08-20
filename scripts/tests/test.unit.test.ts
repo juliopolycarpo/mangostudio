@@ -62,6 +62,29 @@ describe('test script', () => {
     expect(turboConfig.tasks['test:e2e']).toBeUndefined();
   });
 
+  test('the cached root scripts lane keys on the shard and restores its JUnit report', () => {
+    // Both halves are load-bearing and both fail silently. Without
+    // MANGOSTUDIO_* in the key, shard 2 restores shard 1's entry and runs
+    // nothing; without the output, a cache hit leaves no report and the shard
+    // contributes zero root tests to a run that still looks green.
+    expect(turboConfig.tasks['//#test:scripts']).toEqual({
+      inputs: ['scripts/**'],
+      outputs: ['$TURBO_ROOT$/.mango/artifacts/junit/root.xml'],
+      env: ['CI', 'MANGOSTUDIO_*'],
+    });
+  });
+
+  test('leaves the shared JUnit directory out of per-workspace outputs', () => {
+    // Every workspace writes into one directory, so declaring it would have
+    // four tasks claiming the same glob — the overlap the typecheck task's own
+    // comment warns cross-contaminates a restored cache.
+    for (const task of ['test:unit', 'test:integration', 'test:coverage']) {
+      for (const output of turboConfig.tasks[task]?.outputs ?? []) {
+        expect(output).not.toContain('junit');
+      }
+    }
+  });
+
   test('does not add build dependencies to source-driven test lanes', () => {
     for (const task of ['test:unit', 'test:integration', 'test:coverage']) {
       expect(turboConfig.tasks[task]?.dependsOn ?? []).not.toContain('^build');

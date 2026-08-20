@@ -49,12 +49,19 @@ export default defineConfig({
         '**/*.d.ts',
         '**/*.config.*',
       ],
-      thresholds: {
-        statements: 70,
-        branches: 60,
-        functions: 64,
-        lines: 72,
-      },
+      // A shard runs a fraction of the files and therefore covers a fraction
+      // of the sources, so these can only be judged after `--mergeReports`
+      // reassembles the run — which is unsharded, so it does enforce them.
+      // `--reporter=blob` does not switch them off on its own: a sharded run
+      // still evaluates them and still fails, and it fails on every shard.
+      thresholds: process.env.MANGOSTUDIO_TEST_SHARD
+        ? undefined
+        : {
+            statements: 70,
+            branches: 60,
+            functions: 64,
+            lines: 72,
+          },
     },
   },
 });
