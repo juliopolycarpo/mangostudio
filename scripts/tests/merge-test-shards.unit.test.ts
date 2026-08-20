@@ -192,6 +192,37 @@ describe('mergeTestShards', () => {
     const shards = await makeTemp();
     expect(mergeTestShards(shards, await makeTemp())).rejects.toThrow(/No shard directories/);
   });
+
+  // A shard job that dies before "Upload shard results" runs (runner OOM, a
+  // cancelled/timed-out job) leaves its directory missing, not empty, so the
+  // remaining shards can merge clean and green over an incomplete file set.
+  it('fails loudly when fewer shards uploaded than expected', async () => {
+    const shards = await makeTemp();
+    const output = await makeTemp();
+    await writeShards(shards, [
+      {
+        name: 'test-shard-1',
+        lcovLines: [[1, 1]],
+        blob: 'blob-1.json',
+        meta: { shard: 1, exitCode: 0, durationSeconds: 30 },
+      },
+    ]);
+    expect(mergeTestShards(shards, output, 8)).rejects.toThrow(/Expected 8 shard directories/);
+  });
+
+  it('accepts a full shard set when an expected count is given', async () => {
+    const shards = await makeTemp();
+    const output = await makeTemp();
+    await writeShards(shards, [
+      {
+        name: 'test-shard-1',
+        lcovLines: [[1, 1]],
+        blob: 'blob-1.json',
+        meta: { shard: 1, exitCode: 0, durationSeconds: 30 },
+      },
+    ]);
+    expect((await mergeTestShards(shards, output, 1)).shards).toBe(1);
+  });
 });
 
 describe('collect-test-metrics degradation', () => {

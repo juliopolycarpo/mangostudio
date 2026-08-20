@@ -193,7 +193,7 @@ jobs:
 
       - name: Merge shard coverage and run metadata
         id: merge
-        run: bun ./scripts/ci/merge-test-shards.ts shards > shard-summary.json
+        run: bun ./scripts/ci/merge-test-shards.ts shards "${SHARD_COUNT}" > shard-summary.json
 
       # Reassembles next run's timings, and fails this run if the eight shards
       # claimed the same file — which means they read different timings and did
@@ -210,12 +210,19 @@ jobs:
       # Deliberately has no `if:`, so a failed merge above skips it and the next
       # run keeps balancing against the last known-good file rather than one
       # written from a split that did not add up.
+      #
+      # actions/cache is immutable, so a save under the same key every run
+      # would only ever write once — every later run's timings would be
+      # silently discarded and the balance would never track file changes. The
+      # run id makes each save's key unique; the restore step above matches on
+      # the `test-` prefix (not this exact key) and picks the most recent hit,
+      # so it still finds this file next run.
       - name: Save test timings
         uses: ./.github/actions/cache-scoped
         with:
           family: timings
           path: .mango/artifacts/timings
-          validity: test-shard-${{ env.SHARD_COUNT }}
+          validity: test-shard-${{ env.SHARD_COUNT }}-${{ github.run_id }}
           mode: save
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 

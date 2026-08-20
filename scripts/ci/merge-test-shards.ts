@@ -17,7 +17,7 @@
 // JUnit reports are not merged here: scripts/qa-gate/junit-results.ts reads
 // them straight out of the shard directories, so nothing has to move.
 //
-// Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> > shard-summary.json
+// Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [expected-shard-count] > shard-summary.json
 
 import { mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -78,11 +78,24 @@ export const listShardDirs = async (shardsRoot: string): Promise<readonly string
  */
 export const mergeTestShards = async (
   shardsRoot: string,
-  outputRoot: string = ROOT_DIR
+  outputRoot: string = ROOT_DIR,
+  expectedShards?: number
 ): Promise<ShardSummary> => {
   const shardDirs = await listShardDirs(shardsRoot);
   if (shardDirs.length === 0) {
     throw new Error(`No shard directories under ${shardsRoot}; nothing to merge.`);
+  }
+  // A shard job that dies before "Upload shard results" runs (runner OOM, a
+  // cancelled/timed-out job) leaves its directory missing rather than empty,
+  // so the empty-set check above does not catch it. The remaining shards can
+  // still be green, and summarizeShardMeta would report a passing suite over
+  // an incomplete file set.
+  if (expectedShards !== undefined && shardDirs.length !== expectedShards) {
+    throw new Error(
+      `Expected ${expectedShards} shard directories under ${shardsRoot}, found ${shardDirs.length}. ` +
+        'A shard job likely failed before its upload step ran; merging a partial set would report ' +
+        'incomplete coverage and test counts as a green run.'
+    );
   }
 
   for (const [workspace, lcovPath] of Object.entries(SHARDED_LCOV_PATHS)) {
@@ -148,14 +161,18 @@ export const mergeTestShards = async (
 };
 
 if (import.meta.main) {
-  const [, , shardsRoot] = process.argv;
+  const [, , shardsRoot, expectedShardsArg] = process.argv;
   if (!shardsRoot) {
     process.stderr.write(
-      'Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> > shard-summary.json\n'
+      'Usage: bun ./scripts/ci/merge-test-shards.ts <shards-dir> [expected-shard-count] > shard-summary.json\n'
     );
     process.exit(1);
   }
-  const summary = await mergeTestShards(shardsRoot);
+  const summary = await mergeTestShards(
+    shardsRoot,
+    ROOT_DIR,
+    expectedShardsArg ? Number(expectedShardsArg) : undefined
+  );
   process.stderr.write(
     `Merged ${summary.shards} shard(s): exit ${summary.exitCode}, slowest ${summary.durationSeconds}s\n`
   );
