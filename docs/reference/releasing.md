@@ -293,6 +293,27 @@ at level 6: level 1 nearly halves the CPU for 3.8% more bytes.
 Those bytes are cheap. The `assets` artifact measured 1173.8 MB uploaded in 10 s
 (~117 MB/s) on a real run, so trading size for CPU wins at this ratio.
 
+Measured on the lane itself, `main` @ `dffc218e` against the change:
+
+|                                                           |    before |     after |
+| --------------------------------------------------------- | --------: | --------: |
+| `Create content-addressed bundles`                        |      83 s |  **40 s** |
+| `Distribution / Build immutable distribution` (whole job) |     197 s |     185 s |
+| `assets` artifact                                         | 1173.8 MB | 1218.2 MB |
+| `npm` artifact                                            |  439.9 MB |  473.6 MB |
+| one target artifact (`linux-x64`)                         |   78.6 MB |   78.8 MB |
+
+The target bundles grow **0.3%**, not the 4% a local run suggests. Local numbers
+overstate it because a development tree's `distribution-manifest.json` carries a
+`files` listing of whatever is lying around — 18,425 entries and 3.3 MB in one
+local case, against ~0.25 MB in CI — and that manifest, not the archive, is
+where target-bundle gzip found its bytes. The time saving is unaffected: it comes
+from not re-gzipping the 79 MB archive member.
+
+The upload steps are noisy at this size. On the run above two target uploads took
+15 s and 19 s where the other six took 3 s, for payloads that differ by 0.3 MB,
+so read upload timings across several runs before attributing one to a change.
+
 Two consequences worth keeping straight:
 
 - **The name states the compression.** Target bundles are `<target>.tar`, scoped

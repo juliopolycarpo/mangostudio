@@ -49,8 +49,8 @@ export function bundleFileName(name: string, compression: BundleCompression): st
  *
  * - A **target** bundle is the manifest, `SHA256SUMS`, and one platform archive
  *   that is already `.tar.gz` (or `.zip`). Gzip has nothing left to find in the
- *   member holding 99% of the bytes: `-czf` spends 3.06 s to save 3.37 MB of
- *   82.78 MB, where storing costs 0.15 s. Stored.
+ *   member holding 99% of the bytes: on CI the stored bundle is 78.8 MB against
+ *   78.6 MB gzipped, so level 6 bought 0.3% for a full pass over 79 MB. Stored.
  * - A **scoped** bundle carries uncompressed hub and runtime binaries
  *   (`assets`), the npm platform packages (`npm`), or plain text (`checksums`),
  *   so gzip does real work — but not at level 6. Level 1 halves the CPU for
