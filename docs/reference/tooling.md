@@ -280,10 +280,13 @@ table until upstream stores modes.
 
 All verified against the canary the repository pins, not inherited from docs:
 
-- **gzip only, both directions.** `.tar.xz` and `.tar.bz2` throw
+- **gzip and stored tar, both directions.** `.tar.xz` and `.tar.bz2` throw
   `Unrecognized archive format` where GNU tar auto-detects them. Zip is not
   readable at all, so the Windows targets and the Bun cross-runtime download keep
-  their `unzip`/PowerShell/bsdtar subprocesses.
+  their `unzip`/PowerShell/bsdtar subprocesses. Stored tar is detected from the
+  bytes rather than the name, which is what lets the target distribution
+  bundles ship uncompressed. See
+  [`releasing.md`](./releasing.md#distribution-bundle-compression).
 - `files()` is an async method returning `Promise<Map<string, File>>`, and it
   **omits symlink and directory entries**. Anything guarding on that listing sees
   fewer entries than `tar -tzf` reports.
@@ -304,8 +307,3 @@ tracks it as [oven-sh/bun#33212](https://github.com/oven-sh/bun/issues/33212),
 with an unmerged PR at
 [#33213](https://github.com/oven-sh/bun/pull/33213) — check whether that landed
 before re-probing the option parser.
-
-Reading has one limit fewer than first recorded: a **stored** (uncompressed) tar
-reads fine, detected from the bytes rather than the name, which is what lets the
-target distribution bundles ship stored. See
-[`releasing.md`](./releasing.md#distribution-bundle-compression).
