@@ -6,11 +6,11 @@ Obrigado pelo seu interesse em contribuir com o MangoStudio!
 
 ## Pré-requisitos
 
-- [Bun](https://bun.sh/) canary — `bun upgrade --canary` ou
-  `curl -fsSL https://bun.sh/install | bash -s -- canary` na primeira instalação
+- [Bun](https://bun.sh/) 1.4.0 ou mais recente — `bun upgrade` ou
+  `curl -fsSL https://bun.sh/install | bash` na primeira instalação
 - Git com assinatura GPG configurada (veja [Diretrizes de Commit](#diretrizes-de-commit))
 
-O Bun 1.4.0 ainda não foi lançado, e o canary é o único canal com o runtime pós-reescrita contra o qual este repositório compila e roda os testes. O `.bun-version` é o que a CI instala; [`docs/reference/tooling.md`](../reference/tooling.md#bun) explica por que o `packageManager` indica outra string.
+O repositório fixa o Bun 1.4.0, a release que tornou o runtime pós-reescrita disponível de forma geral; até então ele seguia o canal `canary`. O `.bun-version` é o que a CI instala, e o `packageManager` precisa indicar a mesma versão — veja [`docs/reference/tooling.md`](../reference/tooling.md#bun).
 
 ## Configuração do Ambiente
 
