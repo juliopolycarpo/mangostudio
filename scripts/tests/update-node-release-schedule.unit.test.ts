@@ -68,6 +68,17 @@ describe('update-node-release-schedule', () => {
     expect(source).toContain('as const satisfies NodeReleaseSchedule');
   });
 
+  // `maintenance` is optional on purpose: a newly announced line that upstream
+  // has not dated yet must not abort the refresh, so it must not render either.
+  it('omits an undated maintenance line rather than emitting undefined', () => {
+    const source = renderNodeReleaseSchedule('2026-07-26', [
+      { major: 26, start: '2026-04-21', end: '2029-04-30' },
+    ]);
+
+    expect(source).not.toContain('maintenance');
+    expect(source).not.toContain('undefined');
+  });
+
   it('rejects malformed upstream lifecycle dates', () => {
     expect(() =>
       scheduleLinesFromUpstream(
