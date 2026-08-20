@@ -213,6 +213,7 @@ runs:
         EXACT_KEY: ${{ inputs.exact-key }}
         EXACT_RESTORE: ${{ inputs.exact-restore }}
         FAMILY: ${{ inputs.family }}
+        LOOKUP_ONLY: ${{ inputs.lookup-only }}
         MODE: ${{ inputs.mode }}
         PRIMARY_KEY: ${{ steps.keys.outputs.primary-key }}
         RESTORE_EXACT_HIT: ${{ steps.restore-exact.outputs.cache-hit }}
@@ -222,9 +223,13 @@ runs:
       run: |
         set -euo pipefail
 
+        # A lookup-only restore never downloads the cache, so a hit here must
+        # not report as restored — only as a key to feed a later exact restore.
+        downloaded=true
         if [ "${MODE}" = "restore" ]; then
           hit="${RESTORE_HIT:-false}"
           matched="${RESTORE_MATCHED:-}"
+          [ "${LOOKUP_ONLY}" = "true" ] && downloaded=false
         elif [ "${MODE}" = "restore-exact" ]; then
           hit="${RESTORE_EXACT_HIT:-false}"
           matched=""
@@ -235,7 +240,8 @@ runs:
         fi
 
         restored=false
-        if [ "${hit}" = "true" ] || { [ "${EXACT_RESTORE}" = "true" ] && [ -n "${matched}" ]; }; then
+        if [ "${downloaded}" = "true" ] \
+          && { [ "${hit}" = "true" ] || { [ "${EXACT_RESTORE}" = "true" ] && [ -n "${matched}" ]; }; }; then
           restored=true
         fi
 
