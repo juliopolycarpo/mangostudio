@@ -31,6 +31,49 @@ describe('test lane declarations', () => {
     }
   );
 
+  // Same pinning as the JUnit paths above, for a stronger reason: the timings
+  // file decides which files each shard runs, so a lane reading one path while
+  // the merge step writes another balances against a file nothing updates —
+  // and silently keeps the old split forever.
+  it.each(TEST_LANES.filter((lane) => lane.timingsPath))(
+    'the $id lane reads timings from where the lane table says it does',
+    async (lane) => {
+      const scripts = await readScripts(lane.manifest);
+      const script = scripts[lane.coverageScript];
+      const expected =
+        lane.manifest === 'package.json' ? lane.timingsPath : `../../${lane.timingsPath}`;
+      expect(script).toContain(`--timings=${expected}`);
+      // Without this the shards read a timings file and never refresh it.
+      expect(script).toContain('--update-timings');
+    }
+  );
+
+  // The inverse direction: a lane that opts out must not carry the flags, or it
+  // writes a slice the merge step then treats as authoritative for a lane it is
+  // not balancing.
+  it.each(TEST_LANES.filter((lane) => !lane.timingsPath))(
+    'the $id lane passes no timings flags',
+    async (lane) => {
+      const scripts = await readScripts(lane.manifest);
+      expect(scripts[lane.coverageScript]).not.toContain('--timings=');
+      expect(scripts[lane.coverageScript]).not.toContain('--update-timings');
+    }
+  );
+
+  // Turbo caches `//#test:scripts` and nothing else in the test lanes. A timings
+  // file is untracked, so it cannot enter that cache key — balancing this lane
+  // would let shard i restore a report built from a different file set. Worth
+  // 0.6s; not worth that. Pinned so re-adding it is a deliberate act.
+  it('the cached root lane opts out of timings', () => {
+    expect(TEST_LANES.find((lane) => lane.id === 'root')?.timingsPath).toBeUndefined();
+  });
+
+  it('the Vitest lane declares no timings path', () => {
+    const vitest = TEST_LANES.filter((lane) => lane.runner === 'vitest');
+    expect(vitest.length).toBeGreaterThan(0);
+    for (const lane of vitest) expect(lane.timingsPath).toBeUndefined();
+  });
+
   it('every Bun lane takes the shard argument', async () => {
     for (const lane of TEST_LANES.filter((candidate) => candidate.runner === 'bun')) {
       const scripts = await readScripts(lane.manifest);

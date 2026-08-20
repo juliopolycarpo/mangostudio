@@ -20,6 +20,12 @@ export interface TestLane {
   readonly runner: 'bun' | 'vitest';
   /** Repo-relative JUnit XML the lane writes. */
   readonly junitPath: string;
+  /**
+   * Repo-relative `--timings` file, for Bun lanes only. Vitest shards on its
+   * own and does not read this format. Paths inside the file are relative to
+   * the lane's own cwd, so every Bun lane needs a separate one.
+   */
+  readonly timingsPath?: string;
   /** Repo-relative manifest declaring the lane's coverage script. */
   readonly manifest: string;
   /** Script key inside that manifest. */
@@ -28,12 +34,30 @@ export interface TestLane {
 
 export const JUNIT_DIR = '.mango/artifacts/junit';
 
+/**
+ * Where each Bun lane's `--timings` file lives.
+ *
+ * These are load-bearing for correctness, not just for speed. Without them
+ * `--shard=i/N` is a round-robin over the alphabetical file list, so all N
+ * shards derive the same partition independently and cannot disagree. With
+ * them the partition is a function of a *shared file*, and N shards that read
+ * different bytes will not cover the file set between them — some files run
+ * twice, others not at all, and every shard still exits 0. `verifyPartition`
+ * in `scripts/ci/merge-timings-shards.ts` is what turns that into a failure.
+ */
+export const TIMINGS_DIR = '.mango/artifacts/timings';
+
 export const TEST_LANES: readonly TestLane[] = [
   {
     id: 'root',
     workspace: 'root',
     runner: 'bun',
     junitPath: `${JUNIT_DIR}/root.xml`,
+    // Deliberately no timingsPath. `//#test:scripts` is the one *cached* test
+    // task, and a timings file is untracked, so it cannot be part of Turbo's
+    // cache key — shard i would restore a `root.xml` produced when the split
+    // put different files on shard i. Balancing this lane is worth 0.5s of its
+    // own and 0.6s overall (measured), which does not pay for that hazard.
     manifest: 'package.json',
     coverageScript: 'test:scripts',
   },
@@ -42,6 +66,7 @@ export const TEST_LANES: readonly TestLane[] = [
     workspace: 'api',
     runner: 'bun',
     junitPath: `${JUNIT_DIR}/api.xml`,
+    timingsPath: `${TIMINGS_DIR}/api.json`,
     manifest: 'apps/api/package.json',
     coverageScript: 'test:coverage',
   },
@@ -50,6 +75,7 @@ export const TEST_LANES: readonly TestLane[] = [
     workspace: 'shared',
     runner: 'bun',
     junitPath: `${JUNIT_DIR}/shared.xml`,
+    timingsPath: `${TIMINGS_DIR}/shared.json`,
     manifest: 'apps/shared/package.json',
     coverageScript: 'test:coverage',
   },
@@ -58,6 +84,7 @@ export const TEST_LANES: readonly TestLane[] = [
     workspace: 'runtime',
     runner: 'bun',
     junitPath: `${JUNIT_DIR}/runtime.xml`,
+    timingsPath: `${TIMINGS_DIR}/runtime.json`,
     manifest: 'apps/runtime/package.json',
     coverageScript: 'test:coverage',
   },
@@ -66,6 +93,7 @@ export const TEST_LANES: readonly TestLane[] = [
     workspace: 'frontend',
     runner: 'bun',
     junitPath: `${JUNIT_DIR}/frontend-bun.xml`,
+    timingsPath: `${TIMINGS_DIR}/frontend-bun.json`,
     manifest: 'apps/frontend/package.json',
     coverageScript: 'test:coverage:bun',
   },

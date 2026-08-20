@@ -10,7 +10,7 @@ import {
 const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
-const EXPECTED_FAMILIES = ['bun', 'turbo', 'vite', 'lint-tools', 'playwright'] as const;
+const EXPECTED_FAMILIES = ['bun', 'turbo', 'vite', 'lint-tools', 'playwright', 'timings'] as const;
 
 describe('CI cache policy', () => {
   test('keeps every cache family behind one composite and one immutable pin', () => {

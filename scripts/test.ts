@@ -13,7 +13,7 @@ import {
   runParallel,
 } from './lib/runner';
 import { createTurboTestCommand, parseShard, type TestShard, testLaneEnv } from './lib/test';
-import { JUNIT_DIR, VITEST_BLOB_DIR } from './lib/test-lanes';
+import { JUNIT_DIR, TIMINGS_DIR, VITEST_BLOB_DIR } from './lib/test-lanes';
 
 const ROOT_SCRIPTS_TEST_COMMAND = ['turbo', 'run', '//#test:scripts', '--ui=stream'];
 
@@ -81,15 +81,25 @@ if (shard && !runCoverage) {
   fatal('--shard requires --coverage; no other lane has a merge step to reassemble it.');
 }
 
-// Bun refuses to create the parent directory for `--reporter-outfile` and, on
-// the pinned canary, prints `JUnitReportFailed` and still exits 0 when it is
-// missing — the lane's counts silently go to zero. Create it here rather than in
-// each of the six lane scripts. Clearing it first keeps a lane that did not run
-// this time from contributing last run's counts to the merged totals.
+// Bun refuses to create the parent directory for `--reporter-outfile` and
+// prints `JUnitReportFailed` while still exiting 0 when it is missing — the
+// lane's counts silently go to zero. Re-verified on the pinned 1.4.0: running
+// `test:scripts` on its own, outside this script, reports 765 passing tests,
+// fails to write the report, and exits 0. Create it here rather than in each of
+// the six lane scripts. Clearing it first keeps a lane that did not run this
+// time from contributing last run's counts to the merged totals.
 const junitDir = join(ROOT_DIR, JUNIT_DIR);
 await rm(junitDir, { recursive: true, force: true });
 await mkdir(junitDir, { recursive: true });
 if (shard) await rm(join(ROOT_DIR, VITEST_BLOB_DIR), { recursive: true, force: true });
+
+// Created but deliberately NOT cleared: a restored timings file is an input to
+// this run, and every shard has to read the same one or they stop agreeing on
+// the split (see scripts/ci/merge-timings-shards.ts). Bun tolerates the file
+// being absent and falls back to the round-robin split, so a cold cache is
+// safe — but it rejects a malformed one outright, which is why nothing here
+// writes a placeholder.
+await mkdir(join(ROOT_DIR, TIMINGS_DIR), { recursive: true });
 
 const laneEnv = testLaneEnv(shard);
 

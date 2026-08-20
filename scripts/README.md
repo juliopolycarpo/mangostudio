@@ -20,7 +20,7 @@ scripts/
 ├── clean.ts          Remove build artifacts (bun run clean)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── bench/            Hermetic performance measurement (startup.ts)
-├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard merge)
+├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
 ├── install/          Archive-install smoke fixture for the release dry-run (install.sh, not shipped; canonical installers live at mangostudio.dev)
@@ -100,6 +100,10 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 - `merge-lcov-shards.ts` — merge per-shard Bun LCOV. Not a concatenation and not
   a union; see `docs/reference/testing.md` for why the naive merge reports a
   coverage regression that did not happen.
+- `../ci/merge-timings-shards.ts` — reassemble the per-shard `--timings` slices
+  that balance the next run's split, and fail the run if two shards claimed the
+  same file. That is the observable symptom of shards reading different timings,
+  which means they did not cover the suite between them while all exiting 0.
 - `collect.ts` + `collect/*` — merge the test fragment with LoC, bundle,
   dependency, duplication, and tooling metrics into the versioned `qa-metrics`
   envelope (`metrics-envelope.ts`), uploaded for PR heads and main baselines.

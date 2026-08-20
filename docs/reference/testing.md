@@ -283,13 +283,55 @@ Two long poles, not one, which is why the shard boundary is a slice of *every*
 lane rather than one job per workspace: a per-workspace split leaves `apps/api`
 alone at 278s.
 
-Eight is where the curve flattens. The suite bin-packs to the ideal split at any
-N — the slowest single file is 20.2s of 348s, so balance does not bite until
-about N=17, and **no committed timings file is needed**; `--timings` would buy
-under 1%. What does bite is the ~21s of fixed setup each job pays and the merge
-job's fixed cost, so measured per-shard test time of 70s → 35s → 23s at N=4 → 8
-→ 12 turns into diminishing wall clock. Raising it is a two-line change:
-`SHARD_COUNT` and the matrix list.
+Eight is where the curve flattens. What bites is the ~21s of fixed setup each
+job pays and the merge job's fixed cost, so measured per-shard test time of 70s
+→ 35s → 23s at N=4 → 8 → 12 turns into diminishing wall clock. Raising it is a
+two-line change: `SHARD_COUNT` and the matrix list.
+
+#### Balancing the split by time
+
+> An earlier revision of this section concluded that **no timings file was
+> needed** and that `--timings` would buy "under 1%". That was reasoned from the
+> slowest single file (20.2s of 348s) as the lower bound on the critical shard.
+> The reasoning was wrong: the imbalance does not come from one big file, it
+> comes from five lanes each round-robining their own file list, and the sums
+> landing unevenly. Re-measured from real per-file durations on Bun 1.4.0:
+
+| Split                                 | Critical shard | Spread across shards |
+| ------------------------------------- | -------------- | -------------------- |
+| Round-robin (Bun's default `--shard`) | 69.6s          | 34.5s                |
+| `--timings`, each lane balanced       | 58.6s          | 16.4s                |
+| Perfect joint balance (not reachable) | 45.0s          | 0s                   |
+
+Bun's `--shard=i/N` is a **round-robin over the alphabetical file list** — file
+at index `k` runs on shard `k % N + 1` (verified against `apps/shared`). Given
+`--timings=<file>`, it balances by measured duration instead.
+
+The joint optimum is out of reach because each lane balances independently, and
+they all put their own slowest file on the same shard index — `apps/api` (8.7s),
+root (9.6s) and `apps/runtime` (6.5s) all land on shard 1, which is why the
+balanced critical shard is 58.6s rather than the 45.0s mean.
+
+**The timings file is a correctness dependency, not just a speed one.** Under
+round-robin, all N shards derive the same partition independently and *cannot*
+disagree. Under `--timings` the partition is a function of a shared file, so N
+shards reading different bytes will not cover the file set between them — some
+files run twice, others not at all, and every shard still exits 0. Three things
+hold that down:
+
+- Only the merge job writes the cache, and only after all eight shards have read
+  it, so nothing changes underneath a fan-out in progress.
+- `scripts/ci/merge-timings-shards.ts` fails the run if two shards claim the
+  same file, which is the observable symptom of a disagreement.
+- A **missing** file is tolerated by Bun and falls back to round-robin, so a cold
+  cache degrades to the old behaviour instead of failing. A **malformed** file is
+  a hard error — including `{}` — so nothing writes a placeholder.
+
+The root `//#test:scripts` lane **opts out**. It is the only test task Turbo
+caches, and a timings file is untracked, so it cannot enter that cache key: shard
+`i` would restore a `root.xml` produced when the split put different files on
+shard `i`. Balancing it is worth 0.5s within the lane and 0.6s overall (59.2s vs
+58.6s critical shard), which does not pay for that hazard.
 
 #### Merging is not concatenation
 

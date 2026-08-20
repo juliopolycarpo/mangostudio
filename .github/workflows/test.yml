@@ -6,14 +6,17 @@ on:
 permissions:
   contents: read
 
-# Shard count. Eight is where the curve flattens: the suite splits evenly at
-# any N (the slowest single file is 20.2s of 348s, so bin-packing hits the
-# ideal split well past N=12), each job pays ~21s of fixed setup, and the merge
-# job adds a fixed ~30s. Measured per-shard test time falls 70s -> 35s -> 23s
-# at N=4 -> 8 -> 12, so doubling again buys ~15s of wall clock for four more
-# jobs. Raising it is a three-line change: this value, the matrix list, and the
-# shard job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
+# Shard count. Eight is where the curve flattens: each job pays ~21s of fixed
+# setup and the merge job adds a fixed ~30s, so measured per-shard test time
+# falling 70s -> 35s -> 23s at N=4 -> 8 -> 12 buys less wall clock each time.
+# Raising it is a three-line change: this value, the matrix list, and the shard
+# job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
 # so that last one cannot interpolate this value.
+#
+# The split itself is balanced by measured per-file duration rather than by file
+# order; see the timings cache below and docs/reference/testing.md. Changing this
+# value invalidates that cache by design — the validity string carries it,
+# because a timings file written for a different N describes a different split.
 env:
   SHARD_COUNT: 8
 
@@ -81,6 +84,27 @@ jobs:
           mode: ${{ matrix.shard == 1 && 'restore-save' || 'restore' }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      # Per-file durations from a previous run, used to balance `--shard` by
+      # time instead of by file order. Measured on this repo: the critical
+      # shard goes 69.6s -> 58.6s and the spread across shards halves.
+      #
+      # `mode: restore` for all eight — only the merge job writes, and it writes
+      # once, after every shard has read. That ordering is what keeps the eight
+      # shards reading the same bytes, which is a correctness requirement and
+      # not just a tidiness one: see scripts/ci/merge-timings-shards.ts.
+      #
+      # A miss is safe. Bun falls back to the round-robin split when the file is
+      # absent, which is exactly the behaviour this workflow had before.
+      - name: Restore test timings
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: timings
+          path: .mango/artifacts/timings
+          validity: test-shard-${{ env.SHARD_COUNT }}
+          restore-prefix: test-
+          mode: restore
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
 
@@ -128,6 +152,7 @@ jobs:
           path: |
             .mango/artifacts/junit/
             .mango/artifacts/coverage/
+            .mango/artifacts/timings/
             apps/frontend/.vitest-reports/
             shard-meta.json
             unhandled-errors.json
@@ -169,6 +194,30 @@ jobs:
       - name: Merge shard coverage and run metadata
         id: merge
         run: bun ./scripts/ci/merge-test-shards.ts shards > shard-summary.json
+
+      # Reassembles next run's timings, and fails this run if the eight shards
+      # claimed the same file — which means they read different timings and did
+      # not cover the suite between them. Every shard exits 0 in that case, so
+      # this step is the only thing standing between a broken split and a green
+      # board.
+      #
+      # Runs before the cache save so a partition that went wrong is never the
+      # thing the next run balances against.
+      - name: Merge test timings
+        id: timings
+        run: bun ./scripts/ci/merge-timings-shards.ts shards .mango/artifacts/timings
+
+      # Deliberately has no `if:`, so a failed merge above skips it and the next
+      # run keeps balancing against the last known-good file rather than one
+      # written from a split that did not add up.
+      - name: Save test timings
+        uses: ./.github/actions/cache-scoped
+        with:
+          family: timings
+          path: .mango/artifacts/timings
+          validity: test-shard-${{ env.SHARD_COUNT }}
+          mode: save
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       # Hard gate: this is where the frontend coverage thresholds apply, the
       # same way `vitest run --coverage` applied them before sharding. Four
