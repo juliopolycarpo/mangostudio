@@ -150,7 +150,10 @@ describe('mergeLcovRecords', () => {
         [12, 0],
       ]
     );
-    const [merged] = mergeLcovRecords([parseLcovRecords(shapeShard), parseLcovRecords(otherRegion)]);
+    const [merged] = mergeLcovRecords([
+      parseLcovRecords(shapeShard),
+      parseLcovRecords(otherRegion),
+    ]);
     expect(merged.lineHits.get(1)).toBe(4);
     expect(merged.lineHits.get(3)).toBe(2);
     expect(merged.lineHits.get(10)).toBe(1);
