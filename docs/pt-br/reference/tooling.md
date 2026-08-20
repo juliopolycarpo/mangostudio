@@ -66,7 +66,7 @@ execução de tasks entre workspaces e fornece cache endereçável por conteúdo
 | `test:unit`        | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Testes unitários                            |
 | `test:integration` | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Testes de integração (sempre reexecutados)  |
 | `test:coverage`    | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑ | Relatórios de cobertura                     |
-| `//#test:scripts`  | on    | inputs `scripts/**`                                | Testes de scripts na raiz (cache via turbo) |
+| `//#test:scripts`  | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`             | Testes de scripts na raiz (cache via turbo) |
 
 ### Cache em CI
 

@@ -68,7 +68,7 @@ describe('test script', () => {
     // nothing; without the output, a cache hit leaves no report and the shard
     // contributes zero root tests to a run that still looks green.
     expect(turboConfig.tasks['//#test:scripts']).toEqual({
-      inputs: ['scripts/**'],
+      inputs: ['$TURBO_DEFAULT$', 'scripts/**'],
       outputs: ['$TURBO_ROOT$/.mango/artifacts/junit/root.xml'],
       env: ['CI', 'MANGOSTUDIO_*'],
     });

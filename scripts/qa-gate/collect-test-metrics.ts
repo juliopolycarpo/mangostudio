@@ -18,6 +18,7 @@ import { safe } from './collect/support';
 import type { CoverageSummary, Failable, TestMetricsFragment } from './collect/types';
 import { readWorkspaceCoverageSummary } from './coverage-summary';
 import { buildTestSuiteStats, readLaneResults } from './junit-results';
+import type { VitestUnhandledErrors } from './vitest-unhandled-errors';
 
 const [, , summaryPath, shardsRoot] = process.argv;
 if (!summaryPath) {
@@ -41,12 +42,28 @@ const FAILED_SUMMARY: ShardSummary = {
 
 // Parsing is not enough: `[]` is valid JSON and would hand an undefined exit
 // code straight into the fragment, which renders as a suite with no outcome
-// rather than a failed one.
-const isShardSummary = (value: unknown): value is ShardSummary =>
+// rather than a failed one. `{"exitCode":0}` is the same hole with a number
+// in the one field the old guard checked.
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+const isVitestUnhandledErrors = (value: unknown): value is VitestUnhandledErrors =>
   typeof value === 'object' &&
   value !== null &&
   !Array.isArray(value) &&
-  typeof (value as ShardSummary).exitCode === 'number';
+  isFiniteNumber((value as VitestUnhandledErrors).errors) &&
+  Array.isArray((value as VitestUnhandledErrors).headlines);
+
+const isShardSummary = (value: unknown): value is ShardSummary => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const summary = value as Partial<ShardSummary>;
+  return (
+    isFiniteNumber(summary.shards) &&
+    isFiniteNumber(summary.exitCode) &&
+    isFiniteNumber(summary.durationSeconds) &&
+    (summary.vitestErrors === undefined || isVitestUnhandledErrors(summary.vitestErrors))
+  );
+};
 
 const readShardSummary = async (path: string): Promise<ShardSummary> => {
   const file = Bun.file(path);

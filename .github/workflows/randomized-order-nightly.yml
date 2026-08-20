@@ -18,7 +18,7 @@ name: Randomized Order Nightly
 #
 # The seed is the run number, so every night is a new order and any failure
 # names the exact seed to reproduce with:
-#   bun test --randomize --seed=<n> <lane>
+#   (cd apps/<workspace> && bun test --timeout 15000 --parallel=1 --randomize --seed=<n>)
 
 on:
   schedule:
@@ -68,18 +68,27 @@ jobs:
       # than through `bun run test`: this is a diagnostic, not the merge gate,
       # and it must not write JUnit reports or coverage that anything else
       # reads.
+      #
+      # Step timeout is tighter than the job's so a hang dies here and still
+      # leaves time for the log upload. A job-level timeout cancels the job
+      # before that step can run, and the log is the finding.
       - name: Run in a randomized order
+        id: randomized
+        timeout-minutes: 12
         working-directory: apps/${{ matrix.workspace }}
         env:
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
+          WORKSPACE: ${{ matrix.workspace }}
         run: |
-          echo "::notice::Reproduce with: bun test --randomize --seed=${SEED}"
+          echo "::notice::Reproduce with: (cd apps/${WORKSPACE} && bun test --timeout 15000 --parallel=1 --randomize --seed=${SEED})"
           bun test --timeout 15000 --parallel=1 --randomize --seed="${SEED}" 2>&1 | tee run.log
 
       # The order is the finding. Without it a red run names a failing test and
       # nothing about what ran before it, which is the half that matters.
+      # `outcome != success` covers a failed run and a step timeout; `!cancelled()`
+      # skips a user-cancelled job, where there is nothing useful to keep.
       - name: Upload run log
-        if: failure()
+        if: ${{ !cancelled() && steps.randomized.outcome != 'success' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: randomized-order-${{ matrix.workspace }}-seed-${{ env.SEED }}

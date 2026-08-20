@@ -379,9 +379,9 @@ seeds 1 and 2 keep `a, b, c`. File order is the half that matters for leaked
 It is deliberately not merge-gating. A suite that fails weekly on a different
 seed is a bug report; making it block merges teaches everyone to re-run CI, and
 that habit outlasts the fix. A failure logs its seed and uploads the run log,
-because the order **is** the finding — reproduce with
-`bun test --randomize --seed=<n>` in the named workspace, and read what ran
-before the failing file rather than the failing file itself.
+because the order **is** the finding. Reproduce with
+`(cd apps/<workspace> && bun test --timeout 15000 --parallel=1 --randomize --seed=<n>)`,
+and read what ran before the failing file rather than the failing file itself.
 
 ### Code Health
 

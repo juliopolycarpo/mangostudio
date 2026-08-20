@@ -141,7 +141,7 @@ Current task definitions:
 | `test:unit`        | on    | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Unit tests                                   |
 | `test:integration` | off   | env `DATABASE_PATH`, `CI`, `MANGOSTUDIO_*`         | Integration tests (always re-run)            |
 | `test:coverage`    | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑ | Coverage reports (always re-run)             |
-| `//#test:scripts`  | on    | inputs `scripts/**`                                | Root scripts tests (cached via turbo)        |
+| `//#test:scripts`  | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`             | Root scripts tests (cached via turbo)        |
 
 ### Inspection Scripts
 

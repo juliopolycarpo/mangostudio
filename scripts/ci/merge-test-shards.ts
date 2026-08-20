@@ -66,8 +66,9 @@ const readJson = async <T>(path: string, fallback: T): Promise<T> => {
 /** Shard artifact directories, sorted so blob file names stay stable across runs. */
 export const listShardDirs = async (shardsRoot: string): Promise<readonly string[]> => {
   const entries = await readdir(shardsRoot, { withFileTypes: true });
+  // The download pattern `test-shard-*` also matches `test-shard-<n>-log`.
   return entries
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && !entry.name.endsWith('-log'))
     .map((entry) => join(shardsRoot, entry.name))
     .sort();
 };

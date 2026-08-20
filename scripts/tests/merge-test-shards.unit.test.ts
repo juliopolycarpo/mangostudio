@@ -94,6 +94,16 @@ describe('listShardDirs', () => {
     await Bun.write(join(root, 'loose.json'), '{}');
     expect(await listShardDirs(root)).toEqual([join(root, 'shard-1')]);
   });
+
+  // The merge job downloads `test-shard-*`, which also matches the
+  // `test-shard-<n>-log` failure artifacts. Those directories have no
+  // shard-meta or coverage, and counting them inflates the merge.
+  it('skips failure-log artifact directories', async () => {
+    const root = await makeTemp();
+    await Bun.write(join(root, 'test-shard-1', 'shard-meta.json'), '{}');
+    await Bun.write(join(root, 'test-shard-1-log', 'coverage-run.log'), 'log');
+    expect(await listShardDirs(root)).toEqual([join(root, 'test-shard-1')]);
+  });
 });
 
 describe('mergeTestShards', () => {
@@ -204,6 +214,11 @@ describe('collect-test-metrics degradation', () => {
     ['empty', ''],
     ['truncated', '{"shards": 8, "exit'],
     ['not an object', '[]'],
+    ['exitCode only', '{"exitCode":0}'],
+    [
+      'malformed vitestErrors',
+      '{"shards":8,"exitCode":0,"durationSeconds":1,"vitestErrors":{"errors":"nope"}}',
+    ],
   ])('reports a failing suite rather than throwing on a %s summary', async (_label, contents) => {
     const dir = await makeTemp();
     const summaryPath = join(dir, 'shard-summary.json');
@@ -220,5 +235,23 @@ describe('collect-test-metrics degradation', () => {
     const { stdout, exitCode } = await collect(join(dir, 'missing.json'), join(dir, 'no-shards'));
     expect(exitCode).toBe(0);
     expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(1);
+  });
+
+  it('accepts a complete summary rather than degrading it', async () => {
+    const dir = await makeTemp();
+    const summaryPath = join(dir, 'shard-summary.json');
+    await Bun.write(
+      summaryPath,
+      JSON.stringify({
+        shards: 8,
+        exitCode: 0,
+        durationSeconds: 12,
+        vitestErrors: { errors: 0, headlines: [] },
+      })
+    );
+
+    const { stdout, exitCode } = await collect(summaryPath);
+    expect(exitCode).toBe(0);
+    expect((JSON.parse(stdout) as { tests: { exitCode: number } }).tests.exitCode).toBe(0);
   });
 });
