@@ -26,6 +26,18 @@ const RELEASE_DOWNLOAD_BASE = 'https://github.com/oven-sh/bun/releases/download'
 const CHECKSUM_FILE = 'SHASUMS256.txt';
 
 /**
+ * Ceilings on the two release-host requests, generous enough that only a stalled
+ * connection trips them: the listing is 3 KB, and an asset is 24–38 MB, which CI
+ * pulls in seconds.
+ *
+ * Present because a hang here is indistinguishable from a slow build until the
+ * job's own timeout kills it — 25 minutes of silence, no failing output, and
+ * nothing in the log naming the request that never came back.
+ */
+const CHECKSUM_TIMEOUT_MS = 30_000;
+const ASSET_TIMEOUT_MS = 120_000;
+
+/**
  * A released Bun, e.g. `1.3.14` or `1.4.0-canary.1` — anything else is a channel.
  *
  * Build metadata is accepted even though no Bun tag carries it, because this
@@ -375,13 +387,21 @@ export async function downloadVerifiedAsset(
   const expected = await fetchAssetChecksum(asset, channel, downloadBase);
 
   const url = `${downloadBase}/${channel}/${asset}.zip`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(ASSET_TIMEOUT_MS) });
   if (!response.ok) {
     throw new Error(`Download failed (${response.status} ${response.statusText}): ${url}`);
   }
-  // Streamed to disk rather than buffered: every target downloads at once, and
-  // a whole Bun per target held in memory is the peak this build does not need.
-  await Bun.write(archivePath, response);
+  // Buffered, not `Bun.write(archivePath, response)`. Streaming the response
+  // straight to disk is the obvious way to keep a whole Bun per target out of
+  // memory, and it **deadlocks** on Bun 1.4.0-canary.1: with the seven foreign
+  // targets downloading at once, a few complete and the rest never write a byte
+  // — measured in CI (4 of 8 targets, then 25 minutes of silence to the job
+  // timeout) and reproduced locally in isolation, where the same seven finish in
+  // 4.7s buffered. One streamed download alone is fine, which is what makes it
+  // easy to reintroduce. The peak this costs is ~222 MB across all seven; the
+  // assets are 24–38 MB each, not the 60 MB the size of a Bun install suggests.
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  await Bun.write(archivePath, bytes);
 
   const actual = await sha256File(archivePath);
   if (actual === expected) return { sha256: actual, tagAdvanced: false };
@@ -400,7 +420,7 @@ async function fetchAssetChecksum(
   downloadBase: string
 ): Promise<string> {
   const url = `${downloadBase}/${channel}/${CHECKSUM_FILE}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(CHECKSUM_TIMEOUT_MS) });
   if (!response.ok) {
     throw new Error(`Checksum download failed (${response.status} ${response.statusText}): ${url}`);
   }
