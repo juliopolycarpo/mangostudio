@@ -3,6 +3,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { bunCompiledRuntimes, bunCrossCompileChannel } from '../lib/bun-cross-runtime';
 import { ROOT_DIR } from '../lib/config';
 import {
   createDistributionManifest,
@@ -124,6 +125,12 @@ async function main(): Promise<void> {
     packageVersion,
     channel,
     bunVersion: Bun.version,
+    bunRevision: Bun.revision,
+    // Reads what the build already resolved, per target, and records nothing for
+    // a target it did not build — a `--platform`-limited run leaves most of them
+    // unbuilt, and the honest answer for those is that this build produced no
+    // runtime for them at all.
+    bunRuntimes: await bunCompiledRuntimes(await bunCrossCompileChannel()),
   });
   writeFileSync(args.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 

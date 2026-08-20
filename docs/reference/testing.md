@@ -108,7 +108,8 @@ test asserts; otherwise take the floor.
 > **Do not set this in `bunfig.toml`.** Bun has no `[test] timeout` key and
 > ignores one **silently** rather than erroring — a 6s test still fails under
 > `timeout = 20000`. `BUN_TEST_TIMEOUT` is ignored too. The `--timeout` CLI flag
-> is the only mechanism that works (verified on Bun 1.3.14).
+> is the only mechanism that works (re-verified on Bun `1.4.0-canary.1`: a 6s
+> test still times out at 5000ms under both, and passes under `--timeout 20000`).
 
 Raising the floor is not a substitute for fixing a slow test. Prefer removing the
 cost — replay migrations against `:memory:` rather than a temp-dir SQLite file,
@@ -124,17 +125,23 @@ fresh global object. Isolation is the load-bearing half. Bun's default — no
 where the in-memory database from `setupTestEnvironment()` and any `mock.module`
 registration outlive the file that made them.
 
-Measured on `apps/api/tests/unit` (3421 tests, 301 files):
+Measured on `apps/api/tests/unit` (3437 tests, 301 files), Bun
+`1.4.0-canary.1`, `--timeout 15000` throughout:
 
-| Invocation                          | Result                                    |
-| ----------------------------------- | ----------------------------------------- |
-| `--parallel=1` (what the lane runs) | 3421 pass                                 |
-| `--isolate` alone                   | 3421 pass — isolation alone is sufficient |
-| neither                             | 7 fail, each at exactly 5000ms            |
+| Invocation                          | Result                                            |
+| ----------------------------------- | ------------------------------------------------- |
+| `--parallel=1` (what the lane runs) | 3437 pass, 188.8s                                 |
+| `--isolate` alone                   | 3437 pass, 186.7s — isolation alone is sufficient |
+| neither                             | 172 fail, 3263 pass, 128.7s                       |
 
-The seven are turn-recovery and checkpoint tests, and they hit the timeout rather
-than failing an assertion, so dropping the flag buys a suite whose failures read
-as unrelated flakes.
+Dropping the flag costs 172 failures, not the seven this table used to record.
+The seven are still there — the same turn-recovery and checkpoint tests, now
+timing out at the 15s floor rather than the old 5s default — but they are 7 of
+172. The other 165 fail in **under 2ms**, on assertions rather than wall clock:
+`todo repository`, `requiresExternalDisclosure`, `external turn controller` and
+`external session manager` account for most of them. So the mode does not merely
+buy failures that read as unrelated flakes; it buys a suite that is wrong about
+its own subject matter. Nor is it a race — repeated runs return the same count.
 
 `test:integration` deliberately does **not** take the flag. The lane passes with
 `--isolate` (779 pass), but it costs 268s against 75s without — 3.5x, on a CI job
@@ -213,6 +220,16 @@ descriptor at the isolate global swap — with a fix open at
 has shipped before re-investigating any of this. Note that the issue recommends
 redirecting to regular files as a workaround; that made it *worse* here, not
 better, so measure before adopting it.
+
+> **A green canary run is not evidence the bug is gone.** The abort stopped
+> firing on the post-rewrite builds this repo now tracks, but the leak that
+> causes it did not go away. Counting how many of an isolate's fds point at the
+> same pipe as fd 2 — PR #38008's own regression test — gives `4 6 8 10 12 14 16
+> 18` across eight files on `1.4.0-canary.1+32e87032b`: two leaked per file,
+> still climbing. Only #38008 flattens it to a constant `4`. So the collision
+> merely stopped being *observable* on this suite; whether it reappears is a
+> question of fd-number timing on some future runner. Wait for that patch
+> specifically, not for "a newer Bun".
 
 Do not read the stack frames below `new WriteStream` as the cause. They usually
 point at `google-logging-utils` inside `google-auth-library`'s module init
@@ -622,14 +639,14 @@ a `validity` string (toolchain versions plus content hashes). `setup-mango`
 wraps the Bun install family; every other family is invoked from the workflow
 that produces or consumes it.
 
-| Family                | Producer / consumer           | Path                               | Invalidators                                    | Restore behavior                  |
-| --------------------- | ----------------------------- | ---------------------------------- | ----------------------------------------------- | --------------------------------- |
-| Bun install           | every job using `setup-mango` | `~/.bun/install/cache`             | OS, arch, Bun version, lockfile                 | loose trusted-`main` prefix       |
-| Turbo task output     | check, test, build            | `.turbo/cache`                     | OS, arch, Bun/Turbo versions, lane, task config | lane-scoped trusted-`main` prefix |
-| Vite optimizer        | test and build                | `apps/frontend/node_modules/.vite` | lockfile and frontend/Vite/Vitest/TS config     | lane-scoped trusted-`main` prefix |
-| TypeScript build info | check                         | `.mango/artifacts/tsbuildinfo/`    | TypeScript version, tsconfig graph, TS sources  | version-scoped trusted-`main`     |
-| Workflow lint tools   | check                         | `.mango/artifacts/tools/`          | pinned tool manifest                            | exact trusted restore only        |
-| Playwright browser    | browser smoke                 | `~/.cache/ms-playwright`           | OS, arch, Playwright version                    | exact trusted restore only        |
+| Family                | Producer / consumer           | Path                               | Invalidators                                             | Restore behavior                  |
+| --------------------- | ----------------------------- | ---------------------------------- | -------------------------------------------------------- | --------------------------------- |
+| Bun install           | every job using `setup-mango` | `~/.bun/install/cache`             | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
+| Turbo task output     | check, test, build            | `.turbo/cache`                     | OS, arch, Bun revision, Turbo version, lane, task config | lane-scoped trusted-`main` prefix |
+| Vite optimizer        | test and build                | `apps/frontend/node_modules/.vite` | lockfile and frontend/Vite/Vitest/TS config              | lane-scoped trusted-`main` prefix |
+| TypeScript build info | check                         | `.mango/artifacts/tsbuildinfo/`    | TypeScript version, tsconfig graph, TS sources           | version-scoped trusted-`main`     |
+| Workflow lint tools   | check                         | `.mango/artifacts/tools/`          | pinned tool manifest                                     | exact trusted restore only        |
+| Playwright browser    | browser smoke                 | `~/.cache/ms-playwright`           | OS, arch, Playwright version                             | exact trusted restore only        |
 
 `mode` selects `restore-save` (default), `restore`, or `save`. Exact-restore
 families (`lint-tools`, `playwright`) set `exact-restore: true` so a loose

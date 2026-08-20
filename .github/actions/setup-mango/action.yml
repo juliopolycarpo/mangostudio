@@ -1,7 +1,7 @@
 name: Setup Mango (Bun + cache + install)
 description: >
-  Install the repository-pinned Bun version, restore its install cache, and run
-  a frozen install. Callers must run actions/checkout first.
+  Install the Bun build named by .bun-version, restore its install cache, and
+  run a frozen install. Callers must run actions/checkout first.
 inputs:
   cache-epoch:
     description: Repository-wide cache epoch used for emergency invalidation.
@@ -17,19 +17,24 @@ outputs:
     description: Trusted main-cache prefix considered during restore.
     value: ${{ steps.cache.outputs.restored-prefix }}
   bun-version:
-    description: Resolved Bun version used for cache keys and downstream families.
+    description: Resolved Bun revision used for cache keys and downstream families.
     value: ${{ steps.toolchain.outputs.bun }}
 runs:
   using: composite
   steps:
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       with:
-        bun-version-file: package.json
+        bun-version-file: .bun-version
 
     - id: toolchain
-      name: Resolve Bun version
+      name: Resolve Bun revision
       shell: bash
-      run: echo "bun=$(bun --version)" >> "$GITHUB_OUTPUT"
+      # `--revision`, not `--version`: `.bun-version` names the floating `canary`
+      # tag, and every canary build reports the same `1.4.0-canary.1` from
+      # `--version`. A cache key built on that would hand one Bun build's
+      # extracted packages to a different one. `--revision` appends the commit
+      # (`1.4.0-canary.1+32e87032b`) and is what actually changes per build.
+      run: echo "bun=$(bun --revision)" >> "$GITHUB_OUTPUT"
 
     - name: Start cache policy summary
       shell: bash
