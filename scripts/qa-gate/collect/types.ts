@@ -71,8 +71,16 @@ export interface ToolingCheckStats {
   readonly failedTasks: readonly string[];
 }
 
+/**
+ * The error half of `Failable`. Named rather than inlined so `isError` can
+ * declare the identical type: a structurally equal but separately written
+ * `{ error: string }` does not narrow `Failable<T>`'s negative branch back to
+ * `T`, and every downstream property access then fails.
+ */
+export type CollectorError = { readonly error: string };
+
 /** A successfully collected value, or a captured error message in its place. */
-export type Failable<T> = T | { readonly error: string };
+export type Failable<T> = T | CollectorError;
 
 /**
  * Test-derived metrics emitted by the CI Test job right after its single

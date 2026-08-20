@@ -1,10 +1,10 @@
 // Pure formatting helpers and Failable guards shared by every render section.
 
-import type { Failable } from '../collect/types';
+import type { CollectorError, Failable } from '../collect/types';
 
 export const NA = 'n/a';
 
-export const isError = <T>(value: Failable<T> | null | undefined): value is { error: string } =>
+export const isError = <T>(value: Failable<T> | null | undefined): value is CollectorError =>
   typeof value === 'object' && value !== null && 'error' in value;
 
 export const ok = <T>(value: Failable<T> | null | undefined): value is T =>

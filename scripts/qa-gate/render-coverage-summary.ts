@@ -4,6 +4,7 @@
 // A green run writes the same coverage tables as before (empty lead).
 // Usage: bun ./scripts/qa-gate/render-coverage-summary.ts [test-metrics.json]
 
+import type { TestMetricsFragment } from './collect/types';
 import { coverageWorkspaceNames, readWorkspaceCoverageSummary } from './coverage-summary';
 import { renderTestFailureLead } from './render/test-failures';
 

@@ -71,7 +71,7 @@ export function findDisallowedNodeEnvReads(
       ts.ScriptTarget.Latest,
       false
     );
-    const allowlistedLines = new Set(
+    const allowlistedLines = new Set<number>(
       NODE_ENV_READ_ALLOWLIST.filter(({ path }) => path === source.path).map(({ line }) => line)
     );
 

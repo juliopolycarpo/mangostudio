@@ -90,6 +90,12 @@ function createRootTasks(skipFormat: boolean): Array<() => Promise<RunResult>> {
       }),
     () => runTask('root:dependency-policy', () => assertNoDisallowedWorkspaceDependencies()),
     () => runTask('root:dependency-cohort', () => assertDependencyCohort()),
+    () =>
+      runCommand(
+        'root:typecheck-scripts',
+        ['bunx', 'tsc', '--noEmit', '-p', 'scripts/tsconfig.json'],
+        { cwd: ROOT_DIR }
+      ),
   ];
 
   if (!skipFormat) {

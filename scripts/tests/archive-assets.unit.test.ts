@@ -90,12 +90,16 @@ const createMuslReleasePlan = (options: {
         sourcePath: archive.binaryPath,
         assetName: hubName,
         assetPath: join(assetsDir, hubName),
-      },
+        platform: archive.platform.arch,
+        kind: 'hub',
+      } as const,
       {
         sourcePath: archive.runtimeBinaryPath,
         assetName: runtimeName,
         assetPath: join(assetsDir, runtimeName),
-      },
+        platform: archive.platform.arch,
+        kind: 'runtime',
+      } as const,
     ];
   });
   const frontendArchive = {
