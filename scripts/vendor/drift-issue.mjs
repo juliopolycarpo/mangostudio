@@ -33,6 +33,10 @@ export const DRIFT_LABELS = ['type: dependencies', 'area: runtime'];
  * `skipped` is excluded deliberately: a runner without vendor credentials is
  * the ordinary case, and filing an issue about it every week would bury the
  * one it exists to surface. The step summary still says what went unverified.
+ *
+ * @template {{ readonly status: string }} Outcome
+ * @param {{ readonly outcomes?: readonly Outcome[] } | null | undefined} report
+ * @returns {readonly Outcome[]}
  */
 export function driftedOutcomes(report) {
   return (report?.outcomes ?? []).filter(

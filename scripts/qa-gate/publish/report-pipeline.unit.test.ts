@@ -9,10 +9,26 @@ import {
   MAX_CI_JOBS,
   QA_METRICS_ARTIFACT_NAME,
   resolveReportInputs,
-} from './report-pipeline';
+} from './report-pipeline.mjs';
 
 const HEAD_SHA = 'fedcba9876543210fedcba9876543210fedcba98';
 const BASE_SHA = '0123456789abcdef0123456789abcdef01234567';
+
+type ReportInputs = Awaited<ReturnType<typeof resolveReportInputs>>;
+
+/**
+ * `resolveReportInputs` returns a bare `{ skip }` when there is nothing to
+ * publish, so its publishing fields are absent on that branch. Assert the
+ * publishing shape once instead of re-checking every field at every assertion,
+ * and fail with the skip reason rather than a bare property read.
+ */
+const publishable = (result: ReportInputs) => {
+  const { reportContext, ciDurations } = result;
+  if (!reportContext || !ciDurations) {
+    throw new Error(`expected publishable inputs, got skip: ${String(result.skip)}`);
+  }
+  return { ...result, reportContext, ciDurations };
+};
 
 interface FakeArtifact {
   readonly id: number;
@@ -252,7 +268,7 @@ describe('resolveReportInputs', () => {
       artifactsByRun: { 42: [artifact(1)] },
     });
 
-    const result = await resolveReportInputs({ github, context });
+    const result = publishable(await resolveReportInputs({ github, context }));
 
     expect(result.baseArchive).toBeNull();
     expect(result.reportContext.baseArtifact.found).toBe(false);
@@ -267,7 +283,7 @@ describe('resolveReportInputs', () => {
       },
     });
 
-    const result = await resolveReportInputs({ github, context });
+    const result = publishable(await resolveReportInputs({ github, context }));
 
     expect(result.headArchive).toBeNull();
     expect(result.reportContext.headArtifact.reason).toContain('exceeds');
@@ -280,7 +296,7 @@ describe('resolveReportInputs', () => {
       artifactsByRun: { 42: [artifact(1, { expired: true })] },
     });
 
-    const result = await resolveReportInputs({ github, context });
+    const result = publishable(await resolveReportInputs({ github, context }));
 
     expect(result.headArchive).toBeNull();
     expect(result.reportContext.headArtifact.reason).toContain('no qa-metrics artifact');
@@ -293,7 +309,7 @@ describe('resolveReportInputs', () => {
       jobErrorsByRun: { 42: 'temporary jobs API outage' },
     });
 
-    const result = await resolveReportInputs({ github, context });
+    const result = publishable(await resolveReportInputs({ github, context }));
 
     expect(result.skip).toBeNull();
     expect(result.ciDurations.head).toEqual({
@@ -313,7 +329,7 @@ describe('resolveReportInputs', () => {
       jobsByRun: { 41: [job('Test / Run tests')] },
     });
 
-    const result = await resolveReportInputs({ github, context });
+    const result = publishable(await resolveReportInputs({ github, context }));
 
     expect(result.ciDurations.previous.runId).toBe(41);
     expect(result.ciDurations.previous.error).toBeNull();
@@ -333,7 +349,7 @@ describe('resolveReportInputs', () => {
       artifactsByRun: { 42: [artifact(1)] },
     });
 
-    const result = await resolveReportInputs({ github, context });
+    const result = publishable(await resolveReportInputs({ github, context }));
 
     expect(result.ciDurations.previous.runId).toBeNull();
     expect(result.ciDurations.previous.error).toContain('no previous successful CI run');

@@ -137,7 +137,9 @@ export function renderNodeReleaseSchedule(
         renderProperty('major', line.major),
         renderProperty('start', line.start),
         ...(line.lts !== undefined ? [renderProperty('lts', line.lts)] : []),
-        renderProperty('maintenance', line.maintenance),
+        ...(line.maintenance !== undefined
+          ? [renderProperty('maintenance', line.maintenance)]
+          : []),
         renderProperty('end', line.end),
         ...(line.codename !== undefined ? [renderProperty('codename', line.codename)] : []),
         ...(line.latest !== undefined ? [renderProperty('latest', line.latest)] : []),

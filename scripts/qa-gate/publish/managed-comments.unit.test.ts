@@ -13,7 +13,7 @@ import {
   QA_REPORT_MARKER,
   REPORT_FALLBACK_BODY,
   readReportBody,
-} from './managed-comments';
+} from './managed-comments.mjs';
 
 const tempDirs: string[] = [];
 
