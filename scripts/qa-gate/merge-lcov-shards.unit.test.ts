@@ -178,7 +178,8 @@ describe('mergeLcovRecords', () => {
         )
       ),
     ]);
-    expect(merged.functionsHit).toBeLessThanOrEqual(merged.functionsFound);
+    expect(merged.functionsFound).toBe(5);
+    expect(merged.functionsHit).toBe(5);
   });
 
   it('keeps files only one shard saw', () => {

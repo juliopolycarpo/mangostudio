@@ -63,7 +63,7 @@ describe('parseJunitXml', () => {
 
   it('does not end a tag on a > inside an attribute value', () => {
     const xml =
-      '<testsuites><testcase name="a &gt; b" file="x.ts"><failure message="broke"/></testcase></testsuites>';
+      '<testsuites><testcase name="a > b" file="x.ts"><failure message="broke"/></testcase></testsuites>';
     const parsed = parseJunitXml(xml);
     expect(parsed).toMatchObject({ tests: 1, failed: 1 });
     expect(parsed.headlines[0]?.message).toBe('a > b: broke');
