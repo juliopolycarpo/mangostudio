@@ -5,9 +5,10 @@ description: Facts, recipes and the parity gate for replacing Vite/Vitest in app
 
 # Bun frontend migration
 
-`apps/frontend` is moving off Vite and Vitest onto one bundler (Bun), one test runner
-(`bun test` + happy-dom) and one server (Elysia) in dev and in the shipped binary. Work lands
-on `refactor/bun-frontend`; child PRs target that branch, not `main`.
+`apps/frontend` moved off Vite and Vitest onto one bundler (Bun), one test runner
+(`bun test` + happy-dom) and one server (Elysia) in dev and in the shipped binary. The
+migration landed through `refactor/bun-frontend`; the ledger below is the review checklist
+for any later change to the frontend build or test harness.
 
 Target-state architecture: `docs/architecture/frontend-build.md`.
 

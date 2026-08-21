@@ -5,9 +5,10 @@ description: Facts, recipes and the parity gate for replacing Vite/Vitest in app
 
 # Bun frontend migration
 
-`apps/frontend` is moving off Vite and Vitest onto one bundler (Bun), one test runner
-(`bun test` + happy-dom) and one server (Elysia) in dev and in the shipped binary. Work lands
-on `refactor/bun-frontend`; child PRs target that branch, not `main`.
+`apps/frontend` moved off Vite and Vitest onto one bundler (Bun), one test runner
+(`bun test` + happy-dom) and one server (Elysia) in dev and in the shipped binary. The
+migration landed through `refactor/bun-frontend`; the ledger below is the review checklist
+for any later change to the frontend build or test harness.
 
 Target-state architecture: `docs/architecture/frontend-build.md`.
 
@@ -37,11 +38,11 @@ imported bundle. The same issue documents that `get('/*')` shadows `.use()`/`.mo
 which is why `registerEmbeddedSpa` registers one explicit GET per asset instead of a root
 wildcard. Preserve that shape.
 
-**T3 — `await staticPlugin()` is what enables the fullstack dev server.** The `await` is
-load-bearing per Elysia's docs; it installs the HMR hooks. `apps/api` is already on
-`@elysia/static@2.0.0-beta.2` and `elysia@2.0.0-beta.4`, so no version bump is needed. Open
-issue [#1857](https://github.com/elysiajs/elysia/issues/1857) reports `@elysia/static` breaking
-dev-server static bundling — verify against beta.2 rather than assuming it applies.
+**T3 — ~~`await staticPlugin()` enables the fullstack dev server~~. Moot: there is no
+fullstack dev server.** Superseded by T20. Bun's HTML-bundle path is unusable for this app, so
+dev serves a built `dist/` through the ordinary directory branch and `staticPlugin` is
+constructed exactly as production always did. Do not reopen this; the reason is T20, not the
+`await`.
 
 **T4 — the fd leak is still live upstream on Bun 1.4.0.** `oven-sh/bun#37968` is open (updated
 2026-08-19) and its fix `#38008` is open and unmerged; both re-verified via `gh api` on
@@ -134,28 +135,278 @@ of Bun's hashes contain no digit at all, so anything that tries to recognize a h
 looks random" misfires at random. `scripts/ci/frontend-bundle-report.ts` keys on suffix length
 instead, for that reason.
 
+**T20 — Bun's HTML *entrypoint loader* silently drops a transitive import from this app's
+graph. Never give Bun an HTML entrypoint.** Measured 2026-08-21 on Bun 1.4.0 with real headless
+chromium loads (`playwright-core` + `~/.cache/ms-playwright/chromium-1237/chrome-linux64/chrome`):
+
+| entrypoint       | browser result                                              |
+| ---------------- | ----------------------------------------------------------- |
+| `./index.html`   | `pageerror: atom is not defined`, `#root` empty, blank page |
+| `./src/main.tsx` | app renders, Tailwind applies, **zero console errors**      |
+
+`atom` is better-auth's `nanostores` import. The same failure appears through
+`Bun.serve({ routes: { '/': htmlBundle } })` and through `app.listen({ routes })` — so the
+common factor is the HTML loader, not `Bun.serve`, not Elysia's two-phase boot, and not the
+`development` flag (all three of `true` / `false` / omitted fail). `splitting: true` is **not**
+the trigger; it was ruled out explicitly.
+
+That is why there is no HMR and why `apps/frontend/build.ts` stitches `index.html` by hand.
+`bun build ./index.html` also fails *hard* on the four absolute `public/` hrefs
+(`error: Could not resolve: "/favicon.ico"`) — a TS entrypoint never parses the HTML, so that
+problem disappears too.
+
+Related upstream, but **not** the same bug: `oven-sh/bun#34357` (`var [arguments, eval] =
+hmr.imports` from typebox's `build/system/arguments/`) is closed *by the reporter*, not by a
+fix; the actual fix `#34361` is open and unmerged. It would only address the `arguments`
+SyntaxError. Even if it lands, the dropped-import bug above is untouched.
+
+**T18 — `naming.entry` and `naming.chunk` must not share a pattern, and the stitch must resolve
+by `kind`.** Under `splitting: true` Bun names a dynamic-import chunk after the entry that
+reaches it, so one pattern for both produced **18 files matching `assets/main-*.js`**. A
+glob-based stitch then picks a chunk instead of the entry and the page renders **blank with
+zero console errors** — no diagnostic at all. Use a `chunk-` prefix *and*
+`result.outputs.find(o => o.kind === 'entry-point')`.
+
+**T19 — `reactCompiler: true` really runs on Bun 1.4.0** (compare `Bun.Archive.write`'s
+accepted-and-ignored `mode`). Unminified A/B on the same entrypoint: `false` → 7,462,834 bytes,
+**0** `$[n]` memo slots, 0 `compiler-runtime` imports; `true` → 8,102,894 bytes, 769× `$[0]`,
+2 `compiler-runtime` imports. Cost measured against the Vite baseline: the bundler swap alone
+is **+11.1% gzip**, and the compiler adds **another ~+205 kB gzip** on top for **+33.6%** total.
+It is a behavior change, not parity — `vite.config.ts` ran `@vitejs/plugin-react` without it.
+
+**T21 — `@types/bun` must track the pinned runtime.** `reactCompiler` is absent from
+`BuildConfig` in `bun-types@1.3.14`, so a correct `Bun.build()` call fails `tsc` with
+`TS2353` while running fine. Bumped to `^1.4.0` in all four `package.json` files;
+`root:dependency-cohort` requires they agree.
+
+**T22 — `getDefaultFrontendDir()` resolves against `process.cwd()`, and Turbo runs the API's
+dev task from `apps/api`.** So dev needs `dev-frontend-dir.ts`, a get/set seam populated only
+by `src/dev.ts`. Resolve the frontend directory from `import.meta.dir`, never the cwd.
+
+**T23 — plain `app.listen()` is enough; the raw-`Bun.serve()` WS shim is not needed.** Verified
+live against `bun run dev`: `/api/ws` and `/api/runtime` both upgrade (`OPEN`), and `/api/*`,
+`/api/auth/*`, `/scalar`, `/uploads/*`, `/images/*` all return their own content-type rather
+than the SPA shell. An earlier iteration hand-rolled `Bun.serve({ routes, websocket, fetch })`
+plus `app.server = server` and Elysia's undocumented `buildGlobalWSHandler()`; that is only
+required when passing an HTML bundle through `routes`, which T20 rules out.
+
+> "Not the SPA shell" was the wrong assertion to check. `/api/auth/*` was answering a JSON
+> 404 — its own content-type, and still broken. See T24.
+
+**T24 — `staticPlugin({ prefix: '/' })` registers `GET /*`, and on `.listen()` that outranks
+every `.all('/*')` route in the app.** `alwaysStatic` keys off `NODE_ENV === 'production'`,
+which nothing in this repo sets, so `@elysia/static@2.0.0-beta.2` always takes the branch at
+`dist/index.js:66` that mounts the catch-all. Once Elysia promotes routes into Bun's native
+table, that root wildcard swallows every `.all('/*')` — at the root, inside a `.group()` and
+inside a mounted prefixed instance alike. **The method is the discriminator, not the nesting:**
+measured on the pre-fix code, `.all('/x/*')` was shadowed at all three depths while
+`.get('/y/*')` was reached at all three. So Better Auth (mounted `.all('/*')` in
+`routes/auth.ts`) 404'd every path but the literal `/ok`, and `/images/*` + `/uploads/*` —
+both `.get` — were never affected. Verify with a real file before claiming a `.get` wildcard
+is broken; a missing file 404s either way and proves nothing.
+
+**`app.handle()` resolves the same request correctly**, which is why nothing caught it: every
+route integration test drives `handle()`, `static-routes.integration.test.ts` only exercises
+the pure `isSpaRoute()`, and `test-build.ts` runs the binary, which takes the
+`registerEmbeddedSpa` branch (explicit per-file routes, no wildcard — its doc comment has
+warned about exactly this since #454). The bug predates this migration; serving the frontend
+from the API in dev is what made it user-visible.
+
+Fix in `registerSpa`: narrow the plugin to `prefix: '/assets'` (hashed filenames change on
+every rebuild, so they must stay behind a dynamic route) and register one explicit route per
+unhashed root file. Guard test: `frontend-static.test.ts` → "over a listening server", which
+binds port 0 and asserts a stand-in `.all('/*')` stays reachable, with a `.get('/*')` control
+so it cannot pass for the wrong reason. **Any new frontend-serving branch needs a test that
+binds a real port**; `handle()` is blind to this whole class.
+
+**T25 — `Bun.build()` honours `tsconfig.json` `paths`, so a test alias there ships.** Measured
+2026-08-21: with `"motion/react": ["./sub/stub.ts"]` in the tsconfig at the build's cwd, the
+stub's marker string appears in the bundled output, `success: true`, no warning. `Bun.build()`
+has no `tsconfig` option to opt out of. So T8's aliases cannot live in
+`apps/frontend/tsconfig.json`; they live in `tsconfig.test.json` and reach `bun test` through
+the global `--tsconfig-override` flag. Three things about that flag:
+
+- **`bunfig.toml`'s `[test] tsconfig = "…"` is accepted and silently ignored.** With the key
+  set, `motion/react` resolved to the real package (383 exports); with the flag, to the stub
+  (2). A run that "passes" against the wrong module looks identical.
+- **`paths` does not merge through `extends`** (ordinary TS semantics), so `tsconfig.test.json`
+  restates `@/*`. `tests/unit/bun-lane-harness.test.ts` fails if the two drift.
+- Every invocation prints `Internal error: directory mismatch for directory "…"` to stderr —
+  once per process, so 1 serial and N+1 under `--parallel=N`. Cosmetic Bun bug; exit code and
+  results are unaffected.
+
+**T26 — the frontend lane must not be able to reach the network.** happy-dom is registered at
+`http://localhost:3001/`, which is where the API really listens in dev, so a relative request
+no scenario answered opens a real socket. Measured: a nine-file run printed `connect
+ECONNREFUSED 127.0.0.1:3001` attributed to two files that issue no requests at all — the
+connection outlived the file that started it and Bun blamed whichever file was running. Green
+counts, an error block, a stack pointing at the wrong test. `bun.setup.ts` installs a `fetch`
+that rejects immediately and names the unanswered request, and reinstates it in `afterEach`.
+
+**T27 — Bun 1.4.0 has no async timer advance, and dropping a queued callback wedges React
+Query.** `jest.advanceTimersByTimeAsync` and `runAllTimersAsync` are `undefined`;
+`advanceTimersByTime` exists and throws `Fake timers are not active` when they are not.
+`Date.now()` does move with the fake clock. The trap: React Query schedules every cache
+notification through `notifyManager`'s live `setTimeout(callback, 0)`
+(`query-core/timeoutManager.js:73`), and whatever is still queued is discarded at
+`useRealTimers()` — after which the manager never delivers again. Measured: one fake-timer
+test made the *next* test in `use-settings-realtime.test.ts` time out at 5s while both passed
+alone. `support/harness/timers.ts` wraps all three calls; use it rather than `jest` directly.
+
+**T28 — `mockReset()` means opposite things in the two runners.** Vitest restores the
+implementation `vi.fn(impl)` was given; jest and `bun test` strip it, so the mock starts
+returning `undefined`. `create-fetch-scenario.restore()` used it, and under `bun test` that
+turned every test after the first in a file into a failed request (measured: 10 of 13 in
+`tool-settings-page`). `mockClear()` is the one that means the same thing in both.
+
+**T29 — the `vi` surface `bun test` simply does not have.** Probed on 1.4.0:
+`jest.resetModules`, `isolateModules`, `mocked`, `hoisted`, `stubEnv`, `unstubAllEnvs`,
+`stubGlobal`, `waitFor` and `runAllTicks` are all `undefined`; `mock.module`, `mock.restore`
+and `mock.clearAllMocks` live on `mock`, not on `jest`. Three consequences worth knowing
+before reaching for a workaround:
+
+- **`import.meta.env` is backed by `process.env`**, so `vi.stubEnv` ports to a plain
+  `process.env.X = …`. Assign `undefined` and you leave the *string* `"undefined"` behind,
+  which reads as a set value — `delete` it.
+- **A cache-busting query really does re-evaluate a module** (`import('@/lib/x?fresh=1')`
+  returned a different instance than `import('@/lib/x')`), which is the only genuine
+  `resetModules` substitute. But knip cannot follow that specifier and reports the module's
+  exports as unused, failing `bun run check`. Same for a module-scope
+  `const ns = await import('@/lib/x')` you then member-access: knip traces *that* and flags
+  whatever the test does not touch. Keeping the dynamic import behind a function is what
+  stays opaque to knip — which is why `shiki.test.ts` has one.
+- `toHaveBeenCalledExactlyOnceWith` is a Vitest matcher with no Bun equivalent; the
+  `toHaveBeenCalledTimes(1)` + `toHaveBeenCalledWith(…)` pair says the same thing.
+
+**T30 — `bun-types` types `toEqual` against the *received* value; Vitest's took `unknown`.**
+So an expected literal that is not assignable to the received type compiled fine there and
+fails `tsc` here — a mock returning a partial payload, a union member the contract does not
+list, a `done: false` where the type says `true`. `expect<unknown>(received).toEqual(…)`
+widens it. It is **not** the general answer to a `tsc` error: anywhere the runtime value does
+not provably escape its declared type, the error means the expected shape is wrong.
+
+**T31 — Bun links a mocked module's whole namespace at import.** Vitest resolved lazily, so a
+factory returning one or two names often went unnoticed by that module's *other* consumers.
+Under `bun test` a missing export is a hard `SyntaxError: Export named 'x' not found in
+module '…'`, surfaced as `# Unhandled error between tests` — one test fails and the message
+points at neither the mock nor the consumer. Measured on `@/services/external-agent-service`,
+`@/features/chat/queries` and `@/features/settings/connectors/api`. Any factory returning
+fewer names than the real module exports needs `const actual = await import(spec)` spread in.
+
+**T32 — happy-dom is not jsdom, in two ways that are invisible until they are not.** The
+origin is `http://localhost:3001`, not jsdom's `http://localhost:3000`: `safe-redirect.test.ts`
+had hard-coded the latter, so its *same-origin* cases were silently exercising the
+cross-origin path. And `navigator.clipboard` is a readonly getter where jsdom left it
+writable — `Object.assign(navigator, { clipboard })` throws `Attempted to assign to readonly
+property`; define and restore the descriptor instead.
+
+**T33 — the `act(...)` warnings that only exist in a full-lane run.** Nine real ones were
+found migrating 156 files, and **not one reproduced when its file ran alone** — the update
+lands inside the test body on an idle machine and after it under load, so a per-file check is
+blind to the whole class. Four shapes, all fixed at the source rather than silenced:
+
+| shape                                                          | fix                       |
+| -------------------------------------------------------------- | ------------------------- |
+| a query resolving behind a synchronous `getByTestId`           | `await screen.findBy…`    |
+| a dropped `renderWithRouter(…)` promise (it is async)          | `await` it                |
+| an async submit handler continuing after `user.click` resolves | drive it inside one `act` |
+| a `lazy()` chunk settling after the assertions                 | `flushAsyncRender()`      |
+
+`flushAsyncRender()` (`support/harness/render.tsx`) advances one macrotask inside `act`. It
+must not run while fake timers are installed — a `setTimeout` does not fire on its own then,
+and an `afterEach` that ignored this would hang the run rather than flush it. An `afterEach`
+flush does **not** work for this class anyway: the resolution happens mid-test, not after it.
+
+Also from that volume, and not a Bun fact: **biome's `noComponentHookFactories` rejects a
+component defined inline in a `mock.module` factory** — which is exactly the shape every
+`Link` stub had under `vi.mock`. Declare the stub at module level and reference it.
+
+**T34 — `bunfig.toml`'s `coverageThreshold` cannot express a total-coverage gate.** Measured
+2026-08-21 on released 1.4.0, fixture and real suite agreeing:
+
+- **It is enforced per *file***: every file must individually clear the bar. A two-file
+  fixture at 33%/100% lines fails `lines = 0.34` and passes `0.3`; the real 167-file suite
+  (82–83% totals, some files legitimately 0%) fails every positive value.
+- Keys are **plural** (`lines` / `functions` / `statements`); singular names are accepted and
+  silently ignored.
+- A key you **omit** is not "no gate" — it keeps a hidden ~0.9 default, so `{ lines = 0.5 }`
+  fails a suite whose functions sit at 50% with no mention of functions anywhere.
+- The whole gate is **silently inert under `coverageReporter = ["lcov"]`** without `"text"` —
+  the check lives in the text reporter's path (Bun's docs now say so).
+- A miss prints **nothing at all**; it exists only in the exit code.
+
+Hence `scripts/qa-gate/enforce-coverage-thresholds.ts`: it reads the emitted LCOV back and
+compares *totals* (lines/functions from LCOV, statements/branches source-derived via
+`coverage-summary.ts`) against floors in `scripts/lib/test-lanes.ts` — chained after
+`bun test --coverage` inside the frontend `test:coverage` script, so a miss fails the lane's
+own invocation. Floors 81/76/81/53 against measured 82.35/77.53/82.39/54.45; observed
+run-to-run jitter on an unchanged suite was 0.03pp (82.35 → 82.32 lines).
+
+**T35 — the D7 soak: `--parallel=4` is clean on the real suite.** Twelve runs of
+`taskset -c 0-3 bun test --tsconfig-override=./tsconfig.test.json --parallel=4
+--timeout 15000 tests` on 2026-08-21: **12/12 exit 0, 1397 pass / 0 fail every run, zero
+`epoll_ctl`, zero hangs, 33–34s per run** against the ~102s pinned serial baseline (the
+plan's soak command omitted the tsconfig flag; it must not be omitted). `test:coverage`
+now carries `--parallel=4 --isolate`; the fallback if CI ever reproduces #37968 is
+`--parallel=2`, not serial (T5). The only stderr signal, in 5 of 12 runs, was the
+previously unattributed `act(...)` warning — root-caused to
+`tests/unit/features/library/backup-usage.test.tsx` asserting *absence* synchronously while
+its mocked usage query resolved after the test ended; fixed with `flushAsyncRender()`
+before the `queryByTestId` check. Unpinned on 28 cores the same coverage invocation runs in
+~30s.
+
+**T36 — `Bun.build()` defaults `process.env.NODE_ENV` to `'development'`, and that ships
+dev-mode React in a minified production bundle.** Measured 2026-08-21 via metafile/sourcemap
+inventory: without a define, the bundle contained `react-dom.development.js`,
+`react.development.js`, `scheduler.development.js` and dev-only `@tanstack/router-core` /
+`motion` modules — Vite inlined `'production'`. Cost: +78 kB gzip on the eager payload plus
+React's dev-mode runtime checks, invisible to `check`, `test` and the browser smoke (the app
+renders identically). The fix is an explicit
+`define: { 'process.env.NODE_ENV': '"production"' }` in `build.ts`. This was most of the
+"bundler swap" size regression: with it, eager parity vs Vite is +3.7% gzip
+(551.2 vs 531.5 kB js-only) and the rest is the React Compiler's owner-accepted +204 kB
+(T19/D8). Also measured then: **zero modules duplicated across chunks** (the 009 plan's
+duplication hypothesis was an artifact of measuring the dev-React bundle), splitting off
+would hoist everything into one 1047 kB eager chunk (keep `splitting: true`), and 1.4.0's
+`Bun.build({ metafile: true })` returns a typed esbuild-style metafile — `build.ts` writes it
+to `apps/frontend/dist-metafile.json` (gitignored) and the bundle report's duplicate-module
+check reads it. `production: true` also exists at runtime but is not in `bun-types` 1.4.0
+(T21 applies); the define is the typed spelling.
+
 ## Test migration mechanics
 
-| Vitest                        | `bun test`                                           |
-| ----------------------------- | ---------------------------------------------------- |
-| `import { vi } from 'vitest'` | `import { jest, mock } from 'bun:test'`              |
-| `vi.fn()` / `vi.spyOn`        | `jest.fn()` / `spyOn` from `bun:test`                |
-| `vi.mock('@/x', factory)`     | `mock.module('@/x', factory)` — see the leak warning |
-| `vi.useFakeTimers()`          | `jest.useFakeTimers()`                               |
-| `resolve.alias`               | `tsconfig.json` `paths` (T8)                         |
-| `globals: true`               | explicit imports from `bun:test`                     |
-| `environment: 'jsdom'`        | happy-dom via the two-file preload (T6)              |
-| `setupFiles`                  | `bunfig.toml` `[test] preload`                       |
+Everything below is what the 004 spike actually needed across its eleven files. Where a row
+says "harness", the wrapper is in `apps/frontend/tests/support/` and exists for a measured
+reason — use it rather than the raw call.
 
-**`mock.module` is not undone by `mock.restore()`.** `bun test` shares one module graph across
-files, so a leftover module mock breaks *other* files — measured in this repo at 8 failures in
-4 unrelated suites from one new file. Re-mocking with the real namespace does not fully recover
-module-level state either. Prefer, in order: resolver-level aliasing (T8), substitution through
-production's own seams, then `mock.module` as a last resort. `--isolate` mitigates this; it
-does not license it.
+| Vitest                             | `bun test`                                                              |
+| ---------------------------------- | ----------------------------------------------------------------------- |
+| `import { vi } from 'vitest'`      | `import { jest, mock, spyOn } from 'bun:test'`                          |
+| `vi.fn()` / `vi.spyOn`             | `jest.fn()` / `spyOn` from `bun:test`                                   |
+| `vi.mocked(x)`                     | no equivalent — keep the `jest.fn()` handle the factory returned        |
+| `vi.mock('@/x', factory)`          | `mock.module` + `await import()` of the module under test, **after** it |
+| `vi.hoisted(() => …)`              | a plain `const` above the `mock.module` call; nothing is hoisted        |
+| `vi.useFakeTimers()`               | `useFakeTimers()` from `support/harness/timers` (T27)                   |
+| `vi.useRealTimers()`               | `await restoreRealTimers()` from the same module (T27)                  |
+| `vi.advanceTimersByTimeAsync(n)`   | `await advanceTimersByTimeAsync(n)` — Bun has no async advance (T27)    |
+| `vi.waitFor(fn)`                   | `waitFor` from `@testing-library/react`                                 |
+| `vi.stubGlobal(k, v)`              | `globalThis[k] = v`, restored by hand — no `unstubAllGlobals` exists    |
+| `expect(m).toHaveBeenCalledOnce()` | `toHaveBeenCalledTimes(1)` — the matcher runs but `bun-types` omits it  |
+| `resolve.alias`                    | `tsconfig.test.json` `paths` + `--tsconfig-override` (T8, **T25**)      |
+| `globals: true`                    | explicit imports from `bun:test`                                        |
+| `environment: 'jsdom'`             | happy-dom via the two-file preload (T6)                                 |
+| `setupFiles`                       | `bunfig.toml` `[test] preload`                                          |
 
-`apps/frontend/tests/support/setup/vitest.setup.ts` carries a *global* `vi.mock('@/lib/auth-client')`.
-That one needs a non-`mock.module` home before the bulk migration, not a mechanical translation.
+**`mock.module` is not undone by `mock.restore()`, and it does cross files.** Measured on Bun
+1.4.0 with a two-file fixture: file A mocks `./real.ts`, file B imports it and sees `MOCKED`
+under the default runner and under `--parallel --no-isolate`, and `REAL` under `--isolate`.
+So `--isolate` is load-bearing for this lane, not a precaution. Prefer, in order:
+resolver-level aliasing (T8), substitution through production's own seams, then `mock.module`.
+
+`vitest.setup.ts`'s global `vi.mock('@/lib/auth-client')` did **not** get a mechanical
+translation: it is a `tsconfig.test.json` `paths` entry pointing at
+`tests/support/setup/auth-client-stub.ts`, whose `setTestSession()` seam replaces the four
+per-file re-mocks. `bun.setup.ts` resets it in `afterEach`.
 
 ## Parity gate
 
