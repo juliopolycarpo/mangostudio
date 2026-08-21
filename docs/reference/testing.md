@@ -487,7 +487,7 @@ shows it is loaded outside a JavaScript or TypeScript import:
 
 ## Browser Smoke
 
-Playwright Chromium suite under `tests/browser-smoke/`. Covers the full auth flow against a live dev stack (API on `:3001`, frontend on `:5173`).
+Playwright Chromium suite under `tests/browser-smoke/`. Covers the full auth flow against a live dev stack on `:3001` — one server serving both the API and the frontend.
 
 ```bash
 bun run test:e2e:setup

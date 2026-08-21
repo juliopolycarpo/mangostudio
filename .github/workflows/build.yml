@@ -47,7 +47,7 @@ jobs:
         with:
           family: vite
           path: apps/frontend/node_modules/.vite
-          validity: build-${{ hashFiles('bun.lock', 'apps/frontend/package.json', 'apps/frontend/vite.config.ts', 'apps/frontend/vitest.config.ts', 'apps/frontend/tsconfig*.json') }}
+          validity: build-${{ hashFiles('bun.lock', 'apps/frontend/package.json', 'apps/frontend/build.ts', 'apps/frontend/vitest.config.ts', 'apps/frontend/tsconfig*.json') }}
           restore-prefix: build-
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 

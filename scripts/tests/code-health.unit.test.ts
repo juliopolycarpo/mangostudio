@@ -19,7 +19,7 @@ describe('code-health check', () => {
       'apps/api/bunfig.toml',
       'apps/api/src/app.ts',
       'apps/api/tests/unit/app.test.ts',
-      'apps/frontend/vite.config.ts',
+      'apps/frontend/build.ts',
       'apps/frontend/src/index.css',
       'packages/cli/bin/mangostudio.js',
     ]) {

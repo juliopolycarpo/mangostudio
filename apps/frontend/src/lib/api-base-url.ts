@@ -7,7 +7,9 @@
  * 3. Fallback for non-browser environments (unit tests, SSR)
  */
 export function getApiBaseUrl(): string {
-  const explicit = import.meta.env.VITE_API_URL;
+  // Optional chaining: Vite always defines import.meta.env, Bun's dev bundler
+  // does not unless [serve.static] env inlining is configured for this key.
+  const explicit = import.meta.env?.VITE_API_URL;
   if (explicit) return explicit.replace(/\/+$/, '');
 
   if (typeof window !== 'undefined' && window.location?.origin) {

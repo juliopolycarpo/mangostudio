@@ -4,10 +4,9 @@ One bundler, one dev server, one topology. `apps/frontend` is built by `Bun.buil
 served by Elysia — in development, from `dist/` in a normal install, and from bytes embedded
 in the standalone binary. There is no second HTTP server and no proxy.
 
-> Status: the destination. `apps/api` already serves `dist/` and the embedded bundle exactly
-> as described below; the bundler and the dev server are being migrated off Vite on
-> `refactor/bun-frontend`. The migration's measured traps live in the `bun-frontend` skill —
-> read it before changing anything on this page's path.
+> Status: the bundler and the dev topology described here are live. The test harness is still
+> Vitest and migrates separately. The measured traps live in the `bun-frontend` skill — read
+> it before changing anything on this page's path.
 
 ## Why one server
 
@@ -22,19 +21,23 @@ Consequence: the frontend is same-origin with the API, so the CORS origin list a
 
 ## Development
 
-Elysia registers the app's `index.html` as a Bun `HTMLBundle` and serves it on the API port.
-Bun's bundler handles the module graph in-process: React Fast Refresh for components, Tailwind
-through `bun-plugin-tailwind` so CSS stays in the module graph rather than being generated
-beside it. Browser console output is echoed into the terminal.
+`bun run dev` starts one process. Before it listens, `apps/api/src/server/dev-frontend.ts`
+runs the production build script as a subprocess, then watches `apps/frontend/src` and rebuilds
+on change. Serving is the ordinary directory mode below — dev and production share both the
+build and the route table, so there is no dev-only serving path to drift.
 
-The route table is unchanged from production: explicit API routes and mounted plugins match
-first, and only the paths nothing else claimed fall through to the SPA shell.
+**There is no HMR, and this is not a temporary omission.** Bun's HTML-bundle dev server
+(`Bun.serve({ routes: { '/': htmlBundle } })`) silently drops a nested transitive import from
+this app's dependency graph, which renders a blank page. So does `Bun.build()` when handed
+`index.html` as the entrypoint. Only a **TS entrypoint** (`src/main.tsx`) bundles this app
+correctly, and the HTML is stitched afterwards — see `apps/frontend/build.ts`. A source edit
+rebuilds in a few seconds; the browser needs a manual refresh.
 
 ## Production build
 
-`Bun.build()` in a script, not the `bun build` CLI — the CLI has no plugin flag, and Tailwind
-is a plugin (T1 in the skill). The build produces the layout the rest of the repo already
-expects:
+`apps/frontend/build.ts`, run by `bun run --filter @mangostudio/frontend build`. `Bun.build()`
+in a script, not the `bun build` CLI — the CLI has no plugin flag, and Tailwind is a plugin
+(T1 in the skill). The build produces the layout the rest of the repo already expects:
 
 ```text
 apps/frontend/dist/
@@ -43,13 +46,20 @@ apps/frontend/dist/
   assets/<name>-<hash>.css
 ```
 
-Two options in that build are load-bearing:
+Four things in that build are load-bearing:
 
-- **`naming`** reproduces the `index.html` + `assets/*-[hash].*` layout. Everything downstream
-  enumerates `dist/` generically, so keeping the layout keeps the API side untouched.
+- **The entrypoint is `src/main.tsx`, never `index.html`.** Bun's HTML loader drops a nested
+  transitive import from this graph. `build.ts` stitches the built `<script>`/`<link>` tags
+  into `index.html` itself.
+- **`naming`** reproduces the `index.html` + `assets/*-[hash].*` layout, and gives chunks a
+  `chunk-` prefix so they cannot collide with the entry. Under `splitting: true` Bun names a
+  dynamic-import chunk after the entry that reaches it, so a shared pattern yields eighteen
+  files called `assets/main-<hash>.js`.
+- **The stitched `<script>` is resolved by `kind === 'entry-point'`**, never by filename. Pick
+  a chunk by mistake and the page renders blank with no console error at all.
 - **`publicPath: '/'`** forces absolute asset URLs. Bun defaults to relative (`./assets/…`),
   which resolves correctly at `/` and 404s on every deep link — a blank page with no
-  server-side error. Nothing in CI catches this.
+  server-side error. `build.ts` asserts on this; nothing in CI catches it otherwise.
 
 Chunking is Bun's automatic splitting; there is no `manualChunks` equivalent and none is
 reintroduced. Bundle size is tracked instead of controlled:
@@ -88,11 +98,12 @@ Two shapes there are deliberate and must survive any change:
 and an entry that registers the manifest before booting the real CLI. `bun build --compile`
 embeds the bytes and rewrites each import to an embedded path that `Bun.file()` can serve.
 
-This is why the dev server's HTML bundle must sit behind a **module boundary**, not a runtime
-`if`: Bun's bundler statically analyzes `import` and `await import()` alike, so a top-level
-`import index from './index.html'` in a server module would drag the whole frontend source
-graph into a binary that already carries the built output. Only the generated entry populates
-the registry — the same shape `embedded-frontend.ts` uses today.
+This is why the dev-mode build and watcher sit behind a **module boundary**, not a runtime
+`if`. `apps/api/src/dev.ts` is a separate entrypoint that `index.ts` — the binary entry —
+never imports, so nothing in `dev-frontend.ts` reaches `bun build --compile`. A binary must
+never shell out to a bundler; it already carries the built output. `dev-frontend-dir.ts` is
+the seam that lets `start-server.ts` read the dev directory without depending on the dev
+module, the same shape `frontend-fallback.ts` uses.
 
 `bun scripts/test-build.ts` is the only gate that runs the compiled binary. `bun run check`,
 `bun run test` and `bun run verify` are all blind to binary-only breakage.

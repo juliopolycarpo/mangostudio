@@ -61,7 +61,7 @@
     "./runtime-home": "./src/runtime-home/index.ts"
   },
   "devDependencies": {
-    "@types/bun": "^1.3.14",
+    "@types/bun": "^1.4.0",
     "typescript": "7.0.2"
   },
   "dependencies": {

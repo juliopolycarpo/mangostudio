@@ -250,7 +250,7 @@ if (import.meta.main) {
   }
 
   const report = await measureBundle(distDir, {
-    builder: flagValue(argv, '--builder') ?? 'vite',
+    builder: flagValue(argv, '--builder') ?? 'bun',
     capturedAt: new Date().toISOString().slice(0, 10),
   });
 
