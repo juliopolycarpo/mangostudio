@@ -60,6 +60,12 @@ async function generateRouteTree(): Promise<void> {
  *   URLs, and the SPA shell served at `/settings/agents` then resolves
  *   `./assets/x.js` to `/settings/assets/x.js` — a 404, a blank page, and no
  *   server-side error. The assertion at the end of this file is the guard.
+ * - **The `NODE_ENV` define.** Nothing in this repo sets `NODE_ENV`, and
+ *   `Bun.build()` then resolves `process.env.NODE_ENV` to `'development'` —
+ *   which is how React, its scheduler, and every dev-gated dependency picked
+ *   their *development* builds in a minified production bundle (measured:
+ *   +78 kB gzip on the eager payload, plus React's dev-mode runtime checks).
+ *   Vite inlined `'production'`; this define restores that.
  */
 export async function buildFrontend(options: BuildFrontendOptions = {}): Promise<void> {
   const production = !options.dev;
@@ -74,6 +80,8 @@ export async function buildFrontend(options: BuildFrontendOptions = {}): Promise
     minify: production,
     sourcemap: 'none',
     publicPath: '/',
+    define: { 'process.env.NODE_ENV': JSON.stringify(production ? 'production' : 'development') },
+    metafile: true,
     // Auto-memoization. `@vitejs/plugin-react` did not run it, so this is a
     // behavior change rather than parity, and nothing in the test suite covers
     // the transform. Off in dev so the loop stays fast.
@@ -98,6 +106,10 @@ export async function buildFrontend(options: BuildFrontendOptions = {}): Promise
 
   await cp(PUBLIC_DIR, DIST, { recursive: true });
   await writeHtml(result);
+  // Next to dist/, not inside it: the binary build embeds every file dist/
+  // contains, and the metafile is a build diagnostic (the bundle report's
+  // duplicate-module check reads it), not shipped payload.
+  await writeFile(join(ROOT, 'dist-metafile.json'), JSON.stringify(result.metafile));
 }
 
 async function writeHtml(result: Awaited<ReturnType<typeof Bun.build>>): Promise<void> {

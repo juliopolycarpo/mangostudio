@@ -49,7 +49,7 @@ apps/frontend/dist/
   assets/<name>-<hash>.css
 ```
 
-Four things in that build are load-bearing:
+Five things in that build are load-bearing:
 
 - **The entrypoint is `src/main.tsx`, never `index.html`.** Bun's HTML loader drops a nested
   transitive import from this graph. `build.ts` stitches the built `<script>`/`<link>` tags
@@ -63,6 +63,11 @@ Four things in that build are load-bearing:
 - **`publicPath: '/'`** forces absolute asset URLs. Bun defaults to relative (`./assets/…`),
   which resolves correctly at `/` and 404s on every deep link — a blank page with no
   server-side error. `build.ts` asserts on this; nothing in CI catches it otherwise.
+- **The `NODE_ENV` define.** Nothing in this repo sets `NODE_ENV`, and `Bun.build()` then
+  resolves `process.env.NODE_ENV` to `'development'` — so React, its scheduler, and every
+  dev-gated dependency selected their *development* builds in a minified production bundle
+  (+78 kB gzip eager, plus React's dev-mode runtime checks). Vite inlined `'production'`;
+  the explicit `define` in `build.ts` restores that.
 
 Chunking is Bun's automatic splitting; there is no `manualChunks` equivalent and none is
 reintroduced. Bundle size is tracked instead of controlled:
@@ -72,7 +77,12 @@ bun ./scripts/ci/frontend-bundle-report.ts --baseline scripts/ci/frontend-bundle
 ```
 
 The baseline is the pre-migration Vite output. Rows are keyed by hash-stripped chunk name, so
-a rebuild is not reported as wholesale churn.
+a rebuild is not reported as wholesale churn. The report splits the bundle into **eager**
+(what a first paint downloads: `index.html`, its stylesheet and script tags, and the
+static-import closure of those scripts) and **lazy**, because a totals-only diff cannot tell
+"we shipped more code" apart from "lazy code went eager". The build also writes
+`apps/frontend/dist-metafile.json` (gitignored), which the report reads to flag any module
+bundled into more than one chunk.
 
 ## Serving a built frontend
 

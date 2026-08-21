@@ -354,6 +354,24 @@ its mocked usage query resolved after the test ended; fixed with `flushAsyncRend
 before the `queryByTestId` check. Unpinned on 28 cores the same coverage invocation runs in
 ~30s.
 
+**T36 — `Bun.build()` defaults `process.env.NODE_ENV` to `'development'`, and that ships
+dev-mode React in a minified production bundle.** Measured 2026-08-21 via metafile/sourcemap
+inventory: without a define, the bundle contained `react-dom.development.js`,
+`react.development.js`, `scheduler.development.js` and dev-only `@tanstack/router-core` /
+`motion` modules — Vite inlined `'production'`. Cost: +78 kB gzip on the eager payload plus
+React's dev-mode runtime checks, invisible to `check`, `test` and the browser smoke (the app
+renders identically). The fix is an explicit
+`define: { 'process.env.NODE_ENV': '"production"' }` in `build.ts`. This was most of the
+"bundler swap" size regression: with it, eager parity vs Vite is +3.7% gzip
+(551.2 vs 531.5 kB js-only) and the rest is the React Compiler's owner-accepted +204 kB
+(T19/D8). Also measured then: **zero modules duplicated across chunks** (the 009 plan's
+duplication hypothesis was an artifact of measuring the dev-React bundle), splitting off
+would hoist everything into one 1047 kB eager chunk (keep `splitting: true`), and 1.4.0's
+`Bun.build({ metafile: true })` returns a typed esbuild-style metafile — `build.ts` writes it
+to `apps/frontend/dist-metafile.json` (gitignored) and the bundle report's duplicate-module
+check reads it. `production: true` also exists at runtime but is not in `bun-types` 1.4.0
+(T21 applies); the define is the typed spelling.
+
 ## Test migration mechanics
 
 Everything below is what the 004 spike actually needed across its eleven files. Where a row
