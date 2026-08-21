@@ -9,7 +9,7 @@
  * named in the result rather than silently absorbed into the count.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,10 +24,16 @@ import {
   closeAllMcpClients,
   setMcpClientConnectorForTest,
 } from '../../../../src/services/mcp/connection-manager';
+import { getRuntimeClient } from '../../../../src/services/runtime-client';
 import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { registerTools } from '../../../../src/services/tools/register-tools';
 import type { EffectiveToolSettings } from '../../../../src/services/tools/types';
-import { type ChatFixture, insertTestChat, insertTestUser } from '../../../support/factories';
+import {
+  type ChatFixture,
+  insertTestChat,
+  insertTestUser,
+  type UserFixture,
+} from '../../../support/factories';
 import { makeFakeMcpHandle } from '../../../support/fixtures/mcp/fake-handle';
 
 const hasBash = isShellAvailable('bash');
@@ -39,9 +45,28 @@ let messageId: string;
 
 registerTools();
 
+/**
+ * One user, and one Local runtime connection, for the whole file.
+ *
+ * Every test here reaches the filesystem through the Local runtime, and the
+ * manager keys connections by `(userId, environmentId)` — so a fresh user per
+ * test meant a fresh in-process runtime host per test, plus the single-owner
+ * attestation churn of closing and reopening one each time. That churn is real
+ * logic, and it is covered directly in the connection-manager unit tests; what
+ * it bought here was making every test in the file depend on a connect none of
+ * them assert anything about. Connecting once in setup also means a connect
+ * that goes wrong fails the file loudly, once, instead of timing out each test
+ * in turn with the cause thrown away.
+ */
+let user: UserFixture;
+
+beforeAll(async () => {
+  user = await insertTestUser();
+  await getRuntimeClient(user.id);
+});
+
 beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'uncheckpointed-sources-test-'));
-  const user = await insertTestUser();
   chat = await insertTestChat(user.id);
   messageId = faker.string.uuid();
   await insertMessage(
@@ -61,6 +86,11 @@ beforeEach(async () => {
 afterEach(async () => {
   setMcpClientConnectorForTest(null);
   await closeAllMcpClients();
+  // The fixture server is keyed by `(userId, slug)` and the slug is baked into
+  // MCP_TOOL_NAME, so it cannot be randomized per test. A fresh user per test
+  // used to hide that; with one user for the file, the row has to be cleaned up
+  // explicitly or the second install collides.
+  await getDb().deleteFrom('mcp_servers').where('userId', '=', chat.userId).execute();
   rmSync(tempDir, { recursive: true, force: true });
 });
 

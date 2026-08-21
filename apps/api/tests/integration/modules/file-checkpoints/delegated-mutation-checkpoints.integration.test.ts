@@ -19,7 +19,7 @@
  * substituted through the registry that production itself uses.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,6 +40,7 @@ import {
   registerProvider,
 } from '../../../../src/services/providers/core/provider-registry';
 import type { AgentEvent, AIProvider } from '../../../../src/services/providers/types';
+import { getRuntimeClient } from '../../../../src/services/runtime-client';
 import { isShellAvailable } from '../../../../src/services/tools/builtin/_shell-exec';
 import { registerTools } from '../../../../src/services/tools/register-tools';
 import {
@@ -47,6 +48,7 @@ import {
   insertTestChat,
   insertTestConnector,
   insertTestUser,
+  type UserFixture,
 } from '../../../support/factories';
 
 const hasBash = isShellAvailable('bash');
@@ -152,6 +154,26 @@ async function enableShellForUser(userId: string): Promise<void> {
   });
 }
 
+/**
+ * One user, and one Local runtime connection, for the whole file.
+ *
+ * Every test here reaches the filesystem through the Local runtime, and the
+ * manager keys connections by `(userId, environmentId)` — so a fresh user per
+ * test meant a fresh in-process runtime host per test, plus the single-owner
+ * attestation churn of closing and reopening one each time. That churn is real
+ * logic, and it is covered directly in the connection-manager unit tests; what
+ * it bought here was making every test in the file depend on a connect none of
+ * them assert anything about. Connecting once in setup also means a connect
+ * that goes wrong fails the file loudly, once, instead of timing out each test
+ * in turn with the cause thrown away.
+ */
+let user: UserFixture;
+
+beforeAll(async () => {
+  user = await insertTestUser();
+  await getRuntimeClient(user.id);
+});
+
 beforeEach(async () => {
   tempDir = mkdtempSync(join(tmpdir(), 'delegated-checkpoints-test-'));
   try {
@@ -161,7 +183,6 @@ beforeEach(async () => {
   }
   registerProvider(new ScriptedProvider());
 
-  const user = await insertTestUser();
   chat = await insertTestChat(user.id);
   // `resolveModel` needs a connector row enabling MODEL_ID, or the turn rejects
   // the model as unavailable before any tool runs.

@@ -4,7 +4,7 @@
  * backwards to restore the pre-turn filesystem state.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,6 +18,7 @@ import {
   revertMessageFileCheckpoints,
 } from '../../../../src/modules/file-checkpoints/application/revert-message-checkpoints';
 import { checkpointBlobSize } from '../../../../src/modules/file-checkpoints/infrastructure/checkpoint-blob-store';
+import { getRuntimeClient } from '../../../../src/services/runtime-client';
 import { executeApplyPatch } from '../../../../src/services/tools/builtin/apply-patch';
 import { executeCreateFile } from '../../../../src/services/tools/builtin/create-file';
 import { executeDeleteFile } from '../../../../src/services/tools/builtin/delete-file';
@@ -27,18 +28,42 @@ import { executeReadFile } from '../../../../src/services/tools/builtin/read-fil
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
 import { clearFileFreshness } from '../../../../src/services/tools/file-freshness';
 import type { ToolContext } from '../../../../src/services/tools/types';
-import { type ChatFixture, insertTestChat, insertTestUser } from '../../../support/factories';
+import {
+  type ChatFixture,
+  insertTestChat,
+  insertTestUser,
+  type UserFixture,
+} from '../../../support/factories';
 
 let tempDir: string;
 let outsideDir: string;
 let chat: ChatFixture;
 let messageId: string;
 
+/**
+ * One user, and one Local runtime connection, for the whole file.
+ *
+ * Every test here reaches the filesystem through the Local runtime, and the
+ * manager keys connections by `(userId, environmentId)` — so a fresh user per
+ * test meant a fresh in-process runtime host per test, plus the single-owner
+ * attestation churn of closing and reopening one each time. That churn is real
+ * logic, and it is covered directly in the connection-manager unit tests; what
+ * it bought here was making every test in the file depend on a connect none of
+ * them assert anything about. Connecting once in setup also means a connect
+ * that goes wrong fails the file loudly, once, instead of timing out each test
+ * in turn with the cause thrown away.
+ */
+let user: UserFixture;
+
+beforeAll(async () => {
+  user = await insertTestUser();
+  await getRuntimeClient(user.id);
+});
+
 beforeEach(async () => {
   clearFileFreshness();
   tempDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-test-'));
   outsideDir = mkdtempSync(join(tmpdir(), 'file-checkpoints-outside-'));
-  const user = await insertTestUser();
   chat = await insertTestChat(user.id);
   messageId = faker.string.uuid();
   await getDb()
