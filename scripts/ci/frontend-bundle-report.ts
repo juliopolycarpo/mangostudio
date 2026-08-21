@@ -152,32 +152,47 @@ function staticImportRefs(source: string): string[] {
   ].map((m) => m[1] ?? m[2] ?? '');
 }
 
+/** One dist file's measurements, alongside the bytes the eager scan reads. */
+interface MeasuredFile {
+  readonly path: string;
+  readonly bytes: Uint8Array;
+  readonly rawBytes: number;
+  readonly gzipBytes: number;
+}
+
+const decoder = new TextDecoder();
+
 /**
  * The set of dist files a first paint downloads: `index.html`, every stylesheet
  * and script it references, and the static-import closure of those scripts.
+ *
+ * Takes the already-read bytes rather than a directory: the size table has to
+ * read every file anyway, and reading the eager ones a second time here was
+ * pure duplicate I/O. Only the traversed files get decoded, so the binary
+ * assets in the map cost nothing.
  */
-async function traverseEagerSet(distDir: string, paths: readonly string[]): Promise<Set<string>> {
-  const known = new Set(paths);
+function traverseEagerSet(contents: ReadonlyMap<string, Uint8Array>): Set<string> {
   const eager = new Set<string>();
   const queue: string[] = [];
 
   const add = (path: string | undefined): void => {
-    if (path !== undefined && known.has(path) && !eager.has(path)) {
+    if (path !== undefined && contents.has(path) && !eager.has(path)) {
       eager.add(path);
       queue.push(path);
     }
   };
 
-  if (!known.has('index.html')) return eager;
+  const html = contents.get('index.html');
+  if (html === undefined) return eager;
   add('index.html');
-  const html = await Bun.file(join(distDir, 'index.html')).text();
-  for (const ref of htmlAssetRefs(html)) add(resolveAssetRef(ref, 'index.html'));
+  for (const ref of htmlAssetRefs(decoder.decode(html))) add(resolveAssetRef(ref, 'index.html'));
 
   while (queue.length > 0) {
     const path = queue.shift();
     if (path === undefined || !path.endsWith('.js')) continue;
-    const source = await Bun.file(join(distDir, path)).text();
-    for (const ref of staticImportRefs(source)) add(resolveAssetRef(ref, path));
+    const source = contents.get(path);
+    if (source === undefined) continue;
+    for (const ref of staticImportRefs(decoder.decode(source))) add(resolveAssetRef(ref, path));
   }
   return eager;
 }
@@ -194,22 +209,37 @@ export async function measureBundle(
   const paths = listDistFiles(distDir)
     .map((path) => path.slice(1))
     .filter((path) => !path.endsWith('.map'));
-  const eagerSet = await traverseEagerSet(distDir, paths);
 
-  const files: BundleFile[] = [];
-  for (const path of paths) {
-    const bytes = new Uint8Array(await Bun.file(join(distDir, path)).arrayBuffer());
-    files.push({
-      path,
-      key: stripContentHash(path),
-      rawBytes: bytes.byteLength,
-      // Default level, so a per-file number here matches the one the QA gate's
-      // collector reports. The totals do not match it: this walks every file in
-      // dist/, the collector counts only .js/.css/.html.
-      gzipBytes: Bun.gzipSync(bytes).byteLength,
-      eager: eagerSet.has(path),
-    });
-  }
+  // One pass, one read per file, all of them in flight at once. The reads do
+  // overlap; the gzips do not, because `Bun.gzipSync` occupies the thread it
+  // runs on and Bun 1.4.0 has no async gzip. `node:zlib`'s asynchronous one is
+  // not a substitute: measured over this dist it disagrees with `gzipSync` on 4
+  // files of 55, and a byte the report does not owe to the bundle is exactly
+  // what makes a size argument unusable.
+  const measured = await Promise.all(
+    paths.map(async (path): Promise<MeasuredFile> => {
+      const bytes = new Uint8Array(await Bun.file(join(distDir, path)).arrayBuffer());
+      return {
+        path,
+        bytes,
+        rawBytes: bytes.byteLength,
+        // Default level, so a per-file number here matches the one the QA gate's
+        // collector reports. The totals do not match it: this walks every file in
+        // dist/, the collector counts only .js/.css/.html.
+        gzipBytes: Bun.gzipSync(bytes).byteLength,
+      };
+    })
+  );
+
+  const eagerSet = traverseEagerSet(new Map(measured.map((file) => [file.path, file.bytes])));
+
+  const files: BundleFile[] = measured.map(({ path, rawBytes, gzipBytes }) => ({
+    path,
+    key: stripContentHash(path),
+    rawBytes,
+    gzipBytes,
+    eager: eagerSet.has(path),
+  }));
   files.sort((a, b) => b.gzipBytes - a.gzipBytes || a.path.localeCompare(b.path));
 
   const sum = (list: readonly BundleFile[], of: (file: BundleFile) => number): number =>
