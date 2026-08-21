@@ -1,11 +1,10 @@
+import { describe, expect, it, jest, mock } from 'bun:test';
 import { DEFAULT_GIT_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
-import { GitSettingsPage } from '@/features/settings/git';
 import { render } from '../../support/harness/render';
 
-vi.mock('@/hooks/use-model-catalog', () => ({
+mock.module('@/hooks/use-model-catalog', () => ({
   catalogKeys: { all: ['model-catalog'] },
   useModelCatalog: () => ({
     catalog: {
@@ -21,15 +20,19 @@ vi.mock('@/hooks/use-model-catalog', () => ({
   }),
 }));
 
+// Below the mock, never as a static import: those are evaluated first and the
+// page would bind the real model catalog.
+const { GitSettingsPage } = await import('@/features/settings/git');
+
 describe('GitSettingsPage', () => {
   it('updates commit signing and sign-off preferences', async () => {
     const user = userEvent.setup();
-    const setSignCommits = vi.fn();
-    const setSignOff = vi.fn();
-    const setPreferredCommitMessageModel = vi.fn();
-    const setCommitMessageSystemPrompt = vi.fn();
-    const resetCommitMessageSystemPrompt = vi.fn();
-    const setCommitMessageMaxDiffKb = vi.fn();
+    const setSignCommits = jest.fn();
+    const setSignOff = jest.fn();
+    const setPreferredCommitMessageModel = jest.fn();
+    const setCommitMessageSystemPrompt = jest.fn();
+    const resetCommitMessageSystemPrompt = jest.fn();
+    const setCommitMessageMaxDiffKb = jest.fn();
 
     render(
       <GitSettingsPage
@@ -67,20 +70,20 @@ describe('GitSettingsPage', () => {
     expect(setCommitMessageMaxDiffKb).toHaveBeenLastCalledWith(200);
 
     await user.click(screen.getByRole('button', { name: 'Reset to default' }));
-    expect(resetCommitMessageSystemPrompt).toHaveBeenCalledOnce();
+    expect(resetCommitMessageSystemPrompt).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the diff budget editable while typing and clamps it on blur', () => {
-    const setCommitMessageMaxDiffKb = vi.fn();
+    const setCommitMessageMaxDiffKb = jest.fn();
 
     render(
       <GitSettingsPage
         settings={DEFAULT_GIT_SETTINGS}
-        setSignCommits={vi.fn()}
-        setSignOff={vi.fn()}
-        setPreferredCommitMessageModel={vi.fn()}
-        setCommitMessageSystemPrompt={vi.fn()}
-        resetCommitMessageSystemPrompt={vi.fn()}
+        setSignCommits={jest.fn()}
+        setSignOff={jest.fn()}
+        setPreferredCommitMessageModel={jest.fn()}
+        setCommitMessageSystemPrompt={jest.fn()}
+        resetCommitMessageSystemPrompt={jest.fn()}
         setCommitMessageMaxDiffKb={setCommitMessageMaxDiffKb}
       />
     );
@@ -104,17 +107,17 @@ describe('GitSettingsPage', () => {
   });
 
   it('allows replacing the full prompt and restores the default for blank input', () => {
-    const setCommitMessageSystemPrompt = vi.fn();
+    const setCommitMessageSystemPrompt = jest.fn();
 
     render(
       <GitSettingsPage
         settings={DEFAULT_GIT_SETTINGS}
-        setSignCommits={vi.fn()}
-        setSignOff={vi.fn()}
-        setPreferredCommitMessageModel={vi.fn()}
+        setSignCommits={jest.fn()}
+        setSignOff={jest.fn()}
+        setPreferredCommitMessageModel={jest.fn()}
         setCommitMessageSystemPrompt={setCommitMessageSystemPrompt}
-        resetCommitMessageSystemPrompt={vi.fn()}
-        setCommitMessageMaxDiffKb={vi.fn()}
+        resetCommitMessageSystemPrompt={jest.fn()}
+        setCommitMessageMaxDiffKb={jest.fn()}
       />
     );
 

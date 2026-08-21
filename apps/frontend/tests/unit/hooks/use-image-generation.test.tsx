@@ -1,38 +1,44 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useImageGeneration } from '../../../src/features/generation/hooks/use-image-generation';
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import type * as GenerationService from '../../../src/services/generation-service';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
-vi.mock('../../../src/services/generation-service', () => ({
-  uploadReferenceImage: vi.fn(),
-  generateImage: vi.fn(),
+// No Bun equivalent for `vi.mocked` — the `jest.fn()` handles created here are
+// what the factory below hands back, so keep them instead.
+const mockUpload = jest.fn();
+const mockGenerate = jest.fn();
+
+mock.module('../../../src/services/generation-service', () => ({
+  uploadReferenceImage: mockUpload,
+  generateImage: mockGenerate,
 }));
 
 // Suppress React Query retries and console noise in tests
-vi.mock('../../../src/features/chat/queries', () => ({
+mock.module('../../../src/features/chat/queries', () => ({
   messageKeys: { list: (id: string) => ['messages', id] },
 }));
 
-vi.mock('../../../src/features/gallery/queries', () => ({
+mock.module('../../../src/features/gallery/queries', () => ({
   galleryKeys: { lists: () => ['gallery'] },
 }));
 
-import { generateImage, uploadReferenceImage } from '../../../src/services/generation-service';
-
-const mockUpload = vi.mocked(uploadReferenceImage);
-const mockGenerate = vi.mocked(generateImage);
+// Static imports are evaluated before any statement above runs, so the hook
+// has to come in afterwards or it binds the real generation service.
+const { useImageGeneration } = await import(
+  '../../../src/features/generation/hooks/use-image-generation'
+);
 
 type ImageGenProps = Parameters<typeof useImageGeneration>[0];
 
 function makeProps(overrides: Partial<ImageGenProps> = {}) {
-  const appendOptimisticMessages = vi.fn();
-  const replaceOptimisticMessages = vi.fn();
-  const updateOptimisticMessage = vi.fn();
+  const appendOptimisticMessages = jest.fn();
+  const replaceOptimisticMessages = jest.fn();
+  const updateOptimisticMessage = jest.fn();
 
   return {
     chats: {
       currentChatId: 'chat-1',
-      createChat: vi.fn().mockResolvedValue({ id: 'chat-new' }),
-      loadChats: vi.fn().mockResolvedValue(undefined),
+      createChat: jest.fn().mockResolvedValue({ id: 'chat-new' }),
+      loadChats: jest.fn().mockResolvedValue(undefined),
     } as unknown as ImageGenProps['chats'],
     getActiveModel: () => 'test-model',
     settings: {
@@ -45,6 +51,10 @@ function makeProps(overrides: Partial<ImageGenProps> = {}) {
       updateOptimisticMessage,
     } as unknown as ImageGenProps['optimistic'],
     ...overrides,
+    // Kept alongside the cast-to-unknown props above so assertions can read
+    // `.mock.calls` — `jest.mocked` has no Bun equivalent to regain that typing.
+    replaceOptimisticMessages,
+    updateOptimisticMessage,
   };
 }
 
@@ -78,7 +88,7 @@ describe('useImageGeneration — reference image upload failure', () => {
       expect.objectContaining({ isGenerating: false })
     );
 
-    const [, , update] = vi.mocked(props.optimistic.updateOptimisticMessage).mock.calls[0];
+    const [, , update] = props.updateOptimisticMessage.mock.calls[0];
     expect(typeof update.text).toBe('string');
     expect(update.text?.length ?? 0).toBeGreaterThan(0);
 
@@ -107,7 +117,7 @@ describe('useImageGeneration — reference image upload failure', () => {
         isGenerating: false,
         interactionMode: 'image',
       },
-    } as unknown as Awaited<ReturnType<typeof generateImage>>);
+    } as unknown as Awaited<ReturnType<typeof GenerationService.generateImage>>);
 
     const props = makeProps();
     const { result } = renderHook(() => useImageGeneration(props));
@@ -149,7 +159,7 @@ describe('useImageGeneration — reference image upload failure', () => {
         styleParams: ['1K'],
         interactionMode: 'image',
       },
-    } as unknown as Awaited<ReturnType<typeof generateImage>>);
+    } as unknown as Awaited<ReturnType<typeof GenerationService.generateImage>>);
 
     const props = makeProps({ getActiveModel: () => 'gpt-image-2' });
     const { result } = renderHook(() => useImageGeneration(props));
@@ -160,8 +170,7 @@ describe('useImageGeneration — reference image upload failure', () => {
 
     await waitFor(() => expect(result.current.isGenerating).toBe(false));
 
-    const [, , replacementMessages] = vi.mocked(props.optimistic.replaceOptimisticMessages).mock
-      .calls[0];
+    const [, , replacementMessages] = props.replaceOptimisticMessages.mock.calls[0];
     expect(replacementMessages[1]).toEqual(
       expect.objectContaining({ imageUrl: '/images/generated-mango.png', modelName: 'gpt-image-2' })
     );

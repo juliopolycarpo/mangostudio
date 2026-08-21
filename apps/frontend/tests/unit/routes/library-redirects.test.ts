@@ -5,8 +5,8 @@
  * `$resourceKey` that drops its param, would strand exactly those bookmarks.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { isRedirect } from '@tanstack/react-router';
-import { describe, expect, it } from 'vitest';
 import { Route as ResourceKeyRoute } from '../../../src/routes/_authenticated/library/$resourceKey';
 import { Route as BackupsRoute } from '../../../src/routes/_authenticated/library/backups';
 import { Route as IndexRoute } from '../../../src/routes/_authenticated/library/index';

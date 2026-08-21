@@ -1,15 +1,20 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import { useClipboard } from '../../../src/hooks/use-clipboard';
 import { act, renderHook } from '../../support/harness/render';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../support/harness/timers';
 
 describe('useClipboard', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    useFakeTimers();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.restoreAllMocks();
+  afterEach(async () => {
+    await restoreRealTimers();
+    jest.restoreAllMocks();
   });
 
   function stubClipboardWrite(writeText: (text: string) => Promise<void>) {
@@ -33,8 +38,8 @@ describe('useClipboard', () => {
     expect(result.current.failed).toBe(true);
     expect(result.current.copied).toBe(false);
 
-    act(() => {
-      vi.advanceTimersByTime(1000);
+    await act(async () => {
+      await advanceTimersByTimeAsync(1000);
     });
 
     expect(result.current.failed).toBe(false);
@@ -52,8 +57,8 @@ describe('useClipboard', () => {
     expect(result.current.copied).toBe(true);
     expect(result.current.failed).toBe(false);
 
-    act(() => {
-      vi.advanceTimersByTime(500);
+    await act(async () => {
+      await advanceTimersByTimeAsync(500);
     });
 
     expect(result.current.copied).toBe(false);

@@ -258,6 +258,68 @@ returning `undefined`. `create-fetch-scenario.restore()` used it, and under `bun
 turned every test after the first in a file into a failed request (measured: 10 of 13 in
 `tool-settings-page`). `mockClear()` is the one that means the same thing in both.
 
+**T29 — the `vi` surface `bun test` simply does not have.** Probed on 1.4.0:
+`jest.resetModules`, `isolateModules`, `mocked`, `hoisted`, `stubEnv`, `unstubAllEnvs`,
+`stubGlobal`, `waitFor` and `runAllTicks` are all `undefined`; `mock.module`, `mock.restore`
+and `mock.clearAllMocks` live on `mock`, not on `jest`. Three consequences worth knowing
+before reaching for a workaround:
+
+- **`import.meta.env` is backed by `process.env`**, so `vi.stubEnv` ports to a plain
+  `process.env.X = …`. Assign `undefined` and you leave the *string* `"undefined"` behind,
+  which reads as a set value — `delete` it.
+- **A cache-busting query really does re-evaluate a module** (`import('@/lib/x?fresh=1')`
+  returned a different instance than `import('@/lib/x')`), which is the only genuine
+  `resetModules` substitute. But knip cannot follow that specifier and reports the module's
+  exports as unused, failing `bun run check`. Same for a module-scope
+  `const ns = await import('@/lib/x')` you then member-access: knip traces *that* and flags
+  whatever the test does not touch. Keeping the dynamic import behind a function is what
+  stays opaque to knip — which is why `shiki.test.ts` has one.
+- `toHaveBeenCalledExactlyOnceWith` is a Vitest matcher with no Bun equivalent; the
+  `toHaveBeenCalledTimes(1)` + `toHaveBeenCalledWith(…)` pair says the same thing.
+
+**T30 — `bun-types` types `toEqual` against the *received* value; Vitest's took `unknown`.**
+So an expected literal that is not assignable to the received type compiled fine there and
+fails `tsc` here — a mock returning a partial payload, a union member the contract does not
+list, a `done: false` where the type says `true`. `expect<unknown>(received).toEqual(…)`
+widens it. It is **not** the general answer to a `tsc` error: anywhere the runtime value does
+not provably escape its declared type, the error means the expected shape is wrong.
+
+**T31 — Bun links a mocked module's whole namespace at import.** Vitest resolved lazily, so a
+factory returning one or two names often went unnoticed by that module's *other* consumers.
+Under `bun test` a missing export is a hard `SyntaxError: Export named 'x' not found in
+module '…'`, surfaced as `# Unhandled error between tests` — one test fails and the message
+points at neither the mock nor the consumer. Measured on `@/services/external-agent-service`,
+`@/features/chat/queries` and `@/features/settings/connectors/api`. Any factory returning
+fewer names than the real module exports needs `const actual = await import(spec)` spread in.
+
+**T32 — happy-dom is not jsdom, in two ways that are invisible until they are not.** The
+origin is `http://localhost:3001`, not jsdom's `http://localhost:3000`: `safe-redirect.test.ts`
+had hard-coded the latter, so its *same-origin* cases were silently exercising the
+cross-origin path. And `navigator.clipboard` is a readonly getter where jsdom left it
+writable — `Object.assign(navigator, { clipboard })` throws `Attempted to assign to readonly
+property`; define and restore the descriptor instead.
+
+**T33 — the `act(...)` warnings that only exist in a full-lane run.** Nine real ones were
+found migrating 156 files, and **not one reproduced when its file ran alone** — the update
+lands inside the test body on an idle machine and after it under load, so a per-file check is
+blind to the whole class. Four shapes, all fixed at the source rather than silenced:
+
+| shape                                                          | fix                       |
+| -------------------------------------------------------------- | ------------------------- |
+| a query resolving behind a synchronous `getByTestId`           | `await screen.findBy…`    |
+| a dropped `renderWithRouter(…)` promise (it is async)          | `await` it                |
+| an async submit handler continuing after `user.click` resolves | drive it inside one `act` |
+| a `lazy()` chunk settling after the assertions                 | `flushAsyncRender()`      |
+
+`flushAsyncRender()` (`support/harness/render.tsx`) advances one macrotask inside `act`. It
+must not run while fake timers are installed — a `setTimeout` does not fire on its own then,
+and an `afterEach` that ignored this would hang the run rather than flush it. An `afterEach`
+flush does **not** work for this class anyway: the resolution happens mid-test, not after it.
+
+Also from that volume, and not a Bun fact: **biome's `noComponentHookFactories` rejects a
+component defined inline in a `mock.module` factory** — which is exactly the shape every
+`Link` stub had under `vi.mock`. Declare the stub at module level and reference it.
+
 ## Test migration mechanics
 
 Everything below is what the 004 spike actually needed across its eleven files. Where a row

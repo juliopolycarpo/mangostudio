@@ -4,6 +4,7 @@
  * that cannot answer says so instead of spinning forever.
  */
 
+import { describe, expect, it } from 'bun:test';
 import type { Environment } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import {
@@ -16,7 +17,6 @@ import {
 } from '@tanstack/react-router';
 import userEvent from '@testing-library/user-event';
 import type { FunctionComponent } from 'react';
-import { describe, expect, it } from 'vitest';
 import { RuntimesPage } from '../../../../src/features/environments/components/RuntimesPage';
 import { validateEnvironmentSearch } from '../../../../src/features/environments/use-environment-scope';
 import { act, render, screen, waitFor } from '../../../support/harness/render';

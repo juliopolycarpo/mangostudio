@@ -7,6 +7,7 @@
  * with nothing to try. So each is asserted for both disabled-ness and reason.
  */
 
+import { describe, expect, it, jest } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { EnvironmentTransportKind } from '@mangostudio/shared/environments';
 import type {
@@ -15,7 +16,6 @@ import type {
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
 import { RunnerSelector } from '../../../src/components/layout/RunnerSelector';
 import { render } from '../../support/harness/render';
 
@@ -50,10 +50,10 @@ function renderSelector(overrides: Partial<React.ComponentProps<typeof RunnerSel
     externalAgents: [descriptor()],
     environmentName: 'this laptop',
     hasTurns: false,
-    onSelectAgent: vi.fn(),
-    onSelectExternal: vi.fn(),
-    onForkWithRunner: vi.fn(),
-    onBrowseSessions: vi.fn(),
+    onSelectAgent: jest.fn(),
+    onSelectExternal: jest.fn(),
+    onForkWithRunner: jest.fn(),
+    onBrowseSessions: jest.fn(),
     ...overrides,
   };
   const result = render(<RunnerSelector {...props} />);

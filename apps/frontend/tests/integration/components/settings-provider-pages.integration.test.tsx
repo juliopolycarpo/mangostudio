@@ -2,33 +2,43 @@
  * Integration tests for provider settings pages.
  */
 
-import type * as TanstackRouter from '@tanstack/react-router';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProviderSettingsPage } from '../../../src/features/settings/providers/components/ProviderSettingsPage';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { act, render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof TanstackRouter>();
-  return {
-    ...actual,
-    Link: ({
-      to,
-      children,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      [k: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-    useParams: () => ({ provider: 'deepseek' }),
-  };
-});
+// Declared at module level rather than inline in the factory: biome's
+// `noComponentHookFactories` rejects a component defined inside a function.
+function LinkStub({
+  to,
+  children,
+  ...props
+}: {
+  to: string;
+  children: React.ReactNode;
+  [k: string]: unknown;
+}) {
+  return (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  );
+}
+
+// `importOriginal` has no `bun test` equivalent: import the real namespace
+// first, register the mock over it, then import the subject. `mock.module` is
+// not hoisted and static imports are.
+const actualRouter = await import('@tanstack/react-router');
+
+mock.module('@tanstack/react-router', () => ({
+  ...actualRouter,
+  Link: LinkStub,
+  useParams: () => ({ provider: 'deepseek' }),
+}));
+
+const { ProviderSettingsPage } = await import(
+  '../../../src/features/settings/providers/components/ProviderSettingsPage'
+);
 
 const DEEPSEEK_DESCRIPTOR = {
   provider: 'deepseek',
@@ -111,6 +121,14 @@ describe('ProviderSettingsPage integration', () => {
         );
       });
       expect(putCalls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    // The PUT resolves *after* the call is recorded and writes the saved
+    // descriptor back into the editor. `waitFor` returns on the call, so
+    // without flushing that response the state update lands outside `act` and
+    // prints an "update was not wrapped in act(...)" block on a green test.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
   });
 

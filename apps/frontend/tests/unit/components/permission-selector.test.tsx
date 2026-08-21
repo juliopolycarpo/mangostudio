@@ -4,9 +4,9 @@
  * shape exists to prevent, so the tests are written against that.
  */
 
+import { describe, expect, it, jest } from 'bun:test';
 import type { ExternalSupportedConfiguration } from '@mangostudio/shared/external-agents';
 import { fireEvent, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
 import { PermissionSelector } from '../../../src/features/chat/components/PermissionSelector';
 import { render } from '../../support/harness/render';
 
@@ -18,7 +18,7 @@ function open(
     configurations,
     level: 'default' as const,
     routing: 'user' as const,
-    onChange: vi.fn(),
+    onChange: jest.fn(),
     ...overrides,
   };
   const result = render(<PermissionSelector {...props} />);
@@ -48,7 +48,12 @@ describe('permission selector', () => {
 
   it('renders nothing at all when the adapter returned no combinations', () => {
     render(
-      <PermissionSelector configurations={[]} level="read-only" routing="user" onChange={vi.fn()} />
+      <PermissionSelector
+        configurations={[]}
+        level="read-only"
+        routing="user"
+        onChange={jest.fn()}
+      />
     );
     expect(screen.queryByRole('button', { name: /permissions/i })).toBeNull();
   });

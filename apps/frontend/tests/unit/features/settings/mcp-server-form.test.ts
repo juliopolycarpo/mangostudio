@@ -3,10 +3,10 @@
  * transport-specific body building, and write-only header semantics.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
 import type { McpServer } from '@mangostudio/shared/mcp';
-import { describe, expect, it } from 'vitest';
 import {
   buildAddBody,
   buildUpdateBody,

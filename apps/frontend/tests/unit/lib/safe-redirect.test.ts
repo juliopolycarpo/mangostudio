@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { safeRedirect } from '../../../src/lib/safe-redirect';
 
 describe('safeRedirect', () => {
@@ -14,12 +14,15 @@ describe('safeRedirect', () => {
   });
 
   it('parses same-origin full URLs to app-relative paths', () => {
-    expect(safeRedirect('http://localhost:3000/chat')).toBe('/chat');
+    // Built from the live origin rather than a literal host: jsdom served the
+    // suite from :3000 and happy-dom serves it from :3001, and a hard-coded
+    // host silently turns into the cross-origin case the tests below cover.
+    expect(safeRedirect(`${window.location.origin}/chat`)).toBe('/chat');
     expect(safeRedirect(`${window.location.origin}/gallery`)).toBe('/gallery');
   });
 
   it('preserves search and hash from same-origin URLs', () => {
-    expect(safeRedirect('http://localhost:3000/chat?q=hello')).toBe('/chat?q=hello');
+    expect(safeRedirect(`${window.location.origin}/chat?q=hello`)).toBe('/chat?q=hello');
     expect(safeRedirect(`${window.location.origin}/page#section`)).toBe('/page#section');
   });
 

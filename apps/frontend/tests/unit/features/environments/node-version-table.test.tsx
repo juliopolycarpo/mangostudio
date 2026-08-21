@@ -4,9 +4,9 @@
  * that reaches a Node rather than an install the server would refuse.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { LtsStatus, ManagedVersion } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NodeVersionTable } from '../../../../src/features/environments/components/NodeVersionTable';
 import { render, screen } from '../../../support/harness/render';
 import { installRecipe, versionManagerStatus } from './fixtures';
@@ -92,7 +92,7 @@ describe('NodeVersionTable', () => {
 
   describe('without nvm', () => {
     const status = versionManagerStatus({ installed: false });
-    const fetchMock = vi.fn();
+    const fetchMock = jest.fn();
 
     beforeEach(() => {
       // Only the identity registry is read here: the card has to derive its
@@ -102,12 +102,13 @@ describe('NodeVersionTable', () => {
           new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
         )
       );
-      vi.stubGlobal('fetch', fetchMock);
+      // `vi.stubGlobal` has no Bun equivalent. `bun.setup.ts` reinstates its
+      // unreachable `fetch` after every test, so a plain assignment cannot leak.
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
     });
 
     afterEach(() => {
       fetchMock.mockReset();
-      vi.unstubAllGlobals();
     });
 
     it('offers the nvm to Node chain as one affordance', () => {

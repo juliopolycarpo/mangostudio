@@ -1,14 +1,19 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { Connector } from '@mangostudio/shared';
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatGptResetCreditAction } from '@/features/settings/connectors/components/ChatGptResetCreditAction';
 import { fireEvent, render, screen, waitFor } from '../../support/harness/render';
 
-const mockRedeemChatGptResetCredit = vi.fn();
+const mockRedeemChatGptResetCredit = jest.fn();
 
-vi.mock('@/features/settings/connectors/api', () => ({
+mock.module('@/features/settings/connectors/api', () => ({
   redeemChatGptResetCredit: (...args: unknown[]) => mockRedeemChatGptResetCredit(...args),
 }));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind the action to the real connectors API.
+const { ChatGptResetCreditAction } = await import(
+  '@/features/settings/connectors/components/ChatGptResetCreditAction'
+);
 
 function makeConnector(usage: Partial<ChatGptUsageSnapshot>): Connector {
   return {
@@ -73,7 +78,7 @@ describe('ChatGptResetCreditAction', () => {
 
   it('redeems after confirmation and notifies the caller', async () => {
     mockRedeemChatGptResetCredit.mockResolvedValue({ code: 'reset', windowsReset: 1 });
-    const onRedeemed = vi.fn();
+    const onRedeemed = jest.fn();
     render(
       <ChatGptResetCreditAction
         connector={makeConnector({ limitReached: true, resetCredits: { availableCount: 1 } })}
@@ -94,7 +99,7 @@ describe('ChatGptResetCreditAction', () => {
 
   it('surfaces the windows restored by the last redemption in the next confirmation', async () => {
     mockRedeemChatGptResetCredit.mockResolvedValue({ code: 'reset', windowsReset: 2 });
-    const onRedeemed = vi.fn();
+    const onRedeemed = jest.fn();
     render(
       <ChatGptResetCreditAction
         connector={makeConnector({ limitReached: true, resetCredits: { availableCount: 2 } })}

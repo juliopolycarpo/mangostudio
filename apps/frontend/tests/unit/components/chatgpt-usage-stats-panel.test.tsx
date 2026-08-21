@@ -1,13 +1,18 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { ChatGptUsageStats } from '@mangostudio/shared/connectors';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChatGptUsageStatsPanel } from '@/features/settings/connectors/components/ChatGptUsageStatsPanel';
 import { render, screen } from '../../support/harness/render';
 
-const mockGetChatGptUsageStats = vi.fn();
+const mockGetChatGptUsageStats = jest.fn();
 
-vi.mock('@/features/settings/connectors/api', () => ({
+mock.module('@/features/settings/connectors/api', () => ({
   getChatGptUsageStats: (...args: unknown[]) => mockGetChatGptUsageStats(...args),
 }));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind the panel to the real connectors API.
+const { ChatGptUsageStatsPanel } = await import(
+  '@/features/settings/connectors/components/ChatGptUsageStatsPanel'
+);
 
 describe('ChatGptUsageStatsPanel', () => {
   beforeEach(() => {

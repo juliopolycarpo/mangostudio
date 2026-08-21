@@ -12,6 +12,7 @@
  * the expected output would drift with neither side noticing.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { ExternalTurnTranscript } from '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
 import type { ExternalAgentEvent } from '@mangostudio/shared/external-agents';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
@@ -22,7 +23,6 @@ import {
   externalTurnCompletedChunk,
 } from '@mangostudio/shared/streaming';
 import type { MessagePart } from '@mangostudio/shared/types';
-import { describe, expect, it } from 'vitest';
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,

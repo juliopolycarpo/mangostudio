@@ -7,7 +7,7 @@
  * replaces — so its absence is the assertion.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import { OverviewPage } from '../../../src/features/environments/components/OverviewPage';
 import { Route as EnvironmentsIndexRoute } from '../../../src/routes/_authenticated/environments/index';
 

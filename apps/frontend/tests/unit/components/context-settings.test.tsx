@@ -1,36 +1,41 @@
-import type * as TanstackRouter from '@tanstack/react-router';
+import { describe, expect, it, jest, mock } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import { ContextSettings } from '../../../src/components/settings/ContextSettings';
-import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
-import { DEFAULT_CONTEXT_SETTINGS } from '../../../src/hooks/use-global-settings';
 import { render } from '../../support/harness/render';
 
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof TanstackRouter>();
-  return {
-    ...actual,
-    Link: ({
-      to,
-      children,
-      activeProps: _activeProps,
-      inactiveProps: _inactiveProps,
-      activeOptions: _activeOptions,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      activeProps?: unknown;
-      inactiveProps?: unknown;
-      activeOptions?: unknown;
-      [key: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-  };
-});
+const actual = await import('@tanstack/react-router');
+
+function LinkStub({
+  to,
+  children,
+  activeProps: _activeProps,
+  inactiveProps: _inactiveProps,
+  activeOptions: _activeOptions,
+  ...props
+}: {
+  to: string;
+  children: React.ReactNode;
+  activeProps?: unknown;
+  inactiveProps?: unknown;
+  activeOptions?: unknown;
+  [key: string]: unknown;
+}) {
+  return (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  );
+}
+
+mock.module('@tanstack/react-router', () => ({
+  ...actual,
+  Link: LinkStub,
+}));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind SettingsTabs to the real router.
+const { ContextSettings } = await import('../../../src/components/settings/ContextSettings');
+const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
+const { DEFAULT_CONTEXT_SETTINGS } = await import('../../../src/hooks/use-global-settings');
 
 function renderSettings(overrides: Partial<React.ComponentProps<typeof ContextSettings>> = {}) {
   const props: React.ComponentProps<typeof ContextSettings> = {
@@ -43,12 +48,12 @@ function renderSettings(overrides: Partial<React.ComponentProps<typeof ContextSe
         supportedActions: ['chat'],
       },
     ],
-    setCompactionBehavior: vi.fn(),
-    setWarningThreshold: vi.fn(),
-    setDangerThreshold: vi.fn(),
-    setHardStopThreshold: vi.fn(),
-    setPreferredSummaryModel: vi.fn(),
-    setProviderCompactionEnabled: vi.fn(),
+    setCompactionBehavior: jest.fn(),
+    setWarningThreshold: jest.fn(),
+    setDangerThreshold: jest.fn(),
+    setHardStopThreshold: jest.fn(),
+    setPreferredSummaryModel: jest.fn(),
+    setProviderCompactionEnabled: jest.fn(),
     ...overrides,
   };
 

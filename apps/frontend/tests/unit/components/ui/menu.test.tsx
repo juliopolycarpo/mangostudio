@@ -1,13 +1,13 @@
+import { describe, expect, it, jest } from 'bun:test';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
-import { describe, expect, it, vi } from 'vitest';
 import { Menu, MenuItem, MenuSeparator } from '@/components/ui/Menu';
 import { SplitButton } from '@/components/ui/SplitButton';
 import { render } from '../../../support/harness/render';
 
 function MenuHarness({
-  onSelect = vi.fn(),
+  onSelect = jest.fn(),
   disabledSecond = false,
 }: {
   readonly onSelect?: (item: string) => void;
@@ -60,7 +60,7 @@ describe('Menu', () => {
 
   it('runs the selected action', async () => {
     const user = userEvent.setup();
-    const onSelect = vi.fn();
+    const onSelect = jest.fn();
     render(<MenuHarness onSelect={onSelect} />);
 
     await user.click(screen.getByRole('button', { name: 'More actions' }));
@@ -124,8 +124,8 @@ describe('Menu', () => {
 });
 
 function SplitButtonHarness({
-  onPrimary = vi.fn(),
-  onSecondary = vi.fn(),
+  onPrimary = jest.fn(),
+  onSecondary = jest.fn(),
   disabled = false,
 }: {
   readonly onPrimary?: () => void;
@@ -150,25 +150,25 @@ function SplitButtonHarness({
 describe('SplitButton', () => {
   it('runs the primary action without opening the menu', async () => {
     const user = userEvent.setup();
-    const onPrimary = vi.fn();
+    const onPrimary = jest.fn();
     render(<SplitButtonHarness onPrimary={onPrimary} />);
 
     await user.click(screen.getByRole('button', { name: 'Commit' }));
 
-    expect(onPrimary).toHaveBeenCalledOnce();
+    expect(onPrimary).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
   });
 
   it('opens the variant menu from the chevron', async () => {
     const user = userEvent.setup();
-    const onPrimary = vi.fn();
-    const onSecondary = vi.fn();
+    const onPrimary = jest.fn();
+    const onSecondary = jest.fn();
     render(<SplitButtonHarness onPrimary={onPrimary} onSecondary={onSecondary} />);
 
     await user.click(screen.getByRole('button', { name: 'More commit actions' }));
     await user.click(screen.getByRole('menuitem', { name: 'Commit and push' }));
 
-    expect(onSecondary).toHaveBeenCalledOnce();
+    expect(onSecondary).toHaveBeenCalledTimes(1);
     expect(onPrimary).not.toHaveBeenCalled();
   });
 

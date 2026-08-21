@@ -3,8 +3,8 @@
  * reported as signed out.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
-import { describe, expect, it } from 'vitest';
 import { AgentCliCard } from '../../../../src/features/environments/components/AgentCliCard';
 import { render, screen } from '../../../support/harness/render';
 import { agentCliStatus, installation } from './fixtures';

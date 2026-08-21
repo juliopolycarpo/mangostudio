@@ -6,8 +6,8 @@
  * second is a lie, and the Retry it offers cannot fix the first.
  */
 
+import { afterEach, describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
-import { afterEach, describe, expect, it } from 'vitest';
 import { PropagationWizard } from '../../../../src/features/library/components/PropagationWizard';
 import { screen } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
@@ -29,7 +29,13 @@ describe('PropagationWizard without candidate destinations', () => {
       <PropagationWizard resourceKeys={['skill:gh']} locationIds={[]} onClose={() => undefined} />
     );
 
-    expect(screen.getByTestId('library-empty')).toHaveTextContent(en.library.wizard.noDestinations);
+    // `find*`, not `get*`: the locations query resolves after the router's own
+    // load settles, and asserting synchronously leaves that state update outside
+    // `act` — which prints an "update was not wrapped in act(...)" block while
+    // the test still passes.
+    expect(await screen.findByTestId('library-empty')).toHaveTextContent(
+      en.library.wizard.noDestinations
+    );
     expect(screen.queryByTestId('library-error')).not.toBeInTheDocument();
     // Continuing would walk into steps built from a preview that was never asked for.
     expect(screen.getByTestId('continue-button')).toBeDisabled();
@@ -41,6 +47,11 @@ describe('PropagationWizard without candidate destinations', () => {
     await renderWithRouter(
       <PropagationWizard resourceKeys={['skill:gh']} locationIds={[]} onClose={() => undefined} />
     );
+
+    // Settle the locations query first, for the same reason as above — and so
+    // the assertion below covers every request the component made, not just the
+    // ones issued before the first paint.
+    await screen.findByTestId('library-empty');
 
     // The contract requires at least one target, so the request the guard
     // prevents would come back 422.

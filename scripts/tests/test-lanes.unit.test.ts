@@ -191,12 +191,24 @@ describe('testLaneEnv', () => {
 });
 
 describe('frontend coverage thresholds', () => {
-  it('are enforced unsharded and deferred to the merge when sharded', async () => {
+  // The Vitest lane used to carry 70/60/64/72, standing them down under
+  // `MANGOSTUDIO_TEST_SHARD` so only the unsharded merge decided them. Those
+  // numbers were measured over the whole suite, and the suite has moved to
+  // `bun test` — this lane now runs nothing, so a threshold on it would gate on
+  // a coverage figure no file produces. Pinned as absent so re-adding one is a
+  // deliberate act rather than a copy-paste.
+  it('are no longer declared on the Vitest lane, which runs no files', async () => {
     const config = await Bun.file(
       new URL('../../apps/frontend/vitest.config.ts', import.meta.url)
     ).text();
-    expect(config).toContain('process.env.MANGOSTUDIO_TEST_SHARD');
-    // The merge invocation is unsharded, so it is what applies them.
+    expect(config).toContain('thresholds: undefined');
+    expect(config).not.toContain('process.env.MANGOSTUDIO_TEST_SHARD');
+  });
+
+  // The merge invocation stays wired even with nothing to merge: it is what
+  // would apply thresholds again, and the Bun lane's own are re-derived
+  // separately.
+  it('leave the unsharded merge as the place they would be applied', async () => {
     const scripts = (await Bun.file(
       new URL('../../apps/frontend/package.json', import.meta.url)
     ).json()) as { scripts: Record<string, string> };

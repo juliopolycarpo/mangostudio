@@ -2,41 +2,46 @@
  * Unit tests for AppearanceSettings component and useTheme hook.
  */
 
-import type * as TanstackRouter from '@tanstack/react-router';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { act, fireEvent, screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppearanceSettings } from '../../../src/components/settings/AppearanceSettings';
-import { SettingsTabs } from '../../../src/components/settings/SettingsTabs';
-import { useTheme } from '../../../src/hooks/use-theme';
 import { render, renderHook } from '../../support/harness/render';
 
 // SettingsTabs uses TanStack Router Link — mock it to a simple anchor
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof TanstackRouter>();
-  return {
-    ...actual,
-    Link: ({
-      to,
-      children,
-      activeProps: _activeProps,
-      inactiveProps: _inactiveProps,
-      activeOptions: _activeOptions,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      activeProps?: unknown;
-      inactiveProps?: unknown;
-      activeOptions?: unknown;
-      [k: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-    useRouterState: () => ({ location: { pathname: '/settings/appearance' } }),
-  };
-});
+const actual = await import('@tanstack/react-router');
+
+function LinkStub({
+  to,
+  children,
+  activeProps: _activeProps,
+  inactiveProps: _inactiveProps,
+  activeOptions: _activeOptions,
+  ...props
+}: {
+  to: string;
+  children: React.ReactNode;
+  activeProps?: unknown;
+  inactiveProps?: unknown;
+  activeOptions?: unknown;
+  [k: string]: unknown;
+}) {
+  return (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  );
+}
+
+mock.module('@tanstack/react-router', () => ({
+  ...actual,
+  Link: LinkStub,
+  useRouterState: () => ({ location: { pathname: '/settings/appearance' } }),
+}));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind SettingsTabs to the real router.
+const { AppearanceSettings } = await import('../../../src/components/settings/AppearanceSettings');
+const { SettingsTabs } = await import('../../../src/components/settings/SettingsTabs');
+const { useTheme } = await import('../../../src/hooks/use-theme');
 
 describe('AppearanceSettings', () => {
   beforeEach(() => {

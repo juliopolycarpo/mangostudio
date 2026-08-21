@@ -2,8 +2,8 @@
  * Integration tests for tools settings page.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
@@ -43,7 +43,7 @@ const TOOLS_RESPONSE = {
 
 describe('ToolSettingsPage integration', () => {
   const fetchScenario = createFetchScenario();
-  const setMaxToolIterations = vi.fn();
+  const setMaxToolIterations = jest.fn();
 
   beforeEach(() => {
     fetchScenario.install();

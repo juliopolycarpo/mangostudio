@@ -1,6 +1,6 @@
+import { describe, expect, it, jest } from 'bun:test';
 import type { Connector, ModelCatalogResponse } from '@mangostudio/shared';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
 import { ConnectorModelsModal } from '../../../src/features/settings/connectors/components/ConnectorModelsModal';
 import { fireEvent, render, screen } from '../../support/harness/render';
 
@@ -55,16 +55,16 @@ const MODEL_CATALOG: ModelCatalogResponse = {
 describe('ConnectorModelsModal', () => {
   it('renders provider models and toggles text and image models', async () => {
     const user = userEvent.setup();
-    const onToggleModel = vi.fn();
+    const onToggleModel = jest.fn();
 
     render(
       <ConnectorModelsModal
         connector={CONNECTOR}
         modelCatalog={MODEL_CATALOG}
         modelSearchQuery=""
-        onSearchChange={vi.fn()}
+        onSearchChange={jest.fn()}
         onToggleModel={onToggleModel}
-        onClose={vi.fn()}
+        onClose={jest.fn()}
       />
     );
 
@@ -80,7 +80,7 @@ describe('ConnectorModelsModal', () => {
   });
 
   it('keeps search input delegated to the modal owner', () => {
-    const onSearchChange = vi.fn();
+    const onSearchChange = jest.fn();
 
     render(
       <ConnectorModelsModal
@@ -88,8 +88,8 @@ describe('ConnectorModelsModal', () => {
         modelCatalog={MODEL_CATALOG}
         modelSearchQuery=""
         onSearchChange={onSearchChange}
-        onToggleModel={vi.fn()}
-        onClose={vi.fn()}
+        onToggleModel={jest.fn()}
+        onClose={jest.fn()}
       />
     );
 
@@ -115,9 +115,9 @@ describe('ConnectorModelsModal', () => {
           discoveredImageModels: [],
         }}
         modelSearchQuery=""
-        onSearchChange={vi.fn()}
-        onToggleModel={vi.fn()}
-        onClose={vi.fn()}
+        onSearchChange={jest.fn()}
+        onToggleModel={jest.fn()}
+        onClose={jest.fn()}
       />
     );
 

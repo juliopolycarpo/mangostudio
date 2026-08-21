@@ -2,41 +2,47 @@
  * Unit tests for ProviderSettingsMenu component.
  */
 
-import type * as TanstackRouter from '@tanstack/react-router';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { screen } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ProviderSettingsMenu } from '../../../src/features/settings/providers/components/ProviderSettingsMenu';
 import { render } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
-// Mock TanStack Router Link
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof TanstackRouter>();
-  return {
-    ...actual,
-    Link: ({
-      to,
-      children,
-      activeProps: _activeProps,
-      inactiveProps: _inactiveProps,
-      activeOptions: _activeOptions,
-      params: _params,
-      ...props
-    }: {
-      to: string;
-      children: React.ReactNode;
-      activeProps?: unknown;
-      inactiveProps?: unknown;
-      activeOptions?: unknown;
-      params?: unknown;
-      [k: string]: unknown;
-    }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-  };
-});
+// Declared at module level rather than inline in the factory: biome's
+// `noComponentHookFactories` rejects a component defined inside a function.
+function LinkStub({
+  to,
+  children,
+  activeProps: _activeProps,
+  inactiveProps: _inactiveProps,
+  activeOptions: _activeOptions,
+  params: _params,
+  ...props
+}: {
+  to: string;
+  children: React.ReactNode;
+  activeProps?: unknown;
+  inactiveProps?: unknown;
+  activeOptions?: unknown;
+  params?: unknown;
+  [k: string]: unknown;
+}) {
+  return (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  );
+}
+
+// `importOriginal` has no `bun test` equivalent: import the real namespace,
+// register the mock over it, then import the subject. `mock.module` is not
+// hoisted and static imports are.
+const actualRouter = await import('@tanstack/react-router');
+
+mock.module('@tanstack/react-router', () => ({ ...actualRouter, Link: LinkStub }));
+
+const { ProviderSettingsMenu } = await import(
+  '../../../src/features/settings/providers/components/ProviderSettingsMenu'
+);
 
 const MOCK_DESCRIPTORS = {
   providers: [

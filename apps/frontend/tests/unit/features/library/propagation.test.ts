@@ -6,7 +6,7 @@
  * never walked into a 422 the form could have prevented.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'bun:test';
 import {
   applySummary,
   buildDecisions,

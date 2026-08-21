@@ -16,7 +16,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { authClient, setTestSession } from '../support/setup/auth-client-stub';
 
@@ -80,22 +80,79 @@ describe('bun lane resolver aliases', () => {
   });
 });
 
-describe('bun lane file list', () => {
-  const bunLaneFiles = readJson<{ scripts: Record<string, string> }>('package.json')
-    .scripts['test:unit:bun'].split(/\s+/)
-    .filter((argument) => /^tests\/.+\.tsx?$/.test(argument));
+describe('bun lane coverage', () => {
+  const scripts = readJson<{ scripts: Record<string, string> }>('package.json').scripts;
 
-  it('is what vitest.config.ts derives its exclusion from', () => {
-    const config = readFileSync(join(WORKSPACE_ROOT, 'vitest.config.ts'), 'utf8');
+  /** Every `*.test.ts(x)` on disk, workspace-relative, `tests/support` aside. */
+  function testFilesOnDisk(directory = 'tests'): string[] {
+    return readdirSync(join(WORKSPACE_ROOT, directory), { withFileTypes: true }).flatMap(
+      (entry) => {
+        const relativePath = `${directory}/${entry.name}`;
+        if (entry.isDirectory()) {
+          return relativePath === 'tests/support' ? [] : testFilesOnDisk(relativePath);
+        }
+        return /\.test\.tsx?$/.test(entry.name) ? [relativePath] : [];
+      }
+    );
+  }
 
-    expect(config).toContain('...bunLaneFiles()');
+  /** Directory arguments the two lane scripts hand to `bun test`. */
+  const laneRoots = ['test:unit', 'test:integration'].map((script) => {
+    const argument = scripts[script].split(/\s+/).at(-1);
+    if (!argument?.startsWith('tests')) {
+      throw new Error(`${script} does not end in a tests/ directory: ${scripts[script]}`);
+    }
+    return argument;
   });
 
-  it('names files that exist', () => {
+  it('reaches every test file on disk', () => {
     // `bun test` treats an unmatched pattern as zero files and still exits 0,
-    // so a typo here silently drops a file from both lanes at once.
-    expect(bunLaneFiles.filter((file) => !existsSync(join(WORKSPACE_ROOT, file)))).toEqual([]);
-    expect(bunLaneFiles.length).toBeGreaterThan(1);
+    // so a file under a directory neither lane names runs nowhere and nothing
+    // reports it. 166 files is well past where anyone notices by eye.
+    const unreached = testFilesOnDisk().filter(
+      (file) => !laneRoots.some((root) => file.startsWith(`${root}/`))
+    );
+
+    expect(unreached).toEqual([]);
+    expect(testFilesOnDisk().length).toBeGreaterThan(100);
+  });
+
+  it('names lane roots that exist', () => {
+    expect(laneRoots.filter((root) => !existsSync(join(WORKSPACE_ROOT, root)))).toEqual([]);
+  });
+
+  it('claims each file exactly once across the two lanes', () => {
+    // Overlapping roots would run a file twice and double its coverage weight,
+    // which is as invisible as running it zero times.
+    for (const root of laneRoots) {
+      const others = laneRoots.filter((candidate) => candidate !== root);
+      expect(others.filter((candidate) => root.startsWith(`${candidate}/`))).toEqual([]);
+    }
+  });
+
+  it('leaves no test file importing vitest', () => {
+    // The migration is only finished when this is true: a leftover
+    // `import { vi } from 'vitest'` fails at collection, but a leftover
+    // `@vitest-environment` docblock or a `vitest.config.ts` include does not.
+    // This file names both patterns, so it excludes itself rather than
+    // weakening the regex to something that would miss a real occurrence.
+    const importers = testFilesOnDisk()
+      .filter((file) => file !== 'tests/unit/bun-lane-harness.test.ts')
+      .filter((file) =>
+        /from ['"]vitest['"]|@vitest-environment/.test(
+          readFileSync(join(WORKSPACE_ROOT, file), 'utf8')
+        )
+      );
+
+    expect(importers).toEqual([]);
+  });
+
+  it('keeps the Vitest lane matching nothing', () => {
+    // Left at its default, `include` collects all 167 files a second time and
+    // every one of them fails on `import … from 'bun:test'`.
+    const config = readFileSync(join(WORKSPACE_ROOT, 'vitest.config.ts'), 'utf8');
+
+    expect(config).toContain('include: []');
   });
 
   it('runs the setup files bunfig.toml preloads, in the documented order', () => {

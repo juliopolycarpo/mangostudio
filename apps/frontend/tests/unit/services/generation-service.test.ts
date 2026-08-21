@@ -5,42 +5,30 @@
  * so its behavior is intentionally not exercised here.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from 'bun:test';
 import type { GenerateImageResponse } from '@mangostudio/shared';
 import type { RespondStreamBody } from '@mangostudio/shared/generation';
 import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as ApiClient from '../../../src/lib/api-client';
+import type { GenerateImageRequest } from '../../../src/services/generation-service';
 
-// Eden Treaty's generic types are too strict for vi.fn() mocks, so the factory is cast via unknown.
-const {
-  mockGeneratePost,
-  mockUploadPost,
-  mockRecoveryChats,
-  mockRecoveryMessages,
-  mockRecoveryCancelPost,
-  mockRecoveryDismissPost,
-} = vi.hoisted(() => {
-  const mockRecoveryCancelPost = vi.fn();
-  const mockRecoveryDismissPost = vi.fn();
-  const mockRecoveryMessages = vi.fn(() => ({
-    recovery: {
-      cancel: { post: mockRecoveryCancelPost },
-      dismiss: { post: mockRecoveryDismissPost },
-    },
-  }));
-  const mockRecoveryChats = vi.fn(() => ({ messages: mockRecoveryMessages }));
-  return {
-    mockGeneratePost: vi.fn(),
-    mockUploadPost: vi.fn(),
-    mockRecoveryChats,
-    mockRecoveryMessages,
-    mockRecoveryCancelPost,
-    mockRecoveryDismissPost,
-  };
-});
+// Eden Treaty's generic types are too strict for jest.fn() mocks, so the factory is cast via unknown.
+// `vi.hoisted` existed because `vi.mock` is hoisted above the file's own
+// statements. `mock.module` is not hoisted, so plain consts are enough.
+const mockGeneratePost = jest.fn();
+const mockUploadPost = jest.fn();
+const mockRecoveryCancelPost = jest.fn();
+const mockRecoveryDismissPost = jest.fn();
+const mockRecoveryMessages = jest.fn(() => ({
+  recovery: {
+    cancel: { post: mockRecoveryCancelPost },
+    dismiss: { post: mockRecoveryDismissPost },
+  },
+}));
+const mockRecoveryChats = jest.fn(() => ({ messages: mockRecoveryMessages }));
 
-vi.mock('../../../src/lib/api-client', () => ({
+mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       generate: { post: mockGeneratePost },
@@ -50,15 +38,16 @@ vi.mock('../../../src/lib/api-client', () => ({
   } as unknown as typeof ApiClient,
 }));
 
-import {
+// Below the mock, never as a static import: those are evaluated first and the
+// service would bind the real API client.
+const {
   cancelInterruptedTurn,
   dismissInterruptedTurn,
-  type GenerateImageRequest,
   generateImage,
   respondTextStream,
   startExternalReviewStream,
   uploadReferenceImage,
-} from '../../../src/services/generation-service';
+} = await import('../../../src/services/generation-service');
 
 const STREAM_PATH = '/api/respond/stream';
 
@@ -94,7 +83,7 @@ function collectChunks() {
 
 describe('turn recovery actions', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('calls the message-scoped cancel and dismiss endpoints', async () => {
@@ -106,8 +95,8 @@ describe('turn recovery actions', () => {
 
     expect(mockRecoveryChats).toHaveBeenCalledWith({ id: 'chat-1' });
     expect(mockRecoveryMessages).toHaveBeenCalledWith({ messageId: 'message-1' });
-    expect(mockRecoveryCancelPost).toHaveBeenCalledOnce();
-    expect(mockRecoveryDismissPost).toHaveBeenCalledOnce();
+    expect(mockRecoveryCancelPost).toHaveBeenCalledTimes(1);
+    expect(mockRecoveryDismissPost).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces a recovery action error from the API', async () => {
@@ -123,15 +112,20 @@ describe('turn recovery actions', () => {
 });
 
 describe('respondTextStream', () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof jest.fn>;
+  let originalFetch: typeof fetch;
 
   beforeEach(() => {
-    fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    fetchMock = jest.fn();
+    // `vi.stubGlobal` / `vi.unstubAllGlobals` do not exist on Bun; the original
+    // is captured and put back by hand. `bun.setup.ts` also reinstates its
+    // unreachable `fetch` after every test, so a missed restore cannot leak.
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
   it('sends a POST to the stream endpoint with the serialized request and signal', async () => {
@@ -192,7 +186,9 @@ describe('respondTextStream', () => {
     const { chunks, onChunk } = collectChunks();
 
     await expect(respondTextStream(makeRequest(), onChunk)).resolves.toBeUndefined();
-    expect(chunks).toEqual([{ type: 'error', error: 'boom', done: false }]);
+    // `expect<unknown>` because bun-types types `toEqual` against the received
+    // type, and the server is free to send an error chunk with `done: false`.
+    expect<unknown>(chunks).toEqual([{ type: 'error', error: 'boom', done: false }]);
   });
 
   it('ignores malformed JSON and non-data lines without throwing', async () => {
@@ -236,15 +232,20 @@ describe('respondTextStream', () => {
 });
 
 describe('startExternalReviewStream', () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
+  let fetchMock: ReturnType<typeof jest.fn>;
+  let originalFetch: typeof fetch;
 
   beforeEach(() => {
-    fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+    fetchMock = jest.fn();
+    // `vi.stubGlobal` / `vi.unstubAllGlobals` do not exist on Bun; the original
+    // is captured and put back by hand. `bun.setup.ts` also reinstates its
+    // unreachable `fetch` after every test, so a missed restore cannot leak.
+    originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    globalThis.fetch = originalFetch;
   });
 
   it('rejects after a terminal setup-error chunk so the review action can toast', async () => {
@@ -270,7 +271,7 @@ describe('startExternalReviewStream', () => {
 
 describe('generateImage', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('returns the generated image payload on success', async () => {
@@ -303,11 +304,11 @@ describe('generateImage', () => {
 describe('uploadReferenceImage', () => {
   // The error and reject paths log via console.error; silence it so the
   // expected-failure tests don't pollute the test output.
-  let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrorSpy: ReturnType<typeof jest.spyOn>;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {
+    jest.clearAllMocks();
+    consoleErrorSpy = spyOn(console, 'error').mockImplementation(() => {
       /* swallow expected error logs in test */
     });
   });

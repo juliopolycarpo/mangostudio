@@ -6,8 +6,8 @@
  * to is disabled with its reason, and an overwrite shows what it replaces.
  */
 
+import { describe, expect, it, jest } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
-import { describe, expect, it, vi } from 'vitest';
 import { ConflictStep } from '../../../../src/features/library/components/ConflictStep';
 import { DestinationStep } from '../../../../src/features/library/components/DestinationStep';
 import { ReviewStep } from '../../../../src/features/library/components/ReviewStep';
@@ -16,7 +16,7 @@ import {
   initialDraft,
   unresolvedEntries,
 } from '../../../../src/features/library/propagation';
-import { screen, within } from '../../../support/harness/render';
+import { flushAsyncRender, screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { destination, location, preview, previewEntry, sourceGroup } from './fixtures';
 
@@ -78,7 +78,7 @@ describe('ConflictStep', () => {
   });
 
   it('presents keeping the copies different as a real answer', async () => {
-    const onResolve = vi.fn();
+    const onResolve = jest.fn();
     const draft = initialDraft(divergentPreview);
 
     await renderWithRouter(
@@ -219,12 +219,12 @@ describe('DestinationStep', () => {
 });
 
 describe('ReviewStep', () => {
-  function renderReview(previewValue: ReturnType<typeof preview>, ...checked: string[]) {
+  async function renderReview(previewValue: ReturnType<typeof preview>, ...checked: string[]) {
     const draft = {
       ...initialDraft(previewValue),
       destinations: new Set(checked.map((locationId) => destinationKey('local', locationId))),
     };
-    return renderWithRouter(
+    const view = await renderWithRouter(
       <ReviewStep
         preview={previewValue}
         draft={draft}
@@ -232,6 +232,11 @@ describe('ReviewStep', () => {
         onToggleAcknowledged={() => undefined}
       />
     );
+    // `InstanceDiff` fetches its diff on mount and renders it after the router
+    // load has already settled, so without this the update lands outside `act`
+    // — a warning that only appears in a loaded full-lane run.
+    await flushAsyncRender();
+    return view;
   }
 
   it('shows a diff for an overwrite', async () => {

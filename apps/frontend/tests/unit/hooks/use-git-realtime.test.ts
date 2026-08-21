@@ -1,25 +1,25 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { GitRepoState } from '@mangostudio/shared/git';
 import { useQuery } from '@tanstack/react-query';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useGitRealtimeInvalidation } from '@/features/workspace/hooks/use-git-state';
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
 import { act, renderHook, waitFor } from '../../support/harness/render';
+import { setTestSession } from '../../support/setup/auth-client-stub';
 
-const mocks = vi.hoisted(() => ({
-  bindRealtimeClientToUser: vi.fn(),
-  subscribe: vi.fn(),
-}));
+const mocks = {
+  bindRealtimeClientToUser: jest.fn(),
+  subscribe: jest.fn(),
+};
 
-vi.mock('@/lib/auth-client', () => ({
-  authClient: {
-    useSession: () => ({ data: { user: { id: 'user-test' } } }),
-  },
-}));
-
-vi.mock('@/lib/realtime/realtime-client', () => ({
+mock.module('@/lib/realtime/realtime-client', () => ({
   bindRealtimeClientToUser: mocks.bindRealtimeClientToUser,
   getRealtimeClient: () => ({ subscribe: mocks.subscribe }),
 }));
+
+// Static imports are evaluated before any statement above runs, so the hook
+// has to come in afterwards or it binds the real realtime client. The
+// signed-in session it reads comes from the aliased auth-client stub, set in
+// `beforeEach`.
+const { useGitRealtimeInvalidation } = await import('@/features/workspace/hooks/use-git-state');
 
 const repoState: GitRepoState = {
   state: 'repo',
@@ -37,10 +37,13 @@ const repoState: GitRepoState = {
 
 describe('useGitRealtimeInvalidation', () => {
   let listener: RealtimeTopicListener;
-  let release: ReturnType<typeof vi.fn>;
+  let release: ReturnType<typeof jest.fn>;
 
   beforeEach(() => {
-    release = vi.fn();
+    // The hook reads the session; the aliased stub reports signed out unless
+    // a test says otherwise, and `bun.setup.ts` resets it after each one.
+    setTestSession({ user: { id: 'user-test' } });
+    release = jest.fn();
     mocks.subscribe.mockImplementation((_: string, nextListener: RealtimeTopicListener) => {
       listener = nextListener;
       return release;
@@ -50,8 +53,8 @@ describe('useGitRealtimeInvalidation', () => {
   });
 
   it('invalidates only signaled Git scopes and unsubscribes on unmount', async () => {
-    const refetchState = vi.fn().mockResolvedValue(repoState);
-    const refetchHistory = vi.fn().mockResolvedValue({ commits: [], nextCursor: null });
+    const refetchState = jest.fn().mockResolvedValue(repoState);
+    const refetchHistory = jest.fn().mockResolvedValue({ commits: [], nextCursor: null });
 
     const { unmount } = renderHook(() => {
       useQuery({
@@ -69,7 +72,7 @@ describe('useGitRealtimeInvalidation', () => {
       useGitRealtimeInvalidation('chat-1');
     });
 
-    expect(mocks.subscribe).toHaveBeenCalledOnce();
+    expect(mocks.subscribe).toHaveBeenCalledTimes(1);
     expect(mocks.subscribe).toHaveBeenCalledWith('git:chat-1', expect.any(Function));
 
     await act(async () => {
@@ -83,10 +86,10 @@ describe('useGitRealtimeInvalidation', () => {
       });
     });
 
-    await waitFor(() => expect(refetchState).toHaveBeenCalledOnce());
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
     expect(refetchHistory).not.toHaveBeenCalled();
 
     unmount();
-    expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 });

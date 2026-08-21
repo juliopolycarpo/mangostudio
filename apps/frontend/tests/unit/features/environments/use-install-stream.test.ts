@@ -6,9 +6,9 @@
  * the outcome.
  */
 
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { InstallStreamEvent } from '@mangostudio/shared/environments';
 import { act } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   INSTALL_CONSOLE_MAX_LINES,
   useInstallStream,
@@ -64,15 +64,16 @@ const EXIT_EVENT: InstallStreamEvent = {
 };
 
 describe('useInstallStream', () => {
-  const fetchMock = vi.fn();
+  const fetchMock = jest.fn();
 
   beforeEach(() => {
-    vi.stubGlobal('fetch', fetchMock);
+    // `vi.stubGlobal` has no Bun equivalent. `bun.setup.ts` reinstates its
+    // unreachable `fetch` after every test, so a plain assignment cannot leak.
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
   });
 
   afterEach(() => {
     fetchMock.mockReset();
-    vi.unstubAllGlobals();
   });
 
   it('appends log events in order and stops on exit', async () => {
@@ -125,7 +126,7 @@ describe('useInstallStream', () => {
   });
 
   it('forwards probe events without adding them to the log', async () => {
-    const onProbe = vi.fn();
+    const onProbe = jest.fn();
     fetchMock.mockResolvedValue(
       streamingResponse([
         sse([
@@ -155,7 +156,7 @@ describe('useInstallStream', () => {
   });
 
   it('tears the response body down on unmount', async () => {
-    const onCancel = vi.fn();
+    const onCancel = jest.fn();
     let signal: AbortSignal | undefined;
     fetchMock.mockImplementation((_url: string, init: RequestInit) => {
       signal = init.signal ?? undefined;

@@ -2,9 +2,9 @@
  * Presentation rules that hold regardless of what the API returns first.
  */
 
+import { describe, expect, it } from 'bun:test';
 import type { RuntimeFinding } from '@mangostudio/shared/environments';
 import { en, ptBR } from '@mangostudio/shared/i18n';
-import { describe, expect, it } from 'vitest';
 import {
   describeFinding,
   findingSeverity,

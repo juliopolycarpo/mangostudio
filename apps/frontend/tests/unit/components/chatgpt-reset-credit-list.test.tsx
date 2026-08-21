@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import type { ChatGptResetCredit } from '@mangostudio/shared/connectors';
-import { describe, expect, it } from 'vitest';
 import { ChatGptResetCreditList } from '@/features/settings/connectors/components/ChatGptResetCreditList';
 import { render, screen } from '../../support/harness/render';
 

@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import type { MessagePart } from '@mangostudio/shared';
-import { describe, expect, it } from 'vitest';
 import { planToolGroups } from '@/features/chat/components/tool-call-grouping';
 
 function call(id: string, name: string, args: Record<string, unknown> = {}): MessagePart {

@@ -6,9 +6,9 @@
  * the picker and the turn can disagree about what is running.
  */
 
+import { describe, expect, it, jest } from 'bun:test';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
-import { describe, expect, it, vi } from 'vitest';
 import { ExternalComposerControls } from '../../../src/features/external-agents/ExternalComposerControls';
 import { render } from '../../support/harness/render';
 
@@ -40,9 +40,9 @@ function renderControls(
     effort: null,
     level: 'default' as const,
     routing: 'user' as const,
-    onModelChange: vi.fn(),
-    onEffortChange: vi.fn(),
-    onPermissionsChange: vi.fn(),
+    onModelChange: jest.fn(),
+    onEffortChange: jest.fn(),
+    onPermissionsChange: jest.fn(),
     ...overrides,
   };
   return { ...render(<ExternalComposerControls {...props} />), props };

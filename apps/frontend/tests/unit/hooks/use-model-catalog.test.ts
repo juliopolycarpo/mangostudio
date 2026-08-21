@@ -1,24 +1,29 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { useQueryClient } from '@tanstack/react-query';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { chatCapabilitiesQueryOptions } from '../../../src/features/chat/hooks/use-chat-capabilities';
-import { useModelCatalog } from '../../../src/hooks/use-model-catalog';
-import { client } from '../../../src/lib/api-client';
 import { EMPTY_MODEL_CATALOG } from '../../../src/utils/model-utils';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
-vi.mock('../../../src/lib/api-client', () => ({
+// No Bun equivalent for `vi.mocked` — the `jest.fn()` handle created here is
+// what the factory below hands back, so keep it instead.
+const mockGet = jest.fn();
+
+mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       settings: {
         models: {
-          get: vi.fn(),
+          get: mockGet,
         },
       },
     },
   },
 }));
 
-const mockGet = vi.mocked(client.api.settings.models.get);
+// Static imports are evaluated before any statement above runs, so the hook
+// has to come in afterwards or it binds the real api-client.
+const { useModelCatalog } = await import('../../../src/hooks/use-model-catalog');
+
 const CAPABILITIES_KEY: readonly unknown[] = chatCapabilitiesQueryOptions({
   chatId: 'chat-1',
 }).queryKey;
@@ -90,7 +95,10 @@ describe('useModelCatalog', () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.catalog).toEqual(mockCatalog);
+    // `expect<unknown>` because bun-types types `toEqual` against the
+    // received type, and the two `it.each` rows above answer with
+    // provider-shaped catalogs the full `ModelCatalog` type does not list.
+    expect<unknown>(result.current.catalog).toEqual(mockCatalog);
   });
 
   it('keeps the empty catalog when the initial fetch fails', async () => {

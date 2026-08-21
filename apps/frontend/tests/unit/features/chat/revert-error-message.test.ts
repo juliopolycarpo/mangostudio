@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import { describe, expect, it } from 'vitest';
 import { revertErrorMessage } from '@/features/chat/components/RevertFileChangesButton';
 import { ApiError } from '@/lib/utils';
 

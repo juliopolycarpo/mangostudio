@@ -3,12 +3,12 @@
  * transport switching, test-connection results, and delete confirmation.
  */
 
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { McpServer } from '@mangostudio/shared/mcp';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { McpSettingsPage } from '../../../src/features/settings/mcp/components/McpSettingsPage';
-import { render, screen } from '../../support/harness/render';
+import { render, screen, waitFor } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const STDIO_SERVER: McpServer = {
@@ -142,7 +142,7 @@ describe('McpSettingsPage', () => {
     await user.type(screen.getByLabelText('Command'), 'bunx server');
     await user.click(screen.getByRole('button', { name: /^save$/i }));
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const postCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
         const input = call[0];
         const init = call[1] as RequestInit | undefined;
@@ -215,7 +215,7 @@ describe('McpSettingsPage', () => {
     const dialogButtons = screen.getAllByRole('button', { name: /delete server/i });
     await user.click(dialogButtons[dialogButtons.length - 1]);
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const deleteCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
         const input = call[0];
         const init = call[1] as RequestInit | undefined;
@@ -444,7 +444,7 @@ describe('McpSettingsPage', () => {
     expect(toggle).not.toBeChecked();
     await user.click(toggle);
 
-    await vi.waitFor(() => {
+    await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
         const input = call[0];
         const init = call[1] as RequestInit | undefined;

@@ -1,13 +1,12 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { useChatGptOAuth } from '../../../src/features/settings/connectors/hooks/use-chatgpt-oauth';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
-const mockStartChatGptOAuth = vi.fn();
-const mockGetChatGptOAuthStatus = vi.fn();
-const mockCancelChatGptOAuth = vi.fn();
+const mockStartChatGptOAuth = jest.fn();
+const mockGetChatGptOAuthStatus = jest.fn();
+const mockCancelChatGptOAuth = jest.fn();
 
-vi.mock('../../../src/features/settings/connectors/api', () => {
+mock.module('../../../src/features/settings/connectors/api', () => {
   class ConnectorApiError extends Error {
     readonly code?: string;
 
@@ -26,10 +25,14 @@ vi.mock('../../../src/features/settings/connectors/api', () => {
   };
 });
 
+const { useChatGptOAuth } = await import(
+  '../../../src/features/settings/connectors/hooks/use-chatgpt-oauth'
+);
+
 function makePopup() {
   return {
     location: { href: '' },
-    close: vi.fn(),
+    close: jest.fn(),
   } as unknown as Window;
 }
 
@@ -43,7 +46,7 @@ describe('useChatGptOAuth', () => {
 
   it('polls until completion and calls onSuccess', async () => {
     const popup = makePopup();
-    const onSuccess = vi.fn().mockResolvedValue(undefined);
+    const onSuccess = jest.fn().mockResolvedValue(undefined);
     mockStartChatGptOAuth.mockResolvedValue({
       sessionId: 'session-1',
       authorizeUrl: 'https://chatgpt.example/authorize',
@@ -78,7 +81,7 @@ describe('useChatGptOAuth', () => {
     mockGetChatGptOAuthStatus.mockResolvedValue({ status: 'pending' });
 
     const { result, unmount } = renderHook(() =>
-      useChatGptOAuth({ messages: en.settings.connectors, onSuccess: vi.fn() })
+      useChatGptOAuth({ messages: en.settings.connectors, onSuccess: jest.fn() })
     );
 
     await act(async () => {

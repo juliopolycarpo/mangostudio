@@ -21,9 +21,9 @@ apps/
       unit/
       integration/
       support/
-        setup/     # vitest.setup.ts
-        harness/   # render.tsx
-        mocks/     # create-fetch-scenario.ts (jsdom hooks only)
+        setup/     # dom-setup.ts + bun.setup.ts (bunfig preloads)
+        harness/   # render.tsx, render-with-router.tsx, timers.ts
+        mocks/     # create-fetch-scenario.ts (happy-dom hook tests only)
 
   shared/
     tests/
@@ -52,17 +52,17 @@ Keep the combinatorial protocol matrix below the browser layer. The API suites u
 | SDK wrapper, HTTP transport, stdio spawn/exit, session reconnect (through the Local runtime)          | API transport integration | `services/mcp/*-transport.integration.test.ts`, `services/mcp/wrapper-contract.integration.test.ts` |
 | Mounted terminal elicitation, persisted MCP media, question resume                                    | Frontend integration      | `components/interactive-chat-flows.integration.test.tsx`                                            |
 | Streamed todo cache update and persisted reload on chat switch                                        | Frontend integration      | `components/interactive-chat-flows.integration.test.tsx`                                            |
-| Browser-only navigation, focus, download, or native rendering behavior                                | Browser smoke             | Add a focused Playwright case only when jsdom and API E2E cannot prove the behavior                 |
+| Browser-only navigation, focus, download, or native rendering behavior                                | Browser smoke             | Add a focused Playwright case only when happy-dom and API E2E cannot prove the behavior             |
 
 Interactive fixtures must use local SDK servers, explicit synchronization barriers, ephemeral ports, bounded diagnostics, and teardown assertions. They must not contact public MCP services, use production credentials, or depend on arbitrary sleeps for tool ordering.
 
 ## Workspace Runners
 
-| Workspace       | Runner                | Environment                                     |
-| --------------- | --------------------- | ----------------------------------------------- |
-| `apps/api`      | `bun test`            | Bun native                                      |
-| `apps/frontend` | `bun:test` + `vitest` | Bun native for pure logic, jsdom for React/Vite |
-| `apps/shared`   | `bun:test`            | Bun native                                      |
+| Workspace       | Runner     | Environment                                    |
+| --------------- | ---------- | ---------------------------------------------- |
+| `apps/api`      | `bun test` | Bun native                                     |
+| `apps/frontend` | `bun test` | Bun native for pure logic, happy-dom for React |
+| `apps/shared`   | `bun:test` | Bun native                                     |
 
 ## Root Scripts
 
@@ -83,9 +83,9 @@ bun run verify              # full local CI gate: check → test --coverage → 
 
 | Lane        | Task name          | Workspaces            | Runner              | Turbo cached |
 | ----------- | ------------------ | --------------------- | ------------------- | ------------ |
-| unit        | `test:unit`        | api, frontend, shared | bun test / vitest   | yes          |
-| integration | `test:integration` | api, frontend         | bun test / vitest   | no           |
-| coverage    | `test:coverage`    | api, frontend, shared | bun test / vitest   | no           |
+| unit        | `test:unit`        | api, frontend, shared | bun test            | yes          |
+| integration | `test:integration` | api, frontend         | bun test            | no           |
+| coverage    | `test:coverage`    | api, frontend, shared | bun test            | no           |
 | e2e         | —                  | root (browser-smoke)  | Playwright Chromium | —            |
 | scripts     | `//#test:scripts`  | root                  | bun test            | yes          |
 
@@ -94,9 +94,9 @@ filters is safe — no per-workspace metadata is needed to gate lane participati
 
 ### Timeouts
 
-Every lane sets a **15s floor** — `--timeout 15000` on the `bun test` lanes,
-`testTimeout` / `hookTimeout` in `apps/frontend/vitest.config.ts`. Both runners
-otherwise default to 5s, and a loaded CI runner is 4–14x slower than a dev
+Every lane sets a **15s floor** — `--timeout 15000`, passed on the command line
+because `bunfig.toml`'s `timeout` key is ignored in this workspace. `bun test`
+otherwise defaults to 5s, and a loaded CI runner is 4–14x slower than a dev
 machine on subprocess-heavy tests, so the default leaves tests that pass in
 milliseconds locally one bad runner away from failing on wall clock alone.
 
@@ -612,7 +612,8 @@ bun run --filter @mangostudio/frontend test:coverage
 
 Frontend support lives in `apps/frontend/tests/support/`:
 
-- `setup/vitest.setup.ts` — runtime bootstrap only
+- `setup/dom-setup.ts` and `setup/bun.setup.ts` — runtime bootstrap only, loaded
+  as `bunfig.toml` `[test] preload` entries in that order
 - `harness/render.tsx` — minimal render surface with providers
 - `mocks/create-fetch-scenario.ts` — method-and-path fetch registry **for React hook tests only** (see scope below)
 
@@ -679,7 +680,7 @@ describe('createGeminiSecretService', () => {
 
 ### Frontend Integration — React hook tests (use fetch mock)
 
-`create-fetch-scenario.ts` is scoped to **React hook tests** in jsdom — hooks that call `fetch` via Eden Treaty and cannot access the Elysia app directly. Do not use it for API contract tests.
+`create-fetch-scenario.ts` is scoped to **React hook tests** in happy-dom — hooks that call `fetch` via Eden Treaty and cannot access the Elysia app directly. Do not use it for API contract tests.
 
 ```tsx
 import { render, screen } from '../../support/harness/render';
@@ -757,27 +758,19 @@ Each provider stream test must cover:
 
 ## Coverage
 
-Coverage reports are written under `.mango/artifacts/coverage/`. Frontend Vitest writes the
-React/Vite report to `.mango/artifacts/coverage/frontend/vitest/`, and frontend `bun:test`
-writes pure-logic LCOV under `.mango/artifacts/coverage/frontend/bun/`:
+Coverage reports are written under `.mango/artifacts/coverage/`. The whole frontend suite
+now runs on `bun test`, which writes LCOV under `.mango/artifacts/coverage/frontend/bun/`;
+`.mango/artifacts/coverage/frontend/vitest/` is produced by a lane that matches no files:
 
 ```bash
 bun run --filter @mangostudio/frontend test:coverage
 ```
 
-Current frontend coverage thresholds:
-
-- Statements: `70`
-- Branches: `60`
-- Functions: `64`
-- Lines: `72`
-
-Last verified with `bun run test --coverage` on this baseline:
-
-- Statements: `71.74%`
-- Branches: `62.92%`
-- Functions: `65.30%`
-- Lines: `73.81%`
+**The frontend declares no coverage thresholds right now.** The previous
+70/60/64/72 were istanbul figures measured over the Vitest suite, and that suite
+has moved runners — the numbers describe a file set that no longer exists, and
+`bun test`'s own LCOV is not comparable to istanbul's. They are re-derived
+against the Bun lane rather than carried over.
 
 When raising or repairing coverage, prioritize release-critical surfaces first:
 
@@ -788,9 +781,10 @@ When raising or repairing coverage, prioritize release-critical surfaces first:
 
 ## Unhandled Errors With Green Test Counts
 
-A frontend Vitest run can print every file and every test as passed, then an
-`Errors N errors` line, and still exit 1. That is not a flake. Do not re-run it.
-CI already failed correctly. The green counts are why it looks like noise.
+A frontend run can report every file and every test as passed and still print an
+error block — `Errors N errors` under Vitest, `# Unhandled error between tests`
+under `bun test` — and exit 1. That is not a flake. Do not re-run it. CI already
+failed correctly. The green counts are why it looks like noise.
 
 ```
 Test Files  144 passed (144)
@@ -798,13 +792,26 @@ Test Files  144 passed (144)
     Errors  2 errors
 ```
 
-The mechanism is always the same. Something schedules a timer that outlives the
-component that scheduled it. Vitest disposes that file's jsdom environment first.
-The callback then runs against a global that is gone: `ReferenceError: window is
-not defined`, attributed to whichever file happened to be running. It only
-reproduces when the suite is loaded enough for the timer to land in that gap, so
-it does not show up in a local single-file run, and re-running the job in CI is
-a coin flip.
+The mechanism is always the same. Something outlives the test that started it —
+a timer, a `lazy()` chunk behind a Suspense boundary, an unanswered `fetch` — and
+lands after the environment it belonged to is gone or after React stopped
+watching. The result is attributed to whichever file happened to be running.
+It only reproduces when the suite is loaded enough for the callback to land in
+that gap, so it does not show up in a local single-file run, and re-running the
+job in CI is a coin flip.
+
+Three guards exist for the three shapes this takes under `bun test` + happy-dom,
+and a change that removes one will not fail any test:
+
+- `bun.setup.ts` installs a `fetch` that rejects immediately, so an unanswered
+  request cannot open a socket to `localhost:3001` and strand an
+  `ECONNREFUSED` under an unrelated file.
+- `support/harness/timers.ts` drains the fake-timer queue before restoring real
+  ones, because React Query announces through a live `setTimeout(callback, 0)`
+  and dropping one leaves its notify manager unable to deliver again.
+- `support/harness/render.tsx` exports `flushAsyncRender()` for a render whose
+  content arrives asynchronously; without it the Suspense resolution lands
+  outside `act` and prints a warning on a passing test.
 
 ### Where to look
 

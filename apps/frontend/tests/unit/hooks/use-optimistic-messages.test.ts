@@ -2,10 +2,10 @@
  * Unit tests for useOptimisticMessages — optimistic cache mutation helpers.
  */
 
+import { describe, expect, it } from 'bun:test';
 import type { Message } from '@mangostudio/shared';
 import type { InfiniteData } from '@tanstack/react-query';
 import { useQueryClient } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
 import type { MessagesPage } from '../../../src/features/chat/queries';
 import { messageKeys } from '../../../src/features/chat/queries';
 import { useOptimisticMessages } from '../../../src/features/generation/hooks/use-optimistic-messages';

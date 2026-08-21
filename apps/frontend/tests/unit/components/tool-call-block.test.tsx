@@ -1,6 +1,6 @@
+import { beforeEach, describe, expect, it, jest } from 'bun:test';
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToolCallBlock } from '@/features/chat/components/ToolCallBlock';
 import { render } from '../../support/harness/render';
 
@@ -18,7 +18,7 @@ function snapshot(overrides: Partial<ToolExecutionSnapshot> = {}): ToolExecution
 
 describe('ToolCallBlock', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('renders a pending state', () => {
@@ -127,17 +127,32 @@ describe('ToolCallBlock', () => {
   });
 
   it('copies the result from the expanded body', async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.assign(navigator, { clipboard: { writeText } });
+    const writeText = jest.fn().mockResolvedValue(undefined);
+    // jsdom left `navigator.clipboard` writable; happy-dom defines it as a
+    // readonly getter, so `Object.assign` throws outright. Defined and restored
+    // instead, so the substitution stays inside this test.
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
     render(
       <ToolCallBlock name="read_file" args={{ path: '/a' }} status="succeeded" result='"logs"' />
     );
 
-    fireEvent.click(screen.getByRole('button'));
-    fireEvent.click(screen.getByTitle('Copy result'));
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith('logs');
-    });
+    try {
+      fireEvent.click(screen.getByRole('button'));
+      fireEvent.click(screen.getByTitle('Copy result'));
+      await waitFor(() => {
+        expect(writeText).toHaveBeenCalledWith('logs');
+      });
+    } finally {
+      if (originalClipboard) {
+        Object.defineProperty(navigator, 'clipboard', originalClipboard);
+      } else {
+        Reflect.deleteProperty(navigator, 'clipboard');
+      }
+    }
   });
 
   it('renders get_current_datetime without hint', () => {

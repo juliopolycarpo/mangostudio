@@ -6,9 +6,9 @@
  * to read the state.
  */
 
+import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { en } from '@mangostudio/shared/i18n';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CoverageMatrix } from '../../../../src/features/library/components/CoverageMatrix';
 import { render, screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';

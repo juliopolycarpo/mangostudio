@@ -1,29 +1,32 @@
+import { beforeEach, describe, expect, it, jest } from 'bun:test';
 import { fireEvent, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ThinkingBlock } from '@/features/chat/components/ThinkingBlock';
-import { render } from '../../support/harness/render';
+import { flushAsyncRender, render } from '../../support/harness/render';
 
 describe('ThinkingBlock', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
-  it('renders closed when not streaming', () => {
+  it('renders closed when not streaming', async () => {
     render(<ThinkingBlock messageId="msg-1" text="Test thought" isStreaming={false} />);
+    await flushAsyncRender();
     const button = screen.getByRole('button', { name: /Thought process/i });
     expect(button).toBeInTheDocument();
     expect(screen.queryByText('Test thought')).not.toBeInTheDocument();
   });
 
-  it('renders open when streaming', () => {
+  it('renders open when streaming', async () => {
     render(<ThinkingBlock messageId="msg-2" text="Streaming thought" isStreaming={true} />);
+    await flushAsyncRender();
     const button = screen.getByRole('button', { name: /Thinking.../i });
     expect(button).toBeInTheDocument();
     expect(screen.getByText('Streaming thought')).toBeInTheDocument();
   });
 
-  it('toggles expansion on click', () => {
+  it('toggles expansion on click', async () => {
     render(<ThinkingBlock messageId="msg-3" text="Toggle thought" isStreaming={false} />);
+    await flushAsyncRender();
     const button = screen.getByRole('button', { name: /Thought process/i });
 
     // Initially closed
@@ -43,8 +46,9 @@ describe('ThinkingBlock', () => {
   // stayed mounted mid-animation, so it only failed under CI load (green on the
   // PR branch, red after merge into main). The synchronous assertion fails fast
   // wherever the deterministic-unmount contract is broken — no waitFor timeout.
-  it('removes the thought body synchronously on collapse', () => {
+  it('removes the thought body synchronously on collapse', async () => {
     render(<ThinkingBlock messageId="msg-collapse" text="Race thought" isStreaming={false} />);
+    await flushAsyncRender();
     const button = screen.getByRole('button', { name: /Thought process/i });
 
     fireEvent.click(button);
@@ -54,8 +58,9 @@ describe('ThinkingBlock', () => {
     expect(screen.queryByText('Race thought')).not.toBeInTheDocument();
   });
 
-  it('handles scroll events', () => {
+  it('handles scroll events', async () => {
     render(<ThinkingBlock messageId="msg-4" text="Scroll thought" isStreaming={true} />);
+    await flushAsyncRender();
 
     // Wait for it to open and find the scrollable container
     const scrollContainer = screen.getByText('Scroll thought').closest('.overflow-y-auto');

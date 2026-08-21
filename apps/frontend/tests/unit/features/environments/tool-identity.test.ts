@@ -6,8 +6,8 @@
  * themes, and only real values can be measured.
  */
 
+import { describe, expect, it } from 'bun:test';
 import type { ToolIdentityMap } from '@mangostudio/shared/tool-identity';
-import { describe, expect, it } from 'vitest';
 import {
   TOOL_AVATAR_PALETTE,
   type ToolAvatarColors,

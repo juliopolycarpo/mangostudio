@@ -3,8 +3,8 @@
  * Naming a disabled location produces the 422 the wizard used to walk into.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { enabledLibraryLocations } from '@mangostudio/shared/library';
-import { describe, expect, it } from 'vitest';
 import { propagationCandidateLocationIds } from '../../../../src/features/library/format';
 import { location } from './fixtures';
 

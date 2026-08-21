@@ -5,31 +5,36 @@
  * derives eligibility on its own.
  */
 
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { useQueryClient } from '@tanstack/react-query';
-import type * as TanstackRouter from '@tanstack/react-router';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CapabilityInspector } from '../../../../src/features/chat/components/CapabilityInspector';
 import { useUpdateToolSetting } from '../../../../src/features/settings/tools/hooks/use-tool-settings';
 import { toolSettingsKeys } from '../../../../src/features/settings/tools/queries';
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof TanstackRouter>();
-  return {
-    ...actual,
-    Link: ({ to, children, ...props }: { to: string; children: React.ReactNode }) => (
-      <a href={to} {...props}>
-        {children}
-      </a>
-    ),
-  };
-});
+// `vi.mock(m, async (importOriginal) => ({ ...await importOriginal(), … }))`
+// ports as three statements: import the real namespace, register the mock, then
+// import the subject. `mock.module` is not hoisted and static imports are.
+const actualRouter = await import('@tanstack/react-router');
+
+function LinkStub({ to, children, ...props }: { to: string; children: React.ReactNode }) {
+  return (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  );
+}
+
+mock.module('@tanstack/react-router', () => ({ ...actualRouter, Link: LinkStub }));
+
+const { CapabilityInspector } = await import(
+  '../../../../src/features/chat/components/CapabilityInspector'
+);
 
 const RESPONSE: ChatCapabilitiesResponse = {
   chatId: 'chat-1',

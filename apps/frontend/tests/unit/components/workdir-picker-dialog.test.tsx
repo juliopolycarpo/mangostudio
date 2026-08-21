@@ -1,7 +1,21 @@
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkdirPickerDialog } from '../../../src/features/workspace/WorkdirPickerDialog';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { act, fireEvent, render, screen, waitFor } from '../../support/harness/render';
+
+/**
+ * Lets the last browse request the dialog fired finish inside `act`.
+ *
+ * Every interaction below starts a query, and the final one resolves after the
+ * test body ends — which leaves its state update outside `act` and prints an
+ * "update was not wrapped in act(...)" block on a green test.
+ */
+async function settlePendingBrowse() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 describe('WorkdirPickerDialog', () => {
@@ -19,7 +33,7 @@ describe('WorkdirPickerDialog', () => {
 
   it('navigates server folders, reveals hidden entries, and selects the current path', async () => {
     const user = userEvent.setup();
-    const onSelect = vi.fn();
+    const onSelect = jest.fn();
     fetchScenario.respondWithJson(
       'GET',
       '/api/workspace/fs?path=%2Fsrv%2Fprojects&chatId=chat-remote',
@@ -59,9 +73,10 @@ describe('WorkdirPickerDialog', () => {
         initialPath="/srv/projects"
         recentWorkdirs={['/srv/other']}
         onSelect={onSelect}
-        onClose={vi.fn()}
+        onClose={jest.fn()}
       />
     );
+    await settlePendingBrowse();
 
     expect(
       screen.getByText(/Agent file tools resolve relative paths from this folder/)
@@ -77,6 +92,8 @@ describe('WorkdirPickerDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Select this folder' }));
 
     expect(onSelect).toHaveBeenCalledWith('/srv/projects/mangostudio');
+
+    await settlePendingBrowse();
   });
 
   it('validates a manually entered server path before browsing it', async () => {
@@ -106,13 +123,27 @@ describe('WorkdirPickerDialog', () => {
         },
       });
 
-    render(<WorkdirPickerDialog open chatId="chat-remote" onSelect={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <WorkdirPickerDialog open chatId="chat-remote" onSelect={jest.fn()} onClose={jest.fn()} />
+    );
+    await settlePendingBrowse();
 
     const pathInput = await screen.findByLabelText('Server path');
     await waitFor(() => expect(pathInput).toHaveValue('/home/mango'));
+    await settlePendingBrowse();
     await user.clear(pathInput);
     await user.type(pathInput, '/srv/manual');
-    await user.click(screen.getByRole('button', { name: 'Open' }));
+    // `handleManualBrowse` is async, so its `setIsValidating(false)` and the
+    // browse it starts land after `user.click` has already resolved — outside
+    // the `act` userEvent puts around the click itself. `fireEvent.submit`
+    // drives the same handler without userEvent's own act bracket, so the one
+    // below covers the whole continuation.
+    await act(async () => {
+      fireEvent.submit(
+        screen.getByRole('button', { name: 'Open' }).closest('form') as HTMLFormElement
+      );
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
 
     await waitFor(() => expect(screen.getByTitle('/srv/manual')).toBeInTheDocument());
     expect(fetchScenario.fetchMock).toHaveBeenCalledWith(
@@ -122,5 +153,7 @@ describe('WorkdirPickerDialog', () => {
         method: 'POST',
       })
     );
+
+    await settlePendingBrowse();
   });
 });

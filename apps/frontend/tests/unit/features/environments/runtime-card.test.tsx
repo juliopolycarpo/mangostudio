@@ -3,18 +3,14 @@
  * finding names both paths and both PATH positions.
  */
 
+import { describe, expect, it } from 'bun:test';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RuntimeCard } from '../../../../src/features/environments/components/RuntimeCard';
 import { render, screen, within } from '../../../support/harness/render';
 import { installation, installRecipe, runtimeStatus } from './fixtures';
 
 describe('RuntimeCard', () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
   it('renders the effective installation first regardless of array order', () => {
     const status = runtimeStatus({
       id: 'node',
@@ -148,14 +144,15 @@ describe('RuntimeCard', () => {
   });
 
   it('says a failed re-check failed instead of leaving the card silently stale', async () => {
-    vi.stubGlobal('fetch', () =>
+    // `vi.stubGlobal` has no Bun equivalent. `bun.setup.ts` reinstates its
+    // unreachable `fetch` after every test, so a plain assignment cannot leak.
+    globalThis.fetch = (() =>
       Promise.resolve(
         new Response(JSON.stringify({ error: 'probe failed' }), {
           status: 500,
           headers: { 'Content-Type': 'application/json' },
         })
-      )
-    );
+      )) as unknown as typeof fetch;
     const status = runtimeStatus({ id: 'bun' });
 
     render(<RuntimeCard status={status} recipes={[]} />);

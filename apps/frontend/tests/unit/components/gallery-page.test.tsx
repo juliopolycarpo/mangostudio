@@ -1,11 +1,10 @@
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { GalleryItem } from '@mangostudio/shared';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GalleryPage } from '../../../src/features/gallery/GalleryPage';
 import { render, screen, waitFor } from '../../support/harness/render';
 
-const { fetchNextPageMock, galleryQueryState } = vi.hoisted(() => ({
-  fetchNextPageMock: vi.fn(),
+const { fetchNextPageMock, galleryQueryState } = {
+  fetchNextPageMock: jest.fn(),
   galleryQueryState: {
     current: {
       data: undefined as
@@ -19,9 +18,9 @@ const { fetchNextPageMock, galleryQueryState } = vi.hoisted(() => ({
       status: 'pending' as 'pending' | 'success',
     },
   },
-}));
+};
 
-vi.mock('../../../src/features/gallery/queries', () => ({
+mock.module('../../../src/features/gallery/queries', () => ({
   useGalleryQuery: () => ({
     data: galleryQueryState.current.data,
     fetchNextPage: fetchNextPageMock,
@@ -30,6 +29,10 @@ vi.mock('../../../src/features/gallery/queries', () => ({
     status: galleryQueryState.current.status,
   }),
 }));
+
+// After the mock, never before: a static import is evaluated first and would
+// bind GalleryPage to the real gallery queries.
+const { GalleryPage } = await import('../../../src/features/gallery/GalleryPage');
 
 const TEST_ITEM: GalleryItem = {
   id: 'img-42',

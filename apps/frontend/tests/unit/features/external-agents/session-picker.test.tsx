@@ -7,21 +7,26 @@
  * than showing an empty group.
  */
 
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type {
   ExternalAgentDescriptor,
   ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 import { screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ExternalSessionPicker } from '../../../../src/features/external-agents/ExternalSessionPicker';
 import { render } from '../../../support/harness/render';
 
-const listSessions = vi.fn();
+const listSessions = jest.fn();
 
-vi.mock('@/services/external-agent-service', () => ({
+mock.module('@/services/external-agent-service', () => ({
   listExternalNativeSessions: (query: unknown) => listSessions(query),
 }));
+
+// Below the mock, never as a static import: those are evaluated first and the
+// component would bind the real service.
+const { ExternalSessionPicker } = await import(
+  '../../../../src/features/external-agents/ExternalSessionPicker'
+);
 
 function descriptor(
   targetId: ExternalAgentDescriptor['targetId'],
@@ -53,8 +58,8 @@ function renderPicker(overrides: Partial<React.ComponentProps<typeof ExternalSes
     environmentName: 'this laptop',
     workspacePath: '/work/repo',
     agents: [descriptor('codex', true), descriptor('cursor', true), descriptor('claude', false)],
-    onAdopt: vi.fn(),
-    onClose: vi.fn(),
+    onAdopt: jest.fn(),
+    onClose: jest.fn(),
     ...overrides,
   };
   return { ...render(<ExternalSessionPicker {...props} />), props };

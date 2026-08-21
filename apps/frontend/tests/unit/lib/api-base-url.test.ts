@@ -1,20 +1,32 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'bun:test';
+
+/**
+ * `vi.stubEnv` / `vi.unstubAllEnvs` have no `bun test` equivalent, and neither
+ * does `vi.resetModules()`. Neither is needed: `import.meta.env` is backed by
+ * `process.env` under Bun, and `getApiBaseUrl()` reads the key on every call
+ * rather than at module scope — so setting the variable is enough and the
+ * module never has to be re-evaluated.
+ */
+function setApiUrl(value: string) {
+  process.env.VITE_API_URL = value;
+}
+
+afterEach(() => {
+  // Assigning `undefined` would leave the string "undefined" behind, which the
+  // module reads as an explicit base URL.
+  delete process.env.VITE_API_URL;
+});
 
 describe('getApiBaseUrl', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    vi.unstubAllEnvs();
-  });
-
   it('prefers explicit VITE_API_URL when set', async () => {
-    vi.stubEnv('VITE_API_URL', 'http://custom-api:9000');
+    setApiUrl('http://custom-api:9000');
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getApiBaseUrl()).toBe('http://custom-api:9000');
   });
 
   it('trims trailing slashes from explicit VITE_API_URL', async () => {
-    vi.stubEnv('VITE_API_URL', 'http://example.com///');
+    setApiUrl('http://example.com///');
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getApiBaseUrl()).toBe('http://example.com');
@@ -23,7 +35,7 @@ describe('getApiBaseUrl', () => {
   it('falls back to window.location.origin when VITE_API_URL is not set', async () => {
     const { getApiBaseUrl } = await import('@/lib/api-base-url');
 
-    // jsdom sets window.location.origin to 'http://localhost'
+    // happy-dom registers the suite at http://localhost:3001
     expect(getApiBaseUrl()).toBe(window.location.origin);
   });
 
@@ -51,27 +63,22 @@ describe('getApiBaseUrl', () => {
 });
 
 describe('getWebSocketBaseUrl', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    vi.unstubAllEnvs();
-  });
-
   it('maps https to wss', async () => {
-    vi.stubEnv('VITE_API_URL', 'https://api.example.com');
+    setApiUrl('https://api.example.com');
     const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getWebSocketBaseUrl()).toBe('wss://api.example.com');
   });
 
   it('maps http to ws', async () => {
-    vi.stubEnv('VITE_API_URL', 'http://custom-api:9000');
+    setApiUrl('http://custom-api:9000');
     const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getWebSocketBaseUrl()).toBe('ws://custom-api:9000');
   });
 
   it('leaves a protocol-less base url unchanged', async () => {
-    vi.stubEnv('VITE_API_URL', 'localhost:3001');
+    setApiUrl('localhost:3001');
     const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
 
     expect(getWebSocketBaseUrl()).toBe('localhost:3001');
@@ -80,7 +87,7 @@ describe('getWebSocketBaseUrl', () => {
   it('derives the scheme from the browser origin when VITE_API_URL is not set', async () => {
     const { getWebSocketBaseUrl } = await import('@/lib/api-base-url');
 
-    // jsdom serves the suite over http, so the origin maps to a ws:// base
+    // happy-dom serves the suite over http, so the origin maps to a ws:// base
     expect(getWebSocketBaseUrl()).toBe(window.location.origin.replace('http:', 'ws:'));
     expect(getWebSocketBaseUrl().startsWith('ws://')).toBe(true);
   });

@@ -1,8 +1,5 @@
-/**
- * @vitest-environment jsdom
- */
+import { describe, expect, it } from 'bun:test';
 import type { ExternalAccountLimits, ExternalUsage } from '@mangostudio/shared/external-agents';
-import { describe, expect, it } from 'vitest';
 import { ExternalAccountLimitsChip } from '@/features/external-agents/ExternalAccountLimitsChip';
 import { ExternalUsageDisplay } from '@/features/external-agents/ExternalUsageDisplay';
 import { render } from '../../../support/harness/render';

@@ -1,5 +1,5 @@
+import { describe, expect, it } from 'bun:test';
 import { useMutation } from '@tanstack/react-query';
-import { describe, expect, it } from 'vitest';
 import { appSettingsKeys } from '@/features/settings/app/queries';
 import { useAppSettingsSaveStatus } from '@/features/settings/app/use-app-settings-save-status';
 import { act, renderHook, waitFor } from '../../../support/harness/render';
