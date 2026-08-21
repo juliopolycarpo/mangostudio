@@ -265,7 +265,7 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
   const SURVIVING_SHAPE = '/images';
 
   async function startFilesystemServer(): Promise<{
-    get: (path: string) => Promise<Response>;
+    get: (path: string, headers?: Record<string, string>) => Promise<Response>;
     frontendDir: string;
     stop: () => Promise<void>;
   }> {
@@ -289,7 +289,8 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });
     const origin = `http://127.0.0.1:${app.server?.port}`;
     return {
-      get: (path: string) => fetch(`${origin}${path}`),
+      get: (path: string, headers?: Record<string, string>) =>
+        fetch(`${origin}${path}`, { headers }),
       frontendDir,
       stop: async () => {
         await app.stop();
@@ -334,6 +335,30 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
       const missing = await server.get('/assets/missing.js');
       expect(missing.status).toBe(404);
       expect(await missing.text()).not.toBe(INDEX_HTML);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('serves unhashed root files with the cache headers the static plugin used to add', async () => {
+    const server = await startFilesystemServer();
+    try {
+      // `staticPlugin({ prefix: '/' })` gave these files max-age=86400, an
+      // ETag and a 304 short-circuit; the per-file routes that replaced the
+      // wildcard must not silently drop that.
+      const first = await server.get('/favicon.ico');
+      expect(first.status).toBe(200);
+      expect(first.headers.get('cache-control')).toBe('public, max-age=86400');
+      const etag = first.headers.get('etag');
+      expect(etag).not.toBeNull();
+
+      const revalidated = await server.get('/favicon.ico', { 'If-None-Match': etag as string });
+      expect(revalidated.status).toBe(304);
+      expect(await revalidated.text()).toBe('');
+
+      const changed = await server.get('/favicon.ico', { 'If-None-Match': '"stale"' });
+      expect(changed.status).toBe(200);
+      expect(await changed.text()).toBe(UPLOAD_BYTES);
     } finally {
       await server.stop();
     }

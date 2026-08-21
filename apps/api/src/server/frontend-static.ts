@@ -81,10 +81,12 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
       continue;
     }
     const filePath = files[urlPath];
-    const headers = urlPath.startsWith('/assets/')
-      ? { 'Cache-Control': 'public, max-age=31536000, immutable' }
-      : undefined;
-    app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
+    if (urlPath.startsWith('/assets/')) {
+      const headers = { 'Cache-Control': 'public, max-age=31536000, immutable' };
+      app.get(urlPath, () => new Response(Bun.file(filePath), { headers }));
+      continue;
+    }
+    app.get(urlPath, ({ request }) => serveUnhashedFile(filePath, request));
   }
 
   setFrontendFallback((request) => {
@@ -97,6 +99,26 @@ function registerEmbeddedSpa(app: App, files: EmbeddedFrontendFiles): void {
 
 /** Directory holding the content-hashed bundle output, relative to the frontend root. */
 const HASHED_ASSET_DIR = 'assets';
+
+/**
+ * Unhashed root files (favicon, icons, manifest, build-info) previously sat
+ * behind `staticPlugin({ prefix: '/' })`, which served them with its defaults:
+ * `Cache-Control: public, max-age=86400`, an ETag and a 304 short-circuit.
+ * The per-file routes that replaced that wildcard (see `registerSpa`) keep the
+ * same behavior. The ETag derives from size and mtime per request, so a dev
+ * rebuild that replaces the file invalidates the cached copy.
+ */
+const UNHASHED_CACHE_CONTROL = 'public, max-age=86400';
+
+function serveUnhashedFile(filePath: string, request: Request): Response {
+  const stats = statSync(filePath);
+  const etag = `"${stats.size.toString(16)}-${Math.trunc(stats.mtimeMs).toString(16)}"`;
+  const headers = { 'Cache-Control': UNHASHED_CACHE_CONTROL, ETag: etag };
+  if (request.headers.get('If-None-Match') === etag) {
+    return new Response(null, { status: 304, headers });
+  }
+  return new Response(Bun.file(filePath), { headers });
+}
 
 /**
  * Files the build emits outside `assets/`, as URL paths.
@@ -146,7 +168,7 @@ function registerSpa(app: App, frontendDir: string): void {
 
   for (const urlPath of unhashedAssetPaths(frontendDir)) {
     const filePath = join(frontendDir, urlPath);
-    app.get(`/${urlPath}`, () => new Response(Bun.file(filePath)));
+    app.get(`/${urlPath}`, ({ request }) => serveUnhashedFile(filePath, request));
   }
 
   if (existsSync(assetsDir)) {
