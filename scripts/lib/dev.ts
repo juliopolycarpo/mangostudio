@@ -1,7 +1,9 @@
 import { ROOT_DIR, WORKSPACES, type WorkspaceName } from './config';
 
-// The API serves the frontend directly in dev (Elysia + a Bun HTML bundle
-// route), so the frontend workspace has no dev server of its own.
+// The API serves the frontend directly in dev: `apps/api/src/dev.ts` builds
+// `apps/frontend/dist` with `Bun.build()` and Elysia serves it from disk (there
+// is no HTML-bundle route — Bun's HTML loader drops a transitive import from
+// this graph). So the frontend workspace has no dev server of its own.
 export const DEV_WORKSPACES: WorkspaceName[] = ['api'];
 
 export interface DevSelection {

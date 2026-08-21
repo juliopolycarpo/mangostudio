@@ -45,7 +45,11 @@ const requestedWorkspaces = usedDefaultSelection ? DEV_WORKSPACES : workspaces;
 const { runnableWorkspaces, skippedWorkspaces, frontendRedirected } =
   selectDevWorkspaces(requestedWorkspaces);
 
-if (frontendRedirected) {
+// `--all` expands to every workspace, so `frontend` appearing in the selection
+// there is not somebody asking for a frontend dev server — only an explicit
+// `--frontend` is, and only that deserves the redirect notice.
+const askedForFrontend = process.argv.slice(2).includes('--frontend');
+if (frontendRedirected && askedForFrontend) {
   warn('The frontend is served by the API dev server now; starting `api` instead of `frontend`.');
 }
 
