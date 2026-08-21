@@ -26,27 +26,73 @@ export interface TestSession {
   readonly [key: string]: unknown;
 }
 
+/**
+ * Every method seam takes the whole function rather than a result: the auth
+ * surfaces drive both halves of a Better Auth call — what it resolves to and
+ * the `fetchOptions.onError` callback it may invoke instead.
+ */
+export type TestAuthMethod = (...args: never[]) => unknown;
+
 let session: TestSession | null = null;
+const methods: Record<'signIn' | 'signUp' | 'signOut', TestAuthMethod | null> = {
+  signIn: null,
+  signUp: null,
+  signOut: null,
+};
 
 /** Makes `authClient.useSession()` report `next` until the next `afterEach`. */
 export function setTestSession(next: TestSession | null): void {
   session = next;
 }
 
-/** Called from `bun.setup.ts`; no test should need this directly. */
-export function resetTestSession(): void {
-  session = null;
+/** Substitutes `authClient.signIn.email` for one test. */
+export function setTestSignIn(next: TestAuthMethod | null): void {
+  methods.signIn = next;
 }
 
-function unstubbed(method: string) {
-  return () => {
-    throw new Error(`authClient.${method} is not stubbed globally; substitute it in this test.`);
+/** Substitutes `authClient.signUp.email` for one test. */
+export function setTestSignUp(next: TestAuthMethod | null): void {
+  methods.signUp = next;
+}
+
+/** Substitutes `authClient.signOut` for one test. */
+export function setTestSignOut(next: TestAuthMethod | null): void {
+  methods.signOut = next;
+}
+
+/**
+ * Clears the session and every method substitution.
+ *
+ * Called from `bun.setup.ts`; no test should need this directly.
+ */
+export function resetTestSession(): void {
+  session = null;
+  methods.signIn = null;
+  methods.signUp = null;
+  methods.signOut = null;
+}
+
+/**
+ * Dispatches to whatever the test installed, and names the missing seam
+ * otherwise. Reading `methods` per call rather than closing over it is what
+ * lets a substitution registered in `beforeEach` reach a component that read
+ * `authClient` at import time.
+ */
+function seam(name: 'signIn' | 'signUp' | 'signOut') {
+  return (...args: never[]): unknown => {
+    const substitute = methods[name];
+    if (!substitute) {
+      throw new Error(
+        `authClient.${name} is not stubbed globally; call setTest${name[0].toUpperCase()}${name.slice(1)} in this test.`
+      );
+    }
+    return substitute(...args);
   };
 }
 
 export const authClient = {
   useSession: () => ({ data: session, isPending: false }),
-  signIn: { email: unstubbed('signIn.email') },
-  signUp: { email: unstubbed('signUp.email') },
-  signOut: unstubbed('signOut'),
+  signIn: { email: seam('signIn') },
+  signUp: { email: seam('signUp') },
+  signOut: seam('signOut'),
 };

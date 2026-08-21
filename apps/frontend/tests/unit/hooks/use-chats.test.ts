@@ -1,8 +1,8 @@
+import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import type { Chat } from '@mangostudio/shared';
 import { createMockChat } from '@mangostudio/shared/test-utils';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useChats } from '../../../src/features/chat/hooks/use-chats';
 import { act, renderHook } from '../../support/harness/render';
+import { restoreRealTimers, useFakeTimers } from '../../support/harness/timers';
 
 const CHAT_A: Chat = createMockChat({
   id: 'chat-a',
@@ -21,36 +21,39 @@ type ChatsQueryResult = {
   data: Chat[] | undefined;
   isLoading: boolean;
   error: Error | null;
-  refetch: ReturnType<typeof vi.fn>;
+  refetch: ReturnType<typeof jest.fn>;
 };
 
-const { mockCreateChat, mockUpdateChat, mockDeleteChat, mockLoadChats, mockChatsQueryResult } =
-  vi.hoisted(() => ({
-    mockCreateChat: vi.fn(),
-    mockUpdateChat: vi.fn(),
-    mockDeleteChat: vi.fn(),
-    mockLoadChats: vi.fn(),
-    mockChatsQueryResult: vi.fn(
-      (): ChatsQueryResult => ({
-        data: [] as Chat[],
-        isLoading: false,
-        error: null,
-        refetch: vi.fn(),
-      })
-    ),
-  }));
+const { mockCreateChat, mockUpdateChat, mockDeleteChat, mockLoadChats, mockChatsQueryResult } = {
+  mockCreateChat: jest.fn(),
+  mockUpdateChat: jest.fn(),
+  mockDeleteChat: jest.fn(),
+  mockLoadChats: jest.fn(),
+  mockChatsQueryResult: jest.fn(
+    (): ChatsQueryResult => ({
+      data: [] as Chat[],
+      isLoading: false,
+      error: null,
+      refetch: jest.fn(),
+    })
+  ),
+};
 
-vi.mock('../../../src/features/chat/queries', () => ({
+mock.module('../../../src/features/chat/queries', () => ({
   useChatsQuery: () => mockChatsQueryResult(),
   useCreateChatMutation: () => ({ mutateAsync: mockCreateChat }),
   useUpdateChatMutation: () => ({ mutateAsync: mockUpdateChat }),
   useDeleteChatMutation: () => ({ mutateAsync: mockDeleteChat }),
 }));
 
+// Static imports are evaluated before any statement above runs, so the hook
+// has to come in afterwards or it binds the real chat queries.
+const { useChats } = await import('../../../src/features/chat/hooks/use-chats');
+
 describe('useChats', () => {
   beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 4, 9, 7, 5));
+    useFakeTimers();
+    jest.setSystemTime(new Date(2026, 4, 9, 7, 5));
     mockChatsQueryResult.mockReturnValue({
       data: [],
       isLoading: false,
@@ -66,9 +69,9 @@ describe('useChats', () => {
     mockDeleteChat.mockResolvedValue({ success: true });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.clearAllMocks();
+  afterEach(async () => {
+    await restoreRealTimers();
+    jest.clearAllMocks();
   });
 
   describe('initial state', () => {
@@ -365,7 +368,7 @@ describe('useChats', () => {
         await result.current.loadChats();
       });
 
-      expect(mockLoadChats).toHaveBeenCalledOnce();
+      expect(mockLoadChats).toHaveBeenCalledTimes(1);
     });
   });
 });

@@ -1,16 +1,19 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import { createMockChat } from '@mangostudio/shared/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatWithContext } from '../../../src/features/chat/queries';
-import { useRunnerSelection } from '../../../src/hooks/use-runner-selection';
 import { act, renderHook, waitFor } from '../../support/harness/render';
 
-vi.mock('../../../src/features/settings/agents/queries', () => ({
+mock.module('../../../src/features/settings/agents/queries', () => ({
   agentSettingsKeys: { all: ['agent-settings'] },
   agentSettingsListQueryOptions: () => ({
     queryKey: ['agent-settings', 'test'],
     queryFn: () => Promise.resolve({ agents: [] }),
   }),
 }));
+
+// Static imports are evaluated before any statement above runs, so the hook
+// has to come in afterwards or it binds the real agent settings queries.
+const { useRunnerSelection } = await import('../../../src/hooks/use-runner-selection');
 
 const CHAT: ChatWithContext = createMockChat({
   id: 'chat-1',
@@ -21,13 +24,13 @@ const CHAT: ChatWithContext = createMockChat({
 });
 
 describe('useRunnerSelection workdir binding', () => {
-  const updateChatRunner = vi.fn(() => Promise.resolve());
-  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
-  const updateChatWorkdir = vi.fn(() => Promise.resolve());
-  const addRecentWorkdir = vi.fn();
+  const updateChatRunner = jest.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = jest.fn(() => Promise.resolve());
+  const updateChatWorkdir = jest.fn(() => Promise.resolve());
+  const addRecentWorkdir = jest.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('applies the default workdir the first time a chat without one is observed', async () => {
@@ -113,13 +116,13 @@ describe('useRunnerSelection workdir binding', () => {
 });
 
 describe('useRunnerSelection binding a chat created mid-submit', () => {
-  const updateChatRunner = vi.fn(() => Promise.resolve());
-  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
-  const updateChatWorkdir = vi.fn(() => Promise.resolve());
-  const addRecentWorkdir = vi.fn();
+  const updateChatRunner = jest.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = jest.fn(() => Promise.resolve());
+  const updateChatWorkdir = jest.fn(() => Promise.resolve());
+  const addRecentWorkdir = jest.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   interface SelectionProps {
@@ -171,7 +174,7 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
   });
 
   it('returns the effective agent selection, falling back after a rejected persist', async () => {
-    const rejectingUpdateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
+    const rejectingUpdateChatRunner = jest.fn(() => Promise.reject(new Error('nope')));
     const { result } = renderHook(
       (props: SelectionProps) =>
         useRunnerSelection({
@@ -231,7 +234,7 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
   });
 
   it('takes the optimistic permissions back when the bind write is rejected', async () => {
-    const rejecting = vi.fn(() => Promise.reject(new Error('nope')));
+    const rejecting = jest.fn(() => Promise.reject(new Error('nope')));
     const { result } = renderHook(
       (props: SelectionProps) =>
         useRunnerSelection({
@@ -264,6 +267,10 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
 
     await act(async () => {
       await result.current.bindNewChat('chat-new');
+      // `bindNewChat` resolves the moment its own awaits settle, but the
+      // agent-selection state it returns updates a tick later — give it room
+      // to run inside `act` rather than after.
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(updateChatWorkdir).toHaveBeenCalledWith('chat-new', '/srv/projects/default');
@@ -298,16 +305,16 @@ describe('useRunnerSelection binding a chat created mid-submit', () => {
 });
 
 describe('useRunnerSelection agent selection', () => {
-  const updateChatWorkdir = vi.fn(() => Promise.resolve());
-  const addRecentWorkdir = vi.fn();
+  const updateChatWorkdir = jest.fn(() => Promise.resolve());
+  const addRecentWorkdir = jest.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   it('shows the chosen agent optimistically', async () => {
-    const updateChatRunner = vi.fn(() => Promise.resolve());
-    const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
+    const updateChatRunner = jest.fn(() => Promise.resolve());
+    const updateChatRunnerPermissions = jest.fn(() => Promise.resolve());
     const { result } = renderHook(() =>
       useRunnerSelection({
         currentChatId: CHAT.id,
@@ -330,8 +337,8 @@ describe('useRunnerSelection agent selection', () => {
   });
 
   it('takes the optimistic selection back when the write is rejected', async () => {
-    const updateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
-    const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
+    const updateChatRunner = jest.fn(() => Promise.reject(new Error('nope')));
+    const updateChatRunnerPermissions = jest.fn(() => Promise.resolve());
     const { result } = renderHook(() =>
       useRunnerSelection({
         currentChatId: CHAT.id,
@@ -353,12 +360,12 @@ describe('useRunnerSelection agent selection', () => {
 });
 
 describe('useRunnerSelection whenRunnerPersisted', () => {
-  const updateChatWorkdir = vi.fn(() => Promise.resolve());
-  const updateChatRunnerPermissions = vi.fn(() => Promise.resolve());
-  const addRecentWorkdir = vi.fn();
+  const updateChatWorkdir = jest.fn(() => Promise.resolve());
+  const updateChatRunnerPermissions = jest.fn(() => Promise.resolve());
+  const addRecentWorkdir = jest.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
   function renderSelection(updateChatRunner: () => Promise<void>) {
@@ -379,7 +386,7 @@ describe('useRunnerSelection whenRunnerPersisted', () => {
   // is still in flight would run on the runner being replaced.
   it('waits for a switch that has not been answered yet', async () => {
     let settle: (() => void) | undefined;
-    const updateChatRunner = vi.fn(
+    const updateChatRunner = jest.fn(
       () =>
         new Promise<void>((resolve) => {
           settle = resolve;
@@ -399,12 +406,15 @@ describe('useRunnerSelection whenRunnerPersisted', () => {
     await act(async () => {
       settle?.();
       await pending;
+      // The switch's own state settling lands a tick behind `pending` —
+      // give it room to run inside `act` rather than after.
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(waited).toBe(true);
   });
 
   it('resolves immediately when no switch is open', async () => {
-    const updateChatRunner = vi.fn(() => Promise.resolve());
+    const updateChatRunner = jest.fn(() => Promise.resolve());
     const { result } = renderSelection(updateChatRunner);
 
     await expect(result.current.whenRunnerPersisted()).resolves.toBeUndefined();
@@ -413,12 +423,16 @@ describe('useRunnerSelection whenRunnerPersisted', () => {
 
   // A rejected write must not leave the gate closed for every later send.
   it('stops waiting once a rejected switch settles', async () => {
-    const updateChatRunner = vi.fn(() => Promise.reject(new Error('nope')));
+    const updateChatRunner = jest.fn(() => Promise.reject(new Error('nope')));
     const { result } = renderSelection(updateChatRunner);
 
     act(() => result.current.setRunnerTarget('codex'));
 
-    await expect(result.current.whenRunnerPersisted()).resolves.toBeUndefined();
+    // The rejection's `.catch` handler updates state, so the wait for it has
+    // to sit inside `act`, not around it.
+    await act(async () => {
+      await expect(result.current.whenRunnerPersisted()).resolves.toBeUndefined();
+    });
     await waitFor(() =>
       expect(result.current.runner).toEqual({
         kind: 'mangostudio',

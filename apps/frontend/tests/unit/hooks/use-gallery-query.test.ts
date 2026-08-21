@@ -1,11 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { galleryKeys, galleryListQueryOptions } from '../../../src/features/gallery/queries';
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
-const { mockGetImages } = vi.hoisted(() => ({
-  mockGetImages: vi.fn(),
-}));
+const mockGetImages = jest.fn();
 
-vi.mock('../../../src/lib/api-client', () => ({
+mock.module('../../../src/lib/api-client', () => ({
   client: {
     api: {
       messages: {
@@ -16,6 +13,12 @@ vi.mock('../../../src/lib/api-client', () => ({
     },
   },
 }));
+
+// Static imports are evaluated before any statement above runs, so the module
+// under test has to come in afterwards or it binds the real api-client.
+const { galleryKeys, galleryListQueryOptions } = await import(
+  '../../../src/features/gallery/queries'
+);
 
 function getQueryFn() {
   const queryFn = galleryListQueryOptions().queryFn;

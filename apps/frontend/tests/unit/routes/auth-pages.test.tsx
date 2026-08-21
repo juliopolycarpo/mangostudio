@@ -1,52 +1,41 @@
+import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType, ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '../../support/harness/render';
+import { setTestSession, setTestSignIn, setTestSignUp } from '../../support/setup/auth-client-stub';
 
-type SessionUser = { user: { name: string } } | null;
-
-const {
-  mockHistoryPush,
-  mockNavigate,
-  mockSignInEmail,
-  mockSignUpEmail,
-  searchState,
-  sessionPendingState,
-  sessionState,
-} = vi.hoisted(() => ({
-  mockHistoryPush: vi.fn(),
-  mockNavigate: vi.fn(),
-  mockSignInEmail: vi.fn(),
-  mockSignUpEmail: vi.fn(),
+const { mockHistoryPush, mockNavigate, mockSignInEmail, mockSignUpEmail, searchState } = {
+  mockHistoryPush: jest.fn(),
+  mockNavigate: jest.fn(),
+  mockSignInEmail: jest.fn(),
+  mockSignUpEmail: jest.fn(),
   searchState: { current: {} as { redirect?: string } },
-  sessionPendingState: { current: false },
-  sessionState: { current: null as SessionUser },
-}));
+};
 
-vi.mock('@tanstack/react-router', () => ({
+// Module-scoped so biome's `noComponentHookFactories` does not see a
+// component defined inside the `mock.module` factory below.
+function LinkStub({ to, children, ...props }: { to: string; children: ReactNode }) {
+  return (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  );
+}
+
+mock.module('@tanstack/react-router', () => ({
   createFileRoute: () => (config: Record<string, unknown>) => ({
     ...config,
     useSearch: () => searchState.current,
   }),
-  Link: ({ to, children, ...props }: { to: string; children: ReactNode }) => (
-    <a href={to} {...props}>
-      {children}
-    </a>
-  ),
+  Link: LinkStub,
   useNavigate: () => mockNavigate,
   useRouter: () => ({ history: { push: mockHistoryPush } }),
 }));
 
-vi.mock('../../../src/lib/auth-client', () => ({
-  authClient: {
-    useSession: () => ({ data: sessionState.current, isPending: sessionPendingState.current }),
-    signIn: { email: mockSignInEmail },
-    signUp: { email: mockSignUpEmail },
-  },
-}));
-
-import { Route as LoginRoute } from '../../../src/routes/login';
-import { Route as SignupRoute } from '../../../src/routes/signup';
+// Static imports are evaluated before any statement above runs, so the
+// routes have to come in afterwards or they bind the real router.
+const { Route: LoginRoute } = await import('../../../src/routes/login');
+const { Route: SignupRoute } = await import('../../../src/routes/signup');
 
 const LoginPage = (LoginRoute as unknown as { component: ComponentType }).component;
 const SignupPage = (SignupRoute as unknown as { component: ComponentType }).component;
@@ -58,13 +47,15 @@ describe('auth routes', () => {
     mockSignInEmail.mockReset();
     mockSignUpEmail.mockReset();
     searchState.current = {};
-    sessionPendingState.current = false;
-    sessionState.current = null;
+    // `resetTestSession` clears these substitutes after every test, so each
+    // one has to re-install them.
+    setTestSignIn(mockSignInEmail);
+    setTestSignUp(mockSignUpEmail);
   });
 
   it('redirects authenticated users from login to the requested route', async () => {
     searchState.current = { redirect: '/settings/providers' };
-    sessionState.current = { user: { name: 'Ada' } };
+    setTestSession({ user: { id: 'user-ada', name: 'Ada' } });
 
     render(<LoginPage />);
 
